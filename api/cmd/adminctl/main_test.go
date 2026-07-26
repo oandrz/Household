@@ -43,7 +43,6 @@ func TestRequireLocalDatabase(t *testing.T) {
 func TestRunRefusesToSeedARemoteDatabaseBeforeConnecting(t *testing.T) {
 	t.Setenv("APP_ENV", "development")
 	t.Setenv("DATABASE_URL", "postgres://hearth:hearth@10.255.255.1:5432/hearth?sslmode=disable")
-	t.Setenv("SESSION_SECRET", "development-session-secret-not-for-production")
 	t.Setenv("SMTP_ADDR", "localhost:1025")
 	t.Setenv("SMTP_FROM", "Hearth <noreply@hearth.localhost>")
 	t.Setenv("APP_BASE_URL", "http://localhost:5173")
@@ -74,7 +73,6 @@ func TestRunRefusesToSeedARemoteDatabaseBeforeConnecting(t *testing.T) {
 func TestRunRefusesToSeedOutsideDevelopmentBeforeConnecting(t *testing.T) {
 	t.Setenv("APP_ENV", "production")
 	t.Setenv("DATABASE_URL", "postgres://hearth:hearth@10.255.255.1:5432/hearth?sslmode=disable")
-	t.Setenv("SESSION_SECRET", "development-session-secret-not-for-production")
 	t.Setenv("SMTP_ADDR", "localhost:1025")
 	t.Setenv("SMTP_FROM", "Hearth <noreply@hearth.localhost>")
 	t.Setenv("APP_BASE_URL", "http://localhost:5173")

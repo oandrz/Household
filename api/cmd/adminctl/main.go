@@ -86,6 +86,7 @@ func run(args []string) error {
 	users := postgres.NewUserRepo(db)
 	households := postgres.NewHouseholdRepo(db)
 	memberships := postgres.NewMembershipRepo(db)
+	sessions := postgres.NewSessionRepo(db)
 	loginAttempts := postgres.NewLoginAttemptRepo(db)
 	invites := postgres.NewInviteRepo(db)
 	spaces := postgres.NewSpaceRepo(db)
@@ -94,7 +95,8 @@ func run(args []string) error {
 	hasher := crypto.NewArgon2Hasher(cfg.Argon2Time, cfg.Argon2MemoryKiB, cfg.Argon2Threads)
 	tokens := crypto.NewTokenGenerator()
 	sysClock := clock.System{}
-	mailer := mail.NewSMTPMailer(cfg.SMTPAddr, cfg.SMTPFrom, cfg.AppBaseURL)
+	mailer := mail.NewSMTPMailer(cfg.SMTPAddr, cfg.SMTPFrom, cfg.AppBaseURL,
+		cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPTLSMode)
 
 	switch args[0] {
 	case "seed":
@@ -112,7 +114,7 @@ func run(args []string) error {
 			BaseURL:       cfg.AppBaseURL,
 		})
 	case "reset-password":
-		return runResetPassword(ctx, args[1:], users, hasher)
+		return runResetPassword(ctx, args[1:], users, hasher, sessions)
 	case "unlock-household":
 		return runUnlockHousehold(ctx, users, memberships, loginAttempts)
 	case "create-invite":
@@ -178,7 +180,16 @@ func requireLocalDatabase(databaseURL string) error {
 	}
 }
 
-func runResetPassword(ctx context.Context, args []string, users usecase.UserRepository, hasher usecase.PasswordHasher) error {
+// runResetPassword revokes every one of the user's live sessions once the
+// new password is set. A password reset is precisely the moment an account
+// may be compromised -- that is the whole reason an operator is doing this
+// by hand rather than the member using their own "forgot password" flow --
+// and an attacker's existing session surviving the reset would defeat the
+// point of it: the operator sees "password reset for x@y.com" and believes
+// the account is secured, while a session minted before the reset keeps
+// working exactly as it did before.
+func runResetPassword(ctx context.Context, args []string, users usecase.UserRepository, hasher usecase.PasswordHasher,
+	sessions usecase.SessionRepository) error {
 	fs := flag.NewFlagSet("reset-password", flag.ContinueOnError)
 	// ContinueOnError already writes its own error and usage to stderr by
 	// default; discarding that here avoids printing the same failure twice,
@@ -218,7 +229,11 @@ func runResetPassword(ctx context.Context, args []string, users usecase.UserRepo
 		return fmt.Errorf("set password hash: %w", err)
 	}
 
-	fmt.Printf("Password reset for %s.\n", *email)
+	if err := sessions.RevokeAllForUser(ctx, user.ID); err != nil {
+		return fmt.Errorf("password was reset, but revoking existing sessions failed: %w", err)
+	}
+
+	fmt.Printf("Password reset for %s. Their existing sessions have been revoked.\n", *email)
 	return nil
 }
 
