@@ -164,6 +164,80 @@ func TestUsersWithoutAPasswordCannotSignIn(t *testing.T) {
 	if !errors.As(err, &failure) {
 		t.Fatalf("err = %v, want *SignInFailedError — a credential-less member must not sign in", err)
 	}
+	// Pin the guard's actual purpose: the hasher must never be asked to
+	// verify a password for a member who has none. Without this assertion
+	// the test would pass even with the guard deleted, because fakeHasher
+	// happens to reject an empty encoded hash for every input.
+	if f.hasher.verifyCalls != 0 {
+		t.Fatalf("Verify was called %d times; a credential-less member must be rejected before any password comparison",
+			f.hasher.verifyCalls)
+	}
+}
+
+// TestLockedUntilAdvancesWhileALockedHouseholdIsGuessed and its companion
+// below pin the fix for a timing oracle: a caller hammering an
+// already-locked household must see LockedUntil advance exactly like a
+// caller hammering an unknown address does. If the locked branch ever stops
+// recording the attempt, LockedUntil freezes here while the unknown-address
+// companion keeps moving, and the two paths become distinguishable again.
+func TestLockedUntilAdvancesWhileALockedHouseholdIsGuessed(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	for i := 0; i < 3; i++ {
+		f.auth.SignIn(ctx, "andreas@hearth.family", "wrong")
+		f.clock.Advance(time.Second)
+	}
+
+	_, err := f.auth.SignIn(ctx, "andreas@hearth.family", "hunter2")
+	var first *usecase.SignInFailedError
+	if !errors.As(err, &first) || !first.Locked {
+		t.Fatalf("err = %v, want a locked *SignInFailedError", err)
+	}
+
+	f.clock.Advance(time.Minute)
+
+	_, err = f.auth.SignIn(ctx, "andreas@hearth.family", "hunter2")
+	var second *usecase.SignInFailedError
+	if !errors.As(err, &second) || !second.Locked {
+		t.Fatalf("err = %v, want a locked *SignInFailedError", err)
+	}
+
+	if !second.LockedUntil.After(first.LockedUntil) {
+		t.Fatalf("LockedUntil did not advance: first = %v, second = %v — "+
+			"a locked household must not report a frozen deadline while an unknown "+
+			"address's deadline keeps advancing, or the two become distinguishable",
+			first.LockedUntil, second.LockedUntil)
+	}
+}
+
+func TestLockedUntilAdvancesWhileAnUnknownAddressIsGuessed(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	for i := 0; i < 3; i++ {
+		f.auth.SignIn(ctx, "stranger@example.com", "whatever")
+		f.clock.Advance(time.Second)
+	}
+
+	_, err := f.auth.SignIn(ctx, "stranger@example.com", "whatever")
+	var first *usecase.SignInFailedError
+	if !errors.As(err, &first) || !first.Locked {
+		t.Fatalf("err = %v, want a locked *SignInFailedError", err)
+	}
+
+	f.clock.Advance(time.Minute)
+
+	_, err = f.auth.SignIn(ctx, "stranger@example.com", "whatever")
+	var second *usecase.SignInFailedError
+	if !errors.As(err, &second) || !second.Locked {
+		t.Fatalf("err = %v, want a locked *SignInFailedError", err)
+	}
+
+	if !second.LockedUntil.After(first.LockedUntil) {
+		t.Fatalf("LockedUntil did not advance: first = %v, second = %v",
+			first.LockedUntil, second.LockedUntil)
+	}
 }
 
 var _ = domain.DefaultLockoutPolicy

@@ -18,10 +18,18 @@ type fixedClock struct{ now time.Time }
 func (c *fixedClock) Now() time.Time          { return c.now }
 func (c *fixedClock) Advance(d time.Duration) { c.now = c.now.Add(d) }
 
-type fakeHasher struct{}
+// fakeHasher counts Verify calls (via a pointer receiver, unlike the
+// brief's value-receiver sketch) so a test can assert that a
+// credential-less member is rejected before any password comparison is
+// even attempted, rather than relying on Verify happening to reject an
+// empty encoded hash.
+type fakeHasher struct{ verifyCalls int }
 
-func (fakeHasher) Hash(plain string) (string, error) { return "hashed:" + plain, nil }
-func (fakeHasher) Verify(plain, encoded string) bool { return encoded == "hashed:"+plain }
+func (h *fakeHasher) Hash(plain string) (string, error) { return "hashed:" + plain, nil }
+func (h *fakeHasher) Verify(plain, encoded string) bool {
+	h.verifyCalls++
+	return encoded == "hashed:"+plain
+}
 
 type seqTokens struct{ n int }
 
@@ -393,6 +401,7 @@ type fixture struct {
 	clock       *fixedClock
 	sessions    *sessionDouble
 	mailer      *mailerDouble
+	hasher      *fakeHasher
 	householdID string
 }
 
@@ -406,7 +415,7 @@ func newFixture(t *testing.T) *fixture {
 	attempts := newLoginAttemptDouble()
 	magicLinks := newMagicLinkDouble(clock, users)
 	mailer := &mailerDouble{}
-	hasher := fakeHasher{}
+	hasher := &fakeHasher{}
 
 	householdID := "household-1"
 
@@ -447,7 +456,7 @@ func newFixture(t *testing.T) *fixture {
 		BaseURL:    "http://localhost:5173",
 	})
 
-	return &fixture{auth: auth, clock: clock, sessions: sessions, mailer: mailer, householdID: householdID}
+	return &fixture{auth: auth, clock: clock, sessions: sessions, mailer: mailer, hasher: hasher, householdID: householdID}
 }
 
 func mustHash(t *testing.T, hasher usecase.PasswordHasher, plain string) string {

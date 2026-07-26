@@ -99,6 +99,23 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 		return SignInResult{}, err
 	}
 	if state := s.d.Policy.Evaluate(failures, now); state.Locked {
+		// Record this attempt too, exactly as the wrong-password and
+		// unknown-address branches do, and re-evaluate over the updated
+		// failure set before responding. Without this, a caller hammering an
+		// already-locked household would see a LockedUntil frozen at the
+		// third failure while hammering an unknown address sees one that
+		// keeps advancing — a timing oracle that tells the two cases apart
+		// even though the error type is identical. Recording here means
+		// continued guessing against a locked household extends the lock,
+		// matching the unknown-address behavior deliberately.
+		if err := s.d.Attempts.Record(ctx, &householdID, &user.ID, email, false, now); err != nil {
+			return SignInResult{}, err
+		}
+		updated, err := s.d.Attempts.FailuresSince(ctx, householdID, now.Add(-s.d.Policy.Window))
+		if err != nil {
+			return SignInResult{}, err
+		}
+		state = s.d.Policy.Evaluate(updated, now)
 		return SignInResult{}, &SignInFailedError{Locked: true, LockedUntil: state.Until}
 	}
 
