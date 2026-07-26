@@ -2,8 +2,8 @@
 SHELL := /bin/bash
 COMPOSE := docker compose
 
-.PHONY: help dev up down restart logs ps migrate migrate-down migrate-new \
-        test test-api lint lint-arch fmt psql shell-api build
+.PHONY: help dev dev-local up down restart logs ps migrate migrate-down migrate-new \
+        test test-api test-web lint lint-arch fmt psql shell-api build
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -12,6 +12,14 @@ help: ## Show this help
 dev: ## Start everything and tail the logs — http://localhost:5173
 	$(COMPOSE) up -d postgres mailpit
 	$(COMPOSE) up --build api web
+
+dev-local: ## Run api and web natively, infra in Docker (Ctrl-C stops both)
+	$(COMPOSE) up -d postgres mailpit
+	$(MAKE) migrate
+	@trap 'kill 0' EXIT INT TERM; \
+	 (cd api && air -c .air.toml 2>&1 | sed 's/^/[api] /') & \
+	 (cd web && npm run dev 2>&1 | sed 's/^/[web] /') & \
+	 wait
 
 up: ## Start everything in the background
 	$(COMPOSE) up -d --build postgres mailpit api web
@@ -38,10 +46,13 @@ migrate-new: ## Create a migration. make migrate-new NAME=add_users
 	@test -n "$(NAME)" || { echo "NAME is required, e.g. make migrate-new NAME=add_users"; exit 1; }
 	cd api && goose -dir ./migrations create $(NAME) sql
 
-test: test-api ## Run every test suite
+test: test-api test-web ## Run every test suite
 
 test-api: ## Run the Go tests (needs Docker for testcontainers)
 	cd api && go test ./... -count=1
+
+test-web: ## Run the frontend tests
+	cd web && npx vitest run
 
 lint: lint-arch ## Run every linter
 	cd api && go vet ./...
@@ -50,7 +61,7 @@ lint-arch: ## Check the clean-architecture dependency rule
 	./scripts/arch-lint.sh
 
 fmt: ## Format the Go code
-	cd api && gofmt -w .
+	cd api && gofmt -w . && cd ../web && npx prettier --write src
 
 psql: ## Open a psql shell against the development database
 	$(COMPOSE) exec postgres psql -U hearth -d hearth

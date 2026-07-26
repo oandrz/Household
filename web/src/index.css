@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+/* Tokens read from design/Household Dashboard.dc.html. Every screen composes
+   from these; nothing hard-codes a hex value. */
+@theme {
+  --color-canvas: #f0eee9;
+  --color-surface: #fafaf9;
+  --color-card: #ffffff;
+  --color-ink: #1c1b18;
+  --color-muted: rgba(0, 0, 0, 0.55);
+  --color-hairline: rgba(0, 0, 0, 0.08);
+  --color-accent: #1a6b52;
+  --color-accent-dark: #12503d;
+
+  --font-sans: "Schibsted Grotesk", system-ui, sans-serif;
+  --font-serif: "Newsreader", Georgia, serif;
+  --font-alt: "Karla", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+
+  --radius-card: 8px;
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+body {
+  margin: 0;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
