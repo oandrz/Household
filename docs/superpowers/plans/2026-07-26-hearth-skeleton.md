@@ -850,7 +850,8 @@ Create `scripts/arch-lint.sh`:
 # Enforces the clean-architecture dependency rule:
 #   internal/domain  imports no other internal package
 #   internal/usecase imports internal/domain only
-# Anything under internal/adapter and cmd may import whatever it needs.
+# Anything under internal/adapter, internal/testsupport and cmd may import
+# whatever it needs.
 set -euo pipefail
 
 cd "$(dirname "$0")/../api"
@@ -858,30 +859,41 @@ cd "$(dirname "$0")/../api"
 MODULE="github.com/andreasoentoro/hearth/api"
 violations=0
 
-# Emits "<package> <import>" for every internal import in the module.
+# A module that does not compile must be a hard error, not a violation-free
+# pass. go list tolerates breakage that the compiler rejects — it can exit 0
+# and silently omit the offending package's imports — so gate on a real build
+# first, and run go list outside a process substitution so set -e can see it.
+go build ./... >/dev/null
+
+imports=$(go list -f '{{$p := .ImportPath}}{{range .Imports}}{{$p}} {{.}}
+{{end}}{{range .TestImports}}{{$p}} {{.}}
+{{end}}{{range .XTestImports}}{{$p}} {{.}}
+{{end}}' ./...)
+
 while read -r pkg imp; do
+    [ -n "$pkg" ] || continue
     case "$pkg" in
-        "$MODULE/internal/domain"*)
+        "$MODULE/internal/domain"|"$MODULE/internal/domain"/*)
             case "$imp" in
-                "$MODULE/internal/domain"*) ;;
-                "$MODULE"/*)
+                "$MODULE/internal/domain"|"$MODULE/internal/domain"/*) ;;
+                "$MODULE"|"$MODULE"/*)
                     echo "domain must not import internal packages: $pkg -> $imp"
                     violations=$((violations + 1))
                     ;;
             esac
             ;;
-        "$MODULE/internal/usecase"*)
+        "$MODULE/internal/usecase"|"$MODULE/internal/usecase"/*)
             case "$imp" in
-                "$MODULE/internal/domain"*|"$MODULE/internal/usecase"*) ;;
-                "$MODULE"/*)
+                "$MODULE/internal/domain"|"$MODULE/internal/domain"/*) ;;
+                "$MODULE/internal/usecase"|"$MODULE/internal/usecase"/*) ;;
+                "$MODULE"|"$MODULE"/*)
                     echo "usecase may import domain only: $pkg -> $imp"
                     violations=$((violations + 1))
                     ;;
             esac
             ;;
     esac
-done < <(go list -f '{{$p := .ImportPath}}{{range .Imports}}{{$p}} {{.}}
-{{end}}' ./... | grep -v '^$')
+done <<< "$imports"
 
 if [ "$violations" -gt 0 ]; then
     echo "architecture lint failed with $violations violation(s)"
@@ -897,8 +909,10 @@ chmod +x scripts/arch-lint.sh
 
 - [ ] **Step 4: Run the self-check**
 
+The self-check covers four cases: the clean tree passes; a planted `domain -> adapter` import is rejected; a package that does not compile is rejected rather than silently passing; and a violation that appears only in a `_test.go` file is rejected. Every case must leave the tree exactly as it found it, directories included.
+
 Run: `./scripts/arch-lint_test.sh`
-Expected: prints `architecture lint passed`, then a violation message for the planted file, then `arch-lint self-check passed`. Confirm `api/internal/domain/violation.go` no longer exists afterwards.
+Expected: all four cases behave as stated, then `arch-lint self-check passed`. Confirm `git status --porcelain` is empty afterwards.
 
 - [ ] **Step 5: Commit**
 
