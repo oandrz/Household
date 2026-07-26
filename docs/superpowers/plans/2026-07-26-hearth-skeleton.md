@@ -1237,7 +1237,7 @@ git commit -m "chore: add Docker, Compose and the Makefile development workflow"
   - `class ApiError extends Error { code: string; status: number; details: Record<string, unknown> }`
   - Tailwind 4 theme tokens declared in `web/src/index.css` via `@theme` — colours `canvas`, `surface`, `card`, `ink`, `muted`, `hairline`, `accent`, `accent-dark`; fonts `sans`, `serif`, `alt`, `mono`. Tailwind 4 needs no `tailwind.config.ts`; the CSS block is the config.
   - `web/Dockerfile` with a `prod` stage, so `make build` succeeds from this task onward
-  - The identity plan's screens are added under `web/src/features/` and registered in the route tree created here.
+  - No router is installed in this task — `App.tsx` is a single placeholder component. The identity plan adds `web/src/features/` and builds the route tree from scratch there.
 
 - [ ] **Step 1: Scaffold the frontend**
 
@@ -1383,8 +1383,18 @@ Create `web/vitest.config.ts`:
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-  test: { environment: "jsdom", globals: true },
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: ["./src/test-setup.ts"],
+  },
 });
+```
+
+Create `web/src/test-setup.ts` so `@testing-library/jest-dom`'s matchers exist — without it the library is installed but never registered, and the first component test in the next plan fails on a missing matcher:
+
+```ts
+import "@testing-library/jest-dom/vitest";
 ```
 
 - [ ] **Step 5: Run it and watch it fail**
@@ -1472,6 +1482,17 @@ export async function apiFetch<T>(
     );
   }
 
+  // An ok response whose body is absent or unparseable must fail loudly.
+  // Returning `undefined as T` here would hand callers a type lie they cannot
+  // detect, and the crash would surface far from the cause.
+  if (parsed === undefined) {
+    throw new ApiError(
+      response.status,
+      "INVALID_RESPONSE",
+      "The server returned a body that is not JSON.",
+    );
+  }
+
   return parsed as T;
 }
 ```
@@ -1481,7 +1502,7 @@ export async function apiFetch<T>(
 Run: `cd web && npx vitest run`
 Expected: PASS, three tests.
 
-- [ ] **Step 8: Build the placeholder route tree**
+- [ ] **Step 8: Build the placeholder app shell**
 
 Create `web/src/main.tsx`:
 
@@ -1574,6 +1595,24 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
+    # Health endpoints must reach the API in production exactly as the Vite
+    # proxy routes them in development. Without these, they fall through to the
+    # SPA fallback below and return index.html with a 200 — a difference that
+    # only appears in production.
+    location = /healthz {
+        proxy_pass http://api:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location = /readyz {
+        proxy_pass http://api:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
     # Same-origin API, so no CORS in production either.
     location /api/ {
         proxy_pass http://api:8080;
@@ -1609,9 +1648,12 @@ dev-local: ## Run api and web natively, infra in Docker (Ctrl-C stops both)
 
 test-web: ## Run the frontend tests
 	cd web && npx vitest run
+
+typecheck: ## Type-check the frontend
+	cd web && npx tsc --noEmit
 ```
 
-Change `test:` to depend on both: `test: test-api test-web ## Run every test suite`, and extend `fmt:` with `&& cd ../web && npx prettier --write src`.
+Change `test:` to depend on both: `test: test-api test-web ## Run every test suite`; extend `fmt:` with `&& cd ../web && npx prettier --write src`; and make `lint` depend on `typecheck` as well as `lint-arch`, so the enforced gate actually type-checks the frontend. `vitest` transforms with esbuild and never type-checks, so without this a type error reaches only `make build`.
 
 - [ ] **Step 10: Verify the full stack end to end**
 
