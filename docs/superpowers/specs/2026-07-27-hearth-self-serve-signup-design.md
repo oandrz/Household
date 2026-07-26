@@ -145,12 +145,43 @@ Each reuse drops a `NOT NULL` foreign key that is currently doing real work.
 
 ### 3.2 Retention
 
-`signups` is the first table in this codebase a stranger can grow at will, and
-**nothing here prunes anything** — `magic_links`, `invites`, `sessions` and
-`login_attempts` all grow forever. `adminctl prune-signups` ships with the
-table, deleting consumed and expired rows past a window. The migration carries
-a comment saying why this table has a pruner when its siblings do not, so the
-asymmetry reads as a decision rather than an oversight.
+**Nothing in this codebase prunes anything.** `magic_links`, `invites`,
+`sessions` and `login_attempts` all grow without bound. `adminctl prune` ships
+with the table, deleting consumed and expired rows past a window.
+
+`signups` is **not** the first table a stranger can grow at will, and the
+earlier draft of this section said it was. `login_attempts` already is, and is
+worse — see 3.3. The migration comment therefore says why this table gets a
+pruner *first*, not why it is uniquely exposed.
+
+### 3.3 A defect found while writing this: `login_attempts` grows forever
+
+Not caused by sign-up, but discovered by asking which tables a stranger can
+already grow, and it changes what the pruner should cover.
+
+An unauthenticated stranger POSTing any address to the public
+`/api/v1/auth/sign-in` reaches `signInFailedForUnknownAddress`, which records
+one row per request with a NULL `household_id` and NULL `user_id`
+(`usecase/auth.go:153` — deliberately nullable per
+`migrations/00002_identity.sql:85-91`, so an attempt against an unknown address
+can be counted without revealing whether it exists). There is **no rate-limit
+middleware anywhere in the HTTP layer**; the only `ErrRateLimited` mapping
+serves the per-address magic-link limit.
+
+The part that makes it unbounded rather than merely large: `ClearFailures` is
+`DELETE FROM login_attempts WHERE household_id = $1 AND succeeded = false`
+(`queries/identity.sql:112`), and `household_id = $1` cannot match NULL. So the
+rows a **member** generates are the only ones anything ever deletes, and the
+rows a **stranger** generates are deleted by nothing, ever.
+
+**In scope, because this spec is already adding a pruner:** the subcommand
+becomes `adminctl prune` and covers `login_attempts` as well as `signups`.
+
+Its retention window must sit **well beyond `domain.LockoutPolicy.Window`**.
+Pruning a row still inside that window would silently shorten or clear a live
+lockout, which is a security regression dressed as a cleanup — the pruner must
+never be able to unlock a household as a side effect. The window is a constant
+with a comment saying exactly that.
 
 ---
 
@@ -302,6 +333,18 @@ type SignupRepository interface {
 }
 ```
 
+`LoginAttemptRepository` gains the matching method, for the defect in section
+3.3:
+
+```go
+    // Prune deletes attempts older than the cutoff, including the
+    // NULL-household_id rows an unknown-address attempt records, which
+    // ClearFailures cannot reach. The caller is responsible for a cutoff well
+    // outside domain.LockoutPolicy.Window -- deleting a row still inside it
+    // would clear a live lockout.
+    Prune(ctx context.Context, before time.Time) (int64, error)
+```
+
 `Provision` calls `domain.BuiltinSpaces(newHouseholdID)` itself, because the
 ID does not exist until inside the transaction. The knowledge of which spaces
 a household starts with stays in domain; the adapter only executes it inside
@@ -380,7 +423,7 @@ registered.
 | Route | Guard | Answer |
 |---|---|---|
 | `POST /api/v1/auth/sign-up` | public | Always `202 {"status":"accepted"}` — identical for fresh, registered and rate-limited addresses. Matches `handleRequestMagicLink`'s existing body exactly. |
-| `GET /api/v1/auth/sign-up/{token}` | public | `200 {"email":"…"}`. `410 TOKEN_EXPIRED`, `409 ALREADY_EXISTS`. |
+| `GET /api/v1/auth/sign-up/{token}` | public | `200 {"email":"…"}`. `410 TOKEN_EXPIRED`, `409 SIGNUP_ALREADY_USED`, `404 NOT_FOUND` for a token that never existed — the same three answers `handleInvitePreview` already gives, since an unknown token hash becomes `domain.ErrNotFound` at the repository boundary. |
 | `POST /api/v1/auth/sign-up/{token}/complete` | public | `completeSignIn` — the me bundle plus session and CSRF cookies, byte-identical in shape to sign-in. |
 | `GET /api/v1/currencies` | public | `200 {"currencies":[{"code":"SGD","symbol":"S$","name":"Singapore dollar"},…]}` |
 
@@ -390,9 +433,10 @@ the request step must sit beside `/auth/magic-link`, and splitting one flow
 across two prefixes is worse than the asymmetry. `/currencies` is top-level
 because it is not part of the sign-up flow — the Settings panel reads it too.
 
-Every handler decodes through `decodeJSONBody`, so the 1 KiB
-`maxRequestBodyBytes` bound applies. The completion body — household name,
-display name, currency, password — fits well inside it.
+The two POST handlers decode through `decodeJSONBody`, so the 1 KiB
+`maxRequestBodyBytes` bound applies to both. The completion body — household
+name, display name, currency, password — fits well inside it. The two GETs
+carry no body and decode nothing, exactly as `handleInvitePreview` does not.
 
 `completeSignIn` is reused verbatim. It assembles the me bundle and generates
 the CSRF token *before* writing either cookie, so a failure at either step
@@ -508,6 +552,9 @@ is "exactly one household per deployment". The moment a stranger signs up,
 those commands act on the wrong household. `--email` resolves through any
 member's address; the Andreas default survives for development only.
 
+**`adminctl prune` arrives**, covering `signups` and `login_attempts` — see
+section 3.3 for the defect that widened it beyond the table this spec adds.
+
 **`AvatarInitial` derives from the first Unicode grapheme, and the column
 widens from `char(1)` to `text`.** A non-ASCII display name currently produces
 a permanent replacement-character avatar with no profile-edit endpoint to fix
@@ -589,7 +636,11 @@ fixed at one site while siblings kept the bug.
   an invite. Use the `maintaining-system-design` skill.
 - **`FEATURE_TRACKER.md`** — new rows for sign-up and provisioning; the 🟡 for
   the missing secondary-currency picker; recount the summary table.
-- **`LEARNING.md`** — whatever this work teaches.
+- **`LEARNING.md`** — whatever this work teaches, and the `login_attempts`
+  defect in section 3.3 regardless of what else happens: a `DELETE` scoped to a
+  column that is deliberately nullable silently spares exactly the rows the
+  nullable case creates. That is a pattern, not a one-off, and it was found by
+  asking "which tables can a stranger already grow?" rather than by any test.
 - **`HANDOVER.md`** — the build order changed; say so.
 
 ---
@@ -611,6 +662,12 @@ able to express it.
 
 **A secondary-currency picker** in `CurrencyPanel` (section 9).
 
-**Retention for `magic_links`, `invites`, `sessions` and `login_attempts`.**
-`prune-signups` handles only the table this spec adds. The others still grow
-forever.
+**Retention for `magic_links`, `invites` and `sessions`.** `adminctl prune`
+covers `signups` and `login_attempts` (section 3.3). These three still grow
+forever. None is stranger-growable — `magic_links` and `invites` both require
+an existing account or an owner to create a row — which is why they wait.
+
+**Rate limiting on `/auth/sign-in`.** Section 3.3 found there is none anywhere
+in the HTTP layer. Sign-up brings its own limiter (section 8), and that limiter
+is the obvious thing to point at sign-in next, but doing so touches the lockout
+interaction and belongs in its own change.
