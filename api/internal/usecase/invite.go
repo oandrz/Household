@@ -43,6 +43,23 @@ const maxPasswordLength = 256
 // auth.go) instead of returning a distinguishable sentinel.
 var ErrPasswordTooLong = errors.New("password must be at most 256 characters")
 
+// ErrInviteeAlreadyRegistered is Create's rejection of an invite to an email
+// address that already has a users row. Without this check, Create wrote the
+// invite and sent the mail anyway -- InviteRepo.Accept unconditionally calls
+// CreateUser and never reuses an existing row, so acceptance always hit
+// users.email's unique constraint, translated to domain.ErrAlreadyExists with
+// no mapping, and answered 500. The transaction rolled back, so the invite
+// stayed live and every retry produced the same 500: the owner who sent the
+// invite saw success, and the recipient could never accept it, forever.
+//
+// Rejecting at creation -- where the owner who typed the address can see the
+// error and act on it -- is better than teaching Accept to reuse the
+// existing row: re-inviting an address that already belongs to someone is
+// almost always a mistake (a mistype, or an accidental re-invite of a
+// current member) rather than a genuine intent to hand a second person the
+// same account.
+var ErrInviteeAlreadyRegistered = errors.New("an account with that email address already exists")
+
 // InviteDeps mirrors AuthDeps: every port InviteService needs, gathered into
 // one struct so NewInviteService has a single, named argument rather than a
 // long positional list.
@@ -130,6 +147,20 @@ func (s *InviteService) Create(ctx context.Context, householdID, invitedByUserID
 			return err
 		}
 		_, _, err = s.d.Users.CreateWithMembership(ctx, "", "", name, membership)
+		return err
+	}
+
+	// Reject an invite to an address that already has a users row before
+	// writing anything -- see ErrInviteeAlreadyRegistered's doc comment for
+	// the 500 this closes. This is a pre-check, not the only gate: two
+	// callers inviting the same brand-new address at once can both pass it
+	// before either invite is accepted, so the race is still possible at
+	// acceptance time. That race is closed by users.email's unique
+	// constraint (translated to domain.ErrAlreadyExists, mapped to 409 in
+	// MapDomainError's default case) rather than by anything here.
+	if _, err := s.d.Users.ByEmail(ctx, email); err == nil {
+		return ErrInviteeAlreadyRegistered
+	} else if !errors.Is(err, domain.ErrNotFound) {
 		return err
 	}
 

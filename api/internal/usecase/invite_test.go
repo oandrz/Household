@@ -47,6 +47,32 @@ func TestCreateWithAnEmailSendsExactlyOneInviteEmail(t *testing.T) {
 	}
 }
 
+// TestCreateRejectsAnInviteToAnAddressThatAlreadyHasAUsersRow pins the fix
+// for the invite-to-an-existing-member 500: InviteRepo.Accept unconditionally
+// calls CreateUser and never reuses an existing row, so an invite to an
+// address that already belongs to a user (a mistype of a current member's
+// address, or a re-invite) would write successfully, mail successfully, and
+// then 500 forever at acceptance -- the invite's own transaction rolling
+// back on every retry. Create must refuse this before writing anything, so
+// the owner who typed the address sees the problem immediately instead of
+// the recipient hitting a dead end later.
+func TestCreateRejectsAnInviteToAnAddressThatAlreadyHasAUsersRow(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	err := f.invites.Create(ctx, f.householdID, f.andreasID, "Ethan", "ethan@hearth.family",
+		domain.RoleLimited, domain.Capabilities{domain.CapCalendar})
+	if !errors.Is(err, usecase.ErrInviteeAlreadyRegistered) {
+		t.Fatalf("err = %v, want usecase.ErrInviteeAlreadyRegistered", err)
+	}
+	if got := f.inviteRepo.count(); got != 0 {
+		t.Fatalf("invite rows written = %d, want 0", got)
+	}
+	if got := f.mailer.invitesSentCount(); got != 0 {
+		t.Fatalf("invite emails sent = %d, want 0", got)
+	}
+}
+
 func TestCreateForALimitedMemberWithNoEmailCreatesNoInviteButCreatesTheChild(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
