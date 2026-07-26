@@ -44,15 +44,39 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// serveErr carries the outcome of ListenAndServe back to the main path.
+	// It is buffered so the goroutine never blocks sending to it, and it is
+	// only ever read after <-ctx.Done() returns, so there is no data race:
+	// a listen failure sends before calling stop() (which is what unblocks
+	// ctx.Done() below), so the send always happens-before the read.
+	serveErr := make(chan error, 1)
+
 	go func() {
 		slog.Info("listening", "addr", srv.Addr, "env", cfg.AppEnv)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("server stopped", "error", err)
+			serveErr <- err
 			stop()
+			return
 		}
+		serveErr <- nil
 	}()
 
 	<-ctx.Done()
+
+	// If the listener itself failed to start, there is nothing to shut down
+	// and the failure must propagate so the process exits non-zero. A
+	// signal-driven shutdown leaves serveErr empty at this point, since
+	// ListenAndServe only returns (with ErrServerClosed) once Shutdown is
+	// called below.
+	select {
+	case err := <-serveErr:
+		if err != nil {
+			return fmt.Errorf("listen and serve: %w", err)
+		}
+	default:
+	}
+
 	slog.Info("shutting down")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

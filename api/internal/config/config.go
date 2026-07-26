@@ -34,6 +34,9 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("PORT must be a number: %w", err)
 	}
+	if port < 1 || port > 65535 {
+		return Config{}, fmt.Errorf("PORT must be between 1 and 65535, got %d", port)
+	}
 	cfg.Port = port
 
 	if cfg.DatabaseURL == "" {
