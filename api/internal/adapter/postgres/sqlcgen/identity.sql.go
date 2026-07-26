@@ -376,6 +376,54 @@ func (q *Queries) GetInviteByTokenHash(ctx context.Context, tokenHash []byte) (G
 	return i, err
 }
 
+const getLiveInviteForEmail = `-- name: GetLiveInviteForEmail :one
+SELECT i.id, i.household_id, i.email, i.name, i.role, i.capabilities,
+       i.expires_at, i.accepted_at, h.family_name, u.display_name AS inviter_name
+FROM invites i
+JOIN households h ON h.id = i.household_id
+JOIN users u ON u.id = i.invited_by
+WHERE i.household_id = $1 AND i.email = $2
+  AND i.accepted_at IS NULL AND i.expires_at > now()
+ORDER BY i.created_at DESC
+LIMIT 1
+`
+
+type GetLiveInviteForEmailParams struct {
+	HouseholdID pgtype.UUID
+	Email       string
+}
+
+type GetLiveInviteForEmailRow struct {
+	ID           pgtype.UUID
+	HouseholdID  pgtype.UUID
+	Email        string
+	Name         string
+	Role         string
+	Capabilities []string
+	ExpiresAt    pgtype.Timestamptz
+	AcceptedAt   pgtype.Timestamptz
+	FamilyName   string
+	InviterName  string
+}
+
+func (q *Queries) GetLiveInviteForEmail(ctx context.Context, arg GetLiveInviteForEmailParams) (GetLiveInviteForEmailRow, error) {
+	row := q.db.QueryRow(ctx, getLiveInviteForEmail, arg.HouseholdID, arg.Email)
+	var i GetLiveInviteForEmailRow
+	err := row.Scan(
+		&i.ID,
+		&i.HouseholdID,
+		&i.Email,
+		&i.Name,
+		&i.Role,
+		&i.Capabilities,
+		&i.ExpiresAt,
+		&i.AcceptedAt,
+		&i.FamilyName,
+		&i.InviterName,
+	)
+	return i, err
+}
+
 const getLiveSession = `-- name: GetLiveSession :one
 SELECT id, user_id, household_id, expires_at FROM sessions
 WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()
@@ -440,6 +488,40 @@ func (q *Queries) GetNotificationPreferences(ctx context.Context, householdID pg
 		&i.OverspendAlerts,
 		&i.RetroReminder,
 		&i.WeeklyDigest,
+	)
+	return i, err
+}
+
+const getOrphanedCredentiallessUserByName = `-- name: GetOrphanedCredentiallessUserByName :one
+SELECT id, email, password_hash, display_name, avatar_initial
+FROM users u
+WHERE u.display_name = $1
+  AND u.email IS NULL
+  AND u.password_hash IS NULL
+  AND NOT EXISTS (SELECT 1 FROM memberships m WHERE m.user_id = u.id)
+LIMIT 1
+`
+
+type GetOrphanedCredentiallessUserByNameRow struct {
+	ID            pgtype.UUID
+	Email         *string
+	PasswordHash  *string
+	DisplayName   string
+	AvatarInitial string
+}
+
+// A credential-less user (no email, no password) with this display name
+// that currently holds no membership row at all -- the state a removed
+// membership leaves behind without deleting the user underneath it.
+func (q *Queries) GetOrphanedCredentiallessUserByName(ctx context.Context, displayName string) (GetOrphanedCredentiallessUserByNameRow, error) {
+	row := q.db.QueryRow(ctx, getOrphanedCredentiallessUserByName, displayName)
+	var i GetOrphanedCredentiallessUserByNameRow
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.AvatarInitial,
 	)
 	return i, err
 }

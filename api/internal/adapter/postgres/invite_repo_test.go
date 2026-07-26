@@ -220,6 +220,73 @@ func TestInviteAcceptRollsBackOnMembershipConstraintViolation(t *testing.T) {
 	}
 }
 
+// TestLiveInviteForEmail proves LiveInviteForEmail's filter against a real
+// Postgres query planner, not just the in-memory double: an unaccepted,
+// unexpired invite is found; an accepted one and an expired one, for the
+// same address, are not; and a live invite in a different household for the
+// same address is not found either.
+func TestLiveInviteForEmail(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	households := postgres.NewHouseholdRepo(db)
+	users := postgres.NewUserRepo(db)
+	invites := postgres.NewInviteRepo(db)
+
+	h, err := households.Create(ctx, "Andreas & Christine", "Oentoro")
+	if err != nil {
+		t.Fatalf("create household: %v", err)
+	}
+	inviter, err := users.Create(ctx, "andreas@hearth.family", "hash", "Andreas")
+	if err != nil {
+		t.Fatalf("create inviter: %v", err)
+	}
+
+	if _, err := invites.LiveInviteForEmail(ctx, h.ID, "christine@hearth.family"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("before any invite exists: got %v, want domain.ErrNotFound", err)
+	}
+
+	liveHash := []byte("livetokenhashlivetokenhashlive01")
+	liveID, err := invites.Create(ctx, h.ID, "christine@hearth.family", "Christine", domain.RoleOwner,
+		domain.AllCapabilities(), liveHash, inviter.ID, time.Now().Add(72*time.Hour))
+	if err != nil {
+		t.Fatalf("Create (live): %v", err)
+	}
+
+	details, err := invites.LiveInviteForEmail(ctx, h.ID, "christine@hearth.family")
+	if err != nil {
+		t.Fatalf("LiveInviteForEmail: %v", err)
+	}
+	if details.ID != liveID || details.Role != domain.RoleOwner || details.Name != "Christine" ||
+		details.InviterName != "Andreas" || details.FamilyName != "Oentoro" {
+		t.Fatalf("details = %+v", details)
+	}
+
+	// A different household's invite for the same address must not surface.
+	h2, err := households.Create(ctx, "A Different Household", "Someone Else")
+	if err != nil {
+		t.Fatalf("create second household: %v", err)
+	}
+	if _, err := invites.LiveInviteForEmail(ctx, h2.ID, "christine@hearth.family"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("a different household's lookup: got %v, want domain.ErrNotFound", err)
+	}
+
+	if err := invites.MarkAccepted(ctx, liveID); err != nil {
+		t.Fatalf("MarkAccepted: %v", err)
+	}
+	if _, err := invites.LiveInviteForEmail(ctx, h.ID, "christine@hearth.family"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("after acceptance: got %v, want domain.ErrNotFound", err)
+	}
+
+	expiredHash := []byte("expiredtokenhashexpiredtokenhas1")
+	if _, err := invites.Create(ctx, h.ID, "kayla@example.com", "Kayla", domain.RoleLimited,
+		domain.Capabilities{domain.CapCalendar}, expiredHash, inviter.ID, time.Now().Add(-time.Hour)); err != nil {
+		t.Fatalf("Create (expired): %v", err)
+	}
+	if _, err := invites.LiveInviteForEmail(ctx, h.ID, "kayla@example.com"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("an expired invite: got %v, want domain.ErrNotFound", err)
+	}
+}
+
 func countUsersByEmail(t *testing.T, db *postgres.DB, email string) int {
 	t.Helper()
 	var count int

@@ -204,6 +204,24 @@ func (d *userDouble) SetPasswordHash(_ context.Context, userID, hash string) err
 	return nil
 }
 
+// FindOrphanedChild mirrors GetOrphanedCredentiallessUserByName: a
+// credential-less user (no email, no password) with this display name that
+// holds no membership row anywhere. It exists so seed.go's ensureChild can
+// detect the state removing a membership without deleting its user leaves
+// behind, instead of silently creating a duplicate under the same name.
+func (d *userDouble) FindOrphanedChild(_ context.Context, displayName string) (domain.User, error) {
+	for _, u := range d.byID {
+		if u.DisplayName != displayName || u.Email != "" || u.PasswordHash != "" {
+			continue
+		}
+		if _, hasMembership := d.members.byUser[u.ID]; hasMembership {
+			continue
+		}
+		return u.User, nil
+	}
+	return domain.User{}, domain.ErrNotFound
+}
+
 // --- MembershipRepository --------------------------------------------
 
 type membershipDouble struct {
@@ -560,6 +578,17 @@ type inviteDouble struct {
 	familyName map[string]string // householdID -> family name, mirrors the households join
 	rows       map[string]*inviteRow
 	n          int
+
+	// raceNextCreate arms a one-shot simulated race: the next Create call
+	// writes its row (mirroring a concurrent writer's insert landing first)
+	// and returns domain.ErrAlreadyExists instead of the row's ID, exactly
+	// as translate maps the real UNIQUE (token_hash) constraint's violation.
+	// It exists so a test can exercise the tolerance branch a check-then-
+	// write caller (seed.go's issueChristineInviteAtNextRung) relies on for
+	// the window between its own existence check and this call -- a branch
+	// that plain concurrent double calls cannot otherwise reach
+	// deterministically.
+	raceNextCreate bool
 }
 
 func newInviteDouble(clock *fixedClock, users *userDouble, members *membershipDouble) *inviteDouble {
@@ -585,13 +614,36 @@ func (d *inviteDouble) byID(inviteID string) *inviteRow {
 	return nil
 }
 
+// failNextCreateWithAlreadyExists arms raceNextCreate: the next Create call
+// writes its row but reports domain.ErrAlreadyExists instead of its ID, and
+// every call after that succeeds normally again.
+func (d *inviteDouble) failNextCreateWithAlreadyExists() {
+	d.raceNextCreate = true
+}
+
 func (d *inviteDouble) Create(_ context.Context, householdID, email, name string, role domain.Role,
 	caps domain.Capabilities, tokenHash []byte, invitedBy string, expiresAt time.Time) (string, error) {
+	if _, exists := d.rows[string(tokenHash)]; exists {
+		// Mirrors the real UNIQUE (token_hash) constraint: a second Create
+		// under a hash that already has a row is rejected outright, exactly
+		// as translate maps Postgres's unique-violation error.
+		return "", domain.ErrAlreadyExists
+	}
+
 	d.n++
 	id := fmt.Sprintf("invite-%d", d.n)
 	d.rows[string(tokenHash)] = &inviteRow{
 		ID: id, HouseholdID: householdID, Email: email, Name: name, Role: role,
 		Capabilities: caps, InvitedBy: invitedBy, ExpiresAt: expiresAt,
+	}
+
+	if d.raceNextCreate {
+		d.raceNextCreate = false
+		// The row above is exactly what a concurrent writer's insert would
+		// have produced, landing between the caller's own existence check
+		// and this call -- so the row must still exist afterwards, only the
+		// return value differs from the ordinary success case.
+		return "", domain.ErrAlreadyExists
 	}
 	return id, nil
 }
@@ -601,13 +653,37 @@ func (d *inviteDouble) ByTokenHash(_ context.Context, tokenHash []byte) (usecase
 	if !ok {
 		return usecase.InviteDetails{}, domain.ErrNotFound
 	}
+	return d.details(row), nil
+}
+
+// LiveInviteForEmail mirrors GetLiveInviteForEmail: the invite, if any, for
+// this address in this household that is neither accepted nor expired.
+func (d *inviteDouble) LiveInviteForEmail(_ context.Context, householdID, email string) (usecase.InviteDetails, error) {
+	now := d.clock.Now()
+	for _, row := range d.rows {
+		if row.HouseholdID != householdID || row.Email != email {
+			continue
+		}
+		if row.AcceptedAt != nil || !row.ExpiresAt.After(now) {
+			continue
+		}
+		return d.details(row), nil
+	}
+	return usecase.InviteDetails{}, domain.ErrNotFound
+}
+
+// details projects one row the same way ByTokenHash and LiveInviteForEmail
+// both need to: joined to its inviter's display name and its household's
+// family name, mirroring the real GetInviteByTokenHash / GetLiveInviteForEmail
+// SQL joins.
+func (d *inviteDouble) details(row *inviteRow) usecase.InviteDetails {
 	inviter := d.users.byID[row.InvitedBy]
 	return usecase.InviteDetails{
 		ID: row.ID, HouseholdID: row.HouseholdID, Email: row.Email, Name: row.Name,
 		Role: row.Role, Capabilities: row.Capabilities,
 		FamilyName: d.familyName[row.HouseholdID], InviterName: inviter.DisplayName,
 		ExpiresAt: row.ExpiresAt, AcceptedAt: row.AcceptedAt,
-	}, nil
+	}
 }
 
 // MarkAccepted mirrors MarkInviteAccepted's guarded update -- accepted_at IS

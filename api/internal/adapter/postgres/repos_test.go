@@ -36,6 +36,65 @@ func TestUserRepoRoundTrip(t *testing.T) {
 	}
 }
 
+// TestFindOrphanedChild proves the query behind seed.go's duplicate-child
+// guard against a real Postgres query planner: it finds a credential-less
+// user with no membership row at all, but not one that still has a
+// membership, and not one that has an email or a password even if its
+// display name matches.
+func TestFindOrphanedChild(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	households := postgres.NewHouseholdRepo(db)
+	users := postgres.NewUserRepo(db)
+	members := postgres.NewMembershipRepo(db)
+
+	if _, err := users.FindOrphanedChild(ctx, "Kayla"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("before any user exists: got %v, want domain.ErrNotFound", err)
+	}
+
+	h, err := households.Create(ctx, "Andreas & Christine", "Oentoro")
+	if err != nil {
+		t.Fatalf("create household: %v", err)
+	}
+
+	// A credential-less user with a membership is not an orphan.
+	memberedKayla, err := users.Create(ctx, "", "", "Kayla")
+	if err != nil {
+		t.Fatalf("create membered kayla: %v", err)
+	}
+	if _, err := members.Create(ctx, domain.Membership{
+		HouseholdID: h.ID, UserID: memberedKayla.ID, Role: domain.RoleLimited,
+		Capabilities: domain.Capabilities{domain.CapCalendar},
+	}); err != nil {
+		t.Fatalf("create membership: %v", err)
+	}
+	if _, err := users.FindOrphanedChild(ctx, "Kayla"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("a membered Kayla must not be reported as an orphan: got %v", err)
+	}
+
+	// A user with an email, even with no membership, is not this kind of
+	// orphan -- FindOrphanedChild only concerns credential-less members.
+	if _, err := users.Create(ctx, "kayla2@example.com", "", "Kayla"); err != nil {
+		t.Fatalf("create emailed kayla: %v", err)
+	}
+	if _, err := users.FindOrphanedChild(ctx, "Kayla"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("an emailed Kayla must not be reported as an orphan: got %v", err)
+	}
+
+	// The real orphan: credential-less, no membership.
+	orphan, err := users.Create(ctx, "", "", "Kayla")
+	if err != nil {
+		t.Fatalf("create orphaned kayla: %v", err)
+	}
+	found, err := users.FindOrphanedChild(ctx, "Kayla")
+	if err != nil {
+		t.Fatalf("FindOrphanedChild: %v", err)
+	}
+	if found.ID != orphan.ID {
+		t.Fatalf("found = %+v, want the orphaned user %+v", found, orphan)
+	}
+}
+
 func TestMembershipRepoRejectsAnInvalidCapabilitySet(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

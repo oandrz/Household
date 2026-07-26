@@ -64,6 +64,28 @@ func (r *InviteRepo) ByTokenHash(ctx context.Context, tokenHash []byte) (usecase
 	}, nil
 }
 
+func (r *InviteRepo) LiveInviteForEmail(ctx context.Context, householdID, email string) (usecase.InviteDetails, error) {
+	row, err := r.q.GetLiveInviteForEmail(ctx, sqlcgen.GetLiveInviteForEmailParams{
+		HouseholdID: uuid(householdID),
+		Email:       email,
+	})
+	if err != nil {
+		return usecase.InviteDetails{}, translate(err, "get live invite for email")
+	}
+	return usecase.InviteDetails{
+		ID:           uuidToString(row.ID),
+		HouseholdID:  uuidToString(row.HouseholdID),
+		Email:        row.Email,
+		Name:         row.Name,
+		Role:         toRole(row.Role),
+		Capabilities: toCapabilities(row.Capabilities),
+		FamilyName:   row.FamilyName,
+		InviterName:  row.InviterName,
+		ExpiresAt:    timeOf(row.ExpiresAt),
+		AcceptedAt:   timePtrOf(row.AcceptedAt),
+	}, nil
+}
+
 // MarkAccepted deliberately does not go through translate. MarkInviteAccepted
 // is a guarded atomic update (accepted_at IS NULL AND expires_at > now()), so
 // zero rows means the invite was already accepted or has expired -- not that

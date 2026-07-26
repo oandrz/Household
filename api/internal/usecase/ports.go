@@ -70,6 +70,15 @@ type UserRepository interface {
 	// another orphan each time.
 	CreateWithMembership(ctx context.Context, email, passwordHash, displayName string,
 		m domain.Membership) (domain.User, domain.Membership, error)
+	// FindOrphanedChild returns the credential-less user (no email, no
+	// password) with this exact display name that currently holds no
+	// membership anywhere, if one exists. It reports domain.ErrNotFound when
+	// there is none. This is the state removing a membership leaves behind
+	// without deleting the user row underneath it -- a credential-less
+	// member has no email for a unique constraint to protect the way a real
+	// address does, so nothing else stops a second create under the same
+	// name from silently duplicating one.
+	FindOrphanedChild(ctx context.Context, displayName string) (domain.User, error)
 }
 
 type HouseholdRepository interface {
@@ -152,6 +161,14 @@ type InviteRepository interface {
 	Create(ctx context.Context, householdID, email, name string, role domain.Role,
 		caps domain.Capabilities, tokenHash []byte, invitedBy string, expiresAt time.Time) (string, error)
 	ByTokenHash(ctx context.Context, tokenHash []byte) (InviteDetails, error)
+	// LiveInviteForEmail answers "is there already something usable in
+	// flight for this address in this household" -- neither accepted nor
+	// expired -- without requiring the raw token that produced it, which is
+	// never persisted anywhere. It reports domain.ErrNotFound when there is
+	// none, exactly as ByTokenHash does for an unknown token: "no live
+	// invite" and "no invite at all" are the same absence from a caller's
+	// point of view.
+	LiveInviteForEmail(ctx context.Context, householdID, email string) (InviteDetails, error)
 	// Returns domain.ErrInviteAlreadyAccepted when the invite was already
 	// accepted or has expired — the guard lives in the SQL, not in the caller.
 	MarkAccepted(ctx context.Context, inviteID string) error

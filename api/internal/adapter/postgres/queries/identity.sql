@@ -12,6 +12,18 @@ RETURNING id, email, password_hash, display_name, avatar_initial;
 -- name: SetPasswordHash :exec
 UPDATE users SET password_hash = $2 WHERE id = $1;
 
+-- name: GetOrphanedCredentiallessUserByName :one
+-- A credential-less user (no email, no password) with this display name
+-- that currently holds no membership row at all -- the state a removed
+-- membership leaves behind without deleting the user underneath it.
+SELECT id, email, password_hash, display_name, avatar_initial
+FROM users u
+WHERE u.display_name = $1
+  AND u.email IS NULL
+  AND u.password_hash IS NULL
+  AND NOT EXISTS (SELECT 1 FROM memberships m WHERE m.user_id = u.id)
+LIMIT 1;
+
 -- name: GetHousehold :one
 SELECT id, name, family_name, primary_currency, show_secondary_currency,
        secondary_currency, fx_rate_mode
@@ -111,6 +123,17 @@ FROM invites i
 JOIN households h ON h.id = i.household_id
 JOIN users u ON u.id = i.invited_by
 WHERE i.token_hash = $1;
+
+-- name: GetLiveInviteForEmail :one
+SELECT i.id, i.household_id, i.email, i.name, i.role, i.capabilities,
+       i.expires_at, i.accepted_at, h.family_name, u.display_name AS inviter_name
+FROM invites i
+JOIN households h ON h.id = i.household_id
+JOIN users u ON u.id = i.invited_by
+WHERE i.household_id = $1 AND i.email = $2
+  AND i.accepted_at IS NULL AND i.expires_at > now()
+ORDER BY i.created_at DESC
+LIMIT 1;
 
 -- name: MarkInviteAccepted :one
 UPDATE invites SET accepted_at = now()

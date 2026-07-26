@@ -114,6 +114,14 @@ func (r *UserRepo) CreateWithMembership(ctx context.Context, email, passwordHash
 	return user, membership, nil
 }
 
+func (r *UserRepo) FindOrphanedChild(ctx context.Context, displayName string) (domain.User, error) {
+	row, err := r.q.GetOrphanedCredentiallessUserByName(ctx, displayName)
+	if err != nil {
+		return domain.User{}, translate(err, "find orphaned child")
+	}
+	return toStoredUser(row.ID, row.Email, row.PasswordHash, row.DisplayName, row.AvatarInitial).User, nil
+}
+
 func (r *UserRepo) SetPasswordHash(ctx context.Context, userID, hash string) error {
 	return translate(r.q.SetPasswordHash(ctx, sqlcgen.SetPasswordHashParams{
 		ID: uuid(userID), PasswordHash: nullableText(hash),
