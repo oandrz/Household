@@ -74,7 +74,9 @@
   - `domain.NewMembership(id, householdID, userID string, role Role, caps Capabilities) (Membership, error)`
   - `domain.ValidateMembershipChange(all []Membership, targetID string, newRole Role, newCaps Capabilities) error`
   - `domain.ValidateMembershipRemoval(all []Membership, targetID string) error`
-  - Errors: `ErrInvalidCredentials`, `ErrHouseholdLocked`, `ErrLastOwner`, `ErrLimitedCannotHoldMarriage`, `ErrUnknownCapability`, `ErrCurrencyMismatch`, `ErrNotFound`, `ErrForbidden`, `ErrInviteExpired`, `ErrInviteAlreadyAccepted`, `ErrTokenExpired`, `ErrRateLimited`
+  - Errors: `ErrInvalidCredentials`, `ErrHouseholdLocked`, `ErrLastOwner`, `ErrLimitedCannotHoldMarriage`, `ErrOwnerMustHoldAllCapabilities`, `ErrUnknownCapability`, `ErrUnknownRole`, `ErrCurrencyMismatch`, `ErrAmountOverflow`, `ErrInvalidMoney`, `ErrNotFound`, `ErrForbidden`, `ErrInviteExpired`, `ErrInviteAlreadyAccepted`, `ErrTokenExpired`, `ErrRateLimited`
+
+**Two contract rules established here that every later task depends on.** An owner must hold all four capabilities — the design shows both parents with full access, and leaving it unenforced made space visibility ambiguous. And `ValidateMembershipChange` / `ValidateMembershipRemoval` return `ErrNotFound` when the target membership is absent, rather than silently approving; they consult the last-owner rule only when the target is currently an owner and the change would stop it being one, so a capability edit on a limited member never trips it.
 
 - [ ] **Step 1: Write the failing money test**
 
@@ -923,6 +925,13 @@ CREATE TABLE memberships (
     ),
     CONSTRAINT limited_members_have_no_marriage CHECK (
         role <> 'limited' OR NOT ('marriage' = ANY (capabilities))
+    ),
+    -- Mirrors the domain rule that an owner holds every capability. The domain
+    -- constructor is the first gate; this is the second, for rows written by
+    -- anything that bypasses it.
+    CONSTRAINT owners_hold_all_capabilities CHECK (
+        role <> 'owner'
+        OR capabilities @> ARRAY['calendar', 'chores', 'money', 'marriage']::text[]
     )
 );
 
@@ -2842,6 +2851,9 @@ Create the two test files covering:
 
 1. `Update` demoting the only owner returns `domain.ErrLastOwner` and writes nothing.
 2. `Update` granting `marriage` to a `limited` member returns `domain.ErrLimitedCannotHoldMarriage`.
+2b. `Update` promoting a member to `owner` with a partial capability set returns `domain.ErrOwnerMustHoldAllCapabilities`.
+2c. `Update` on a membership ID that does not exist in the household returns `domain.ErrNotFound`.
+2d. `Update` changing only the capabilities of a `limited` member succeeds in a household with no other owner — the last-owner rule must not be consulted when ownership is not at stake.
 3. `Update` succeeding revokes that member's sessions — assert the session double is empty afterwards, because a capability change must not remain effective in an open tab.
 4. `Remove` of the only owner returns `domain.ErrLastOwner`.
 5. `Remove` succeeding deletes the membership and revokes that user's sessions.
@@ -2913,7 +2925,7 @@ Expected: FAIL — routes do not exist.
 
 - [ ] **Step 3: Implement the error table**
 
-Create `api/internal/adapter/http/errors.go` mapping, in one `switch`: `domain.ErrInvalidCredentials` → 401 `INVALID_CREDENTIALS`; `domain.ErrHouseholdLocked` → 423 `HOUSEHOLD_LOCKED`; `domain.ErrNotFound` → 404 `NOT_FOUND`; `domain.ErrForbidden` → 403 `FORBIDDEN`; `domain.ErrLastOwner` → 409 `LAST_OWNER`; `domain.ErrLimitedCannotHoldMarriage` → 422 `INVALID_CAPABILITIES`; `domain.ErrUnknownCapability` → 422 `INVALID_CAPABILITIES`; `domain.ErrInviteExpired` → 410 `INVITE_EXPIRED`; `domain.ErrInviteAlreadyAccepted` → 409 `INVITE_ALREADY_ACCEPTED`; `domain.ErrTokenExpired` → 410 `TOKEN_EXPIRED`; `domain.ErrRateLimited` → 429 `RATE_LIMITED`; default → 500 `INTERNAL` with the request ID in `details.requestId` and the real error logged, never returned.
+Create `api/internal/adapter/http/errors.go` mapping, in one `switch`: `domain.ErrInvalidCredentials` → 401 `INVALID_CREDENTIALS`; `domain.ErrHouseholdLocked` → 423 `HOUSEHOLD_LOCKED`; `domain.ErrNotFound` → 404 `NOT_FOUND`; `domain.ErrForbidden` → 403 `FORBIDDEN`; `domain.ErrLastOwner` → 409 `LAST_OWNER`; `domain.ErrLimitedCannotHoldMarriage` → 422 `INVALID_CAPABILITIES`; `domain.ErrOwnerMustHoldAllCapabilities` → 422 `INVALID_CAPABILITIES`; `domain.ErrUnknownCapability` → 422 `INVALID_CAPABILITIES`; `domain.ErrUnknownRole` → 422 `INVALID_ROLE`; `domain.ErrAmountOverflow` and `domain.ErrInvalidMoney` → 500 `INTERNAL`, since either reaching the HTTP layer means a calculation is wrong rather than a request being bad; `domain.ErrInviteExpired` → 410 `INVITE_EXPIRED`; `domain.ErrInviteAlreadyAccepted` → 409 `INVITE_ALREADY_ACCEPTED`; `domain.ErrTokenExpired` → 410 `TOKEN_EXPIRED`; `domain.ErrRateLimited` → 429 `RATE_LIMITED`; default → 500 `INTERNAL` with the request ID in `details.requestId` and the real error logged, never returned.
 
 - [ ] **Step 4: Implement the middleware**
 
