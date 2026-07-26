@@ -460,6 +460,66 @@ func TestRequestMagicLinkSwallowsAMailerFailure(t *testing.T) {
 	}
 }
 
+// TestRequestMagicLinkSwallowsAPersistenceFailure is
+// TestRequestMagicLinkSwallowsAMailerFailure's sibling for the other two
+// steps that are reachable only from the known-address branch: token
+// generation and MagicLinks.Create. An INSERT that fails on a statement
+// timeout or a connection blip is exactly as reachable-only-by-a-member as
+// a mailer failure is, so it must be swallowed identically.
+func TestRequestMagicLinkSwallowsAPersistenceFailure(t *testing.T) {
+	f := newFixture(t)
+	f.magicLinks.failNextMagicLinkCreate(errors.New("pq: statement timeout"))
+
+	knownErr := f.auth.RequestMagicLink(context.Background(), "andreas@hearth.family")
+	unknownErr := f.auth.RequestMagicLink(context.Background(), "stranger@example.com")
+
+	if knownErr != nil {
+		t.Fatalf("a persistence failure must not surface to the caller: %v", knownErr)
+	}
+	if knownErr != unknownErr {
+		t.Fatalf("known = %v, unknown = %v — a persistence failure must be indistinguishable "+
+			"from an unknown address", knownErr, unknownErr)
+	}
+	// Create itself failed, so no row and nothing to send.
+	if got := f.magicLinks.count(); got != 0 {
+		t.Fatalf("magic link rows = %d, want 0 — Create failed and nothing should have persisted", got)
+	}
+	if got := f.mailer.sentCount(); got != 0 {
+		t.Fatalf("sent = %d, want 0 — there is no token to send a link for", got)
+	}
+}
+
+// TestSendMagicLinkAsyncRecoversFromAPanicInTheSend pins the fix for the
+// second finding: chi's middleware.Recoverer guards only the request
+// goroutine, and sendMagicLinkAsync's send runs on a goroutine of its own
+// after the request has already returned. Without a recover() there, this
+// test's panicking mailer would crash the entire test binary right here,
+// rather than merely failing an assertion — that is the whole point of the
+// fix, and it's why this test's strongest assertion is simply "execution
+// reached this line at all."
+func TestSendMagicLinkAsyncRecoversFromAPanicInTheSend(t *testing.T) {
+	f := newFixture(t)
+	f.mailer.panicNextMagicLink("simulated panic in the mail client")
+
+	if err := f.auth.RequestMagicLink(context.Background(), "andreas@hearth.family"); err != nil {
+		t.Fatalf("RequestMagicLink: %v", err)
+	}
+	// If the goroutine's recover() didn't catch the panic, the process
+	// would already be dead before this line runs.
+	f.mailer.waitForSend(t)
+
+	// A recovered panic must not wedge the double or the service: the next,
+	// healthy request should still succeed and still send.
+	if err := f.auth.RequestMagicLink(context.Background(), "andreas@hearth.family"); err != nil {
+		t.Fatalf("RequestMagicLink after a recovered panic: %v", err)
+	}
+	f.mailer.waitForSend(t)
+	if got := f.mailer.sentCount(); got != 1 {
+		t.Fatalf("sent = %d, want 1 — the panicking send must not count, "+
+			"but the following healthy one must", got)
+	}
+}
+
 // TestRequestMagicLinkPerformsTheSameReadsForEveryOutcome pins the other
 // half of the fix: a known address under the limit, an unknown address, and
 // a known address that has exhausted the limit must all perform the exact

@@ -2,7 +2,10 @@ module github.com/andreasoentoro/hearth/api
 
 go 1.25.7
 
-require github.com/go-chi/chi/v5 v5.3.1
+require (
+	github.com/go-chi/chi/v5 v5.3.1
+	github.com/wneessen/go-mail v0.8.1
+)
 
 require (
 	cel.dev/expr v0.25.1 // indirect
@@ -34,7 +37,6 @@ require (
 	github.com/tetratelabs/wazero v1.9.0 // indirect
 	github.com/wasilibs/go-pgquery v0.0.0-20250409022910-10ac41983c07 // indirect
 	github.com/wasilibs/wazero-helpers v0.0.0-20240620070341-3dff1577cd52 // indirect
-	github.com/wneessen/go-mail v0.8.1 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
 	golang.org/x/exp v0.0.0-20260718201538-764159d718ef // indirect

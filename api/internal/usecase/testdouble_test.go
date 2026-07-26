@@ -351,6 +351,13 @@ type magicLinkDouble struct {
 	// ever touched from the synchronous portion of RequestMagicLink, never
 	// from the background send goroutine.
 	countSinceCalls int
+
+	// failNextCreate arms a one-shot failure for the next Create call, the
+	// same one-shot pattern as mailerDouble.failNext. Unguarded for the same
+	// reason as countSinceCalls: Create runs synchronously on the request
+	// goroutine, never from sendMagicLinkAsync's goroutine, so nothing here
+	// is ever touched concurrently.
+	failNextCreate error
 }
 
 func newMagicLinkDouble(clock *fixedClock, users *userDouble) *magicLinkDouble {
@@ -363,7 +370,19 @@ func newMagicLinkDouble(clock *fixedClock, users *userDouble) *magicLinkDouble {
 // failed.
 func (d *magicLinkDouble) count() int { return len(d.rows) }
 
+// failNextMagicLinkCreate arms failNextCreate: the next call to Create
+// returns err instead of persisting a row, and every call after that
+// succeeds normally again.
+func (d *magicLinkDouble) failNextMagicLinkCreate(err error) {
+	d.failNextCreate = err
+}
+
 func (d *magicLinkDouble) Create(_ context.Context, userID string, tokenHash []byte, expiresAt time.Time) error {
+	if d.failNextCreate != nil {
+		err := d.failNextCreate
+		d.failNextCreate = nil
+		return err
+	}
 	d.rows[string(tokenHash)] = &magicLinkRow{UserID: userID, ExpiresAt: expiresAt, CreatedAt: d.clock.Now()}
 	return nil
 }
@@ -418,6 +437,7 @@ type mailerDouble struct {
 	magicLinks []sentMail
 	invites    []sentMail
 	failNext   error
+	panicNext  string
 	sent       chan struct{}
 }
 
@@ -434,10 +454,27 @@ func (d *mailerDouble) failNextMagicLink(err error) {
 	d.failNext = err
 }
 
+// panicNextMagicLink arms a one-shot panic: the next SendMagicLink call
+// panics with msg instead of returning, and every call after that behaves
+// normally again. It exists to prove sendMagicLinkAsync's recover() (see
+// auth.go) actually stops a panic in the send from escaping its goroutine —
+// without it, this panic would crash the whole test binary, not just fail
+// an assertion.
+func (d *mailerDouble) panicNextMagicLink(msg string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.panicNext = msg
+}
+
 func (d *mailerDouble) SendMagicLink(_ context.Context, to, name, url string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	defer d.signalSent()
+	if d.panicNext != "" {
+		msg := d.panicNext
+		d.panicNext = ""
+		panic(msg)
+	}
 	if d.failNext != nil {
 		err := d.failNext
 		d.failNext = nil

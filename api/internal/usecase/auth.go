@@ -271,10 +271,31 @@ const (
 	magicLinkSendTimeout = 30 * time.Second
 )
 
+// hashPrefix renders the first n hex characters of hash, or the whole thing
+// if hash has fewer than that. It exists because a bare
+// fmt.Sprintf("%x", hash)[:n] panics the instant hash is shorter than n
+// bytes -- TokenGenerator makes no minimum-length promise, so nothing here
+// may assume the real generator's 32 bytes are the only implementation that
+// will ever exist. Every log line in this file that redacts an email or
+// token goes through this rather than slicing directly, including the ones
+// that run inside sendMagicLinkAsync's goroutine, where a panic has no
+// middleware.Recoverer to catch it.
+func hashPrefix(hash []byte, n int) string {
+	encoded := fmt.Sprintf("%x", hash)
+	if len(encoded) < n {
+		return encoded
+	}
+	return encoded[:n]
+}
+
 // RequestMagicLink is deliberately quiet. Neither an unknown address nor an
 // exhausted rate limit produces an error, because any observable difference
-// between the two would let a caller discover who is a member. Nor does a
-// mailer failure: see sendMagicLinkAsync.
+// between the two would let a caller discover who is a member. Nor does any
+// failure once a known address has been established -- token generation,
+// persistence, or the send itself (see sendMagicLinkAsync) -- because every
+// one of those steps is reachable only from the known-address branch, and a
+// propagated error from any of them would be exactly the same oracle a
+// propagated mailer error would have been.
 func (s *AuthService) RequestMagicLink(ctx context.Context, email string) error {
 	now := s.d.Clock.Now()
 
@@ -312,17 +333,35 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, email string) error 
 			// join (it looks up d.users.byID[row.UserID].Email), so a test
 			// relying on this invariant would still pass even if the real
 			// query's join were the one that broke.
-			slog.Info("magic link rate limit reached", "email_hash", fmt.Sprintf("%x", s.d.Tokens.HashToken(email))[:12])
+			slog.Info("magic link rate limit reached", "email_hash", hashPrefix(s.d.Tokens.HashToken(email), 12))
 		}
 		return nil
 	}
 
+	// Everything from here down is reachable only by a known,
+	// under-limit address -- the exact asymmetry that made a propagated
+	// mailer error an oracle (see sendMagicLinkAsync). A token generator
+	// that fails on entropy exhaustion, or an INSERT that fails on a
+	// statement timeout or a connection blip, is just as reachable only
+	// by this branch: no unknown or rate-limited address could ever
+	// produce either error. So the rule is the same as the mailer's: log
+	// at error level with the failure reason and a hashed address, and
+	// return nil rather than propagate. Anyone adding a further step to
+	// this function below this comment must give it the same treatment.
 	raw, hash, err := s.d.Tokens.NewToken()
 	if err != nil {
-		return fmt.Errorf("generate magic link token: %w", err)
+		slog.Error("magic link token generation failed",
+			"error", err,
+			"email_hash", hashPrefix(s.d.Tokens.HashToken(email), 12),
+		)
+		return nil
 	}
 	if err := s.d.MagicLinks.Create(ctx, user.ID, hash, now.Add(magicLinkTTL)); err != nil {
-		return err
+		slog.Error("magic link persistence failed",
+			"error", err,
+			"email_hash", hashPrefix(s.d.Tokens.HashToken(email), 12),
+		)
+		return nil
 	}
 
 	url := fmt.Sprintf("%s/sign-in/magic?token=%s", s.d.BaseURL, raw)
@@ -358,14 +397,32 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, email string) error 
 // which happens before this goroutine would otherwise get to run; sending
 // on an already-cancelled context would silently never deliver anything.
 func (s *AuthService) sendMagicLinkAsync(to, name, url string) {
+	// Computed here, on the caller's goroutine, rather than inside the
+	// goroutine below: this line runs on the request path, which chi's
+	// middleware.Recoverer still covers, and it lets the recover() below
+	// reuse the value without calling HashToken a second time from inside
+	// a panic handler.
+	emailHash := hashPrefix(s.d.Tokens.HashToken(to), 12)
+
 	go func() {
+		// middleware.Recoverer guards only the request goroutine. Once the
+		// send moved off the request path (see this function's doc comment
+		// above), nothing supervises this goroutine at all: an
+		// unrecovered panic here would crash the whole process, taking
+		// down every unrelated in-flight request with it, not just this
+		// send. Recovering keeps a bug in the mailer, or in some future
+		// step added to this closure, contained to the one send that
+		// triggered it.
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("magic link send panicked", "panic", r, "email_hash", emailHash)
+			}
+		}()
+
 		ctx, cancel := context.WithTimeout(context.Background(), magicLinkSendTimeout)
 		defer cancel()
 		if err := s.d.Mailer.SendMagicLink(ctx, to, name, url); err != nil {
-			slog.Error("magic link email failed to send",
-				"error", err,
-				"email_hash", fmt.Sprintf("%x", s.d.Tokens.HashToken(to))[:12],
-			)
+			slog.Error("magic link email failed to send", "error", err, "email_hash", emailHash)
 		}
 	}()
 }
