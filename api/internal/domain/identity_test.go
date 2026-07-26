@@ -2,6 +2,7 @@ package domain_test
 
 import (
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/andreasoentoro/hearth/api/internal/domain"
@@ -72,6 +73,82 @@ func TestChangingAMemberToAnInvalidCapabilitySetIsRejected(t *testing.T) {
 	}
 }
 
+func TestValidateMembershipChangeRejectsAnUnknownTarget(t *testing.T) {
+	all := []domain.Membership{owner("m1")}
+
+	err := domain.ValidateMembershipChange(all, "ghost", domain.RoleLimited,
+		domain.Capabilities{domain.CapCalendar})
+
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestValidateMembershipRemovalRejectsAnUnknownTarget(t *testing.T) {
+	all := []domain.Membership{owner("m1")}
+
+	if err := domain.ValidateMembershipRemoval(all, "ghost"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
+// TestCapabilityOnlyEditOnALimitedMemberNeverConsultsTheOwnerRule guards
+// against the bug where requireAnotherOwner ran for every non-owner role,
+// including a change that never touches ownership. In a household with no
+// owners at all, a pure capability edit on an already-limited member must
+// still succeed: ownership is not at stake.
+func TestCapabilityOnlyEditOnALimitedMemberNeverConsultsTheOwnerRule(t *testing.T) {
+	all := []domain.Membership{kid("m1", domain.Capabilities{domain.CapCalendar})}
+
+	err := domain.ValidateMembershipChange(all, "m1", domain.RoleLimited,
+		domain.Capabilities{domain.CapCalendar, domain.CapChores})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDemotingOneOfTwoOwnersIsAllowed(t *testing.T) {
+	all := []domain.Membership{owner("m1"), owner("m2")}
+
+	err := domain.ValidateMembershipChange(all, "m1", domain.RoleLimited,
+		domain.Capabilities{domain.CapCalendar})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestNewMembershipRejectsAnOwnerWithAPartialCapabilitySet(t *testing.T) {
+	_, err := domain.NewMembership("m1", "h1", "u1", domain.RoleOwner,
+		domain.Capabilities{domain.CapCalendar, domain.CapChores})
+
+	if !errors.Is(err, domain.ErrOwnerMustHoldAllCapabilities) {
+		t.Fatalf("err = %v, want ErrOwnerMustHoldAllCapabilities", err)
+	}
+}
+
+func TestPromotingALimitedMemberToOwnerWithTheFullSetIsAllowed(t *testing.T) {
+	all := []domain.Membership{owner("m1"), kid("m2", domain.Capabilities{domain.CapCalendar})}
+
+	err := domain.ValidateMembershipChange(all, "m2", domain.RoleOwner, domain.AllCapabilities())
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestPromotingAMemberToOwnerWithAPartialCapabilitySetIsRejected(t *testing.T) {
+	all := []domain.Membership{owner("m1"), kid("m2", domain.Capabilities{domain.CapCalendar})}
+
+	err := domain.ValidateMembershipChange(all, "m2", domain.RoleOwner,
+		domain.Capabilities{domain.CapCalendar, domain.CapChores})
+
+	if !errors.Is(err, domain.ErrOwnerMustHoldAllCapabilities) {
+		t.Fatalf("err = %v, want ErrOwnerMustHoldAllCapabilities", err)
+	}
+}
+
 func TestParseCapabilitiesRejectsUnknownValues(t *testing.T) {
 	if _, err := domain.ParseCapabilities([]string{"calendar", "spaceships"}); !errors.Is(err, domain.ErrUnknownCapability) {
 		t.Fatalf("err = %v, want ErrUnknownCapability", err)
@@ -83,8 +160,9 @@ func TestParseCapabilitiesDeduplicates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(caps) != 2 {
-		t.Fatalf("len = %d, want 2", len(caps))
+	want := domain.Capabilities{domain.CapCalendar, domain.CapMoney}
+	if !slices.Equal(caps, want) {
+		t.Fatalf("caps = %v, want %v", caps, want)
 	}
 }
 
@@ -95,5 +173,17 @@ func TestHasReportsMembership(t *testing.T) {
 	}
 	if caps.Has(domain.CapMarriage) {
 		t.Fatal("did not expect marriage")
+	}
+}
+
+func TestStringsRoundTripsThroughParseCapabilities(t *testing.T) {
+	original := domain.Capabilities{domain.CapMoney, domain.CapChores, domain.CapCalendar}
+
+	parsed, err := domain.ParseCapabilities(original.Strings())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !slices.Equal(parsed, original) {
+		t.Fatalf("parsed = %v, want %v", parsed, original)
 	}
 }

@@ -18,4 +18,9 @@ var (
 	ErrInviteAlreadyAccepted     = errors.New("invite has already been accepted")
 	ErrTokenExpired              = errors.New("token has expired or been used")
 	ErrRateLimited               = errors.New("too many requests")
+
+	// Added in the Task 6 fix round (see task-6-report.md, "Fix round 1").
+	ErrAmountOverflow               = errors.New("amount overflows a signed 64-bit integer")
+	ErrInvalidMoney                 = errors.New("money value is invalid")
+	ErrOwnerMustHoldAllCapabilities = errors.New("an owner must hold every capability")
 )
