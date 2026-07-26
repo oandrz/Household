@@ -1790,8 +1790,14 @@ type InviteRepository interface {
 	Create(ctx context.Context, householdID, email, name string, role domain.Role,
 		caps domain.Capabilities, tokenHash []byte, invitedBy string, expiresAt time.Time) (string, error)
 	ByTokenHash(ctx context.Context, tokenHash []byte) (InviteDetails, error)
-	// Returns domain.ErrInviteAlreadyAccepted when the invite was already
-	// accepted or has expired — the guard lives in the SQL, not in the caller.
+	// MarkAccepted stamps the invite alone. Returns
+	// domain.ErrInviteAlreadyAccepted when it was already accepted or has
+	// expired — the guard lives in the SQL, not in the caller.
+	//
+	// Do NOT compose this with separate user and membership creation to
+	// implement acceptance. Use Accept, which is transactional. Three separate
+	// writes leave an orphaned user holding the unique email index if the
+	// middle one fails, and the invite then cannot be accepted by anyone.
 	MarkAccepted(ctx context.Context, inviteID string) error
 }
 
