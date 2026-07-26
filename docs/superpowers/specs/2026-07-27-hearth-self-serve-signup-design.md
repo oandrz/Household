@@ -220,8 +220,19 @@ defining property. What they *do* share is the blueprint, plus
 `usecase.DefaultNotificationPreferences()`, so the defaults cannot drift.
 
 Seed passes `SGD` / `IDR` / show=true, keeping the design's household as it
-is. Provision passes the chosen currency, `SecondaryCurrency` equal to it, and
-show=false — see section 6.4.
+is. Provision passes the chosen currency, `SecondaryCurrency` **equal to it**,
+and show=false.
+
+Setting the two currencies equal is deliberate, and checked: `households` has
+no constraint requiring them to differ, and `normalizeCurrency`
+(`usecase/household.go:118`) validates each field independently, so equality is
+accepted rather than a provisioning failure waiting inside `Provision`'s
+transaction. The reason not to leave the column's `IDR` default is that
+`CurrencyPanel` renders its toggle label straight from the column — a
+household in São Paulo would otherwise find "Show IDR equivalents" sitting in
+Settings, referring to a currency nobody chose. Equal-to-primary makes the
+toggle inert but coherent, and makes the missing secondary picker (section 9) a
+visible gap rather than a surprise.
 
 ### 5.2 `usecase/password.go`
 
@@ -315,10 +326,10 @@ comment must say so:
   them is the same oracle a propagated mailer error would be. **Anyone adding
   a step below that point owes it the same treatment**, and the comment says
   so; that comment is the reason the existing one has not leaked.
-- Both branches send mail. A fresh address gets a create-household link; a
-  registered one gets "you already have an account, sign in here" with no
-  token. That is what keeps the endpoint silent while remaining useful to a
-  human who forgot.
+- Both branches send mail, through the two new `Mailer` methods in section 5.5.
+  A fresh address gets a create-household link; a registered one gets "you
+  already have an account, sign in here" with no token. That is what keeps the
+  endpoint silent while remaining useful to a human who forgot.
 
 **`Preview(ctx, token) (SignupPreview, error)`** — resolves the token, checks
 liveness via `domain.TokenLifecycle`, returns `{Email}`. Mirrors
@@ -336,6 +347,31 @@ the session is indistinguishable from theirs down to how it is minted.
 transaction, and a bare `MembershipRepository.Create` here would reintroduce
 the orphaned-user defect both `CreateWithMembership` and `Accept` exist to
 prevent.
+
+### 5.5 The `Mailer` port grows two methods
+
+`usecase.Mailer` is currently exactly `SendMagicLink` and `SendInvite`. Both
+sign-up branches need one:
+
+```go
+SendSignupLink(ctx context.Context, to, url string) error
+SendSignupForExistingAccount(ctx context.Context, to, signInURL string) error
+```
+
+Neither takes a display name: at request time nobody has told us one, and
+inventing a greeting from the local part of the address would be worse than
+having none. Two new templates in the mail adapter accordingly.
+
+**Both are sent off the request goroutine**, through the same fire-and-forget
+shape as `sendMagicLinkAsync` — including its `recover()`, since nothing
+supervises a goroutine once it leaves the request path and an unrecovered
+panic there takes down every unrelated in-flight request. Both log a hashed
+address on failure and return nothing, per section 5.4's contract.
+
+`SendSignupForExistingAccount` matters as much as the other for the property
+in decision 3: if only the fresh branch sent mail, the *absence* of an email
+would tell anyone who could observe the mailbox that the address is
+registered.
 
 ---
 
@@ -503,10 +539,24 @@ tool, and it is spec B's first console action.
 
 The bar is `docs/LEARNING.md`'s checklist. Specifically:
 
-**The oracle test asserts the response body, the status *and* the repository
-call sequence are identical** across fresh / registered / rate-limited
-addresses. Call *count* is what leaked in `RequestMagicLink`, so counting is
-the assertion, not an afterthought.
+**The oracle test asserts what is actually true**, which is narrower than
+"everything is identical" and needs stating precisely, because the obvious
+over-claim is untestable and an implementer will discover that on day one.
+
+The three branches genuinely differ in what they write: a fresh under-limit
+address does `NewToken` + `signups.Create`; a registered one does neither; an
+over-limit one does neither. `RequestMagicLink` has exactly the same
+asymmetry (`MagicLinks.Create` on the known branch only) and it was accepted,
+so this is not a new exposure. What the test must assert:
+
+- **Identical status and body** — `202 {"status":"accepted"}` on all three.
+- **No error propagated** on any branch, including when the mailer fails.
+- **Both reads always run, unconditionally, in the same fixed order** — the
+  rate-limit count and the address lookup, on every call, whatever the
+  outcome. This is the real lesson from `RequestMagicLink`: the leak there was
+  a read being *skipped* on one branch, not a differing write count. A test
+  that pins the read order and the fact that neither read is conditional is
+  the one that would have caught it.
 
 **The transaction test forces a failure mid-`Provision`** and asserts no
 household, no user, no membership, no spaces, and the signup still unconsumed.
