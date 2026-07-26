@@ -420,6 +420,9 @@ spaces. It prints Christine's invite URL on completion, so acceptance can be
 exercised without a signup flow. `adminctl create-invite` produces further
 invites on demand.
 
+Because the seed writes a known development password, it refuses to run unless
+`APP_ENV=development`, and exits non-zero otherwise.
+
 Configuration is by environment variable, with a committed `.env.example` and a
 git-ignored `.env` for Compose.
 
