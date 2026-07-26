@@ -246,12 +246,22 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 }
 
 func (s *AuthService) issueSession(ctx context.Context, userID, householdID string, now time.Time) (SignInResult, error) {
-	raw, hash, err := s.d.Tokens.NewToken()
+	return issueSession(ctx, s.d.Sessions, s.d.Tokens, s.d.SessionTTL, userID, householdID, now)
+}
+
+// issueSession is the one place a live session gets minted. It is a
+// package-level function, not a method, so InviteService.Accept can call it
+// too -- the invite flow's session must be indistinguishable from sign-in's,
+// down to how it's issued, not a second implementation that happens to look
+// similar. AuthService.issueSession above is kept as a thin wrapper so its
+// existing call sites don't need to change.
+func issueSession(ctx context.Context, sessions SessionRepository, tokens TokenGenerator, sessionTTL time.Duration, userID, householdID string, now time.Time) (SignInResult, error) {
+	raw, hash, err := tokens.NewToken()
 	if err != nil {
 		return SignInResult{}, fmt.Errorf("generate session token: %w", err)
 	}
-	expiresAt := now.Add(s.d.SessionTTL)
-	if err := s.d.Sessions.Create(ctx, hash, userID, householdID, expiresAt); err != nil {
+	expiresAt := now.Add(sessionTTL)
+	if err := sessions.Create(ctx, hash, userID, householdID, expiresAt); err != nil {
 		return SignInResult{}, err
 	}
 	return SignInResult{SessionToken: raw, ExpiresAt: expiresAt, UserID: userID, HouseholdID: householdID}, nil

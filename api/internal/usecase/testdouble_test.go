@@ -119,6 +119,11 @@ func (d *userDouble) Create(_ context.Context, email, passwordHash, displayName 
 	return u.User, nil
 }
 
+// count reports how many users exist, for tests confirming an invite
+// acceptance created exactly one — not zero, and not two from a botched
+// retry.
+func (d *userDouble) count() int { return len(d.byID) }
+
 func (d *userDouble) SetPasswordHash(_ context.Context, userID, hash string) error {
 	u, ok := d.byID[userID]
 	if !ok {
@@ -160,6 +165,10 @@ func (d *membershipDouble) List(_ context.Context, householdID string) ([]usecas
 	}
 	return out, nil
 }
+
+// count reports how many memberships exist, the matching half of
+// userDouble.count for invite-acceptance tests.
+func (d *membershipDouble) count() int { return len(d.byID) }
 
 func (d *membershipDouble) ByUser(_ context.Context, userID string) (domain.Membership, error) {
 	id, ok := d.byUser[userID]
@@ -415,6 +424,129 @@ func (d *magicLinkDouble) CountSince(_ context.Context, email string, since time
 	return n, nil
 }
 
+// --- InviteRepository -------------------------------------------------
+
+type inviteRow struct {
+	ID           string
+	HouseholdID  string
+	Email        string
+	Name         string
+	Role         domain.Role
+	Capabilities domain.Capabilities
+	InvitedBy    string
+	ExpiresAt    time.Time
+	AcceptedAt   *time.Time
+}
+
+// inviteDouble plays the same role invite_repo.go's InviteRepo plays over
+// Postgres: ByTokenHash joins through users and a household name the same
+// way GetInviteByTokenHash's SQL does, and Accept performs the user
+// creation, membership creation and acceptance stamp together, mirroring
+// the one-transaction guarantee the real Accept gives (see its doc comment
+// in ports.go). It holds the same userDouble and membershipDouble the rest
+// of the fixture uses, rather than private state of its own, so a test can
+// check "exactly one user, exactly one membership" through those doubles
+// after calling InviteService.Accept.
+type inviteDouble struct {
+	clock      *fixedClock
+	users      *userDouble
+	members    *membershipDouble
+	familyName map[string]string // householdID -> family name, mirrors the households join
+	rows       map[string]*inviteRow
+	n          int
+}
+
+func newInviteDouble(clock *fixedClock, users *userDouble, members *membershipDouble) *inviteDouble {
+	return &inviteDouble{
+		clock: clock, users: users, members: members,
+		familyName: map[string]string{}, rows: map[string]*inviteRow{},
+	}
+}
+
+func (d *inviteDouble) setFamilyName(householdID, name string) { d.familyName[householdID] = name }
+
+// count reports how many invite rows have ever been created, for tests
+// confirming the "limited member with no email" path writes no invite row
+// at all, and the "rejected before any write" path writes none either.
+func (d *inviteDouble) count() int { return len(d.rows) }
+
+func (d *inviteDouble) byID(inviteID string) *inviteRow {
+	for _, row := range d.rows {
+		if row.ID == inviteID {
+			return row
+		}
+	}
+	return nil
+}
+
+func (d *inviteDouble) Create(_ context.Context, householdID, email, name string, role domain.Role,
+	caps domain.Capabilities, tokenHash []byte, invitedBy string, expiresAt time.Time) (string, error) {
+	d.n++
+	id := fmt.Sprintf("invite-%d", d.n)
+	d.rows[string(tokenHash)] = &inviteRow{
+		ID: id, HouseholdID: householdID, Email: email, Name: name, Role: role,
+		Capabilities: caps, InvitedBy: invitedBy, ExpiresAt: expiresAt,
+	}
+	return id, nil
+}
+
+func (d *inviteDouble) ByTokenHash(_ context.Context, tokenHash []byte) (usecase.InviteDetails, error) {
+	row, ok := d.rows[string(tokenHash)]
+	if !ok {
+		return usecase.InviteDetails{}, domain.ErrNotFound
+	}
+	inviter := d.users.byID[row.InvitedBy]
+	return usecase.InviteDetails{
+		ID: row.ID, HouseholdID: row.HouseholdID, Email: row.Email, Name: row.Name,
+		Role: row.Role, Capabilities: row.Capabilities,
+		FamilyName: d.familyName[row.HouseholdID], InviterName: inviter.DisplayName,
+		ExpiresAt: row.ExpiresAt, AcceptedAt: row.AcceptedAt,
+	}, nil
+}
+
+// MarkAccepted mirrors MarkInviteAccepted's guarded update -- accepted_at IS
+// NULL AND expires_at > now() -- reporting domain.ErrInviteAlreadyAccepted
+// for either an already-accepted or an expired invite, exactly as the SQL's
+// zero-rows result does.
+func (d *inviteDouble) MarkAccepted(_ context.Context, inviteID string) error {
+	row := d.byID(inviteID)
+	if row == nil || row.AcceptedAt != nil || !row.ExpiresAt.After(d.clock.Now()) {
+		return domain.ErrInviteAlreadyAccepted
+	}
+	now := d.clock.Now()
+	row.AcceptedAt = &now
+	return nil
+}
+
+// Accept performs the guarded acceptance stamp first, then the user and
+// membership creation, in that order -- the same order invite_repo.go's
+// Accept uses, and for the same reason: the guard is what makes a second,
+// concurrent acceptance fail cheaply rather than colliding on the first
+// acceptance's already-claimed email address.
+func (d *inviteDouble) Accept(ctx context.Context, inviteID, email, passwordHash, displayName string,
+	householdID string, role domain.Role, caps domain.Capabilities) (usecase.AcceptedInvite, error) {
+	row := d.byID(inviteID)
+	if row == nil || row.AcceptedAt != nil || !row.ExpiresAt.After(d.clock.Now()) {
+		return usecase.AcceptedInvite{}, domain.ErrInviteAlreadyAccepted
+	}
+	now := d.clock.Now()
+	row.AcceptedAt = &now
+
+	user, err := d.users.Create(ctx, email, passwordHash, displayName)
+	if err != nil {
+		return usecase.AcceptedInvite{}, err
+	}
+	membership, err := domain.NewMembership("", householdID, user.ID, role, caps)
+	if err != nil {
+		return usecase.AcceptedInvite{}, err
+	}
+	created, err := d.members.Create(ctx, membership)
+	if err != nil {
+		return usecase.AcceptedInvite{}, err
+	}
+	return usecase.AcceptedInvite{UserID: user.ID, MembershipID: created.ID, HouseholdID: created.HouseholdID}, nil
+}
+
 // --- Mailer ---------------------------------------------------------
 
 type sentMail struct {
@@ -489,6 +621,25 @@ func (d *mailerDouble) SendInvite(_ context.Context, to, name, inviterName, u st
 	defer d.mu.Unlock()
 	d.invites = append(d.invites, sentMail{To: to, Name: name, URL: u})
 	return nil
+}
+
+// invitesSentCount is a mutex-guarded read of len(invites). Unlike
+// SendMagicLink, InviteService.Create calls SendInvite synchronously on the
+// caller's goroutine, so there is no background send to wait for here —
+// this can be read immediately after Create returns.
+func (d *mailerDouble) invitesSentCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.invites)
+}
+
+// lastInviteURL is a mutex-guarded read of the most recently sent invite
+// email's URL, for a test that just called Create and wants the token that
+// was mailed out.
+func (d *mailerDouble) lastInviteURL() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.invites[len(d.invites)-1].URL
 }
 
 // signalSent must be called with mu held. The channel is large enough that
@@ -576,13 +727,17 @@ func (d *mailerDouble) magicLinkURLAt(i int) string {
 // starting at 2026-07-18T09:41:00Z.
 type fixture struct {
 	auth        *usecase.AuthService
+	invites     *usecase.InviteService
 	clock       *fixedClock
 	sessions    *sessionDouble
 	mailer      *mailerDouble
 	hasher      *fakeHasher
 	users       *userDouble
+	members     *membershipDouble
 	magicLinks  *magicLinkDouble
+	inviteRepo  *inviteDouble
 	householdID string
+	andreasID   string
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -636,9 +791,29 @@ func newFixture(t *testing.T) *fixture {
 		BaseURL:    "http://localhost:5173",
 	})
 
+	inviteRepo := newInviteDouble(clock, users, members)
+	// Matches the design's household throughout: households.Create("Andreas
+	// & Christine", "Oentoro") in invite_repo_test.go, and Andreas as the
+	// inviter whose display name every invite-preview test expects.
+	inviteRepo.setFamilyName(householdID, "Oentoro")
+
+	invites := usecase.NewInviteService(usecase.InviteDeps{
+		Invites:    inviteRepo,
+		Users:      users,
+		Members:    members,
+		Sessions:   sessions,
+		Mailer:     mailer,
+		Hasher:     hasher,
+		Tokens:     &seqTokens{},
+		Clock:      clock,
+		SessionTTL: 30 * 24 * time.Hour,
+		BaseURL:    "http://localhost:5173",
+	})
+
 	return &fixture{
-		auth: auth, clock: clock, sessions: sessions, mailer: mailer, hasher: hasher,
-		users: users, magicLinks: magicLinks, householdID: householdID,
+		auth: auth, invites: invites, clock: clock, sessions: sessions, mailer: mailer, hasher: hasher,
+		users: users, members: members, magicLinks: magicLinks, inviteRepo: inviteRepo,
+		householdID: householdID, andreasID: andreas.ID,
 	}
 }
 

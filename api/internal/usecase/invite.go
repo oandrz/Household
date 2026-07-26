@@ -1,0 +1,204 @@
+package usecase
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/andreasoentoro/hearth/api/internal/domain"
+)
+
+// inviteTTL is the design's invite lifetime: seven days from the moment
+// Create is called, measured against Clock rather than wall time so tests
+// can move it.
+const inviteTTL = 7 * 24 * time.Hour
+
+// minInvitePasswordLength is Accept's password floor. It is a usecase-level
+// rule, not a domain one -- domain has no notion of a password at all -- so
+// it lives here rather than in internal/domain, exactly as SignInFailedError
+// (also a usecase-only concept) lives in auth.go rather than domain.
+const minInvitePasswordLength = 12
+
+// ErrPasswordTooShort is Accept's rejection when the chosen password is
+// under minInvitePasswordLength characters. It is a usecase sentinel, not a
+// domain one, for the same reason minInvitePasswordLength is defined here:
+// domain has no password concept to attach an error to.
+var ErrPasswordTooShort = errors.New("password must be at least 12 characters")
+
+// InviteDeps mirrors AuthDeps: every port InviteService needs, gathered into
+// one struct so NewInviteService has a single, named argument rather than a
+// long positional list.
+type InviteDeps struct {
+	Invites    InviteRepository
+	Users      UserRepository
+	Members    MembershipRepository
+	Sessions   SessionRepository
+	Mailer     Mailer
+	Hasher     PasswordHasher
+	Tokens     TokenGenerator
+	Clock      Clock
+	SessionTTL time.Duration
+	BaseURL    string
+}
+
+type InviteService struct {
+	d InviteDeps
+}
+
+// NewInviteService has nothing that needs a zero-value default the way
+// NewAuthService's Policy does -- every InviteDeps field is either required
+// or, for BaseURL, safely empty -- so it is a direct wrap, kept as a
+// constructor (rather than a struct literal at call sites) purely to match
+// AuthService's shape.
+func NewInviteService(d InviteDeps) *InviteService {
+	return &InviteService{d: d}
+}
+
+// InvitePreview is what a caller sees before signing in: enough to render
+// "Andreas invited you to join the Oentoro household as Kid, with calendar
+// and chores access" without exposing anything else about the invite.
+type InvitePreview struct {
+	FamilyName   string
+	InviterName  string
+	Name         string
+	Role         domain.Role
+	Capabilities domain.Capabilities
+}
+
+// Create adds a new member to the household. Most of the time that means
+// writing an invite row and emailing a link; a limited member with no email
+// address of their own -- the design's children -- is instead created
+// directly, with no invite and no email at all, because there is no address
+// to send one to and no one who will ever type a password for that account.
+//
+// The membership shape is validated through domain.NewMembership before any
+// write happens, in both branches, so an invalid role/capability combination
+// (a limited member holding marriage, or an owner missing a capability)
+// never reaches a repository call.
+func (s *InviteService) Create(ctx context.Context, householdID, invitedByUserID, name, email string,
+	role domain.Role, caps domain.Capabilities) error {
+	if _, err := domain.NewMembership("", householdID, "", role, caps); err != nil {
+		return err
+	}
+
+	if role == domain.RoleLimited && email == "" {
+		user, err := s.d.Users.Create(ctx, "", "", name)
+		if err != nil {
+			return err
+		}
+		membership, err := domain.NewMembership("", householdID, user.ID, role, caps)
+		if err != nil {
+			return err
+		}
+		_, err = s.d.Members.Create(ctx, membership)
+		return err
+	}
+
+	now := s.d.Clock.Now()
+	raw, hash, err := s.d.Tokens.NewToken()
+	if err != nil {
+		return fmt.Errorf("generate invite token: %w", err)
+	}
+	if _, err := s.d.Invites.Create(ctx, householdID, email, name, role, caps, hash, invitedByUserID,
+		now.Add(inviteTTL)); err != nil {
+		return err
+	}
+
+	inviter, err := s.d.Users.ByID(ctx, invitedByUserID)
+	if err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf("%s/invite/%s", s.d.BaseURL, raw)
+	return s.d.Mailer.SendInvite(ctx, email, name, inviter.DisplayName, url)
+}
+
+// Preview lets a caller see what an invite offers before they sign in or
+// create credentials. It shares its expiry/acceptance checks with Accept
+// through checkInviteLive.
+func (s *InviteService) Preview(ctx context.Context, token string) (InvitePreview, error) {
+	details, err := s.d.Invites.ByTokenHash(ctx, s.d.Tokens.HashToken(token))
+	if err != nil {
+		return InvitePreview{}, err
+	}
+	if err := checkInviteLive(details, s.d.Clock.Now()); err != nil {
+		return InvitePreview{}, err
+	}
+	return InvitePreview{
+		FamilyName:   details.FamilyName,
+		InviterName:  details.InviterName,
+		Name:         details.Name,
+		Role:         details.Role,
+		Capabilities: details.Capabilities,
+	}, nil
+}
+
+// checkInviteLive reports the specific reason an invite can no longer be
+// used, distinguishing an already-accepted invite (409, per the spec) from
+// an expired one (410) -- a distinction InviteRepository.Accept's own
+// no-rows case cannot make, because its guarded UPDATE collapses both into
+// the same zero-rows result. Reading accepted_at and expires_at ourselves,
+// via ByTokenHash, is what lets Preview and Accept report the two apart;
+// InviteRepository.Accept's answer is then authoritative only for the race
+// window between this read and that write.
+func checkInviteLive(details InviteDetails, now time.Time) error {
+	if details.AcceptedAt != nil {
+		return domain.ErrInviteAlreadyAccepted
+	}
+	if !details.ExpiresAt.After(now) {
+		return domain.ErrInviteExpired
+	}
+	return nil
+}
+
+// Accept turns an invite into a real account: it hashes the chosen password,
+// creates the user and membership and stamps the invite as accepted --all in
+// the one transaction InviteRepository.Accept performs -- and then signs the
+// new member in exactly as SignIn does, through the same issueSession
+// function.
+//
+// Do not compose this from MarkAccepted plus separate CreateUser and
+// CreateMembership calls: a failure between those three steps would leave an
+// orphaned user occupying the unique email index, and the invite could then
+// never be accepted by anyone, ever (see InviteRepository.Accept's doc
+// comment in ports.go).
+func (s *InviteService) Accept(ctx context.Context, token, password, displayName string) (SignInResult, error) {
+	if len(password) < minInvitePasswordLength {
+		return SignInResult{}, ErrPasswordTooShort
+	}
+
+	now := s.d.Clock.Now()
+	details, err := s.d.Invites.ByTokenHash(ctx, s.d.Tokens.HashToken(token))
+	if err != nil {
+		return SignInResult{}, err
+	}
+	if err := checkInviteLive(details, now); err != nil {
+		return SignInResult{}, err
+	}
+
+	// Validate the membership shape before any write, exactly as Create
+	// does -- this is what catches an invite whose stored role/capabilities
+	// would otherwise reach the repository's transaction and fail there
+	// instead of here.
+	if _, err := domain.NewMembership("", details.HouseholdID, "", details.Role, details.Capabilities); err != nil {
+		return SignInResult{}, err
+	}
+
+	passwordHash, err := s.d.Hasher.Hash(password)
+	if err != nil {
+		return SignInResult{}, fmt.Errorf("hash invite password: %w", err)
+	}
+
+	// InviteRepository.Accept is the concurrency gate: its guarded update is
+	// the authoritative answer for the race window between the ByTokenHash
+	// read above and this call, so its domain.ErrInviteAlreadyAccepted is
+	// returned as-is rather than re-derived from the stale read.
+	accepted, err := s.d.Invites.Accept(ctx, details.ID, details.Email, passwordHash, displayName,
+		details.HouseholdID, details.Role, details.Capabilities)
+	if err != nil {
+		return SignInResult{}, err
+	}
+
+	return issueSession(ctx, s.d.Sessions, s.d.Tokens, s.d.SessionTTL, accepted.UserID, accepted.HouseholdID, now)
+}
