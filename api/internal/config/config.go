@@ -18,8 +18,13 @@ type Config struct {
 func (c Config) IsDevelopment() bool { return c.AppEnv == "development" }
 
 func Load() (Config, error) {
+	appEnv := os.Getenv("APP_ENV")
+	if appEnv == "" {
+		return Config{}, fmt.Errorf("APP_ENV is required (development, test or production)")
+	}
+
 	cfg := Config{
-		AppEnv:        env("APP_ENV", "development"),
+		AppEnv:        appEnv,
 		DatabaseURL:   os.Getenv("DATABASE_URL"),
 		SessionSecret: os.Getenv("SESSION_SECRET"),
 	}

@@ -31,6 +31,16 @@ func TestLoadRejectsMissingDatabaseURL(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsMissingAppEnv(t *testing.T) {
+	t.Setenv("APP_ENV", "")
+	t.Setenv("DATABASE_URL", "postgres://x")
+	t.Setenv("SESSION_SECRET", "0123456789abcdef0123456789abcdef")
+
+	if _, err := config.Load(); err == nil {
+		t.Fatal("expected an error when APP_ENV is unset")
+	}
+}
+
 func TestLoadRejectsUnknownAppEnv(t *testing.T) {
 	t.Setenv("APP_ENV", "staging")
 	t.Setenv("DATABASE_URL", "postgres://x")
