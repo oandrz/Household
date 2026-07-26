@@ -1300,8 +1300,14 @@ JOIN households h ON h.id = i.household_id
 JOIN users u ON u.id = i.invited_by
 WHERE i.token_hash = $1;
 
--- name: MarkInviteAccepted :exec
-UPDATE invites SET accepted_at = now() WHERE id = $1;
+-- name: MarkInviteAccepted :one
+-- Guarded and atomic, mirroring ConsumeMagicLink. Without the conditions, two
+-- concurrent accepts of one token both pass the service's "not yet accepted"
+-- read and both succeed, creating two users and two memberships from a single
+-- invitation. No rows returned means already accepted or expired.
+UPDATE invites SET accepted_at = now()
+WHERE id = $1 AND accepted_at IS NULL AND expires_at > now()
+RETURNING id;
 
 -- name: ListSpaces :many
 SELECT id, household_id, key, name, visibility, position, is_builtin, required_capability
@@ -1738,6 +1744,8 @@ type InviteRepository interface {
 	Create(ctx context.Context, householdID, email, name string, role domain.Role,
 		caps domain.Capabilities, tokenHash []byte, invitedBy string, expiresAt time.Time) (string, error)
 	ByTokenHash(ctx context.Context, tokenHash []byte) (InviteDetails, error)
+	// Returns domain.ErrInviteAlreadyAccepted when the invite was already
+	// accepted or has expired — the guard lives in the SQL, not in the caller.
 	MarkAccepted(ctx context.Context, inviteID string) error
 }
 
@@ -2870,7 +2878,7 @@ Create `api/internal/usecase/invite.go`. Rules to encode:
 - Invite lifetime is 7 days from `Clock.Now()`.
 - `Create` builds the `domain.Membership` through `domain.NewMembership` *before* any write, so an invalid capability set is rejected without touching the database.
 - A `limited` member with no email is created directly as a user and membership with a null password, and no invite row is written.
-- `Accept` requires a password of at least 12 characters, hashes it with `PasswordHasher`, creates the user, creates the membership from the invite's role and capabilities, marks the invite accepted, then issues a session through the same `issueSession` path sign-in uses.
+- `Accept` requires a password of at least 12 characters, hashes it with `PasswordHasher`, creates the user, creates the membership from the invite's role and capabilities, marks the invite accepted, then issues a session through the same `issueSession` path sign-in uses. `MarkAccepted` is the concurrency gate: it is a guarded atomic update, so call it and treat `domain.ErrInviteAlreadyAccepted` as the authoritative answer rather than relying on the earlier read.
 - `Preview` and `Accept` both check expiry and prior acceptance, returning the specific domain error for each.
 
 - [ ] **Step 4: Run the tests**
