@@ -17,6 +17,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"strings"
 
@@ -57,6 +58,21 @@ func run(args []string) error {
 		return err
 	}
 
+	// Both of seed's guards run before postgres.Open below, not after:
+	// Open verifies the pool by pinging it, so checking afterwards would
+	// mean a connection to the wrong database had already been attempted by
+	// the time either guard had a say. Refusing first is the only way
+	// "refuse to seed a production database" also means "never even talk to
+	// one."
+	if args[0] == "seed" {
+		if !cfg.IsDevelopment() {
+			return fmt.Errorf("refusing to seed outside development (APP_ENV=%s)", cfg.AppEnv)
+		}
+		if err := requireLocalDatabase(cfg.DatabaseURL); err != nil {
+			return err
+		}
+	}
+
 	ctx := context.Background()
 	db, err := postgres.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -82,7 +98,7 @@ func run(args []string) error {
 
 	switch args[0] {
 	case "seed":
-		return runSeed(ctx, cfg, usecase.SeedDeps{
+		return runSeed(ctx, usecase.SeedDeps{
 			Households:    households,
 			Users:         users,
 			Memberships:   memberships,
@@ -114,14 +130,10 @@ func run(args []string) error {
 	}
 }
 
-// runSeed is the only subcommand gated on the environment: it writes a known
-// development password, and that guard is the only thing standing between
-// it and a production database (see usecase.DevPassword's doc comment).
-func runSeed(ctx context.Context, cfg config.Config, deps usecase.SeedDeps) error {
-	if !cfg.IsDevelopment() {
-		return fmt.Errorf("refusing to seed outside development (APP_ENV=%s)", cfg.AppEnv)
-	}
-
+// runSeed is the only subcommand gated on the environment and the database
+// host -- both checked in run, above, before the connection those guards are
+// meant to prevent is ever opened.
+func runSeed(ctx context.Context, deps usecase.SeedDeps) error {
 	result, err := usecase.Seed(ctx, deps)
 	if err != nil {
 		return fmt.Errorf("seed: %w", err)
@@ -129,8 +141,41 @@ func runSeed(ctx context.Context, cfg config.Config, deps usecase.SeedDeps) erro
 
 	fmt.Println("Seeded the household \"Andreas & Christine\".")
 	fmt.Printf("  Andreas:            %s / %s\n", usecase.AndreasEmail, usecase.DevPassword)
-	fmt.Printf("  Christine's invite: %s\n", result.InviteURL)
+	switch {
+	case result.ChristineIsMember:
+		fmt.Println("  Christine has already accepted her invite; she is a member of the household.")
+	case result.InviteURL != "":
+		fmt.Printf("  Christine's invite: %s\n", result.InviteURL)
+	default:
+		fmt.Println("  Christine already has an invite pending that this seed did not create; " +
+			"check Mailpit for the link.")
+	}
 	return nil
+}
+
+// requireLocalDatabase is Seed's second, independent guard. APP_ENV and
+// DATABASE_URL are set separately: APP_ENV=development alone says nothing
+// about which database is actually about to receive a known password and a
+// known invite token, so the environment guard above is honestly the "only
+// thing standing between Seed and a production database" (see DevPassword's
+// doc comment in seed.go) only for as long as nothing else can point Seed at
+// one. This closes that gap by naming the target: two independent
+// conditions must now hold before Seed runs, and this is the one that
+// actually inspects which database it is about to write to.
+func requireLocalDatabase(databaseURL string) error {
+	u, err := url.Parse(databaseURL)
+	if err != nil {
+		return fmt.Errorf("refusing to seed: could not parse DATABASE_URL: %w", err)
+	}
+	host := u.Hostname()
+	switch host {
+	case "localhost", "127.0.0.1", "::1", "postgres":
+		return nil
+	default:
+		return fmt.Errorf(
+			"refusing to seed: DATABASE_URL host %q is not a recognised local address "+
+				"(want localhost, 127.0.0.1, ::1 or postgres)", host)
+	}
 }
 
 func runResetPassword(ctx context.Context, args []string, users usecase.UserRepository, hasher usecase.PasswordHasher) error {
