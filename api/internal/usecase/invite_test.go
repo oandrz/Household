@@ -126,6 +126,38 @@ func TestCreateInviteRejectsALimitedRoleHoldingMarriage(t *testing.T) {
 	}
 }
 
+// TestCreateInviteRejectsAnOwnerWithNoEmail guards against the gap a
+// coordinator review caught: RoleLimited with an empty email is the design's
+// child case (created directly, no invite, no email needed), but any other
+// role with an empty email has nowhere for an invite to go. Left unguarded,
+// Create would happily write an invite row and "succeed" while the token it
+// generated was never mailed to anyone -- a row that just sits there,
+// unopenable, until it expires seven days later.
+func TestCreateInviteRejectsAnOwnerWithNoEmail(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	usersBefore, membersBefore := f.users.count(), f.members.count()
+
+	err := f.invites.Create(ctx, f.householdID, f.andreasID, "Co-owner", "",
+		domain.RoleOwner, domain.AllCapabilities())
+	if !errors.Is(err, domain.ErrInviteRequiresEmail) {
+		t.Fatalf("err = %v, want ErrInviteRequiresEmail", err)
+	}
+	if got := f.inviteRepo.count(); got != 0 {
+		t.Fatalf("invite rows = %d, want 0 — an undeliverable invite must never be written", got)
+	}
+	if got := f.mailer.invitesSentCount(); got != 0 {
+		t.Fatalf("invite emails sent = %d, want 0", got)
+	}
+	if got := f.users.count(); got != usersBefore {
+		t.Fatalf("users = %d, want %d unchanged — rejecting the combination must create nothing", got, usersBefore)
+	}
+	if got := f.members.count(); got != membersBefore {
+		t.Fatalf("memberships = %d, want %d unchanged", got, membersBefore)
+	}
+}
+
 func TestPreviewReturnsFamilyNameInviterRoleAndCapabilities(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()

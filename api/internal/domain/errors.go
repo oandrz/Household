@@ -16,6 +16,7 @@ var (
 	ErrForbidden                 = errors.New("forbidden")
 	ErrInviteExpired             = errors.New("invite has expired")
 	ErrInviteAlreadyAccepted     = errors.New("invite has already been accepted")
+	ErrInviteRequiresEmail       = errors.New("an invite requires an email address")
 	ErrTokenExpired              = errors.New("token has expired or been used")
 	ErrRateLimited               = errors.New("too many requests")
 

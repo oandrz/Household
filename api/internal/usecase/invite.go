@@ -82,7 +82,16 @@ func (s *InviteService) Create(ctx context.Context, householdID, invitedByUserID
 		return err
 	}
 
-	if role == domain.RoleLimited && email == "" {
+	if email == "" {
+		// Only a limited member can be created without an email at all --
+		// that's the design's child case, created directly with no
+		// credentials. Any other role with no email has nowhere for an
+		// invite to go: it would occupy a token hash, sit unopened, and
+		// expire silently seven days later while the caller who created it
+		// saw success. Reject the combination before writing anything.
+		if role != domain.RoleLimited {
+			return domain.ErrInviteRequiresEmail
+		}
 		user, err := s.d.Users.Create(ctx, "", "", name)
 		if err != nil {
 			return err
