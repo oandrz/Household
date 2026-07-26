@@ -2433,7 +2433,16 @@ type AuthDeps struct {
 
 type AuthService struct{ d AuthDeps }
 
-func NewAuthService(d AuthDeps) *AuthService { return &AuthService{d: d} }
+// NewAuthService fills in a zero-valued Policy. A LockoutPolicy{} never locks
+// anyone out while reporting AttemptsRemaining as 0 — an inconsistent state
+// that would silently disable the lockout while the UI showed "0 tries left".
+// A struct literal that forgets the field is the obvious way to reach it.
+func NewAuthService(d AuthDeps) *AuthService {
+	if d.Policy.MaxAttempts == 0 {
+		d.Policy = domain.DefaultLockoutPolicy()
+	}
+	return &AuthService{d: d}
+}
 
 type SignInResult struct {
 	SessionToken string
@@ -2461,7 +2470,7 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 		if err != nil {
 			return SignInResult{}, err
 		}
-		state := s.d.Policy.Evaluate(failures, lockoutNow)
+		state := s.d.Policy.Evaluate(failures, now)
 		return SignInResult{}, &SignInFailedError{
 			AttemptsRemaining: state.AttemptsRemaining,
 			Locked:            state.Locked,
@@ -2479,7 +2488,7 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 	if err != nil {
 		return SignInResult{}, err
 	}
-	if state := s.d.Policy.Evaluate(failures, lockoutNow); state.Locked {
+	if state := s.d.Policy.Evaluate(failures, now); state.Locked {
 		return SignInResult{}, &SignInFailedError{Locked: true, LockedUntil: state.Until}
 	}
 
@@ -2491,7 +2500,7 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 		if err != nil {
 			return SignInResult{}, err
 		}
-		state := s.d.Policy.Evaluate(failures, lockoutNow)
+		state := s.d.Policy.Evaluate(failures, now)
 		return SignInResult{}, &SignInFailedError{
 			AttemptsRemaining: state.AttemptsRemaining,
 			Locked:            state.Locked,
