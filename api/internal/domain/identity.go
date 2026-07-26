@@ -126,6 +126,11 @@ func validateCapabilitiesForRole(role Role, caps Capabilities) error {
 				return ErrOwnerMustHoldAllCapabilities
 			}
 		}
+	default:
+		// This function is the single enforcement point for both role
+		// invariants. A role it does not recognise must fail closed rather
+		// than sail through with no validation at all.
+		return fmt.Errorf("%w: %q", ErrUnknownRole, role)
 	}
 	return nil
 }

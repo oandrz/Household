@@ -35,6 +35,21 @@ func TestLimitedMemberMayHoldCalendarAndChores(t *testing.T) {
 	}
 }
 
+// TestNewMembershipRejectsAnUnrecognisedRole guards the default case in
+// validateCapabilitiesForRole: a Role value that is neither RoleOwner nor
+// RoleLimited (only reachable by bypassing ParseRole, e.g. a raw conversion
+// like this one) must fail closed rather than skip capability validation
+// entirely. Do not delete this as unreachable -- it is exactly what makes
+// the default case reachable in the first place.
+func TestNewMembershipRejectsAnUnrecognisedRole(t *testing.T) {
+	_, err := domain.NewMembership("m1", "h1", "u1", domain.Role("admin"),
+		domain.Capabilities{domain.CapCalendar})
+
+	if !errors.Is(err, domain.ErrUnknownRole) {
+		t.Fatalf("err = %v, want ErrUnknownRole", err)
+	}
+}
+
 func TestRemovingTheLastOwnerIsRejected(t *testing.T) {
 	all := []domain.Membership{owner("m1"), kid("m2", domain.Capabilities{domain.CapCalendar})}
 
