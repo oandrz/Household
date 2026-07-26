@@ -19,6 +19,7 @@ import { apiFetch } from "../../api/client";
 import { apiErrorMessage } from "../auth/copy";
 import { useMe } from "../auth/useAuth";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
+import { ALL_CAPABILITIES } from "./capabilities";
 import { InviteMemberModal } from "./InviteMemberModal";
 import { memberBadgeLabel, memberDescriptionLine } from "./copy";
 import {
@@ -73,6 +74,14 @@ function useUpdateMember() {
       // (if they just edited their own membership) looking at stale
       // navigation.
       queryClient.invalidateQueries({ queryKey: ["me"] });
+      // SpacesPanel reads its own, separately keyed ['spaces'] query.
+      // domain.VisibleSpaces filters by role/capabilities, so a role or
+      // capability change here can change which spaces the caller (if they
+      // just edited their own membership -- e.g. an owner demoting
+      // themselves) is allowed to see. Without this, SpacesPanel would keep
+      // listing a space like Marriage as visible after its own viewer lost
+      // the access that used to grant it.
+      queryClient.invalidateQueries({ queryKey: ["spaces"] });
     },
   });
 }
@@ -97,6 +106,7 @@ function MemberRow({
   member,
   colorClass,
   isOwner,
+  pending,
   errorMessage,
   warningMessage,
   onUpdate,
@@ -104,6 +114,15 @@ function MemberRow({
   member: MemberView;
   colorClass: string;
   isOwner: boolean;
+  // True while a mutation for *this* member is in flight. Scoped per
+  // member (not a single panel-wide flag) so editing Kayla never disables
+  // Ethan's row -- see MembersPanel's pendingIds state for how this is
+  // tracked. Needed because toggleCapability below computes its next array
+  // from `member.capabilities`, which is only as fresh as the last
+  // completed fetch: clicking a second capability before the first PATCH
+  // settles and refetches would compute from the pre-first-click array and
+  // silently revert it.
+  pending: boolean;
   errorMessage?: string;
   warningMessage?: string;
   onUpdate: (vars: { role?: string; capabilities?: string[] }) => void;
@@ -123,7 +142,7 @@ function MemberRow({
   // fine; this request happens to need both.)
   function toggleRole() {
     if (isLimited) {
-      onUpdate({ role: "owner", capabilities: ["calendar", "chores", "money", "marriage"] });
+      onUpdate({ role: "owner", capabilities: [...ALL_CAPABILITIES] });
     } else {
       onUpdate({
         role: "limited",
@@ -166,7 +185,7 @@ function MemberRow({
           role="switch"
           aria-checked={!isLimited}
           aria-label={`${member.user.displayName}'s role`}
-          disabled={!isOwner}
+          disabled={!isOwner || pending}
           onClick={toggleRole}
           className={`rounded-full px-2.5 py-1 text-[11px] font-semibold disabled:cursor-default ${
             isLimited ? "bg-badge-limited-bg text-label" : "bg-badge-owner-bg text-accent"
@@ -183,6 +202,7 @@ function MemberRow({
               <ToggleSwitch
                 checked={member.capabilities.includes(key)}
                 onChange={() => toggleCapability(key)}
+                disabled={pending}
                 label={`${member.user.displayName} ${label} access`}
               />
               {label}
@@ -212,6 +232,13 @@ export function MembersPanel() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [rowWarnings, setRowWarnings] = useState<Record<string, string>>({});
+  // Which members currently have a mutation in flight -- a Set, not a
+  // single boolean, so editing one member's row never disables another's.
+  // This is app-level bookkeeping independent of react-query's own
+  // mutation.isPending: a single useUpdateMember instance is shared by
+  // every row, so its isPending reflects only the most recently dispatched
+  // call, not "is a call for member X still outstanding."
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
 
   const isOwner = me.data?.membership.role === "owner";
 
@@ -220,12 +247,22 @@ export function MembersPanel() {
   // the mutation actually succeeds and its query is invalidated/refetched.
   // A 409/422 response therefore leaves every control exactly where it was
   // -- there is no local "already flipped" state to roll back.
+  //
+  // pendingIds is what stands between a click and the request it sends: a
+  // member's role switch and capability toggles are disabled (see
+  // MemberRow's `pending` prop) for exactly the window between calling
+  // mutate and that mutation settling. Without it, clicking a second
+  // capability before the first PATCH resolves and refetches would compute
+  // its next array from the same, now-stale `member.capabilities` the first
+  // click already read -- silently reverting whichever change happened
+  // first.
   function handleUpdate(
     memberId: string,
     vars: { role?: string; capabilities?: string[] },
   ) {
     setRowErrors((prev) => ({ ...prev, [memberId]: "" }));
     setRowWarnings((prev) => ({ ...prev, [memberId]: "" }));
+    setPendingIds((prev) => new Set(prev).add(memberId));
     updateMember.mutate(
       { id: memberId, ...vars },
       {
@@ -239,6 +276,13 @@ export function MembersPanel() {
             ...prev,
             [memberId]: apiErrorMessage(error, "Something went wrong. Please try again."),
           }));
+        },
+        onSettled: () => {
+          setPendingIds((prev) => {
+            const next = new Set(prev);
+            next.delete(memberId);
+            return next;
+          });
         },
       },
     );
@@ -274,6 +318,7 @@ export function MembersPanel() {
               member={member}
               colorClass={AVATAR_CLASSES[index % AVATAR_CLASSES.length]}
               isOwner={isOwner}
+              pending={pendingIds.has(member.id)}
               errorMessage={rowErrors[member.id]}
               warningMessage={rowWarnings[member.id]}
               onUpdate={(vars) => handleUpdate(member.id, vars)}

@@ -9,13 +9,9 @@ import { Modal } from "../../components/Modal";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { apiFetch } from "../../api/client";
 import { apiErrorMessage } from "../auth/copy";
+import { ALL_CAPABILITIES } from "./capabilities";
 
 type RoleOption = "owner" | "limited";
-
-// domain.NewMembership's own invariant, mirrored client-side as UX rather
-// than enforcement -- the server rejects any owner body missing one of
-// these four just as firmly if this ever drifted.
-const ALL_CAPABILITIES = ["calendar", "chores", "money", "marriage"];
 
 async function inviteMember(vars: {
   name: string;
@@ -60,7 +56,7 @@ export function InviteMemberModal({
   ]);
   const invite = useInviteMember();
 
-  const capabilities = role === "owner" ? ALL_CAPABILITIES : limitedCapabilities;
+  const capabilities = role === "owner" ? [...ALL_CAPABILITIES] : limitedCapabilities;
 
   function toggleLimitedCapability(cap: string) {
     setLimitedCapabilities((prev) =>

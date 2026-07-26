@@ -282,4 +282,111 @@ describe("MembersPanel", () => {
     // Capability toggles are only ever rendered for the owner viewer.
     expect(screen.queryByRole("switch", { name: "Kayla Money access" })).not.toBeInTheDocument();
   });
+
+  // Fix round 2 (spec review). toggleCapability computes its next array
+  // from `member.capabilities`, which is only as fresh as the last
+  // completed fetch. Clicking Money, then clicking Chores before the first
+  // PATCH resolves and the members query refetches, would compute the
+  // second request from the same pre-first-click array the first click
+  // already read -- silently reverting the money grant with no error and
+  // no visible reason. The fix disables a member's role switch and every
+  // capability toggle while a mutation for that specific member (not the
+  // whole list) is in flight.
+  it("disables a member's own controls while its mutation is in flight, so a second click cannot revert the first", async () => {
+    const kaylaAfterMoney = { ...kayla, capabilities: ["calendar", "chores", "money"] };
+    const fetchMock = stubFetchRoutes({
+      [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
+      [`GET ${MEMBERS_URL}`]: [
+        { status: 200, body: [andreas, kayla, ethan] },
+        // What a refetch (triggered once the first PATCH's onSuccess
+        // invalidates the query) sees -- money now granted.
+        { status: 200, body: [andreas, kaylaAfterMoney, ethan] },
+      ],
+      "PATCH /api/v1/household/members/mem-kayla": {
+        status: 200,
+        body: { id: "mem-kayla", role: "limited", capabilities: ["calendar", "chores", "money"] },
+      },
+    });
+    renderPanel();
+
+    await screen.findByText("Kid · calendar & chores only");
+
+    const moneyToggle = screen.getByRole("switch", { name: "Kayla Money access" });
+    const choresToggle = screen.getByRole("switch", { name: "Kayla Chores access" });
+    const kaylaRoleToggle = screen.getByRole("switch", { name: "Kayla's role" });
+    const ethanChoresToggle = screen.getByRole("switch", { name: "Ethan Chores access" });
+
+    fireEvent.click(moneyToggle);
+
+    // Immediately -- before the PATCH resolves -- every other control on
+    // Kayla's own row is disabled too, and Ethan's row is untouched: the
+    // guard is scoped per member, not to the whole list.
+    expect(choresToggle).toBeDisabled();
+    expect(kaylaRoleToggle).toBeDisabled();
+    expect(ethanChoresToggle).not.toBeDisabled();
+
+    // A click on a disabled control fires no request at all.
+    fireEvent.click(choresToggle);
+
+    function kaylaPatchCalls() {
+      return fetchMock.mock.calls.filter(
+        ([input, init]) =>
+          String(input) === "/api/v1/household/members/mem-kayla" &&
+          (init?.method ?? "").toUpperCase() === "PATCH",
+      );
+    }
+
+    await waitFor(() => expect(kaylaPatchCalls()).toHaveLength(1));
+    expect(JSON.parse(kaylaPatchCalls()[0][1]!.body as string)).toEqual({
+      capabilities: ["calendar", "chores", "money"],
+    });
+
+    // Once the mutation settles and the query refetches, the row re-enables
+    // -- and a genuine second click, now computed from the up-to-date
+    // array, carries both changes: money (already persisted) stays, chores
+    // is what actually changes.
+    await waitFor(() => expect(choresToggle).not.toBeDisabled());
+    await screen.findByText("Kid · calendar & chores & money only");
+
+    fireEvent.click(choresToggle);
+
+    await waitFor(() => expect(kaylaPatchCalls()).toHaveLength(2));
+    expect(JSON.parse(kaylaPatchCalls()[1][1]!.body as string)).toEqual({
+      capabilities: ["calendar", "money"],
+    });
+  });
+
+  // Fix round 2 (spec review), Finding 2. Every promotion this UI can
+  // trigger sends the full, hardcoded capability set (via the shared
+  // ALL_CAPABILITIES constant), so 422 INVALID_CAPABILITIES is prevented by
+  // construction rather than ever actually reaching this code today. That
+  // is exactly why it needs a test that drives the error directly rather
+  // than through the UI: the path must stay correct even though nothing in
+  // this screen can currently produce it, so it is still safe on the day a
+  // future change (a fifth capability, a relaxed client-side guard) makes
+  // it reachable.
+  it("renders a 422 INVALID_CAPABILITIES response inline, the same way the 409 LAST_OWNER case does", async () => {
+    stubFetchRoutes({
+      [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
+      [`GET ${MEMBERS_URL}`]: { status: 200, body: [andreas, kayla, ethan] },
+      "PATCH /api/v1/household/members/mem-kayla": {
+        status: 422,
+        body: {
+          error: {
+            code: "INVALID_CAPABILITIES",
+            message: "That capability set is not valid for this role.",
+          },
+        },
+      },
+    });
+    renderPanel();
+
+    await screen.findByText("Kid · calendar & chores only");
+    fireEvent.click(screen.getByRole("switch", { name: "Kayla's role" }));
+
+    expect(
+      await screen.findByText("That capability set is not valid for this role."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Kayla's role" })).toHaveTextContent("Limited");
+  });
 });
