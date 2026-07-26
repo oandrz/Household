@@ -39,14 +39,15 @@ type updateHouseholdRequest struct {
 // what it's handed (see its doc comment in usecase/household.go), so a
 // request that omitted a field would otherwise blank it out.
 //
-// This sits behind requireSession + requireCSRF only, per the task brief's
-// routing description, which names requireOwner explicitly for
-// /household/members mutations and /spaces creation but not for this route
-// or notification-preferences. That leaves any member -- including a
-// limited one -- able to edit household-wide settings such as the primary
-// currency. Flagged in the task report as an authorization gap for the
-// coordinator to rule on; not something this task invents a guard for on its
-// own authority.
+// This sits behind requireSession + requireCSRF + requireOwner: the
+// household's primary/secondary currency and FX mode are household-wide
+// settings the design presents on the parents' Settings screen, and letting
+// a limited member (a child) change them was an authorization hole the
+// initial routing left open -- see the task-16 fix report's audit for the
+// full route-by-route reasoning. GET /household stays reachable by any
+// authenticated member: the frontend needs these values to render amounts
+// for anyone who can see a money figure, and reading them discloses nothing
+// a member doesn't already see on screen.
 func handleUpdateHousehold(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, ok := RequestScope(r)
@@ -105,7 +106,8 @@ type createSpaceRequest struct {
 	Template string `json:"template"`
 }
 
-// handleCreateSpace sits behind requireOwner, per the task brief.
+// handleCreateSpace sits behind requireOwner: only an owner may add a
+// custom space to the household's sidebar.
 func handleCreateSpace(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, ok := RequestScope(r)
@@ -167,9 +169,10 @@ type notificationPreferencesRequest struct {
 }
 
 // handleUpdateNotificationPreferences sits behind requireSession +
-// requireCSRF only -- see handleUpdateHousehold's doc comment for why that
-// matches the task brief but leaves a limited member able to change these
-// too.
+// requireCSRF + requireOwner, for the same reason handleUpdateHousehold
+// does: these are household-wide toggles on the parents' Settings screen,
+// not a per-member preference. GET /notification-preferences stays
+// reachable by any authenticated member.
 func handleUpdateNotificationPreferences(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, ok := RequestScope(r)

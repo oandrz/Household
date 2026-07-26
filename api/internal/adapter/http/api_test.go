@@ -511,3 +511,84 @@ func TestLimitedMemberCannotCreateSpace(t *testing.T) {
 		map[string]any{"name": "Movie Night", "visibility": "everyone"}, session, csrf)
 	assertErrorResponse(t, rec, http.StatusForbidden, "FORBIDDEN")
 }
+
+// TestOwnerOnlyRoutesRejectALimitedMember is the sibling of
+// TestEveryProtectedRouteRejectsAnUnauthenticatedCaller: where that test
+// walks the router asserting every non-public route needs a session at all,
+// this one hand-lists every route this task's audit (see the fix report)
+// concluded must sit behind requireOwner, and asserts a signed-in,
+// CSRF-valid *limited* member is rejected with 403 FORBIDDEN on every one of
+// them. It is deliberately a fixed table rather than a walk: chi.Walk
+// exposes a route's middleware chain, but there is no reliable, non-reflection
+// way to ask "does this chain include requireOwner specifically" the way the
+// unauthenticated matrix can ask "did this return 401." A route added to the
+// owner-gated set in the audit without actually being wired behind
+// requireOwner in router.go fails this test rather than shipping unnoticed.
+//
+// TestLimitedMemberCannotUpdateMembers and TestLimitedMemberCannotCreateSpace
+// above already cover two of these rows individually, matching the task's
+// original eleven enumerated behaviours verbatim; this table is the
+// superset the coordinator's route audit asked for.
+func TestOwnerOnlyRoutesRejectALimitedMember(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   any
+	}{
+		{
+			name:   "PATCH /household",
+			method: http.MethodPatch,
+			path:   "/api/v1/household",
+			body: map[string]any{
+				"name": "New Name", "familyName": "New Family", "primaryCurrency": "SGD",
+				"showSecondaryCurrency": true, "secondaryCurrency": "IDR", "fxRateMode": "auto",
+			},
+		},
+		{
+			name:   "PATCH /notification-preferences",
+			method: http.MethodPatch,
+			path:   "/api/v1/notification-preferences",
+			body: map[string]any{
+				"billReminders": true, "overspendAlerts": true, "retroReminder": true, "weeklyDigest": true,
+			},
+		},
+		{
+			name:   "POST /household/members/invite",
+			method: http.MethodPost,
+			path:   "/api/v1/household/members/invite",
+			body: map[string]any{
+				"name": "New Kid", "email": "newkid@hearth.family", "role": "limited",
+				"capabilities": []string{"calendar"},
+			},
+		},
+		{
+			name:   "PATCH /household/members/{id}",
+			method: http.MethodPatch,
+			path:   "/api/v1/household/members/00000000-0000-0000-0000-000000000000",
+			body:   map[string]any{"role": "limited", "capabilities": []string{"calendar"}},
+		},
+		{
+			name:   "DELETE /household/members/{id}",
+			method: http.MethodDelete,
+			path:   "/api/v1/household/members/00000000-0000-0000-0000-000000000000",
+			body:   nil,
+		},
+		{
+			name:   "POST /spaces",
+			method: http.MethodPost,
+			path:   "/api/v1/spaces",
+			body:   map[string]any{"name": "Movie Night", "visibility": "everyone"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := newTestEnv(t)
+			session, csrf := env.signIn(t, env.limitedEmail, env.limitedPassword)
+
+			rec := env.authed(t, tt.method, tt.path, tt.body, session, csrf)
+			assertErrorResponse(t, rec, http.StatusForbidden, "FORBIDDEN")
+		})
+	}
+}

@@ -85,11 +85,10 @@ func NewRouter(deps Deps) http.Handler {
 			g.Group(func(m chi.Router) {
 				m.Use(requireCSRF)
 
-				m.Patch("/household", handleUpdateHousehold(deps))
-				m.Patch("/notification-preferences", handleUpdateNotificationPreferences(deps))
-
 				m.Group(func(o chi.Router) {
 					o.Use(requireOwner)
+					o.Patch("/household", handleUpdateHousehold(deps))
+					o.Patch("/notification-preferences", handleUpdateNotificationPreferences(deps))
 					o.Post("/household/members/invite", handleInviteMember(deps))
 					o.Patch("/household/members/{id}", handleUpdateMember(deps))
 					o.Delete("/household/members/{id}", handleRemoveMember(deps))
