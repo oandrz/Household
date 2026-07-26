@@ -1250,6 +1250,10 @@ npm install @tanstack/react-router @tanstack/react-query zod react-hook-form @ho
 npm install -D tailwindcss @tailwindcss/vite vitest @testing-library/react @testing-library/jest-dom jsdom prettier
 ```
 
+Pin every version rather than accepting a floating `@latest` — Task 4 was broken twice by floating tool versions and the same exposure applies here. Add `@types/node` too: the Vite config below reads `process.env`.
+
+Collapse whatever `tsconfig.*.json` files the scaffold generates into the single `web/tsconfig.json` this plan specifies, and delete any `tailwind.config.ts` it produces — Tailwind 4 is configured by the `@theme` block in `src/index.css`, and a config file would be a second source of truth. Delete the rest of the template debris as well: `App.css`, `assets/`, and the scaffold's own `index.css` body.
+
 - [ ] **Step 2: Configure Vite with the API proxy**
 
 Replace `web/vite.config.ts`:
@@ -1364,9 +1368,11 @@ describe("apiFetch", () => {
       vi.fn(async () => new Response("<html>502</html>", { status: 502 })),
     );
 
-    const error = await apiFetch("/api/v1/anything").catch((e) => e);
+    // Narrow at the use site: apiFetch returns Promise<unknown>, so the caught
+    // value is unknown and has no .code until it is asserted.
+    const error = await apiFetch("/api/v1/anything").catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ApiError);
-    expect(error.code).toBe("UNKNOWN");
+    expect((error as ApiError).code).toBe("UNKNOWN");
   });
 });
 ```
