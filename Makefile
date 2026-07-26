@@ -1,7 +1,6 @@
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 COMPOSE := docker compose
-DB_URL := postgres://hearth:hearth@localhost:5432/hearth?sslmode=disable
 
 .PHONY: help dev up down restart logs ps migrate migrate-down migrate-new \
         test test-api lint lint-arch fmt psql shell-api build
@@ -12,13 +11,10 @@ help: ## Show this help
 
 dev: ## Start everything and tail the logs — http://localhost:5173
 	$(COMPOSE) up -d postgres mailpit
-	$(COMPOSE) run --rm migrate
 	$(COMPOSE) up --build api web
 
 up: ## Start everything in the background
-	$(COMPOSE) up -d --build postgres mailpit
-	$(COMPOSE) run --rm migrate
-	$(COMPOSE) up -d --build api web
+	$(COMPOSE) up -d --build postgres mailpit api web
 
 down: ## Stop everything and remove the containers
 	$(COMPOSE) down
@@ -36,7 +32,7 @@ migrate: ## Apply pending migrations
 
 migrate-down: ## Roll back the most recent migration
 	$(COMPOSE) run --rm migrate sh -c \
-	  'goose -dir ./migrations postgres "postgres://hearth:hearth@postgres:5432/hearth?sslmode=disable" down'
+	  'goose -dir ./migrations postgres "$$DATABASE_URL" down'
 
 migrate-new: ## Create a migration. make migrate-new NAME=add_users
 	@test -n "$(NAME)" || { echo "NAME is required, e.g. make migrate-new NAME=add_users"; exit 1; }
