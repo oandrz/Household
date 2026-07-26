@@ -141,8 +141,14 @@ WHERE id = $1 AND accepted_at IS NULL AND expires_at > now()
 RETURNING id;
 
 -- name: ListSpaces :many
+-- ORDER BY position, key: position alone has no tiebreaker, so two spaces
+-- sharing a position (nothing stops that -- positions are assigned by
+-- NextSpacePosition, not a unique constraint) sorted nondeterministically,
+-- and the sidebar's order could change from one request to the next with no
+-- write in between. key is unique per household, so it always breaks the tie
+-- the same way.
 SELECT id, household_id, key, name, visibility, position, is_builtin, required_capability
-FROM spaces WHERE household_id = $1 ORDER BY position;
+FROM spaces WHERE household_id = $1 ORDER BY position, key;
 
 -- name: CreateSpace :one
 INSERT INTO spaces (household_id, key, name, visibility, position, is_builtin, required_capability)

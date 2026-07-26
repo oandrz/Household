@@ -688,9 +688,15 @@ func (q *Queries) ListRecentFailuresByEmail(ctx context.Context, arg ListRecentF
 
 const listSpaces = `-- name: ListSpaces :many
 SELECT id, household_id, key, name, visibility, position, is_builtin, required_capability
-FROM spaces WHERE household_id = $1 ORDER BY position
+FROM spaces WHERE household_id = $1 ORDER BY position, key
 `
 
+// ORDER BY position, key: position alone has no tiebreaker, so two spaces
+// sharing a position (nothing stops that -- positions are assigned by
+// NextSpacePosition, not a unique constraint) sorted nondeterministically,
+// and the sidebar's order could change from one request to the next with no
+// write in between. key is unique per household, so it always breaks the tie
+// the same way.
 func (q *Queries) ListSpaces(ctx context.Context, householdID pgtype.UUID) ([]Space, error) {
 	rows, err := q.db.Query(ctx, listSpaces, householdID)
 	if err != nil {

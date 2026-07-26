@@ -43,6 +43,11 @@ var ErrSpaceNameTaken = errors.New("a space with that name already exists in thi
 // collision.
 var ErrSpaceNameRequired = errors.New("space name is required")
 
+// ErrInvalidFXRateMode is Update's rejection of any fxRateMode value other
+// than "auto" or "manual" -- see Update's doc comment for why this exists at
+// the usecase level as well as in the database's own CHECK constraint.
+var ErrInvalidFXRateMode = errors.New(`fxRateMode must be "auto" or "manual"`)
+
 // HouseholdDeps mirrors AuthDeps/InviteDeps: every port HouseholdService
 // needs, gathered into one struct so NewHouseholdService has a single, named
 // argument.
@@ -80,6 +85,13 @@ func (s *HouseholdService) Get(ctx context.Context, householdID string) (domain.
 // sentinel Money.Add already uses for the same family of problem) rather
 // than returned bare, so a caller -- and eventually Task 16's HTTP layer --
 // can test for it with errors.Is instead of matching an fmt.Errorf string.
+//
+// FXRateMode gets the identical treatment for the identical reason: the
+// database enforces CHECK (fx_rate_mode IN ('auto', 'manual'))
+// (migrations/00002_identity.sql), so without a check here a caller-supplied
+// value outside that pair -- a typo, or any other string -- would reach the
+// constraint first and fail as an unmapped 500, exactly as an invalid
+// currency code did before normalizeCurrency existed.
 func (s *HouseholdService) Update(ctx context.Context, h domain.Household) (domain.Household, error) {
 	primary, err := normalizeCurrency(h.PrimaryCurrency)
 	if err != nil {
@@ -88,6 +100,11 @@ func (s *HouseholdService) Update(ctx context.Context, h domain.Household) (doma
 	secondary, err := normalizeCurrency(h.SecondaryCurrency)
 	if err != nil {
 		return domain.Household{}, err
+	}
+	switch h.FXRateMode {
+	case "auto", "manual":
+	default:
+		return domain.Household{}, ErrInvalidFXRateMode
 	}
 	h.PrimaryCurrency = primary
 	h.SecondaryCurrency = secondary
@@ -126,6 +143,11 @@ func (s *HouseholdService) Spaces(ctx context.Context, householdID string, m dom
 // anything. The new space is never builtin and carries no required
 // capability: only the three seeded spaces gate on one.
 //
+// The stored Name is the same trimmed value the key is derived from, not the
+// caller's raw string: there is no rename endpoint, so a name saved with
+// leading or trailing whitespace (" Movie Night ") would be permanent, and
+// would render with that whitespace in the sidebar forever.
+//
 // The list-then-compare duplicate check above is not transactional, so it is
 // not the only gate against a collision: Create's own domain.ErrAlreadyExists
 // (the database's UNIQUE (household_id, key) constraint, translated -- see
@@ -140,7 +162,8 @@ func (s *HouseholdService) CreateSpace(ctx context.Context, householdID, name st
 		return domain.Space{}, ErrSpaceVisibilityNotSupported
 	}
 
-	if strings.TrimSpace(name) == "" {
+	trimmedName := strings.TrimSpace(name)
+	if trimmedName == "" {
 		return domain.Space{}, ErrSpaceNameRequired
 	}
 
@@ -164,7 +187,7 @@ func (s *HouseholdService) CreateSpace(ctx context.Context, householdID, name st
 	created, err := s.d.Spaces.Create(ctx, domain.Space{
 		HouseholdID: householdID,
 		Key:         key,
-		Name:        name,
+		Name:        trimmedName,
 		Visibility:  visibility,
 		Position:    position,
 		IsBuiltin:   false,
