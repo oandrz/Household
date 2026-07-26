@@ -56,15 +56,18 @@ afterEach(() => {
 });
 
 describe("CurrencyPanel", () => {
-  it("renders the primary currency with its symbol", async () => {
+  it("renders the primary currency with its symbol for a non-owner viewer", async () => {
     stubFetchRoutes({
-      [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
+      [`GET ${ME_URL}`]: { status: 200, body: meFixture("limited") },
       [`GET ${HOUSEHOLD_URL}`]: { status: 200, body: householdFixture() },
     });
     renderPanel();
 
     expect(await screen.findByText("SGD (S$)")).toBeInTheDocument();
     expect(screen.getByText("Show IDR equivalents")).toBeInTheDocument();
+    // A non-owner gets the plain, non-interactive display -- no input, no
+    // way to reach PATCH /household's primaryCurrency field at all.
+    expect(screen.queryByLabelText("Primary currency")).not.toBeInTheDocument();
   });
 
   it("issues a PATCH toggling showSecondaryCurrency for an owner", async () => {
@@ -78,7 +81,7 @@ describe("CurrencyPanel", () => {
     });
     renderPanel();
 
-    await screen.findByText("SGD (S$)");
+    await screen.findByDisplayValue("SGD");
     fireEvent.click(screen.getByRole("switch", { name: /show secondary currency/i }));
 
     await waitFor(() => {
@@ -100,5 +103,75 @@ describe("CurrencyPanel", () => {
 
     await screen.findByText("SGD (S$)");
     expect(screen.getByRole("switch", { name: /show secondary currency/i })).toBeDisabled();
+  });
+
+  it("lets an owner edit the primary currency and issues a matching PATCH", async () => {
+    const fetchMock = stubFetchRoutes({
+      [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
+      [`GET ${HOUSEHOLD_URL}`]: { status: 200, body: householdFixture({ primaryCurrency: "SGD" }) },
+      [`PATCH ${HOUSEHOLD_URL}`]: {
+        status: 200,
+        body: householdFixture({ primaryCurrency: "USD" }),
+      },
+    });
+    renderPanel();
+
+    const input = await screen.findByDisplayValue("SGD");
+    fireEvent.change(input, { target: { value: "usd" } });
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([reqInput, init]) =>
+          String(reqInput) === HOUSEHOLD_URL && (init?.method ?? "").toUpperCase() === "PATCH",
+      );
+      expect(call).toBeDefined();
+      // Lowercase input is uppercased before it ever reaches the request --
+      // the backend's own rule (domain.NewMoney) requires uppercase.
+      expect(JSON.parse(call![1]!.body as string)).toEqual({ primaryCurrency: "USD" });
+    });
+  });
+
+  it("keeps Save disabled until the input is exactly three letters and different from the saved value", async () => {
+    stubFetchRoutes({
+      [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
+      [`GET ${HOUSEHOLD_URL}`]: { status: 200, body: householdFixture({ primaryCurrency: "SGD" }) },
+    });
+    renderPanel();
+
+    const input = await screen.findByDisplayValue("SGD");
+    const save = screen.getByRole("button", { name: /save/i });
+
+    // Unchanged from the saved value.
+    expect(save).toBeDisabled();
+
+    // Too short to be a currency code.
+    fireEvent.change(input, { target: { value: "US" } });
+    expect(save).toBeDisabled();
+
+    // A real, different, three-letter code enables it.
+    fireEvent.change(input, { target: { value: "USD" } });
+    expect(save).not.toBeDisabled();
+  });
+
+  it("surfaces the backend's own message on a rejected currency code, and keeps the owner's attempted input", async () => {
+    stubFetchRoutes({
+      [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
+      [`GET ${HOUSEHOLD_URL}`]: { status: 200, body: householdFixture({ primaryCurrency: "SGD" }) },
+      [`PATCH ${HOUSEHOLD_URL}`]: {
+        status: 422,
+        body: { error: { code: "INVALID_CURRENCY", message: "That currency code is not valid." } },
+      },
+    });
+    renderPanel();
+
+    const input = await screen.findByDisplayValue("SGD");
+    fireEvent.change(input, { target: { value: "ZZZ" } });
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    expect(await screen.findByText("That currency code is not valid.")).toBeInTheDocument();
+    // The rejected attempt stays on screen for the owner to correct, rather
+    // than silently reverting to the last saved value.
+    expect(screen.getByDisplayValue("ZZZ")).toBeInTheDocument();
   });
 });

@@ -9,37 +9,30 @@
 // a second call for the same token would fail even though the first one
 // already signed the user in, turning a successful sign-in into a visible
 // error.
+//
+// Both outcomes (sign-in success -> navigate; failure -> show the message)
+// are handled inside useConsumeMagicLink itself, not here -- see that
+// hook's comment in useAuth.ts for why. This screen only fires the mutation
+// once and renders whichever of "Signing you in…" or the error state the
+// hook reports back.
 import { useEffect, useRef } from "react";
-import { useNavigate } from "@tanstack/react-router";
-import { ApiError } from "../../api/client";
 import { useConsumeMagicLink } from "./useAuth";
 
 export function MagicLinkConsumeScreen({ token }: { token: string }) {
-  const navigate = useNavigate();
-  const consume = useConsumeMagicLink();
+  const { mutate, errorMessage } = useConsumeMagicLink();
   const firedRef = useRef(false);
 
   useEffect(() => {
     if (firedRef.current) return;
     firedRef.current = true;
-    consume.mutate(
-      { token },
-      { onSuccess: () => navigate({ to: "/", replace: true }) },
-    );
+    mutate({ token });
     // Deliberately fires once for this screen's lifetime, keyed on nothing
     // but mount: token is a prop of a screen the router only ever renders
     // once per emailed link, and re-running this for a changed `token`
     // isn't a case that occurs (the token comes from the URL that reached
-    // this screen). consume.mutate and navigate are both stable.
+    // this screen). mutate is stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const errorMessage =
-    consume.error instanceof ApiError
-      ? consume.error.message
-      : consume.isError
-        ? "That link didn't work. Please try again."
-        : null;
 
   return (
     <main className="min-h-screen grid place-items-center bg-canvas p-6 font-sans text-ink">
