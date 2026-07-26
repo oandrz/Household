@@ -12,6 +12,8 @@ React + TypeScript frontend, Postgres, Docker Compose.
 - **`docs/FEATURE_TRACKER.md`** — every feature in the design and whether it
   exists yet. **Check it before starting anything**, to see whether the work is
   already listed and what it depends on.
+- `docs/SKILL_TRACKER.md` — the project skills in `.claude/skills/`, and when to
+  reach for each. Each exists because a real defect got through here.
 - `docs/HANDOVER.md` — current state, what to build next, open items.
 - `docs/GUIDE.md` — how to use the product.
 - `docs/superpowers/specs/` and `docs/superpowers/plans/` — the specs and plans
