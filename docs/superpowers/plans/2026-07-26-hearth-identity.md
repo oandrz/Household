@@ -864,7 +864,12 @@ func VisibleSpaces(all []Space, m Membership) []Space {
 		// does not exist yet, and the design marks custom space pages "not
 		// built". Until that lands, custom fails closed to owners rather than
 		// degrading to the most permissive mode.
-		if s.Visibility == VisibilityCustom && m.Role != RoleOwner {
+		//
+		// An unrecognised visibility fails closed the same way. These values
+		// come back from a Postgres text column, so they are as untrusted as a
+		// role is, and the safe reading of "I do not know who may see this" is
+		// "not everyone".
+		if s.Visibility != VisibilityEveryone && m.Role != RoleOwner {
 			continue
 		}
 		if s.RequiredCapability != "" && !m.Capabilities.Has(s.RequiredCapability) {
