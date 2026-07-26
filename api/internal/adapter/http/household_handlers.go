@@ -1,7 +1,7 @@
 package httpadapter
 
 import (
-	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/andreasoentoro/hearth/api/internal/domain"
@@ -24,20 +24,29 @@ func handleGetHousehold(deps Deps) http.HandlerFunc {
 	}
 }
 
+// updateHouseholdRequest's fields are all pointers so the handler can tell
+// "the caller omitted this field" (nil) apart from "the caller sent its
+// zero value" (non-nil pointing at false/""). A previous version used plain
+// value fields and assigned all six unconditionally: the two cases were
+// indistinguishable, so PATCH /household behaved like PUT -- sending the API
+// spec's own documented body (which omits secondaryCurrency) blanked it to
+// "", which then failed HouseholdService.Update's currency validation with a
+// 500, and an omitted fxRateMode would have violated the database's CHECK
+// constraint the moment a field actually reached it blank. See the fix
+// report for the full account.
 type updateHouseholdRequest struct {
-	Name                  string `json:"name"`
-	FamilyName            string `json:"familyName"`
-	PrimaryCurrency       string `json:"primaryCurrency"`
-	ShowSecondaryCurrency bool   `json:"showSecondaryCurrency"`
-	SecondaryCurrency     string `json:"secondaryCurrency"`
-	FXRateMode            string `json:"fxRateMode"`
+	Name                  *string `json:"name"`
+	FamilyName            *string `json:"familyName"`
+	PrimaryCurrency       *string `json:"primaryCurrency"`
+	ShowSecondaryCurrency *bool   `json:"showSecondaryCurrency"`
+	SecondaryCurrency     *string `json:"secondaryCurrency"`
+	FXRateMode            *string `json:"fxRateMode"`
 }
 
-// handleUpdateHousehold reads the current record first and overwrites it
-// with the request's fields, rather than trusting the caller to submit a
-// complete domain.Household: HouseholdService.Update persists every field on
-// what it's handed (see its doc comment in usecase/household.go), so a
-// request that omitted a field would otherwise blank it out.
+// handleUpdateHousehold reads the current record first and applies only the
+// fields present in the request, leaving every omitted field exactly as it
+// was -- a real PATCH, not a PUT wearing a PATCH's name. See
+// updateHouseholdRequest's doc comment for the bug this fixes.
 //
 // This sits behind requireSession + requireCSRF + requireOwner: the
 // household's primary/secondary currency and FX mode are household-wide
@@ -56,8 +65,7 @@ func handleUpdateHousehold(deps Deps) http.HandlerFunc {
 			return
 		}
 		var req updateHouseholdRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			WriteError(w, http.StatusBadRequest, "INVALID_BODY", "The request body could not be parsed.", nil)
+		if !decodeJSONBody(w, r, &req) {
 			return
 		}
 		current, err := deps.Households.Get(r.Context(), scope.HouseholdID)
@@ -65,12 +73,24 @@ func handleUpdateHousehold(deps Deps) http.HandlerFunc {
 			MapDomainError(w, r, err)
 			return
 		}
-		current.Name = req.Name
-		current.FamilyName = req.FamilyName
-		current.PrimaryCurrency = req.PrimaryCurrency
-		current.ShowSecondaryCurrency = req.ShowSecondaryCurrency
-		current.SecondaryCurrency = req.SecondaryCurrency
-		current.FXRateMode = req.FXRateMode
+		if req.Name != nil {
+			current.Name = *req.Name
+		}
+		if req.FamilyName != nil {
+			current.FamilyName = *req.FamilyName
+		}
+		if req.PrimaryCurrency != nil {
+			current.PrimaryCurrency = *req.PrimaryCurrency
+		}
+		if req.ShowSecondaryCurrency != nil {
+			current.ShowSecondaryCurrency = *req.ShowSecondaryCurrency
+		}
+		if req.SecondaryCurrency != nil {
+			current.SecondaryCurrency = *req.SecondaryCurrency
+		}
+		if req.FXRateMode != nil {
+			current.FXRateMode = *req.FXRateMode
+		}
 
 		updated, err := deps.Households.Update(r.Context(), current)
 		if err != nil {
@@ -116,8 +136,7 @@ func handleCreateSpace(deps Deps) http.HandlerFunc {
 			return
 		}
 		var req createSpaceRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			WriteError(w, http.StatusBadRequest, "INVALID_BODY", "The request body could not be parsed.", nil)
+		if !decodeJSONBody(w, r, &req) {
 			return
 		}
 		created, err := deps.Households.CreateSpace(r.Context(), scope.HouseholdID, req.Name, domain.Visibility(req.Visibility))
@@ -161,11 +180,17 @@ func handleGetNotificationPreferences(deps Deps) http.HandlerFunc {
 	}
 }
 
+// notificationPreferencesRequest's fields are pointers for the identical
+// reason updateHouseholdRequest's are: a plain bool field cannot distinguish
+// "the caller didn't mention this toggle" from "the caller explicitly wants
+// it off," so a partial PATCH silently switched every omitted preference to
+// false. See updateHouseholdRequest's doc comment above for the full account
+// of the same bug on /household.
 type notificationPreferencesRequest struct {
-	BillReminders   bool `json:"billReminders"`
-	OverspendAlerts bool `json:"overspendAlerts"`
-	RetroReminder   bool `json:"retroReminder"`
-	WeeklyDigest    bool `json:"weeklyDigest"`
+	BillReminders   *bool `json:"billReminders"`
+	OverspendAlerts *bool `json:"overspendAlerts"`
+	RetroReminder   *bool `json:"retroReminder"`
+	WeeklyDigest    *bool `json:"weeklyDigest"`
 }
 
 // handleUpdateNotificationPreferences sits behind requireSession +
@@ -173,6 +198,16 @@ type notificationPreferencesRequest struct {
 // does: these are household-wide toggles on the parents' Settings screen,
 // not a per-member preference. GET /notification-preferences stays
 // reachable by any authenticated member.
+//
+// It reads the current preferences first and applies only the toggles
+// present in the request, exactly as handleUpdateHousehold does for
+// /household -- a real PATCH, not a PUT. Unlike households (always created
+// with a row), notification_preferences has no row until the first PATCH
+// upserts one (see migrations/00002_identity.sql) -- domain.ErrNotFound from
+// the read above is expected on that first call, not an error, and is
+// treated as the schema's own column defaults (every toggle DEFAULT true)
+// rather than Go's zero value, so a partial first PATCH doesn't silently
+// switch every un-mentioned toggle off before the row even exists.
 func handleUpdateNotificationPreferences(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, ok := RequestScope(r)
@@ -181,16 +216,33 @@ func handleUpdateNotificationPreferences(deps Deps) http.HandlerFunc {
 			return
 		}
 		var req notificationPreferencesRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			WriteError(w, http.StatusBadRequest, "INVALID_BODY", "The request body could not be parsed.", nil)
+		if !decodeJSONBody(w, r, &req) {
 			return
 		}
-		updated, err := deps.Households.UpdateNotifications(r.Context(), scope.HouseholdID, usecase.NotificationPreferences{
-			BillReminders:   req.BillReminders,
-			OverspendAlerts: req.OverspendAlerts,
-			RetroReminder:   req.RetroReminder,
-			WeeklyDigest:    req.WeeklyDigest,
-		})
+		current, err := deps.Households.Notifications(r.Context(), scope.HouseholdID)
+		if err != nil {
+			if !errors.Is(err, domain.ErrNotFound) {
+				MapDomainError(w, r, err)
+				return
+			}
+			current = usecase.NotificationPreferences{
+				BillReminders: true, OverspendAlerts: true, RetroReminder: true, WeeklyDigest: true,
+			}
+		}
+		if req.BillReminders != nil {
+			current.BillReminders = *req.BillReminders
+		}
+		if req.OverspendAlerts != nil {
+			current.OverspendAlerts = *req.OverspendAlerts
+		}
+		if req.RetroReminder != nil {
+			current.RetroReminder = *req.RetroReminder
+		}
+		if req.WeeklyDigest != nil {
+			current.WeeklyDigest = *req.WeeklyDigest
+		}
+
+		updated, err := deps.Households.UpdateNotifications(r.Context(), scope.HouseholdID, current)
 		if err != nil {
 			MapDomainError(w, r, err)
 			return
