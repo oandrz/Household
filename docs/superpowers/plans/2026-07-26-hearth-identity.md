@@ -866,8 +866,10 @@ git commit -m "feat: add spaces and visibility filtering to the domain"
 
 **Files:**
 - Create: `api/migrations/00002_identity.sql`, `api/sqlc.yaml`, `api/internal/adapter/postgres/queries/identity.sql`
-- Modify: `api/migrations/00001_init.sql` is left alone; the new migration drops `schema_smoke`
+- Modify: `api/internal/adapter/postgres/pool_test.go` (its `schema_smoke` assertion, which this migration invalidates)
 - Modify: `Makefile` (add `sqlc`)
+
+`api/migrations/00001_init.sql` is **not** touched. It has already been applied on every developer's database and goose will not re-run it, so anything this task needs — including the `citext` extension — belongs in `00002`.
 - Test: `api/internal/adapter/postgres/schema_test.go`
 
 **Interfaces:**
@@ -880,6 +882,8 @@ Create `api/migrations/00002_identity.sql`:
 
 ```sql
 -- +goose Up
+CREATE EXTENSION IF NOT EXISTS citext;
+
 DROP TABLE IF EXISTS schema_smoke;
 
 CREATE TABLE households (
@@ -996,8 +1000,6 @@ CREATE TABLE schema_smoke (
 );
 ```
 
-Add `CREATE EXTENSION IF NOT EXISTS citext;` to the top of the `-- +goose Up` block, alongside the existing `pgcrypto` extension in `00001_init.sql`.
-
 - [ ] **Step 2: Write the failing schema test**
 
 Create `api/internal/adapter/postgres/schema_test.go`:
@@ -1072,10 +1074,26 @@ func openTestDB(t *testing.T) *postgres.DB {
 Run: `cd api && go test ./internal/adapter/postgres/... -run Identity`
 Expected: FAIL — relation `households` does not exist, because the migration has not been written into `migrations/` yet or has a syntax error. Fix any SQL errors reported here before continuing.
 
+- [ ] **Step 3b: Update the skeleton plan's schema assertion**
+
+This migration drops `schema_smoke`, so `TestMigrationsCreatedTheSchema` in `api/internal/adapter/postgres/pool_test.go` no longer describes reality. Change its query to assert the identity schema instead:
+
+```go
+	var count int
+	err = db.Pool().QueryRow(context.Background(),
+		`SELECT count(*) FROM information_schema.tables WHERE table_name = 'households'`).Scan(&count)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("households table not found; migrations did not run")
+	}
+```
+
 - [ ] **Step 4: Run the schema tests**
 
 Run: `cd api && go test ./internal/adapter/postgres/... -v`
-Expected: PASS. The existing `TestMigrationsCreatedTheSchema` from the skeleton plan now fails because `schema_smoke` was dropped — replace its assertion to check for the `households` table instead, and note the change in the commit message.
+Expected: PASS, including the updated `TestMigrationsCreatedTheSchema`.
 
 - [ ] **Step 5: Configure sqlc**
 
@@ -1205,6 +1223,11 @@ SELECT at FROM login_attempts
 WHERE household_id = $1 AND succeeded = false AND at > $2
 ORDER BY at DESC;
 
+-- name: ListRecentFailuresByEmail :many
+SELECT at FROM login_attempts
+WHERE email = $1 AND succeeded = false AND at > $2
+ORDER BY at DESC;
+
 -- name: ClearFailures :exec
 DELETE FROM login_attempts WHERE household_id = $1 AND succeeded = false;
 
@@ -1279,7 +1302,7 @@ git commit -m "feat: add the identity schema and generate typed queries with sql
   - `usecase.TokenGenerator interface { NewToken() (raw string, hash []byte, err error); HashToken(raw string) []byte }`
   - `usecase.Mailer interface { SendMagicLink(ctx context.Context, to, name, url string) error; SendInvite(ctx context.Context, to, name, inviterName, url string) error }`
   - `usecase.UserRepository`, `usecase.HouseholdRepository`, `usecase.MembershipRepository`, `usecase.SessionRepository`, `usecase.MagicLinkRepository`, `usecase.LoginAttemptRepository`, `usecase.InviteRepository`, `usecase.SpaceRepository`, `usecase.NotificationRepository` — full signatures below
-  - `usecase.FXRateProvider interface { Rate(ctx context.Context, from, to string) (int64, error) }` — the rate is expressed in ten-thousandths of a unit, so `S$1 = Rp 12,410` is `124_100_000`, keeping conversion in integers
+  - `usecase.Rate{Numerator, Denominator int64}` and `usecase.FXRateProvider interface { Rate(ctx context.Context, from, to string) (Rate, error) }` — a ratio, not a scaled decimal, so that inverting a rate is exact in both directions
   - `crypto.NewArgon2Hasher() *Argon2Hasher`, `crypto.NewTokenGenerator() *Tokens`, `clock.System{}`, `fx.NewStaticProvider() *StaticProvider`
 
 - [ ] **Step 1: Write the failing hasher test**
@@ -1591,6 +1614,11 @@ type MemberView struct {
 
 type MembershipRepository interface {
 	List(ctx context.Context, householdID string) ([]MemberView, error)
+	// ByUser is the one method that cannot take a household scope, because
+	// sign-in resolves the household from it. It is therefore the seam where
+	// multi-tenancy will need attention: today it returns the single membership
+	// a user has, and the query's LIMIT 1 would pick arbitrarily if a user ever
+	// belonged to two households.
 	ByUser(ctx context.Context, userID string) (domain.Membership, error)
 	Create(ctx context.Context, m domain.Membership) (domain.Membership, error)
 	Update(ctx context.Context, householdID, membershipID string, role domain.Role, caps domain.Capabilities) error
@@ -1620,6 +1648,10 @@ type MagicLinkRepository interface {
 type LoginAttemptRepository interface {
 	Record(ctx context.Context, householdID, userID *string, email string, succeeded bool, at time.Time) error
 	FailuresSince(ctx context.Context, householdID string, since time.Time) ([]time.Time, error)
+	// FailuresSinceForEmail counts attempts by address rather than by household.
+	// Sign-in uses it for addresses that match no user, so a stranger sees the
+	// same countdown a member does and cannot tell the two apart.
+	FailuresSinceForEmail(ctx context.Context, email string, since time.Time) ([]time.Time, error)
 	ClearFailures(ctx context.Context, householdID string) error
 }
 
@@ -1661,12 +1693,30 @@ type NotificationRepository interface {
 	Upsert(ctx context.Context, householdID string, p NotificationPreferences) (NotificationPreferences, error)
 }
 
+// Rate is a ratio, held as a fraction rather than a scaled decimal. SGD to IDR
+// is {12410, 1}; IDR to SGD is {1, 12410}. A scaled decimal cannot represent
+// the second direction — 0.0000806 truncates to zero at any sane scale — and
+// IDR to SGD is precisely the direction the design's Finances screen uses.
+type Rate struct {
+	Numerator   int64
+	Denominator int64
+}
+
+// Apply converts an amount of minor units, rounding half away from zero.
+func (r Rate) Apply(minorUnits int64) int64 {
+	num := minorUnits * r.Numerator
+	half := r.Denominator / 2
+	if num < 0 {
+		return (num - half) / r.Denominator
+	}
+	return (num + half) / r.Denominator
+}
+
 // FXRateProvider converts between the household's primary and secondary
-// currencies. The rate is in ten-thousandths of a unit so that conversion never
-// leaves integer arithmetic. The design labels the rate "auto"; a live provider
-// replaces the static one without any caller changing.
+// currencies. The design labels the rate "auto"; a live provider replaces the
+// static one without any caller changing.
 type FXRateProvider interface {
-	Rate(ctx context.Context, from, to string) (int64, error)
+	Rate(ctx context.Context, from, to string) (Rate, error)
 }
 ```
 
@@ -1691,8 +1741,27 @@ func TestStaticProviderKnowsTheDesignsRate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Rate: %v", err)
 	}
-	if rate != 124_100_000 {
-		t.Fatalf("rate = %d, want 124100000 (S$1 = Rp 12,410)", rate)
+	if rate.Numerator != 12_410 || rate.Denominator != 1 {
+		t.Fatalf("rate = %+v, want {12410, 1} (S$1 = Rp 12,410)", rate)
+	}
+}
+
+func TestStaticProviderInvertsExactly(t *testing.T) {
+	p := fx.NewStaticProvider()
+
+	rate, err := p.Rate(context.Background(), "IDR", "SGD")
+	if err != nil {
+		t.Fatalf("Rate: %v", err)
+	}
+	if rate.Numerator != 1 || rate.Denominator != 12_410 {
+		t.Fatalf("rate = %+v, want {1, 12410}", rate)
+	}
+
+	// The design's Finances screen: Rp 85,400,000 shown as approximately
+	// S$6,880. In minor units that is 8_540_000_000 IDR.
+	// 8_540_000_000 / 12_410 = 688_154.7…, which rounds to 688_155 → S$6,881.55.
+	if got := rate.Apply(8_540_000_000); got != 688_155 {
+		t.Fatalf("Apply = %d, want 688155", got)
 	}
 }
 
@@ -1703,8 +1772,8 @@ func TestStaticProviderReturnsUnityForTheSameCurrency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Rate: %v", err)
 	}
-	if rate != 10_000 {
-		t.Fatalf("rate = %d, want 10000", rate)
+	if rate.Apply(1234) != 1234 {
+		t.Fatalf("a same-currency rate must be the identity, got %+v", rate)
 	}
 }
 
@@ -1732,35 +1801,38 @@ package fx
 import (
 	"context"
 	"fmt"
+
+	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
-// Scale is the fixed-point denominator: a rate of 10_000 means 1:1.
-const Scale = 10_000
-
 type StaticProvider struct {
-	rates map[[2]string]int64
+	// units maps a currency pair to how many units of the second currency one
+	// unit of the first buys. Stored one way only; the inverse is exact because
+	// a Rate is a fraction.
+	units map[[2]string]int64
 }
 
 func NewStaticProvider() *StaticProvider {
-	return &StaticProvider{rates: map[[2]string]int64{
-		{"SGD", "IDR"}: 124_100_000, // S$1 = Rp 12,410, per the design's Settings screen
-		{"IDR", "SGD"}: 0,           // computed by inversion below
+	return &StaticProvider{units: map[[2]string]int64{
+		{"SGD", "IDR"}: 12_410, // per the design's Settings screen
 	}}
 }
 
-func (p *StaticProvider) Rate(_ context.Context, from, to string) (int64, error) {
+func (p *StaticProvider) Rate(_ context.Context, from, to string) (usecase.Rate, error) {
 	if from == to {
-		return Scale, nil
+		return usecase.Rate{Numerator: 1, Denominator: 1}, nil
 	}
-	if rate, ok := p.rates[[2]string{from, to}]; ok && rate > 0 {
-		return rate, nil
+	if n, ok := p.units[[2]string{from, to}]; ok {
+		return usecase.Rate{Numerator: n, Denominator: 1}, nil
 	}
-	if inverse, ok := p.rates[[2]string{to, from}]; ok && inverse > 0 {
-		return int64(Scale) * Scale / inverse, nil
+	if n, ok := p.units[[2]string{to, from}]; ok {
+		return usecase.Rate{Numerator: 1, Denominator: n}, nil
 	}
-	return 0, fmt.Errorf("no rate available for %s to %s", from, to)
+	return usecase.Rate{}, fmt.Errorf("no rate available for %s to %s", from, to)
 }
 ```
+
+Note the import direction: `adapter/fx` imports `usecase` to satisfy its port, which is exactly what the dependency rule allows. `make lint-arch` confirms it.
 
 Run: `cd api && go test ./internal/adapter/fx/... -v`
 Expected: PASS, three tests.
@@ -2224,6 +2296,11 @@ func TestAnUnknownEmailFailsIdenticallyToAWrongPassword(t *testing.T) {
 	if a.Locked != b.Locked {
 		t.Fatal("the two failures must be indistinguishable to a caller")
 	}
+	if a.AttemptsRemaining != b.AttemptsRemaining {
+		t.Fatalf("AttemptsRemaining differs: unknown = %d, wrong password = %d — "+
+			"the countdown itself must not reveal whether the address exists",
+			a.AttemptsRemaining, b.AttemptsRemaining)
+	}
 }
 
 func TestAnUnknownEmailNeverLocksARealHousehold(t *testing.T) {
@@ -2345,12 +2422,23 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 		if !errors.Is(err, domain.ErrNotFound) {
 			return SignInResult{}, err
 		}
-		// Record the attempt with no household so that guessing at unknown
-		// addresses cannot lock a real household, then fail identically.
+		// Record the attempt with no household, so guessing at unknown addresses
+		// cannot lock a real household. Then evaluate the same policy over that
+		// address's own failures, so the countdown a stranger sees is
+		// indistinguishable from the one a member sees.
 		if err := s.d.Attempts.Record(ctx, nil, nil, email, false, now); err != nil {
 			return SignInResult{}, err
 		}
-		return SignInResult{}, &SignInFailedError{AttemptsRemaining: s.d.Policy.MaxAttempts - 1}
+		failures, err := s.d.Attempts.FailuresSinceForEmail(ctx, email, now.Add(-s.d.Policy.Window))
+		if err != nil {
+			return SignInResult{}, err
+		}
+		state := s.d.Policy.Evaluate(failures, now)
+		return SignInResult{}, &SignInFailedError{
+			AttemptsRemaining: state.AttemptsRemaining,
+			Locked:            state.Locked,
+			LockedUntil:       state.Until,
+		}
 	}
 
 	membership, err := s.d.Members.ByUser(ctx, user.ID)
@@ -2466,7 +2554,7 @@ func TestRequestMagicLinkStaysSilentForAnUnknownAddress(t *testing.T) {
 	}
 }
 
-func TestMagicLinkIsRateLimitedToThreePerHour(t *testing.T) {
+func TestMagicLinkIsRateLimitedSilentlyToThreePerHour(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
 
@@ -2477,12 +2565,29 @@ func TestMagicLinkIsRateLimitedToThreePerHour(t *testing.T) {
 		f.clock.Advance(time.Minute)
 	}
 
-	err := f.auth.RequestMagicLink(ctx, "andreas@hearth.family")
-	if !errors.Is(err, domain.ErrRateLimited) {
-		t.Fatalf("err = %v, want ErrRateLimited", err)
+	// The fourth request must look exactly like the first three from the
+	// outside. Returning an error here would make four requests an oracle for
+	// whether the address belongs to a member, which is the property this
+	// endpoint exists to avoid.
+	if err := f.auth.RequestMagicLink(ctx, "andreas@hearth.family"); err != nil {
+		t.Fatalf("the rate limit must be silent, got err = %v", err)
 	}
 	if len(f.mailer.magicLinks) != 3 {
-		t.Fatalf("sent = %d, want 3", len(f.mailer.magicLinks))
+		t.Fatalf("sent = %d, want 3 — the fourth request sends nothing", len(f.mailer.magicLinks))
+	}
+}
+
+func TestMagicLinkRequestsAreIndistinguishableAtEveryCount(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	for i := 0; i < 5; i++ {
+		knownErr := f.auth.RequestMagicLink(ctx, "andreas@hearth.family")
+		unknownErr := f.auth.RequestMagicLink(ctx, "stranger@example.com")
+		if knownErr != nil || unknownErr != nil {
+			t.Fatalf("request %d: known = %v, unknown = %v — both must be nil", i, knownErr, unknownErr)
+		}
+		f.clock.Advance(time.Minute)
 	}
 }
 
@@ -2568,8 +2673,9 @@ const (
 	magicLinkPerHourLimit = 3
 )
 
-// RequestMagicLink is deliberately quiet: an unknown address produces no error
-// and no email, so the endpoint cannot be used to discover who is a member.
+// RequestMagicLink is deliberately quiet. Neither an unknown address nor an
+// exhausted rate limit produces an error, because any observable difference
+// between the two would let a caller discover who is a member.
 func (s *AuthService) RequestMagicLink(ctx context.Context, email string) error {
 	now := s.d.Clock.Now()
 
@@ -2578,7 +2684,8 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, email string) error 
 		return err
 	}
 	if count >= magicLinkPerHourLimit {
-		return domain.ErrRateLimited
+		slog.Info("magic link rate limit reached", "email_hash", fmt.Sprintf("%x", s.d.Tokens.HashToken(email))[:12])
+		return nil
 	}
 
 	user, err := s.d.Users.ByEmail(ctx, email)
@@ -2621,6 +2728,8 @@ func (s *AuthService) ConsumeMagicLink(ctx context.Context, token string) (SignI
 	return s.issueSession(ctx, userID, membership.HouseholdID, now)
 }
 ```
+
+Add `"log/slog"` to the imports. `domain.ErrRateLimited` is no longer returned from this path — it stays defined and mapped to `429 RATE_LIMITED` in Task 16 for endpoints where an explicit rejection is safe, which magic link is not.
 
 The in-memory `MagicLinkRepository` double must honour `expires_at` against the fixed clock; the Postgres implementation already does through `expires_at > now()` in the `ConsumeMagicLink` query.
 
