@@ -63,12 +63,19 @@ export async function apiFetch<T>(
 
   if (!response.ok) {
     const envelope = parsed as
-      | { error?: { code?: string; message?: string; details?: Record<string, unknown> } }
+      | {
+          error?: {
+            code?: string;
+            message?: string;
+            details?: Record<string, unknown>;
+          };
+        }
       | undefined;
     throw new ApiError(
       response.status,
       envelope?.error?.code ?? "UNKNOWN",
-      envelope?.error?.message ?? `Request failed with status ${response.status}.`,
+      envelope?.error?.message ??
+        `Request failed with status ${response.status}.`,
       envelope?.error?.details ?? {},
     );
   }

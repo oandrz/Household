@@ -6,11 +6,12 @@ afterEach(() => vi.unstubAllGlobals());
 function stubFetch(status: number, body: unknown) {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () =>
-      new Response(JSON.stringify(body), {
-        status,
-        headers: { "Content-Type": "application/json" },
-      }),
+    vi.fn(
+      async () =>
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { "Content-Type": "application/json" },
+        }),
     ),
   );
 }
@@ -40,8 +41,8 @@ describe("apiFetch", () => {
       vi.fn(async () => new Response("<html>502</html>", { status: 502 })),
     );
 
-    const error = await apiFetch("/api/v1/anything").catch((e) => e);
+    const error = await apiFetch("/api/v1/anything").catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ApiError);
-    expect(error.code).toBe("UNKNOWN");
+    expect((error as ApiError).code).toBe("UNKNOWN");
   });
 });
