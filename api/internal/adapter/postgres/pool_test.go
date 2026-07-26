@@ -33,12 +33,12 @@ func TestMigrationsCreatedTheSchema(t *testing.T) {
 
 	var count int
 	err = db.Pool().QueryRow(context.Background(),
-		`SELECT count(*) FROM information_schema.tables WHERE table_name = 'schema_smoke'`).Scan(&count)
+		`SELECT count(*) FROM information_schema.tables WHERE table_name = 'households'`).Scan(&count)
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if count != 1 {
-		t.Fatalf("schema_smoke table not found; migrations did not run")
+		t.Fatalf("households table not found; migrations did not run")
 	}
 }
 

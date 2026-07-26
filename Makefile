@@ -3,7 +3,7 @@ SHELL := /bin/bash
 COMPOSE := docker compose
 
 .PHONY: help dev dev-local up down restart logs ps migrate migrate-down migrate-new \
-        test test-api test-web lint lint-arch lint-web typecheck fmt psql shell-api build
+        test test-api test-web lint lint-arch lint-web typecheck fmt psql shell-api build sqlc
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -48,6 +48,9 @@ migrate-down: ## Roll back the most recent migration
 migrate-new: ## Create a migration. make migrate-new NAME=add_users
 	@test -n "$(NAME)" || { echo "NAME is required, e.g. make migrate-new NAME=add_users"; exit 1; }
 	$(COMPOSE) run --rm migrate goose -dir ./migrations create $(NAME) sql
+
+sqlc: ## Regenerate the typed queries from SQL
+	cd api && go tool sqlc generate
 
 test: test-api test-web ## Run every test suite
 
