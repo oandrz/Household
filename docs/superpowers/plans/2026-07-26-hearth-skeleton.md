@@ -985,8 +985,10 @@ Create `api/Dockerfile`:
 # --- dev: hot reload -------------------------------------------------------
 FROM golang:1.25.7-alpine AS dev
 WORKDIR /src
-RUN go install github.com/air-verse/air@latest \
- && go install github.com/pressly/goose/v3/cmd/goose@latest
+# Pinned, not @latest: air v1.67+ and future goose releases raise their Go
+# minimum past this base image and fail the build with no warning.
+RUN go install github.com/air-verse/air@v1.66.1 \
+ && go install github.com/pressly/goose/v3/cmd/goose@v3.27.3
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
@@ -1059,9 +1061,9 @@ services:
   migrate:
     build: { context: ./api, target: dev }
     working_dir: /src
-    command: >
-      goose -dir ./migrations postgres
-      "postgres://hearth:hearth@postgres:5432/hearth?sslmode=disable" up
+    environment:
+      DATABASE_URL: postgres://hearth:hearth@postgres:5432/hearth?sslmode=disable
+    command: sh -c 'goose -dir ./migrations postgres "$$DATABASE_URL" up'
     volumes: ["./api:/src"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -1080,6 +1082,7 @@ services:
     volumes: ["./api:/src"]
     depends_on:
       postgres: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
 
   web:
     image: node:22-alpine
@@ -1110,8 +1113,6 @@ Create `Makefile`:
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 COMPOSE := docker compose
-DB_URL := postgres://hearth:hearth@localhost:5432/hearth?sslmode=disable
-
 .PHONY: help dev up down restart logs ps migrate migrate-down migrate-new \
         test test-api lint lint-arch fmt psql shell-api build
 
@@ -1121,13 +1122,10 @@ help: ## Show this help
 
 dev: ## Start everything and tail the logs — http://localhost:5173
 	$(COMPOSE) up -d postgres mailpit
-	$(COMPOSE) run --rm migrate
 	$(COMPOSE) up --build api web
 
 up: ## Start everything in the background
-	$(COMPOSE) up -d --build postgres mailpit
-	$(COMPOSE) run --rm migrate
-	$(COMPOSE) up -d --build api web
+	$(COMPOSE) up -d --build postgres mailpit api web
 
 down: ## Stop everything and remove the containers
 	$(COMPOSE) down
@@ -1145,7 +1143,7 @@ migrate: ## Apply pending migrations
 
 migrate-down: ## Roll back the most recent migration
 	$(COMPOSE) run --rm migrate sh -c \
-	  'goose -dir ./migrations postgres "postgres://hearth:hearth@postgres:5432/hearth?sslmode=disable" down'
+	  'goose -dir ./migrations postgres "$$DATABASE_URL" down'
 
 migrate-new: ## Create a migration. make migrate-new NAME=add_users
 	@test -n "$(NAME)" || { echo "NAME is required, e.g. make migrate-new NAME=add_users"; exit 1; }
