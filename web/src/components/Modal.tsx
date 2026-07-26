@@ -1,0 +1,123 @@
+// The shared modal primitive. Lives in components/, not a feature folder --
+// slices 2-4 build roughly fifteen modals on it, and moving a shared
+// primitive once it has fifteen call sites is expensive.
+//
+// Built on the native <dialog> element so focus trapping and Escape handling
+// come from the platform rather than hand-written key handling: a real
+// browser's showModal() puts the dialog in the top layer, traps Tab focus
+// inside it, and fires a "cancel" event (which this listens for via
+// onCancel) when the user presses Escape.
+//
+// jsdom does not implement any of that -- its HTMLDialogElement is a five-
+// line stub with no showModal(), no close(), and consequently no
+// "cancel"/"close" events (see
+// node_modules/jsdom/lib/jsdom/living/nodes/HTMLDialogElement-impl.js).
+// Every call to those two methods below is feature-detected rather than
+// assumed, purely so this renders without throwing under jsdom; skipping
+// them there does not change anything a real, capable browser does, since a
+// browser that has them always takes this branch.
+//
+// Backdrop-vs-panel detection and the ✕ button do not depend on showModal()
+// at all -- they're ordinary DOM click handling and are unaffected by
+// jsdom's gap. Focus entering the dialog on open and returning to the
+// trigger on close *is* this component's own logic (real browsers move
+// focus into the dialog automatically on showModal(), and restore it to the
+// previously-focused element on close, per the dialog close steps in the
+// HTML spec -- but jsdom does neither, so this implements both explicitly,
+// stepping aside for the platform's own choice when one already exists).
+import { type ReactNode, useEffect, useId, useRef } from "react";
+
+export function Modal({
+  open,
+  onClose,
+  title,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  children: ReactNode;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+  const titleId = useId();
+
+  useEffect(() => {
+    if (!open) return;
+
+    previouslyFocusedRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+
+    const dialog = dialogRef.current;
+    if (dialog && typeof dialog.showModal === "function") {
+      dialog.showModal();
+    }
+
+    // A capable browser's showModal() already moved focus inside; only step
+    // in when it hasn't (jsdom, or a dialog with nothing focusable of its
+    // own to land on).
+    if (dialog && !dialog.contains(document.activeElement)) {
+      dialog.focus();
+    }
+
+    return () => {
+      if (dialog && dialog.open && typeof dialog.close === "function") {
+        dialog.close();
+      }
+      const previouslyFocused = previouslyFocusedRef.current;
+      if (previouslyFocused && document.contains(previouslyFocused)) {
+        previouslyFocused.focus();
+      }
+    };
+  }, [open]);
+
+  if (!open) return null;
+
+  return (
+    <dialog
+      ref={dialogRef}
+      open
+      tabIndex={-1}
+      aria-labelledby={titleId}
+      className="m-0 max-h-none max-w-none border-none bg-transparent p-0 open:fixed open:inset-0 open:grid open:place-items-center open:bg-black/40"
+      onCancel={(event) => {
+        // Fired by a real browser when the user presses Escape on a modal
+        // dialog. preventDefault stops the platform's own close (which
+        // would leave `open`, this component's own prop, out of sync) --
+        // onClose is the single source of truth for whether the dialog is
+        // open, driven back through the caller's state.
+        event.preventDefault();
+        onClose();
+      }}
+      onClick={(event) => {
+        // The dialog element's own box covers the backdrop; a click that
+        // lands there (not on the panel inside it, which stops propagation
+        // by virtue of being a distinct element the event bubbles up
+        // from) has event.target === event.currentTarget.
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="max-w-[calc(100vw-32px)] w-[420px] rounded-2xl border border-hairline bg-card p-6 shadow-[var(--shadow-auth-card)]">
+        <div className="mb-4 flex items-center justify-between gap-4">
+          <h2
+            id={titleId}
+            className="font-serif text-xl font-medium tracking-[-0.01em]"
+          >
+            {title}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="grid h-7 w-7 flex-none place-items-center rounded-lg bg-canvas text-[13px] text-label"
+          >
+            ✕
+          </button>
+        </div>
+        {children}
+      </div>
+    </dialog>
+  );
+}

@@ -63,6 +63,26 @@ export function useRequestMagicLink() {
   });
 }
 
+// ConsumeMagicLink signs the token's holder in -- see usecase/auth.go. The
+// token is single-use, so this must only ever be called once per emailed
+// link; MagicLinkConsumeScreen guards against StrictMode's double-invoke of
+// effects, not this hook itself.
+export function useConsumeMagicLink() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { token: string }): Promise<Me> => {
+      const body = await apiFetch<unknown>(
+        "/api/v1/auth/magic-link/consume",
+        { method: "POST", body: JSON.stringify(vars) },
+      );
+      return meQuerySchema.parse(body);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: meQueryKey });
+    },
+  });
+}
+
 export function useAcceptInvite() {
   const queryClient = useQueryClient();
   return useMutation({

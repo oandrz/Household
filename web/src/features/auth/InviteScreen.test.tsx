@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { stubFetchRoutes } from "./fetchStub";
+import { screen, waitFor, fireEvent } from "@testing-library/react";
+import { stubFetchRoutes } from "../../test/fetchStub";
+import { renderWithRouter } from "../../test/renderWithRouter";
 import { InviteScreen } from "./InviteScreen";
 
 const PREVIEW_URL = "/api/v1/invites/tok123";
@@ -45,18 +45,13 @@ const meBody = {
   spaces: [],
 };
 
+// InviteScreen now calls useNavigate() (it navigates to "/" once acceptance
+// succeeds -- see routes/router.tsx's comment on why the invite route itself
+// does not redirect an already-signed-in visitor away), which throws outside
+// a router context, so this needs renderWithRouter rather than a bare
+// QueryClientProvider.
 function renderInvite(token = "tok123") {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <InviteScreen token={token} />
-    </QueryClientProvider>,
-  );
+  return renderWithRouter(<InviteScreen token={token} />, `/invite/${token}`);
 }
 
 afterEach(() => {
@@ -241,5 +236,26 @@ describe("InviteScreen", () => {
       password: "a-strong-password-12",
       displayName: "Andreas",
     });
+  });
+
+  it("navigates to / once acceptance succeeds", async () => {
+    stubFetchRoutes({
+      [`GET ${PREVIEW_URL}`]: { status: 200, body: previewBody },
+      [`POST ${ACCEPT_URL}`]: { status: 200, body: meBody },
+    });
+    const { router } = renderInvite("tok123");
+    expect(router.state.location.pathname).toBe("/invite/tok123");
+
+    await screen.findByText("Christine invited you in.");
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "a-strong-password-12" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Accept & join household" }),
+    );
+
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/"),
+    );
   });
 });

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { stubFetchRoutes } from "./fetchStub";
+import { stubFetchRoutes } from "../../test/fetchStub";
 import { SignInScreen } from "./SignInScreen";
 
 const SIGN_IN_URL = "/api/v1/auth/sign-in";

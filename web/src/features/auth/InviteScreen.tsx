@@ -14,6 +14,7 @@
 // invite." is genuine design copy, now with the real inviter name.
 import { type FormEvent, type ReactNode, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { apiFetch, ApiError } from "../../api/client";
 import {
   apiErrorMessage,
@@ -85,6 +86,7 @@ function AcceptInviteForm({
   const [displayName, setDisplayName] = useState(preview.name);
   const [password, setPassword] = useState("");
   const acceptInvite = useAcceptInvite();
+  const navigate = useNavigate();
 
   const spaces = formatList(sharedSpaceNames(preview.role, preview.capabilities));
   const label = roleLabel(preview.role);
@@ -95,7 +97,14 @@ function AcceptInviteForm({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    acceptInvite.mutate({ token, password, displayName });
+    // Task 19's route tree deliberately does not redirect an already
+    // signed-in visitor away from this screen (see routes/router.tsx) --
+    // this is the one case that actually needs "enter the app from here":
+    // acceptance just created a session.
+    acceptInvite.mutate(
+      { token, password, displayName },
+      { onSuccess: () => navigate({ to: "/", replace: true }) },
+    );
   }
 
   return (
