@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Enforces the clean-architecture dependency rule:
-#   internal/domain  imports no other internal package
-#   internal/usecase imports internal/domain only
+#   internal/domain  imports no other internal package and no third-party
+#                     package -- standard library only.
+#   internal/usecase imports internal/domain and the standard library only.
 # Anything under internal/adapter, internal/testsupport and cmd may import
-# whatever it needs.
+# whatever it needs, including third-party infrastructure libraries -- that
+# is the whole point of the rule: infrastructure lives only where it can be
+# swapped out.
 set -euo pipefail
 
 cd "$(dirname "$0")/../api"
@@ -32,6 +35,17 @@ while read -r pkg imp; do
                     echo "domain must not import internal packages: $pkg -> $imp"
                     violations=$((violations + 1))
                     ;;
+                *)
+                    # Standard-library import paths have no dot in their
+                    # first segment ("net/http", "errors"); third-party ones
+                    # do ("github.com/...", "golang.org/...").
+                    case "${imp%%/*}" in
+                        *.*)
+                            echo "domain must not import third-party packages: $pkg -> $imp"
+                            violations=$((violations + 1))
+                            ;;
+                    esac
+                    ;;
             esac
             ;;
         "$MODULE/internal/usecase"|"$MODULE/internal/usecase"/*)
@@ -41,6 +55,14 @@ while read -r pkg imp; do
                 "$MODULE"|"$MODULE"/*)
                     echo "usecase may import domain only: $pkg -> $imp"
                     violations=$((violations + 1))
+                    ;;
+                *)
+                    case "${imp%%/*}" in
+                        *.*)
+                            echo "usecase must not import third-party packages: $pkg -> $imp"
+                            violations=$((violations + 1))
+                            ;;
+                    esac
                     ;;
             esac
             ;;
