@@ -46,6 +46,107 @@ func TestSignInWithAWrongPasswordReportsTwoTriesLeft(t *testing.T) {
 	}
 }
 
+// TestSignInRejectsAPasswordOverTheLengthCeilingWithoutHashing proves the
+// fix for the uncapped-password DoS: argon2id's cost scales with the size
+// of the string it hashes, so a caller who submits a multi-megabyte
+// password must never reach the hasher at all, decoy or real. The
+// resulting failure must still look exactly like a wrong password (see
+// TestSignInWithATooLongPasswordFailsIdenticallyToAWrongPassword below for
+// the side-by-side comparison); this test's extra job is confirming no
+// Verify call happened.
+//
+// It checks this for both a known address (Andreas) and an unknown one
+// (stranger@example.com), not just the former. The unknown-address branch's
+// entire reason to call Verify at all is timing parity with the known
+// branches (see the decoy doc comment in auth.go) — if the length guard
+// were ever narrowed to cover only the real-verify path and not every decoy
+// call site, the known-address half of this test would still pass while
+// unknown-vs-known timing quietly diverged again for oversized passwords.
+// Asserting both branches skip the hasher is what actually pins that down.
+func TestSignInRejectsAPasswordOverTheLengthCeilingWithoutHashing(t *testing.T) {
+	f := newFixture(t)
+	tooLong := strings.Repeat("a", 257)
+
+	beforeKnown := f.hasher.verifyCallCount()
+	_, err := f.auth.SignIn(context.Background(), "andreas@hearth.family", tooLong)
+
+	var failure *usecase.SignInFailedError
+	if !errors.As(err, &failure) {
+		t.Fatalf("err = %v, want *SignInFailedError", err)
+	}
+	if failure.AttemptsRemaining != 2 {
+		t.Fatalf("AttemptsRemaining = %d, want 2 — must look exactly like a wrong password", failure.AttemptsRemaining)
+	}
+	if failure.Locked {
+		t.Fatal("one over-length attempt must not lock")
+	}
+	if got := f.hasher.verifyCallCount(); got != beforeKnown {
+		t.Fatalf("hasher Verify calls after a known-address attempt = %d, want %d unchanged — "+
+			"an over-length password must never reach the hasher, decoy or real", got, beforeKnown)
+	}
+
+	beforeUnknown := f.hasher.verifyCallCount()
+	if _, err := f.auth.SignIn(context.Background(), "stranger@example.com", tooLong); err == nil {
+		t.Fatal("expected a *SignInFailedError for an unknown address")
+	}
+	if got := f.hasher.verifyCallCount(); got != beforeUnknown {
+		t.Fatalf("hasher Verify calls after an unknown-address attempt = %d, want %d unchanged — "+
+			"the decoy call that exists purely for timing parity must also be skipped for an over-length password", got, beforeUnknown)
+	}
+}
+
+// TestSignInWithATooLongPasswordFailsIdenticallyToAWrongPassword is the
+// indistinguishability check the coordinator asked for: a too-long password
+// against a known user must produce the identical SignInFailedError shape a
+// wrong password of ordinary length would, using two independent fixtures
+// so neither call's recorded attempt affects the other's countdown.
+func TestSignInWithATooLongPasswordFailsIdenticallyToAWrongPassword(t *testing.T) {
+	fTooLong := newFixture(t)
+	fWrong := newFixture(t)
+
+	tooLong := strings.Repeat("a", 257)
+	_, tooLongErr := fTooLong.auth.SignIn(context.Background(), "andreas@hearth.family", tooLong)
+	_, wrongErr := fWrong.auth.SignIn(context.Background(), "andreas@hearth.family", "wrong")
+
+	var a, b *usecase.SignInFailedError
+	if !errors.As(tooLongErr, &a) || !errors.As(wrongErr, &b) {
+		t.Fatalf("both must be *SignInFailedError: %v / %v", tooLongErr, wrongErr)
+	}
+	if a.Locked != b.Locked {
+		t.Fatal("the two failures must be indistinguishable to a caller")
+	}
+	if a.AttemptsRemaining != b.AttemptsRemaining {
+		t.Fatalf("AttemptsRemaining differs: too-long = %d, wrong password = %d — "+
+			"a too-long password must not be a distinguishable failure mode", a.AttemptsRemaining, b.AttemptsRemaining)
+	}
+}
+
+// TestSignInAcceptsAPasswordAtTheLengthCeiling proves the ceiling is
+// inclusive: exactly 256 characters is still a legitimate password, not one
+// character over the line into rejection.
+func TestSignInAcceptsAPasswordAtTheLengthCeiling(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	atLimit := strings.Repeat("b", 256)
+	f.users.put(usecase.StoredUser{
+		User:         domain.User{ID: "user-atlimit", Email: "atlimit@hearth.family", DisplayName: "At Limit"},
+		PasswordHash: mustHash(t, f.hasher, atLimit),
+	})
+	f.members.put(domain.Membership{
+		ID: "membership-atlimit", HouseholdID: f.householdID, UserID: "user-atlimit",
+		Role: domain.RoleLimited, Capabilities: domain.Capabilities{domain.CapChores},
+	})
+
+	result, err := f.auth.SignIn(ctx, "atlimit@hearth.family", atLimit)
+	if err != nil {
+		t.Fatalf("SignIn: %v", err)
+	}
+	if result.SessionToken == "" {
+		t.Fatal("expected a session token")
+	}
+}
+
 func TestThreeWrongPasswordsLockTheHousehold(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()

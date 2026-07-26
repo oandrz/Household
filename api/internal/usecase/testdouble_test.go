@@ -79,6 +79,21 @@ type userDouble struct {
 	// itself; only the mailer double's state is touched from a background
 	// goroutine.
 	byEmailCalls int
+
+	// members is set once, after construction (userDouble and
+	// membershipDouble each need a reference to the other), and used only by
+	// CreateWithMembership to mirror UserRepo.CreateWithMembership's
+	// transaction: the user insert and the membership insert happen
+	// together, and a failure in the second undoes the first.
+	members *membershipDouble
+
+	// failNextMembershipCreate arms a one-shot failure for the next
+	// CreateWithMembership call's membership half, mirroring the real
+	// owners_hold_all_capabilities constraint rejecting an invalid row
+	// mid-transaction. It exists so a usecase-level test can prove the
+	// double rolls back the user insert exactly as the real transaction
+	// does, not just that the happy path works.
+	failNextMembershipCreate error
 }
 
 func newUserDouble() *userDouble {
@@ -123,6 +138,58 @@ func (d *userDouble) Create(_ context.Context, email, passwordHash, displayName 
 // acceptance created exactly one — not zero, and not two from a botched
 // retry.
 func (d *userDouble) count() int { return len(d.byID) }
+
+// setMembers completes the two doubles' mutual reference: newMembershipDouble
+// already takes a *userDouble, and CreateWithMembership needs the reverse
+// direction to create the membership half of its transaction.
+func (d *userDouble) setMembers(m *membershipDouble) { d.members = m }
+
+// failNextCreateWithMembership arms failNextMembershipCreate: the next
+// CreateWithMembership call's membership insert returns err instead of
+// succeeding, and the user insert that call already made is rolled back
+// (removed from byID/byEmail) to mirror the real transaction's rollback.
+// Every call after that succeeds normally again.
+func (d *userDouble) failNextCreateWithMembership(err error) {
+	d.failNextMembershipCreate = err
+}
+
+// CreateWithMembership mirrors UserRepo.CreateWithMembership: the user and
+// membership are created together, and a failure in the membership half
+// undoes the user insert rather than leaving it committed -- the same
+// all-or-nothing guarantee the real transaction gives, reproduced here
+// without an actual database.
+func (d *userDouble) CreateWithMembership(ctx context.Context, email, passwordHash, displayName string,
+	m domain.Membership) (domain.User, domain.Membership, error) {
+	user, err := d.Create(ctx, email, passwordHash, displayName)
+	if err != nil {
+		return domain.User{}, domain.Membership{}, err
+	}
+
+	if d.failNextMembershipCreate != nil {
+		err := d.failNextMembershipCreate
+		d.failNextMembershipCreate = nil
+		d.rollback(user)
+		return domain.User{}, domain.Membership{}, err
+	}
+
+	m.UserID = user.ID
+	membership, err := d.members.Create(ctx, m)
+	if err != nil {
+		d.rollback(user)
+		return domain.User{}, domain.Membership{}, err
+	}
+	return user, membership, nil
+}
+
+// rollback undoes the user insert Create just made, for the two
+// CreateWithMembership failure paths above -- the in-memory equivalent of
+// the real transaction's Rollback.
+func (d *userDouble) rollback(user domain.User) {
+	delete(d.byID, user.ID)
+	if user.Email != "" {
+		delete(d.byEmail, user.Email)
+	}
+}
 
 func (d *userDouble) SetPasswordHash(_ context.Context, userID, hash string) error {
 	u, ok := d.byID[userID]
@@ -746,6 +813,7 @@ func newFixture(t *testing.T) *fixture {
 	clock := &fixedClock{now: time.Date(2026, 7, 18, 9, 41, 0, 0, time.UTC)}
 	users := newUserDouble()
 	members := newMembershipDouble(users)
+	users.setMembers(members)
 	sessions := newSessionDouble(clock)
 	attempts := newLoginAttemptDouble()
 	magicLinks := newMagicLinkDouble(clock, users)
@@ -800,7 +868,6 @@ func newFixture(t *testing.T) *fixture {
 	invites := usecase.NewInviteService(usecase.InviteDeps{
 		Invites:    inviteRepo,
 		Users:      users,
-		Members:    members,
 		Sessions:   sessions,
 		Mailer:     mailer,
 		Hasher:     hasher,

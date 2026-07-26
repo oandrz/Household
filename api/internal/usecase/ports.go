@@ -63,6 +63,13 @@ type UserRepository interface {
 	// passwordHash == "".
 	Create(ctx context.Context, email, passwordHash, displayName string) (domain.User, error)
 	SetPasswordHash(ctx context.Context, userID, hash string) error
+	// CreateWithMembership creates the user and their membership in one
+	// transaction. Either both happen or neither does: a partial failure leaves an
+	// orphaned user with no membership, and because a child's email is NULL there
+	// is no unique constraint to make the retry fail loudly — it silently creates
+	// another orphan each time.
+	CreateWithMembership(ctx context.Context, email, passwordHash, displayName string,
+		m domain.Membership) (domain.User, domain.Membership, error)
 }
 
 type HouseholdRepository interface {

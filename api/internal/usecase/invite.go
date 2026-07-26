@@ -26,13 +26,37 @@ const minInvitePasswordLength = 12
 // domain has no password concept to attach an error to.
 var ErrPasswordTooShort = errors.New("password must be at least 12 characters")
 
+// maxPasswordLength is the ceiling applied everywhere a caller-supplied
+// password reaches PasswordHasher, in both InviteService.Accept (below) and
+// AuthService.SignIn (auth.go): argon2id's cost scales with the size of the
+// string it hashes, so with no upper bound a caller could force an
+// arbitrarily expensive hash by submitting a multi-megabyte password --
+// uncapped CPU cost fronted directly by an HTTP endpoint. 256 characters is
+// far beyond any legitimate human-chosen or generator-produced password.
+const maxPasswordLength = 256
+
+// ErrPasswordTooLong is Accept's rejection when the chosen password exceeds
+// maxPasswordLength. SignIn enforces the identical ceiling but never
+// surfaces this error: a too-long password there must fail exactly like a
+// wrong password -- same error, same shape -- so SignIn folds the case into
+// its ordinary invalid-credentials path (see AuthService.verifyPassword in
+// auth.go) instead of returning a distinguishable sentinel.
+var ErrPasswordTooLong = errors.New("password must be at most 256 characters")
+
 // InviteDeps mirrors AuthDeps: every port InviteService needs, gathered into
 // one struct so NewInviteService has a single, named argument rather than a
 // long positional list.
+//
+// There is no MembershipRepository here. Every write InviteService makes to
+// a membership goes through a port that creates it transactionally alongside
+// the user it belongs to -- UserRepository.CreateWithMembership for the
+// child branch of Create, InviteRepository.Accept for Accept -- so a bare
+// MembershipRepository.Create call is never the right tool for this service
+// (see both ports' doc comments in ports.go for why a lone Create would
+// reintroduce the orphaned-user defect this task fixed).
 type InviteDeps struct {
 	Invites    InviteRepository
 	Users      UserRepository
-	Members    MembershipRepository
 	Sessions   SessionRepository
 	Mailer     Mailer
 	Hasher     PasswordHasher
@@ -92,15 +116,20 @@ func (s *InviteService) Create(ctx context.Context, householdID, invitedByUserID
 		if role != domain.RoleLimited {
 			return domain.ErrInviteRequiresEmail
 		}
-		user, err := s.d.Users.Create(ctx, "", "", name)
+		// The user's own ID isn't known yet -- CreateWithMembership assigns
+		// it inside its transaction -- so this validates the role/capability
+		// shape with the same empty-userID placeholder Accept uses, before
+		// any write happens. CreateWithMembership itself does the user
+		// creation and the membership creation together, in one
+		// transaction: see its doc comment in ports.go for why that matters
+		// (a partial failure here would orphan a user with a NULL email --
+		// no unique constraint to make a retry fail loudly, so it would
+		// silently create another orphan each time).
+		membership, err := domain.NewMembership("", householdID, "", role, caps)
 		if err != nil {
 			return err
 		}
-		membership, err := domain.NewMembership("", householdID, user.ID, role, caps)
-		if err != nil {
-			return err
-		}
-		_, err = s.d.Members.Create(ctx, membership)
+		_, _, err = s.d.Users.CreateWithMembership(ctx, "", "", name, membership)
 		return err
 	}
 
@@ -175,6 +204,9 @@ func checkInviteLive(details InviteDetails, now time.Time) error {
 func (s *InviteService) Accept(ctx context.Context, token, password, displayName string) (SignInResult, error) {
 	if len(password) < minInvitePasswordLength {
 		return SignInResult{}, ErrPasswordTooShort
+	}
+	if len(password) > maxPasswordLength {
+		return SignInResult{}, ErrPasswordTooLong
 	}
 
 	now := s.d.Clock.Now()

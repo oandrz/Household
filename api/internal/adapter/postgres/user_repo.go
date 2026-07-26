@@ -7,15 +7,23 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres/sqlcgen"
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
-type UserRepo struct{ q *sqlcgen.Queries }
+// UserRepo keeps the pool alongside the pool-backed *sqlcgen.Queries, just as
+// InviteRepo does, because CreateWithMembership needs to begin its own
+// transaction -- something a *sqlcgen.Queries built once at construction
+// time cannot do on its own.
+type UserRepo struct {
+	q    *sqlcgen.Queries
+	pool *pgxpool.Pool
+}
 
-func NewUserRepo(db *DB) *UserRepo { return &UserRepo{q: sqlcgen.New(db.Pool())} }
+func NewUserRepo(db *DB) *UserRepo { return &UserRepo{q: sqlcgen.New(db.Pool()), pool: db.Pool()} }
 
 func (r *UserRepo) ByEmail(ctx context.Context, email string) (usecase.StoredUser, error) {
 	row, err := r.q.GetUserByEmail(ctx, text(email))
@@ -44,6 +52,65 @@ func (r *UserRepo) Create(ctx context.Context, email, passwordHash, displayName 
 		return domain.User{}, translate(err, "create user")
 	}
 	return toStoredUser(row.ID, row.Email, row.PasswordHash, row.DisplayName, row.AvatarInitial).User, nil
+}
+
+// CreateWithMembership creates the user and their membership in one
+// transaction, mirroring the pattern InviteRepo.Accept already establishes:
+// begin a transaction from the pool, bind sqlcgen.Queries to it with WithTx,
+// run both statements, commit -- with a deferred rollback that is a no-op
+// once Commit has succeeded.
+//
+// Either both writes happen or neither does. Create's child branch (a
+// limited member with no email of their own) used to call Create and then
+// Members.Create as two independent statements: if the second failed, the
+// first had already committed, leaving an orphaned user with a NULL email
+// and no membership. Because that email is NULL, it is not
+// unique-constrained the way a real email would be, so a retry would not
+// fail loudly -- it would silently create another orphan, and another, each
+// time the caller retried.
+func (r *UserRepo) CreateWithMembership(ctx context.Context, email, passwordHash, displayName string,
+	m domain.Membership) (domain.User, domain.Membership, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return domain.User{}, domain.Membership{}, fmt.Errorf("begin create-with-membership transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	q := r.q.WithTx(tx)
+
+	userRow, err := q.CreateUser(ctx, sqlcgen.CreateUserParams{
+		Email:         nullableText(email),
+		PasswordHash:  nullableText(passwordHash),
+		DisplayName:   displayName,
+		AvatarInitial: initialOf(displayName),
+	})
+	if err != nil {
+		return domain.User{}, domain.Membership{}, translate(err, "create user")
+	}
+
+	membershipRow, err := q.CreateMembership(ctx, sqlcgen.CreateMembershipParams{
+		HouseholdID:  uuid(m.HouseholdID),
+		UserID:       userRow.ID,
+		Role:         string(m.Role),
+		Capabilities: m.Capabilities.Strings(),
+	})
+	if err != nil {
+		return domain.User{}, domain.Membership{}, translate(err, "create membership")
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return domain.User{}, domain.Membership{}, fmt.Errorf("commit create-with-membership transaction: %w", err)
+	}
+
+	user := toStoredUser(userRow.ID, userRow.Email, userRow.PasswordHash, userRow.DisplayName, userRow.AvatarInitial).User
+	membership := domain.Membership{
+		ID:           uuidToString(membershipRow.ID),
+		HouseholdID:  uuidToString(membershipRow.HouseholdID),
+		UserID:       uuidToString(membershipRow.UserID),
+		Role:         toRole(membershipRow.Role),
+		Capabilities: toCapabilities(membershipRow.Capabilities),
+	}
+	return user, membership, nil
 }
 
 func (r *UserRepo) SetPasswordHash(ctx context.Context, userID, hash string) error {

@@ -96,6 +96,37 @@ func TestCreateForALimitedMemberWithNoEmailCreatesNoInviteButCreatesTheChild(t *
 	}
 }
 
+// TestCreateInviteForAChildRollsBackTheUserIfMembershipCreationFails proves
+// the fix for the orphaned-user defect a coordinator review caught: the
+// child branch used to call Users.Create and Members.Create as two
+// independent statements, so a failure in the second left a user row
+// committed with a NULL email and no membership -- and because that email
+// is NULL, not unique-constrained, a retry would silently create another
+// orphan rather than failing loudly. UserRepository.CreateWithMembership
+// closes that gap by doing both in one transaction; this test forces the
+// membership half to fail (mirroring the real owners_hold_all_capabilities
+// constraint) and asserts no user survives.
+func TestCreateInviteForAChildRollsBackTheUserIfMembershipCreationFails(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	usersBefore, membersBefore := f.users.count(), f.members.count()
+	f.users.failNextCreateWithMembership(errors.New("simulated membership constraint violation"))
+
+	err := f.invites.Create(ctx, f.householdID, f.andreasID, "Baby", "",
+		domain.RoleLimited, domain.Capabilities{domain.CapChores})
+	if err == nil {
+		t.Fatal("expected the simulated membership failure to propagate")
+	}
+
+	if got := f.users.count(); got != usersBefore {
+		t.Fatalf("users = %d, want %d unchanged — a failed membership insert must not leave an orphaned user", got, usersBefore)
+	}
+	if got := f.members.count(); got != membersBefore {
+		t.Fatalf("memberships = %d, want %d unchanged", got, membersBefore)
+	}
+}
+
 // findUserByDisplayName is the child-lookup path a real caller doesn't
 // need (a child's own display name is not unique in general) but this test
 // does, since Create returns nothing to identify the row it wrote and the
@@ -339,5 +370,62 @@ func TestAcceptInviteRejectsAPasswordShorterThan12CharactersAndCreatesNothing(t 
 	// have consumed it.
 	if _, err := f.invites.Preview(ctx, token); err != nil {
 		t.Fatalf("Preview after a rejected Accept: %v", err)
+	}
+}
+
+// TestAcceptInviteRejectsAPasswordOverTheLengthCeilingAndCreatesNothing is
+// the mirror of the floor test above: argon2id's cost scales with the size
+// of the string it hashes, so Accept must reject an over-length password
+// before ever calling Hasher.Hash, the same way it rejects a too-short one.
+func TestAcceptInviteRejectsAPasswordOverTheLengthCeilingAndCreatesNothing(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	if err := f.invites.Create(ctx, f.householdID, f.andreasID, "Kid", "kid@example.com",
+		domain.RoleLimited, domain.Capabilities{domain.CapCalendar}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	token := lastInviteToken(t, f)
+	usersBefore, membersBefore := f.users.count(), f.members.count()
+
+	tooLong := strings.Repeat("a", 257)
+	if _, err := f.invites.Accept(ctx, token, tooLong, "Kid"); !errors.Is(err, usecase.ErrPasswordTooLong) {
+		t.Fatalf("err = %v, want ErrPasswordTooLong", err)
+	}
+
+	if got := f.users.count(); got != usersBefore {
+		t.Fatalf("users = %d, want %d unchanged", got, usersBefore)
+	}
+	if got := f.members.count(); got != membersBefore {
+		t.Fatalf("memberships = %d, want %d unchanged", got, membersBefore)
+	}
+
+	// The invite itself must still be usable — a rejected password must not
+	// have consumed it.
+	if _, err := f.invites.Preview(ctx, token); err != nil {
+		t.Fatalf("Preview after a rejected Accept: %v", err)
+	}
+}
+
+// TestAcceptInviteAcceptsAPasswordAtTheLengthCeiling proves the ceiling is
+// inclusive: exactly 256 characters is accepted, not rejected as one
+// character over the line would be.
+func TestAcceptInviteAcceptsAPasswordAtTheLengthCeiling(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	if err := f.invites.Create(ctx, f.householdID, f.andreasID, "Kid", "kid@example.com",
+		domain.RoleLimited, domain.Capabilities{domain.CapCalendar}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	token := lastInviteToken(t, f)
+
+	atLimit := strings.Repeat("b", 256)
+	result, err := f.invites.Accept(ctx, token, atLimit, "Kid")
+	if err != nil {
+		t.Fatalf("Accept: %v", err)
+	}
+	if result.SessionToken == "" {
+		t.Fatal("expected a live session token")
 	}
 }

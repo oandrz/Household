@@ -105,6 +105,30 @@ func (s *AuthService) decoy() string {
 	return s.decoyHash
 }
 
+// verifyPassword is the one path through which SignIn ever hands a
+// caller-supplied password to the hasher -- decoy or real. It rejects a
+// password over maxPasswordLength (see invite.go) without calling Verify at
+// all: argon2id's cost scales with the size of the string it hashes, so
+// handing an unbounded password to Verify -- even the decoy call, which
+// exists purely for timing parity -- would be exactly the uncapped CPU
+// amplification a length ceiling is meant to close off.
+//
+// This deliberately breaks timing parity for this one case: a too-long
+// password costs nothing to reject, while every other failure costs a real
+// or decoy hash. That is safe rather than a regression of the
+// indistinguishability this file works hard to protect elsewhere, because
+// the asymmetry reveals nothing the caller doesn't already know -- they
+// already know the length of the string they sent. What indistinguishability
+// protects against is a caller *guessing at an address* learning something
+// about the account; nobody learns anything new here that their own input
+// didn't already tell them.
+func (s *AuthService) verifyPassword(password, encoded string) bool {
+	if len(password) > maxPasswordLength {
+		return false
+	}
+	return s.d.Hasher.Verify(password, encoded)
+}
+
 type SignInResult struct {
 	SessionToken string
 	ExpiresAt    time.Time
@@ -124,7 +148,7 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 		// Hasher.Verify call would occupy for a known user — this branch
 		// otherwise returns without ever touching the hasher, which is
 		// trivially distinguishable by timing from every branch that does.
-		s.d.Hasher.Verify(password, s.decoy())
+		s.verifyPassword(password, s.decoy())
 		// Record the attempt with no household, so guessing at unknown addresses
 		// cannot lock a real household. Then evaluate the same policy over that
 		// address's own failures, so the countdown a stranger sees is
@@ -175,7 +199,7 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 		// the household not been locked — otherwise this branch returns
 		// without ever touching the hasher, timing-distinguishable from
 		// every branch that does.
-		s.d.Hasher.Verify(password, s.decoy())
+		s.verifyPassword(password, s.decoy())
 
 		// Record this attempt too, exactly as the wrong-password and
 		// unknown-address branches do, and re-evaluate over the updated
@@ -215,9 +239,9 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 		// in the exact position the real one would have occupied, so a
 		// credential-less member costs exactly what a member with the wrong
 		// password costs.
-		s.d.Hasher.Verify(password, s.decoy())
+		s.verifyPassword(password, s.decoy())
 	} else {
-		passwordFailed = !s.d.Hasher.Verify(password, user.PasswordHash)
+		passwordFailed = !s.verifyPassword(password, user.PasswordHash)
 	}
 
 	if passwordFailed {
