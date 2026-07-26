@@ -15,8 +15,10 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { describe, expect, it } from "vitest";
-import type { Me } from "../features/auth/schemas";
+import { afterEach, describe, expect, it } from "vitest";
+import { setUnauthorizedHandler } from "../api/client";
+import { createUnauthorizedHandler } from "../api/unauthorizedRedirect";
+import type { InvitePreview, Me } from "../features/auth/schemas";
 import { stubFetchRoutes } from "../test/fetchStub";
 import { routeTree } from "./router";
 
@@ -55,6 +57,28 @@ const NO_SESSION = {
   body: { error: { code: "UNAUTHENTICATED", message: "Sign in required." } },
 };
 
+function invitePreviewFixture(overrides: Partial<InvitePreview> = {}): InvitePreview {
+  return {
+    householdName: "Andreas & Christine",
+    inviterName: "Andreas",
+    name: "Christine",
+    role: "owner",
+    capabilities: ["calendar", "chores", "money", "marriage"],
+    ...overrides,
+  };
+}
+
+// renderApp wires setUnauthorizedHandler with the *real* factory
+// (createUnauthorizedHandler), against this test's own router and
+// QueryClient, exactly as main.tsx wires it against the app's singletons.
+// Fix round 4 wired apiFetch's 401 reaction, but every test that exercised
+// it installed a stub handler instead of this one, and every test in this
+// file predates the handler entirely -- the one seam that regression
+// introduced was the only seam nothing here exercised. Wiring the real
+// handler into this harness is what makes
+// "does not bounce the invite screen off an expected GET /auth/me 401"
+// below an actual regression test, not a hand check of the underlying
+// logic in isolation.
 function renderApp(initialPath: string) {
   const testRouter = createRouter({
     routeTree,
@@ -63,6 +87,7 @@ function renderApp(initialPath: string) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  setUnauthorizedHandler(createUnauthorizedHandler(testRouter, queryClient));
   return {
     ...render(
       <QueryClientProvider client={queryClient}>
@@ -72,6 +97,14 @@ function renderApp(initialPath: string) {
     router: testRouter,
   };
 }
+
+afterEach(() => {
+  // setUnauthorizedHandler is module-level state in client.ts -- a handler
+  // built against one test's throwaway router/QueryClient must not survive
+  // into the next test, where it would hold a reference to an unmounted
+  // router.
+  setUnauthorizedHandler(null);
+});
 
 describe("the real route tree", () => {
   it("redirects an unauthenticated visit to / to /sign-in", async () => {
@@ -118,5 +151,47 @@ describe("the real route tree", () => {
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/"));
     expect(await screen.findByText("Arriving in slice 5.")).toBeInTheDocument();
+  });
+
+  // Fix round 5, Finding 1 (critical): this is the exact reproduction the
+  // coordinator's reviewer used -- /invite/tok with GET /api/v1/auth/me
+  // returning 401 (a genuine, signed-out invitee -- Christine from `make
+  // seed` included) and the invite preview returning 200. Before the fix,
+  // the 401 from useMe() inside InviteScreen fired the real
+  // unauthorizedHandler, which cleared the cache and navigated to
+  // /sign-in -- the acceptance form never rendered, for every invitee. This
+  // asserts both halves of that: the form renders, and the path is still
+  // the invite link, not /sign-in.
+  it("does not bounce the invite screen off an expected GET /auth/me 401", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": NO_SESSION,
+      "GET /api/v1/invites/some-invite-token": {
+        status: 200,
+        body: invitePreviewFixture(),
+      },
+    });
+
+    const { router } = renderApp("/invite/some-invite-token");
+
+    expect(
+      await screen.findByText("Andreas invited you in."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Accept & join household" }),
+    ).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/invite/some-invite-token");
+  });
+
+  // The sign-in screen has the identical shape (useMe() checking "is
+  // someone already signed in", reachable with no session at all) --
+  // covered here too so the fix is pinned for both screens the finding
+  // named, not just the invite one.
+  it("does not bounce the sign-in screen off its own expected GET /auth/me 401", async () => {
+    stubFetchRoutes({ "GET /api/v1/auth/me": NO_SESSION });
+
+    const { router } = renderApp("/sign-in");
+
+    expect(await screen.findByText("Welcome back.")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/sign-in");
   });
 });

@@ -57,6 +57,17 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): voi
 // cheap and future-proofs both without needing to track that invariant here.
 // /api/v1/invites/ covers both the preview and the accept endpoint the same
 // way.
+//
+// This list is deliberately about *request paths*, not about which screen is
+// currently mounted -- GET /api/v1/auth/me is never in it, on purpose, since
+// that is the exact endpoint whose 401 unauthorizedHandler exists to react
+// to. A screen that is itself reachable pre-auth but still calls useMe()
+// (the sign-in screen checking "is someone already signed in"; the invite
+// screen checking "are you signed in as someone else") is a different
+// problem -- see unauthorizedRedirect.ts's isOnPublicRoute, which the
+// installed handler itself is responsible for consulting. Do not try to fix
+// that here by adding "/api/v1/auth/me" to this list: that would silence the
+// 401 this handler exists for everywhere, not just on those two screens.
 const preAuthPathPrefixes = [
   "/api/v1/auth/sign-in",
   "/api/v1/auth/magic-link",
