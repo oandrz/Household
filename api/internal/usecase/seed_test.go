@@ -86,6 +86,20 @@ func (f *seedFixture) memberByName(t *testing.T, name string) usecase.MemberView
 	panic("unreachable")
 }
 
+// liveInviteCount counts invite rows that are neither accepted nor expired
+// against the fixture's clock -- the same "live" definition
+// InviteRepository.LiveInviteForEmail's real SQL filter uses.
+func liveInviteCount(f *seedFixture) int {
+	now := f.clock.Now()
+	n := 0
+	for _, row := range f.inviteRepo.rows {
+		if row.AcceptedAt == nil && row.ExpiresAt.After(now) {
+			n++
+		}
+	}
+	return n
+}
+
 func TestSeedCreatesExactlyOneHousehold(t *testing.T) {
 	f := newSeedFixture()
 	if _, err := usecase.Seed(context.Background(), f.deps); err != nil {
@@ -349,5 +363,166 @@ func TestSeedReissuesChristinesInviteOnceTheFixedOneHasExpired(t *testing.T) {
 	}
 	if details.Role != domain.RoleOwner || details.Name != "Christine" {
 		t.Fatalf("reissued invite = %+v, want Christine as owner", details)
+	}
+}
+
+// TestSeedAcrossTwoExpiryBoundariesKeepsExactlyOneLiveInvite is fix round
+// 1's finding 1, made concrete: checking devInviteToken's own hash and
+// nothing else meant a second expiry abandoned the first reissue live and
+// pending forever, sending a fresh real email every run after the first
+// expiry. Four runs across two expiry boundaries must instead hold exactly
+// one live invite at every point, reissuing only on a genuine expiry (twice
+// here, not three times) and reusing the still-live one on the run that
+// follows with nothing expired.
+func TestSeedAcrossTwoExpiryBoundariesKeepsExactlyOneLiveInvite(t *testing.T) {
+	f := newSeedFixture()
+	ctx := context.Background()
+
+	var urls []string
+	run := func(label string) {
+		t.Helper()
+		result, err := usecase.Seed(ctx, f.deps)
+		if err != nil {
+			t.Fatalf("%s: Seed: %v", label, err)
+		}
+		if result.InviteURL == "" {
+			t.Fatalf("%s: expected a usable invite url", label)
+		}
+		urls = append(urls, result.InviteURL)
+		if got := liveInviteCount(f); got != 1 {
+			t.Fatalf("%s: live invites = %d, want exactly 1", label, got)
+		}
+	}
+
+	run("run 1 (initial)")
+	f.clock.Advance(8 * 24 * time.Hour) // first expiry boundary
+	run("run 2 (after first expiry)")
+	f.clock.Advance(8 * 24 * time.Hour) // second expiry boundary
+	run("run 3 (after second expiry)")
+	run("run 4 (immediately after -- nothing has expired)")
+
+	if urls[0] == urls[1] || urls[1] == urls[2] {
+		t.Fatalf("each genuine expiry must reissue a new url, got %v", urls)
+	}
+	if urls[2] != urls[3] {
+		t.Fatalf("run 4 must reuse run 3's still-live url instead of abandoning it, got %q then %q", urls[2], urls[3])
+	}
+	if got := f.mailer.invitesSentCount(); got != 3 {
+		t.Fatalf("invite emails sent = %d, want 3 -- one per genuine issuance (runs 1, 2 and 3), "+
+			"not one per Seed call", got)
+	}
+	if got := f.inviteRepo.count(); got != 3 {
+		t.Fatalf("invite rows = %d, want 3 (one live, two expired and correctly abandoned by design)", got)
+	}
+}
+
+// TestSeedTreatsAConcurrentInviteCreateRaceAsAlreadyDone is fix round 1's
+// finding 2: issueChristineInviteAtNextRung tolerates domain.ErrAlreadyExists
+// from Create to close the window between its own ByTokenHash check and the
+// write, but that branch was unreachable through the double before
+// inviteDouble.Create could ever return it. This exercises it directly.
+func TestSeedTreatsAConcurrentInviteCreateRaceAsAlreadyDone(t *testing.T) {
+	f := newSeedFixture()
+	ctx := context.Background()
+	f.inviteRepo.failNextCreateWithAlreadyExists()
+
+	result, err := usecase.Seed(ctx, f.deps)
+	if err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+	if result.InviteURL == "" {
+		t.Fatal("expected a usable invite url despite the simulated create race")
+	}
+
+	const prefix = "http://localhost:5173/invite/"
+	token := strings.TrimPrefix(result.InviteURL, prefix)
+	details, err := f.inviteRepo.ByTokenHash(ctx, f.deps.Tokens.HashToken(token))
+	if err != nil {
+		t.Fatalf("ByTokenHash: %v", err)
+	}
+	if details.AcceptedAt != nil || !details.ExpiresAt.After(f.clock.Now()) {
+		t.Fatal("the raced-in invite must be live and pending")
+	}
+	if got := f.inviteRepo.count(); got != 1 {
+		t.Fatalf("invites = %d, want 1 -- the race must not create a second row", got)
+	}
+}
+
+// TestSeedReportsChristineAsAlreadyMemberOnceSheAccepts is fix round 1's
+// finding 1, part two: Seed must check membership before ever touching an
+// invite, so that accepting stops the seed from re-inviting (or even just
+// re-reporting a URL for) someone who is already a genuine owner.
+func TestSeedReportsChristineAsAlreadyMemberOnceSheAccepts(t *testing.T) {
+	f := newSeedFixture()
+	ctx := context.Background()
+
+	first, err := usecase.Seed(ctx, f.deps)
+	if err != nil {
+		t.Fatalf("first Seed: %v", err)
+	}
+	if first.ChristineIsMember {
+		t.Fatal("christine must not be reported as a member before she accepts")
+	}
+
+	const prefix = "http://localhost:5173/invite/"
+	token := strings.TrimPrefix(first.InviteURL, prefix)
+	details, err := f.inviteRepo.ByTokenHash(ctx, f.deps.Tokens.HashToken(token))
+	if err != nil {
+		t.Fatalf("ByTokenHash: %v", err)
+	}
+	householdID := f.theHousehold(t).ID
+	if _, err := f.inviteRepo.Accept(ctx, details.ID, "christine@hearth.family", "hashed:whatever",
+		"Christine", householdID, details.Role, details.Capabilities); err != nil {
+		t.Fatalf("Accept: %v", err)
+	}
+
+	second, err := usecase.Seed(ctx, f.deps)
+	if err != nil {
+		t.Fatalf("second Seed: %v", err)
+	}
+	if !second.ChristineIsMember {
+		t.Fatal("expected christine to be reported as already a member")
+	}
+	if second.InviteURL != "" {
+		t.Fatalf("expected no invite url once christine is a member, got %q", second.InviteURL)
+	}
+	if got := f.mailer.invitesSentCount(); got != 1 {
+		t.Fatalf("invite emails sent = %d, want 1 -- accepting must not trigger a re-invite", got)
+	}
+	if got := f.inviteRepo.count(); got != 1 {
+		t.Fatalf("invites = %d, want 1", got)
+	}
+	if got := f.users.count(); got != 4 {
+		t.Fatalf("users = %d, want 4 (andreas, kayla, ethan, christine)", got)
+	}
+}
+
+// TestSeedRefusesToDuplicateAnOrphanedChild is fix round 1's finding 3: a
+// membership removed without deleting the underlying credential-less user
+// leaves an orphan no unique constraint protects, and Seed must refuse
+// rather than silently create a second Kayla.
+func TestSeedRefusesToDuplicateAnOrphanedChild(t *testing.T) {
+	f := newSeedFixture()
+	ctx := context.Background()
+
+	if _, err := usecase.Seed(ctx, f.deps); err != nil {
+		t.Fatalf("first Seed: %v", err)
+	}
+
+	kayla := f.memberByName(t, "Kayla")
+	householdID := f.theHousehold(t).ID
+	if err := f.members.Delete(ctx, householdID, kayla.Membership.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	_, err := usecase.Seed(ctx, f.deps)
+	if err == nil {
+		t.Fatal("expected Seed to refuse rather than create a second Kayla")
+	}
+	if !strings.Contains(err.Error(), "Kayla") {
+		t.Fatalf("error = %q, want it to name Kayla", err.Error())
+	}
+	if got := f.users.count(); got != 3 {
+		t.Fatalf("users = %d, want 3 -- no duplicate Kayla created", got)
 	}
 }
