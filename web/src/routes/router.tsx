@@ -161,7 +161,10 @@ const settingsRoute = createRoute({
   component: () => <PlaceholderPage page="Settings" slice={1} />,
 });
 
-const routeTree = rootRoute.addChildren([
+// Exported (not just `router`) so a test can mount the real tree with its
+// own memory history and QueryClient instead of RouterProvider's registered
+// singleton -- see routes/router.test.tsx.
+export const routeTree = rootRoute.addChildren([
   signInRoute,
   signInMagicRoute,
   inviteRoute,
