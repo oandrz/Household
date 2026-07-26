@@ -3,7 +3,8 @@ SHELL := /bin/bash
 COMPOSE := docker compose
 
 .PHONY: help dev dev-local up down restart logs ps migrate migrate-down migrate-new \
-        test test-api test-web lint lint-arch lint-web typecheck fmt psql shell-api build sqlc
+        test test-api test-web lint lint-arch lint-web typecheck fmt psql shell-api build sqlc \
+        seed reset-password unlock-household
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -82,6 +83,16 @@ psql: ## Open a psql shell against the development database
 
 shell-api: ## Open a shell inside the api container
 	$(COMPOSE) exec api sh
+
+seed: ## Seed the design's household and print Christine's invite URL
+	$(COMPOSE) exec api go run ./cmd/adminctl seed
+
+reset-password: ## Set a member's password. make reset-password EMAIL=you@example.com
+	@test -n "$(EMAIL)" || { echo "EMAIL is required"; exit 1; }
+	$(COMPOSE) exec api go run ./cmd/adminctl reset-password --email=$(EMAIL)
+
+unlock-household: ## Clear the seeded household's lock immediately
+	$(COMPOSE) exec api go run ./cmd/adminctl unlock-household
 
 build: ## Build the production images
 	docker build --target prod -t hearth-api:latest ./api

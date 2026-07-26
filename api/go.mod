@@ -5,6 +5,7 @@ go 1.25.7
 require (
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/wneessen/go-mail v0.8.1
+	golang.org/x/term v0.45.0
 )
 
 require (
