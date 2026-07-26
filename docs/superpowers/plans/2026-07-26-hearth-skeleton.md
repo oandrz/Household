@@ -985,8 +985,11 @@ Create `api/Dockerfile`:
 # --- dev: hot reload -------------------------------------------------------
 FROM golang:1.25.7-alpine AS dev
 WORKDIR /src
-# Pinned, not @latest: air v1.67+ and future goose releases raise their Go
-# minimum past this base image and fail the build with no warning.
+# air and goose are pinned, not @latest: air's newest release already requires a
+# newer Go than this image ships, and goose could do the same tomorrow. Pinning
+# keeps `docker compose build` from breaking out from under us with no warning.
+# Bump these deliberately after checking the target version's go.mod against the
+# golang:1.25.7-alpine base above.
 RUN go install github.com/air-verse/air@v1.66.1 \
  && go install github.com/pressly/goose/v3/cmd/goose@v3.27.3
 COPY go.mod go.sum ./
@@ -1097,7 +1100,7 @@ services:
     depends_on: [api]
 
   mailpit:
-    image: axllent/mailpit:latest
+    image: axllent/mailpit:v1.30.5
     ports: ["8025:8025", "1025:1025"]
 
 volumes:
