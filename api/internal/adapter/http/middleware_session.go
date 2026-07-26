@@ -95,6 +95,22 @@ func requireSession(deps Deps) func(http.Handler) http.Handler {
 					// the ByTokenHash lookup above) expiry and gets another
 					// chance to extend on the next request.
 					slog.Warn("failed to extend session", "error", err)
+				} else {
+					// Extending the database row is only half of "extended
+					// on use": the browser's copy of hearth_session was set
+					// once, at sign-in, with a fixed Expires, and would
+					// otherwise still discard it on that original schedule no
+					// matter how actively the session was used -- Extend
+					// succeeding above changed the row, not the cookie. Same
+					// for csrf_token: it was issued with the identical fixed
+					// lifetime at sign-in and would die on the same day.
+					// Both are re-issued here with the same token values
+					// (only the expiry moves), so a browser that is still
+					// actively presenting this session never loses it.
+					setSessionCookie(w, deps, cookie.Value, newExpiry)
+					if csrfCookie, err := r.Cookie(csrfCookieName); err == nil {
+						setCSRFCookie(w, deps, csrfCookie.Value, newExpiry)
+					}
 				}
 			}
 
