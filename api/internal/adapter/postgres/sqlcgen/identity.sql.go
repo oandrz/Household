@@ -638,13 +638,16 @@ func (q *Queries) ListSpaces(ctx context.Context, householdID pgtype.UUID) ([]Sp
 	return items, nil
 }
 
-const markInviteAccepted = `-- name: MarkInviteAccepted :exec
-UPDATE invites SET accepted_at = now() WHERE id = $1
+const markInviteAccepted = `-- name: MarkInviteAccepted :one
+UPDATE invites SET accepted_at = now()
+WHERE id = $1 AND accepted_at IS NULL AND expires_at > now()
+RETURNING id
 `
 
-func (q *Queries) MarkInviteAccepted(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, markInviteAccepted, id)
-	return err
+func (q *Queries) MarkInviteAccepted(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, markInviteAccepted, id)
+	err := row.Scan(&id)
+	return id, err
 }
 
 const nextSpacePosition = `-- name: NextSpacePosition :one

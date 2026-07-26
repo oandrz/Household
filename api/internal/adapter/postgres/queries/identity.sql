@@ -111,8 +111,10 @@ JOIN households h ON h.id = i.household_id
 JOIN users u ON u.id = i.invited_by
 WHERE i.token_hash = $1;
 
--- name: MarkInviteAccepted :exec
-UPDATE invites SET accepted_at = now() WHERE id = $1;
+-- name: MarkInviteAccepted :one
+UPDATE invites SET accepted_at = now()
+WHERE id = $1 AND accepted_at IS NULL AND expires_at > now()
+RETURNING id;
 
 -- name: ListSpaces :many
 SELECT id, household_id, key, name, visibility, position, is_builtin, required_capability
