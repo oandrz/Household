@@ -264,29 +264,57 @@ func (s *AuthService) SignOut(ctx context.Context, sessionToken string) error {
 const (
 	magicLinkTTL          = 15 * time.Minute
 	magicLinkPerHourLimit = 3
+
+	// magicLinkSendTimeout bounds the background send so a wedged relay
+	// cannot leak goroutines forever. It is generous because nothing is
+	// waiting on it -- see sendMagicLinkAsync.
+	magicLinkSendTimeout = 30 * time.Second
 )
 
 // RequestMagicLink is deliberately quiet. Neither an unknown address nor an
 // exhausted rate limit produces an error, because any observable difference
-// between the two would let a caller discover who is a member.
+// between the two would let a caller discover who is a member. Nor does a
+// mailer failure: see sendMagicLinkAsync.
 func (s *AuthService) RequestMagicLink(ctx context.Context, email string) error {
 	now := s.d.Clock.Now()
 
+	// Both reads below run unconditionally, in this fixed order, for every
+	// call -- a known address, an unknown one, or one that has already hit
+	// the rate limit. Earlier this returned as soon as the rate-limit check
+	// decided the outcome, skipping ByEmail entirely for a rate-limited
+	// address; that made the *number* of repository reads distinguish the
+	// rate-limited case from the other two just as surely as an error would
+	// have. CountSince, in particular, can never report a count >=
+	// magicLinkPerHourLimit for an address with no user behind it (it joins
+	// through users), so "rate limited" was already proof of membership by
+	// itself once ByEmail stopped running alongside it.
 	count, err := s.d.MagicLinks.CountSince(ctx, email, now.Add(-time.Hour))
 	if err != nil {
 		return err
 	}
-	if count >= magicLinkPerHourLimit {
-		slog.Info("magic link rate limit reached", "email_hash", fmt.Sprintf("%x", s.d.Tokens.HashToken(email))[:12])
-		return nil
-	}
-
 	user, err := s.d.Users.ByEmail(ctx, email)
-	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return nil
-		}
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
 		return err
+	}
+	known := err == nil
+	rateLimited := count >= magicLinkPerHourLimit
+
+	if !known || rateLimited {
+		if rateLimited {
+			// known is always true here in practice, per the CountSince note
+			// above, but the check stays explicit rather than assumed. That
+			// claim holds only as long as CountRecentMagicLinks keeps its
+			// join through users (internal/adapter/postgres/queries/identity.sql)
+			// -- if it's ever rewritten to count by raw email string instead,
+			// an unknown address could reach this branch too, and this log
+			// line would then fire for strangers as well as members. The
+			// in-memory magicLinkDouble used in tests replicates the same
+			// join (it looks up d.users.byID[row.UserID].Email), so a test
+			// relying on this invariant would still pass even if the real
+			// query's join were the one that broke.
+			slog.Info("magic link rate limit reached", "email_hash", fmt.Sprintf("%x", s.d.Tokens.HashToken(email))[:12])
+		}
+		return nil
 	}
 
 	raw, hash, err := s.d.Tokens.NewToken()
@@ -298,7 +326,48 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, email string) error 
 	}
 
 	url := fmt.Sprintf("%s/sign-in/magic?token=%s", s.d.BaseURL, raw)
-	return s.d.Mailer.SendMagicLink(ctx, user.Email, user.DisplayName, url)
+	s.sendMagicLinkAsync(user.Email, user.DisplayName, url)
+	return nil
+}
+
+// sendMagicLinkAsync fires the email off the request path and returns
+// immediately, for two reasons that turn out to be the same reason seen from
+// two sides:
+//
+//   - Timing: a synchronous SMTP conversation (dial, EHLO, MAIL, RCPT, DATA,
+//     QUIT) plus the token's DB write made the known-address branch far
+//     slower than the unknown-address and rate-limited branches, which do
+//     only a couple of reads. That gap is wider, and more variable under a
+//     slow or degraded relay, than anything the SignIn decoy machinery
+//     guards against.
+//   - Correctness: RequestMagicLink's contract is "always nil, always
+//     silent." A relay that is down, slow, or rejecting mail must not turn
+//     into a caller-visible error on the known-address branch only --
+//     unknown and rate-limited addresses can never fail this way, so a
+//     propagated mailer error would be a discrete yes/no oracle for
+//     membership, cheaper to exploit than any timing measurement.
+//
+// Deliberately swallowing an error is normally a bug smell; it is correct
+// here because no caller is in a position to see it safely. The token row
+// is already committed by the time this goroutine runs, so a send failure
+// only costs a retry (the member asks for another link, or the existing one
+// still works once the relay recovers, until it expires in 15 minutes) --
+// it never costs correctness. The context is derived from
+// context.Background(), not the request's ctx, because the request's
+// context is cancelled the moment the HTTP handler returns a response,
+// which happens before this goroutine would otherwise get to run; sending
+// on an already-cancelled context would silently never deliver anything.
+func (s *AuthService) sendMagicLinkAsync(to, name, url string) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), magicLinkSendTimeout)
+		defer cancel()
+		if err := s.d.Mailer.SendMagicLink(ctx, to, name, url); err != nil {
+			slog.Error("magic link email failed to send",
+				"error", err,
+				"email_hash", fmt.Sprintf("%x", s.d.Tokens.HashToken(to))[:12],
+			)
+		}
+	}()
 }
 
 // ConsumeMagicLink signs the holder in. It is not gated by the household lock:

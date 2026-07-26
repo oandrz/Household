@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"sync"
 	"testing"
 	"time"
 
@@ -68,6 +69,16 @@ type userDouble struct {
 	byID    map[string]usecase.StoredUser
 	byEmail map[string]string // email -> id
 	n       int
+
+	// byEmailCalls counts ByEmail invocations. RequestMagicLink is meant to
+	// call this exactly once per request regardless of outcome (see
+	// magicLinkDouble.countSinceCalls for the matching count on the other
+	// read) -- this field is how a test pins that down without resorting to
+	// wall-clock timing. It is safe unguarded because every test that reads
+	// it calls AuthService methods synchronously from the test goroutine
+	// itself; only the mailer double's state is touched from a background
+	// goroutine.
+	byEmailCalls int
 }
 
 func newUserDouble() *userDouble {
@@ -82,6 +93,7 @@ func (d *userDouble) put(u usecase.StoredUser) {
 }
 
 func (d *userDouble) ByEmail(_ context.Context, email string) (usecase.StoredUser, error) {
+	d.byEmailCalls++
 	id, ok := d.byEmail[email]
 	if !ok {
 		return usecase.StoredUser{}, domain.ErrNotFound
@@ -332,11 +344,24 @@ type magicLinkDouble struct {
 	clock *fixedClock
 	users *userDouble
 	rows  map[string]*magicLinkRow // keyed by string(tokenHash)
+
+	// countSinceCalls counts CountSince invocations, the matching half of
+	// userDouble.byEmailCalls for pinning "every outcome does the same
+	// reads." Safe unguarded for the same reason byEmailCalls is: it is only
+	// ever touched from the synchronous portion of RequestMagicLink, never
+	// from the background send goroutine.
+	countSinceCalls int
 }
 
 func newMagicLinkDouble(clock *fixedClock, users *userDouble) *magicLinkDouble {
 	return &magicLinkDouble{clock: clock, users: users, rows: map[string]*magicLinkRow{}}
 }
+
+// count reports how many magic-link rows have ever been created, regardless
+// of whether they were later consumed. It exists so a test can confirm a
+// token was persisted even when the send that was supposed to follow it
+// failed.
+func (d *magicLinkDouble) count() int { return len(d.rows) }
 
 func (d *magicLinkDouble) Create(_ context.Context, userID string, tokenHash []byte, expiresAt time.Time) error {
 	d.rows[string(tokenHash)] = &magicLinkRow{UserID: userID, ExpiresAt: expiresAt, CreatedAt: d.clock.Now()}
@@ -357,6 +382,7 @@ func (d *magicLinkDouble) Consume(_ context.Context, tokenHash []byte) (string, 
 }
 
 func (d *magicLinkDouble) CountSince(_ context.Context, email string, since time.Time) (int, error) {
+	d.countSinceCalls++
 	n := 0
 	for _, row := range d.rows {
 		u, ok := d.users.byID[row.UserID]
@@ -378,25 +404,101 @@ type sentMail struct {
 	URL  string
 }
 
+// mailerDouble is touched from two goroutines now that
+// AuthService.RequestMagicLink sends off the request path: the test's own
+// goroutine, and the background goroutine the service spawns to call
+// SendMagicLink. mu guards every field below for that reason. sent is
+// signalled once per SendMagicLink call, success or failure alike, purely
+// as a synchronization point -- "the double has been called and its state
+// is now settled" -- so a test can wait for the async send to land instead
+// of racing it. Waiting on a channel rather than sleeping is what keeps
+// these tests race-detector-clean and non-flaky.
 type mailerDouble struct {
+	mu         sync.Mutex
 	magicLinks []sentMail
 	invites    []sentMail
+	failNext   error
+	sent       chan struct{}
+}
+
+func newMailerDouble() *mailerDouble {
+	return &mailerDouble{sent: make(chan struct{}, 64)}
+}
+
+// failNextMagicLink arms a one-shot failure: the next SendMagicLink call
+// returns err instead of recording a sent mail, and every call after that
+// succeeds normally again.
+func (d *mailerDouble) failNextMagicLink(err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.failNext = err
 }
 
 func (d *mailerDouble) SendMagicLink(_ context.Context, to, name, url string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	defer d.signalSent()
+	if d.failNext != nil {
+		err := d.failNext
+		d.failNext = nil
+		return err
+	}
 	d.magicLinks = append(d.magicLinks, sentMail{To: to, Name: name, URL: url})
 	return nil
 }
 
 func (d *mailerDouble) SendInvite(_ context.Context, to, name, inviterName, u string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.invites = append(d.invites, sentMail{To: to, Name: name, URL: u})
 	return nil
 }
 
-// lastMagicToken extracts the "token" query parameter from the most
-// recently sent magic-link URL, failing the test if no magic link was sent.
+// signalSent must be called with mu held. The channel is large enough that
+// no realistic test sequence fills it; a full channel drops the signal
+// rather than blocking the mailer (and thus the service's background
+// goroutine) forever.
+//
+// Invariant callers of waitForSend must respect: drain exactly one signal
+// per send you expect to have happened, in order, before reading
+// magicLinks/sentCount. The channel is a bare counter with no identity —
+// draining fewer signals than were sent leaves extras buffered (harmless,
+// the next waitForSend just returns immediately), but draining fewer than
+// expected before *reading state* means you may be reading a snapshot from
+// an earlier send than the one you meant to wait for. Every test in this
+// package drains exactly once per expected send for exactly this reason.
+func (d *mailerDouble) signalSent() {
+	select {
+	case d.sent <- struct{}{}:
+	default:
+	}
+}
+
+// waitForSend blocks until RequestMagicLink's background goroutine has
+// called SendMagicLink at least once since the last time this was drained,
+// or fails the test after a generous timeout. Tests need this because the
+// send is fire-and-forget from the caller's point of view: by the time
+// RequestMagicLink returns, the goroutine may not have run yet, so reading
+// magicLinks immediately afterward would be a data race as well as flaky.
+func (d *mailerDouble) waitForSend(t *testing.T) {
+	t.Helper()
+	select {
+	case <-d.sent:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the async magic-link send")
+	}
+}
+
+// lastMagicToken waits for the most recent RequestMagicLink call's
+// background send to land, then extracts the "token" query parameter from
+// the most recently sent magic-link URL, failing the test if no magic link
+// was ever sent.
 func (d *mailerDouble) lastMagicToken(t *testing.T) string {
 	t.Helper()
+	d.waitForSend(t)
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if len(d.magicLinks) == 0 {
 		t.Fatal("no magic link was sent")
 	}
@@ -412,6 +514,23 @@ func (d *mailerDouble) lastMagicToken(t *testing.T) string {
 	return token
 }
 
+// sentCount is a mutex-guarded read of len(magicLinks), for tests that
+// already called waitForSend (or know no send is pending) and just want the
+// count without racing the mailer's internal state.
+func (d *mailerDouble) sentCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.magicLinks)
+}
+
+// magicLinkURLAt is a mutex-guarded read of magicLinks[i].URL, for the same
+// reason as sentCount.
+func (d *mailerDouble) magicLinkURLAt(i int) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.magicLinks[i].URL
+}
+
 // --- fixture ----------------------------------------------------------
 
 // fixture builds an AuthService over the in-memory doubles containing the
@@ -424,6 +543,8 @@ type fixture struct {
 	sessions    *sessionDouble
 	mailer      *mailerDouble
 	hasher      *fakeHasher
+	users       *userDouble
+	magicLinks  *magicLinkDouble
 	householdID string
 }
 
@@ -436,7 +557,7 @@ func newFixture(t *testing.T) *fixture {
 	sessions := newSessionDouble(clock)
 	attempts := newLoginAttemptDouble()
 	magicLinks := newMagicLinkDouble(clock, users)
-	mailer := &mailerDouble{}
+	mailer := newMailerDouble()
 	hasher := &fakeHasher{}
 
 	householdID := "household-1"
@@ -478,7 +599,10 @@ func newFixture(t *testing.T) *fixture {
 		BaseURL:    "http://localhost:5173",
 	})
 
-	return &fixture{auth: auth, clock: clock, sessions: sessions, mailer: mailer, hasher: hasher, householdID: householdID}
+	return &fixture{
+		auth: auth, clock: clock, sessions: sessions, mailer: mailer, hasher: hasher,
+		users: users, magicLinks: magicLinks, householdID: householdID,
+	}
 }
 
 func mustHash(t *testing.T, hasher usecase.PasswordHasher, plain string) string {

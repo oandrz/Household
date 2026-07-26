@@ -299,11 +299,16 @@ func TestRequestMagicLinkSendsAnEmail(t *testing.T) {
 	if err := f.auth.RequestMagicLink(context.Background(), "andreas@hearth.family"); err != nil {
 		t.Fatalf("RequestMagicLink: %v", err)
 	}
-	if len(f.mailer.magicLinks) != 1 {
-		t.Fatalf("sent = %d, want 1", len(f.mailer.magicLinks))
+	// The send happens off the request path (see sendMagicLinkAsync), so the
+	// double's state isn't settled the instant RequestMagicLink returns —
+	// wait for it before reading magicLinks, or this races the background
+	// goroutine as well as flaking under load.
+	f.mailer.waitForSend(t)
+	if got := f.mailer.sentCount(); got != 1 {
+		t.Fatalf("sent = %d, want 1", got)
 	}
-	if !strings.HasPrefix(f.mailer.magicLinks[0].URL, "http://localhost:5173/sign-in/magic?token=") {
-		t.Fatalf("url = %q", f.mailer.magicLinks[0].URL)
+	if url := f.mailer.magicLinkURLAt(0); !strings.HasPrefix(url, "http://localhost:5173/sign-in/magic?token=") {
+		t.Fatalf("url = %q", url)
 	}
 }
 
@@ -313,8 +318,10 @@ func TestRequestMagicLinkStaysSilentForAnUnknownAddress(t *testing.T) {
 	if err := f.auth.RequestMagicLink(context.Background(), "stranger@example.com"); err != nil {
 		t.Fatalf("an unknown address must not produce an error: %v", err)
 	}
-	if len(f.mailer.magicLinks) != 0 {
-		t.Fatal("no email should have been sent")
+	// An unknown address never reaches sendMagicLinkAsync, so no background
+	// goroutine is spawned and there is nothing to wait for here.
+	if got := f.mailer.sentCount(); got != 0 {
+		t.Fatalf("sent = %d, want 0 — no email should have been sent", got)
 	}
 }
 
@@ -326,6 +333,7 @@ func TestMagicLinkIsRateLimitedSilentlyToThreePerHour(t *testing.T) {
 		if err := f.auth.RequestMagicLink(ctx, "andreas@hearth.family"); err != nil {
 			t.Fatalf("request %d: %v", i, err)
 		}
+		f.mailer.waitForSend(t)
 		f.clock.Advance(time.Minute)
 	}
 
@@ -336,8 +344,10 @@ func TestMagicLinkIsRateLimitedSilentlyToThreePerHour(t *testing.T) {
 	if err := f.auth.RequestMagicLink(ctx, "andreas@hearth.family"); err != nil {
 		t.Fatalf("the rate limit must be silent, got err = %v", err)
 	}
-	if len(f.mailer.magicLinks) != 3 {
-		t.Fatalf("sent = %d, want 3 — the fourth request sends nothing", len(f.mailer.magicLinks))
+	// The fourth request is rate-limited, so it never spawns a send
+	// goroutine — nothing more to wait for before reading the count.
+	if got := f.mailer.sentCount(); got != 3 {
+		t.Fatalf("sent = %d, want 3 — the fourth request sends nothing", got)
 	}
 }
 
@@ -418,3 +428,114 @@ func TestAMagicLinkWorksWhileTheHouseholdIsLocked(t *testing.T) {
 		t.Fatalf("consuming a magic link while locked must succeed: %v", err)
 	}
 }
+
+// TestRequestMagicLinkSwallowsAMailerFailure pins the fix for the oracle a
+// propagated mailer error would create: RequestMagicLink's contract is
+// "always nil," and a relay outage must not carve out an exception for
+// known addresses only, since unknown and rate-limited addresses can never
+// fail this way. A caller who can make the relay misbehave (or who simply
+// catches it misbehaving) must not learn anything from the response.
+func TestRequestMagicLinkSwallowsAMailerFailure(t *testing.T) {
+	f := newFixture(t)
+	f.mailer.failNextMagicLink(errors.New("smtp: connection refused"))
+
+	knownErr := f.auth.RequestMagicLink(context.Background(), "andreas@hearth.family")
+	f.mailer.waitForSend(t) // the failing send still happens; wait for it to land.
+
+	unknownErr := f.auth.RequestMagicLink(context.Background(), "stranger@example.com")
+
+	if knownErr != nil {
+		t.Fatalf("a mailer failure must not surface to the caller: %v", knownErr)
+	}
+	if knownErr != unknownErr {
+		t.Fatalf("known = %v, unknown = %v — a mailer failure must be indistinguishable "+
+			"from an unknown address", knownErr, unknownErr)
+	}
+	if got := f.mailer.sentCount(); got != 0 {
+		t.Fatalf("sent = %d, want 0 — the send failed and must not be recorded as delivered", got)
+	}
+	if got := f.magicLinks.count(); got != 1 {
+		t.Fatalf("magic link rows = %d, want 1 — the token must persist even though "+
+			"delivery failed; a retry within the rate limit can still use it or ask again", got)
+	}
+}
+
+// TestRequestMagicLinkPerformsTheSameReadsForEveryOutcome pins the other
+// half of the fix: a known address under the limit, an unknown address, and
+// a known address that has exhausted the limit must all perform the exact
+// same number of repository reads, in the same order. Before this fix, a
+// rate-limited request returned before ever calling Users.ByEmail, which
+// made the read count itself distinguish "rate limited" from the other two
+// cases — and since CountRecentMagicLinks joins through users, an unknown
+// address can never reach the rate-limited branch in the first place, so
+// that asymmetry was really a membership oracle wearing a read-count
+// disguise.
+func TestRequestMagicLinkPerformsTheSameReadsForEveryOutcome(t *testing.T) {
+	countReads := func(t *testing.T, do func(f *fixture)) (byEmail, countSince int) {
+		t.Helper()
+		f := newFixture(t)
+		do(f)
+		return f.users.byEmailCalls, f.magicLinks.countSinceCalls
+	}
+
+	knownByEmail, knownCountSince := countReads(t, func(f *fixture) {
+		if err := f.auth.RequestMagicLink(context.Background(), "andreas@hearth.family"); err != nil {
+			t.Fatalf("RequestMagicLink: %v", err)
+		}
+		f.mailer.waitForSend(t)
+	})
+
+	unknownByEmail, unknownCountSince := countReads(t, func(f *fixture) {
+		if err := f.auth.RequestMagicLink(context.Background(), "stranger@example.com"); err != nil {
+			t.Fatalf("RequestMagicLink: %v", err)
+		}
+	})
+
+	rateLimitedByEmail, rateLimitedCountSince := countReads(t, func(f *fixture) {
+		ctx := context.Background()
+		for i := 0; i < magicLinkRateLimitForTest; i++ {
+			if err := f.auth.RequestMagicLink(ctx, "andreas@hearth.family"); err != nil {
+				t.Fatalf("priming request %d: %v", i, err)
+			}
+			f.mailer.waitForSend(t)
+			f.clock.Advance(time.Minute)
+		}
+		primed := f.mailer.sentCount()
+		// Reset the counters right before the request under test: we only
+		// care about the fourth (rate-limited) request's own reads, not the
+		// three that filled the bucket.
+		f.users.byEmailCalls = 0
+		f.magicLinks.countSinceCalls = 0
+		if err := f.auth.RequestMagicLink(ctx, "andreas@hearth.family"); err != nil {
+			t.Fatalf("RequestMagicLink: %v", err)
+		}
+		// Self-check: if magicLinkPerHourLimit ever changes in auth.go
+		// without this test's local copy following it, the priming loop
+		// above would stop actually exhausting the limit, and this whole
+		// test would silently compare "known, under the limit" against
+		// itself twice instead of against the rate-limited case. Confirm
+		// the fourth request really was rate-limited — no additional send —
+		// before trusting the read counts below.
+		if got := f.mailer.sentCount(); got != primed {
+			t.Fatalf("sent = %d after the priming loop's %d, want no change — "+
+				"the request under test was not actually rate-limited; "+
+				"magicLinkRateLimitForTest may be out of sync with auth.go's magicLinkPerHourLimit",
+				got, primed)
+		}
+	})
+
+	if knownByEmail != unknownByEmail || knownByEmail != rateLimitedByEmail {
+		t.Fatalf("Users.ByEmail calls differ: known = %d, unknown = %d, rate-limited = %d — "+
+			"every outcome must perform the same reads", knownByEmail, unknownByEmail, rateLimitedByEmail)
+	}
+	if knownCountSince != unknownCountSince || knownCountSince != rateLimitedCountSince {
+		t.Fatalf("MagicLinks.CountSince calls differ: known = %d, unknown = %d, rate-limited = %d",
+			knownCountSince, unknownCountSince, rateLimitedCountSince)
+	}
+}
+
+// magicLinkRateLimitForTest mirrors auth.go's unexported
+// magicLinkPerHourLimit (3). It's redeclared here rather than exported from
+// the service, since the architecture rule keeps this test file from adding
+// any new exported surface to usecase just to read a constant.
+const magicLinkRateLimitForTest = 3
