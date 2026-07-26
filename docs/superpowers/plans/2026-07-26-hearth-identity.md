@@ -1777,31 +1777,38 @@ type Rate struct {
 }
 
 // Apply converts an amount of minor units, rounding half away from zero. It
-// refuses to wrap: domain.Money.Add guards addition for the same reason, and
-// multiplication overflows far sooner — at the design's rate of 12,410, any
-// amount above roughly 743 billion minor units would wrap to a negative
-// balance rather than fail.
+// reports domain.ErrAmountOverflow rather than silently wrapping when
+// minorUnits * r.Numerator would not fit in an int64 — the same failure mode
+// domain.Money.Add already refuses to allow on this codebase's monetary
+// path, and multiplication overflows far sooner than addition does.
 func (r Rate) Apply(minorUnits int64) (int64, error) {
-	// Detect before multiplying: if the magnitude exceeds MaxInt64 divided by
-	// the multiplier, the product cannot fit. MinInt64 is checked separately
-	// because it has no positive counterpart to take the magnitude of.
-	if minorUnits == math.MinInt64 && r.Numerator != 0 {
+	if mulOverflows(minorUnits, r.Numerator) {
 		return 0, domain.ErrAmountOverflow
 	}
-	magnitude := minorUnits
-	if magnitude < 0 {
-		magnitude = -magnitude
-	}
-	if r.Numerator != 0 && magnitude > math.MaxInt64/r.Numerator {
-		return 0, domain.ErrAmountOverflow
-	}
-
 	num := minorUnits * r.Numerator
 	half := r.Denominator / 2
 	if num < 0 {
 		return (num - half) / r.Denominator, nil
 	}
 	return (num + half) / r.Denominator, nil
+}
+
+// mulOverflows reports whether a*b would overflow an int64. It computes the
+// product (which may wrap, but wrapping a signed integer is well-defined in
+// Go, never a panic) and divides back by b: for any b != 0, (a*b)/b == a
+// unless the multiplication actually wrapped. The one case that check misses
+// is a==-1,b==math.MinInt64 (or the reverse): math.MinInt64 has no positive
+// counterpart, so negating it wraps right back to math.MinInt64 and the
+// divide-back reproduces a even though the multiplication did overflow —
+// that pair is therefore checked explicitly, before the general rule runs.
+func mulOverflows(a, b int64) bool {
+	if a == 0 || b == 0 {
+		return false
+	}
+	if (a == -1 && b == math.MinInt64) || (b == -1 && a == math.MinInt64) {
+		return true
+	}
+	return (a*b)/b != a
 }
 
 // FXRateProvider converts between the household's primary and secondary
