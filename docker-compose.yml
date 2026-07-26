@@ -35,6 +35,7 @@ services:
       DATABASE_URL: postgres://hearth:hearth@postgres:5432/hearth?sslmode=disable
       SESSION_SECRET: development-session-secret-not-for-production
       SMTP_ADDR: mailpit:1025
+      SMTP_FROM: "Hearth <noreply@hearth.localhost>"
       APP_BASE_URL: http://localhost:5173
     ports: ["8080:8080"]
     volumes: ["./api:/src"]

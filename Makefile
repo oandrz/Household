@@ -14,9 +14,12 @@ dev: ## Start everything and tail the logs — http://localhost:5173
 	$(COMPOSE) up --build api web
 
 dev-local: ## Run api and web natively, infra in Docker (Ctrl-C stops both)
+	@command -v air >/dev/null 2>&1 || { echo "air is not on PATH; run: go install github.com/air-verse/air@v1.66.1"; exit 1; }
+	@test -f .env || { echo ".env is required for dev-local; copy .env.example to .env first"; exit 1; }
 	$(COMPOSE) up -d postgres mailpit
 	$(MAKE) migrate
-	@trap 'kill 0' EXIT INT TERM; \
+	@set -a; . ./.env; set +a; \
+	 trap 'kill 0' EXIT INT TERM; \
 	 (cd api && air -c .air.toml 2>&1 | sed 's/^/[api] /') & \
 	 (cd web && npm run dev 2>&1 | sed 's/^/[web] /') & \
 	 wait
@@ -44,7 +47,7 @@ migrate-down: ## Roll back the most recent migration
 
 migrate-new: ## Create a migration. make migrate-new NAME=add_users
 	@test -n "$(NAME)" || { echo "NAME is required, e.g. make migrate-new NAME=add_users"; exit 1; }
-	cd api && goose -dir ./migrations create $(NAME) sql
+	$(COMPOSE) run --rm migrate goose -dir ./migrations create $(NAME) sql
 
 test: test-api test-web ## Run every test suite
 
