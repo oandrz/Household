@@ -832,22 +832,39 @@ type Space struct {
 // Settings screen: Money and Marriage are parents-only, Family is for everyone.
 func BuiltinSpaces(householdID string) []Space {
 	return []Space{
+		// Money is capability-gated, not structurally locked. The design's
+		// Settings screen labels it "Parents" without a lock, and the invite
+		// modal offers "Money & balances" as a toggle that is off for kids by
+		// default — meaning it can be switched on. Marriage carries the lock
+		// icon and is the only structurally parents-only space.
 		{HouseholdID: householdID, Key: "money", Name: "Money",
-			Visibility: VisibilityParentsOnly, Position: 1, IsBuiltin: true, RequiredCapability: CapMoney},
+			Visibility: VisibilityEveryone, Position: 1, IsBuiltin: true, RequiredCapability: CapMoney},
 		{HouseholdID: householdID, Key: "marriage", Name: "Marriage",
 			Visibility: VisibilityParentsOnly, Position: 2, IsBuiltin: true, RequiredCapability: CapMarriage},
+		// Family is "Everyone" with no qualifier in the design. Requiring a
+		// capability here would hide it from a member holding only chores.
 		{HouseholdID: householdID, Key: "family", Name: "Family",
-			Visibility: VisibilityEveryone, Position: 3, IsBuiltin: true, RequiredCapability: CapCalendar},
+			Visibility: VisibilityEveryone, Position: 3, IsBuiltin: true, RequiredCapability: ""},
 	}
 }
 
-// VisibleSpaces filters spaces for one membership. Visibility is checked before
-// capability, so a parents-only space stays hidden from a limited member even
-// if their capability set would otherwise allow it.
+// VisibleSpaces filters spaces for one membership. A parents-only space stays
+// hidden from a limited member even if their capability set would allow it.
+//
+// Output preserves input order; it does not sort. Callers must supply spaces
+// already ordered by Position — the repository query does this with an ORDER BY
+// and the sidebar depends on it.
 func VisibleSpaces(all []Space, m Membership) []Space {
 	visible := make([]Space, 0, len(all))
 	for _, s := range all {
 		if s.Visibility == VisibilityParentsOnly && m.Role != RoleOwner {
+			continue
+		}
+		// Provisional: custom visibility means a per-space member list, which
+		// does not exist yet, and the design marks custom space pages "not
+		// built". Until that lands, custom fails closed to owners rather than
+		// degrading to the most permissive mode.
+		if s.Visibility == VisibilityCustom && m.Role != RoleOwner {
 			continue
 		}
 		if s.RequiredCapability != "" && !m.Capabilities.Has(s.RequiredCapability) {
@@ -2874,6 +2891,7 @@ Create the two test files covering:
 5. `Remove` succeeding deletes the membership and revokes that user's sessions.
 6. `Spaces` for a limited member with only `calendar` returns exactly the Family space.
 7. `CreateSpace` assigns the next position and is not builtin.
+7b. `CreateSpace` accepts only `everyone` and `parents_only`; `custom` is rejected until per-space member lists exist.
 8. `CreateSpace` rejects a duplicate name within the household.
 9. `Update` on the household normalises the primary currency to uppercase and rejects a currency that is not three letters.
 10. `UpdateNotifications` round-trips all four flags.
@@ -3191,7 +3209,7 @@ Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement the panels**
 
-Four panels inside one page, each owning its own mutation and invalidating `['me']` and its own query on success. `InviteMemberModal` and `NewSpaceModal` are built on the `components/Modal` primitive and mirror the design's fields exactly, including the `Off for kids by default` helper text on the money capability and the space templates Kids, Home, Travel and Blank.
+Four panels inside one page, each owning its own mutation and invalidating `['me']` and its own query on success. `InviteMemberModal` and `NewSpaceModal` are built on the `components/Modal` primitive and mirror the design's fields exactly, including the `Off for kids by default` helper text on the money capability and the space templates Kids, Home, Travel and Blank. The New space modal's visibility choices are `Everyone` and `Parents only`; `Custom` is shown disabled with a note that per-space membership is not built yet, matching the design's own "not built" marker rather than offering a control that silently behaves like `Everyone`.
 
 The plan label reads `Free plan` as static text with no link, per the spec.
 
