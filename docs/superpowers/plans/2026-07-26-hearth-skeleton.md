@@ -1649,7 +1649,7 @@ dev-local: ## Run api and web natively, infra in Docker (Ctrl-C stops both)
 test-web: ## Run the frontend tests
 	cd web && npx vitest run
 
-typecheck: ## Type-check the frontend
+typecheck: ## Type-check the frontend, tests included
 	cd web && npx tsc --noEmit
 ```
 

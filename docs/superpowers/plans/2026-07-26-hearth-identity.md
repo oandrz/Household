@@ -24,6 +24,7 @@
 - Magic-link rate limit: 3 requests per email address per hour.
 - Capability strings are exactly `calendar`, `chores`, `money`, `marriage`. Role strings are exactly `owner`, `limited`.
 - All user-visible copy is taken verbatim from `design/Household Dashboard.dc.html`. The wrong-password message is: `That password doesn't match. Two tries left before we lock the household for 15 minutes.` — with the count substituted.
+- **Every 2xx response except `204` carries a JSON body.** The frontend's `apiFetch` throws `ApiError` with code `INVALID_RESPONSE` on an ok response whose body is absent or unparseable, so an empty `200` or `202` is a client-visible failure. `POST /auth/magic-link` answers `202` with `{"status":"accepted"}`; `POST /auth/sign-out` and `DELETE /household/members/:id` answer `204` with no body, which `apiFetch` handles explicitly.
 - Every task ends with a commit.
 
 ## File Structure
