@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -339,6 +340,22 @@ func (d *sessionDouble) live() int {
 	n := 0
 	for _, row := range d.rows {
 		if !row.Revoked && row.ExpiresAt.After(d.clock.Now()) {
+			n++
+		}
+	}
+	return n
+}
+
+// liveForUser is live()'s per-user counterpart: it exists so a member-service
+// test can prove RevokeAllForUser was scoped to the one member it touched --
+// that member's live count drops to zero while an unrelated member's live
+// session is left standing -- rather than merely proving "some session
+// somewhere got revoked," which a bug that revoked every row in the table
+// would also satisfy.
+func (d *sessionDouble) liveForUser(userID string) int {
+	n := 0
+	for _, row := range d.rows {
+		if row.UserID == userID && !row.Revoked && row.ExpiresAt.After(d.clock.Now()) {
 			n++
 		}
 	}
@@ -786,6 +803,139 @@ func (d *mailerDouble) magicLinkURLAt(i int) string {
 	return d.magicLinks[i].URL
 }
 
+// --- HouseholdRepository -----------------------------------------------
+
+type householdDouble struct {
+	rows map[string]domain.Household
+	n    int
+}
+
+func newHouseholdDouble() *householdDouble {
+	return &householdDouble{rows: map[string]domain.Household{}}
+}
+
+func (d *householdDouble) put(h domain.Household) { d.rows[h.ID] = h }
+
+func (d *householdDouble) Get(_ context.Context, householdID string) (domain.Household, error) {
+	h, ok := d.rows[householdID]
+	if !ok {
+		return domain.Household{}, domain.ErrNotFound
+	}
+	return h, nil
+}
+
+// Update mirrors HouseholdRepo.Update: it persists every field on h, not a
+// narrowed subset -- see that repo's doc comment in
+// internal/adapter/postgres/household_repo.go for the defect this guards
+// against (a query that silently dropped Name and SecondaryCurrency while
+// still returning a nil error).
+func (d *householdDouble) Update(_ context.Context, h domain.Household) (domain.Household, error) {
+	if _, ok := d.rows[h.ID]; !ok {
+		return domain.Household{}, domain.ErrNotFound
+	}
+	d.rows[h.ID] = h
+	return h, nil
+}
+
+// Create mirrors CreateHousehold's schema defaults (migrations/00002_identity.sql):
+// SGD primary, IDR secondary, shown, auto FX mode.
+func (d *householdDouble) Create(_ context.Context, name, familyName string) (domain.Household, error) {
+	d.n++
+	h := domain.Household{
+		ID: fmt.Sprintf("household-%d", d.n), Name: name, FamilyName: familyName,
+		PrimaryCurrency: "SGD", ShowSecondaryCurrency: true, SecondaryCurrency: "IDR", FXRateMode: "auto",
+	}
+	d.rows[h.ID] = h
+	return h, nil
+}
+
+// --- SpaceRepository -----------------------------------------------------
+
+// spaceDouble sorts List's result by Position, mirroring ListSpaces' own
+// ORDER BY position (internal/adapter/postgres/queries/identity.sql) --
+// domain.VisibleSpaces relies on its input already being in that order and
+// does not sort itself, so a double that returned insertion order instead
+// would let a test pass even if a caller forgot the sort was the repo's job,
+// not the domain's.
+type spaceDouble struct {
+	rows []domain.Space
+	n    int
+}
+
+func newSpaceDouble() *spaceDouble { return &spaceDouble{} }
+
+// seed adds spaces with IDs already assigned, for builtins constructed via
+// domain.BuiltinSpaces (which deliberately leaves ID empty -- see that
+// function's doc comment) that a fixture wants to look pre-seeded, as if the
+// database had already assigned them.
+func (d *spaceDouble) seed(spaces ...domain.Space) {
+	for _, s := range spaces {
+		d.n++
+		if s.ID == "" {
+			s.ID = fmt.Sprintf("space-%d", d.n)
+		}
+		d.rows = append(d.rows, s)
+	}
+}
+
+func (d *spaceDouble) List(_ context.Context, householdID string) ([]domain.Space, error) {
+	var out []domain.Space
+	for _, s := range d.rows {
+		if s.HouseholdID == householdID {
+			out = append(out, s)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Position < out[j].Position })
+	return out, nil
+}
+
+func (d *spaceDouble) Create(_ context.Context, s domain.Space) (domain.Space, error) {
+	d.n++
+	s.ID = fmt.Sprintf("space-%d", d.n)
+	d.rows = append(d.rows, s)
+	return s, nil
+}
+
+func (d *spaceDouble) NextPosition(_ context.Context, householdID string) (int, error) {
+	max := 0
+	for _, s := range d.rows {
+		if s.HouseholdID == householdID && s.Position > max {
+			max = s.Position
+		}
+	}
+	return max + 1, nil
+}
+
+// --- NotificationRepository ----------------------------------------------
+
+type notificationDouble struct {
+	rows map[string]usecase.NotificationPreferences
+}
+
+func newNotificationDouble() *notificationDouble {
+	return &notificationDouble{rows: map[string]usecase.NotificationPreferences{}}
+}
+
+func (d *notificationDouble) put(householdID string, p usecase.NotificationPreferences) {
+	d.rows[householdID] = p
+}
+
+func (d *notificationDouble) Get(_ context.Context, householdID string) (usecase.NotificationPreferences, error) {
+	p, ok := d.rows[householdID]
+	if !ok {
+		return usecase.NotificationPreferences{}, domain.ErrNotFound
+	}
+	return p, nil
+}
+
+// Upsert mirrors UpsertNotificationPreferences' ON CONFLICT ... DO UPDATE:
+// a household with no row yet gets one created, an existing row is replaced
+// wholesale.
+func (d *notificationDouble) Upsert(_ context.Context, householdID string, p usecase.NotificationPreferences) (usecase.NotificationPreferences, error) {
+	d.rows[householdID] = p
+	return p, nil
+}
+
 // --- fixture ----------------------------------------------------------
 
 // fixture builds an AuthService over the in-memory doubles containing the
@@ -793,18 +943,24 @@ func (d *mailerDouble) magicLinkURLAt(i int) string {
 // password at all, both members of one household, and a fixedClock
 // starting at 2026-07-18T09:41:00Z.
 type fixture struct {
-	auth        *usecase.AuthService
-	invites     *usecase.InviteService
-	clock       *fixedClock
-	sessions    *sessionDouble
-	mailer      *mailerDouble
-	hasher      *fakeHasher
-	users       *userDouble
-	members     *membershipDouble
-	magicLinks  *magicLinkDouble
-	inviteRepo  *inviteDouble
-	householdID string
-	andreasID   string
+	auth          *usecase.AuthService
+	invites       *usecase.InviteService
+	memberSvc     *usecase.MemberService
+	householdSvc  *usecase.HouseholdService
+	clock         *fixedClock
+	sessions      *sessionDouble
+	mailer        *mailerDouble
+	hasher        *fakeHasher
+	users         *userDouble
+	members       *membershipDouble
+	magicLinks    *magicLinkDouble
+	inviteRepo    *inviteDouble
+	households    *householdDouble
+	spaces        *spaceDouble
+	notifications *notificationDouble
+	householdID   string
+	andreasID     string
+	ethanID       string
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -877,10 +1033,37 @@ func newFixture(t *testing.T) *fixture {
 		BaseURL:    "http://localhost:5173",
 	})
 
+	memberSvc := usecase.NewMemberService(usecase.MemberDeps{
+		Members:  members,
+		Sessions: sessions,
+	})
+
+	households := newHouseholdDouble()
+	households.put(domain.Household{
+		ID: householdID, Name: "Andreas & Christine", FamilyName: "Oentoro",
+		PrimaryCurrency: "SGD", ShowSecondaryCurrency: true, SecondaryCurrency: "IDR", FXRateMode: "auto",
+	})
+
+	spaces := newSpaceDouble()
+	spaces.seed(domain.BuiltinSpaces(householdID)...)
+
+	notifications := newNotificationDouble()
+	notifications.put(householdID, usecase.NotificationPreferences{
+		BillReminders: true, OverspendAlerts: true, RetroReminder: true, WeeklyDigest: true,
+	})
+
+	householdSvc := usecase.NewHouseholdService(usecase.HouseholdDeps{
+		Households:    households,
+		Spaces:        spaces,
+		Notifications: notifications,
+	})
+
 	return &fixture{
-		auth: auth, invites: invites, clock: clock, sessions: sessions, mailer: mailer, hasher: hasher,
+		auth: auth, invites: invites, memberSvc: memberSvc, householdSvc: householdSvc,
+		clock: clock, sessions: sessions, mailer: mailer, hasher: hasher,
 		users: users, members: members, magicLinks: magicLinks, inviteRepo: inviteRepo,
-		householdID: householdID, andreasID: andreas.ID,
+		households: households, spaces: spaces, notifications: notifications,
+		householdID: householdID, andreasID: andreas.ID, ethanID: ethan.ID,
 	}
 }
 
