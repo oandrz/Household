@@ -67,7 +67,12 @@ export DOCKER_HOST=unix:///Volumes/Oink_Machine/.colima/default/docker.sock
 export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
 ```
 
-## Architecture rules
+## How code here is written
+
+These are requirements, not preferences. A feature that works but nobody can
+safely change is not finished.
+
+### Clean architecture
 
 Dependencies point inward and `make lint-arch` enforces it mechanically,
 including in test files:
@@ -76,15 +81,63 @@ including in test files:
 - `internal/usecase` may add `internal/domain`
 - everything else lives under `internal/adapter/**` or `cmd/**`
 
+No database, HTTP or third-party type crosses out of the adapter layer. A
+missing row becomes `domain.ErrNotFound` at that boundary, never `pgx.ErrNoRows`
+further up.
+
 `internal/usecase/ports.go` is the contract between the layers. Its doc comments
 are load-bearing — read them before writing a service or a repository.
+
+### SOLID, as it applies here
+
+- **Single responsibility** — one file, one job. When describing a file needs
+  the word "and", split it.
+- **Open/closed** — extend by adding an adapter, not by editing a service.
+  `FXRateProvider` and `BankSyncProvider` exist so a real rate source or a real
+  aggregator can arrive without touching their callers.
+- **Liskov** — an adapter honours its port's whole contract, errors included. A
+  caller must never need to know which implementation it holds.
+- **Interface segregation** — narrow ports for what a caller needs. Nine small
+  repositories, not one object with forty methods.
+- **Dependency inversion** — services depend on interfaces they declare;
+  `cmd/api/main.go` chooses the implementations. This is why every service is
+  testable against in-memory doubles.
+
+### Readable by a junior engineer in their first week
+
+- Names say what a thing is. Comments say **why** — never what the line already
+  says.
+- Small, focused files beat clever ones. If understanding a function needs three
+  other files open, the seam is in the wrong place.
+- Exported things carry their contract in a doc comment. `usecase/ports.go` is
+  the model.
+- Write every non-obvious decision down **at the point someone would try to
+  change it**. Where a trade-off was accepted, say so and why — the lockout and
+  magic-link comments are the pattern.
+- Tests read as documentation: the name states the behaviour, the body shows it.
+- No cleverness in security-sensitive code. Obvious and boring wins.
+
+### Rules specific to this product
 
 **Authorisation exists only in the HTTP layer.** No service takes an actor
 parameter; services enforce what is *valid*, middleware enforces who is
 *asking*. A route without its guard has no second line of defence.
 
-Money is `int64` minor units plus an ISO 4217 code, everywhere. `float64` never
-appears in a monetary path.
+**Money is `int64` minor units plus an ISO 4217 code, everywhere.** `float64`
+never appears in a monetary path. Exchange rates are fractions, not scaled
+decimals.
+
+**Every 2xx except 204 carries a JSON body**, because the frontend's `apiFetch`
+throws on an ok response it cannot parse.
+
+**Fail closed on values you did not construct.** A `switch` over a type that
+arrives from a database column or a request needs a `default` that refuses.
+
+### Definition of done
+
+`make lint && make test` green on the tree you are integrating, at least one new
+test mutation-checked, `docs/FEATURE_TRACKER.md` and `docs/LEARNING.md` updated.
+The full checklist is at the end of `docs/LEARNING.md`.
 
 ## Agent skills
 

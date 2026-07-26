@@ -29,6 +29,57 @@ Marriage, Family or Overview has been started.
 
 ---
 
+## What "built" means
+
+A row only becomes ✅ when the feature works **and** the code behind it meets the
+standards below. A feature that works but nobody can safely change is not
+finished — it is a debt with a tick next to it.
+
+**Clean architecture.** Dependencies point inward. `internal/domain` holds the
+rules and imports the standard library only; `internal/usecase` orchestrates
+them through ports it declares itself; adapters implement those ports. Any
+database, HTTP or third-party type stops at the adapter boundary. `make
+lint-arch` enforces this mechanically, including in test files.
+
+**SOLID, as it actually applies here.**
+
+- **Single responsibility** — one file, one job. `auth.go` does sign-in;
+  `invite.go` does invites. When a file starts needing "and" to describe it,
+  split it.
+- **Open/closed** — extend by adding an adapter, not by editing a service.
+  `FXRateProvider` and `BankSyncProvider` exist precisely so a real rate source
+  or a real aggregator can arrive without touching the code that uses them.
+- **Liskov** — an adapter must honour its port's whole contract, including
+  errors. A missing row surfaces as `domain.ErrNotFound`, never `pgx.ErrNoRows`.
+  A caller must not need to know which implementation it has.
+- **Interface segregation** — narrow ports for what a caller needs. Nine small
+  repositories, not one object with forty methods.
+- **Dependency inversion** — services depend on interfaces they declare, and
+  `main.go` decides the implementations. That is the whole reason the services
+  are testable against in-memory doubles.
+
+**Readable by a junior engineer on their first week.** This is a real
+requirement, not a nicety:
+
+- Names say what a thing is. Comments say **why** — never what the line already
+  says.
+- Small, focused files beat clever ones. If understanding a function needs three
+  other files open, the seam is wrong.
+- Exported things carry their contract in a doc comment. `usecase/ports.go` is
+  the model: the `""` ⇄ SQL NULL convention and the transactional-accept warning
+  live where the next implementer will actually read them.
+- Every non-obvious decision is written down at the point someone would try to
+  change it. Where a trade-off was accepted, the comment says so and why.
+- Tests read as documentation. A test name states the behaviour; the body shows
+  it.
+- No cleverness in security-sensitive code. Obvious and boring wins.
+
+**And the practical gate:** `make lint && make test` green, at least one new test
+mutation-checked, and `docs/LEARNING.md` updated with anything the work taught.
+The full checklist is at the end of `docs/LEARNING.md`.
+
+---
+
 ## 1 · Entry and authentication
 
 | Feature | State | Notes |
