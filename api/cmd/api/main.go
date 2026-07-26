@@ -14,6 +14,7 @@ import (
 	"time"
 
 	httpadapter "github.com/andreasoentoro/hearth/api/internal/adapter/http"
+	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres"
 	"github.com/andreasoentoro/hearth/api/internal/config"
 )
 
@@ -24,25 +25,26 @@ func main() {
 	}
 }
 
-// nilPinger stands in until the database pool exists in Task 2.
-type nilPinger struct{}
-
-func (nilPinger) Ping(context.Context) error { return nil }
-
 func run() error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
 
-	srv := &http.Server{
-		Addr:              fmt.Sprintf(":%d", cfg.Port),
-		Handler:           httpadapter.NewRouter(httpadapter.Deps{Pinger: nilPinger{}}),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	db, err := postgres.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	srv := &http.Server{
+		Addr:              fmt.Sprintf(":%d", cfg.Port),
+		Handler:           httpadapter.NewRouter(httpadapter.Deps{Pinger: db}),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 
 	// serveErr carries the outcome of ListenAndServe back to the main path.
 	// It is buffered so the goroutine never blocks sending to it, and it is
