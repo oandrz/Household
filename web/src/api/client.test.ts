@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { apiFetch, ApiError } from "./client";
+import { apiFetch, ApiError, setUnauthorizedHandler } from "./client";
 
 function clearCookies() {
   document.cookie.split("; ").forEach((cookie) => {
@@ -14,6 +14,11 @@ beforeEach(() => clearCookies());
 afterEach(() => {
   vi.unstubAllGlobals();
   clearCookies();
+  // setUnauthorizedHandler is module-level state, not scoped to a single
+  // test -- a handler left installed by one test would otherwise leak into
+  // the next and either fire unexpectedly or mask this suite's own
+  // assertions about when it should and shouldn't fire.
+  setUnauthorizedHandler(null);
 });
 
 function stubFetch(status: number, body: unknown) {
@@ -171,5 +176,87 @@ describe("apiFetch request", () => {
     expect((init?.headers as Headers).get("X-CSRF-Token")).toBe(
       "dGVzdC1jc3JmLXRva2Vu==",
     );
+  });
+});
+
+// A revoked session (an owner changed a member's capabilities, or removed
+// them outright) must be visible to an already-open tab immediately, not
+// only once something remounts RequireAuth -- that's the gap this closes.
+describe("apiFetch unauthorized handling", () => {
+  it("calls the unauthorized handler on a 401 from an ordinary request", async () => {
+    stubFetch(401, {
+      error: { code: "UNAUTHENTICATED", message: "Sign in required." },
+    });
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+
+    await apiFetch("/api/v1/auth/me").catch(() => {});
+
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not call the unauthorized handler on a 401 from sign-in itself", async () => {
+    // A wrong password is exactly this shape (401 INVALID_CREDENTIALS) --
+    // reacting to it would clear the cache and bounce the caller off the
+    // sign-in screen they were already using.
+    stubFetch(401, {
+      error: { code: "INVALID_CREDENTIALS", message: "That email or password is incorrect." },
+    });
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+
+    await apiFetch("/api/v1/auth/sign-in", {
+      method: "POST",
+      body: "{}",
+    }).catch(() => {});
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("does not call the unauthorized handler on a 401 from magic-link consumption", async () => {
+    stubFetch(401, { error: { code: "UNAUTHENTICATED", message: "x" } });
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+
+    await apiFetch("/api/v1/auth/magic-link/consume", {
+      method: "POST",
+      body: "{}",
+    }).catch(() => {});
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("does not call the unauthorized handler on a 401 from invite acceptance", async () => {
+    stubFetch(401, { error: { code: "UNAUTHENTICATED", message: "x" } });
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+
+    await apiFetch("/api/v1/invites/some-token/accept", {
+      method: "POST",
+      body: "{}",
+    }).catch(() => {});
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("does not call the unauthorized handler on a non-401 error", async () => {
+    stubFetch(500, { error: { code: "INTERNAL", message: "x" } });
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+
+    await apiFetch("/api/v1/auth/me").catch(() => {});
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("stops calling a handler once it has been cleared with null", async () => {
+    stubFetch(401, { error: { code: "UNAUTHENTICATED", message: "x" } });
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+    setUnauthorizedHandler(null);
+
+    await apiFetch("/api/v1/auth/me").catch(() => {});
+
+    expect(handler).not.toHaveBeenCalled();
   });
 });
