@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/andreasoentoro/hearth/api/internal/domain"
@@ -19,6 +20,20 @@ type SignInFailedError struct {
 }
 
 func (e *SignInFailedError) Error() string { return "sign in failed" }
+
+// Unwrap distinguishes ErrHouseholdLocked from ErrInvalidCredentials, and
+// that distinction is intentional, not a leak this task's indistinguishability
+// work missed: the design's sign-in screen deliberately shows the household a
+// different message ("we've locked the household for 15 minutes") than it
+// shows a simple wrong password, and the spec assigns 401 to one and 423 to
+// the other on purpose. Whoever is looking at the failed sign-in screen is
+// meant to learn which case they're in — what the indistinguishability work
+// protects against is a caller *guessing at an address* learning whether that
+// address exists or belongs to a locked household, which lives entirely in
+// AttemptsRemaining/Locked/LockedUntil being computed identically across
+// branches, not in collapsing the two errors into one HTTP status. Task 16's
+// handler should map these to 401 and 423 respectively; do not "fix" this
+// into a single status.
 func (e *SignInFailedError) Unwrap() error {
 	if e.Locked {
 		return domain.ErrHouseholdLocked
@@ -41,7 +56,12 @@ type AuthDeps struct {
 	BaseURL    string
 }
 
-type AuthService struct{ d AuthDeps }
+type AuthService struct {
+	d AuthDeps
+
+	decoyOnce sync.Once
+	decoyHash string
+}
 
 // NewAuthService fills in a zero-valued Policy. A LockoutPolicy{} never locks
 // anyone out while reporting AttemptsRemaining as 0 — an inconsistent state
@@ -52,6 +72,36 @@ func NewAuthService(d AuthDeps) *AuthService {
 		d.Policy = domain.DefaultLockoutPolicy()
 	}
 	return &AuthService{d: d}
+}
+
+// fallbackDecoyHash is used only if generating a real decoy hash through the
+// configured Hasher ever fails (practically: Hash's entropy source is
+// exhausted). NewAuthService cannot fail and must not silently skip the
+// timing mitigation just because the one-time decoy generation had a bad
+// day, so this constant guarantees decoy() always has *something* to Verify
+// against. It is built once, right here, so it can never itself error.
+const fallbackDecoyHash = "decoy-hash-used-only-if-generating-a-real-one-failed"
+
+// decoy returns an encoded hash to run Hasher.Verify against on every SignIn
+// path that would otherwise return without ever calling Verify. Against a
+// real hasher (argon2id in production) a genuine verification costs tens to
+// hundreds of milliseconds; a branch that skips it is trivially
+// distinguishable from one that doesn't by timing alone, which defeats the
+// same indistinguishability the error type and the attempts countdown exist
+// to protect. decoy() is generated lazily against the service's own Hasher
+// the first time it's needed (so it costs the same as the paths it's
+// standing in for) and cached for the life of the service; SignIn always
+// discards the result, since the call exists for its cost, not its answer.
+func (s *AuthService) decoy() string {
+	s.decoyOnce.Do(func() {
+		hash, err := s.d.Hasher.Hash("decoy-password-for-timing-parity")
+		if err != nil {
+			s.decoyHash = fallbackDecoyHash
+			return
+		}
+		s.decoyHash = hash
+	})
+	return s.decoyHash
 }
 
 type SignInResult struct {
@@ -69,6 +119,11 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 		if !errors.Is(err, domain.ErrNotFound) {
 			return SignInResult{}, err
 		}
+		// Run the decoy verification here, in the position a real
+		// Hasher.Verify call would occupy for a known user — this branch
+		// otherwise returns without ever touching the hasher, which is
+		// trivially distinguishable by timing from every branch that does.
+		s.d.Hasher.Verify(password, s.decoy())
 		// Record the attempt with no household, so guessing at unknown addresses
 		// cannot lock a real household. Then evaluate the same policy over that
 		// address's own failures, so the countdown a stranger sees is
@@ -94,11 +149,33 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 	}
 	householdID := membership.HouseholdID
 
+	// This counter is household-scoped, not address-scoped, because the
+	// lockout itself is household-wide by design: the sign-in screen tells
+	// whoever is typing "we've locked the household," not "we've locked
+	// this address." That is a deliberate, accepted disclosure, not an
+	// oversight — a wrong-password guess against one member's address
+	// visibly decrements the countdown a second member's address reports,
+	// so someone who already knows one member's email can use this to
+	// confirm a candidate second address belongs to the same household.
+	// The human partner weighed this against the product: a four-user,
+	// two-adult household where both adults' addresses are already known
+	// to each other, and chose to keep the household-wide lock rather than
+	// scope the counter per address (which would also change the design's
+	// own copy). Anyone changing the lock's scope away from
+	// household-wide should revisit this trade-off, since it's the reason
+	// the scoping is what it is.
 	failures, err := s.d.Attempts.FailuresSince(ctx, householdID, now.Add(-s.d.Policy.Window))
 	if err != nil {
 		return SignInResult{}, err
 	}
 	if state := s.d.Policy.Evaluate(failures, now); state.Locked {
+		// Run the decoy verification here, in the exact position the real
+		// one would have occupied next (see the password check below) had
+		// the household not been locked — otherwise this branch returns
+		// without ever touching the hasher, timing-distinguishable from
+		// every branch that does.
+		s.d.Hasher.Verify(password, s.decoy())
+
 		// Record this attempt too, exactly as the wrong-password and
 		// unknown-address branches do, and re-evaluate over the updated
 		// failure set before responding. Without this, a caller hammering an
@@ -108,6 +185,16 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 		// even though the error type is identical. Recording here means
 		// continued guessing against a locked household extends the lock,
 		// matching the unknown-address behavior deliberately.
+		//
+		// This is itself an accepted trade-off, not an oversight: it means
+		// someone who already knows a member's email can keep the household
+		// locked indefinitely just by continuing to guess, with no cap. The
+		// human partner chose to leave this uncapped rather than let the
+		// lock expire on a fixed schedule while an attacker is still
+		// actively working it — and magic link sign-in is deliberately
+		// never gated by this lock (see domain.LockoutPolicy's doc comment),
+		// so a real member always has a way back into their own household
+		// even while the password lock is being held open this way.
 		if err := s.d.Attempts.Record(ctx, &householdID, &user.ID, email, false, now); err != nil {
 			return SignInResult{}, err
 		}
@@ -119,7 +206,20 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 		return SignInResult{}, &SignInFailedError{Locked: true, LockedUntil: state.Until}
 	}
 
-	if user.PasswordHash == "" || !s.d.Hasher.Verify(password, user.PasswordHash) {
+	passwordFailed := true
+	if user.PasswordHash == "" {
+		// The empty string is the sentinel for "no password set" (see
+		// StoredUser's doc comment); it must never be handed to Verify as
+		// if it were a real stored hash. Run the decoy verification instead,
+		// in the exact position the real one would have occupied, so a
+		// credential-less member costs exactly what a member with the wrong
+		// password costs.
+		s.d.Hasher.Verify(password, s.decoy())
+	} else {
+		passwordFailed = !s.d.Hasher.Verify(password, user.PasswordHash)
+	}
+
+	if passwordFailed {
 		if err := s.d.Attempts.Record(ctx, &householdID, &user.ID, email, false, now); err != nil {
 			return SignInResult{}, err
 		}

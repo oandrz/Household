@@ -18,17 +18,39 @@ type fixedClock struct{ now time.Time }
 func (c *fixedClock) Now() time.Time          { return c.now }
 func (c *fixedClock) Advance(d time.Duration) { c.now = c.now.Add(d) }
 
-// fakeHasher counts Verify calls (via a pointer receiver, unlike the
-// brief's value-receiver sketch) so a test can assert that a
-// credential-less member is rejected before any password comparison is
-// even attempted, rather than relying on Verify happening to reject an
-// empty encoded hash.
-type fakeHasher struct{ verifyCalls int }
+// fakeHasher logs every Verify call, by encoded argument (via a pointer
+// receiver, unlike the brief's value-receiver sketch), so a test can tell
+// apart a real verification against a member's own stored hash from
+// AuthService's timing-parity decoy verification, which runs against a
+// different, unrelated encoded hash. verifyCallCount answers "did the
+// hasher get touched at all" (the decoy's whole reason to exist); the log
+// itself answers "was it touched with *this* encoded value" (the guard
+// TestUsersWithoutAPasswordCannotSignIn cares about — a credential-less
+// member's own empty PasswordHash must never reach Verify, decoy or not).
+type fakeHasher struct {
+	verifyLog []string /* encoded arguments */
+}
 
 func (h *fakeHasher) Hash(plain string) (string, error) { return "hashed:" + plain, nil }
 func (h *fakeHasher) Verify(plain, encoded string) bool {
-	h.verifyCalls++
+	h.verifyLog = append(h.verifyLog, encoded)
 	return encoded == "hashed:"+plain
+}
+
+func (h *fakeHasher) verifyCallCount() int { return len(h.verifyLog) }
+
+// verifyCallsWithEncoded counts Verify calls made against a specific encoded
+// hash — e.g. a member's real (possibly empty) PasswordHash — independent of
+// however many additional decoy calls, against a different encoded hash,
+// also happened.
+func (h *fakeHasher) verifyCallsWithEncoded(encoded string) int {
+	n := 0
+	for _, e := range h.verifyLog {
+		if e == encoded {
+			n++
+		}
+	}
+	return n
 }
 
 type seqTokens struct{ n int }

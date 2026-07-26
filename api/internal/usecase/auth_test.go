@@ -165,12 +165,62 @@ func TestUsersWithoutAPasswordCannotSignIn(t *testing.T) {
 		t.Fatalf("err = %v, want *SignInFailedError — a credential-less member must not sign in", err)
 	}
 	// Pin the guard's actual purpose: the hasher must never be asked to
-	// verify a password for a member who has none. Without this assertion
-	// the test would pass even with the guard deleted, because fakeHasher
-	// happens to reject an empty encoded hash for every input.
-	if f.hasher.verifyCalls != 0 {
-		t.Fatalf("Verify was called %d times; a credential-less member must be rejected before any password comparison",
-			f.hasher.verifyCalls)
+	// verify a password against Ethan's own (empty) stored hash. Without
+	// this assertion the test would pass even with the guard deleted,
+	// because fakeHasher happens to reject an empty encoded hash for every
+	// input. SignIn does run a decoy verification for this branch now (see
+	// TestACredentialLessMemberRunsADecoyVerification below), against a
+	// different encoded hash entirely — that call is expected and doesn't
+	// count here.
+	if n := f.hasher.verifyCallsWithEncoded(""); n != 0 {
+		t.Fatalf("Verify was called %d times against the member's own empty hash; "+
+			"a credential-less member must be rejected before any real password comparison", n)
+	}
+}
+
+// TestUnknownAddressRunsADecoyVerification, TestALockedHouseholdRunsADecoyVerification
+// and TestACredentialLessMemberRunsADecoyVerification pin the timing-parity
+// fix: every branch of SignIn that returns without a real password
+// comparison must still call Hasher.Verify exactly once, against a decoy
+// hash, so that branch costs the same (against a real hasher) as one that
+// does compare a real password. Without the decoy call, these branches would
+// return near-instantly while a wrong-password guess pays argon2id's real
+// cost — a timing side channel that defeats the same indistinguishability
+// the error type and the attempts countdown exist to protect.
+func TestUnknownAddressRunsADecoyVerification(t *testing.T) {
+	f := newFixture(t)
+
+	f.auth.SignIn(context.Background(), "stranger@example.com", "whatever")
+
+	if got := f.hasher.verifyCallCount(); got != 1 {
+		t.Fatalf("Verify calls = %d, want 1 (a decoy verification for timing parity)", got)
+	}
+}
+
+func TestALockedHouseholdRunsADecoyVerification(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	for i := 0; i < 3; i++ {
+		f.auth.SignIn(ctx, "andreas@hearth.family", "wrong")
+		f.clock.Advance(time.Second)
+	}
+	before := f.hasher.verifyCallCount()
+
+	f.auth.SignIn(ctx, "andreas@hearth.family", "hunter2")
+
+	if got := f.hasher.verifyCallCount() - before; got != 1 {
+		t.Fatalf("Verify calls while locked = %d, want 1 (a decoy verification for timing parity)", got)
+	}
+}
+
+func TestACredentialLessMemberRunsADecoyVerification(t *testing.T) {
+	f := newFixture(t)
+
+	f.auth.SignIn(context.Background(), "ethan@hearth.family", "")
+
+	if got := f.hasher.verifyCallCount(); got != 1 {
+		t.Fatalf("Verify calls = %d, want 1 (a decoy verification for timing parity)", got)
 	}
 }
 
