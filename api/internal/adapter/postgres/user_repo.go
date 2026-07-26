@@ -160,7 +160,19 @@ func translate(err error, op string) error {
 		// key can both pass that check before either insert lands, and the
 		// database's UNIQUE (household_id, key) constraint is the
 		// authoritative backstop for that race.
-		return domain.ErrAlreadyExists
+		//
+		// op and pgErr.ConstraintName are folded into the message -- not
+		// just discarded the way a bare `return domain.ErrAlreadyExists`
+		// would -- because this is the one class of error with a typed
+		// sentinel a caller can match against, which makes it exactly the
+		// case where losing the diagnostic (which operation, which
+		// constraint) would be missed most: every log line for it would
+		// otherwise read "already exists" with no way to tell CreateSpace's
+		// key collision apart from CreateUser's email collision. %w keeps it
+		// errors.Is-matchable against domain.ErrAlreadyExists despite the
+		// wrapping, exactly as the default branch below already does for
+		// every other error.
+		return fmt.Errorf("%s: constraint %q: %w", op, pgErr.ConstraintName, domain.ErrAlreadyExists)
 	default:
 		return fmt.Errorf("%s: %w", op, err)
 	}
