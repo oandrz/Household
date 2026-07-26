@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -258,4 +259,64 @@ func (s *AuthService) issueSession(ctx context.Context, userID, householdID stri
 
 func (s *AuthService) SignOut(ctx context.Context, sessionToken string) error {
 	return s.d.Sessions.RevokeByToken(ctx, s.d.Tokens.HashToken(sessionToken))
+}
+
+const (
+	magicLinkTTL          = 15 * time.Minute
+	magicLinkPerHourLimit = 3
+)
+
+// RequestMagicLink is deliberately quiet. Neither an unknown address nor an
+// exhausted rate limit produces an error, because any observable difference
+// between the two would let a caller discover who is a member.
+func (s *AuthService) RequestMagicLink(ctx context.Context, email string) error {
+	now := s.d.Clock.Now()
+
+	count, err := s.d.MagicLinks.CountSince(ctx, email, now.Add(-time.Hour))
+	if err != nil {
+		return err
+	}
+	if count >= magicLinkPerHourLimit {
+		slog.Info("magic link rate limit reached", "email_hash", fmt.Sprintf("%x", s.d.Tokens.HashToken(email))[:12])
+		return nil
+	}
+
+	user, err := s.d.Users.ByEmail(ctx, email)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+
+	raw, hash, err := s.d.Tokens.NewToken()
+	if err != nil {
+		return fmt.Errorf("generate magic link token: %w", err)
+	}
+	if err := s.d.MagicLinks.Create(ctx, user.ID, hash, now.Add(magicLinkTTL)); err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf("%s/sign-in/magic?token=%s", s.d.BaseURL, raw)
+	return s.d.Mailer.SendMagicLink(ctx, user.Email, user.DisplayName, url)
+}
+
+// ConsumeMagicLink signs the holder in. It is not gated by the household lock:
+// the lock exists to stop password guessing, and this is the recovery path.
+func (s *AuthService) ConsumeMagicLink(ctx context.Context, token string) (SignInResult, error) {
+	now := s.d.Clock.Now()
+
+	userID, err := s.d.MagicLinks.Consume(ctx, s.d.Tokens.HashToken(token))
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return SignInResult{}, domain.ErrTokenExpired
+		}
+		return SignInResult{}, err
+	}
+
+	membership, err := s.d.Members.ByUser(ctx, userID)
+	if err != nil {
+		return SignInResult{}, err
+	}
+	return s.issueSession(ctx, userID, membership.HouseholdID, now)
 }

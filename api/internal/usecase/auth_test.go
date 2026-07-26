@@ -3,6 +3,7 @@ package usecase_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -291,3 +292,129 @@ func TestLockedUntilAdvancesWhileAnUnknownAddressIsGuessed(t *testing.T) {
 }
 
 var _ = domain.DefaultLockoutPolicy
+
+func TestRequestMagicLinkSendsAnEmail(t *testing.T) {
+	f := newFixture(t)
+
+	if err := f.auth.RequestMagicLink(context.Background(), "andreas@hearth.family"); err != nil {
+		t.Fatalf("RequestMagicLink: %v", err)
+	}
+	if len(f.mailer.magicLinks) != 1 {
+		t.Fatalf("sent = %d, want 1", len(f.mailer.magicLinks))
+	}
+	if !strings.HasPrefix(f.mailer.magicLinks[0].URL, "http://localhost:5173/sign-in/magic?token=") {
+		t.Fatalf("url = %q", f.mailer.magicLinks[0].URL)
+	}
+}
+
+func TestRequestMagicLinkStaysSilentForAnUnknownAddress(t *testing.T) {
+	f := newFixture(t)
+
+	if err := f.auth.RequestMagicLink(context.Background(), "stranger@example.com"); err != nil {
+		t.Fatalf("an unknown address must not produce an error: %v", err)
+	}
+	if len(f.mailer.magicLinks) != 0 {
+		t.Fatal("no email should have been sent")
+	}
+}
+
+func TestMagicLinkIsRateLimitedSilentlyToThreePerHour(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	for i := 0; i < 3; i++ {
+		if err := f.auth.RequestMagicLink(ctx, "andreas@hearth.family"); err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+		f.clock.Advance(time.Minute)
+	}
+
+	// The fourth request must look exactly like the first three from the
+	// outside. Returning an error here would make four requests an oracle for
+	// whether the address belongs to a member, which is the property this
+	// endpoint exists to avoid.
+	if err := f.auth.RequestMagicLink(ctx, "andreas@hearth.family"); err != nil {
+		t.Fatalf("the rate limit must be silent, got err = %v", err)
+	}
+	if len(f.mailer.magicLinks) != 3 {
+		t.Fatalf("sent = %d, want 3 — the fourth request sends nothing", len(f.mailer.magicLinks))
+	}
+}
+
+func TestMagicLinkRequestsAreIndistinguishableAtEveryCount(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	for i := 0; i < 5; i++ {
+		knownErr := f.auth.RequestMagicLink(ctx, "andreas@hearth.family")
+		unknownErr := f.auth.RequestMagicLink(ctx, "stranger@example.com")
+		if knownErr != nil || unknownErr != nil {
+			t.Fatalf("request %d: known = %v, unknown = %v — both must be nil", i, knownErr, unknownErr)
+		}
+		f.clock.Advance(time.Minute)
+	}
+}
+
+func TestConsumingAMagicLinkSignsIn(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	if err := f.auth.RequestMagicLink(ctx, "andreas@hearth.family"); err != nil {
+		t.Fatalf("RequestMagicLink: %v", err)
+	}
+	token := f.mailer.lastMagicToken(t)
+
+	result, err := f.auth.ConsumeMagicLink(ctx, token)
+	if err != nil {
+		t.Fatalf("ConsumeMagicLink: %v", err)
+	}
+	if result.SessionToken == "" {
+		t.Fatal("expected a session")
+	}
+}
+
+func TestAMagicLinkCannotBeUsedTwice(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	f.auth.RequestMagicLink(ctx, "andreas@hearth.family")
+	token := f.mailer.lastMagicToken(t)
+	f.auth.ConsumeMagicLink(ctx, token)
+
+	if _, err := f.auth.ConsumeMagicLink(ctx, token); !errors.Is(err, domain.ErrTokenExpired) {
+		t.Fatalf("err = %v, want ErrTokenExpired", err)
+	}
+}
+
+func TestAMagicLinkExpiresAfterFifteenMinutes(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	f.auth.RequestMagicLink(ctx, "andreas@hearth.family")
+	token := f.mailer.lastMagicToken(t)
+	f.clock.Advance(16 * time.Minute)
+
+	if _, err := f.auth.ConsumeMagicLink(ctx, token); !errors.Is(err, domain.ErrTokenExpired) {
+		t.Fatalf("err = %v, want ErrTokenExpired", err)
+	}
+}
+
+func TestAMagicLinkWorksWhileTheHouseholdIsLocked(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	for i := 0; i < 3; i++ {
+		f.auth.SignIn(ctx, "andreas@hearth.family", "wrong")
+		f.clock.Advance(time.Second)
+	}
+	if _, err := f.auth.SignIn(ctx, "andreas@hearth.family", "hunter2"); err == nil {
+		t.Fatal("expected the household to be locked")
+	}
+
+	if err := f.auth.RequestMagicLink(ctx, "andreas@hearth.family"); err != nil {
+		t.Fatalf("magic link must remain available while locked: %v", err)
+	}
+	if _, err := f.auth.ConsumeMagicLink(ctx, f.mailer.lastMagicToken(t)); err != nil {
+		t.Fatalf("consuming a magic link while locked must succeed: %v", err)
+	}
+}
