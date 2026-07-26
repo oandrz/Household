@@ -3102,7 +3102,13 @@ A `requireCapability(cap domain.Capability)` middleware and a `requireOwner` mid
 
 - [ ] **Step 5: Implement the handlers and wire the router**
 
-Every route from the spec, grouped: `/auth/*` public except `/auth/me` and `/auth/sign-out`; `/invites/:token` and `/invites/:token/accept` public; everything else behind session then CSRF, with `/household/members` mutations and `/spaces` creation additionally behind `requireOwner`.
+Every route from the spec, grouped: `/auth/*` public except `/auth/me` and `/auth/sign-out`; `/invites/:token` and `/invites/:token/accept` public; everything else behind session then CSRF.
+
+`requireOwner` additionally guards **every household-wide mutation**: `/household/members` mutations, `/spaces` creation, `PATCH /household` and `PATCH /notification-preferences`. The last two are easy to miss — they change currency, FX mode and notification settings for everyone, and without the guard a child can edit them. No service checks who is asking, so a route without its guard has no second line of defence.
+
+The matching `GET` routes stay open to any authenticated member: reading configuration discloses nothing a member cannot already see rendered. `GET /household/members` is the one exception worth stating — it stays open, because a later slice needs member names for calendar filters, but its email field is populated only when the caller is an owner. A limited caller receives every member with an empty email, so the response shape does not change. Empty means withheld here as well as absent; a child's own record legitimately has no email, and the two are indistinguishable to a limited caller by design.
+
+Write the guard audit down. For every route, state which guard it carries and why. A table-driven test must assert that each ownership-gated route returns 403 to a limited member, so a route added later without a guard fails a test rather than shipping.
 
 Update `cmd/api/main.go` to construct every repository, service and adapter and pass them in `Deps`. `Secure: !cfg.IsDevelopment()`.
 
