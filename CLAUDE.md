@@ -12,6 +12,8 @@ React + TypeScript frontend, Postgres, Docker Compose.
 - **`docs/FEATURE_TRACKER.md`** — every feature in the design and whether it
   exists yet. **Check it before starting anything**, to see whether the work is
   already listed and what it depends on.
+- **`docs/SYSTEM_DESIGN.md`** — component, flow and data diagrams. **Read it
+  before changing anything structural**, and keep it true as you go (below).
 - `docs/SKILL_TRACKER.md` — the project skills in `.claude/skills/`, and when to
   reach for each. Each exists because a real defect got through here.
 - `docs/HANDOVER.md` — current state, what to build next, open items.
@@ -21,8 +23,16 @@ React + TypeScript frontend, Postgres, Docker Compose.
 
 ## Keeping the docs current
 
-Two documents must not be allowed to go stale. Update both **as part of the
+Three documents must not be allowed to go stale. Update them **as part of the
 work**, before calling it finished — not as a separate tidy-up later.
+
+**`docs/SYSTEM_DESIGN.md`** — use the **`maintaining-system-design`** skill. It
+triggers on more than shipped features: a route or its guards changing, a table
+or column, a port or interface, a new service or adapter, a reshaped request
+flow, or any refactor across a boundary. This is the document a human engineer
+onboards from, so an out-of-date diagram actively misleads — worse than none,
+because it is believed. Change the prose under a diagram too; that is where the
+non-obvious reasoning lives.
 
 **`docs/FEATURE_TRACKER.md`**
 

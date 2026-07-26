@@ -17,6 +17,7 @@ Add a row here whenever you add a skill, and say plainly when to reach for it.
 | **`verifying-in-the-real-environment`** | Work touches the DOM, a browser API, SQL, a transaction, a migration, or wiring you introduced. Before claiming a UI feature works. | jsdom's `<dialog>` is a stub, so five green tests hid a modal that threw on **every open** in production — and fixing that exposed a second bug that had been unreachable. |
 | **`finding-disclosure-oracles`** | Building or reviewing sign-in, password reset, magic links, invites, member lookup — anything whose contract is "answer the same way regardless". | Four leaks here were built from timing, side effects and error asymmetry, on endpoints returning byte-identical responses. One was readable by watching *which deadline moved*. |
 | **`guarding-partial-writes`** | Writing or reviewing any create/update flow, any handler with a request struct, any repository method, any code where two things must both happen. | Four defects returned success for work that only partly happened. One left an orphaned row holding a unique index, making an invite **permanently unacceptable** with no recovery. |
+| **`maintaining-system-design`** | A feature ships, a route or its guards change, a table or port changes, a flow is reshaped, or anything is refactored across a boundary. | `docs/SYSTEM_DESIGN.md` is what a human engineer reads to onboard. Its value is entirely in being accurate — a diagram that is 80% right is worse than none, because it is believed. |
 
 ---
 
@@ -37,6 +38,10 @@ caller measure, and what survives a failure halfway through.
 **Before claiming done** — `proving-tests-can-fail` and
 `verifying-in-the-real-environment`. Both answer the same underlying question:
 is the evidence real, or does it only look like evidence?
+
+**As part of shipping** — `maintaining-system-design`, alongside the tracker and
+learning-log updates. Documentation written afterwards is documentation written
+never.
 
 ## What these deliberately do not cover
 
