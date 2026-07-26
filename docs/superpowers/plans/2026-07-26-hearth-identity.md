@@ -25,6 +25,7 @@
 - Capability strings are exactly `calendar`, `chores`, `money`, `marriage`. Role strings are exactly `owner`, `limited`.
 - All user-visible copy is taken verbatim from `design/Household Dashboard.dc.html`. The wrong-password message is: `That password doesn't match. Two tries left before we lock the household for 15 minutes.` — with the count substituted.
 - **Every 2xx response except `204` carries a JSON body.** The frontend's `apiFetch` throws `ApiError` with code `INVALID_RESPONSE` on an ok response whose body is absent or unparseable, so an empty `200` or `202` is a client-visible failure. `POST /auth/magic-link` answers `202` with `{"status":"accepted"}`; `POST /auth/sign-out` and `DELETE /household/members/:id` answer `204` with no body, which `apiFetch` handles explicitly.
+- `make lint-arch` now rejects **any** third-party import in `internal/domain` and `internal/usecase`, including imports that appear only in `_test.go` files. Those packages and their tests may use the standard library and in-module packages only. Assertion libraries do not belong there; the tests in this plan use stdlib `testing` throughout.
 - Every task ends with a commit.
 
 ## File Structure
@@ -50,7 +51,8 @@
 | `api/internal/adapter/http/auth_handlers.go` etc. | One handler file per resource group |
 | `api/cmd/adminctl/main.go` | `seed`, `reset-password`, `unlock-household`, `create-invite` |
 | `web/src/features/auth/` | Sign-in state machine, invite acceptance |
-| `web/src/features/shell/` | Sidebar, header, `RequireAuth`, `RequireCapability`, `Modal` |
+| `web/src/features/shell/` | Sidebar, header, `RequireAuth`, `RequireCapability` |
+| `web/src/components/` | Generic primitives only: `Modal`, `Button`, `Field` |
 | `web/src/features/settings/` | Members, spaces, currency, notifications |
 
 ---
@@ -1298,6 +1300,7 @@ git commit -m "feat: add the identity schema and generate typed queries with sql
 **Interfaces:**
 - Consumes: `domain` from Tasks 6–8.
 - Produces:
+  - `config.Config` gains `SMTPAddr`, `SMTPFrom`, `AppBaseURL`, `Argon2Time`, `Argon2MemoryKiB`, `Argon2Threads` — read from `SMTP_ADDR`, `SMTP_FROM`, `APP_BASE_URL`, `ARGON2_TIME`, `ARGON2_MEMORY_KIB`, `ARGON2_THREADS`. The first three are required; the argon2 three default to 3, 65536 and 2. The spec requires argon2 parameters to live in configuration so they can be raised without a code change, and the mailer cannot be constructed without the first three.
   - `usecase.Clock interface { Now() time.Time }`
   - `usecase.PasswordHasher interface { Hash(plain string) (string, error); Verify(plain, encoded string) bool }`
   - `usecase.TokenGenerator interface { NewToken() (raw string, hash []byte, err error); HashToken(raw string) []byte }`
@@ -1305,6 +1308,12 @@ git commit -m "feat: add the identity schema and generate typed queries with sql
   - `usecase.UserRepository`, `usecase.HouseholdRepository`, `usecase.MembershipRepository`, `usecase.SessionRepository`, `usecase.MagicLinkRepository`, `usecase.LoginAttemptRepository`, `usecase.InviteRepository`, `usecase.SpaceRepository`, `usecase.NotificationRepository` — full signatures below
   - `usecase.Rate{Numerator, Denominator int64}` and `usecase.FXRateProvider interface { Rate(ctx context.Context, from, to string) (Rate, error) }` — a ratio, not a scaled decimal, so that inverting a rate is exact in both directions
   - `crypto.NewArgon2Hasher() *Argon2Hasher`, `crypto.NewTokenGenerator() *Tokens`, `clock.System{}`, `fx.NewStaticProvider() *StaticProvider`
+
+- [ ] **Step 0: Extend the configuration**
+
+`config.Config` today carries only `AppEnv`, `Port`, `DatabaseURL` and `SessionSecret`. This task's hasher and the next task's mailer both need more. Add the six fields listed under Produces above, validating that `SMTP_ADDR`, `SMTP_FROM` and `APP_BASE_URL` are non-empty and that the three argon2 values are positive, in the same style as the existing `DATABASE_URL` and `SESSION_SECRET` checks. Extend `config_test.go` to cover a missing `SMTP_FROM` and a zero `ARGON2_TIME`.
+
+`docker-compose.yml` already sets `SMTP_ADDR`, `SMTP_FROM` and `APP_BASE_URL`; add the three argon2 variables there and to `.env.example`. Confirm `make up` still reaches `{"status":"ready"}` before moving on — a required variable that Compose does not set would stop the API from starting at all.
 
 - [ ] **Step 1: Write the failing hasher test**
 
@@ -1321,7 +1330,7 @@ import (
 )
 
 func TestHashThenVerify(t *testing.T) {
-	h := crypto.NewArgon2Hasher()
+	h := crypto.NewArgon2Hasher(3, 64*1024, 2)
 
 	encoded, err := h.Hash("correct horse battery staple")
 	if err != nil {
@@ -1339,7 +1348,7 @@ func TestHashThenVerify(t *testing.T) {
 }
 
 func TestHashIsSaltedPerCall(t *testing.T) {
-	h := crypto.NewArgon2Hasher()
+	h := crypto.NewArgon2Hasher(3, 64*1024, 2)
 
 	first, _ := h.Hash("same")
 	second, _ := h.Hash("same")
@@ -1350,7 +1359,7 @@ func TestHashIsSaltedPerCall(t *testing.T) {
 }
 
 func TestVerifyRejectsMalformedInput(t *testing.T) {
-	h := crypto.NewArgon2Hasher()
+	h := crypto.NewArgon2Hasher(3, 64*1024, 2)
 
 	for _, encoded := range []string{"", "not-a-hash", "$argon2id$v=19$m=1", "$bcrypt$whatever"} {
 		if h.Verify("anything", encoded) {
@@ -1396,8 +1405,11 @@ type Argon2Hasher struct {
 	saltLen int
 }
 
-func NewArgon2Hasher() *Argon2Hasher {
-	return &Argon2Hasher{time: 3, memory: 64 * 1024, threads: 2, keyLen: 32, saltLen: 16}
+// NewArgon2Hasher takes its cost parameters from configuration so they can be
+// raised without a code change, as the spec requires. Callers pass
+// cfg.Argon2Time, cfg.Argon2MemoryKiB and cfg.Argon2Threads.
+func NewArgon2Hasher(time uint32, memoryKiB uint32, threads uint8) *Argon2Hasher {
+	return &Argon2Hasher{time: time, memory: memoryKiB, threads: threads, keyLen: 32, saltLen: 16}
 }
 
 func (h *Argon2Hasher) Hash(plain string) (string, error) {
@@ -3068,7 +3080,7 @@ git commit -m "feat: add the sign-in, invite and magic-link screens"
 ### Task 19: The application shell
 
 **Files:**
-- Create: `web/src/features/shell/AppShell.tsx`, `Sidebar.tsx`, `RequireAuth.tsx`, `RequireCapability.tsx`, `Modal.tsx`, `Modal.test.tsx`, `Sidebar.test.tsx`, `web/src/routes/router.tsx`, `web/src/features/placeholder/PlaceholderPage.tsx`
+- Create: `web/src/features/shell/AppShell.tsx`, `Sidebar.tsx`, `RequireAuth.tsx`, `RequireCapability.tsx`, `Sidebar.test.tsx`, `web/src/components/Modal.tsx`, `web/src/components/Modal.test.tsx`, `web/src/routes/router.tsx`, `web/src/features/placeholder/PlaceholderPage.tsx`
 - Modify: `web/src/App.tsx`
 
 **Interfaces:**
@@ -3103,7 +3115,7 @@ Expected: FAIL — modules not found.
 
 - [ ] **Step 3: Implement the shell**
 
-Build `Modal.tsx` on the native `<dialog>` element so focus trapping and Escape come from the platform rather than from hand-written key handling. `Sidebar.tsx` renders from `me.spaces` — never from a hard-coded list, because that is the property that makes "+ New space" work. `RequireAuth.tsx` redirects to `/sign-in` when `useMe` fails with a 401.
+Build `components/Modal.tsx` on the native `<dialog>` element — it lives in `components/`, not in a feature folder, because slices 2-4 build roughly fifteen modals on it and moving a shared primitive once it has fifteen call sites is expensive so focus trapping and Escape come from the platform rather than from hand-written key handling. `Sidebar.tsx` renders from `me.spaces` — never from a hard-coded list, because that is the property that makes "+ New space" work. `RequireAuth.tsx` redirects to `/sign-in` when `useMe` fails with a 401.
 
 `PlaceholderPage.tsx` takes a `slice` prop and renders the page name with `Arriving in slice N` so an unfinished area is honest rather than broken.
 
@@ -3133,7 +3145,7 @@ git commit -m "feat: add the application shell, sidebar and modal primitive"
 - Modify: `web/src/routes/router.tsx`
 
 **Interfaces:**
-- Consumes: `Modal` from Task 19, the household endpoints from Task 16.
+- Consumes: `components/Modal` from Task 19, the household endpoints from Task 16.
 - Produces: the Settings route, complete except the Connected-accounts panel, which belongs to slice 2.
 
 - [ ] **Step 1: Write the failing test**
@@ -3152,7 +3164,7 @@ Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement the panels**
 
-Four panels inside one page, each owning its own mutation and invalidating `['me']` and its own query on success. `InviteMemberModal` and `NewSpaceModal` are built on the `Modal` primitive and mirror the design's fields exactly, including the `Off for kids by default` helper text on the money capability and the space templates Kids, Home, Travel and Blank.
+Four panels inside one page, each owning its own mutation and invalidating `['me']` and its own query on success. `InviteMemberModal` and `NewSpaceModal` are built on the `components/Modal` primitive and mirror the design's fields exactly, including the `Off for kids by default` helper text on the money capability and the space templates Kids, Home, Travel and Blank.
 
 The plan label reads `Free plan` as static text with no link, per the spec.
 
