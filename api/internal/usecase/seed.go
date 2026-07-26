@@ -401,6 +401,16 @@ func findLiveLadderURL(ctx context.Context, d SeedDeps) (string, error) {
 // UNIQUE (token_hash) constraint is the authoritative backstop for that
 // window, exactly as it is everywhere else this codebase relies on
 // translate's unique-violation mapping.
+//
+// ErrInviteeAlreadyRegistered from Create is not tolerated the same way: it
+// means christineEmail already has a users row with no membership in this
+// household -- the state removing a membership (MemberService.Remove)
+// leaves behind, since it deletes the memberships row and not the user
+// underneath it (see that fix's report). That is not a race Seed can retry
+// past; InviteService.Create refuses to write anything until it's resolved,
+// exactly as intended. This surfaces it through christineOrphanedUserError
+// instead, naming the row and the remedy, the same way ensureChild's
+// identical orphan case does for a credential-less child.
 func issueChristineInviteAtNextRung(ctx context.Context, d SeedDeps, householdID, andreasID string) (string, error) {
 	for rung := 1; rung <= maxInviteLadderRungs; rung++ {
 		token := devInviteTokenAt(rung)
@@ -416,17 +426,44 @@ func issueChristineInviteAtNextRung(ctx context.Context, d SeedDeps, householdID
 				Clock:   d.Clock,
 				BaseURL: d.BaseURL,
 			})
-			if err := inviteSvc.Create(ctx, householdID, andreasID, "Christine", christineEmail,
-				domain.RoleOwner, domain.AllCapabilities()); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+			err := inviteSvc.Create(ctx, householdID, andreasID, "Christine", christineEmail,
+				domain.RoleOwner, domain.AllCapabilities())
+			switch {
+			case err == nil, errors.Is(err, domain.ErrAlreadyExists):
+				return fmt.Sprintf("%s/invite/%s", d.BaseURL, token), nil
+			case errors.Is(err, ErrInviteeAlreadyRegistered):
+				return "", christineOrphanedUserError(ctx, d)
+			default:
 				return "", fmt.Errorf("invite christine: %w", err)
 			}
-			return fmt.Sprintf("%s/invite/%s", d.BaseURL, token), nil
 		case err != nil:
 			return "", fmt.Errorf("check invite ladder rung %d: %w", rung, err)
 		}
 		// Rung already used (live, expired or accepted) -- try the next one.
 	}
 	return "", fmt.Errorf("exhausted the development invite token ladder (%d rungs)", maxInviteLadderRungs)
+}
+
+// christineOrphanedUserError builds the actionable error
+// issueChristineInviteAtNextRung returns when InviteService.Create refuses
+// because christineEmail already has a users row: Seed has already
+// confirmed she is not a member (Seed calls christineIsMember before ever
+// reaching here), so that row can only be an orphan left behind by removing
+// her membership without deleting the user underneath it. Names the row and
+// the remedy -- not just the fact that Create refused -- mirroring
+// ensureChild's identical orphan case for a credential-less child, so an
+// operator sees a concrete next step instead of a bare wrapped error.
+func christineOrphanedUserError(ctx context.Context, d SeedDeps) error {
+	existing, err := d.Users.ByEmail(ctx, christineEmail)
+	if err != nil {
+		return fmt.Errorf(
+			"a users row for %q already exists with no membership in this household, blocking her invite, "+
+				"but it could not be looked up to report its id: %w", christineEmail, err)
+	}
+	return fmt.Errorf(
+		"a users row for %q (id %s) already exists with no membership in this household; "+
+			"remove that user or restore their membership before running seed again",
+		christineEmail, existing.ID)
 }
 
 // seedInviteService builds an InviteService over d's ports, wrapping Tokens

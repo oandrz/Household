@@ -497,6 +497,62 @@ func TestSeedReportsChristineAsAlreadyMemberOnceSheAccepts(t *testing.T) {
 	}
 }
 
+// TestSeedNamesTheOrphanedUserWhenChristinesMembershipWasRemovedAfterAccepting
+// pins the fix for the seed-time counterpart of the invite-500 finding:
+// InviteService.Create now refuses (ErrInviteeAlreadyRegistered) an invite to
+// an address that already has a users row, and Christine's row survives
+// MemberService.Remove deleting her membership (removing a member deletes
+// only the memberships row, not the user underneath it). Seed's own
+// christineIsMember check sees no membership and proceeds to re-invite her,
+// which now hits that same refusal -- correctly, since InviteRepo.Accept
+// would otherwise collide on her already-claimed users.email exactly as the
+// original finding described. Failing is right; the message must say what
+// to do about it, naming the row and the remedy the way ensureChild's
+// identical orphan case does.
+func TestSeedNamesTheOrphanedUserWhenChristinesMembershipWasRemovedAfterAccepting(t *testing.T) {
+	f := newSeedFixture()
+	ctx := context.Background()
+
+	first, err := usecase.Seed(ctx, f.deps)
+	if err != nil {
+		t.Fatalf("first Seed: %v", err)
+	}
+
+	const prefix = "http://localhost:5173/invite/"
+	token := strings.TrimPrefix(first.InviteURL, prefix)
+	details, err := f.inviteRepo.ByTokenHash(ctx, f.deps.Tokens.HashToken(token))
+	if err != nil {
+		t.Fatalf("ByTokenHash: %v", err)
+	}
+	householdID := f.theHousehold(t).ID
+	accepted, err := f.inviteRepo.Accept(ctx, details.ID, "christine@hearth.family", "hashed:whatever",
+		"Christine", householdID, details.Role, details.Capabilities)
+	if err != nil {
+		t.Fatalf("Accept: %v", err)
+	}
+
+	// Simulate an owner removing Christine afterward: this deletes only her
+	// membership, exactly as MemberService.Remove does, leaving her users
+	// row (and its claim on christine@hearth.family) behind.
+	if err := f.members.Delete(ctx, householdID, accepted.MembershipID); err != nil {
+		t.Fatalf("Delete membership: %v", err)
+	}
+
+	_, err = usecase.Seed(ctx, f.deps)
+	if err == nil {
+		t.Fatal("expected Seed to fail rather than silently re-invite an orphaned address")
+	}
+	if !strings.Contains(err.Error(), "christine@hearth.family") {
+		t.Fatalf("err = %v, want it to name the blocked address", err)
+	}
+	if !strings.Contains(err.Error(), accepted.UserID) {
+		t.Fatalf("err = %v, want it to name the orphaned user's id %q", err, accepted.UserID)
+	}
+	if !strings.Contains(err.Error(), "remove that user or restore their membership") {
+		t.Fatalf("err = %v, want it to name the remedy, matching ensureChild's identical orphan case", err)
+	}
+}
+
 // TestSeedRefusesToDuplicateAnOrphanedChild is fix round 1's finding 3: a
 // membership removed without deleting the underlying credential-less user
 // leaves an orphan no unique constraint protects, and Seed must refuse
