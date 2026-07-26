@@ -25,21 +25,6 @@ function space(overrides: Partial<Space>): Space {
   };
 }
 
-const moneySpace = space({
-  id: "space-money",
-  key: "money",
-  name: "Money",
-  position: 1,
-  requiredCapability: "money",
-});
-const marriageSpace = space({
-  id: "space-marriage",
-  key: "marriage",
-  name: "Marriage",
-  visibility: "parents_only",
-  position: 2,
-  requiredCapability: "marriage",
-});
 const familySpace = space({
   id: "space-family",
   key: "family",
@@ -88,20 +73,52 @@ describe("Sidebar", () => {
     expect(screen.queryByText("Marriage")).not.toBeInTheDocument();
   });
 
-  it("renders all three spaces in position order when all are visible", async () => {
-    // Deliberately out of position order, matching the domain's own
-    // documented invariant that VisibleSpaces does not sort -- callers must
-    // already supply spaces in position order, so the sidebar must render
-    // in the order given, not re-sort by `position` itself.
+  it("renders spaces in the order given, not re-sorted by position", async () => {
+    // Fix round 1, Finding 2: the previous version of this test supplied
+    // Money/Marriage/Family both in the array in that order AND with
+    // ascending positions (1, 2, 3) -- a component that re-sorted by
+    // `position` would have produced an identical rendered order, so the
+    // test could not have caught that regression. This supplies them in the
+    // array as Family, Money, Marriage while their `position` fields are 3,
+    // 1, 2 respectively (still distinct and still meaningful data, just not
+    // ascending in array order), and asserts the *array* order is what
+    // renders -- not the position-sorted order (which would be Money,
+    // Marriage, Family). Per domain.VisibleSpaces's own documented
+    // invariant, the server has already ordered by position and the sidebar
+    // must render exactly what it's given, never re-sort.
+    const outOfOrderFamily = space({
+      id: "space-family",
+      key: "family",
+      name: "Family",
+      position: 3,
+    });
+    const outOfOrderMoney = space({
+      id: "space-money",
+      key: "money",
+      name: "Money",
+      position: 1,
+      requiredCapability: "money",
+    });
+    const outOfOrderMarriage = space({
+      id: "space-marriage",
+      key: "marriage",
+      name: "Marriage",
+      visibility: "parents_only",
+      position: 2,
+      requiredCapability: "marriage",
+    });
+
     renderWithRouter(
-      <Sidebar me={meFixture([moneySpace, marriageSpace, familySpace])} />,
+      <Sidebar
+        me={meFixture([outOfOrderFamily, outOfOrderMoney, outOfOrderMarriage])}
+      />,
     );
 
     const elements = await screen.findAllByTestId("sidebar-space");
     expect(elements.map((el) => el.textContent)).toEqual([
+      "Family",
       "Money",
       "Marriage",
-      "Family",
     ]);
   });
 
