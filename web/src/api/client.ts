@@ -22,10 +22,13 @@ export class ApiError extends Error {
 }
 
 function readCookie(name: string): string | undefined {
+  const prefix = `${name}=`;
+  // slice past the first "=" only -- split("=")[1] would truncate any
+  // value containing "=", which base64 tokens routinely do (padding).
   return document.cookie
     .split("; ")
-    .find((row) => row.startsWith(`${name}=`))
-    ?.split("=")[1];
+    .find((row) => row.startsWith(prefix))
+    ?.slice(prefix.length);
 }
 
 export async function apiFetch<T>(

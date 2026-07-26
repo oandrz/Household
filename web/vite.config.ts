@@ -17,6 +17,9 @@ export default defineConfig({
       "/healthz": {
         target: process.env.VITE_API_PROXY_TARGET ?? "http://localhost:8080",
       },
+      "/readyz": {
+        target: process.env.VITE_API_PROXY_TARGET ?? "http://localhost:8080",
+      },
     },
   },
 });

@@ -1,7 +1,20 @@
-import { describe, expect, it, vi, afterEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { apiFetch, ApiError } from "./client";
 
-afterEach(() => vi.unstubAllGlobals());
+function clearCookies() {
+  document.cookie.split("; ").forEach((cookie) => {
+    const name = cookie.split("=")[0];
+    if (name) {
+      document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+    }
+  });
+}
+
+beforeEach(() => clearCookies());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  clearCookies();
+});
 
 function stubFetch(status: number, body: unknown) {
   vi.stubGlobal(
@@ -14,6 +27,23 @@ function stubFetch(status: number, body: unknown) {
         }),
     ),
   );
+}
+
+// Captures the RequestInit each call to fetch received, so tests can assert
+// on headers, credentials, etc -- the request side of apiFetch, not just the
+// response side the tests above already cover.
+function stubFetchCapturing(status: number, body: unknown) {
+  const fetchMock = vi.fn<
+    (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+  >(
+    async () =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
 }
 
 describe("apiFetch", () => {
@@ -76,5 +106,70 @@ describe("apiFetch", () => {
     const error = await apiFetch("/api/v1/anything").catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).code).toBe("INVALID_RESPONSE");
+  });
+});
+
+describe("apiFetch request", () => {
+  it("sends X-CSRF-Token matching the csrf_token cookie on a POST", async () => {
+    document.cookie = "csrf_token=abc123";
+    const fetchMock = stubFetchCapturing(200, { status: "ok" });
+
+    await apiFetch("/api/v1/things", { method: "POST", body: "{}" });
+
+    const init = fetchMock.mock.calls[0][1];
+    expect((init?.headers as Headers).get("X-CSRF-Token")).toBe("abc123");
+  });
+
+  it("does not send X-CSRF-Token on a GET", async () => {
+    document.cookie = "csrf_token=abc123";
+    const fetchMock = stubFetchCapturing(200, { status: "ok" });
+
+    await apiFetch("/api/v1/things");
+
+    const init = fetchMock.mock.calls[0][1];
+    expect((init?.headers as Headers).get("X-CSRF-Token")).toBeNull();
+  });
+
+  it("sets Content-Type: application/json when a body is present", async () => {
+    const fetchMock = stubFetchCapturing(200, { status: "ok" });
+
+    await apiFetch("/api/v1/things", { method: "POST", body: "{}" });
+
+    const init = fetchMock.mock.calls[0][1];
+    expect((init?.headers as Headers).get("Content-Type")).toBe(
+      "application/json",
+    );
+  });
+
+  it("does not set Content-Type when there is no body", async () => {
+    const fetchMock = stubFetchCapturing(200, { status: "ok" });
+
+    await apiFetch("/api/v1/things");
+
+    const init = fetchMock.mock.calls[0][1];
+    expect((init?.headers as Headers).get("Content-Type")).toBeNull();
+  });
+
+  it("always sends credentials: same-origin", async () => {
+    const fetchMock = stubFetchCapturing(200, { status: "ok" });
+
+    await apiFetch("/api/v1/things");
+
+    const init = fetchMock.mock.calls[0][1];
+    expect(init?.credentials).toBe("same-origin");
+  });
+
+  it("transmits a cookie value containing = padding intact", async () => {
+    // A realistic base64 CSRF token, padded -- readCookie must not truncate
+    // it at the first "=".
+    document.cookie = "csrf_token=dGVzdC1jc3JmLXRva2Vu==";
+    const fetchMock = stubFetchCapturing(200, { status: "ok" });
+
+    await apiFetch("/api/v1/things", { method: "POST", body: "{}" });
+
+    const init = fetchMock.mock.calls[0][1];
+    expect((init?.headers as Headers).get("X-CSRF-Token")).toBe(
+      "dGVzdC1jc3JmLXRva2Vu==",
+    );
   });
 });
