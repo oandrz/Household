@@ -189,6 +189,179 @@ describe("SignInScreen", () => {
     ).toBeEnabled();
   });
 
+  // Fix round 4, Finding 2: signInError (and the locked state it drives)
+  // used to clear only inside handleSubmit, which cannot run while Continue
+  // is disabled -- so once the household locked there was no way back to a
+  // usable form short of reloading the page. Editing either field must
+  // re-enable it.
+  it("re-enables Continue when the user edits the password after being locked", async () => {
+    stubFetchRoutes({
+      [`POST ${SIGN_IN_URL}`]: {
+        status: 423,
+        body: {
+          error: {
+            code: "HOUSEHOLD_LOCKED",
+            message:
+              "This household is temporarily locked after too many failed sign-in attempts.",
+            details: { lockedUntil: "2026-07-26T13:00:00Z" },
+          },
+        },
+      },
+    });
+    renderSignIn();
+
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "andreas@hearth.family" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "wrong-password" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    await screen.findByText(
+      "This household is locked for 15 minutes after too many failed attempts. Use a magic link below to sign in instead.",
+    );
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "a-different-password" },
+    });
+
+    expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
+  });
+
+  it("re-enables Continue when the user edits the email after being locked", async () => {
+    stubFetchRoutes({
+      [`POST ${SIGN_IN_URL}`]: {
+        status: 423,
+        body: {
+          error: {
+            code: "HOUSEHOLD_LOCKED",
+            message:
+              "This household is temporarily locked after too many failed sign-in attempts.",
+            details: { lockedUntil: "2026-07-26T13:00:00Z" },
+          },
+        },
+      },
+    });
+    renderSignIn();
+
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "andreas@hearth.family" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "wrong-password" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    await screen.findByText(
+      "This household is locked for 15 minutes after too many failed attempts. Use a magic link below to sign in instead.",
+    );
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "christine@hearth.family" },
+    });
+
+    expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
+  });
+
+  // Fix round 4, Finding 3: "Forgot?" had no `disabled` while its sibling
+  // ("Email me a one-time sign-in link") did -- the same
+  // guard-on-one-control-not-its-sibling class this project hit repeatedly.
+  it("disables Forgot? while a magic-link request is pending, matching its sibling", async () => {
+    let resolveSend!: () => void;
+    const fetchMock = vi.fn<
+      (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+    >((input, init) => {
+      const url = String(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "POST" && url === MAGIC_LINK_URL) {
+        return new Promise<Response>((resolve) => {
+          resolveSend = () =>
+            resolve(
+              new Response(JSON.stringify({ status: "accepted" }), {
+                status: 202,
+                headers: { "Content-Type": "application/json" },
+              }),
+            );
+        });
+      }
+      throw new Error(`unexpected fetch call: ${method} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderSignIn();
+
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "andreas@hearth.family" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Email me a one-time sign-in link" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Forgot?" }),
+      ).toBeDisabled(),
+    );
+    expect(
+      screen.getByRole("button", { name: "Email me a one-time sign-in link" }),
+    ).toBeDisabled();
+
+    await act(async () => {
+      resolveSend();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  });
+
+  // Fix round 4, Finding 3: neither magic-link control is inside the <form>
+  // (both are type="button"), so neither honours the email field's
+  // `required` attribute -- clicking with an empty field used to post
+  // straight to the API.
+  it("shows an inline message and makes no request when Forgot? is clicked with an empty email", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    renderSignIn();
+
+    fireEvent.click(screen.getByRole("button", { name: "Forgot?" }));
+
+    expect(
+      screen.getByText("Enter your email address to get a sign-in link."),
+    ).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("shows an inline message and makes no request when Email me... is clicked with an empty email", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    renderSignIn();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Email me a one-time sign-in link" }),
+    );
+
+    expect(
+      screen.getByText("Enter your email address to get a sign-in link."),
+    ).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("shows an inline message when the email does not look like an email address", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    renderSignIn();
+
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "not-an-email" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Forgot?" }));
+
+    expect(
+      screen.getByText("Enter your email address to get a sign-in link."),
+    ).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   // Fix round 1, Finding 5: clicking the magic-link control while locked
   // must not erase the lock explanation before the new request resolves --
   // the locked state and the magic-link request's own error are tracked

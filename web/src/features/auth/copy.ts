@@ -13,6 +13,22 @@ export function apiErrorMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message : fallback;
 }
 
+// A deliberately loose "does this look like an email address" check, not a
+// full RFC 5322 validator: it exists only to catch an empty field and the
+// obviously-not-an-email case ("no", "andreas") before either magic-link
+// control ever fires a request, both of which are type="button" outside the
+// <form> and so never get the browser's own `required` validation the
+// password field's sibling inputs do. A server-side check still has the
+// final word on any address this lets through -- this is a client-side
+// guard against wasting one of the household's three hourly magic links (or
+// posting an empty email) on something that was never going to work, not a
+// replacement for that check.
+const PLAUSIBLE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export function isPlausibleEmail(email: string): boolean {
+  return PLAUSIBLE_EMAIL.test(email.trim());
+}
+
 const NUMBER_WORDS: Record<number, string> = {
   0: "Zero",
   1: "One",

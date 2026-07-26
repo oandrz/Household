@@ -10,7 +10,7 @@
 // Signed in).
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { ApiError } from "../../api/client";
-import { apiErrorMessage, triesLeftPhrase } from "./copy";
+import { apiErrorMessage, isPlausibleEmail, triesLeftPhrase } from "./copy";
 import { MagicLinkSentPanel } from "./MagicLinkSentPanel";
 import { useRequestMagicLink, useSignIn } from "./useAuth";
 
@@ -29,6 +29,15 @@ export function SignInScreen() {
   // confused with a failed initial send.
   const [signInError, setSignInError] = useState<unknown>(null);
   const [magicLinkError, setMagicLinkError] = useState<unknown>(null);
+  // Fix round 4, Finding 3: a client-side "that doesn't look like an email"
+  // message, distinct from magicLinkError above -- it is never an ApiError
+  // (the request that would have produced one never fires), so it can't be
+  // folded into apiErrorMessage's fallback without losing its actual text.
+  // Cleared alongside magicLinkError on every mode change, for the identical
+  // reason (fix round 2, Finding 1).
+  const [magicLinkValidationError, setMagicLinkValidationError] = useState<
+    string | null
+  >(null);
 
   const signIn = useSignIn();
   const requestMagicLink = useRequestMagicLink();
@@ -49,6 +58,7 @@ export function SignInScreen() {
   // request is still relevant to the mode it started in; see handleMagicLink.
   useEffect(() => {
     setMagicLinkError(null);
+    setMagicLinkValidationError(null);
   }, [mode]);
 
   const modeRef = useRef(mode);
@@ -68,12 +78,52 @@ export function SignInScreen() {
     );
   }
 
+  // Fix round 4, Finding 2: signInError (and the locked state it drives,
+  // including the disabled Continue button) used to clear only inside
+  // handleSubmit -- which cannot run while Continue is disabled, so once the
+  // household locked there was no way back to a usable form short of
+  // reloading the page. Clearing it here, on every edit to either field,
+  // means typing itself re-enables the form: the very next keystroke after
+  // a lockout (or a plain wrong-password rejection) clears the stale error
+  // rather than leaving it stuck until a fresh submit that can never happen.
+  function handleEmailChange(value: string) {
+    setEmail(value);
+    if (signInError) setSignInError(null);
+  }
+  function handlePasswordChange(value: string) {
+    setPassword(value);
+    if (signInError) setSignInError(null);
+  }
+
   // Also used by "Forgot?": magic link is the recovery path (it works even
   // while the household is locked -- see usecase/auth.go), so there is no
   // separate password-reset flow to wire this to. Deliberately does not
   // touch signInError: clicking this while the locked explanation is showing
   // must not erase it before the new request resolves.
+  //
+  // Fix round 4, Finding 3: neither "Forgot?" nor its sibling is inside the
+  // <form> (both are type="button"), so neither ever honours the email
+  // field's `required` attribute the way a real submit would -- clicking
+  // either with an empty or obviously-not-an-email field used to post
+  // straight to the API and render the "Check your email" panel for
+  // nothing. This guards on both a pending request (matching the disabled
+  // attribute both controls now carry -- see the JSX below) and a
+  // plausibly-formed, non-empty address before ever calling mutate, so a
+  // request is only ever made once whichever pending request was already in
+  // flight, and only ever posts an address that could conceivably belong to
+  // someone.
   function handleMagicLink() {
+    if (requestMagicLink.isPending) return;
+
+    const trimmedEmail = email.trim();
+    if (!isPlausibleEmail(trimmedEmail)) {
+      setMagicLinkValidationError(
+        "Enter your email address to get a sign-in link.",
+      );
+      return;
+    }
+    setMagicLinkValidationError(null);
+
     // Captured now, not read later: this is the mode the request started
     // in. `onSuccess`/`onError` below compare it against `modeRef.current`
     // (the *latest* mode, which a plain closure over `mode` could never see)
@@ -86,7 +136,7 @@ export function SignInScreen() {
     const startedInMode = mode;
     setMagicLinkError(null);
     requestMagicLink.mutate(
-      { email },
+      { email: trimmedEmail },
       {
         onSuccess: () => {
           if (modeRef.current !== startedInMode) return;
@@ -100,12 +150,14 @@ export function SignInScreen() {
     );
   }
 
-  const magicLinkErrorMessage = magicLinkError
-    ? apiErrorMessage(
-        magicLinkError,
-        "That didn't go through. Please try again.",
-      )
-    : null;
+  const magicLinkErrorMessage =
+    magicLinkValidationError ??
+    (magicLinkError
+      ? apiErrorMessage(
+          magicLinkError,
+          "That didn't go through. Please try again.",
+        )
+      : null);
 
   if (mode === "magic-sent") {
     return (
@@ -170,7 +222,7 @@ export function SignInScreen() {
                 autoComplete="email"
                 required
                 value={email}
-                onChange={(event) => setEmail(event.target.value)}
+                onChange={(event) => handleEmailChange(event.target.value)}
                 className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
               />
             </div>
@@ -186,7 +238,8 @@ export function SignInScreen() {
                 <button
                   type="button"
                   onClick={handleMagicLink}
-                  className="cursor-pointer text-[11.5px] font-medium text-accent"
+                  disabled={requestMagicLink.isPending}
+                  className="cursor-pointer text-[11.5px] font-medium text-accent disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Forgot?
                 </button>
@@ -197,7 +250,7 @@ export function SignInScreen() {
                 autoComplete="current-password"
                 required
                 value={password}
-                onChange={(event) => setPassword(event.target.value)}
+                onChange={(event) => handlePasswordChange(event.target.value)}
                 className={
                   signInError
                     ? "rounded-lg border border-danger-border bg-danger-soft px-3.5 py-2.5 text-[13.5px]"
