@@ -35,6 +35,25 @@ func run() error {
 		return err
 	}
 
+	// Deps.Secure below (and the session/CSRF cookies it governs) is
+	// !cfg.IsDevelopment(): Secure outside development, which means a
+	// browser will only ever return either cookie over HTTPS. This process
+	// itself never terminates TLS -- it just listens on cfg.Port -- so
+	// outside development that guarantee depends entirely on a reverse
+	// proxy or load balancer terminating TLS in front of it (see
+	// web/nginx.conf and .env.example). Deployed with nothing doing that,
+	// every cookie this service sets is silently dropped by the browser and
+	// every authenticated request 401s with no indication why. This can't be
+	// fixed from here -- it's a deployment-topology requirement, not a code
+	// path -- so the best this can do is make it loud at the one moment an
+	// operator is watching: startup.
+	if !cfg.IsDevelopment() {
+		slog.Warn("APP_ENV is not development: session and CSRF cookies are Secure and will only be " +
+			"returned by a browser over HTTPS. TLS termination in front of this service (a reverse proxy " +
+			"or load balancer) is mandatory -- see .env.example and web/nginx.conf. Without it, every " +
+			"cookie this service sets is silently dropped and every authenticated request will 401.")
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -61,7 +80,8 @@ func run() error {
 	hasher := crypto.NewArgon2Hasher(cfg.Argon2Time, cfg.Argon2MemoryKiB, cfg.Argon2Threads)
 	tokens := crypto.NewTokenGenerator()
 	sysClock := clock.System{}
-	mailer := mail.NewSMTPMailer(cfg.SMTPAddr, cfg.SMTPFrom, cfg.AppBaseURL)
+	mailer := mail.NewSMTPMailer(cfg.SMTPAddr, cfg.SMTPFrom, cfg.AppBaseURL,
+		cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPTLSMode)
 
 	authSvc := usecase.NewAuthService(usecase.AuthDeps{
 		Users:      users,

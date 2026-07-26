@@ -39,7 +39,6 @@ func TestRunReturnsErrorWhenListenFails(t *testing.T) {
 	t.Setenv("APP_ENV", "test")
 	t.Setenv("PORT", strconv.Itoa(port))
 	t.Setenv("DATABASE_URL", databaseURL)
-	t.Setenv("SESSION_SECRET", "0123456789abcdef0123456789abcdef")
 	t.Setenv("SMTP_ADDR", "localhost:1025")
 	t.Setenv("SMTP_FROM", "Hearth <noreply@hearth.localhost>")
 	t.Setenv("APP_BASE_URL", "http://localhost:5173")
