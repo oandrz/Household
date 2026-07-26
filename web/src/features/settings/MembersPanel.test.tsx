@@ -8,14 +8,13 @@
 //    toggle in its previous position.
 // 4. The marriage capability is not offered for a limited member.
 //
-// Plus, per the advisor's review of api/internal/adapter/http/
-// member_handlers.go's updateMemberRequest (plain, non-pointer Role/
-// Capabilities fields -- a real PATCH still has to send both, since an
-// omitted one decodes to its zero value and 422s): a role toggle must fix
-// up the capability array in the same request, so two more behaviours are
-// pinned directly rather than left to be inferred from #2/#3 alone --
-// promoting sends every capability (domain.ErrOwnerMustHoldAllCapabilities),
-// demoting drops "marriage" (domain.ErrLimitedCannotHoldMarriage) -- and the
+// Plus, since a role change and a capability change interact through
+// domain rules (an owner must hold every capability, a limited member may
+// never hold "marriage"): a role toggle must fix up the capability array in
+// the same request, so two more behaviours are pinned directly rather than
+// left to be inferred from #2/#3 alone -- promoting sends every capability
+// (domain.ErrOwnerMustHoldAllCapabilities), demoting drops "marriage"
+// (domain.ErrLimitedCannotHoldMarriage) -- and the
 // 200-with-`warning` path (usecase.ErrSessionRevocationFailed) is checked
 // explicitly rather than silently dropped.
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -119,7 +118,13 @@ describe("MembersPanel", () => {
     expect(screen.getByRole("switch", { name: "Ethan's role" })).toHaveTextContent("Limited");
   });
 
-  it("issues PATCH /api/v1/household/members/:id with the new capability array when a kid's capability is toggled", async () => {
+  it("issues PATCH /api/v1/household/members/:id with only the new capability array when a kid's capability is toggled", async () => {
+    // Since the coordinator's fix (api/internal/adapter/http/
+    // member_handlers.go's updateMemberRequest fields are now pointers,
+    // matching /household and /notification-preferences), a plain
+    // capability toggle sends capabilities alone -- role isn't changing,
+    // and the server resolves the absent field against the membership's
+    // current role rather than requiring it repeated on every request.
     const fetchMock = stubFetchRoutes({
       [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
       [`GET ${MEMBERS_URL}`]: { status: 200, body: [andreas, kayla, ethan] },
@@ -141,7 +146,6 @@ describe("MembersPanel", () => {
       );
       expect(call).toBeDefined();
       expect(JSON.parse(call![1]!.body as string)).toEqual({
-        role: "limited",
         capabilities: ["calendar", "chores", "money"],
       });
     });

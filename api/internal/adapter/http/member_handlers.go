@@ -114,9 +114,32 @@ func handleInviteMember(deps Deps) http.HandlerFunc {
 	}
 }
 
+// updateMemberRequest's fields are pointers for the same reason
+// updateHouseholdRequest's and notificationPreferencesRequest's are (see
+// household_handlers.go): a plain string/slice field cannot distinguish "the
+// caller omitted this" from "the caller sent its zero value," so a request
+// that only means to change capabilities would otherwise blank Role to ""
+// and fail as an unknown role, and vice versa. Unlike those two, this one
+// briefly shipped with value fields anyway -- Task 20's frontend had to work
+// around it client-side by always sending both fields together. Fixed here
+// the same way: absent means unchanged.
 type updateMemberRequest struct {
-	Role         string   `json:"role"`
-	Capabilities []string `json:"capabilities"`
+	Role         *string   `json:"role"`
+	Capabilities *[]string `json:"capabilities"`
+}
+
+// currentMembership finds membershipID's row in an already-loaded member
+// list. Returns domain.ErrNotFound for a miss, matching what
+// domain.ValidateMembershipChange itself returns for the same target --
+// asking to patch a membership that doesn't exist should look identical
+// either way.
+func currentMembership(views []usecase.MemberView, membershipID string) (domain.Membership, error) {
+	for _, v := range views {
+		if v.Membership.ID == membershipID {
+			return v.Membership, nil
+		}
+	}
+	return domain.Membership{}, domain.ErrNotFound
 }
 
 // handleUpdateMember sits behind requireOwner. A successful update's normal
@@ -126,6 +149,20 @@ type updateMemberRequest struct {
 // happen, and reporting it as a failure would invite a pointless retry. This
 // is checked here, before MapDomainError, because MapDomainError only ever
 // sees the error, not this route's success body to append the warning to.
+//
+// This is a real PATCH: it reads the membership's current role and
+// capabilities first (via deps.Members.List, the same read
+// handleListMembers uses) and applies only the fields present in the
+// request, exactly as handleUpdateHousehold does for /household. Role and
+// capabilities interact through domain rules that only make sense evaluated
+// together -- an owner must hold every capability, a limited member may
+// never hold "marriage" -- so a role-only patch is validated against the
+// membership's *existing* capabilities, and a capabilities-only patch is
+// validated against its *existing* role, never against a half-populated
+// candidate. usecase.MemberService.Update already runs the fully-resolved
+// candidate through domain.ValidateMembershipChange internally; building
+// that candidate here, before calling it, is what makes that validation
+// correct rather than vacuous.
 func handleUpdateMember(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, ok := RequestScope(r)
@@ -139,15 +176,33 @@ func handleUpdateMember(deps Deps) http.HandlerFunc {
 		if !decodeJSONBody(w, r, &req) {
 			return
 		}
-		role, err := domain.ParseRole(req.Role)
+
+		views, err := deps.Members.List(r.Context(), scope.HouseholdID)
 		if err != nil {
 			MapDomainError(w, r, err)
 			return
 		}
-		caps, err := domain.ParseCapabilities(req.Capabilities)
+		current, err := currentMembership(views, membershipID)
 		if err != nil {
 			MapDomainError(w, r, err)
 			return
+		}
+
+		role := current.Role
+		if req.Role != nil {
+			role, err = domain.ParseRole(*req.Role)
+			if err != nil {
+				MapDomainError(w, r, err)
+				return
+			}
+		}
+		caps := current.Capabilities
+		if req.Capabilities != nil {
+			caps, err = domain.ParseCapabilities(*req.Capabilities)
+			if err != nil {
+				MapDomainError(w, r, err)
+				return
+			}
 		}
 
 		body := map[string]any{"id": membershipID, "role": string(role), "capabilities": caps.Strings()}

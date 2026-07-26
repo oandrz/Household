@@ -1037,3 +1037,126 @@ func TestCreateSpaceWithABlankNameReturns422(t *testing.T) {
 		map[string]any{"name": "   ", "visibility": "everyone"}, session, csrf)
 	assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "SPACE_NAME_REQUIRED")
 }
+
+// --- Task 20 fix round: PATCH /household/members/:id was the last PATCH
+// still behaving like a PUT ----------------------------------------------
+
+// TestUpdateMemberIsARealPatch is TestUpdateHouseholdIsARealPatch's and
+// TestUpdateNotificationPreferencesIsARealPatch's sibling for
+// PATCH /household/members/:id, which had the identical bug for longer:
+// plain (non-pointer) Role/Capabilities fields meant a caller had to send
+// both together, or the omitted one decoded to its zero value and 422'd as
+// an unknown role or an invalid capability set. Unlike the other two, this
+// endpoint's role and capabilities also interact through domain rules that
+// only make sense evaluated together (an owner must hold every capability;
+// a limited member may never hold "marriage"), so beyond "absent means
+// unchanged" this also pins that a role-only change is validated against
+// the membership's *existing* capabilities, not a zero-valued stand-in for
+// them.
+//
+// The seeded limited member (env.limitedMembership, capabilities
+// {calendar, chores}) is used throughout: it is the one membership in
+// newTestEnv whose existing capabilities are a strict subset of
+// domain.AllCapabilities(), which is exactly what makes the third subtest
+// below possible.
+func TestUpdateMemberIsARealPatch(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	t.Run("a role-only patch leaves capabilities intact", func(t *testing.T) {
+		// Sent role equals the membership's current role -- a legitimate
+		// "role-only" body (only the "role" key is present at all) that
+		// exercises the exact regression a pointer-less fix would miss: if
+		// an absent capabilities field decoded to an empty slice instead of
+		// the current value, this would still succeed (an empty set is
+		// valid for "limited") while silently wiping Ethan's capabilities.
+		rec := env.authed(t, http.MethodPatch, "/api/v1/household/members/"+env.limitedMembership,
+			map[string]any{"role": "limited"}, session, csrf)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var got updateMemberResponse
+		if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+			t.Fatalf("decode: %v (body = %s)", err, rec.Body.String())
+		}
+		if got.Role != "limited" {
+			t.Fatalf("role = %q, want limited", got.Role)
+		}
+		if !slicesEqual(got.Capabilities, []string{"calendar", "chores"}) {
+			t.Fatalf("capabilities = %v, want [calendar chores] unchanged by a role-only patch", got.Capabilities)
+		}
+
+		members := env.getMembers(t, session)
+		persisted := mustFindMember(t, members, env.limitedMembership)
+		if !slicesEqual(persisted.Capabilities, []string{"calendar", "chores"}) {
+			t.Fatalf("persisted capabilities = %v, want [calendar chores] unchanged", persisted.Capabilities)
+		}
+	})
+
+	t.Run("a capabilities-only patch leaves the role intact", func(t *testing.T) {
+		// This is the exact shape that used to 422 INVALID_ROLE: only
+		// "capabilities" is sent, no "role" key at all.
+		rec := env.authed(t, http.MethodPatch, "/api/v1/household/members/"+env.limitedMembership,
+			map[string]any{"capabilities": []string{"calendar", "chores", "money"}}, session, csrf)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var got updateMemberResponse
+		if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+			t.Fatalf("decode: %v (body = %s)", err, rec.Body.String())
+		}
+		if got.Role != "limited" {
+			t.Fatalf("role = %q, want limited (unchanged by a capabilities-only patch)", got.Role)
+		}
+		if !slicesEqual(got.Capabilities, []string{"calendar", "chores", "money"}) {
+			t.Fatalf("capabilities = %v, want [calendar chores money]", got.Capabilities)
+		}
+
+		members := env.getMembers(t, session)
+		persisted := mustFindMember(t, members, env.limitedMembership)
+		if persisted.Role != "limited" {
+			t.Fatalf("persisted role = %q, want limited unchanged", persisted.Role)
+		}
+	})
+
+	t.Run("a role-only promotion to owner with a partial capability set still 422s", func(t *testing.T) {
+		// At this point env.limitedMembership holds {calendar, chores,
+		// money} (the previous subtest's result) -- still missing
+		// "marriage", so promoting it to owner without also sending every
+		// capability must be validated against those *existing*
+		// capabilities and rejected, not validated against an empty or
+		// full stand-in value that would let it through incorrectly.
+		rec := env.authed(t, http.MethodPatch, "/api/v1/household/members/"+env.limitedMembership,
+			map[string]any{"role": "owner"}, session, csrf)
+		assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "INVALID_CAPABILITIES")
+
+		// And the rejection must not have partially applied: still limited,
+		// still exactly the capabilities from before this subtest ran.
+		members := env.getMembers(t, session)
+		persisted := mustFindMember(t, members, env.limitedMembership)
+		if persisted.Role != "limited" {
+			t.Fatalf("persisted role = %q, want limited -- a rejected update must not apply", persisted.Role)
+		}
+		if !slicesEqual(persisted.Capabilities, []string{"calendar", "chores", "money"}) {
+			t.Fatalf("persisted capabilities = %v, want [calendar chores money] unchanged by the rejected PATCH",
+				persisted.Capabilities)
+		}
+	})
+}
+
+type updateMemberResponse struct {
+	ID           string   `json:"id"`
+	Role         string   `json:"role"`
+	Capabilities []string `json:"capabilities"`
+}
+
+func mustFindMember(t *testing.T, members []memberListEntry, id string) memberListEntry {
+	t.Helper()
+	for _, m := range members {
+		if m.ID == id {
+			return m
+		}
+	}
+	t.Fatalf("no member with id %q in %+v", id, members)
+	return memberListEntry{}
+}

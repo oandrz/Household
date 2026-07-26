@@ -38,22 +38,31 @@ function useMembers() {
   return useQuery({ queryKey: membersQueryKey, queryFn: fetchMembers });
 }
 
-// api/internal/adapter/http/member_handlers.go's updateMemberRequest has
-// plain (non-pointer) Role/Capabilities fields, unlike /household and
-// /notification-preferences -- so this is a real PUT-shaped PATCH: every
-// call must send both fields, never just the one that changed, or the
-// omitted one decodes as its zero value ("" / []) and 422s as an unknown
-// role or an invalid capability set.
+// api/internal/adapter/http/member_handlers.go's updateMemberRequest fields
+// are now pointers (fixed alongside this task, matching /household and
+// /notification-preferences): an absent field means "leave this alone,"
+// resolved server-side against the membership's *current* role/capabilities
+// before domain.ValidateMembershipChange ever runs. This mutation takes
+// advantage of that -- role and capabilities are each optional, and only
+// the one(s) actually changing are sent. A plain capability toggle
+// (toggleCapability below) sends capabilities alone; a role change
+// (toggleRole below) sends both, because promoting or demoting genuinely
+// changes both fields at once, not because the endpoint demands it.
 function useUpdateMember() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: { id: string; role: string; capabilities: string[] }) => {
+    mutationFn: async (vars: {
+      id: string;
+      role?: string;
+      capabilities?: string[];
+    }) => {
+      const patch: { role?: string; capabilities?: string[] } = {};
+      if (vars.role !== undefined) patch.role = vars.role;
+      if (vars.capabilities !== undefined) patch.capabilities = vars.capabilities;
+
       const body = await apiFetch<unknown>(
         `/api/v1/household/members/${encodeURIComponent(vars.id)}`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({ role: vars.role, capabilities: vars.capabilities }),
-        },
+        { method: "PATCH", body: JSON.stringify(patch) },
       );
       return updateMemberResponseSchema.parse(body);
     },
@@ -97,17 +106,21 @@ function MemberRow({
   isOwner: boolean;
   errorMessage?: string;
   warningMessage?: string;
-  onUpdate: (vars: { role: string; capabilities: string[] }) => void;
+  onUpdate: (vars: { role?: string; capabilities?: string[] }) => void;
 }) {
   const isLimited = member.role === "limited";
 
   // Flips Owner <-> Limited. This is the one control that can reach the
   // server's last-owner rule (domain.ValidateMembershipChange /
   // ErrLastOwner): only a role change away from "owner" ever consults it,
-  // never a same-role capability edit. The capability array is fixed up in
-  // the same request rather than left to a second round trip, matching the
-  // two invariants domain.NewMembership enforces: an owner must hold every
-  // capability, and a limited member may never hold "marriage".
+  // never a same-role capability edit. Both fields are sent together here
+  // because both are genuinely changing at once -- promoting grants every
+  // capability, demoting drops "marriage" -- matching the two invariants
+  // domain.NewMembership enforces: an owner must hold every capability, and
+  // a limited member may never hold "marriage". (Unlike toggleCapability
+  // below, this is not a workaround for the endpoint's own shape -- the
+  // server now resolves an omitted field against the current value just
+  // fine; this request happens to need both.)
   function toggleRole() {
     if (isLimited) {
       onUpdate({ role: "owner", capabilities: ["calendar", "chores", "money", "marriage"] });
@@ -119,11 +132,14 @@ function MemberRow({
     }
   }
 
+  // Role is never sent here -- it isn't changing, and the server now
+  // resolves an absent field against the membership's current role rather
+  // than requiring it to be repeated on every request.
   function toggleCapability(cap: string) {
     const next = member.capabilities.includes(cap)
       ? member.capabilities.filter((c) => c !== cap)
       : [...member.capabilities, cap];
-    onUpdate({ role: member.role, capabilities: next });
+    onUpdate({ capabilities: next });
   }
 
   return (
@@ -206,7 +222,7 @@ export function MembersPanel() {
   // -- there is no local "already flipped" state to roll back.
   function handleUpdate(
     memberId: string,
-    vars: { role: string; capabilities: string[] },
+    vars: { role?: string; capabilities?: string[] },
   ) {
     setRowErrors((prev) => ({ ...prev, [memberId]: "" }));
     setRowWarnings((prev) => ({ ...prev, [memberId]: "" }));
