@@ -3,7 +3,7 @@ SHELL := /bin/bash
 COMPOSE := docker compose
 
 .PHONY: help dev dev-local up down restart logs ps migrate migrate-down migrate-new \
-        test test-api test-web lint lint-arch typecheck fmt psql shell-api build
+        test test-api test-web lint lint-arch lint-web typecheck fmt psql shell-api build
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -52,16 +52,21 @@ migrate-new: ## Create a migration. make migrate-new NAME=add_users
 test: test-api test-web ## Run every test suite
 
 test-api: ## Run the Go tests (needs Docker for testcontainers)
-	cd api && go test ./... -count=1
+	cd api && go test ./... -count=1 -timeout=5m
 
+# A bare `npm install` in web/ needs --legacy-peer-deps (an optional peer
+# conflict in @hookform/resolvers); `npm ci` does not need it and is clean.
 test-web: ## Run the frontend tests
 	cd web && npx vitest run
 
-lint: lint-arch typecheck ## Run every linter
+lint: lint-arch typecheck lint-web ## Run every linter
 	cd api && go vet ./...
 
 lint-arch: ## Check the clean-architecture dependency rule
 	./scripts/arch-lint.sh
+
+lint-web: ## Lint the frontend
+	cd web && npm run lint
 
 typecheck: ## Type-check the frontend, tests included
 	cd web && npx tsc --noEmit
