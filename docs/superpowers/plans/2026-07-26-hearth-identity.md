@@ -1776,14 +1776,32 @@ type Rate struct {
 	Denominator int64
 }
 
-// Apply converts an amount of minor units, rounding half away from zero.
-func (r Rate) Apply(minorUnits int64) int64 {
+// Apply converts an amount of minor units, rounding half away from zero. It
+// refuses to wrap: domain.Money.Add guards addition for the same reason, and
+// multiplication overflows far sooner — at the design's rate of 12,410, any
+// amount above roughly 743 billion minor units would wrap to a negative
+// balance rather than fail.
+func (r Rate) Apply(minorUnits int64) (int64, error) {
+	// Detect before multiplying: if the magnitude exceeds MaxInt64 divided by
+	// the multiplier, the product cannot fit. MinInt64 is checked separately
+	// because it has no positive counterpart to take the magnitude of.
+	if minorUnits == math.MinInt64 && r.Numerator != 0 {
+		return 0, domain.ErrAmountOverflow
+	}
+	magnitude := minorUnits
+	if magnitude < 0 {
+		magnitude = -magnitude
+	}
+	if r.Numerator != 0 && magnitude > math.MaxInt64/r.Numerator {
+		return 0, domain.ErrAmountOverflow
+	}
+
 	num := minorUnits * r.Numerator
 	half := r.Denominator / 2
 	if num < 0 {
-		return (num - half) / r.Denominator
+		return (num - half) / r.Denominator, nil
 	}
-	return (num + half) / r.Denominator
+	return (num + half) / r.Denominator, nil
 }
 
 // FXRateProvider converts between the household's primary and secondary
@@ -1834,7 +1852,11 @@ func TestStaticProviderInvertsExactly(t *testing.T) {
 	// The design's Finances screen: Rp 85,400,000 shown as approximately
 	// S$6,880. In minor units that is 8_540_000_000 IDR.
 	// 8_540_000_000 / 12_410 = 688_154.7…, which rounds to 688_155 → S$6,881.55.
-	if got := rate.Apply(8_540_000_000); got != 688_155 {
+	got, err := rate.Apply(8_540_000_000)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if got != 688_155 {
 		t.Fatalf("Apply = %d, want 688155", got)
 	}
 }
@@ -1846,7 +1868,11 @@ func TestStaticProviderReturnsUnityForTheSameCurrency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Rate: %v", err)
 	}
-	if rate.Apply(1234) != 1234 {
+	got, err := rate.Apply(1234)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if got != 1234 {
 		t.Fatalf("a same-currency rate must be the identity, got %+v", rate)
 	}
 }
