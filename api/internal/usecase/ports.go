@@ -39,6 +39,14 @@ type Mailer interface {
 // password yet) has PasswordHash == "", and Task 12 already treats that
 // empty string as "cannot sign in" — the repository must not turn a NULL
 // into any other sentinel.
+//
+// The embedded domain.User.Email follows the identical convention, for the
+// identical reason: users.email is also nullable (and citext UNIQUE, so
+// storing "" rather than NULL for two credential-less members would collide
+// on the unique index where two NULLs do not). A member created without an
+// email of their own — the same invited-member-with-no-login case — has
+// Email == "", and the repository must round-trip SQL NULL to "" and "" to
+// SQL NULL there exactly as it does for PasswordHash.
 type StoredUser struct {
 	domain.User
 	PasswordHash string
@@ -47,10 +55,12 @@ type StoredUser struct {
 type UserRepository interface {
 	ByEmail(ctx context.Context, email string) (StoredUser, error)
 	ByID(ctx context.Context, id string) (StoredUser, error)
-	// Create writes passwordHash following the same "" <-> NULL convention
-	// as StoredUser.PasswordHash: passing "" stores SQL NULL, not an empty
-	// string in the column. Children (members with no login of their own)
-	// are created this way, with passwordHash == "".
+	// Create writes email and passwordHash following the same "" <-> NULL
+	// convention as StoredUser.PasswordHash (and, by the same reasoning,
+	// StoredUser's embedded domain.User.Email): passing "" for either stores
+	// SQL NULL, not an empty string in the column. Children (members with no
+	// login of their own) are created this way, with email == "" and
+	// passwordHash == "".
 	Create(ctx context.Context, email, passwordHash, displayName string) (domain.User, error)
 	SetPasswordHash(ctx context.Context, userID, hash string) error
 }

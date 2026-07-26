@@ -19,7 +19,8 @@ FROM households WHERE id = $1;
 
 -- name: UpdateHousehold :one
 UPDATE households
-SET family_name = $2, primary_currency = $3, show_secondary_currency = $4, fx_rate_mode = $5
+SET name = $2, family_name = $3, primary_currency = $4, show_secondary_currency = $5,
+    secondary_currency = $6, fx_rate_mode = $7
 WHERE id = $1
 RETURNING id, name, family_name, primary_currency, show_secondary_currency,
           secondary_currency, fx_rate_mode;

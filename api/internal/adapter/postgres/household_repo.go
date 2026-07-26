@@ -20,18 +20,21 @@ func (r *HouseholdRepo) Get(ctx context.Context, householdID string) (domain.Hou
 		row.ShowSecondaryCurrency, row.SecondaryCurrency, row.FxRateMode), nil
 }
 
-// Update persists only the columns the generated UpdateHousehold query
-// accepts -- family_name, primary_currency, show_secondary_currency and
-// fx_rate_mode. h.Name and h.SecondaryCurrency are not writable through this
-// method; the RETURNING row reflects their unchanged stored values, and this
-// method returns exactly that row rather than echoing back whatever the
-// caller passed in.
+// Update persists every field on h. The generated UpdateHousehold query used
+// to accept only family_name, primary_currency, show_secondary_currency and
+// fx_rate_mode -- silently discarding a caller's Name or SecondaryCurrency
+// while still returning a nil error, which is indistinguishable from a
+// successful full write. The query (queries/identity.sql) was widened to set
+// name and secondary_currency too, so the port's full-struct signature is now
+// honest: nothing you pass in Update is dropped.
 func (r *HouseholdRepo) Update(ctx context.Context, h domain.Household) (domain.Household, error) {
 	row, err := r.q.UpdateHousehold(ctx, sqlcgen.UpdateHouseholdParams{
 		ID:                    uuid(h.ID),
+		Name:                  h.Name,
 		FamilyName:            h.FamilyName,
 		PrimaryCurrency:       h.PrimaryCurrency,
 		ShowSecondaryCurrency: h.ShowSecondaryCurrency,
+		SecondaryCurrency:     h.SecondaryCurrency,
 		FxRateMode:            h.FXRateMode,
 	})
 	if err != nil {

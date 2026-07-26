@@ -26,21 +26,21 @@ func TestHouseholdRepoRoundTrip(t *testing.T) {
 		t.Fatalf("defaults not applied: %+v", created)
 	}
 
-	updated, err := households.Update(ctx, domain.Household{
-		ID: created.ID, FamilyName: "Tan", PrimaryCurrency: "USD",
-		ShowSecondaryCurrency: false, FXRateMode: "manual",
-	})
+	// Change every field, including Name and SecondaryCurrency -- the two
+	// UpdateHousehold used to silently drop. This is the assertion that makes
+	// a future narrowing of the query fail loudly instead of returning a nil
+	// error over a partial write.
+	want := domain.Household{
+		ID: created.ID, Name: "The Oentoro Household", FamilyName: "Tan",
+		PrimaryCurrency: "USD", ShowSecondaryCurrency: false,
+		SecondaryCurrency: "EUR", FXRateMode: "manual",
+	}
+	updated, err := households.Update(ctx, want)
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	if updated.FamilyName != "Tan" || updated.PrimaryCurrency != "USD" ||
-		updated.ShowSecondaryCurrency || updated.FXRateMode != "manual" {
-		t.Fatalf("update did not persist: %+v", updated)
-	}
-	// Name and SecondaryCurrency are not writable through Update; they must
-	// come back unchanged rather than as the (empty) values on the argument.
-	if updated.Name != "Andreas & Christine" || updated.SecondaryCurrency != "IDR" {
-		t.Fatalf("Update must not touch Name or SecondaryCurrency: %+v", updated)
+	if updated != want {
+		t.Fatalf("Update returned %+v, want %+v", updated, want)
 	}
 
 	fetched, err := households.Get(ctx, created.ID)
