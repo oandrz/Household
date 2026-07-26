@@ -30,6 +30,15 @@ type Mailer interface {
 }
 
 // StoredUser carries the password hash, which never leaves the usecase layer.
+//
+// users.password_hash is nullable in the database, and sqlc generates *string
+// for it — but PasswordHash here is a plain string by design, not an
+// unwritten gap the Postgres implementation has to paper over. The
+// convention, both directions: SQL NULL maps to "", and "" maps to SQL NULL.
+// A user created without credentials (e.g. an invited member with no
+// password yet) has PasswordHash == "", and Task 12 already treats that
+// empty string as "cannot sign in" — the repository must not turn a NULL
+// into any other sentinel.
 type StoredUser struct {
 	domain.User
 	PasswordHash string
@@ -38,6 +47,10 @@ type StoredUser struct {
 type UserRepository interface {
 	ByEmail(ctx context.Context, email string) (StoredUser, error)
 	ByID(ctx context.Context, id string) (StoredUser, error)
+	// Create writes passwordHash following the same "" <-> NULL convention
+	// as StoredUser.PasswordHash: passing "" stores SQL NULL, not an empty
+	// string in the column. Children (members with no login of their own)
+	// are created this way, with passwordHash == "".
 	Create(ctx context.Context, email, passwordHash, displayName string) (domain.User, error)
 	SetPasswordHash(ctx context.Context, userID, hash string) error
 }
