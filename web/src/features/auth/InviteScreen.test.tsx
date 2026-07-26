@@ -162,11 +162,18 @@ describe("InviteScreen", () => {
     expect(
       await screen.findByText("Password must be at least 12 characters."),
     ).toBeInTheDocument();
+    // Both counts matter: the accept call happened exactly once (the point
+    // of the test), and the preview was not silently refetched in the
+    // process (fix round 3 -- a filtered-length check on the accept call
+    // alone would pass even if the preview GET fired twice).
     await waitFor(() =>
       expect(
         fetchMock.mock.calls.filter(([input]) => String(input) === ACCEPT_URL),
       ).toHaveLength(1),
     );
+    expect(
+      fetchMock.mock.calls.filter(([input]) => String(input) === PREVIEW_URL),
+    ).toHaveLength(1);
   });
 
   it("surfaces the server's message on a 422 PASSWORD_TOO_LONG", async () => {
@@ -212,11 +219,19 @@ describe("InviteScreen", () => {
       screen.getByRole("button", { name: "Accept & join household" }),
     );
 
+    // Both counts matter: the accept call happened exactly once, and the
+    // preview was not fetched more than once either (fix round 3 -- the
+    // filtered-length check on the accept call alone would pass even if the
+    // preview GET fired twice, which the plain toHaveBeenCalledTimes(2) this
+    // replaced would have caught).
     await waitFor(() =>
       expect(
         fetchMock.mock.calls.filter(([input]) => String(input) === ACCEPT_URL),
       ).toHaveLength(1),
     );
+    expect(
+      fetchMock.mock.calls.filter(([input]) => String(input) === PREVIEW_URL),
+    ).toHaveLength(1);
     const acceptCall = fetchMock.mock.calls.find(
       ([input]) => String(input) === ACCEPT_URL,
     );

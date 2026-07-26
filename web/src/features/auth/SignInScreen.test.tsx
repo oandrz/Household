@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { act, render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { stubFetchRoutes } from "./fetchStub";
 import { SignInScreen } from "./SignInScreen";
@@ -389,5 +389,83 @@ describe("SignInScreen", () => {
     // resend failure must not still be showing.
     expect(await screen.findByLabelText("Password")).toBeInTheDocument();
     expect(screen.queryByText("Something went wrong.")).not.toBeInTheDocument();
+  });
+
+  // Fix round 3, Finding 1: clearing magicLinkError on mode change (the fix
+  // above) only clears an error that already exists at the moment the mode
+  // changes. It does nothing for a request that is still in flight when the
+  // user navigates away and only settles afterwards. "Send another link" has
+  // no pending guard on "Use a password instead", so that interleaving is
+  // reachable: start a resend, switch to password mode before it settles,
+  // then let it reject -- onError must not render its result anywhere,
+  // because by the time it fires the request no longer belongs to the
+  // current mode.
+  //
+  // The resend's fetch is a deferred promise resolved manually, so the
+  // interleaving is deterministic rather than timing-dependent -- a version
+  // that raced real timers could pass by luck and would not pin the fix.
+  it("does not render a stale resend error if 'Use a password instead' is clicked while the resend is still in flight", async () => {
+    let rejectResend!: (reason: unknown) => void;
+    let resendCallCount = 0;
+
+    const fetchMock = vi.fn<
+      (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+    >((input, init) => {
+      const method = (init?.method ?? "GET").toUpperCase();
+      const url = String(input);
+      if (method === "POST" && url === MAGIC_LINK_URL) {
+        resendCallCount += 1;
+        if (resendCallCount === 1) {
+          // The initial send: resolves immediately so the test can reach
+          // the sent panel.
+          return Promise.resolve(
+            new Response(JSON.stringify({ status: "accepted" }), {
+              status: 202,
+              headers: { "Content-Type": "application/json" },
+            }),
+          );
+        }
+        // The resend: deferred until the test rejects it manually below.
+        return new Promise<Response>((_resolve, reject) => {
+          rejectResend = reject;
+        });
+      }
+      throw new Error(`unexpected fetch call: ${method} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSignIn();
+
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "andreas@hearth.family" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Email me a one-time sign-in link" }),
+    );
+    await screen.findByText("Check your email.");
+
+    // Start the resend -- it will not settle until rejectResend() is called.
+    fireEvent.click(screen.getByRole("button", { name: "Send another link" }));
+    await waitFor(() => expect(resendCallCount).toBe(2));
+
+    // While it's still in flight, navigate back to the password form.
+    fireEvent.click(
+      screen.getByRole("button", { name: "Use a password instead" }),
+    );
+    await screen.findByLabelText("Password");
+
+    // Now the abandoned resend fails. Flush a macrotask so every microtask
+    // in the mutation's internal chain (fetch rejects -> onError runs) has
+    // definitely completed before asserting.
+    await act(async () => {
+      rejectResend(new TypeError("Failed to fetch"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // Still on the password form, and nothing rendered from the abandoned
+    // request -- no alert region at all, since this test never attempted a
+    // sign-in either.
+    expect(screen.getByLabelText("Password")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

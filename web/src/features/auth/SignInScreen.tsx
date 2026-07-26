@@ -8,7 +8,7 @@
 // not a separate locked screen (there is no such state in the design's own
 // authScreen enum, which only has Sign in / Invited / Wrong password /
 // Signed in).
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { ApiError } from "../../api/client";
 import { apiErrorMessage, triesLeftPhrase } from "./copy";
 import { MagicLinkSentPanel } from "./MagicLinkSentPanel";
@@ -39,8 +39,21 @@ export function SignInScreen() {
   // handler covered the one path that existed then, but not any future path
   // back to the password form. Keying this off `mode` itself, rather than a
   // specific handler, covers all of them.
+  //
+  // This alone is not enough (fix round 3, Finding 1): it only clears an
+  // error that already exists at the moment `mode` changes. It does nothing
+  // for a request that is still in flight when the user navigates away and
+  // only settles afterwards -- "Send another link" has no pending guard on
+  // "Use a password instead", so that interleaving is reachable. `modeRef`
+  // gives onSuccess/onError a way to check, at settle time, whether the
+  // request is still relevant to the mode it started in; see handleMagicLink.
   useEffect(() => {
     setMagicLinkError(null);
+  }, [mode]);
+
+  const modeRef = useRef(mode);
+  useEffect(() => {
+    modeRef.current = mode;
   }, [mode]);
 
   const apiSignInError = signInError instanceof ApiError ? signInError : null;
@@ -61,12 +74,28 @@ export function SignInScreen() {
   // touch signInError: clicking this while the locked explanation is showing
   // must not erase it before the new request resolves.
   function handleMagicLink() {
+    // Captured now, not read later: this is the mode the request started
+    // in. `onSuccess`/`onError` below compare it against `modeRef.current`
+    // (the *latest* mode, which a plain closure over `mode` could never see)
+    // at the moment the request actually settles. If the user has since
+    // navigated away -- clicked "Use a password instead" while this exact
+    // request was still in flight -- the settled result is scoped to a mode
+    // that's no longer current, and is dropped rather than applied. This
+    // removes the whole class of "an abandoned request's result renders
+    // somewhere it no longer belongs," not just the one reported sequence.
+    const startedInMode = mode;
     setMagicLinkError(null);
     requestMagicLink.mutate(
       { email },
       {
-        onSuccess: () => setMode("magic-sent"),
-        onError: (err) => setMagicLinkError(err),
+        onSuccess: () => {
+          if (modeRef.current !== startedInMode) return;
+          setMode("magic-sent");
+        },
+        onError: (err) => {
+          if (modeRef.current !== startedInMode) return;
+          setMagicLinkError(err);
+        },
       },
     );
   }
