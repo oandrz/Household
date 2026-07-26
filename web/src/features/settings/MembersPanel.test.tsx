@@ -283,15 +283,15 @@ describe("MembersPanel", () => {
     expect(screen.queryByRole("switch", { name: "Kayla Money access" })).not.toBeInTheDocument();
   });
 
-  // Fix round 2 (spec review). toggleCapability computes its next array
-  // from `member.capabilities`, which is only as fresh as the last
-  // completed fetch. Clicking Money, then clicking Chores before the first
-  // PATCH resolves and the members query refetches, would compute the
-  // second request from the same pre-first-click array the first click
-  // already read -- silently reverting the money grant with no error and
-  // no visible reason. The fix disables a member's role switch and every
-  // capability toggle while a mutation for that specific member (not the
-  // whole list) is in flight.
+  // Fix round 2 (spec review), Finding 1. toggleCapability computes its
+  // next array from `member.capabilities`, which is only as fresh as the
+  // last completed fetch. Clicking Money, then clicking Chores before the
+  // first PATCH resolves and the members query refetches, would compute
+  // the second request from the same pre-first-click array the first
+  // click already read -- silently reverting the money grant with no error
+  // and no visible reason. The fix disables a member's role switch and
+  // every capability toggle while a mutation for that specific member (not
+  // the whole list) is in flight.
   it("disables a member's own controls while its mutation is in flight, so a second click cannot revert the first", async () => {
     const kaylaAfterMoney = { ...kayla, capabilities: ["calendar", "chores", "money"] };
     const fetchMock = stubFetchRoutes({
@@ -348,6 +348,115 @@ describe("MembersPanel", () => {
     await waitFor(() => expect(choresToggle).not.toBeDisabled());
     await screen.findByText("Kid · calendar & chores & money only");
 
+    fireEvent.click(choresToggle);
+
+    await waitFor(() => expect(kaylaPatchCalls()).toHaveLength(2));
+    expect(JSON.parse(kaylaPatchCalls()[1][1]!.body as string)).toEqual({
+      capabilities: ["calendar", "money"],
+    });
+  });
+
+  // Fix round 3 (spec review), Finding 1 -- still open after round 2. The
+  // test above waits for `screen.findByText("Kid · calendar & chores &
+  // money only")` before its second click, i.e. it waits for the refetch to
+  // visibly land -- it proves "disabled while the PATCH is in flight" but
+  // steps around "settled but not yet refetched," the narrower window that
+  // was actually still open: useUpdateMember's onSuccess fired three
+  // invalidateQueries calls without returning/awaiting them, so TanStack
+  // Query treated the mutation as settled -- and pendingIds cleared -- the
+  // instant the PATCH response arrived, before the invalidated members
+  // query had refetched. A click in exactly that gap would still compute
+  // from the stale array.
+  //
+  // This test manufactures that gap directly with a fetch mock (not
+  // stubFetchRoutes, which resolves every response on the same microtask
+  // and cannot hold one open) whose second GET /household/members call --
+  // the refetch -- is deliberately left pending until the test resolves it
+  // by hand.
+  it("keeps a member's controls disabled until the refetch after its mutation actually lands, not just until the PATCH resolves", async () => {
+    let resolveRefetch!: (response: Response) => void;
+    const refetchResponse = new Promise<Response>((resolve) => {
+      resolveRefetch = resolve;
+    });
+    let membersGetCount = 0;
+
+    function jsonResponse(body: unknown, status = 200): Response {
+      return new Response(JSON.stringify(body), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        const method = (init?.method ?? "GET").toUpperCase();
+        const url = String(input);
+        const key = `${method} ${url}`;
+
+        if (key === `GET ${ME_URL}`) return jsonResponse(meFixture("owner"));
+        if (key === `GET ${MEMBERS_URL}`) {
+          membersGetCount += 1;
+          if (membersGetCount === 1) {
+            return jsonResponse([andreas, kayla, ethan]);
+          }
+          // The refetch triggered by the first mutation's invalidateQueries
+          // -- held open to simulate a slow network landing well after the
+          // PATCH itself has already resolved.
+          return refetchResponse;
+        }
+        if (key === "PATCH /api/v1/household/members/mem-kayla") {
+          return jsonResponse({
+            id: "mem-kayla",
+            role: "limited",
+            capabilities: ["calendar", "chores", "money"],
+          });
+        }
+        throw new Error(`unstubbed request in this test: ${key}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPanel();
+    await screen.findByText("Kid · calendar & chores only");
+
+    const choresToggle = screen.getByRole("switch", { name: "Kayla Chores access" });
+
+    function kaylaPatchCalls() {
+      return fetchMock.mock.calls.filter(
+        ([input, init]) =>
+          String(input) === "/api/v1/household/members/mem-kayla" &&
+          ((init as RequestInit | undefined)?.method ?? "").toUpperCase() === "PATCH",
+      );
+    }
+
+    fireEvent.click(screen.getByRole("switch", { name: "Kayla Money access" }));
+
+    // Let the PATCH itself resolve -- it is not held open, only the
+    // refetch is.
+    await waitFor(() => expect(kaylaPatchCalls()).toHaveLength(1));
+
+    // The PATCH has resolved, but the members refetch it triggered is
+    // still pending (deliberately held open). This is exactly the gap the
+    // non-awaited-onSuccess bug left uncovered: the row must still be
+    // disabled here, not just during the PATCH itself.
+    expect(choresToggle).toBeDisabled();
+
+    // A click in this gap must be a genuine no-op.
+    fireEvent.click(choresToggle);
+    expect(kaylaPatchCalls()).toHaveLength(1);
+
+    // Let the refetch land.
+    resolveRefetch(
+      jsonResponse([andreas, { ...kayla, capabilities: ["calendar", "chores", "money"] }, ethan]),
+    );
+
+    await waitFor(() => expect(choresToggle).not.toBeDisabled());
+    await screen.findByText("Kid · calendar & chores & money only");
+
+    // Now the real second click: computed from the up-to-date array, it
+    // must carry both changes -- money (already persisted) stays, chores
+    // is what actually changes -- never a request that lost money because
+    // it was computed from the pre-refetch array.
     fireEvent.click(choresToggle);
 
     await waitFor(() => expect(kaylaPatchCalls()).toHaveLength(2));

@@ -40,9 +40,18 @@ function useUpdatePreferences() {
       });
       return notificationPreferencesSchema.parse(body);
     },
+    // Returns (rather than fires-and-forgets) the invalidation promises --
+    // see CurrencyPanel.tsx's useUpdateHousehold for the identical fix and
+    // the full reasoning. Here it matters even though every toggle patches
+    // a different field: two rapid clicks on the *same* toggle (on, then
+    // off again) would otherwise both compute from the identical stale
+    // cached value once `isPending` cleared early, sending the same
+    // request twice instead of the second, intended reversal.
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: preferencesQueryKey });
-      queryClient.invalidateQueries({ queryKey: ["me"] });
+      return Promise.all([
+        queryClient.invalidateQueries({ queryKey: preferencesQueryKey }),
+        queryClient.invalidateQueries({ queryKey: ["me"] }),
+      ]);
     },
   });
 }

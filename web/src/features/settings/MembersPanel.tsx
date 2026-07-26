@@ -67,21 +67,36 @@ function useUpdateMember() {
       );
       return updateMemberResponseSchema.parse(body);
     },
+    // Returns the combined invalidation promise rather than firing all
+    // three and letting onSuccess return undefined: TanStack Query awaits
+    // whatever a mutation's onSuccess returns before treating the mutation
+    // as settled, so onSettled (and therefore MembersPanel's pendingIds
+    // cleanup, which is what re-enables a member's controls) only runs
+    // once every invalidated query has actually refetched. Without the
+    // `return`/`Promise.all`, invalidateQueries's returned promises would
+    // be fire-and-forget: the PATCH response arriving would settle the
+    // mutation immediately, re-enabling the row while ['household',
+    // 'members'] was still serving its stale cached value -- the same
+    // stale-array race the pendingIds guard exists to close, just moved
+    // into the gap between "PATCH resolved" and "refetch landed" instead
+    // of "click" and "PATCH resolved".
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: membersQueryKey });
-      // The sidebar and every RequireCapability guard read from ['me']; a
-      // capability or role change that doesn't refresh it leaves the caller
-      // (if they just edited their own membership) looking at stale
-      // navigation.
-      queryClient.invalidateQueries({ queryKey: ["me"] });
-      // SpacesPanel reads its own, separately keyed ['spaces'] query.
-      // domain.VisibleSpaces filters by role/capabilities, so a role or
-      // capability change here can change which spaces the caller (if they
-      // just edited their own membership -- e.g. an owner demoting
-      // themselves) is allowed to see. Without this, SpacesPanel would keep
-      // listing a space like Marriage as visible after its own viewer lost
-      // the access that used to grant it.
-      queryClient.invalidateQueries({ queryKey: ["spaces"] });
+      return Promise.all([
+        queryClient.invalidateQueries({ queryKey: membersQueryKey }),
+        // The sidebar and every RequireCapability guard read from ['me'];
+        // a capability or role change that doesn't refresh it leaves the
+        // caller (if they just edited their own membership) looking at
+        // stale navigation.
+        queryClient.invalidateQueries({ queryKey: ["me"] }),
+        // SpacesPanel reads its own, separately keyed ['spaces'] query.
+        // domain.VisibleSpaces filters by role/capabilities, so a role or
+        // capability change here can change which spaces the caller (if
+        // they just edited their own membership -- e.g. an owner demoting
+        // themselves) is allowed to see. Without this, SpacesPanel would
+        // keep listing a space like Marriage as visible after its own
+        // viewer lost the access that used to grant it.
+        queryClient.invalidateQueries({ queryKey: ["spaces"] }),
+      ]);
     },
   });
 }

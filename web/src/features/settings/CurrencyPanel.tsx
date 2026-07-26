@@ -28,9 +28,19 @@ function useUpdateHousehold() {
       });
       return householdSchema.parse(body);
     },
+    // Returns (rather than fires-and-forgets) the invalidation promises: a
+    // mutation's onSuccess return value is awaited by TanStack Query before
+    // the mutation is considered settled, which is what `isPending` (the
+    // toggle's disabled condition below) reflects. Without this, the PATCH
+    // response arriving would immediately re-enable the toggle while
+    // ['household'] was still serving its stale cached value -- a second
+    // click in that gap would compute `!household.data.showSecondaryCurrency`
+    // from the same pre-click value the first click already read.
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["household"] });
-      queryClient.invalidateQueries({ queryKey: ["me"] });
+      return Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["household"] }),
+        queryClient.invalidateQueries({ queryKey: ["me"] }),
+      ]);
     },
   });
 }
