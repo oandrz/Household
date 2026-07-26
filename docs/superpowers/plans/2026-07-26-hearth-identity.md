@@ -1207,8 +1207,12 @@ SELECT id, name, family_name, primary_currency, show_secondary_currency,
 FROM households WHERE id = $1;
 
 -- name: UpdateHousehold :one
+-- Sets every field the port accepts. An UPDATE that persists a subset of what
+-- its caller passes returns nil for a write that partly did not happen, and
+-- that is indistinguishable from success.
 UPDATE households
-SET family_name = $2, primary_currency = $3, show_secondary_currency = $4, fx_rate_mode = $5
+SET name = $2, family_name = $3, primary_currency = $4,
+    show_secondary_currency = $5, secondary_currency = $6, fx_rate_mode = $7
 WHERE id = $1
 RETURNING id, name, family_name, primary_currency, show_secondary_currency,
           secondary_currency, fx_rate_mode;
@@ -2983,6 +2987,7 @@ Create the two test files covering:
 7b. `CreateSpace` accepts only `everyone` and `parents_only`; `custom` is rejected until per-space member lists exist.
 8. `CreateSpace` rejects a duplicate name within the household.
 9. `Update` on the household normalises the primary currency to uppercase and rejects a currency that is not three letters.
+9b. `Update` on the household persists every field it is given — set all of them, read back, and assert each one changed. This is what stops a future narrowing of the query from silently dropping writes.
 10. `UpdateNotifications` round-trips all four flags.
 
 - [ ] **Step 2: Run them and watch them fail**
