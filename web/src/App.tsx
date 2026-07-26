@@ -1,28 +1,50 @@
-import { useQuery } from "@tanstack/react-query";
-import { apiFetch } from "./api/client";
+import { InviteScreen } from "./features/auth/InviteScreen";
+import { SignInScreen } from "./features/auth/SignInScreen";
+import { useMe } from "./features/auth/useAuth";
 
-// A deliberately minimal shell. The identity plan replaces this with the real
-// sidebar; its only job today is to prove the proxy and the stack are wired.
+// The invite-accept flow is reached from an emailed link
+// (`${BaseURL}/invite/${token}`, minted in usecase/invite.go) and is public --
+// it must render before there is any session to check. A plain pathname
+// match is enough here: standing up @tanstack/react-router is Task 19's
+// concern (the app shell), not this one's.
+function inviteTokenFromPath(pathname: string): string | null {
+  const match = /^\/invite\/([^/]+)\/?$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 export function App() {
-  const health = useQuery({
-    queryKey: ["healthz"],
-    queryFn: () => apiFetch<{ status: string }>("/healthz"),
-  });
+  const inviteToken = inviteTokenFromPath(window.location.pathname);
+  if (inviteToken) {
+    return <InviteScreen token={inviteToken} />;
+  }
+  return <SignedInOrSignIn />;
+}
+
+// A deliberately minimal shell for the signed-in state. Task 19 replaces
+// this with the real sidebar and dashboard; its only job today is to prove
+// that a live session renders something other than the sign-in screen.
+function SignedInOrSignIn() {
+  const me = useMe();
+
+  if (me.isPending) {
+    return (
+      <main className="min-h-screen grid place-items-center p-10">
+        <p className="text-muted text-sm">Loading…</p>
+      </main>
+    );
+  }
+
+  if (me.isError) {
+    return <SignInScreen />;
+  }
 
   return (
     <main className="min-h-screen grid place-items-center p-10">
       <div className="bg-card border border-hairline rounded-[8px] shadow-[var(--shadow-card)] p-8 max-w-md">
         <h1 className="font-serif text-2xl mb-2">Hearth</h1>
-        <p className="text-muted text-sm mb-6">
-          Skeleton is running. Identity arrives in the next plan.
-        </p>
-        <p className="font-mono text-xs">
-          API:{" "}
-          {health.isPending
-            ? "checking…"
-            : health.isError
-              ? "unreachable"
-              : health.data?.status}
+        <p className="text-muted text-sm">
+          Signed in as {me.data.user.displayName}. The real app shell arrives
+          in the next task.
         </p>
       </div>
     </main>
