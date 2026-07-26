@@ -8,7 +8,7 @@
 // not a separate locked screen (there is no such state in the design's own
 // authScreen enum, which only has Sign in / Invited / Wrong password /
 // Signed in).
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { ApiError } from "../../api/client";
 import { apiErrorMessage, triesLeftPhrase } from "./copy";
 import { MagicLinkSentPanel } from "./MagicLinkSentPanel";
@@ -32,6 +32,16 @@ export function SignInScreen() {
 
   const signIn = useSignIn();
   const requestMagicLink = useRequestMagicLink();
+
+  // Fix round 2, Finding 1: a magic-link error belongs to the mode it was
+  // raised in (a failed resend belongs to the sent panel), so it must not
+  // survive a transition to a different mode -- clearing it only in onBack's
+  // handler covered the one path that existed then, but not any future path
+  // back to the password form. Keying this off `mode` itself, rather than a
+  // specific handler, covers all of them.
+  useEffect(() => {
+    setMagicLinkError(null);
+  }, [mode]);
 
   const apiSignInError = signInError instanceof ApiError ? signInError : null;
   const locked = apiSignInError?.code === "HOUSEHOLD_LOCKED";

@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { stubFetchRoutes } from "./fetchStub";
 import { SignInScreen } from "./SignInScreen";
+
+const SIGN_IN_URL = "/api/v1/auth/sign-in";
+const MAGIC_LINK_URL = "/api/v1/auth/magic-link";
 
 // Mirrors api/internal/adapter/http/auth_handlers.go's meResponseBody -- a
 // successful sign-in answers with this shape.
@@ -32,20 +36,6 @@ const meBody = {
   spaces: [],
 };
 
-function stubFetch(status: number, body: unknown) {
-  const fetchMock = vi.fn<
-    (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
-  >(
-    async () =>
-      new Response(JSON.stringify(body), {
-        status,
-        headers: { "Content-Type": "application/json" },
-      }),
-  );
-  vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
-}
-
 function renderSignIn() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -75,7 +65,12 @@ describe("SignInScreen", () => {
   });
 
   it("submits valid credentials to POST /api/v1/auth/sign-in exactly once", async () => {
-    const fetchMock = stubFetch(200, meBody);
+    // Only /auth/sign-in is registered -- if "Continue" ever posted anywhere
+    // else (e.g. the magic-link endpoint), stubFetchRoutes would throw
+    // rather than let this test pass on the wrong request.
+    const fetchMock = stubFetchRoutes({
+      [`POST ${SIGN_IN_URL}`]: { status: 200, body: meBody },
+    });
     renderSignIn();
 
     fireEvent.change(screen.getByLabelText("Email"), {
@@ -88,7 +83,7 @@ describe("SignInScreen", () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("/api/v1/auth/sign-in");
+    expect(url).toBe(SIGN_IN_URL);
     expect(init?.method).toBe("POST");
     expect(JSON.parse(init?.body as string)).toEqual({
       email: "andreas@hearth.family",
@@ -97,11 +92,16 @@ describe("SignInScreen", () => {
   });
 
   it("renders the exact two-tries-left copy on a 401 with attemptsRemaining: 2", async () => {
-    stubFetch(401, {
-      error: {
-        code: "INVALID_CREDENTIALS",
-        message: "That email or password is incorrect.",
-        details: { attemptsRemaining: 2 },
+    stubFetchRoutes({
+      [`POST ${SIGN_IN_URL}`]: {
+        status: 401,
+        body: {
+          error: {
+            code: "INVALID_CREDENTIALS",
+            message: "That email or password is incorrect.",
+            details: { attemptsRemaining: 2 },
+          },
+        },
       },
     });
     renderSignIn();
@@ -122,11 +122,16 @@ describe("SignInScreen", () => {
   });
 
   it("pluralises attemptsRemaining: 1 as 'One try left', not '1 tries left'", async () => {
-    stubFetch(401, {
-      error: {
-        code: "INVALID_CREDENTIALS",
-        message: "That email or password is incorrect.",
-        details: { attemptsRemaining: 1 },
+    stubFetchRoutes({
+      [`POST ${SIGN_IN_URL}`]: {
+        status: 401,
+        body: {
+          error: {
+            code: "INVALID_CREDENTIALS",
+            message: "That email or password is incorrect.",
+            details: { attemptsRemaining: 1 },
+          },
+        },
       },
     });
     renderSignIn();
@@ -148,12 +153,17 @@ describe("SignInScreen", () => {
   });
 
   it("renders the locked message and disables the submit button on a 423", async () => {
-    stubFetch(423, {
-      error: {
-        code: "HOUSEHOLD_LOCKED",
-        message:
-          "This household is temporarily locked after too many failed sign-in attempts.",
-        details: { lockedUntil: "2026-07-26T13:00:00Z" },
+    stubFetchRoutes({
+      [`POST ${SIGN_IN_URL}`]: {
+        status: 423,
+        body: {
+          error: {
+            code: "HOUSEHOLD_LOCKED",
+            message:
+              "This household is temporarily locked after too many failed sign-in attempts.",
+            details: { lockedUntil: "2026-07-26T13:00:00Z" },
+          },
+        },
       },
     });
     renderSignIn();
@@ -184,34 +194,23 @@ describe("SignInScreen", () => {
   // the locked state and the magic-link request's own error are tracked
   // separately for exactly this reason.
   it("keeps the locked message on screen when a magic-link click fails", async () => {
-    let call = 0;
-    const fetchMock = vi.fn<
-      (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
-    >(async () => {
-      call += 1;
-      if (call === 1) {
-        // The sign-in attempt that gets the household locked.
-        return new Response(
-          JSON.stringify({
-            error: {
-              code: "HOUSEHOLD_LOCKED",
-              message:
-                "This household is temporarily locked after too many failed sign-in attempts.",
-              details: { lockedUntil: "2026-07-26T13:00:00Z" },
-            },
-          }),
-          { status: 423, headers: { "Content-Type": "application/json" } },
-        );
-      }
-      // The magic-link click that follows, which fails.
-      return new Response(
-        JSON.stringify({
-          error: { code: "RATE_LIMITED", message: "Too many requests. Try again later." },
-        }),
-        { status: 429, headers: { "Content-Type": "application/json" } },
-      );
+    stubFetchRoutes({
+      [`POST ${SIGN_IN_URL}`]: {
+        status: 423,
+        body: {
+          error: {
+            code: "HOUSEHOLD_LOCKED",
+            message:
+              "This household is temporarily locked after too many failed sign-in attempts.",
+            details: { lockedUntil: "2026-07-26T13:00:00Z" },
+          },
+        },
+      },
+      [`POST ${MAGIC_LINK_URL}`]: {
+        status: 429,
+        body: { error: { code: "RATE_LIMITED", message: "Too many requests. Try again later." } },
+      },
     });
-    vi.stubGlobal("fetch", fetchMock);
     renderSignIn();
 
     fireEvent.change(screen.getByLabelText("Email"), {
@@ -238,7 +237,9 @@ describe("SignInScreen", () => {
   });
 
   it("requests a magic link and shows the sent confirmation instead of the form", async () => {
-    const fetchMock = stubFetch(202, { status: "accepted" });
+    const fetchMock = stubFetchRoutes({
+      [`POST ${MAGIC_LINK_URL}`]: { status: 202, body: { status: "accepted" } },
+    });
     renderSignIn();
 
     fireEvent.change(screen.getByLabelText("Email"), {
@@ -250,7 +251,7 @@ describe("SignInScreen", () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("/api/v1/auth/magic-link");
+    expect(url).toBe(MAGIC_LINK_URL);
     expect(JSON.parse(init?.body as string)).toEqual({
       email: "andreas@hearth.family",
     });
@@ -274,8 +275,11 @@ describe("SignInScreen", () => {
   // no-op. Magic link is the only way back in while a household is locked,
   // so an offer that can fail silently is not a real offer.
   it("shows an error when the magic-link request itself fails (e.g. rate-limited)", async () => {
-    stubFetch(429, {
-      error: { code: "RATE_LIMITED", message: "Too many requests. Try again later." },
+    stubFetchRoutes({
+      [`POST ${MAGIC_LINK_URL}`]: {
+        status: 429,
+        body: { error: { code: "RATE_LIMITED", message: "Too many requests. Try again later." } },
+      },
     });
     renderSignIn();
 
@@ -296,8 +300,24 @@ describe("SignInScreen", () => {
   // Fix round 1, Finding 1 (resend path): the sent panel's "Send another
   // link" calls the same handler as the original send, so a failed resend
   // must surface its own error rather than looking identical to success.
+  // The magic-link route is given two responses in order: 202 for the
+  // original send, then 500 for the resend.
   it("shows an error in the sent panel when a resend fails", async () => {
-    stubFetch(202, { status: "accepted" });
+    stubFetchRoutes({
+      [`POST ${MAGIC_LINK_URL}`]: [
+        { status: 202, body: { status: "accepted" } },
+        {
+          status: 500,
+          body: {
+            error: {
+              code: "INTERNAL",
+              message:
+                "Something went wrong. Please try again, or quote this reference if it keeps happening.",
+            },
+          },
+        },
+      ],
+    });
     renderSignIn();
 
     fireEvent.change(screen.getByLabelText("Email"), {
@@ -308,7 +328,6 @@ describe("SignInScreen", () => {
     );
     await screen.findByText("Check your email.");
 
-    stubFetch(500, { error: { code: "INTERNAL", message: "Something went wrong. Please try again, or quote this reference if it keeps happening." } });
     fireEvent.click(screen.getByRole("button", { name: "Send another link" }));
 
     expect(
@@ -337,5 +356,38 @@ describe("SignInScreen", () => {
     expect(
       await screen.findByText("Something went wrong. Please try again."),
     ).toBeInTheDocument();
+  });
+
+  // Fix round 2, Finding 1: the resend-failure message must not survive a
+  // return to password mode -- it belongs to the sent panel, not the form.
+  it("clears a stale resend-failure message when returning to the password form", async () => {
+    stubFetchRoutes({
+      [`POST ${MAGIC_LINK_URL}`]: [
+        { status: 202, body: { status: "accepted" } },
+        {
+          status: 500,
+          body: { error: { code: "INTERNAL", message: "Something went wrong." } },
+        },
+      ],
+    });
+    renderSignIn();
+
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "andreas@hearth.family" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Email me a one-time sign-in link" }),
+    );
+    await screen.findByText("Check your email.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Send another link" }));
+    await screen.findByText("Something went wrong.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Use a password instead" }));
+
+    // Back on the password form, with no fresh request made yet -- the old
+    // resend failure must not still be showing.
+    expect(await screen.findByLabelText("Password")).toBeInTheDocument();
+    expect(screen.queryByText("Something went wrong.")).not.toBeInTheDocument();
   });
 });
