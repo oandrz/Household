@@ -44,6 +44,15 @@ func (p LockoutPolicy) Evaluate(failures []time.Time, now time.Time) LockState {
 		if now.Before(until) {
 			return LockState{Locked: true, Until: until, AttemptsRemaining: 0}
 		}
+		// A lock that has been served resets the allowance to full, by
+		// design: once LockFor has elapsed the household earns a fresh set
+		// of tries rather than being immediately re-evaluated against the
+		// same recent failures. This is only coherent while LockFor >=
+		// Window — with DefaultLockoutPolicy the two are equal, so a lock
+		// can never expire while its triggering failures are still inside
+		// the window. A policy with LockFor < Window would let the lock
+		// expire before the failures age out, briefly granting a full
+		// allowance with failures still counting.
 		return LockState{AttemptsRemaining: p.MaxAttempts}
 	}
 
