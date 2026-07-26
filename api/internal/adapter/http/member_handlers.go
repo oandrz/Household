@@ -1,7 +1,6 @@
 package httpadapter
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -94,8 +93,7 @@ func handleInviteMember(deps Deps) http.HandlerFunc {
 			return
 		}
 		var req inviteMemberRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			WriteError(w, http.StatusBadRequest, "INVALID_BODY", "The request body could not be parsed.", nil)
+		if !decodeJSONBody(w, r, &req) {
 			return
 		}
 		role, err := domain.ParseRole(req.Role)
@@ -138,8 +136,7 @@ func handleUpdateMember(deps Deps) http.HandlerFunc {
 		membershipID := chi.URLParam(r, "id")
 
 		var req updateMemberRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			WriteError(w, http.StatusBadRequest, "INVALID_BODY", "The request body could not be parsed.", nil)
+		if !decodeJSONBody(w, r, &req) {
 			return
 		}
 		role, err := domain.ParseRole(req.Role)

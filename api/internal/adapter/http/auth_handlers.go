@@ -2,7 +2,6 @@ package httpadapter
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 
 	"github.com/andreasoentoro/hearth/api/internal/domain"
@@ -172,8 +171,7 @@ type signInRequest struct {
 func handleSignIn(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req signInRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			WriteError(w, http.StatusBadRequest, "INVALID_BODY", "The request body could not be parsed.", nil)
+		if !decodeJSONBody(w, r, &req) {
 			return
 		}
 		result, err := deps.Auth.SignIn(r.Context(), req.Email, req.Password)
@@ -192,8 +190,7 @@ type magicLinkRequest struct {
 func handleRequestMagicLink(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req magicLinkRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			WriteError(w, http.StatusBadRequest, "INVALID_BODY", "The request body could not be parsed.", nil)
+		if !decodeJSONBody(w, r, &req) {
 			return
 		}
 		// RequestMagicLink's own contract is "always nil" (see its doc
@@ -215,8 +212,7 @@ type magicLinkConsumeRequest struct {
 func handleConsumeMagicLink(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req magicLinkConsumeRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			WriteError(w, http.StatusBadRequest, "INVALID_BODY", "The request body could not be parsed.", nil)
+		if !decodeJSONBody(w, r, &req) {
 			return
 		}
 		result, err := deps.Auth.ConsumeMagicLink(r.Context(), req.Token)

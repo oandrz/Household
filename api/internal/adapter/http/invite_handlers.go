@@ -1,7 +1,6 @@
 package httpadapter
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -50,8 +49,7 @@ func handleAcceptInvite(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := chi.URLParam(r, "token")
 		var req acceptInviteRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			WriteError(w, http.StatusBadRequest, "INVALID_BODY", "The request body could not be parsed.", nil)
+		if !decodeJSONBody(w, r, &req) {
 			return
 		}
 		result, err := deps.Invites.Accept(r.Context(), token, req.Password, req.DisplayName)

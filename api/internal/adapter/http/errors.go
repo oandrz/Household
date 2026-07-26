@@ -1,6 +1,7 @@
 package httpadapter
 
 import (
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -10,6 +11,45 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
+
+// maxRequestBodyBytes bounds every JSON body this API accepts. It is one
+// constant used everywhere, rather than a per-handler value, so the limit
+// cannot silently drift from one route to another. 1 KiB is generous for
+// every request shape in this file: the largest legitimate body (a member
+// invite, or a full household update) is a few hundred bytes of field names
+// and short strings.
+const maxRequestBodyBytes = 1024
+
+// decodeJSONBody reads r.Body bounded to maxRequestBodyBytes and decodes it
+// into dest, writing the response itself on any failure. A caller over the
+// limit gets 413 PAYLOAD_TOO_LARGE through the standard error envelope
+// (never net/http's own bare "http: request body too large" text); any
+// other decode failure -- malformed JSON, a wrong-shaped field -- gets 400
+// INVALID_BODY, exactly as every handler already answered before this
+// helper existed.
+//
+// Without this, an unauthenticated POST (sign-in, magic-link, magic-link
+// consume are all reachable pre-auth and pre-CSRF) carrying a
+// multi-gigabyte body would be decoded into memory in full before the
+// handler ever got a chance to reject it -- the worst place for an unbounded
+// read to live, since none of the usual gates (a session, a CSRF token)
+// have run yet.
+//
+// Usage: `var req someRequest; if !decodeJSONBody(w, r, &req) { return }`.
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, dest any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(dest); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			WriteError(w, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE",
+				"The request body is too large.", nil)
+			return false
+		}
+		WriteError(w, http.StatusBadRequest, "INVALID_BODY", "The request body could not be parsed.", nil)
+		return false
+	}
+	return true
+}
 
 // MapDomainError is the single table translating a domain or usecase
 // sentinel into the one error envelope every failure response uses.
@@ -68,12 +108,23 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 			"That capability set is not valid for this role.", nil)
 	case errors.Is(err, domain.ErrUnknownRole):
 		WriteError(w, http.StatusUnprocessableEntity, "INVALID_ROLE", "That role is not recognised.", nil)
-	case errors.Is(err, domain.ErrAmountOverflow), errors.Is(err, domain.ErrInvalidMoney):
-		// Either of these reaching the HTTP layer means a calculation is
-		// wrong, not that the caller sent a bad request. Handled like the
+	case errors.Is(err, domain.ErrAmountOverflow):
+		// Reaching the HTTP layer means a calculation is wrong, not that the
+		// caller sent a bad request -- nothing on this API surface accepts a
+		// caller-supplied amount that could overflow. Handled like the
 		// default branch (logged, generic 500) with its own case only so the
 		// log line names the specific cause.
 		logAndWriteInternal(w, r, err)
+	case errors.Is(err, domain.ErrInvalidMoney):
+		// Unlike ErrAmountOverflow above, this is no longer only an internal-
+		// arithmetic signal: HouseholdService.Update (Task 15) wraps a
+		// caller-supplied currency code's domain.NewMoney failure in this
+		// same sentinel (see normalizeCurrency in usecase/household.go), so
+		// a typo in PATCH /household's primaryCurrency or secondaryCurrency
+		// field reaches here too. That is an ordinary bad request, not a
+		// calculation gone wrong, and must not 500.
+		WriteError(w, http.StatusUnprocessableEntity, "INVALID_CURRENCY",
+			"That currency code is not valid.", nil)
 	case errors.Is(err, domain.ErrInviteExpired):
 		WriteError(w, http.StatusGone, "INVITE_EXPIRED", "This invite has expired.", nil)
 	case errors.Is(err, domain.ErrInviteRequiresEmail):
@@ -95,6 +146,8 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 		WriteError(w, http.StatusConflict, "SPACE_NAME_TAKEN", "A space with that name already exists.", nil)
 	case errors.Is(err, usecase.ErrSpaceVisibilityNotSupported):
 		WriteError(w, http.StatusUnprocessableEntity, "INVALID_VISIBILITY", "That visibility is not supported yet.", nil)
+	case errors.Is(err, usecase.ErrSpaceNameRequired):
+		WriteError(w, http.StatusUnprocessableEntity, "SPACE_NAME_REQUIRED", "A space name is required.", nil)
 	default:
 		// domain.ErrAlreadyExists deliberately has no case above and falls
 		// through to here: it is a general unique-violation sentinel (see its

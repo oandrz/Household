@@ -113,6 +113,17 @@ func run() error {
 			Secure:      !cfg.IsDevelopment(),
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
+		// ReadTimeout bounds the whole request, not just its headers:
+		// ReadHeaderTimeout alone leaves a slow-body attack (or a request
+		// that simply never finishes sending) free to hold a connection open
+		// indefinitely once the headers have arrived.
+		ReadTimeout: 15 * time.Second,
+		// MaxHeaderBytes is set explicitly rather than left to net/http's
+		// unstated default -- this is the request-size bound that lives on
+		// the *server*, alongside the JSON-body bound
+		// (httpadapter's unexported maxRequestBodyBytes, in errors.go) that
+		// lives in the handler layer.
+		MaxHeaderBytes: 1 << 20,
 	}
 
 	// serveErr carries the outcome of ListenAndServe back to the main path.
