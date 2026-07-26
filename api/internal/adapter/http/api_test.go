@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -20,6 +21,14 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/testsupport"
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
+
+// movableClock is a controllable usecase.Clock for the one test that needs
+// to fast-forward time without sleeping: proving a session's cookies slide
+// when the session is extended near expiry.
+type movableClock struct{ now time.Time }
+
+func (c *movableClock) Now() time.Time          { return c.now }
+func (c *movableClock) Advance(d time.Duration) { c.now = c.now.Add(d) }
 
 // noopMailer satisfies usecase.Mailer without talking to a real relay: these
 // tests exercise the HTTP layer's wiring and authorization, not delivery,
@@ -47,6 +56,15 @@ type testEnv struct {
 
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
+	return newTestEnvWithClock(t, clock.System{})
+}
+
+// newTestEnvWithClock is newTestEnv's more general form, used by the one
+// test that needs to fast-forward time to prove a session's cookies slide
+// when it's extended -- everything else gets the real wall clock via
+// newTestEnv.
+func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
+	t.Helper()
 
 	dbURL := testsupport.StartPostgres(t)
 	db, err := postgres.Open(context.Background(), dbURL)
@@ -71,7 +89,6 @@ func newTestEnv(t *testing.T) *testEnv {
 	// exercising Verify -- only the cost is turned down.
 	hasher := crypto.NewArgon2Hasher(1, 8*1024, 1)
 	tokens := crypto.NewTokenGenerator()
-	sysClock := clock.System{}
 	mailer := noopMailer{}
 
 	authSvc := usecase.NewAuthService(usecase.AuthDeps{
@@ -83,7 +100,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		Mailer:     mailer,
 		Hasher:     hasher,
 		Tokens:     tokens,
-		Clock:      sysClock,
+		Clock:      clk,
 		SessionTTL: httpadapter.SessionTTL,
 		BaseURL:    "http://localhost:5173",
 	})
@@ -94,7 +111,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		Mailer:     mailer,
 		Hasher:     hasher,
 		Tokens:     tokens,
-		Clock:      sysClock,
+		Clock:      clk,
 		SessionTTL: httpadapter.SessionTTL,
 		BaseURL:    "http://localhost:5173",
 	})
@@ -115,7 +132,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		Memberships: memberships,
 		Sessions:    sessions,
 		Tokens:      tokens,
-		Clock:       sysClock,
+		Clock:       clk,
 		Secure:      false,
 	})
 
@@ -513,83 +530,172 @@ func TestLimitedMemberCannotCreateSpace(t *testing.T) {
 }
 
 // TestOwnerOnlyRoutesRejectALimitedMember is the sibling of
-// TestEveryProtectedRouteRejectsAnUnauthenticatedCaller: where that test
-// walks the router asserting every non-public route needs a session at all,
-// this one hand-lists every route this task's audit (see the fix report)
-// concluded must sit behind requireOwner, and asserts a signed-in,
-// CSRF-valid *limited* member is rejected with 403 FORBIDDEN on every one of
-// them. It is deliberately a fixed table rather than a walk: chi.Walk
-// exposes a route's middleware chain, but there is no reliable, non-reflection
-// way to ask "does this chain include requireOwner specifically" the way the
-// unauthenticated matrix can ask "did this return 401." A route added to the
-// owner-gated set in the audit without actually being wired behind
-// requireOwner in router.go fails this test rather than shipping unnoticed.
+// TestEveryProtectedRouteRejectsAnUnauthenticatedCaller: it walks the live
+// router and, for every mutating route (method not GET/HEAD/OPTIONS), signs
+// in as a *limited* member and attaches a genuinely valid session and CSRF
+// token -- so the only thing that could still reject the request is
+// requireOwner -- then asserts 403 FORBIDDEN unless the route is on the
+// short, commented allowlist below.
+//
+// An earlier version of this test was a hand-maintained table of "routes I
+// believe are owner-gated," justified by a claim that chi.Walk can't be used
+// here because Go function values aren't comparable, so there was no
+// reliable way to check whether a route's middleware chain included
+// requireOwner specifically. That claim was correct but beside the point:
+// this test was never supposed to introspect the middleware chain. It
+// observes behaviour, exactly as the unauthenticated matrix does for
+// requireSession -- a route wired without requireOwner now simply succeeds
+// when it should have been forbidden, and fails this test on that basis, no
+// reflection required. A route added to the owner-gated set without
+// actually being wired behind requireOwner in router.go fails this test
+// rather than shipping unnoticed.
 //
 // TestLimitedMemberCannotUpdateMembers and TestLimitedMemberCannotCreateSpace
-// above already cover two of these rows individually, matching the task's
-// original eleven enumerated behaviours verbatim; this table is the
-// superset the coordinator's route audit asked for.
+// above still individually pin the task's original eleven enumerated
+// behaviours verbatim; this walk is the exhaustive superset the
+// coordinator's route audit asked for.
 func TestOwnerOnlyRoutesRejectALimitedMember(t *testing.T) {
-	tests := []struct {
-		name   string
-		method string
-		path   string
-		body   any
-	}{
-		{
-			name:   "PATCH /household",
-			method: http.MethodPatch,
-			path:   "/api/v1/household",
-			body: map[string]any{
-				"name": "New Name", "familyName": "New Family", "primaryCurrency": "SGD",
-				"showSecondaryCurrency": true, "secondaryCurrency": "IDR", "fxRateMode": "auto",
-			},
-		},
-		{
-			name:   "PATCH /notification-preferences",
-			method: http.MethodPatch,
-			path:   "/api/v1/notification-preferences",
-			body: map[string]any{
-				"billReminders": true, "overspendAlerts": true, "retroReminder": true, "weeklyDigest": true,
-			},
-		},
-		{
-			name:   "POST /household/members/invite",
-			method: http.MethodPost,
-			path:   "/api/v1/household/members/invite",
-			body: map[string]any{
-				"name": "New Kid", "email": "newkid@hearth.family", "role": "limited",
-				"capabilities": []string{"calendar"},
-			},
-		},
-		{
-			name:   "PATCH /household/members/{id}",
-			method: http.MethodPatch,
-			path:   "/api/v1/household/members/00000000-0000-0000-0000-000000000000",
-			body:   map[string]any{"role": "limited", "capabilities": []string{"calendar"}},
-		},
-		{
-			name:   "DELETE /household/members/{id}",
-			method: http.MethodDelete,
-			path:   "/api/v1/household/members/00000000-0000-0000-0000-000000000000",
-			body:   nil,
-		},
-		{
-			name:   "POST /spaces",
-			method: http.MethodPost,
-			path:   "/api/v1/spaces",
-			body:   map[string]any{"name": "Movie Night", "visibility": "everyone"},
-		},
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.limitedEmail, env.limitedPassword)
+
+	// Every entry is a mutating route that is correctly NOT owner-gated,
+	// with the reason it's exempt recorded alongside it.
+	allowlist := map[string]bool{
+		// Public, pre-auth: reached before any session exists at all, so
+		// there is no caller identity yet to check ownership against.
+		"POST /api/v1/auth/sign-in":            true,
+		"POST /api/v1/auth/magic-link":         true,
+		"POST /api/v1/auth/magic-link/consume": true,
+		// Any signed-in member, owner or not, may end their own session --
+		// ownership has nothing to do with signing yourself out.
+		"POST /api/v1/auth/sign-out": true,
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			env := newTestEnv(t)
-			session, csrf := env.signIn(t, env.limitedEmail, env.limitedPassword)
+	routes, ok := env.router.(chi.Routes)
+	if !ok {
+		t.Fatal("router does not implement chi.Routes")
+	}
 
-			rec := env.authed(t, tt.method, tt.path, tt.body, session, csrf)
-			assertErrorResponse(t, rec, http.StatusForbidden, "FORBIDDEN")
-		})
+	replacer := strings.NewReplacer("{id}", "00000000-0000-0000-0000-000000000000")
+
+	checked := 0
+	err := chi.Walk(routes, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		switch method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			return nil
+		}
+		if strings.HasPrefix(route, "/api/v1/invites/") {
+			// Public, pre-auth, and mutating (POST .../accept) -- exempt for
+			// the identical reason the /auth/* entries above are, just
+			// expressed as a prefix (like the unauthenticated matrix does)
+			// rather than a second, redundant allowlist entry.
+			return nil
+		}
+		if allowlist[method+" "+route] {
+			return nil
+		}
+
+		path := replacer.Replace(route)
+		req := httptest.NewRequest(method, path, bytes.NewReader([]byte("{}")))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(session)
+		req.AddCookie(csrf)
+		req.Header.Set("X-CSRF-Token", csrf.Value)
+		rec := httptest.NewRecorder()
+		env.router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("%s %s: status = %d, want 403 (body = %s)", method, route, rec.Code, rec.Body.String())
+		} else {
+			body := decodeError(t, rec)
+			if body.Error.Code != "FORBIDDEN" {
+				t.Errorf("%s %s: error code = %q, want FORBIDDEN", method, route, body.Error.Code)
+			}
+		}
+		checked++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("chi.Walk: %v", err)
+	}
+	t.Logf("checked %d owner-gated candidate routes", checked)
+	if checked < 6 {
+		t.Fatalf("checked %d routes, want at least 6 -- "+
+			"the walk may not be enumerating routes correctly", checked)
+	}
+}
+
+// TestEveryMutatingRouteRequiresCSRF is the CSRF guard's sibling of the same
+// two matrices: it walks the live router and, for every mutating route,
+// sends a request carrying a *valid* session cookie but no X-CSRF-Token
+// header (and no csrf_token cookie), and asserts 403 CSRF_INVALID.
+// TestCSRFIsRequiredForMutatingRequests above already pins the missing-
+// header and mismatched-header cases concretely on one route (sign-out);
+// this walk is the exhaustive check that no other mutating route was wired
+// outside the requireCSRF group.
+//
+// The three public /auth/* routes and everything under /invites/ are
+// skipped -- not via some second allowlist, but because they are
+// structurally pre-CSRF: router.go never wraps them in requireCSRF at all
+// (there is no session yet to fixate before one exists), so calling them
+// without a header succeeds or fails on their own terms, never with
+// CSRF_INVALID.
+func TestEveryMutatingRouteRequiresCSRF(t *testing.T) {
+	env := newTestEnv(t)
+	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	public := map[string]bool{
+		"POST /api/v1/auth/sign-in":            true,
+		"POST /api/v1/auth/magic-link":         true,
+		"POST /api/v1/auth/magic-link/consume": true,
+	}
+
+	routes, ok := env.router.(chi.Routes)
+	if !ok {
+		t.Fatal("router does not implement chi.Routes")
+	}
+
+	replacer := strings.NewReplacer("{id}", "00000000-0000-0000-0000-000000000000")
+
+	checked := 0
+	err := chi.Walk(routes, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		switch method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			return nil
+		}
+		if strings.HasPrefix(route, "/api/v1/invites/") {
+			return nil
+		}
+		if public[method+" "+route] {
+			return nil
+		}
+
+		path := replacer.Replace(route)
+		req := httptest.NewRequest(method, path, bytes.NewReader([]byte("{}")))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(session)
+		// Deliberately no csrf_token cookie and no X-CSRF-Token header.
+		rec := httptest.NewRecorder()
+		env.router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("%s %s: status = %d, want 403 (body = %s)", method, route, rec.Code, rec.Body.String())
+		} else {
+			body := decodeError(t, rec)
+			if body.Error.Code != "CSRF_INVALID" {
+				t.Errorf("%s %s: error code = %q, want CSRF_INVALID", method, route, body.Error.Code)
+			}
+		}
+		checked++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("chi.Walk: %v", err)
+	}
+	t.Logf("checked %d mutating routes", checked)
+	if checked < 7 {
+		t.Fatalf("checked %d mutating routes, want at least 7 -- "+
+			"the walk may not be enumerating routes correctly", checked)
 	}
 }
 
@@ -696,4 +802,238 @@ func slicesEqual(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// --- fix round 3 -----------------------------------------------------------
+
+// TestSessionCookiesSlideWhenExtended pins the fix for the missing cookie
+// refresh: requireSession already extended the database row when a session
+// drifted inside its extension window, but never re-issued the cookies
+// carrying that new expiry, so the browser discarded hearth_session (and
+// csrf_token, set with the identical fixed lifetime) on the original
+// sign-in-plus-30-days schedule no matter how actively the session was
+// used. A request made inside the window must now come back with a
+// refreshed Set-Cookie for both, with the same token values and a later
+// expiry.
+func TestSessionCookiesSlideWhenExtended(t *testing.T) {
+	clk := &movableClock{now: time.Now().UTC()}
+	env := newTestEnvWithClock(t, clk)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	// Move to inside the extension window: under a day left of the 30-day
+	// session.
+	clk.Advance(httpadapter.SessionTTL - time.Hour)
+
+	rec := env.do(http.MethodGet, "/api/v1/auth/me", nil, session, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	var newSession, newCSRF *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		switch c.Name {
+		case "hearth_session":
+			newSession = c
+		case "csrf_token":
+			newCSRF = c
+		}
+	}
+	if newSession == nil {
+		t.Fatal("expected a refreshed hearth_session Set-Cookie")
+	}
+	if newCSRF == nil {
+		t.Fatal("expected a refreshed csrf_token Set-Cookie")
+	}
+	if newSession.Value != session.Value {
+		t.Fatalf("session token value changed: got %q, want unchanged %q", newSession.Value, session.Value)
+	}
+	if newCSRF.Value != csrf.Value {
+		t.Fatalf("csrf token value changed: got %q, want unchanged %q", newCSRF.Value, csrf.Value)
+	}
+	if !newSession.Expires.After(session.Expires) {
+		t.Fatalf("session cookie did not slide: new expiry %v, old expiry %v", newSession.Expires, session.Expires)
+	}
+	if !newCSRF.Expires.After(csrf.Expires) {
+		t.Fatalf("csrf cookie did not slide: new expiry %v, old expiry %v", newCSRF.Expires, csrf.Expires)
+	}
+}
+
+// TestSignInRejectsAnOversizedBody pins the fix for the unbounded body read:
+// a body over the shared size limit must be rejected with 413 before it is
+// ever handed to json.Decode, let alone SignIn. Deliberately tested on a
+// public route -- sign-in is reachable pre-auth and pre-CSRF, which is
+// exactly where an unbounded read is most dangerous: nothing has gated the
+// request yet.
+func TestSignInRejectsAnOversizedBody(t *testing.T) {
+	env := newTestEnv(t)
+
+	oversizedPassword := strings.Repeat("a", 2*1024*1024) // 2 MiB, far past the 1 KiB limit
+	body := `{"email":"a@b.c","password":"` + oversizedPassword + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/sign-in", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	env.router.ServeHTTP(rec, req)
+
+	assertErrorResponse(t, rec, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE")
+}
+
+type householdResponse struct {
+	ID                    string `json:"id"`
+	Name                  string `json:"name"`
+	FamilyName            string `json:"familyName"`
+	PrimaryCurrency       string `json:"primaryCurrency"`
+	ShowSecondaryCurrency bool   `json:"showSecondaryCurrency"`
+	SecondaryCurrency     string `json:"secondaryCurrency"`
+	FXRateMode            string `json:"fxRateMode"`
+}
+
+func (env *testEnv) getHousehold(t *testing.T, session *http.Cookie) householdResponse {
+	t.Helper()
+	rec := env.do(http.MethodGet, "/api/v1/household", nil, session)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /household: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var h householdResponse
+	if err := json.NewDecoder(rec.Body).Decode(&h); err != nil {
+		t.Fatalf("decode household: %v (body = %s)", err, rec.Body.String())
+	}
+	return h
+}
+
+// TestUpdateHouseholdIsARealPatch pins the fix for Finding 1: PATCH
+// /household previously assigned every field unconditionally from plain
+// value fields, so an omitted field and an explicit zero value were
+// indistinguishable -- sending the API spec's own documented body (which
+// omits secondaryCurrency) blanked it to "", and HouseholdService.Update's
+// currency validation then failed with a 500. Pointer fields fix this: an
+// absent field must leave the current value untouched, and a bad currency
+// must report 422, never 500.
+func TestUpdateHouseholdIsARealPatch(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	t.Run("every field present", func(t *testing.T) {
+		rec := env.authed(t, http.MethodPatch, "/api/v1/household", map[string]any{
+			"name": "The Oentoros", "familyName": "Oentoro", "primaryCurrency": "SGD",
+			"showSecondaryCurrency": false, "secondaryCurrency": "IDR", "fxRateMode": "manual",
+		}, session, csrf)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var got householdResponse
+		if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+			t.Fatalf("decode: %v (body = %s)", err, rec.Body.String())
+		}
+		if got.Name != "The Oentoros" || got.FamilyName != "Oentoro" || got.PrimaryCurrency != "SGD" ||
+			got.ShowSecondaryCurrency || got.SecondaryCurrency != "IDR" || got.FXRateMode != "manual" {
+			t.Fatalf("household = %+v, want every field updated to what was sent", got)
+		}
+	})
+
+	t.Run("a single field present leaves the rest unchanged", func(t *testing.T) {
+		before := env.getHousehold(t, session)
+
+		rec := env.authed(t, http.MethodPatch, "/api/v1/household",
+			// The spec's own documented PATCH body: only familyName,
+			// primaryCurrency, showSecondaryCurrency and fxRateMode --
+			// secondaryCurrency (and name) are deliberately omitted here,
+			// which is exactly the shape that used to 500.
+			map[string]any{"familyName": "Oentoro-Wattimena"}, session, csrf)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var got householdResponse
+		if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+			t.Fatalf("decode: %v (body = %s)", err, rec.Body.String())
+		}
+		if got.FamilyName != "Oentoro-Wattimena" {
+			t.Fatalf("familyName = %q, want the new value", got.FamilyName)
+		}
+		if got.Name != before.Name ||
+			got.PrimaryCurrency != before.PrimaryCurrency ||
+			got.ShowSecondaryCurrency != before.ShowSecondaryCurrency ||
+			got.SecondaryCurrency != before.SecondaryCurrency ||
+			got.FXRateMode != before.FXRateMode {
+			t.Fatalf("PATCHing only familyName changed other fields: before = %+v, after = %+v", before, got)
+		}
+	})
+
+	t.Run("an invalid currency reports 422, not 500", func(t *testing.T) {
+		rec := env.authed(t, http.MethodPatch, "/api/v1/household",
+			map[string]any{"primaryCurrency": "nope"}, session, csrf)
+		assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "INVALID_CURRENCY")
+	})
+}
+
+type notificationPreferencesResponse struct {
+	BillReminders   bool `json:"billReminders"`
+	OverspendAlerts bool `json:"overspendAlerts"`
+	RetroReminder   bool `json:"retroReminder"`
+	WeeklyDigest    bool `json:"weeklyDigest"`
+}
+
+// TestUpdateNotificationPreferencesIsARealPatch is
+// TestUpdateHouseholdIsARealPatch's sibling for
+// PATCH /notification-preferences, which had the identical bug: a plain
+// bool field cannot distinguish "the caller didn't mention this toggle"
+// from "the caller wants it off," so an omitted field was silently set to
+// false.
+func TestUpdateNotificationPreferencesIsARealPatch(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	// Establish a known starting point: every toggle on.
+	rec := env.authed(t, http.MethodPatch, "/api/v1/notification-preferences", map[string]any{
+		"billReminders": true, "overspendAlerts": true, "retroReminder": true, "weeklyDigest": true,
+	}, session, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("setup PATCH status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	t.Run("a single field present leaves the rest unchanged", func(t *testing.T) {
+		rec := env.authed(t, http.MethodPatch, "/api/v1/notification-preferences",
+			map[string]any{"weeklyDigest": false}, session, csrf)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var got notificationPreferencesResponse
+		if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+			t.Fatalf("decode: %v (body = %s)", err, rec.Body.String())
+		}
+		if got.WeeklyDigest {
+			t.Fatal("weeklyDigest = true, want false after the PATCH")
+		}
+		if !got.BillReminders || !got.OverspendAlerts || !got.RetroReminder {
+			t.Fatalf("PATCHing only weeklyDigest changed other toggles: %+v", got)
+		}
+	})
+
+	t.Run("every field present", func(t *testing.T) {
+		rec := env.authed(t, http.MethodPatch, "/api/v1/notification-preferences", map[string]any{
+			"billReminders": false, "overspendAlerts": false, "retroReminder": false, "weeklyDigest": false,
+		}, session, csrf)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var got notificationPreferencesResponse
+		if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+			t.Fatalf("decode: %v (body = %s)", err, rec.Body.String())
+		}
+		if got.BillReminders || got.OverspendAlerts || got.RetroReminder || got.WeeklyDigest {
+			t.Fatalf("preferences = %+v, want every toggle false", got)
+		}
+	})
+}
+
+// TestCreateSpaceWithABlankNameReturns422 pins the fix for Finding 4's other
+// sentinel: usecase.ErrSpaceNameRequired had no MapDomainError case at all
+// and fell through to a bare 500 for what is an entirely ordinary bad
+// request -- a blank space name.
+func TestCreateSpaceWithABlankNameReturns422(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/spaces",
+		map[string]any{"name": "   ", "visibility": "everyone"}, session, csrf)
+	assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "SPACE_NAME_REQUIRED")
 }
