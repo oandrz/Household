@@ -165,6 +165,9 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("PORT must be a number: %w", err)
 	}
+	if port < 1 || port > 65535 {
+		return Config{}, fmt.Errorf("PORT must be between 1 and 65535, got %d", port)
+	}
 	cfg.Port = port
 
 	if cfg.DatabaseURL == "" {
@@ -457,15 +460,37 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// Buffered so the goroutine never blocks, and so a bind failure is
+	// distinguishable from a signal. Without this, a failed listen unblocks
+	// ctx.Done() exactly like SIGTERM, Shutdown finds nothing to drain and
+	// returns nil, and the process exits 0 having served zero requests — which
+	// a supervisor reads as a clean stop rather than a crash.
+	serveErr := make(chan error, 1)
+
 	go func() {
 		slog.Info("listening", "addr", srv.Addr, "env", cfg.AppEnv)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("server stopped", "error", err)
+		err := srv.ListenAndServe()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErr <- err
 			stop()
+			return
 		}
+		serveErr <- nil
 	}()
 
 	<-ctx.Done()
+
+	// The send happens-before stop(), which happens-before ctx.Done() returns,
+	// so a bind error is already in the channel here. On a real signal the
+	// channel is still empty and the default case falls through to shutdown.
+	select {
+	case err := <-serveErr:
+		if err != nil {
+			return fmt.Errorf("listen: %w", err)
+		}
+	default:
+	}
+
 	slog.Info("shutting down")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -473,6 +498,8 @@ func run() error {
 	return srv.Shutdown(shutdownCtx)
 }
 ```
+
+Add a config test asserting `Load()` rejects `PORT=0`, `-1` and `70000` and accepts `1` and `65535`, and a `cmd/api` test that binds a wildcard listener on port 0, points the server at the same port, and asserts `run()` returns a non-nil error. Run both with `-race`.
 
 - [ ] **Step 13: Commit**
 
