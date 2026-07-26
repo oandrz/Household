@@ -26,6 +26,21 @@
   --color-callout: #f4f8f6;
   --color-callout-border: #cfe0d8;
 
+  /* Settings screen (Task 20). Owner/Limited role badges (Members panel);
+     the shared ToggleSwitch's off-state track (also reused for the New-space
+     modal's disabled "Custom" pill and the "+ New space" dashed-border
+     look-alike); and a small avatar-colour palette cycled by row index,
+     since the API has no per-member colour field to read a real one from
+     (see MembersPanel.tsx). --color-avatar-1 is deliberately omitted --
+     it reuses --color-accent, the same green the design uses for the first
+     member's avatar. */
+  --color-badge-owner-bg: #e3ede8;
+  --color-badge-limited-bg: #f1f0ec;
+  --color-toggle-off: #e4e2dc;
+  --color-avatar-2: #36618c;
+  --color-avatar-3: #a97c2f;
+  --color-avatar-4: #7c4d6e;
+
   --font-sans: "Schibsted Grotesk", system-ui, sans-serif;
   --font-serif: "Newsreader", Georgia, serif;
   --font-alt: "Karla", system-ui, sans-serif;

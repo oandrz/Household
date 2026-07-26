@@ -13,8 +13,7 @@
 //       /family/calendar                            -- Family (slice 4 placeholder); unconditional,
 //                                                       per domain.BuiltinSpaces Family carries no
 //                                                       required capability
-//       /settings                                   -- slice 1 (this slice); Task 20 replaces this
-//                                                       route's component with the real Settings screen
+//       /settings                                   -- slice 1; the real Settings screen (Task 20)
 import {
   Navigate,
   createRootRoute,
@@ -28,6 +27,7 @@ import { MagicLinkConsumeScreen } from "../features/auth/MagicLinkConsumeScreen"
 import { SignInScreen } from "../features/auth/SignInScreen";
 import { useMe } from "../features/auth/useAuth";
 import { PlaceholderPage } from "../features/placeholder/PlaceholderPage";
+import { SettingsPage } from "../features/settings/SettingsPage";
 import { AppShell } from "../features/shell/AppShell";
 import { RequireAuth } from "../features/shell/RequireAuth";
 import { RequireCapability } from "../features/shell/RequireCapability";
@@ -158,7 +158,10 @@ const familyCalendarRoute = createRoute({
 const settingsRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "settings",
-  component: () => <PlaceholderPage page="Settings" slice={1} />,
+  // Task 20 replaces the placeholder with the real screen -- Members,
+  // Spaces, Currency & region and Notifications; Connected accounts is a
+  // later slice.
+  component: SettingsPage,
 });
 
 // Exported (not just `router`) so a test can mount the real tree with its
