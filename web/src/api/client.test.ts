@@ -45,4 +45,36 @@ describe("apiFetch", () => {
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).code).toBe("UNKNOWN");
   });
+
+  it("resolves to undefined on a 204 without throwing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 204 })),
+    );
+
+    await expect(apiFetch("/api/v1/sessions/1")).resolves.toBeUndefined();
+  });
+
+  it("throws ApiError with INVALID_RESPONSE on a 200 with an empty body", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("", { status: 200 })),
+    );
+
+    const error = await apiFetch("/api/v1/anything").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("INVALID_RESPONSE");
+    expect((error as ApiError).status).toBe(200);
+  });
+
+  it("throws ApiError with INVALID_RESPONSE on a 200 with an HTML body", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("<html>not json</html>", { status: 200 })),
+    );
+
+    const error = await apiFetch("/api/v1/anything").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("INVALID_RESPONSE");
+  });
 });

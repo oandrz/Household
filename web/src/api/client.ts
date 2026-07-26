@@ -80,5 +80,16 @@ export async function apiFetch<T>(
     );
   }
 
+  // A 2xx response whose body is missing or not JSON is not something a
+  // caller can safely treat as T — hand back an ApiError instead of a type
+  // lie (`undefined` cast to T) that only fails far from here.
+  if (parsed === undefined) {
+    throw new ApiError(
+      response.status,
+      "INVALID_RESPONSE",
+      "The server returned a non-JSON body.",
+    );
+  }
+
   return parsed as T;
 }
