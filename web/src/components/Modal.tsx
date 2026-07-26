@@ -25,7 +25,27 @@
 // previously-focused element on close, per the dialog close steps in the
 // HTML spec -- but jsdom does neither, so this implements both explicitly,
 // stepping aside for the platform's own choice when one already exists).
+//
+// Fix round 1, Finding 1: this used to render the `open` attribute
+// declaratively on every render (`<dialog open ...>`) and then call
+// `showModal()` from an effect. In a real browser that throws --
+// showModal()'s first spec'd step is "if this has an open attribute, throw
+// an InvalidStateError" -- so React committing the attribute before the
+// effect ever runs made every open() a guaranteed exception in production.
+// jsdom hid this completely: its HTMLDialogElement has no showModal() at
+// all, so the feature-detection guard always took the no-op branch and the
+// throwing one was never reached in any test. `supportsShowModal` is
+// computed once, at module scope, specifically so the two paths never mix
+// for a single element: a capable engine never gets the attribute rendered
+// declaratively (showModal() sets it itself, and close() clears it), and
+// only an engine without showModal() (this file's only reason to exist:
+// jsdom, or a hypothetical non-modal-capable browser) gets `open` set by
+// JSX at all.
 import { type ReactNode, useEffect, useId, useRef } from "react";
+
+const supportsShowModal =
+  typeof HTMLDialogElement !== "undefined" &&
+  typeof HTMLDialogElement.prototype.showModal === "function";
 
 export function Modal({
   open,
@@ -51,7 +71,7 @@ export function Modal({
         : null;
 
     const dialog = dialogRef.current;
-    if (dialog && typeof dialog.showModal === "function") {
+    if (dialog && supportsShowModal) {
       dialog.showModal();
     }
 
@@ -63,7 +83,7 @@ export function Modal({
     }
 
     return () => {
-      if (dialog && dialog.open && typeof dialog.close === "function") {
+      if (dialog && supportsShowModal && dialog.open) {
         dialog.close();
       }
       const previouslyFocused = previouslyFocusedRef.current;
@@ -78,10 +98,22 @@ export function Modal({
   return (
     <dialog
       ref={dialogRef}
-      open
+      // Only set declaratively on the fallback path -- a capable engine's
+      // showModal()/close() are the sole managers of this attribute (see the
+      // file header comment). jsdom (this repo's test environment) always
+      // takes this branch, since it has no showModal() at all.
+      {...(!supportsShowModal ? { open: true } : {})}
       tabIndex={-1}
       aria-labelledby={titleId}
-      className="m-0 max-h-none max-w-none border-none bg-transparent p-0 open:fixed open:inset-0 open:grid open:place-items-center open:bg-black/40"
+      // w-screen/h-screen matter, not just cosmetically: <dialog>'s default
+      // UA sizing is width/height: fit-content, which -- confirmed in a real
+      // browser (Chromium), not inferred -- wins over `inset-0` stretching
+      // the box to the viewport. Without an explicit full-viewport size, the
+      // dialog's own box shrink-wraps its single child exactly, leaving no
+      // backdrop area at all for a click-outside-to-dismiss to ever land on;
+      // getBoundingClientRect() on the dialog and its panel were identical
+      // (420x118, both) before this was added.
+      className="m-0 h-screen w-screen max-h-none max-w-none border-none bg-transparent p-0 open:fixed open:inset-0 open:grid open:place-items-center open:bg-black/40"
       onCancel={(event) => {
         // Fired by a real browser when the user presses Escape on a modal
         // dialog. preventDefault stops the platform's own close (which
