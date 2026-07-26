@@ -136,6 +136,35 @@ type SignInResult struct {
 	HouseholdID  string
 }
 
+// signInFailedForUnknownAddress is the failure branch shared by an address
+// with no user row at all and a user row with no membership (an ex-member --
+// see SignIn's own comment on the second call site for why that state
+// exists). Both must look identical to a caller probing addresses: the same
+// decoy Hasher.Verify call in the position a real one would occupy, the same
+// address-scoped attempt record and countdown, so neither is distinguishable
+// from the other, or from a real member's wrong password, by timing or by
+// which counter advances.
+func (s *AuthService) signInFailedForUnknownAddress(ctx context.Context, password, email string, now time.Time) (SignInResult, error) {
+	s.verifyPassword(password, s.decoy())
+	// Record the attempt with no household, so guessing at unknown addresses
+	// cannot lock a real household. Then evaluate the same policy over that
+	// address's own failures, so the countdown a stranger sees is
+	// indistinguishable from the one a member sees.
+	if err := s.d.Attempts.Record(ctx, nil, nil, email, false, now); err != nil {
+		return SignInResult{}, err
+	}
+	failures, err := s.d.Attempts.FailuresSinceForEmail(ctx, email, now.Add(-s.d.Policy.Window))
+	if err != nil {
+		return SignInResult{}, err
+	}
+	state := s.d.Policy.Evaluate(failures, now)
+	return SignInResult{}, &SignInFailedError{
+		AttemptsRemaining: state.AttemptsRemaining,
+		Locked:            state.Locked,
+		LockedUntil:       state.Until,
+	}
+}
+
 func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignInResult, error) {
 	now := s.d.Clock.Now()
 
@@ -144,33 +173,24 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 		if !errors.Is(err, domain.ErrNotFound) {
 			return SignInResult{}, err
 		}
-		// Run the decoy verification here, in the position a real
-		// Hasher.Verify call would occupy for a known user — this branch
-		// otherwise returns without ever touching the hasher, which is
-		// trivially distinguishable by timing from every branch that does.
-		s.verifyPassword(password, s.decoy())
-		// Record the attempt with no household, so guessing at unknown addresses
-		// cannot lock a real household. Then evaluate the same policy over that
-		// address's own failures, so the countdown a stranger sees is
-		// indistinguishable from the one a member sees.
-		if err := s.d.Attempts.Record(ctx, nil, nil, email, false, now); err != nil {
-			return SignInResult{}, err
-		}
-		failures, err := s.d.Attempts.FailuresSinceForEmail(ctx, email, now.Add(-s.d.Policy.Window))
-		if err != nil {
-			return SignInResult{}, err
-		}
-		state := s.d.Policy.Evaluate(failures, now)
-		return SignInResult{}, &SignInFailedError{
-			AttemptsRemaining: state.AttemptsRemaining,
-			Locked:            state.Locked,
-			LockedUntil:       state.Until,
-		}
+		return s.signInFailedForUnknownAddress(ctx, password, email, now)
 	}
 
 	membership, err := s.d.Members.ByUser(ctx, user.ID)
 	if err != nil {
-		return SignInResult{}, err
+		if !errors.Is(err, domain.ErrNotFound) {
+			return SignInResult{}, err
+		}
+		// A users row can outlive its membership: removing a member deletes
+		// its row from memberships, not from users (see
+		// MemberService.Remove and the fix report). An ex-member's address
+		// must fail exactly like a stranger's -- same decoy verify, same
+		// address-scoped countdown -- rather than the raw domain.ErrNotFound
+		// this branch used to propagate, which MapDomainError turned into a
+		// bare 404 the sign-in screen has no copy for, and which told a
+		// caller "this address once existed" where every other failure here
+		// tells them nothing.
+		return s.signInFailedForUnknownAddress(ctx, password, email, now)
 	}
 	householdID := membership.HouseholdID
 
@@ -352,21 +372,40 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, email string) error 
 		return err
 	}
 	known := err == nil
+
+	// A users row can outlive its membership (removing a member deletes only
+	// the memberships row -- see the fix report and SignIn's identical
+	// check). Minting a token for that address would mail a link that can
+	// never become a session: ConsumeMagicLink resolves the token to a
+	// userID and then calls Members.ByUser itself, which would fail
+	// identically. Treat this exactly like "no such address" -- log it, and
+	// fall through to the same silent return every unknown or rate-limited
+	// address gets below.
+	if known {
+		if _, membErr := s.d.Members.ByUser(ctx, user.ID); membErr != nil {
+			if !errors.Is(membErr, domain.ErrNotFound) {
+				return membErr
+			}
+			slog.Info("magic link requested for a user with no membership",
+				"email_hash", hashPrefix(s.d.Tokens.HashToken(email), 12))
+			known = false
+		}
+	}
+
 	rateLimited := count >= magicLinkPerHourLimit
 
 	if !known || rateLimited {
 		if rateLimited {
-			// known is always true here in practice, per the CountSince note
-			// above, but the check stays explicit rather than assumed. That
-			// claim holds only as long as CountRecentMagicLinks keeps its
-			// join through users (internal/adapter/postgres/queries/identity.sql)
-			// -- if it's ever rewritten to count by raw email string instead,
-			// an unknown address could reach this branch too, and this log
-			// line would then fire for strangers as well as members. The
-			// in-memory magicLinkDouble used in tests replicates the same
-			// join (it looks up d.users.byID[row.UserID].Email), so a test
-			// relying on this invariant would still pass even if the real
-			// query's join were the one that broke.
+			// known was always true here in practice before the membership
+			// check above existed, per the CountSince note above -- an
+			// address could not be rate-limited without a user behind it.
+			// That still holds (CountRecentMagicLinks' join through users is
+			// unchanged), but known can now also be false here for a
+			// different reason: an ex-member whose past magic-link requests,
+			// made while they still had a membership, are still within the
+			// hour. Either way this log line is accurate -- rate-limited is
+			// rate-limited -- it just can no longer be read as proof that
+			// `known` was true going into this block.
 			slog.Info("magic link rate limit reached", "email_hash", hashPrefix(s.d.Tokens.HashToken(email), 12))
 		}
 		return nil

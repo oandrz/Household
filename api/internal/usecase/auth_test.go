@@ -240,6 +240,39 @@ func TestAnUnknownEmailNeverLocksARealHousehold(t *testing.T) {
 	}
 }
 
+// TestSignInForARemovedMemberFailsIdenticallyToAnUnknownAddress pins the fix
+// for the 404 an ex-member used to get at sign-in: removing a member deletes
+// only its memberships row, not the users row underneath it (see
+// MemberService.Remove and the fix report), so Members.ByUser(ctx, user.ID)
+// returns domain.ErrNotFound for a real, still-existing user. SignIn used to
+// propagate that bare, and MapDomainError turned it into 404 -- a status no
+// other sign-in failure ever produces, and one a stranger's guess never
+// gets, which is itself a tell that the address once belonged to someone.
+// This must fail exactly like a stranger's guess instead: the same
+// *SignInFailedError shape, the same countdown.
+func TestSignInForARemovedMemberFailsIdenticallyToAnUnknownAddress(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	if err := f.members.Delete(ctx, f.householdID, "membership-andreas"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	_, removedErr := f.auth.SignIn(ctx, "andreas@hearth.family", "hunter2")
+	_, unknownErr := f.auth.SignIn(ctx, "stranger@example.com", "whatever")
+
+	var a, b *usecase.SignInFailedError
+	if !errors.As(removedErr, &a) {
+		t.Fatalf("removed member: err = %v, want *SignInFailedError (not a bare domain.ErrNotFound / 404)", removedErr)
+	}
+	if !errors.As(unknownErr, &b) {
+		t.Fatalf("unknown address: err = %v, want *SignInFailedError", unknownErr)
+	}
+	if a.Locked != b.Locked || a.AttemptsRemaining != b.AttemptsRemaining {
+		t.Fatalf("a removed member's failure must be indistinguishable from an unknown address's: %+v vs %+v", a, b)
+	}
+}
+
 func TestSignOutRevokesTheSession(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -423,6 +456,31 @@ func TestRequestMagicLinkStaysSilentForAnUnknownAddress(t *testing.T) {
 	// goroutine is spawned and there is nothing to wait for here.
 	if got := f.mailer.sentCount(); got != 0 {
 		t.Fatalf("sent = %d, want 0 — no email should have been sent", got)
+	}
+}
+
+// TestRequestMagicLinkStaysSilentForARemovedMember pins the fix for the
+// unusable link an ex-member used to be mailed: removing a member deletes
+// only the memberships row, not the users row underneath it (see
+// MemberService.Remove and the fix report), so RequestMagicLink's
+// known-address branch used to run for them too -- minting a token,
+// persisting it, and mailing a link that ConsumeMagicLink could never turn
+// into a session (it calls Members.ByUser itself and would fail
+// identically). This must be treated exactly like an unknown address: no
+// email sent, no error.
+func TestRequestMagicLinkStaysSilentForARemovedMember(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	if err := f.members.Delete(ctx, f.householdID, "membership-andreas"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	if err := f.auth.RequestMagicLink(ctx, "andreas@hearth.family"); err != nil {
+		t.Fatalf("a removed member's address must not produce an error: %v", err)
+	}
+	if got := f.mailer.sentCount(); got != 0 {
+		t.Fatalf("sent = %d, want 0 — no email should have been sent to a removed member", got)
 	}
 }
 
