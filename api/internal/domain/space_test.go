@@ -166,6 +166,38 @@ func TestAnOwnerSeesACustomSpace(t *testing.T) {
 	}
 }
 
+// TestAnUnrecognisedVisibilityFailsClosed pins the default case in
+// VisibleSpaces's switch. Without it, a Visibility value that is not
+// "everyone", "parents_only" or "custom" -- e.g. a future value, a bad
+// migration, or corrupt data read back from Postgres -- would fall through
+// with no restriction and be treated as visible to everyone, subject only to
+// the capability check. That is the fail-open direction this package
+// rejects elsewhere (validateCapabilitiesForRole's ErrUnknownRole for an
+// unrecognised Role in identity.go). This test exists so the default case
+// is not deleted as unreachable dead code.
+func TestAnUnrecognisedVisibilityFailsClosed(t *testing.T) {
+	all := []domain.Space{{
+		ID: "s3", HouseholdID: "h1", Key: "grandma", Name: "Grandma's Space",
+		Visibility: domain.Visibility("shared-with-grandma"),
+	}}
+
+	limited, err := domain.NewMembership("m9", "h1", "u9", domain.RoleLimited, domain.Capabilities{domain.CapCalendar})
+	if err != nil {
+		t.Fatalf("NewMembership: %v", err)
+	}
+	if got := domain.VisibleSpaces(all, limited); len(got) != 0 {
+		t.Fatalf("visible = %+v, want none: an unrecognised visibility must fail closed", got)
+	}
+
+	andreas, err := domain.NewMembership("m10", "h1", "u10", domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("NewMembership: %v", err)
+	}
+	if got := domain.VisibleSpaces(all, andreas); len(got) != 1 {
+		t.Fatalf("visible = %+v, want the space present for an owner", got)
+	}
+}
+
 func TestOrderingIsStable(t *testing.T) {
 	all := domain.BuiltinSpaces("h1")
 	for i := 1; i < len(all); i++ {

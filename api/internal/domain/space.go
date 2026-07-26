@@ -46,7 +46,9 @@ func BuiltinSpaces(householdID string) []Space {
 
 // VisibleSpaces filters spaces for one membership. Visibility is checked before
 // capability, so a parents-only space stays hidden from a limited member even
-// if their capability set would otherwise allow it.
+// if their capability set would otherwise allow it. An unrecognised Visibility
+// value is treated as owner-only rather than as everyone -- see the default
+// case below.
 //
 // The result preserves the input order; VisibleSpaces does not sort. Callers
 // must supply all already ordered by Position — Task 9's query does this with
@@ -55,6 +57,8 @@ func VisibleSpaces(all []Space, m Membership) []Space {
 	visible := make([]Space, 0, len(all))
 	for _, s := range all {
 		switch s.Visibility {
+		case VisibilityEveryone:
+			// No visibility restriction; the capability check below still applies.
 		case VisibilityParentsOnly:
 			if m.Role != RoleOwner {
 				continue
@@ -65,6 +69,17 @@ func VisibleSpaces(all []Space, m Membership) []Space {
 			// whose membership model is unbuilt must fail closed rather than
 			// default to maximum exposure, so custom spaces are owner-only
 			// until per-space membership is implemented.
+			if m.Role != RoleOwner {
+				continue
+			}
+		default:
+			// An unrecognised Visibility is a data or version problem, not a
+			// choice anyone made -- the same situation validateCapabilitiesForRole
+			// faces with an unknown Role rebuilt from a Postgres column (see
+			// ErrUnknownRole in identity.go). VisibleSpaces has no error return
+			// to report that, so it fails closed instead: the safe reading of
+			// "I do not know who may see this" is "not everyone", so an unknown
+			// value is owner-only, like VisibilityCustom.
 			if m.Role != RoleOwner {
 				continue
 			}
