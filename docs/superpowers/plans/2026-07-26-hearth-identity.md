@@ -2620,6 +2620,21 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 		return SignInResult{}, err
 	}
 	if state := s.d.Policy.Evaluate(failures, now); state.Locked {
+		// Record even while locked. Skipping it froze LockedUntil at the
+		// original third failure while the unknown-address branch kept
+		// advancing its own deadline — a caller guessing at a steady rate
+		// could tell a real locked household from an unknown address by
+		// watching which deadline moved. Recording also means hammering a
+		// locked household extends the lock rather than letting it expire on
+		// schedule, which is the behaviour we want.
+		if err := s.d.Attempts.Record(ctx, &householdID, &user.ID, email, false, now); err != nil {
+			return SignInResult{}, err
+		}
+		failures, err = s.d.Attempts.FailuresSince(ctx, householdID, now.Add(-s.d.Policy.Window))
+		if err != nil {
+			return SignInResult{}, err
+		}
+		state = s.d.Policy.Evaluate(failures, now)
 		return SignInResult{}, &SignInFailedError{Locked: true, LockedUntil: state.Until}
 	}
 
