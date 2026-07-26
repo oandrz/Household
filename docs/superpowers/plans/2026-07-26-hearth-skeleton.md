@@ -927,7 +927,7 @@ Create `api/Dockerfile`:
 # syntax=docker/dockerfile:1
 
 # --- dev: hot reload -------------------------------------------------------
-FROM golang:1.25-alpine AS dev
+FROM golang:1.25.7-alpine AS dev
 WORKDIR /src
 RUN go install github.com/air-verse/air@latest \
  && go install github.com/pressly/goose/v3/cmd/goose@latest
@@ -938,7 +938,7 @@ EXPOSE 8080
 CMD ["air", "-c", ".air.toml"]
 
 # --- builder ---------------------------------------------------------------
-FROM golang:1.25-alpine AS builder
+FROM golang:1.25.7-alpine AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
