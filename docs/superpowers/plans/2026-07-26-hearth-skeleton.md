@@ -6,7 +6,7 @@
 
 **Architecture:** Two deployables in one repository. The Go service layers `domain` → `usecase` → `adapter`, with dependencies pointing inward only; a lint script fails the build if that is violated. The React app talks only to `/api/v1`, proxied by Vite in development so requests stay same-origin.
 
-**Tech Stack:** Go 1.24, chi v5, pgx v5, goose, testcontainers-go, Postgres 17, Vite 6, React 19, TypeScript 5 (strict), TanStack Router, TanStack Query, Tailwind 4, Docker Compose, GNU Make.
+**Tech Stack:** Go 1.25, chi v5, pgx v5, goose, testcontainers-go, Postgres 17, Vite 6, React 19, TypeScript 5 (strict), TanStack Router, TanStack Query, Tailwind 4, Docker Compose, GNU Make.
 
 **Spec:** `docs/superpowers/specs/2026-07-26-hearth-foundation-design.md`
 
@@ -14,9 +14,9 @@
 
 ## Global Constraints
 
-- Go module path: `github.com/andreasoentoro/hearth/api`. Go 1.24.
+- Go module path: `github.com/andreasoentoro/hearth/api`. Go 1.25.
 - The directory `internal/adapter/http` declares `package httpadapter`, so it never shadows the standard library's `net/http`.
-- `internal/domain` imports nothing from `internal/`. `internal/usecase` imports `internal/domain` only. Only `internal/adapter/**` and `cmd/**` may import third-party infrastructure libraries (pgx, chi). Enforced by `make lint-arch`.
+- `internal/domain` imports nothing from `internal/`. `internal/usecase` imports `internal/domain` only. Only `internal/adapter/**`, `cmd/**` and `internal/testsupport` may import third-party infrastructure libraries (pgx, chi, testcontainers). `internal/testsupport` is fixture code imported exclusively from `_test.go` files, which is why it is exempt. Enforced by `make lint-arch`.
 - All money is `int64` minor units plus an ISO 4217 currency code. `float64` never appears in a monetary path.
 - All configuration comes from environment variables. `APP_ENV` is one of `development`, `test`, `production`.
 - The application URL during development is always `http://localhost:5173`. Port 8080 is reached through the Vite proxy, never directly by the browser.
@@ -927,7 +927,7 @@ Create `api/Dockerfile`:
 # syntax=docker/dockerfile:1
 
 # --- dev: hot reload -------------------------------------------------------
-FROM golang:1.24-alpine AS dev
+FROM golang:1.25-alpine AS dev
 WORKDIR /src
 RUN go install github.com/air-verse/air@latest \
  && go install github.com/pressly/goose/v3/cmd/goose@latest
@@ -938,7 +938,7 @@ EXPOSE 8080
 CMD ["air", "-c", ".air.toml"]
 
 # --- builder ---------------------------------------------------------------
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
