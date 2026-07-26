@@ -24,7 +24,7 @@ import {
   sharedSpaceNames,
 } from "./copy";
 import { invitePreviewSchema, type InvitePreview } from "./schemas";
-import { useAcceptInvite } from "./useAuth";
+import { useAcceptInvite, useMe } from "./useAuth";
 
 async function fetchInvitePreview(token: string): Promise<InvitePreview> {
   const body = await apiFetch<unknown>(`/api/v1/invites/${encodeURIComponent(token)}`);
@@ -72,6 +72,28 @@ function InvitePreviewError({ error }: { error: unknown }) {
   return (
     <p role="alert" className="text-[13px] leading-relaxed text-muted">
       {message}
+    </p>
+  );
+}
+
+// Fix round 1, Finding 3: the invite route is deliberately public (see
+// routes/router.tsx) so a shared device with someone else already signed in
+// can still show the invite -- but nothing said so out loud. The accept
+// endpoint sits outside the session group and overwrites the session cookie
+// unconditionally on success; on a shared device, one person accepting their
+// own invite would otherwise silently sign the other one out with no
+// indication anything happened. This doesn't block acceptance (a shared
+// device is exactly the case the public route protects) -- it just names
+// who's currently signed in and says plainly what accepting will do, before
+// the form that does it.
+function ExistingSessionWarning({ displayName }: { displayName: string }) {
+  return (
+    <p
+      role="status"
+      className="mb-4 rounded-lg border border-hairline bg-canvas px-3.5 py-3 text-[12.5px] leading-relaxed text-label"
+    >
+      Signed in as <strong className="font-semibold">{displayName}</strong>.
+      Accepting this invite will sign them out and sign you in instead.
     </p>
   );
 }
@@ -201,9 +223,13 @@ export function InviteScreen({ token }: { token: string }) {
     queryFn: () => fetchInvitePreview(token),
     retry: false,
   });
+  const me = useMe();
 
   return (
     <AuthShell>
+      {me.isSuccess && (
+        <ExistingSessionWarning displayName={me.data.user.displayName} />
+      )}
       {preview.isPending && (
         <p className="text-[13px] leading-relaxed text-muted">Loading your invite…</p>
       )}
