@@ -3234,6 +3234,8 @@ Expected: FAIL — module not found.
 
 - [ ] **Step 4: Implement the screens**
 
+The magic-link sent panel must tell the user what to do if nothing arrives. Sending is fire-and-forget by design — the endpoint always answers 202 and a relay failure is invisible to the caller, because an error only members could receive would reveal who is a member. Nothing will prompt a retry, so the copy has to: say the link lasts 15 minutes, suggest checking spam, and offer to send another.
+
 `SignInScreen.tsx` is a single component with a `mode` state of `'password' | 'magic-sent'` and an `error` state derived from the last `ApiError`. Copy comes verbatim from the design document. The attempts message pluralises through a small helper so `1` reads `One try left`.
 
 `InviteScreen.tsx` fetches `GET /api/v1/invites/:token`, renders `Christine invited you in.` with the real inviter name, the shared-spaces sentence, and the `Joining as co-owner` line, then collects a password and posts to accept.
