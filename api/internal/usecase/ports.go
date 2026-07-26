@@ -134,6 +134,13 @@ type InviteDetails struct {
 	AcceptedAt   *time.Time
 }
 
+// AcceptedInvite is what a successful acceptance produces.
+type AcceptedInvite struct {
+	UserID       string
+	MembershipID string
+	HouseholdID  string
+}
+
 type InviteRepository interface {
 	Create(ctx context.Context, householdID, email, name string, role domain.Role,
 		caps domain.Capabilities, tokenHash []byte, invitedBy string, expiresAt time.Time) (string, error)
@@ -141,6 +148,16 @@ type InviteRepository interface {
 	// Returns domain.ErrInviteAlreadyAccepted when the invite was already
 	// accepted or has expired — the guard lives in the SQL, not in the caller.
 	MarkAccepted(ctx context.Context, inviteID string) error
+	// Accept creates the user, creates the membership, and marks the invite
+	// accepted in one transaction. Either all three happen or none do -- a
+	// partial acceptance would leave an orphaned user occupying the unique
+	// email index, which makes the invite permanently unusable: a retry could
+	// never create a second user with that address, so there would be no path
+	// forward short of manual SQL. Returns domain.ErrInviteAlreadyAccepted,
+	// with nothing written, when the invite was already accepted or has
+	// expired.
+	Accept(ctx context.Context, inviteID, email, passwordHash, displayName string,
+		householdID string, role domain.Role, caps domain.Capabilities) (AcceptedInvite, error)
 }
 
 type SpaceRepository interface {

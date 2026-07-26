@@ -61,6 +61,13 @@ func TestMembershipRepoRejectsAnInvalidCapabilitySet(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected the database constraint to reject marriage for a limited member")
 	}
+	// A constraint violation must not be mistranslated as "not found": that
+	// would report data that is present and invalid as if it were absent.
+	// translate special-cases only pgx.ErrNoRows today; this guards against a
+	// regression that widened the mapping.
+	if errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("constraint violation must not translate to domain.ErrNotFound, got %v", err)
+	}
 }
 
 func TestSessionLifecycle(t *testing.T) {
