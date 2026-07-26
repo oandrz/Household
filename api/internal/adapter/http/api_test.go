@@ -592,3 +592,108 @@ func TestOwnerOnlyRoutesRejectALimitedMember(t *testing.T) {
 		})
 	}
 }
+
+// memberListEntry mirrors member_handlers.go's memberViewDTO for decoding
+// GET /household/members responses in the tests below.
+type memberListEntry struct {
+	ID   string `json:"id"`
+	User struct {
+		ID            string `json:"id"`
+		Email         string `json:"email"`
+		DisplayName   string `json:"displayName"`
+		AvatarInitial string `json:"avatarInitial"`
+	} `json:"user"`
+	Role         string   `json:"role"`
+	Capabilities []string `json:"capabilities"`
+}
+
+func (env *testEnv) getMembers(t *testing.T, session *http.Cookie) []memberListEntry {
+	t.Helper()
+	rec := env.do(http.MethodGet, "/api/v1/household/members", nil, session)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /household/members: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var members []memberListEntry
+	if err := json.NewDecoder(rec.Body).Decode(&members); err != nil {
+		t.Fatalf("decode member list: %v (body = %s)", err, rec.Body.String())
+	}
+	return members
+}
+
+// TestMemberListRevealsEmailsToAnOwner covers the coordinator's ruling on
+// GET /household/members: an owner caller sees the full roster with every
+// member's real email address populated.
+func TestMemberListRevealsEmailsToAnOwner(t *testing.T) {
+	env := newTestEnv(t)
+	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	members := env.getMembers(t, session)
+	if len(members) != 2 {
+		t.Fatalf("members = %d, want 2 (owner + limited)", len(members))
+	}
+	for _, m := range members {
+		if m.User.Email == "" {
+			t.Fatalf("member %q (%s) has an empty email, want it populated for an owner caller",
+				m.User.DisplayName, m.Role)
+		}
+	}
+}
+
+// TestMemberListWithholdsEmailsFromALimitedMember is
+// TestMemberListRevealsEmailsToAnOwner's sibling: a limited caller sees the
+// identical roster -- same member count, names, roles and capabilities --
+// with every email emptied rather than the list filtered down to fewer
+// rows. The member-count assertion is what would catch a future change that
+// filtered rows instead of redacting the one field that needs it: a row
+// filter would still make this test's email assertions pass while quietly
+// hiding other members entirely.
+func TestMemberListWithholdsEmailsFromALimitedMember(t *testing.T) {
+	env := newTestEnv(t)
+
+	ownerSession, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	asOwner := env.getMembers(t, ownerSession)
+
+	limitedSession, _ := env.signIn(t, env.limitedEmail, env.limitedPassword)
+	asLimited := env.getMembers(t, limitedSession)
+
+	if len(asLimited) != len(asOwner) {
+		t.Fatalf("members seen by limited caller = %d, want %d (same as an owner) -- "+
+			"emails must be redacted per-field, not filtered by row", len(asLimited), len(asOwner))
+	}
+
+	byID := make(map[string]memberListEntry, len(asOwner))
+	for _, m := range asOwner {
+		byID[m.ID] = m
+	}
+
+	for _, m := range asLimited {
+		if m.User.Email != "" {
+			t.Fatalf("member %q (%s) has email %q, want it withheld from a limited caller",
+				m.User.DisplayName, m.Role, m.User.Email)
+		}
+
+		owner, ok := byID[m.ID]
+		if !ok {
+			t.Fatalf("member %+v (id %q) is not among the members an owner sees -- "+
+				"the roster itself must be identical, only the email field should differ", m, m.ID)
+		}
+		if m.User.DisplayName != owner.User.DisplayName ||
+			m.User.AvatarInitial != owner.User.AvatarInitial ||
+			m.Role != owner.Role ||
+			!slicesEqual(m.Capabilities, owner.Capabilities) {
+			t.Fatalf("member %q differs beyond email: limited view = %+v, owner view = %+v", m.ID, m, owner)
+		}
+	}
+}
+
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

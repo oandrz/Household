@@ -18,15 +18,41 @@ type memberViewDTO struct {
 	Capabilities []string `json:"capabilities"`
 }
 
-func toMemberViewDTO(v usecase.MemberView) memberViewDTO {
+// toMemberViewDTO builds one row of the member list. revealEmail gates the
+// User.Email field: when false (a limited caller), it is emptied rather than
+// populated -- the field key still appears in the JSON (userDTO's Email has
+// no `omitempty`), so the response shape is identical either way and the
+// frontend never needs two types.
+//
+// An empty email here is deliberately ambiguous between "withheld because
+// the caller isn't an owner" and "this member genuinely has no email" (a
+// credential-less child's own record) -- see the doc comment on
+// handleListMembers for why that ambiguity is the point, not a gap.
+func toMemberViewDTO(v usecase.MemberView, revealEmail bool) memberViewDTO {
+	user := toUserDTO(v.User)
+	if !revealEmail {
+		user.Email = ""
+	}
 	return memberViewDTO{
 		ID:           v.Membership.ID,
-		User:         toUserDTO(v.User),
+		User:         user,
 		Role:         string(v.Membership.Role),
 		Capabilities: v.Membership.Capabilities.Strings(),
 	}
 }
 
+// handleListMembers is reachable by any authenticated member -- names,
+// roles and capabilities are needed household-wide (a future slice's
+// calendar per-person filters, in particular) -- but email addresses are
+// personal data belonging to the other members and the identifier the whole
+// authentication surface is keyed on. Nothing in the design shows a child a
+// parent's email address, so the list always contains every member (the
+// household's full roster, not a filtered subset), and only an owner caller
+// gets the User.Email field populated; a limited caller sees it emptied on
+// every row via toMemberViewDTO's revealEmail parameter. This is a
+// per-field redaction, deliberately not a per-row filter, so a limited
+// caller still learns who is in the household and what they can do -- just
+// not how to reach them by email.
 func handleListMembers(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, ok := RequestScope(r)
@@ -39,9 +65,10 @@ func handleListMembers(deps Deps) http.HandlerFunc {
 			MapDomainError(w, r, err)
 			return
 		}
+		revealEmail := scope.Membership.Role == domain.RoleOwner
 		out := make([]memberViewDTO, 0, len(views))
 		for _, v := range views {
-			out = append(out, toMemberViewDTO(v))
+			out = append(out, toMemberViewDTO(v, revealEmail))
 		}
 		WriteJSON(w, http.StatusOK, out)
 	}
