@@ -148,17 +148,31 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 		WriteError(w, http.StatusUnprocessableEntity, "INVALID_VISIBILITY", "That visibility is not supported yet.", nil)
 	case errors.Is(err, usecase.ErrSpaceNameRequired):
 		WriteError(w, http.StatusUnprocessableEntity, "SPACE_NAME_REQUIRED", "A space name is required.", nil)
+	case errors.Is(err, usecase.ErrInvalidFXRateMode):
+		WriteError(w, http.StatusUnprocessableEntity, "INVALID_FX_RATE_MODE", "That FX rate mode is not valid.", nil)
+	case errors.Is(err, usecase.ErrInviteeAlreadyRegistered):
+		WriteError(w, http.StatusConflict, "EMAIL_ALREADY_REGISTERED",
+			"An account with that email address already exists.", nil)
+	case errors.Is(err, domain.ErrAlreadyExists):
+		// Every service that means a genuine, nameable conflict already
+		// translates domain.ErrAlreadyExists into its own sentinel before
+		// this function ever sees it (e.g. HouseholdService.CreateSpace ->
+		// ErrSpaceNameTaken, InviteService.Create -> ErrInviteeAlreadyRegistered
+		// above) -- both get their own, more specific case, and are matched
+		// first because errors.Is walks in switch-case order. This case is
+		// the backstop for the race those specific translations cannot
+		// close by themselves: two callers hitting the same unique
+		// constraint at once, only one of which had a pre-check to lose.
+		// The clearest example is InviteRepository.Accept -- two invites for
+		// the same new address accepted concurrently both pass Create's
+		// email-not-registered check, and only one of the two CreateUser
+		// calls that follow can win the users.email unique index. Falling
+		// through to the generic 500 default below would be wrong for that
+		// race: it is a real, if rare, conflict a retry can't paper over,
+		// not an internal bug, so 409 is the right answer whenever nothing
+		// more specific already caught it.
+		WriteError(w, http.StatusConflict, "ALREADY_EXISTS", "That already exists.", nil)
 	default:
-		// domain.ErrAlreadyExists deliberately has no case above and falls
-		// through to here: it is a general unique-violation sentinel (see its
-		// doc comment in domain/errors.go), and blanket-mapping it to 409
-		// would turn an unrelated collision -- e.g. a session token-hash
-		// collision during sign-in -- into a caller-visible conflict instead
-		// of the transparent retry it actually needs. Every service that
-		// means a genuine conflict already translates ErrAlreadyExists into
-		// its own sentinel (e.g. HouseholdService.CreateSpace ->
-		// ErrSpaceNameTaken) before this function ever sees it; that
-		// sentinel gets its own case above instead.
 		logAndWriteInternal(w, r, err)
 	}
 }
