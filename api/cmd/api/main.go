@@ -13,9 +13,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/andreasoentoro/hearth/api/internal/adapter/clock"
+	"github.com/andreasoentoro/hearth/api/internal/adapter/crypto"
 	httpadapter "github.com/andreasoentoro/hearth/api/internal/adapter/http"
+	"github.com/andreasoentoro/hearth/api/internal/adapter/mail"
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres"
 	"github.com/andreasoentoro/hearth/api/internal/config"
+	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
 func main() {
@@ -40,9 +44,74 @@ func run() error {
 	}
 	defer db.Close()
 
+	// Repositories. Each is constructed once and shared by every service (and,
+	// for Users/Memberships/Sessions, by the HTTP layer directly too) that
+	// needs it -- there is exactly one implementation of each port in
+	// production, backed by this one connection pool.
+	users := postgres.NewUserRepo(db)
+	households := postgres.NewHouseholdRepo(db)
+	memberships := postgres.NewMembershipRepo(db)
+	sessions := postgres.NewSessionRepo(db)
+	magicLinks := postgres.NewMagicLinkRepo(db)
+	loginAttempts := postgres.NewLoginAttemptRepo(db)
+	invites := postgres.NewInviteRepo(db)
+	spaces := postgres.NewSpaceRepo(db)
+	notifications := postgres.NewNotificationRepo(db)
+
+	hasher := crypto.NewArgon2Hasher(cfg.Argon2Time, cfg.Argon2MemoryKiB, cfg.Argon2Threads)
+	tokens := crypto.NewTokenGenerator()
+	sysClock := clock.System{}
+	mailer := mail.NewSMTPMailer(cfg.SMTPAddr, cfg.SMTPFrom, cfg.AppBaseURL)
+
+	authSvc := usecase.NewAuthService(usecase.AuthDeps{
+		Users:      users,
+		Members:    memberships,
+		Sessions:   sessions,
+		Attempts:   loginAttempts,
+		MagicLinks: magicLinks,
+		Mailer:     mailer,
+		Hasher:     hasher,
+		Tokens:     tokens,
+		Clock:      sysClock,
+		SessionTTL: httpadapter.SessionTTL,
+		BaseURL:    cfg.AppBaseURL,
+	})
+	inviteSvc := usecase.NewInviteService(usecase.InviteDeps{
+		Invites:    invites,
+		Users:      users,
+		Sessions:   sessions,
+		Mailer:     mailer,
+		Hasher:     hasher,
+		Tokens:     tokens,
+		Clock:      sysClock,
+		SessionTTL: httpadapter.SessionTTL,
+		BaseURL:    cfg.AppBaseURL,
+	})
+	memberSvc := usecase.NewMemberService(usecase.MemberDeps{
+		Members:  memberships,
+		Sessions: sessions,
+	})
+	householdSvc := usecase.NewHouseholdService(usecase.HouseholdDeps{
+		Households:    households,
+		Spaces:        spaces,
+		Notifications: notifications,
+	})
+
 	srv := &http.Server{
-		Addr:              fmt.Sprintf(":%d", cfg.Port),
-		Handler:           httpadapter.NewRouter(httpadapter.Deps{Pinger: db}),
+		Addr: fmt.Sprintf(":%d", cfg.Port),
+		Handler: httpadapter.NewRouter(httpadapter.Deps{
+			Pinger:      db,
+			Auth:        authSvc,
+			Invites:     inviteSvc,
+			Members:     memberSvc,
+			Households:  householdSvc,
+			Users:       users,
+			Memberships: memberships,
+			Sessions:    sessions,
+			Tokens:      tokens,
+			Clock:       sysClock,
+			Secure:      !cfg.IsDevelopment(),
+		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
