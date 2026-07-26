@@ -190,11 +190,31 @@ counter for that household.
 The sign-in response reports `attemptsRemaining` on failure and `lockedUntil`
 when locked, because the design's error state displays both.
 
+**The lock gates password sign-in only.** Magic link remains available while a
+household is locked, and is the intended recovery route: possessing the mailbox
+is a stronger proof than the password being guessed, and the lock would
+otherwise let either parent lock both of them out for fifteen minutes by
+mistyping their own password three times. Magic link is not a brute-force
+bypass because it is rate-limited independently — three requests per address per
+hour, and the token only reaches the address owner.
+
+`adminctl unlock-household` clears the household's `LoginAttempt` rows, ending a
+lock immediately. It exists for the case where neither mailbox is reachable.
+
+A failed attempt for an address that matches no user records a row with null
+`user_id` and null `household_id`; such rows count only toward global rate
+limiting, never toward a household lock. This keeps sign-in from revealing
+whether an address exists.
+
 ### Money and foreign exchange
 
 `Money{amount int64, currency string}` is a value object in `domain`, always in
 minor units. Arithmetic between differing currencies is a compile-time-visible
 error path, never a silent conversion.
+
+`Household.fx_rate_mode` is one of `auto` or `manual`. It is persisted and
+editable from Settings this slice but has no effect until a live rate provider
+exists; `StaticRateProvider` is used in both modes for now.
 
 `FXRateProvider` is a port. Slice 1 ships `StaticRateProvider` seeded with
 `S$1 = Rp 12,410`. The design labels the rate "auto", so a live provider can be
@@ -392,10 +412,13 @@ dev-local:
 The `trap 'kill 0'` terminates the whole process group, so an interrupt never
 leaves an orphaned Vite process holding port 5173.
 
-`make seed` creates the exact household from the design — Andreas and Christine
-as owners, Kayla (12) with calendar and chores, Ethan (8) with calendar, and the
-three built-in spaces — so every later slice develops against a realistic
-fixture.
+`make seed` creates the exact household from the design and the bootstrap state
+the definition of done depends on: Andreas as an owner with a known development
+password, a **pending invite for Christine** as the second owner, Kayla (12)
+with calendar and chores, Ethan (8) with calendar, and the three built-in
+spaces. It prints Christine's invite URL on completion, so acceptance can be
+exercised without a signup flow. `adminctl create-invite` produces further
+invites on demand.
 
 Configuration is by environment variable, with a committed `.env.example` and a
 git-ignored `.env` for Compose.
@@ -418,14 +441,16 @@ Test-driven: tests are written before the code they cover.
 
 ## Definition of done
 
-On a clean checkout, `make dev` produces a working application at
-`http://localhost:5173` where a user can:
+On a clean checkout, `make dev` followed by `make seed` produces a working
+application at `http://localhost:5173` where a user can:
 
-1. Open an invite link and accept it by setting a password.
+1. Open the invite link printed by `make seed` and accept it as Christine by
+   setting a password.
 2. Sign in with email and password.
-3. Be locked out for 15 minutes after three incorrect passwords, seeing the
-   remaining attempts before that.
-4. Request a magic link, retrieve it from Mailpit, and sign in with it.
+3. Be locked out of password sign-in for 15 minutes after three incorrect
+   passwords, seeing the remaining attempts before that.
+4. While still locked, request a magic link, retrieve it from Mailpit, and sign
+   in with it.
 5. See the real sidebar, filtered by their capabilities.
 6. Edit household currency settings and notification preferences.
 7. Invite a member and change a child's capabilities.
