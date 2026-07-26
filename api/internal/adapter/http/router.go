@@ -40,7 +40,10 @@ func NewRouter(deps Deps) http.Handler {
 
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	r.Use(middleware.Recoverer)
+	// recoverer, not middleware.Recoverer -- see its own doc comment in
+	// middleware_recoverer.go for why chi's version (a bare, bodyless 500)
+	// is wrong for this API.
+	r.Use(recoverer)
 
 	r.NotFound(func(w http.ResponseWriter, _ *http.Request) {
 		WriteError(w, http.StatusNotFound, "NOT_FOUND", "That endpoint does not exist.", nil)
