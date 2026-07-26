@@ -22,6 +22,24 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
+// invitePreAuthRoutes is the exact, complete set of routes reached before any
+// session exists at all: GET .../invites/{token} (the preview) and POST
+// .../invites/{token}/accept (mutating, but pre-auth by design -- there is no
+// caller identity yet to check a session, a CSRF token or ownership against).
+//
+// The three route-walk matrices below name these two routes explicitly
+// rather than skipping anything matching a "/api/v1/invites/" prefix, which
+// is what each used to do. A prefix skip silently exempts *any* future route
+// added under that prefix from whichever guard the matrix checks -- a
+// mutating admin route added under /invites/ later would be auto-exempt from
+// the CSRF and owner checks with no test ever noticing. Naming the two
+// routes that actually exist means a third one added later is walked and
+// checked like every other route, not quietly waved through.
+var invitePreAuthRoutes = map[string]bool{
+	"GET /api/v1/invites/{token}":         true,
+	"POST /api/v1/invites/{token}/accept": true,
+}
+
 // movableClock is a controllable usecase.Clock for the one test that needs
 // to fast-forward time without sleeping: proving a session's cookies slide
 // when the session is extended near expiry.
@@ -468,8 +486,8 @@ func TestEveryProtectedRouteRejectsAnUnauthenticatedCaller(t *testing.T) {
 		if !strings.HasPrefix(route, "/api/v1") {
 			return nil // /healthz, /readyz
 		}
-		if strings.HasPrefix(route, "/api/v1/invites/") {
-			return nil // pre-auth by design
+		if invitePreAuthRoutes[method+" "+route] {
+			return nil // pre-auth by design -- see invitePreAuthRoutes' doc comment
 		}
 		if public[method+" "+route] {
 			return nil
@@ -584,11 +602,12 @@ func TestOwnerOnlyRoutesRejectALimitedMember(t *testing.T) {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
 			return nil
 		}
-		if strings.HasPrefix(route, "/api/v1/invites/") {
+		if invitePreAuthRoutes[method+" "+route] {
 			// Public, pre-auth, and mutating (POST .../accept) -- exempt for
-			// the identical reason the /auth/* entries above are, just
-			// expressed as a prefix (like the unauthenticated matrix does)
-			// rather than a second, redundant allowlist entry.
+			// the identical reason the /auth/* entries above are. See
+			// invitePreAuthRoutes' doc comment for why this is a named
+			// two-route allowlist rather than a "/api/v1/invites/" prefix
+			// skip.
 			return nil
 		}
 		if allowlist[method+" "+route] {
@@ -663,7 +682,7 @@ func TestEveryMutatingRouteRequiresCSRF(t *testing.T) {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
 			return nil
 		}
-		if strings.HasPrefix(route, "/api/v1/invites/") {
+		if invitePreAuthRoutes[method+" "+route] {
 			return nil
 		}
 		if public[method+" "+route] {
@@ -963,6 +982,16 @@ func TestUpdateHouseholdIsARealPatch(t *testing.T) {
 			map[string]any{"primaryCurrency": "nope"}, session, csrf)
 		assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "INVALID_CURRENCY")
 	})
+
+	// The surviving sibling of the ErrInvalidMoney fix above: fxRateMode
+	// reaches the database's CHECK (fx_rate_mode IN ('auto', 'manual'))
+	// constraint completely unvalidated on this path, so a caller-supplied
+	// value outside that pair used to reach the constraint first and 500.
+	t.Run("an invalid fxRateMode reports 422, not 500", func(t *testing.T) {
+		rec := env.authed(t, http.MethodPatch, "/api/v1/household",
+			map[string]any{"fxRateMode": "weekly"}, session, csrf)
+		assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "INVALID_FX_RATE_MODE")
+	})
 }
 
 type notificationPreferencesResponse struct {
@@ -1036,6 +1065,49 @@ func TestCreateSpaceWithABlankNameReturns422(t *testing.T) {
 	rec := env.authed(t, http.MethodPost, "/api/v1/spaces",
 		map[string]any{"name": "   ", "visibility": "everyone"}, session, csrf)
 	assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "SPACE_NAME_REQUIRED")
+}
+
+// TestInviteMemberRejectsAnAddressThatAlreadyHasAUsersRow pins the fix for
+// the invite-to-an-existing-member 500: InviteRepo.Accept unconditionally
+// calls CreateUser and never reuses an existing row, so an owner inviting an
+// address that already belongs to a member (a mistype, or a re-invite) used
+// to get 201 with the mail sent, and the recipient would then 500 forever at
+// acceptance. This must be rejected at creation, where the owner who typed
+// the address can see it and act on it.
+func TestInviteMemberRejectsAnAddressThatAlreadyHasAUsersRow(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/household/members/invite", map[string]any{
+		"name": "Ethan Again", "email": env.limitedEmail, "role": "limited",
+		"capabilities": []string{"calendar"},
+	}, session, csrf)
+	assertErrorResponse(t, rec, http.StatusConflict, "EMAIL_ALREADY_REGISTERED")
+}
+
+// TestSignInForARemovedMemberReturns401NotA404 pins the fix for the other
+// symptom sharing the invite-500's root cause: removing a member deletes
+// only its memberships row, not the users row underneath it, so the address
+// still resolves through Users.ByEmail. SignIn used to call Members.ByUser
+// next, get domain.ErrNotFound back, and propagate it bare -- MapDomainError
+// turns that into 404, a status no other sign-in failure produces and a
+// stranger's guess never gets, which itself discloses that the address once
+// belonged to someone. It must fail exactly like any other sign-in failure:
+// 401 INVALID_CREDENTIALS.
+func TestSignInForARemovedMemberReturns401NotA404(t *testing.T) {
+	env := newTestEnv(t)
+	ownerSession, ownerCSRF := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	rec := env.authed(t, http.MethodDelete, "/api/v1/household/members/"+env.limitedMembership,
+		nil, ownerSession, ownerCSRF)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("remove member: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	rec = env.do(http.MethodPost, "/api/v1/auth/sign-in", map[string]string{
+		"email": env.limitedEmail, "password": env.limitedPassword,
+	})
+	assertErrorResponse(t, rec, http.StatusUnauthorized, "INVALID_CREDENTIALS")
 }
 
 // --- Task 20 fix round: PATCH /household/members/:id was the last PATCH
