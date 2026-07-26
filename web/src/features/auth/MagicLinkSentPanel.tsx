@@ -9,11 +9,17 @@
 export function MagicLinkSentPanel({
   email,
   pending,
+  error,
   onResend,
   onBack,
 }: {
   email: string;
   pending: boolean;
+  // A resend calls the exact same endpoint as the original send; a failure
+  // (429, 500, a network rejection) must not look identical to success --
+  // this panel is the only thing on screen once "sent" mode is entered, so
+  // if it doesn't surface the failure, nothing else will.
+  error: string | null;
   onResend: () => void;
   onBack: () => void;
 }) {
@@ -45,6 +51,15 @@ export function MagicLinkSentPanel({
           >
             {pending ? "Sending…" : "Send another link"}
           </button>
+          {error && (
+            <div
+              role="alert"
+              className="mt-2 flex items-start justify-center gap-1.5 text-xs leading-snug text-danger"
+            >
+              <span className="font-bold">!</span>
+              <span>{error}</span>
+            </div>
+          )}
           <button
             type="button"
             onClick={onBack}

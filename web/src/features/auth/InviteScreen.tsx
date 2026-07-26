@@ -16,6 +16,7 @@ import { type FormEvent, type ReactNode, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch, ApiError } from "../../api/client";
 import {
+  apiErrorMessage,
   formatList,
   limitedAccessPhrase,
   roleLabel,
@@ -57,7 +58,7 @@ function InvitePreviewError({ error }: { error: unknown }) {
         "This invite has expired. Ask whoever invited you to send a new one.";
     } else if (error.status === 409) {
       return (
-        <p className="text-[13px] leading-relaxed text-muted">
+        <p role="alert" className="text-[13px] leading-relaxed text-muted">
           This invite has already been accepted.{" "}
           <a href="/" className="font-medium text-accent">
             Sign in
@@ -67,7 +68,11 @@ function InvitePreviewError({ error }: { error: unknown }) {
       );
     }
   }
-  return <p className="text-[13px] leading-relaxed text-muted">{message}</p>;
+  return (
+    <p role="alert" className="text-[13px] leading-relaxed text-muted">
+      {message}
+    </p>
+  );
 }
 
 function AcceptInviteForm({
@@ -95,6 +100,15 @@ function AcceptInviteForm({
 
   return (
     <>
+      {/* The design places a household caption directly above this heading
+          (turn 5's #5a card, authInvite branch, the avatar-row line above
+          "Christine invited you in."). That line also names a member count
+          ("2 adults, 2 kids") the invite preview response has no field for
+          -- householdName is what's actually available, so that's all this
+          renders. */}
+      <p className="mb-1 text-[12.5px] font-medium text-muted">
+        {preview.householdName}
+      </p>
       <h1 className="mt-0.5 mb-1 font-serif text-[27px] font-medium tracking-[-0.015em]">
         {preview.inviterName} invited you in.
       </h1>
@@ -141,12 +155,16 @@ function AcceptInviteForm({
           />
           <p className="text-[11px] text-muted">At least 12 characters.</p>
           {acceptInvite.isError && (
-            <div className="mt-px flex items-start gap-1.5 text-xs leading-snug text-danger">
+            <div
+              role="alert"
+              className="mt-px flex items-start gap-1.5 text-xs leading-snug text-danger"
+            >
               <span className="font-bold">!</span>
               <span>
-                {acceptInvite.error instanceof ApiError
-                  ? acceptInvite.error.message
-                  : "Something went wrong. Please try again."}
+                {apiErrorMessage(
+                  acceptInvite.error,
+                  "Something went wrong. Please try again.",
+                )}
               </span>
             </div>
           )}

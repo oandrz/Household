@@ -10,7 +10,7 @@
 // Signed in).
 import { type FormEvent, useState } from "react";
 import { ApiError } from "../../api/client";
-import { triesLeftPhrase } from "./copy";
+import { apiErrorMessage, triesLeftPhrase } from "./copy";
 import { MagicLinkSentPanel } from "./MagicLinkSentPanel";
 import { useRequestMagicLink, useSignIn } from "./useAuth";
 
@@ -20,40 +20,60 @@ export function SignInScreen() {
   const [mode, setMode] = useState<Mode>("password");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<ApiError | null>(null);
+  // unknown, not ApiError | null: an onError handler receives whatever the
+  // mutation rejected with, which can be a network TypeError or a zod
+  // ParseError, not only an ApiError. Both sign-in and magic-link need their
+  // own state -- clicking "Email me a one-time sign-in link" (or "Forgot?")
+  // must not erase a sign-in error that's still on screen (see the locked
+  // case below), and a failed resend from the sent panel must not be
+  // confused with a failed initial send.
+  const [signInError, setSignInError] = useState<unknown>(null);
+  const [magicLinkError, setMagicLinkError] = useState<unknown>(null);
 
   const signIn = useSignIn();
   const requestMagicLink = useRequestMagicLink();
 
-  const locked = error?.code === "HOUSEHOLD_LOCKED";
+  const apiSignInError = signInError instanceof ApiError ? signInError : null;
+  const locked = apiSignInError?.code === "HOUSEHOLD_LOCKED";
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
+    setSignInError(null);
     signIn.mutate(
       { email, password },
-      {
-        onError: (err) => setError(err instanceof ApiError ? err : null),
-      },
+      { onError: (err) => setSignInError(err) },
     );
   }
 
   // Also used by "Forgot?": magic link is the recovery path (it works even
   // while the household is locked -- see usecase/auth.go), so there is no
-  // separate password-reset flow to wire this to.
+  // separate password-reset flow to wire this to. Deliberately does not
+  // touch signInError: clicking this while the locked explanation is showing
+  // must not erase it before the new request resolves.
   function handleMagicLink() {
-    setError(null);
+    setMagicLinkError(null);
     requestMagicLink.mutate(
       { email },
-      { onSuccess: () => setMode("magic-sent") },
+      {
+        onSuccess: () => setMode("magic-sent"),
+        onError: (err) => setMagicLinkError(err),
+      },
     );
   }
+
+  const magicLinkErrorMessage = magicLinkError
+    ? apiErrorMessage(
+        magicLinkError,
+        "That didn't go through. Please try again.",
+      )
+    : null;
 
   if (mode === "magic-sent") {
     return (
       <MagicLinkSentPanel
         email={email}
         pending={requestMagicLink.isPending}
+        error={magicLinkErrorMessage}
         onResend={handleMagicLink}
         onBack={() => setMode("password")}
       />
@@ -69,11 +89,16 @@ export function SignInScreen() {
     // which stays enabled.
     errorMessage =
       "This household is locked for 15 minutes after too many failed attempts. Use a magic link below to sign in instead.";
-  } else if (error?.code === "INVALID_CREDENTIALS") {
-    const attemptsRemaining = Number(error.details.attemptsRemaining ?? 0);
+  } else if (apiSignInError?.code === "INVALID_CREDENTIALS") {
+    const attemptsRemaining = Number(
+      apiSignInError.details.attemptsRemaining ?? 0,
+    );
     errorMessage = `That password doesn't match. ${triesLeftPhrase(attemptsRemaining)} before we lock the household for 15 minutes.`;
-  } else if (error) {
-    errorMessage = error.message;
+  } else if (signInError) {
+    errorMessage = apiErrorMessage(
+      signInError,
+      "Something went wrong. Please try again.",
+    );
   }
 
   return (
@@ -135,13 +160,16 @@ export function SignInScreen() {
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 className={
-                  error
+                  signInError
                     ? "rounded-lg border border-danger-border bg-danger-soft px-3.5 py-2.5 text-[13.5px]"
                     : "rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
                 }
               />
               {errorMessage && (
-                <div className="mt-px flex items-start gap-1.5 text-xs leading-snug text-danger">
+                <div
+                  role="alert"
+                  className="mt-px flex items-start gap-1.5 text-xs leading-snug text-danger"
+                >
                   <span className="font-bold">!</span>
                   <span>{errorMessage}</span>
                 </div>
@@ -171,6 +199,15 @@ export function SignInScreen() {
           >
             Email me a one-time sign-in link
           </button>
+          {magicLinkErrorMessage && (
+            <div
+              role="alert"
+              className="mt-2 flex items-start gap-1.5 text-xs leading-snug text-danger"
+            >
+              <span className="font-bold">!</span>
+              <span>{magicLinkErrorMessage}</span>
+            </div>
+          )}
         </div>
 
         <p className="text-center text-xs leading-relaxed text-muted">
