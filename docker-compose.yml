@@ -37,6 +37,9 @@ services:
       SMTP_ADDR: mailpit:1025
       SMTP_FROM: "Hearth <noreply@hearth.localhost>"
       APP_BASE_URL: http://localhost:5173
+      ARGON2_TIME: "3"
+      ARGON2_MEMORY_KIB: "65536"
+      ARGON2_THREADS: "2"
     ports: ["8080:8080"]
     volumes: ["./api:/src"]
     depends_on:

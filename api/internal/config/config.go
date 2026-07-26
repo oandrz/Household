@@ -9,10 +9,16 @@ import (
 )
 
 type Config struct {
-	AppEnv        string
-	Port          int
-	DatabaseURL   string
-	SessionSecret string
+	AppEnv          string
+	Port            int
+	DatabaseURL     string
+	SessionSecret   string
+	SMTPAddr        string
+	SMTPFrom        string
+	AppBaseURL      string
+	Argon2Time      uint32
+	Argon2MemoryKiB uint32
+	Argon2Threads   uint8
 }
 
 func (c Config) IsDevelopment() bool { return c.AppEnv == "development" }
@@ -27,6 +33,9 @@ func Load() (Config, error) {
 		AppEnv:        appEnv,
 		DatabaseURL:   os.Getenv("DATABASE_URL"),
 		SessionSecret: os.Getenv("SESSION_SECRET"),
+		SMTPAddr:      os.Getenv("SMTP_ADDR"),
+		SMTPFrom:      os.Getenv("SMTP_FROM"),
+		AppBaseURL:    os.Getenv("APP_BASE_URL"),
 	}
 
 	switch cfg.AppEnv {
@@ -50,6 +59,47 @@ func Load() (Config, error) {
 	if len(cfg.SessionSecret) < 32 {
 		return Config{}, fmt.Errorf("SESSION_SECRET must be at least 32 characters")
 	}
+	if cfg.SMTPAddr == "" {
+		return Config{}, fmt.Errorf("SMTP_ADDR is required")
+	}
+	if cfg.SMTPFrom == "" {
+		return Config{}, fmt.Errorf("SMTP_FROM is required")
+	}
+	if cfg.AppBaseURL == "" {
+		return Config{}, fmt.Errorf("APP_BASE_URL is required")
+	}
+
+	// ParseUint with an explicit bit size rejects a value that would overflow
+	// the field it is destined for (e.g. ARGON2_THREADS=256) instead of
+	// silently wrapping to zero on the uint8/uint32 cast, which would hand
+	// argon2.IDKey a "positive" configuration that is actually zero threads.
+	argon2Time, err := strconv.ParseUint(env("ARGON2_TIME", "3"), 10, 32)
+	if err != nil {
+		return Config{}, fmt.Errorf("ARGON2_TIME must be a positive number that fits in 32 bits: %w", err)
+	}
+	if argon2Time == 0 {
+		return Config{}, fmt.Errorf("ARGON2_TIME must be positive, got %d", argon2Time)
+	}
+	cfg.Argon2Time = uint32(argon2Time)
+
+	argon2MemoryKiB, err := strconv.ParseUint(env("ARGON2_MEMORY_KIB", "65536"), 10, 32)
+	if err != nil {
+		return Config{}, fmt.Errorf("ARGON2_MEMORY_KIB must be a positive number that fits in 32 bits: %w", err)
+	}
+	if argon2MemoryKiB == 0 {
+		return Config{}, fmt.Errorf("ARGON2_MEMORY_KIB must be positive, got %d", argon2MemoryKiB)
+	}
+	cfg.Argon2MemoryKiB = uint32(argon2MemoryKiB)
+
+	argon2Threads, err := strconv.ParseUint(env("ARGON2_THREADS", "2"), 10, 8)
+	if err != nil {
+		return Config{}, fmt.Errorf("ARGON2_THREADS must be a positive number that fits in 8 bits: %w", err)
+	}
+	if argon2Threads == 0 {
+		return Config{}, fmt.Errorf("ARGON2_THREADS must be positive, got %d", argon2Threads)
+	}
+	cfg.Argon2Threads = uint8(argon2Threads)
+
 	return cfg, nil
 }
 
