@@ -22,29 +22,52 @@ type Space struct {
 }
 
 // BuiltinSpaces is the set every household starts with, taken from the design's
-// Settings screen: Money and Marriage are parents-only, Family is for everyone.
+// Settings screen. Marriage is structurally locked to parents (VisibilityParentsOnly;
+// the domain also forbids a limited member from ever holding CapMarriage). Money is
+// visible to everyone but gated on CapMoney, matching the invite modal's "Money &
+// balances" toggle ("Off for kids by default") — a child can be granted access, and
+// gating on visibility instead of capability would make that toggle meaningless,
+// since visibility is checked before capability. Family is unconditional: the design
+// labels its audience "Everyone" with no qualifier, so it carries no required
+// capability; gating the Calendar page's content is a later slice, not this one.
 //
 // ID is left empty: identifiers are assigned by the database when a household
 // is seeded (Task 9's schema, Task 17's seed), not by this constructor.
 func BuiltinSpaces(householdID string) []Space {
 	return []Space{
 		{HouseholdID: householdID, Key: "money", Name: "Money",
-			Visibility: VisibilityParentsOnly, Position: 1, IsBuiltin: true, RequiredCapability: CapMoney},
+			Visibility: VisibilityEveryone, Position: 1, IsBuiltin: true, RequiredCapability: CapMoney},
 		{HouseholdID: householdID, Key: "marriage", Name: "Marriage",
 			Visibility: VisibilityParentsOnly, Position: 2, IsBuiltin: true, RequiredCapability: CapMarriage},
 		{HouseholdID: householdID, Key: "family", Name: "Family",
-			Visibility: VisibilityEveryone, Position: 3, IsBuiltin: true, RequiredCapability: CapCalendar},
+			Visibility: VisibilityEveryone, Position: 3, IsBuiltin: true},
 	}
 }
 
 // VisibleSpaces filters spaces for one membership. Visibility is checked before
 // capability, so a parents-only space stays hidden from a limited member even
 // if their capability set would otherwise allow it.
+//
+// The result preserves the input order; VisibleSpaces does not sort. Callers
+// must supply all already ordered by Position — Task 9's query does this with
+// an ORDER BY, and Task 19's sidebar relies on the order coming out as given.
 func VisibleSpaces(all []Space, m Membership) []Space {
 	visible := make([]Space, 0, len(all))
 	for _, s := range all {
-		if s.Visibility == VisibilityParentsOnly && m.Role != RoleOwner {
-			continue
+		switch s.Visibility {
+		case VisibilityParentsOnly:
+			if m.Role != RoleOwner {
+				continue
+			}
+		case VisibilityCustom:
+			// Provisional: per-space member lists do not exist yet, and the
+			// design marks custom space pages "not built". A visibility mode
+			// whose membership model is unbuilt must fail closed rather than
+			// default to maximum exposure, so custom spaces are owner-only
+			// until per-space membership is implemented.
+			if m.Role != RoleOwner {
+				continue
+			}
 		}
 		if s.RequiredCapability != "" && !m.Capabilities.Has(s.RequiredCapability) {
 			continue

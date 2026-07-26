@@ -22,6 +22,9 @@ func TestBuiltinSpacesMatchTheDesign(t *testing.T) {
 			t.Fatalf("%s has household %q", s.Key, s.HouseholdID)
 		}
 	}
+	if keys["money"] != domain.VisibilityEveryone {
+		t.Fatal("money must be visible to everyone (gated by capability, not visibility)")
+	}
 	if keys["marriage"] != domain.VisibilityParentsOnly {
 		t.Fatal("marriage must be parents only")
 	}
@@ -70,6 +73,96 @@ func TestParentsOnlySpacesAreHiddenFromLimitedMembersEvenWithTheCapability(t *te
 
 	if got := domain.VisibleSpaces(all, kid); len(got) != 0 {
 		t.Fatalf("visible = %+v, want none: parents_only outranks the capability", got)
+	}
+}
+
+func TestALimitedMemberGrantedMoneyCapabilitySeesMoney(t *testing.T) {
+	all := domain.BuiltinSpaces("h1")
+	member, err := domain.NewMembership("m4", "h1", "u4", domain.RoleLimited,
+		domain.Capabilities{domain.CapCalendar, domain.CapMoney})
+	if err != nil {
+		t.Fatalf("NewMembership: %v", err)
+	}
+
+	visible := domain.VisibleSpaces(all, member)
+
+	found := false
+	for _, s := range visible {
+		if s.Key == "money" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("visible = %+v, want money present: a limited member holding CapMoney must see it", visible)
+	}
+}
+
+func TestALimitedMemberWithoutMoneyCapabilityDoesNotSeeMoney(t *testing.T) {
+	all := domain.BuiltinSpaces("h1")
+	member, err := domain.NewMembership("m5", "h1", "u5", domain.RoleLimited,
+		domain.Capabilities{domain.CapCalendar})
+	if err != nil {
+		t.Fatalf("NewMembership: %v", err)
+	}
+
+	visible := domain.VisibleSpaces(all, member)
+
+	for _, s := range visible {
+		if s.Key == "money" {
+			t.Fatalf("visible = %+v, want money absent: a limited member without CapMoney must not see it", visible)
+		}
+	}
+}
+
+func TestALimitedMemberWithOnlyChoresStillSeesFamily(t *testing.T) {
+	all := domain.BuiltinSpaces("h1")
+	member, err := domain.NewMembership("m6", "h1", "u6", domain.RoleLimited,
+		domain.Capabilities{domain.CapChores})
+	if err != nil {
+		t.Fatalf("NewMembership: %v", err)
+	}
+
+	visible := domain.VisibleSpaces(all, member)
+
+	found := false
+	for _, s := range visible {
+		if s.Key == "family" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("visible = %+v, want family present: Family is unconditional (\"Everyone\", no qualifier)", visible)
+	}
+}
+
+func TestALimitedMemberDoesNotSeeACustomSpace(t *testing.T) {
+	all := []domain.Space{{
+		ID: "s2", HouseholdID: "h1", Key: "book-club", Name: "Book Club",
+		Visibility: domain.VisibilityCustom,
+	}}
+	member, err := domain.NewMembership("m7", "h1", "u7", domain.RoleLimited,
+		domain.Capabilities{domain.CapCalendar, domain.CapChores, domain.CapMoney})
+	if err != nil {
+		t.Fatalf("NewMembership: %v", err)
+	}
+
+	if got := domain.VisibleSpaces(all, member); len(got) != 0 {
+		t.Fatalf("visible = %+v, want none: custom spaces are provisionally owner-only", got)
+	}
+}
+
+func TestAnOwnerSeesACustomSpace(t *testing.T) {
+	all := []domain.Space{{
+		ID: "s2", HouseholdID: "h1", Key: "book-club", Name: "Book Club",
+		Visibility: domain.VisibilityCustom,
+	}}
+	andreas, err := domain.NewMembership("m8", "h1", "u8", domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("NewMembership: %v", err)
+	}
+
+	if got := domain.VisibleSpaces(all, andreas); len(got) != 1 {
+		t.Fatalf("visible = %+v, want the custom space present for an owner", got)
 	}
 }
 
