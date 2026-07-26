@@ -9,20 +9,43 @@ React + TypeScript frontend, Postgres, Docker Compose.
   one teaches. **Consult it whenever something breaks or behaves oddly**; most
   failure modes here have been seen before and the patterns section explains
   why. Its "Before you call something done" checklist is the bar for finishing.
+- **`docs/FEATURE_TRACKER.md`** — every feature in the design and whether it
+  exists yet. **Check it before starting anything**, to see whether the work is
+  already listed and what it depends on.
 - `docs/HANDOVER.md` — current state, what to build next, open items.
 - `docs/GUIDE.md` — how to use the product.
 - `docs/superpowers/specs/` and `docs/superpowers/plans/` — the specs and plans
   the work was built from.
 
-## Keeping the learning log current
+## Keeping the docs current
 
-**When a piece of work is finished, add what it taught to `docs/LEARNING.md`
-before closing it out.** One entry per defect worth remembering: what broke,
-what the symptom looked like, and what would have caught it sooner. If the
-defect matches an existing pattern, add it there as evidence rather than
-starting a new section — the repetition is the point.
+Two documents must not be allowed to go stale. Update both **as part of the
+work**, before calling it finished — not as a separate tidy-up later.
 
-A defect nobody wrote down gets rebuilt.
+**`docs/FEATURE_TRACKER.md`**
+
+- **When a feature is finished**, change its row from ⬜ to ✅. If it shipped
+  with a known gap, mark it 🟡 and say what the gap is — a 🟡 with no
+  explanation is worse than a ⬜.
+- **When you build something the design does not describe**, add a row for it.
+  The tracker is the map of what exists, not only of what was drawn.
+- **When you discover a feature in the design that no row covers**, add it as ⬜.
+  Finding a gap in the list counts as work on the list.
+- **Update the summary table at the top.** Its columns must sum to the stated
+  totals; if you change a row, recount rather than guessing.
+- If a feature turns out not to be buildable, say so where the row is, with the
+  reason — as the Money section does for automatic bank sync.
+
+**`docs/LEARNING.md`**
+
+- **When a piece of work is finished, add what it taught.** One entry per defect
+  worth remembering: what broke, what the symptom looked like, and what would
+  have caught it sooner.
+- If the defect matches an existing pattern, add it there as evidence rather
+  than starting a new section — the repetition is the point.
+
+A defect nobody wrote down gets rebuilt, and a feature nobody ticked off gets
+built twice.
 
 ## Running it
 
