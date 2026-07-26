@@ -1089,8 +1089,11 @@ shell-api: ## Open a shell inside the api container
 	$(COMPOSE) exec api sh
 
 build: ## Build the production images
-	$(COMPOSE) build --build-arg TARGET=prod
+	docker build --target prod -t hearth-api:latest ./api
+	docker build --target prod -t hearth-web:latest ./web
 ```
+
+`--target` is what selects a Dockerfile stage; a `--build-arg` cannot. `./web` has no Dockerfile until Task 5, so `make build` fails until then — that is expected and Task 5 closes it.
 
 - [ ] **Step 4: Write `.env.example` and update `.gitignore`**
 
@@ -1140,7 +1143,7 @@ git commit -m "chore: add Docker, Compose and the Makefile development workflow"
 ### Task 5: The React application shell and design tokens
 
 **Files:**
-- Create: `web/package.json`, `web/vite.config.ts`, `web/tsconfig.json`, `web/index.html`, `web/tailwind.config.ts`, `web/src/main.tsx`, `web/src/index.css`, `web/src/routes/__root.tsx`, `web/src/routes/index.tsx`, `web/src/api/client.ts`, `web/src/api/client.test.ts`, `web/vitest.config.ts`
+- Create: `web/package.json`, `web/vite.config.ts`, `web/tsconfig.json`, `web/index.html`, `web/src/main.tsx`, `web/src/App.tsx`, `web/src/index.css`, `web/src/api/client.ts`, `web/src/api/client.test.ts`, `web/vitest.config.ts`, `web/Dockerfile`, `web/nginx.conf`, `web/.dockerignore`
 - Modify: `Makefile` (add `dev-local`, `test-web`, `fmt` for the frontend)
 
 **Interfaces:**
@@ -1148,7 +1151,8 @@ git commit -m "chore: add Docker, Compose and the Makefile development workflow"
 - Produces:
   - `apiFetch<T>(path: string, init?: RequestInit): Promise<T>` — throws `ApiError` on a non-2xx response
   - `class ApiError extends Error { code: string; status: number; details: Record<string, unknown> }`
-  - Tailwind tokens: colours `canvas`, `surface`, `ink`, `accent`, `accent-dark`, `muted`; fonts `sans`, `serif`, `alt`, `mono`
+  - Tailwind 4 theme tokens declared in `web/src/index.css` via `@theme` — colours `canvas`, `surface`, `card`, `ink`, `muted`, `hairline`, `accent`, `accent-dark`; fonts `sans`, `serif`, `alt`, `mono`. Tailwind 4 needs no `tailwind.config.ts`; the CSS block is the config.
+  - `web/Dockerfile` with a `prod` stage, so `make build` succeeds from this task onward
   - The identity plan's screens are added under `web/src/features/` and registered in the route tree created here.
 
 - [ ] **Step 1: Scaffold the frontend**
@@ -1447,6 +1451,58 @@ export function App() {
 ```
 
 Delete the Vite template leftovers: `web/src/App.css`, `web/src/assets/react.svg`, and the template body of `web/src/index.css` if the scaffold wrote one above your `@import`.
+
+- [ ] **Step 8b: Write the web production image**
+
+Create `web/Dockerfile`:
+
+```dockerfile
+# syntax=docker/dockerfile:1
+
+FROM node:22-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM nginx:1.27-alpine AS prod
+COPY --from=builder /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80
+```
+
+Create `web/nginx.conf`:
+
+```nginx
+server {
+    listen 80;
+    root /usr/share/nginx/html;
+
+    # The SPA owns routing: any unknown path serves index.html.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Same-origin API, so no CORS in production either.
+    location /api/ {
+        proxy_pass http://api:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Create `web/.dockerignore`:
+
+```
+node_modules
+dist
+```
+
+Verify: `make build`
+Expected: both images build. This is the first point at which `make build` can succeed.
 
 - [ ] **Step 9: Add the frontend Make targets**
 
