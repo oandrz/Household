@@ -25,9 +25,23 @@ var ErrSpaceVisibilityNotSupported = errors.New("space visibility must be \"ever
 // lowercased and hyphenated, with an existing space's key -- including a
 // builtin one. The database enforces the identical constraint
 // (UNIQUE (household_id, key), migrations/00002_identity.sql), so this check
-// exists to fail with a clear, typed error before a write is even attempted,
-// not to duplicate a rule the schema wouldn't otherwise enforce.
+// exists to fail with a clear, typed error in the common case, before a write
+// is even attempted. It is not the only gate: CreateSpace's pre-check is a
+// plain list-then-compare, not a transaction, so two concurrent creates that
+// derive the same key can both pass it before either insert lands. The
+// database's constraint is the backstop for that race, and the postgres
+// adapter's translate function reports the identical violation as
+// domain.ErrAlreadyExists; CreateSpace maps that onto this same sentinel
+// below, so a caller sees one error regardless of which gate caught it.
 var ErrSpaceNameTaken = errors.New("a space with that name already exists in this household")
+
+// ErrSpaceNameRequired is CreateSpace's rejection of a name that is empty
+// once trimmed. Without this check, a blank name would derive the empty key
+// "" and create a nameless space; a second blank name would then collide
+// with it and report ErrSpaceNameTaken, a confusing way to say "a name is
+// required" for what is really a missing-input problem, not a naming
+// collision.
+var ErrSpaceNameRequired = errors.New("space name is required")
 
 // HouseholdDeps mirrors AuthDeps/InviteDeps: every port HouseholdService
 // needs, gathered into one struct so NewHouseholdService has a single, named
@@ -105,16 +119,29 @@ func (s *HouseholdService) Spaces(ctx context.Context, householdID string, m dom
 
 // CreateSpace adds a custom space to the household's sidebar. It accepts only
 // domain.VisibilityEveryone and domain.VisibilityParentsOnly -- see
-// ErrSpaceVisibilityNotSupported -- and derives the space's key by trimming,
+// ErrSpaceVisibilityNotSupported -- rejects a name that is blank once
+// trimmed (ErrSpaceNameRequired), and derives the space's key by trimming,
 // lowercasing and hyphenating the name, rejecting a collision against any
 // existing space (builtin or custom) with ErrSpaceNameTaken before writing
 // anything. The new space is never builtin and carries no required
 // capability: only the three seeded spaces gate on one.
+//
+// The list-then-compare duplicate check above is not transactional, so it is
+// not the only gate against a collision: Create's own domain.ErrAlreadyExists
+// (the database's UNIQUE (household_id, key) constraint, translated -- see
+// ErrSpaceNameTaken's doc comment) is mapped onto the identical
+// ErrSpaceNameTaken sentinel, so the race between two concurrent creates
+// deriving the same key is closed at the database and reported identically
+// to the caller, whichever gate actually caught it.
 func (s *HouseholdService) CreateSpace(ctx context.Context, householdID, name string, visibility domain.Visibility) (domain.Space, error) {
 	switch visibility {
 	case domain.VisibilityEveryone, domain.VisibilityParentsOnly:
 	default:
 		return domain.Space{}, ErrSpaceVisibilityNotSupported
+	}
+
+	if strings.TrimSpace(name) == "" {
+		return domain.Space{}, ErrSpaceNameRequired
 	}
 
 	key := spaceKey(name)
@@ -134,7 +161,7 @@ func (s *HouseholdService) CreateSpace(ctx context.Context, householdID, name st
 		return domain.Space{}, err
 	}
 
-	return s.d.Spaces.Create(ctx, domain.Space{
+	created, err := s.d.Spaces.Create(ctx, domain.Space{
 		HouseholdID: householdID,
 		Key:         key,
 		Name:        name,
@@ -142,6 +169,13 @@ func (s *HouseholdService) CreateSpace(ctx context.Context, householdID, name st
 		Position:    position,
 		IsBuiltin:   false,
 	})
+	if err != nil {
+		if errors.Is(err, domain.ErrAlreadyExists) {
+			return domain.Space{}, ErrSpaceNameTaken
+		}
+		return domain.Space{}, err
+	}
+	return created, nil
 }
 
 // spaceKey derives a space's key from its name: trimmed, lowercased, spaces

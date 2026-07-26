@@ -141,6 +141,38 @@ func TestUpdateSucceedingRevokesThatMembersSessionsOnly(t *testing.T) {
 	}
 }
 
+// TestUpdateSucceedingButSessionRevocationFailingReturnsADistinctErrorAndKeepsTheMutation
+// covers the gap a coordinator review caught: Update commits the membership
+// mutation before revoking sessions, and does not roll the mutation back if
+// that revocation fails (see Update's doc comment in member.go for why not).
+// A caller must be able to tell that outcome -- "the change happened, but the
+// old session(s) may still be live" -- apart from an outright failure where
+// nothing happened at all. This forces RevokeAllForUser to fail and asserts
+// both halves: the membership mutation persisted despite the failure, and
+// the returned error is usecase.ErrSessionRevocationFailed specifically, not
+// merely "some error" that could be mistaken for the mutation itself having
+// failed (which would return before ever reaching Sessions.RevokeAllForUser,
+// and would never be this sentinel).
+func TestUpdateSucceedingButSessionRevocationFailingReturnsADistinctErrorAndKeepsTheMutation(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.sessions.failNextRevokeAllForUser(errors.New("simulated revoke failure"))
+
+	err := f.memberSvc.Update(ctx, f.householdID, "membership-ethan", domain.RoleLimited,
+		domain.Capabilities{domain.CapChores, domain.CapCalendar})
+	if !errors.Is(err, usecase.ErrSessionRevocationFailed) {
+		t.Fatalf("err = %v, want usecase.ErrSessionRevocationFailed", err)
+	}
+	if errors.Is(err, domain.ErrLastOwner) || errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("err = %v must not also look like a validation failure", err)
+	}
+
+	m := f.members.byID["membership-ethan"]
+	if len(m.Capabilities) != 2 || !m.Capabilities.Has(domain.CapChores) || !m.Capabilities.Has(domain.CapCalendar) {
+		t.Fatalf("membership = %+v, want the mutation persisted despite the revoke failure", m)
+	}
+}
+
 func TestRemoveOfTheOnlyOwnerReturnsErrLastOwner(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -172,6 +204,30 @@ func TestRemoveSucceedingDeletesTheMembershipAndRevokesThatUsersSessions(t *test
 	}
 	if got := f.sessions.liveForUser(f.andreasID); got != 1 {
 		t.Fatalf("live sessions for Andreas = %d, want 1 (untouched)", got)
+	}
+}
+
+// TestRemoveSucceedingButSessionRevocationFailingReturnsADistinctErrorAndKeepsTheMutation
+// is Remove's mirror of the Update test above: the membership is deleted
+// before sessions are revoked, that deletion is not undone if the
+// revocation fails, and the caller must see usecase.ErrSessionRevocationFailed
+// -- not an error indistinguishable from Remove having failed outright and
+// left the membership in place.
+func TestRemoveSucceedingButSessionRevocationFailingReturnsADistinctErrorAndKeepsTheMutation(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.sessions.failNextRevokeAllForUser(errors.New("simulated revoke failure"))
+
+	err := f.memberSvc.Remove(ctx, f.householdID, "membership-ethan")
+	if !errors.Is(err, usecase.ErrSessionRevocationFailed) {
+		t.Fatalf("err = %v, want usecase.ErrSessionRevocationFailed", err)
+	}
+	if errors.Is(err, domain.ErrLastOwner) || errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("err = %v must not also look like a validation failure", err)
+	}
+
+	if _, ok := f.members.byID["membership-ethan"]; ok {
+		t.Fatal("membership-ethan still exists, want it deleted despite the revoke failure")
 	}
 }
 

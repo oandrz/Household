@@ -111,6 +111,52 @@ func TestCreateSpaceRejectsADuplicateNameWithinTheHousehold(t *testing.T) {
 	}
 }
 
+// TestCreateSpaceMapsAConcurrentDuplicateKeyOntoErrSpaceNameTaken simulates
+// the race CreateSpace's list-then-compare pre-check cannot close on its
+// own: two concurrent creates deriving the same key can both pass that
+// pre-check before either insert lands, and the database's
+// UNIQUE (household_id, key) constraint is the backstop. The postgres
+// adapter reports that constraint violation as domain.ErrAlreadyExists (see
+// translate's pgconn.PgError/23505 case); this test arms the space double to
+// return that same sentinel from Create, standing in for the loser of that
+// race, and asserts CreateSpace maps it onto the identical
+// usecase.ErrSpaceNameTaken a caller already gets from the ordinary
+// pre-check path -- one error, regardless of which gate caught it.
+func TestCreateSpaceMapsAConcurrentDuplicateKeyOntoErrSpaceNameTaken(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	f.spaces.failNextSpaceCreate(domain.ErrAlreadyExists)
+
+	if _, err := f.householdSvc.CreateSpace(ctx, f.householdID, "Movie Night", domain.VisibilityEveryone); !errors.Is(err, usecase.ErrSpaceNameTaken) {
+		t.Fatalf("err = %v, want usecase.ErrSpaceNameTaken", err)
+	}
+}
+
+// TestCreateSpaceRejectsABlankName guards the case a duplicate-name check
+// alone reports confusingly: without this, an empty or whitespace-only name
+// derives the empty key "" and creates a nameless space, and a second blank
+// name then collides with it, reporting ErrSpaceNameTaken -- a poor way to
+// say "a name is required".
+func TestCreateSpaceRejectsABlankName(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	if _, err := f.householdSvc.CreateSpace(ctx, f.householdID, "   ", domain.VisibilityEveryone); !errors.Is(err, usecase.ErrSpaceNameRequired) {
+		t.Fatalf("err = %v, want usecase.ErrSpaceNameRequired", err)
+	}
+
+	spaces, err := f.spaces.List(ctx, f.householdID)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	for _, s := range spaces {
+		if s.Key == "" {
+			t.Fatal("a nameless space was written despite the rejection")
+		}
+	}
+}
+
 func TestUpdateNormalisesThePrimaryCurrencyToUppercaseAndRejectsANonThreeLetterCurrency(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()

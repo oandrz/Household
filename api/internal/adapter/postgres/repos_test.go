@@ -158,3 +158,28 @@ func TestSpaceRepoListsInPositionOrder(t *testing.T) {
 		t.Fatalf("NextPosition = %d, want 4", next)
 	}
 }
+
+// TestSpaceRepoRejectsADuplicateKeyWithErrAlreadyExists proves the database's
+// own UNIQUE (household_id, key) constraint -- the backstop for the race
+// usecase.HouseholdService.CreateSpace's list-then-compare pre-check cannot
+// close on its own -- surfaces as domain.ErrAlreadyExists rather than an
+// opaque wrapped driver error. translate's pgconn.PgError/23505 case is what
+// this exercises.
+func TestSpaceRepoRejectsADuplicateKeyWithErrAlreadyExists(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	h, _ := postgres.NewHouseholdRepo(db).Create(ctx, "H", "H")
+	spaces := postgres.NewSpaceRepo(db)
+
+	first := domain.Space{HouseholdID: h.ID, Key: "movie-night", Name: "Movie Night",
+		Visibility: domain.VisibilityEveryone, Position: 1}
+	if _, err := spaces.Create(ctx, first); err != nil {
+		t.Fatalf("first Create: %v", err)
+	}
+
+	second := domain.Space{HouseholdID: h.ID, Key: "movie-night", Name: "Movie Night (again)",
+		Visibility: domain.VisibilityEveryone, Position: 2}
+	if _, err := spaces.Create(ctx, second); !errors.Is(err, domain.ErrAlreadyExists) {
+		t.Fatalf("err = %v, want domain.ErrAlreadyExists", err)
+	}
+}

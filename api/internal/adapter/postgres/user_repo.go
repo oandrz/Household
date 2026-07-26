@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres/sqlcgen"
@@ -127,14 +128,31 @@ func initialOf(displayName string) string {
 	return strings.ToUpper(name[:1])
 }
 
+// pgUniqueViolation is the Postgres SQLSTATE for a unique-constraint
+// violation (23505). See
+// https://www.postgresql.org/docs/current/errcodes-appendix.html.
+const pgUniqueViolation = "23505"
+
 // translate converts driver errors into domain errors so nothing above the
 // adapter layer ever sees pgx types.
 func translate(err error, op string) error {
+	var pgErr *pgconn.PgError
 	switch {
 	case err == nil:
 		return nil
 	case errors.Is(err, pgx.ErrNoRows):
 		return domain.ErrNotFound
+	case errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation:
+		// Mirrors ErrNotFound's translation: a caller-testable domain
+		// sentinel rather than a generic wrapped driver error, so
+		// usecase-level code can distinguish "this already exists" from
+		// any other failure with errors.Is. Task 15's CreateSpace is the
+		// first caller: its own pre-check (list, then compare keys) closes
+		// the common case, but two concurrent creates deriving the same
+		// key can both pass that check before either insert lands, and the
+		// database's UNIQUE (household_id, key) constraint is the
+		// authoritative backstop for that race.
+		return domain.ErrAlreadyExists
 	default:
 		return fmt.Errorf("%s: %w", op, err)
 	}

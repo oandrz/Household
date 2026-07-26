@@ -289,6 +289,16 @@ type sessionDouble struct {
 	clock   *fixedClock
 	rows    map[string]*sessionRow // keyed by string(tokenHash)
 	created int
+
+	// failNextRevoke arms a one-shot failure for the next RevokeAllForUser
+	// call, the same one-shot pattern userDouble.failNextCreateWithMembership
+	// and magicLinkDouble.failNextCreate use. It exists so a usecase-level
+	// test can prove MemberService reports (and logs) a revocation failure
+	// distinctly from the membership mutation itself failing -- the real
+	// SessionRepository.RevokeAllForUser can fail (a dead connection, a
+	// statement timeout) even on an otherwise-successful Update or Remove,
+	// and nothing exercised that path before this existed.
+	failNextRevoke error
 }
 
 func newSessionDouble(clock *fixedClock) *sessionDouble {
@@ -323,7 +333,19 @@ func (d *sessionDouble) RevokeByToken(_ context.Context, tokenHash []byte) error
 	return nil // RevokeSessionByToken is :exec — an unknown token is a silent no-op.
 }
 
+// failNextRevokeAllForUser arms failNextRevoke: the next RevokeAllForUser
+// call returns err instead of revoking anything, and every call after that
+// succeeds normally again.
+func (d *sessionDouble) failNextRevokeAllForUser(err error) {
+	d.failNextRevoke = err
+}
+
 func (d *sessionDouble) RevokeAllForUser(_ context.Context, userID string) error {
+	if d.failNextRevoke != nil {
+		err := d.failNextRevoke
+		d.failNextRevoke = nil
+		return err
+	}
 	for _, row := range d.rows {
 		if row.UserID == userID {
 			row.Revoked = true
@@ -860,6 +882,16 @@ func (d *householdDouble) Create(_ context.Context, name, familyName string) (do
 type spaceDouble struct {
 	rows []domain.Space
 	n    int
+
+	// failNextCreate arms a one-shot failure for the next Create call, the
+	// same one-shot pattern magicLinkDouble.failNextCreate uses. It exists so
+	// a test can simulate the race HouseholdService.CreateSpace's
+	// list-then-compare pre-check cannot close on its own: a concurrent
+	// creator wins on the same derived key, the real Postgres adapter
+	// reports that as domain.ErrAlreadyExists (translate's pgconn.PgError/
+	// 23505 case), and this double reproduces exactly that error without
+	// needing two real concurrent callers.
+	failNextCreate error
 }
 
 func newSpaceDouble() *spaceDouble { return &spaceDouble{} }
@@ -889,7 +921,19 @@ func (d *spaceDouble) List(_ context.Context, householdID string) ([]domain.Spac
 	return out, nil
 }
 
+// failNextSpaceCreate arms failNextCreate: the next Create call returns err
+// instead of persisting a row, and every call after that succeeds normally
+// again.
+func (d *spaceDouble) failNextSpaceCreate(err error) {
+	d.failNextCreate = err
+}
+
 func (d *spaceDouble) Create(_ context.Context, s domain.Space) (domain.Space, error) {
+	if d.failNextCreate != nil {
+		err := d.failNextCreate
+		d.failNextCreate = nil
+		return domain.Space{}, err
+	}
 	d.n++
 	s.ID = fmt.Sprintf("space-%d", d.n)
 	d.rows = append(d.rows, s)

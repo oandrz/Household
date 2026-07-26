@@ -24,4 +24,11 @@ var (
 	ErrAmountOverflow               = errors.New("amount overflows a signed 64-bit integer")
 	ErrInvalidMoney                 = errors.New("money value is invalid")
 	ErrOwnerMustHoldAllCapabilities = errors.New("an owner must hold every capability")
+
+	// ErrAlreadyExists mirrors ErrNotFound: a row that must be unique
+	// already exists. It exists so an adapter can translate a Postgres
+	// unique-violation (SQLSTATE 23505) into something usecase code can
+	// test with errors.Is, instead of a generic wrapped driver error. Added
+	// in the Task 15 fix round (see task-15-report.md, "Fix round 2").
+	ErrAlreadyExists = errors.New("already exists")
 )
