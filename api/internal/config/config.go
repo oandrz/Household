@@ -9,12 +9,28 @@ import (
 )
 
 type Config struct {
-	AppEnv          string
-	Port            int
-	DatabaseURL     string
-	SessionSecret   string
-	SMTPAddr        string
-	SMTPFrom        string
+	AppEnv      string
+	Port        int
+	DatabaseURL string
+	SMTPAddr    string
+	SMTPFrom    string
+	// SMTPUsername and SMTPPassword are optional: empty (the default) means
+	// no SMTP AUTH is attempted at all, which is what talking to Mailpit
+	// (development) needs. Set both together for a relay that requires
+	// authentication -- see SMTPTLSMode's doc comment for why "both or
+	// neither" is the only combination Load accepts.
+	SMTPUsername string
+	SMTPPassword string
+	// SMTPTLSMode is one of "none", "opportunistic" or "mandatory",
+	// controlling whether the mailer requires, attempts, or never uses
+	// STARTTLS. It defaults to "none" in development (Mailpit speaks plain
+	// SMTP on the Compose network, and requiring TLS there would break it)
+	// and to "mandatory" everywhere else: no hosted relay accepts an
+	// unauthenticated, unencrypted connection, and the send is fire-and-
+	// forget (see usecase/auth.go's sendMagicLinkAsync), so a silently
+	// downgraded or rejected connection would otherwise never surface
+	// anywhere a caller or an operator could see it.
+	SMTPTLSMode     string
 	AppBaseURL      string
 	Argon2Time      uint32
 	Argon2MemoryKiB uint32
@@ -30,12 +46,13 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		AppEnv:        appEnv,
-		DatabaseURL:   os.Getenv("DATABASE_URL"),
-		SessionSecret: os.Getenv("SESSION_SECRET"),
-		SMTPAddr:      os.Getenv("SMTP_ADDR"),
-		SMTPFrom:      os.Getenv("SMTP_FROM"),
-		AppBaseURL:    os.Getenv("APP_BASE_URL"),
+		AppEnv:       appEnv,
+		DatabaseURL:  os.Getenv("DATABASE_URL"),
+		SMTPAddr:     os.Getenv("SMTP_ADDR"),
+		SMTPFrom:     os.Getenv("SMTP_FROM"),
+		SMTPUsername: os.Getenv("SMTP_USERNAME"),
+		SMTPPassword: os.Getenv("SMTP_PASSWORD"),
+		AppBaseURL:   os.Getenv("APP_BASE_URL"),
 	}
 
 	switch cfg.AppEnv {
@@ -56,14 +73,28 @@ func Load() (Config, error) {
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("DATABASE_URL is required")
 	}
-	if len(cfg.SessionSecret) < 32 {
-		return Config{}, fmt.Errorf("SESSION_SECRET must be at least 32 characters")
-	}
 	if cfg.SMTPAddr == "" {
 		return Config{}, fmt.Errorf("SMTP_ADDR is required")
 	}
 	if cfg.SMTPFrom == "" {
 		return Config{}, fmt.Errorf("SMTP_FROM is required")
+	}
+	// Both or neither: a username with no password (or vice versa) is never
+	// a deployment anyone intends, and silently sending unauthenticated in
+	// that case would mask a misconfigured relay behind mail that appears to
+	// send fine right up until the relay actually starts rejecting it.
+	if (cfg.SMTPUsername == "") != (cfg.SMTPPassword == "") {
+		return Config{}, fmt.Errorf("SMTP_USERNAME and SMTP_PASSWORD must both be set, or both left empty")
+	}
+	defaultTLSMode := "mandatory"
+	if cfg.IsDevelopment() {
+		defaultTLSMode = "none"
+	}
+	cfg.SMTPTLSMode = env("SMTP_TLS_MODE", defaultTLSMode)
+	switch cfg.SMTPTLSMode {
+	case "none", "opportunistic", "mandatory":
+	default:
+		return Config{}, fmt.Errorf(`SMTP_TLS_MODE must be "none", "opportunistic" or "mandatory", got %q`, cfg.SMTPTLSMode)
 	}
 	if cfg.AppBaseURL == "" {
 		return Config{}, fmt.Errorf("APP_BASE_URL is required")

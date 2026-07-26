@@ -11,7 +11,6 @@ func setRequiredEnv(t *testing.T) {
 	t.Setenv("APP_ENV", "development")
 	t.Setenv("PORT", "8080")
 	t.Setenv("DATABASE_URL", "postgres://hearth:hearth@localhost:5432/hearth?sslmode=disable")
-	t.Setenv("SESSION_SECRET", "0123456789abcdef0123456789abcdef")
 	t.Setenv("SMTP_ADDR", "localhost:1025")
 	t.Setenv("SMTP_FROM", "Hearth <noreply@hearth.localhost>")
 	t.Setenv("APP_BASE_URL", "http://localhost:5173")
@@ -94,6 +93,81 @@ func TestLoadRejectsMissingSMTPFrom(t *testing.T) {
 
 	if _, err := config.Load(); err == nil {
 		t.Fatal("expected an error when SMTP_FROM is empty")
+	}
+}
+
+// TestLoadDefaultsSMTPTLSModeToNoneInDevelopmentAndMandatoryOtherwise pins
+// the production-blocker fix: the mailer used to hardcode NoTLS
+// unconditionally, which no hosted relay accepts. The default must not break
+// Mailpit (plain SMTP, development) while still refusing to send unencrypted
+// by default everywhere else.
+func TestLoadDefaultsSMTPTLSModeToNoneInDevelopmentAndMandatoryOtherwise(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("APP_ENV", "development")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.SMTPTLSMode != "none" {
+		t.Fatalf("SMTPTLSMode = %q, want %q in development", cfg.SMTPTLSMode, "none")
+	}
+
+	setRequiredEnv(t)
+	t.Setenv("APP_ENV", "production")
+	cfg, err = config.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.SMTPTLSMode != "mandatory" {
+		t.Fatalf("SMTPTLSMode = %q, want %q in production", cfg.SMTPTLSMode, "mandatory")
+	}
+}
+
+func TestLoadRejectsAnUnknownSMTPTLSMode(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("SMTP_TLS_MODE", "sometimes")
+
+	if _, err := config.Load(); err == nil {
+		t.Fatal("expected an error for an unknown SMTP_TLS_MODE")
+	}
+}
+
+func TestLoadAcceptsAnExplicitSMTPTLSMode(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("SMTP_TLS_MODE", "opportunistic")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.SMTPTLSMode != "opportunistic" {
+		t.Fatalf("SMTPTLSMode = %q, want %q", cfg.SMTPTLSMode, "opportunistic")
+	}
+}
+
+// TestLoadRejectsOneOfSMTPUsernameOrPasswordWithoutTheOther pins the pairing
+// rule: a lone SMTP_USERNAME or SMTP_PASSWORD is never an intended
+// deployment and would otherwise silently send unauthenticated.
+func TestLoadRejectsOneOfSMTPUsernameOrPasswordWithoutTheOther(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("SMTP_USERNAME", "relay-user")
+
+	if _, err := config.Load(); err == nil {
+		t.Fatal("expected an error when SMTP_USERNAME is set without SMTP_PASSWORD")
+	}
+}
+
+func TestLoadAcceptsBothSMTPUsernameAndPassword(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("SMTP_USERNAME", "relay-user")
+	t.Setenv("SMTP_PASSWORD", "relay-pass")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.SMTPUsername != "relay-user" || cfg.SMTPPassword != "relay-pass" {
+		t.Fatalf("unexpected config: %+v", cfg)
 	}
 }
 

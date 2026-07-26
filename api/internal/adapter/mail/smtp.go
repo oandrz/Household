@@ -13,24 +13,54 @@ import (
 	gomail "github.com/wneessen/go-mail"
 )
 
-// SMTPMailer talks to a plain SMTP relay: no authentication, no TLS. In
-// development addr points at Mailpit (SMTP_ADDR=mailpit:1025); in production
-// it points at whatever relay the deployment trusts on its private network.
-// Message bodies are plain text by design — there is no HTML template system
-// to keep in sync with the design's copy.
+// SMTPMailer talks to an SMTP relay: TLS policy and (optional) authentication
+// are both taken from configuration rather than hardcoded, so this same
+// mailer talks plain, unauthenticated SMTP to Mailpit in development
+// (SMTP_ADDR=mailpit:1025, SMTPTLSMode "none") and mandatory-TLS,
+// authenticated SMTP to whatever relay a real deployment trusts (SMTPTLSMode
+// "mandatory" by default outside development -- see config.Config.SMTPTLSMode's
+// doc comment for why no hosted relay accepts anything less). Message bodies
+// are plain text by design — there is no HTML template system to keep in
+// sync with the design's copy.
 type SMTPMailer struct {
-	host    string
-	port    int
-	from    string
-	baseURL string // currently unused: both callers already hand over a fully-built url.
+	host     string
+	port     int
+	from     string
+	baseURL  string // currently unused: both callers already hand over a fully-built url.
+	username string
+	password string
+	tls      gomail.TLSPolicy
 }
 
 // NewSMTPMailer builds a mailer from config values. It never reads the
-// environment itself — config.Config already did that — so addr, from and
-// baseURL are exactly config.SMTPAddr, config.SMTPFrom and config.AppBaseURL.
-func NewSMTPMailer(addr, from, baseURL string) *SMTPMailer {
+// environment itself — config.Config already did that — so every argument
+// is exactly the like-named config.Config field: addr is SMTPAddr, from is
+// SMTPFrom, baseURL is AppBaseURL, username and password are SMTPUsername
+// and SMTPPassword (both "" means no SMTP AUTH is attempted at all), and
+// tlsMode is SMTPTLSMode ("none", "opportunistic" or "mandatory" -- anything
+// else falls back to NoTLS, but config.Load already rejects any other value,
+// so that fallback is unreachable outside a test that constructs this
+// mailer directly with a bad string).
+func NewSMTPMailer(addr, from, baseURL, username, password, tlsMode string) *SMTPMailer {
 	host, port := splitAddr(addr)
-	return &SMTPMailer{host: host, port: port, from: from, baseURL: baseURL}
+	return &SMTPMailer{
+		host: host, port: port, from: from, baseURL: baseURL,
+		username: username, password: password, tls: tlsPolicyFromMode(tlsMode),
+	}
+}
+
+// tlsPolicyFromMode maps config.Config.SMTPTLSMode's three accepted strings
+// onto go-mail's own TLSPolicy type, kept as a small pure function so a unit
+// test can pin the mapping without dialing anything.
+func tlsPolicyFromMode(mode string) gomail.TLSPolicy {
+	switch mode {
+	case "mandatory":
+		return gomail.TLSMandatory
+	case "opportunistic":
+		return gomail.TLSOpportunistic
+	default:
+		return gomail.NoTLS
+	}
 }
 
 // splitAddr defaults to port 25 if addr carries no port or an unparsable
@@ -89,7 +119,18 @@ func (m *SMTPMailer) send(ctx context.Context, to, subject, body string) error {
 	msg.Subject(subject)
 	msg.SetBodyString(gomail.TypeTextPlain, body)
 
-	client, err := gomail.NewClient(m.host, gomail.WithPort(m.port), gomail.WithTLSPolicy(gomail.NoTLS))
+	opts := []gomail.Option{gomail.WithPort(m.port), gomail.WithTLSPolicy(m.tls)}
+	if m.username != "" {
+		// SMTPAuthAutoDiscover negotiates the strongest mechanism the relay
+		// actually offers rather than this mailer guessing one -- see its
+		// own doc comment in the go-mail package. m.username != "" is the
+		// only gate: config.Load already rejects a lone username or a lone
+		// password (see its SMTP_USERNAME/SMTP_PASSWORD pairing check), so
+		// a non-empty username here always means a non-empty password too.
+		opts = append(opts, gomail.WithSMTPAuth(gomail.SMTPAuthAutoDiscover),
+			gomail.WithUsername(m.username), gomail.WithPassword(m.password))
+	}
+	client, err := gomail.NewClient(m.host, opts...)
 	if err != nil {
 		return fmt.Errorf("create smtp client: %w", err)
 	}
