@@ -515,7 +515,9 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
-var now = time.Date(2026, 7, 18, 9, 41, 0, 0, time.UTC)
+// Package-scoped, and every domain test file shares the domain_test package —
+// so this name is deliberately specific rather than a bare `now`.
+var lockoutNow = time.Date(2026, 7, 18, 9, 41, 0, 0, time.UTC)
 
 func TestNoFailuresMeansFullAllowance(t *testing.T) {
 	state := domain.DefaultLockoutPolicy().Evaluate(nil, now)
@@ -529,9 +531,9 @@ func TestNoFailuresMeansFullAllowance(t *testing.T) {
 }
 
 func TestOneFailureLeavesTwoTries(t *testing.T) {
-	failures := []time.Time{now.Add(-time.Minute)}
+	failures := []time.Time{lockoutNow.Add(-time.Minute)}
 
-	state := domain.DefaultLockoutPolicy().Evaluate(failures, now)
+	state := domain.DefaultLockoutPolicy().Evaluate(failures, lockoutNow)
 
 	if state.Locked {
 		t.Fatal("did not expect a lock")
@@ -543,12 +545,12 @@ func TestOneFailureLeavesTwoTries(t *testing.T) {
 
 func TestThreeFailuresInsideTheWindowLock(t *testing.T) {
 	failures := []time.Time{
-		now.Add(-10 * time.Minute),
-		now.Add(-5 * time.Minute),
-		now.Add(-1 * time.Minute),
+		lockoutNow.Add(-10 * time.Minute),
+		lockoutNow.Add(-5 * time.Minute),
+		lockoutNow.Add(-1 * time.Minute),
 	}
 
-	state := domain.DefaultLockoutPolicy().Evaluate(failures, now)
+	state := domain.DefaultLockoutPolicy().Evaluate(failures, lockoutNow)
 
 	if !state.Locked {
 		t.Fatal("expected a lock")
@@ -556,7 +558,7 @@ func TestThreeFailuresInsideTheWindowLock(t *testing.T) {
 	if state.AttemptsRemaining != 0 {
 		t.Fatalf("AttemptsRemaining = %d, want 0", state.AttemptsRemaining)
 	}
-	want := now.Add(-1 * time.Minute).Add(15 * time.Minute)
+	want := lockoutNow.Add(-1 * time.Minute).Add(15 * time.Minute)
 	if !state.Until.Equal(want) {
 		t.Fatalf("Until = %v, want %v — the lock runs from the most recent failure", state.Until, want)
 	}
@@ -564,12 +566,12 @@ func TestThreeFailuresInsideTheWindowLock(t *testing.T) {
 
 func TestFailuresOlderThanTheWindowAreIgnored(t *testing.T) {
 	failures := []time.Time{
-		now.Add(-40 * time.Minute),
-		now.Add(-30 * time.Minute),
-		now.Add(-20 * time.Minute),
+		lockoutNow.Add(-40 * time.Minute),
+		lockoutNow.Add(-30 * time.Minute),
+		lockoutNow.Add(-20 * time.Minute),
 	}
 
-	state := domain.DefaultLockoutPolicy().Evaluate(failures, now)
+	state := domain.DefaultLockoutPolicy().Evaluate(failures, lockoutNow)
 
 	if state.Locked {
 		t.Fatal("did not expect a lock from failures outside the window")
@@ -581,12 +583,12 @@ func TestFailuresOlderThanTheWindowAreIgnored(t *testing.T) {
 
 func TestTheLockExpiresAfterFifteenMinutes(t *testing.T) {
 	failures := []time.Time{
-		now.Add(-20 * time.Minute),
-		now.Add(-19 * time.Minute),
-		now.Add(-18 * time.Minute),
+		lockoutNow.Add(-20 * time.Minute),
+		lockoutNow.Add(-19 * time.Minute),
+		lockoutNow.Add(-18 * time.Minute),
 	}
 
-	state := domain.DefaultLockoutPolicy().Evaluate(failures, now)
+	state := domain.DefaultLockoutPolicy().Evaluate(failures, lockoutNow)
 
 	if state.Locked {
 		t.Fatal("the lock should have expired 3 minutes ago")
@@ -595,12 +597,12 @@ func TestTheLockExpiresAfterFifteenMinutes(t *testing.T) {
 
 func TestFailuresNeedNotBeSorted(t *testing.T) {
 	failures := []time.Time{
-		now.Add(-1 * time.Minute),
-		now.Add(-10 * time.Minute),
-		now.Add(-5 * time.Minute),
+		lockoutNow.Add(-1 * time.Minute),
+		lockoutNow.Add(-10 * time.Minute),
+		lockoutNow.Add(-5 * time.Minute),
 	}
 
-	state := domain.DefaultLockoutPolicy().Evaluate(failures, now)
+	state := domain.DefaultLockoutPolicy().Evaluate(failures, lockoutNow)
 
 	if !state.Locked {
 		t.Fatal("expected a lock regardless of input order")
@@ -664,6 +666,10 @@ func (p LockoutPolicy) Evaluate(failures []time.Time, now time.Time) LockState {
 		if now.Before(until) {
 			return LockState{Locked: true, Until: until, AttemptsRemaining: 0}
 		}
+		// A lock that has been served resets the allowance by design. This is
+		// only coherent while LockFor >= Window: with a shorter lock, the lock
+		// could expire while failures are still inside the counting window and
+		// the caller would get a full fresh allowance anyway.
 		return LockState{AttemptsRemaining: p.MaxAttempts}
 	}
 
@@ -673,8 +679,8 @@ func (p LockoutPolicy) Evaluate(failures []time.Time, now time.Time) LockState {
 
 - [ ] **Step 4: Run the lockout tests**
 
-Run: `cd api && go test ./internal/domain/... -run Lock -v`
-Expected: PASS, six tests.
+Run: `cd api && go test ./internal/domain/... -count=1 -v`
+Expected: PASS. Do not filter with `-run Lock` — it substring-matches only two of the six test names, and renaming tests to fit a filter is the wrong direction.
 
 - [ ] **Step 5: Commit**
 
@@ -2455,7 +2461,7 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 		if err != nil {
 			return SignInResult{}, err
 		}
-		state := s.d.Policy.Evaluate(failures, now)
+		state := s.d.Policy.Evaluate(failures, lockoutNow)
 		return SignInResult{}, &SignInFailedError{
 			AttemptsRemaining: state.AttemptsRemaining,
 			Locked:            state.Locked,
@@ -2473,7 +2479,7 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 	if err != nil {
 		return SignInResult{}, err
 	}
-	if state := s.d.Policy.Evaluate(failures, now); state.Locked {
+	if state := s.d.Policy.Evaluate(failures, lockoutNow); state.Locked {
 		return SignInResult{}, &SignInFailedError{Locked: true, LockedUntil: state.Until}
 	}
 
@@ -2485,7 +2491,7 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 		if err != nil {
 			return SignInResult{}, err
 		}
-		state := s.d.Policy.Evaluate(failures, now)
+		state := s.d.Policy.Evaluate(failures, lockoutNow)
 		return SignInResult{}, &SignInFailedError{
 			AttemptsRemaining: state.AttemptsRemaining,
 			Locked:            state.Locked,
