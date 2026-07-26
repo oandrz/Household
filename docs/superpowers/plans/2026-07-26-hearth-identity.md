@@ -848,29 +848,45 @@ func BuiltinSpaces(householdID string) []Space {
 	}
 }
 
-// VisibleSpaces filters spaces for one membership. A parents-only space stays
-// hidden from a limited member even if their capability set would allow it.
+// VisibleSpaces filters spaces for one membership. Visibility is checked before
+// capability, so a parents-only space stays hidden from a limited member even
+// if their capability set would otherwise allow it. An unrecognised Visibility
+// value is treated as owner-only rather than as everyone -- see the default
+// case below.
 //
-// Output preserves input order; it does not sort. Callers must supply spaces
-// already ordered by Position — the repository query does this with an ORDER BY
-// and the sidebar depends on it.
+// The result preserves the input order; VisibleSpaces does not sort. Callers
+// must supply all already ordered by Position — Task 9's query does this with
+// an ORDER BY, and Task 19's sidebar relies on the order coming out as given.
 func VisibleSpaces(all []Space, m Membership) []Space {
 	visible := make([]Space, 0, len(all))
 	for _, s := range all {
-		if s.Visibility == VisibilityParentsOnly && m.Role != RoleOwner {
-			continue
-		}
-		// Provisional: custom visibility means a per-space member list, which
-		// does not exist yet, and the design marks custom space pages "not
-		// built". Until that lands, custom fails closed to owners rather than
-		// degrading to the most permissive mode.
-		//
-		// An unrecognised visibility fails closed the same way. These values
-		// come back from a Postgres text column, so they are as untrusted as a
-		// role is, and the safe reading of "I do not know who may see this" is
-		// "not everyone".
-		if s.Visibility != VisibilityEveryone && m.Role != RoleOwner {
-			continue
+		switch s.Visibility {
+		case VisibilityEveryone:
+			// No visibility restriction; the capability check below still applies.
+		case VisibilityParentsOnly:
+			if m.Role != RoleOwner {
+				continue
+			}
+		case VisibilityCustom:
+			// Provisional: per-space member lists do not exist yet, and the
+			// design marks custom space pages "not built". A visibility mode
+			// whose membership model is unbuilt must fail closed rather than
+			// default to maximum exposure, so custom spaces are owner-only
+			// until per-space membership is implemented.
+			if m.Role != RoleOwner {
+				continue
+			}
+		default:
+			// An unrecognised Visibility is a data or version problem, not a
+			// choice anyone made -- the same situation validateCapabilitiesForRole
+			// faces with an unknown Role rebuilt from a Postgres column (see
+			// ErrUnknownRole in identity.go). VisibleSpaces has no error return
+			// to report that, so it fails closed instead: the safe reading of
+			// "I do not know who may see this" is "not everyone", so an unknown
+			// value is owner-only, like VisibilityCustom.
+			if m.Role != RoleOwner {
+				continue
+			}
 		}
 		if s.RequiredCapability != "" && !m.Capabilities.Has(s.RequiredCapability) {
 			continue
