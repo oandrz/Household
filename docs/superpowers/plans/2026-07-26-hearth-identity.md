@@ -2944,7 +2944,7 @@ git commit -m "feat: add magic-link sign-in with rate limiting"
 - Create: `api/internal/usecase/invite.go`, `api/internal/usecase/invite_test.go`
 
 **Interfaces:**
-- Consumes: `InviteRepository`, `UserRepository`, `MembershipRepository`, `Mailer`, `TokenGenerator`, `Clock`.
+- Consumes: `InviteRepository`, `UserRepository` (including its transactional `CreateWithMembership`), `Mailer`, `TokenGenerator`, `Clock`. `InviteDeps` has no `Members` field — child creation goes through `UserRepository.CreateWithMembership`, so Task 16's wiring must not set one.
 - Produces:
   - `usecase.InviteService`, `NewInviteService(d InviteDeps) *InviteService`
   - `(*InviteService).Create(ctx, householdID, invitedByUserID, name, email string, role domain.Role, caps domain.Capabilities) error`
@@ -3088,7 +3088,7 @@ Expected: FAIL — routes do not exist.
 
 - [ ] **Step 3: Implement the error table**
 
-Create `api/internal/adapter/http/errors.go` mapping, in one `switch`: `domain.ErrInvalidCredentials` → 401 `INVALID_CREDENTIALS`; `domain.ErrHouseholdLocked` → 423 `HOUSEHOLD_LOCKED`; `domain.ErrNotFound` → 404 `NOT_FOUND`; `domain.ErrForbidden` → 403 `FORBIDDEN`; `domain.ErrLastOwner` → 409 `LAST_OWNER`; `domain.ErrLimitedCannotHoldMarriage` → 422 `INVALID_CAPABILITIES`; `domain.ErrOwnerMustHoldAllCapabilities` → 422 `INVALID_CAPABILITIES`; `domain.ErrUnknownCapability` → 422 `INVALID_CAPABILITIES`; `domain.ErrUnknownRole` → 422 `INVALID_ROLE`; `domain.ErrAmountOverflow` and `domain.ErrInvalidMoney` → 500 `INTERNAL`, since either reaching the HTTP layer means a calculation is wrong rather than a request being bad; `domain.ErrInviteExpired` → 410 `INVITE_EXPIRED`; `domain.ErrInviteRequiresEmail` → 422 `INVITE_REQUIRES_EMAIL`; `usecase.ErrPasswordTooShort` → 422 `PASSWORD_TOO_SHORT`; `domain.ErrInviteAlreadyAccepted` → 409 `INVITE_ALREADY_ACCEPTED`; `domain.ErrTokenExpired` → 410 `TOKEN_EXPIRED`; `domain.ErrRateLimited` → 429 `RATE_LIMITED`; default → 500 `INTERNAL` with the request ID in `details.requestId` and the real error logged, never returned.
+Create `api/internal/adapter/http/errors.go` mapping, in one `switch`: `domain.ErrInvalidCredentials` → 401 `INVALID_CREDENTIALS`; `domain.ErrHouseholdLocked` → 423 `HOUSEHOLD_LOCKED`; `domain.ErrNotFound` → 404 `NOT_FOUND`; `domain.ErrForbidden` → 403 `FORBIDDEN`; `domain.ErrLastOwner` → 409 `LAST_OWNER`; `domain.ErrLimitedCannotHoldMarriage` → 422 `INVALID_CAPABILITIES`; `domain.ErrOwnerMustHoldAllCapabilities` → 422 `INVALID_CAPABILITIES`; `domain.ErrUnknownCapability` → 422 `INVALID_CAPABILITIES`; `domain.ErrUnknownRole` → 422 `INVALID_ROLE`; `domain.ErrAmountOverflow` and `domain.ErrInvalidMoney` → 500 `INTERNAL`, since either reaching the HTTP layer means a calculation is wrong rather than a request being bad; `domain.ErrInviteExpired` → 410 `INVITE_EXPIRED`; `domain.ErrInviteRequiresEmail` → 422 `INVITE_REQUIRES_EMAIL`; `usecase.ErrPasswordTooShort` → 422 `PASSWORD_TOO_SHORT`; `usecase.ErrPasswordTooLong` → 422 `PASSWORD_TOO_LONG`; `domain.ErrInviteAlreadyAccepted` → 409 `INVITE_ALREADY_ACCEPTED`; `domain.ErrTokenExpired` → 410 `TOKEN_EXPIRED`; `domain.ErrRateLimited` → 429 `RATE_LIMITED`; default → 500 `INTERNAL` with the request ID in `details.requestId` and the real error logged, never returned.
 
 - [ ] **Step 4: Implement the middleware**
 
