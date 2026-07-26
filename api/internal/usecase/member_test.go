@@ -93,11 +93,15 @@ func TestUpdateOnAMembershipIDThatDoesNotExistInTheHouseholdReturnsErrNotFound(t
 
 // TestUpdateChangingOnlyCapabilitiesOfALimitedMemberSucceedsWithNoOtherOwner
 // proves the last-owner rule is consulted only when ownership is actually at
-// stake. Andreas' owner membership is removed directly from the double
-// (bypassing the service, which would itself refuse to remove the only
-// owner) so the household is left with no owner at all; a pure
+// stake, in a household that has no owner at all. That state is unreachable
+// through MemberService's own API -- Update and Remove both refuse to strip
+// a household of its last owner -- so the test reaches directly into
+// membershipDouble's unexported byID/byUser maps to delete Andreas' owner
+// membership, bypassing the service entirely. This is a test-only shortcut
+// to construct a state the domain rule must still handle correctly, not a
+// capability MemberService offers or a path a real caller can reach. A pure
 // capability edit on Ethan, who stays RoleLimited throughout, must still
-// succeed.
+// succeed once that state exists.
 func TestUpdateChangingOnlyCapabilitiesOfALimitedMemberSucceedsWithNoOtherOwner(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()

@@ -52,27 +52,44 @@ func (s *HouseholdService) Get(ctx context.Context, householdID string) (domain.
 	return s.d.Households.Get(ctx, householdID)
 }
 
-// Update persists every field on h, after normalising PrimaryCurrency to
-// uppercase and validating it through domain.NewMoney's existing currency
-// check -- the same three-letters, uppercase-only rule Money already
-// enforces on the monetary path, rather than a second, independently
-// invented check that could drift from it. domain.NewMoney's own error is
-// wrapped in domain.ErrInvalidMoney (the sentinel Money.Add already uses for
-// the same family of problem) rather than returned bare, so a caller -- and
-// eventually Task 16's HTTP layer -- can test for it with errors.Is instead
-// of matching an fmt.Errorf string.
-//
-// SecondaryCurrency is passed through unchanged: the brief's enumerated
-// behaviour only calls for normalising the primary currency, and
-// ShowSecondaryCurrency == false legitimately pairs with an empty
-// SecondaryCurrency, which domain.NewMoney would reject outright.
+// Update persists every field on h, after normalising both PrimaryCurrency
+// and SecondaryCurrency to uppercase and validating each through
+// domain.NewMoney's existing currency check -- the same three-letters,
+// uppercase-only rule Money already enforces on the monetary path, rather
+// than a second, independently invented check that could drift from it. Both
+// fields get identical treatment, not just the primary: both are persisted
+// (Task 11 widened UpdateHousehold specifically because silently dropping a
+// field was a defect), and both feed FXRateProvider.Rate(from, to) on the
+// conversion path -- a malformed secondary code would not fail here at write
+// time, only later as a missing rate, far from the edit that caused it.
+// domain.NewMoney's own error is wrapped in domain.ErrInvalidMoney (the
+// sentinel Money.Add already uses for the same family of problem) rather
+// than returned bare, so a caller -- and eventually Task 16's HTTP layer --
+// can test for it with errors.Is instead of matching an fmt.Errorf string.
 func (s *HouseholdService) Update(ctx context.Context, h domain.Household) (domain.Household, error) {
-	currency := strings.ToUpper(h.PrimaryCurrency)
-	if _, err := domain.NewMoney(0, currency); err != nil {
-		return domain.Household{}, fmt.Errorf("%w: %v", domain.ErrInvalidMoney, err)
+	primary, err := normalizeCurrency(h.PrimaryCurrency)
+	if err != nil {
+		return domain.Household{}, err
 	}
-	h.PrimaryCurrency = currency
+	secondary, err := normalizeCurrency(h.SecondaryCurrency)
+	if err != nil {
+		return domain.Household{}, err
+	}
+	h.PrimaryCurrency = primary
+	h.SecondaryCurrency = secondary
 	return s.d.Households.Update(ctx, h)
+}
+
+// normalizeCurrency uppercases a currency code and validates it through
+// domain.NewMoney -- the single reference for what a valid currency code
+// looks like, shared by both of Update's currency fields so the two checks
+// cannot drift apart.
+func normalizeCurrency(currency string) (string, error) {
+	upper := strings.ToUpper(currency)
+	if _, err := domain.NewMoney(0, upper); err != nil {
+		return "", fmt.Errorf("%w: %v", domain.ErrInvalidMoney, err)
+	}
+	return upper, nil
 }
 
 // Spaces lists the spaces visible to one membership, via

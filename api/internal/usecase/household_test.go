@@ -137,18 +137,79 @@ func TestUpdateNormalisesThePrimaryCurrencyToUppercaseAndRejectsANonThreeLetterC
 		t.Fatalf("persisted PrimaryCurrency = %q, want %q", fetched.PrimaryCurrency, "USD")
 	}
 
-	invalid := current
-	invalid.PrimaryCurrency = "US"
-	if _, err := f.householdSvc.Update(ctx, invalid); !errors.Is(err, domain.ErrInvalidMoney) {
-		t.Fatalf("err = %v, want domain.ErrInvalidMoney", err)
+	tooShort := current
+	tooShort.PrimaryCurrency = "US"
+	if _, err := f.householdSvc.Update(ctx, tooShort); !errors.Is(err, domain.ErrInvalidMoney) {
+		t.Fatalf("err = %v, want domain.ErrInvalidMoney (two letters)", err)
 	}
-	// Rejected write must not have clobbered the currency Update just set.
+
+	tooLong := current
+	tooLong.PrimaryCurrency = "USDD"
+	if _, err := f.householdSvc.Update(ctx, tooLong); !errors.Is(err, domain.ErrInvalidMoney) {
+		t.Fatalf("err = %v, want domain.ErrInvalidMoney (four letters)", err)
+	}
+
+	// Neither rejected write must have clobbered the currency Update just set.
 	fetched, err = f.householdSvc.Get(ctx, f.householdID)
 	if err != nil {
 		t.Fatalf("Get after rejected Update: %v", err)
 	}
 	if fetched.PrimaryCurrency != "USD" {
 		t.Fatalf("PrimaryCurrency = %q, want %q unchanged after the rejected update", fetched.PrimaryCurrency, "USD")
+	}
+}
+
+// TestUpdateNormalisesTheSecondaryCurrencyToUppercaseAndRejectsANonThreeLetterCurrency
+// mirrors the primary-currency test above: SecondaryCurrency gets the
+// identical normalisation and validation, not a pass-through, because it is
+// persisted exactly like PrimaryCurrency and feeds the same
+// FXRateProvider.Rate(from, to) lookup on the conversion path -- a malformed
+// secondary code must fail here, at the edit, not later as a missing rate.
+func TestUpdateNormalisesTheSecondaryCurrencyToUppercaseAndRejectsANonThreeLetterCurrency(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	current, err := f.householdSvc.Get(ctx, f.householdID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	lowercase := current
+	lowercase.SecondaryCurrency = "eur"
+	updated, err := f.householdSvc.Update(ctx, lowercase)
+	if err != nil {
+		t.Fatalf("Update with lowercase secondary currency: %v", err)
+	}
+	if updated.SecondaryCurrency != "EUR" {
+		t.Fatalf("SecondaryCurrency = %q, want %q", updated.SecondaryCurrency, "EUR")
+	}
+	fetched, err := f.householdSvc.Get(ctx, f.householdID)
+	if err != nil {
+		t.Fatalf("Get after Update: %v", err)
+	}
+	if fetched.SecondaryCurrency != "EUR" {
+		t.Fatalf("persisted SecondaryCurrency = %q, want %q", fetched.SecondaryCurrency, "EUR")
+	}
+
+	tooShort := current
+	tooShort.SecondaryCurrency = "EU"
+	if _, err := f.householdSvc.Update(ctx, tooShort); !errors.Is(err, domain.ErrInvalidMoney) {
+		t.Fatalf("err = %v, want domain.ErrInvalidMoney (two letters)", err)
+	}
+
+	tooLong := current
+	tooLong.SecondaryCurrency = "EURR"
+	if _, err := f.householdSvc.Update(ctx, tooLong); !errors.Is(err, domain.ErrInvalidMoney) {
+		t.Fatalf("err = %v, want domain.ErrInvalidMoney (four letters)", err)
+	}
+
+	// Neither rejected write must have clobbered the currency Update just set.
+	fetched, err = f.householdSvc.Get(ctx, f.householdID)
+	if err != nil {
+		t.Fatalf("Get after rejected Update: %v", err)
+	}
+	if fetched.SecondaryCurrency != "EUR" {
+		t.Fatalf("SecondaryCurrency = %q, want %q unchanged after the rejected update", fetched.SecondaryCurrency, "EUR")
 	}
 }
 
