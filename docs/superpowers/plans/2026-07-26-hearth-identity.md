@@ -1771,7 +1771,22 @@ type InviteDetails struct {
 	AcceptedAt    *time.Time
 }
 
+// AcceptedInvite is what a successful acceptance produces.
+type AcceptedInvite struct {
+	UserID       string
+	MembershipID string
+	HouseholdID  string
+}
+
 type InviteRepository interface {
+	// Accept creates the user, creates the membership, and marks the invite
+	// accepted in one transaction. Either all three happen or none do: a
+	// partial acceptance leaves an orphaned user occupying the unique email
+	// index, and no retry can then create a user with that address — the
+	// invite becomes permanently unusable with no path forward short of
+	// manual SQL.
+	Accept(ctx context.Context, inviteID, email, passwordHash, displayName string,
+		householdID string, role domain.Role, caps domain.Capabilities) (AcceptedInvite, error)
 	Create(ctx context.Context, householdID, email, name string, role domain.Role,
 		caps domain.Capabilities, tokenHash []byte, invitedBy string, expiresAt time.Time) (string, error)
 	ByTokenHash(ctx context.Context, tokenHash []byte) (InviteDetails, error)
@@ -2927,7 +2942,7 @@ Create `api/internal/usecase/invite_test.go` covering, each as its own test func
 6. `Preview` on an expired invite returns `domain.ErrInviteExpired`.
 7. `Preview` on an accepted invite returns `domain.ErrInviteAlreadyAccepted`.
 8. `Accept` creates the user, creates the membership with the invited role and capabilities, marks the invite accepted, and returns a live session.
-9. `Accept` twice with the same token fails the second time with `domain.ErrInviteAlreadyAccepted`.
+9. `Accept` twice with the same token fails the second time with `domain.ErrInviteAlreadyAccepted`, and leaves exactly one user and one membership — not two.
 10. `Accept` with a password shorter than 12 characters returns an error and creates nothing.
 
 - [ ] **Step 2: Run them and watch them fail**
@@ -2942,7 +2957,7 @@ Create `api/internal/usecase/invite.go`. Rules to encode:
 - Invite lifetime is 7 days from `Clock.Now()`.
 - `Create` builds the `domain.Membership` through `domain.NewMembership` *before* any write, so an invalid capability set is rejected without touching the database.
 - A `limited` member with no email is created directly as a user and membership with a null password, and no invite row is written.
-- `Accept` requires a password of at least 12 characters, hashes it with `PasswordHasher`, creates the user, creates the membership from the invite's role and capabilities, marks the invite accepted, then issues a session through the same `issueSession` path sign-in uses. `MarkAccepted` is the concurrency gate: it is a guarded atomic update, so call it and treat `domain.ErrInviteAlreadyAccepted` as the authoritative answer rather than relying on the earlier read.
+- `Accept` requires a password of at least 12 characters and hashes it with `PasswordHasher`, then calls `InviteRepository.Accept`, which performs the user creation, the membership creation and the acceptance stamp in **one transaction**. Do not do those three as separate repository calls: a failure between them leaves an orphaned user holding the unique email index and the invite can never be accepted again. Build the `domain.Membership` through `domain.NewMembership` first so an invalid capability set is rejected before any write, then issue a session through the same `issueSession` path sign-in uses. `MarkAccepted` is the concurrency gate: it is a guarded atomic update, so call it and treat `domain.ErrInviteAlreadyAccepted` as the authoritative answer rather than relying on the earlier read.
 - `Preview` and `Accept` both check expiry and prior acceptance, returning the specific domain error for each.
 
 - [ ] **Step 4: Run the tests**
