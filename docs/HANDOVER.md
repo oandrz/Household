@@ -39,7 +39,8 @@ failed on the first walk and what was done about them, is in
 Self-serve sign-up's own definition of done is a 15-criterion walk, written
 down in `docs/superpowers/plans/2026-07-27-hearth-self-serve-signup.md`
 (Task 32) — a stranger creating a household, the endpoint's silence holding
-under six rapid sign-ups, the per-IP limit eventually engaging, `adminctl
+across the first five rapid sign-ups and the per-IP limit correctly answering
+`429` on the sixth, `adminctl
 unlock-household --email` resolving the right household, and `adminctl prune`
 refusing a window under seven days among them. It has not been run. Start it
 from `make down && make up` (or an explicit `make migrate`), not a bare

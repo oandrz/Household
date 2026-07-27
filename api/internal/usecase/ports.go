@@ -237,7 +237,7 @@ type SignupRepository interface {
 	// table regardless of consumed_at, but before this method existed,
 	// nothing was ever written here for a registered address, so its
 	// counters stayed at zero forever and signupPerHourLimit/
-	// signupGlobalDailyLimit never fired for that branch no matter how many
+	// SignupGlobalDailyLimit never fired for that branch no matter how many
 	// requests arrived (see the fix-round note in signup.go's Request doc
 	// comment). A row created this way can never provision anything --
 	// Provision's guarded UPDATE (ConsumeSignup) requires consumed_at IS
