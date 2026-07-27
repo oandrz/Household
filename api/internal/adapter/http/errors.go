@@ -153,6 +153,18 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, usecase.ErrInviteeAlreadyRegistered):
 		WriteError(w, http.StatusConflict, "EMAIL_ALREADY_REGISTERED",
 			"An account with that email address already exists.", nil)
+	case errors.Is(err, usecase.ErrSignupAlreadyUsed):
+		// Deliberately not folded into ALREADY_EXISTS, whose copy ("That
+		// already exists.") tells the holder of a spent sign-up link nothing
+		// useful, and whose own comment scopes it to a write race.
+		WriteError(w, http.StatusConflict, "SIGNUP_ALREADY_USED",
+			"This link has already been used. Try signing in instead.", nil)
+	case errors.Is(err, usecase.ErrHouseholdNameRequired):
+		WriteError(w, http.StatusUnprocessableEntity, "HOUSEHOLD_NAME_REQUIRED",
+			"A household name is required.", nil)
+	case errors.Is(err, usecase.ErrDisplayNameRequired):
+		WriteError(w, http.StatusUnprocessableEntity, "DISPLAY_NAME_REQUIRED",
+			"Your name is required.", nil)
 	case errors.Is(err, domain.ErrAlreadyExists):
 		// Every service that means a genuine, nameable conflict already
 		// translates domain.ErrAlreadyExists into its own sentinel before

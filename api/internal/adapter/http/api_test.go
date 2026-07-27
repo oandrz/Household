@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -60,6 +61,46 @@ func (noopMailer) SendSignupForExistingAccount(context.Context, string, string) 
 	return nil
 }
 
+// signupMailer is a usecase.Mailer stub used only for SignupService, so tests
+// can recover the raw token a sign-up link carried -- exactly the same need
+// noopMailer's silence can't satisfy.
+//
+// SignupService.Request sends off the request path (see sendAsync in
+// usecase/signup.go), deliberately, so a slow relay cannot make one branch
+// measurably slower than another. That means the URL is not yet captured the
+// instant env.do returns; lastSignupToken (below) synchronizes on sent rather
+// than reading lastURL immediately, and mu guards the field because it is
+// written from that background goroutine and read from the test's.
+//
+// Only SendSignupLink signals sent. TestSignUpAnswersIdenticallyForEveryAddress
+// exercises both the fresh-address and already-registered branches in the same
+// test; if SendSignupForExistingAccount also signalled, a lastSignupToken call
+// could wake on that send instead and read the wrong (or an empty) URL.
+type signupMailer struct {
+	mu      sync.Mutex
+	lastURL string
+	sent    chan struct{}
+}
+
+func newSignupMailer() *signupMailer {
+	return &signupMailer{sent: make(chan struct{}, 64)}
+}
+
+func (m *signupMailer) SendMagicLink(context.Context, string, string, string) error      { return nil }
+func (m *signupMailer) SendInvite(context.Context, string, string, string, string) error { return nil }
+
+func (m *signupMailer) SendSignupLink(_ context.Context, _, url string) error {
+	m.mu.Lock()
+	m.lastURL = url
+	m.mu.Unlock()
+	m.sent <- struct{}{}
+	return nil
+}
+
+func (m *signupMailer) SendSignupForExistingAccount(context.Context, string, string) error {
+	return nil
+}
+
 // testEnv wires the full router against a disposable Postgres database, with
 // one seeded household carrying an owner and a limited (non-owner) member,
 // both with real credentials so tests can sign in as either through the
@@ -74,6 +115,8 @@ type testEnv struct {
 	limitedEmail      string
 	limitedPassword   string
 	limitedMembership string
+
+	signupMailer *signupMailer
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -104,6 +147,7 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 	invites := postgres.NewInviteRepo(db)
 	spaces := postgres.NewSpaceRepo(db)
 	notifications := postgres.NewNotificationRepo(db)
+	signups := postgres.NewSignupRepo(db)
 
 	// Cheap argon2 cost parameters: these tests perform many real sign-ins
 	// under -race, and production cost parameters (65536 KiB, 3 passes)
@@ -112,6 +156,7 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 	hasher := crypto.NewArgon2Hasher(1, 8*1024, 1)
 	tokens := crypto.NewTokenGenerator()
 	mailer := noopMailer{}
+	sigMailer := newSignupMailer()
 
 	authSvc := usecase.NewAuthService(usecase.AuthDeps{
 		Users:      users,
@@ -143,6 +188,17 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 		Spaces:        spaces,
 		Notifications: notifications,
 	})
+	signupSvc := usecase.NewSignupService(usecase.SignupDeps{
+		Signups:    signups,
+		Users:      users,
+		Sessions:   sessions,
+		Mailer:     sigMailer,
+		Hasher:     hasher,
+		Tokens:     tokens,
+		Clock:      clk,
+		SessionTTL: httpadapter.SessionTTL,
+		BaseURL:    "http://localhost:5173",
+	})
 
 	router := httpadapter.NewRouter(httpadapter.Deps{
 		Pinger:      db,
@@ -150,6 +206,7 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 		Invites:     inviteSvc,
 		Members:     memberSvc,
 		Households:  householdSvc,
+		Signups:     signupSvc,
 		Users:       users,
 		Memberships: memberships,
 		Sessions:    sessions,
@@ -158,7 +215,7 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 		Secure:      false,
 	})
 
-	env := &testEnv{router: router}
+	env := &testEnv{router: router, signupMailer: sigMailer}
 
 	ctx := context.Background()
 	h, err := households.Create(ctx, domain.Household{
@@ -284,6 +341,29 @@ func (env *testEnv) signIn(t *testing.T, email, password string) (session, csrf 
 		t.Fatalf("sign-in did not set both cookies: %+v", rec.Result().Cookies())
 	}
 	return session, csrf
+}
+
+// lastSignupToken waits for SignupService.Request's asynchronous mail send to
+// land (see signupMailer's doc comment for why that wait is necessary at
+// all), then recovers the raw token from the sign-up URL it captured.
+func (env *testEnv) lastSignupToken(t *testing.T) string {
+	t.Helper()
+	select {
+	case <-env.signupMailer.sent:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the sign-up mail to send")
+	}
+
+	env.signupMailer.mu.Lock()
+	url := env.signupMailer.lastURL
+	env.signupMailer.mu.Unlock()
+
+	const prefix = "http://localhost:5173/sign-up/"
+	token, ok := strings.CutPrefix(url, prefix)
+	if !ok {
+		t.Fatalf("sign-up URL %q does not have the expected prefix %q", url, prefix)
+	}
+	return token
 }
 
 type errorEnvelope struct {
@@ -476,6 +556,14 @@ func TestEveryProtectedRouteRejectsAnUnauthenticatedCaller(t *testing.T) {
 		"POST /api/v1/auth/sign-in":            true,
 		"POST /api/v1/auth/magic-link":         true,
 		"POST /api/v1/auth/magic-link/consume": true,
+		// Sign-up: reached before any session exists, exactly like the
+		// three routes above -- see middleware_ratelimit.go for the one
+		// thing standing between this and an open relay.
+		"POST /api/v1/auth/sign-up":                  true,
+		"GET /api/v1/auth/sign-up/{token}":           true,
+		"POST /api/v1/auth/sign-up/{token}/complete": true,
+		// Public: the sign-up form reads this before any session exists.
+		"GET /api/v1/currencies": true,
 	}
 
 	routes, ok := env.router.(chi.Routes)
@@ -588,9 +676,11 @@ func TestOwnerOnlyRoutesRejectALimitedMember(t *testing.T) {
 	allowlist := map[string]bool{
 		// Public, pre-auth: reached before any session exists at all, so
 		// there is no caller identity yet to check ownership against.
-		"POST /api/v1/auth/sign-in":            true,
-		"POST /api/v1/auth/magic-link":         true,
-		"POST /api/v1/auth/magic-link/consume": true,
+		"POST /api/v1/auth/sign-in":                  true,
+		"POST /api/v1/auth/magic-link":               true,
+		"POST /api/v1/auth/magic-link/consume":       true,
+		"POST /api/v1/auth/sign-up":                  true,
+		"POST /api/v1/auth/sign-up/{token}/complete": true,
 		// Any signed-in member, owner or not, may end their own session --
 		// ownership has nothing to do with signing yourself out.
 		"POST /api/v1/auth/sign-out": true,
@@ -671,9 +761,11 @@ func TestEveryMutatingRouteRequiresCSRF(t *testing.T) {
 	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
 
 	public := map[string]bool{
-		"POST /api/v1/auth/sign-in":            true,
-		"POST /api/v1/auth/magic-link":         true,
-		"POST /api/v1/auth/magic-link/consume": true,
+		"POST /api/v1/auth/sign-in":                  true,
+		"POST /api/v1/auth/magic-link":               true,
+		"POST /api/v1/auth/magic-link/consume":       true,
+		"POST /api/v1/auth/sign-up":                  true,
+		"POST /api/v1/auth/sign-up/{token}/complete": true,
 	}
 
 	routes, ok := env.router.(chi.Routes)
@@ -1238,4 +1330,206 @@ func mustFindMember(t *testing.T, members []memberListEntry, id string) memberLi
 	}
 	t.Fatalf("no member with id %q in %+v", id, members)
 	return memberListEntry{}
+}
+
+// --- Task 28: self-serve sign-up --------------------------------------------
+
+// The HTTP half of the indistinguishability property. The service-level test
+// (usecase/signup_test.go) pins the read sequence; this pins what a caller can
+// actually see.
+func TestSignUpAnswersIdenticallyForEveryAddress(t *testing.T) {
+	env := newTestEnv(t)
+
+	// The seeded household's owner address exists; the other two do not.
+	for _, email := range []string{usecase.AndreasEmail, "stranger@example.test", "another@example.test"} {
+		rec := env.do(http.MethodPost, "/api/v1/auth/sign-up", map[string]string{"email": email})
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("POST sign-up for %q = %d, want 202", email, rec.Code)
+		}
+		var body map[string]string
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("body for %q is not JSON: %v", email, err)
+		}
+		if body["status"] != "accepted" {
+			t.Fatalf("body for %q = %v, want {\"status\":\"accepted\"}", email, body)
+		}
+	}
+}
+
+// Repeating the same request past the hourly limit must not change the answer.
+func TestSignUpStaysSilentPastTheRateLimit(t *testing.T) {
+	env := newTestEnv(t)
+	for i := 0; i < 6; i++ {
+		rec := env.do(http.MethodPost, "/api/v1/auth/sign-up",
+			map[string]string{"email": "persistent@example.test"})
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("attempt %d = %d, want 202 -- a 429 here is an oracle in its own right", i, rec.Code)
+		}
+	}
+}
+
+// signUpMeBundle mirrors the shape of meResponseBody (auth_handlers.go) for
+// decoding the sign-up completion response. meResponseBody itself is
+// unexported outside package httpadapter -- this package is httpadapter_test
+// -- which is why householdResponse above exists as the identical kind of
+// local mirror for GET /household.
+type signUpMeBundle struct {
+	Household  householdResponse `json:"household"`
+	Membership struct {
+		Role string `json:"role"`
+	} `json:"membership"`
+	Spaces []struct {
+		Key string `json:"key"`
+	} `json:"spaces"`
+}
+
+func TestSignUpPreviewAndComplete(t *testing.T) {
+	env := newTestEnv(t)
+
+	rec := env.do(http.MethodPost, "/api/v1/auth/sign-up", map[string]string{"email": "founder@example.test"})
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("request = %d, want 202", rec.Code)
+	}
+	token := env.lastSignupToken(t)
+
+	t.Run("preview returns the address", func(t *testing.T) {
+		rec := env.do(http.MethodGet, "/api/v1/auth/sign-up/"+token, nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("preview = %d, want 200", rec.Code)
+		}
+		var body map[string]string
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("body: %v", err)
+		}
+		if body["email"] != "founder@example.test" {
+			t.Fatalf("email = %q, want founder@example.test", body["email"])
+		}
+	})
+
+	t.Run("an unknown token is 404", func(t *testing.T) {
+		rec := env.do(http.MethodGet, "/api/v1/auth/sign-up/never-issued", nil)
+		assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
+	})
+
+	t.Run("a blank household name is 422", func(t *testing.T) {
+		rec := env.do(http.MethodPost, "/api/v1/auth/sign-up/"+token+"/complete", map[string]string{
+			"householdName": "  ", "displayName": "Ade", "primaryCurrency": "SGD",
+			"password": "a-long-enough-password",
+		})
+		assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "HOUSEHOLD_NAME_REQUIRED")
+	})
+
+	t.Run("an unknown currency is 422", func(t *testing.T) {
+		rec := env.do(http.MethodPost, "/api/v1/auth/sign-up/"+token+"/complete", map[string]string{
+			"householdName": "Ade & Kris", "displayName": "Ade", "primaryCurrency": "ZZZ",
+			"password": "a-long-enough-password",
+		})
+		assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "INVALID_CURRENCY")
+	})
+
+	t.Run("a short password is 422", func(t *testing.T) {
+		rec := env.do(http.MethodPost, "/api/v1/auth/sign-up/"+token+"/complete", map[string]string{
+			"householdName": "Ade & Kris", "displayName": "Ade", "primaryCurrency": "SGD",
+			"password": "short",
+		})
+		assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "PASSWORD_TOO_SHORT")
+	})
+
+	// Every rejection above left the token usable, which is why this still works.
+	t.Run("completing signs the new owner in", func(t *testing.T) {
+		rec := env.do(http.MethodPost, "/api/v1/auth/sign-up/"+token+"/complete", map[string]string{
+			"householdName": "Ade & Kris", "displayName": "Ade", "primaryCurrency": "SGD",
+			"password": "a-long-enough-password",
+		})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("complete = %d, want 200: %s", rec.Code, rec.Body.String())
+		}
+
+		var body signUpMeBundle
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("body is not a me bundle: %v", err)
+		}
+		if body.Household.Name != "Ade & Kris" {
+			t.Fatalf("household name = %q", body.Household.Name)
+		}
+		if body.Household.PrimaryCurrency != "SGD" || body.Household.SecondaryCurrency != "SGD" ||
+			body.Household.ShowSecondaryCurrency {
+			t.Fatalf("currency fields = %+v, want SGD/SGD/false", body.Household)
+		}
+		if body.Membership.Role != "owner" {
+			t.Fatalf("role = %q, want owner", body.Membership.Role)
+		}
+		if len(body.Spaces) != 3 {
+			t.Fatalf("got %d spaces, want the three builtins", len(body.Spaces))
+		}
+
+		var session, csrf bool
+		for _, c := range rec.Result().Cookies() {
+			switch c.Name {
+			case "hearth_session":
+				session = true
+			case "csrf_token":
+				csrf = true
+			}
+		}
+		if !session || !csrf {
+			t.Fatalf("cookies: session=%v csrf=%v, want both", session, csrf)
+		}
+	})
+
+	t.Run("the token cannot be used twice", func(t *testing.T) {
+		rec := env.do(http.MethodPost, "/api/v1/auth/sign-up/"+token+"/complete", map[string]string{
+			"householdName": "Second household", "displayName": "Ade", "primaryCurrency": "SGD",
+			"password": "a-long-enough-password",
+		})
+		assertErrorResponse(t, rec, http.StatusConflict, "SIGNUP_ALREADY_USED")
+	})
+
+	t.Run("preview of a consumed token is 409, not 410", func(t *testing.T) {
+		rec := env.do(http.MethodGet, "/api/v1/auth/sign-up/"+token, nil)
+		assertErrorResponse(t, rec, http.StatusConflict, "SIGNUP_ALREADY_USED")
+	})
+}
+
+func TestCurrenciesIsPublicAndOnlyOffersTwoMinorUnitCodes(t *testing.T) {
+	env := newTestEnv(t)
+	rec := env.do(http.MethodGet, "/api/v1/currencies", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("= %d, want 200 with no session", rec.Code)
+	}
+	var body struct {
+		Currencies []struct {
+			Code, Symbol, Name string
+		} `json:"currencies"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body: %v", err)
+	}
+	if len(body.Currencies) < 100 {
+		t.Fatalf("got %d currencies, want the two-minor-unit majority of ISO 4217", len(body.Currencies))
+	}
+	byCode := map[string]bool{}
+	for _, c := range body.Currencies {
+		byCode[c.Code] = true
+	}
+	if !byCode["SGD"] || !byCode["USD"] || !byCode["BRL"] {
+		t.Fatal("want SGD, USD and BRL offered")
+	}
+	// Money.String() hard-codes two decimal places, so a household that picked
+	// one of these would have every amount rendered wrong.
+	for _, code := range []string{"JPY", "KRW", "KWD", "BHD", "ISK"} {
+		if byCode[code] {
+			t.Fatalf("%s is offered, but Money.String() renders it wrong", code)
+		}
+	}
+}
+
+// Sign-up is pre-auth and pre-session, so it must not require CSRF -- there is
+// no csrf_token cookie to double-submit yet.
+func TestSignUpRoutesDoNotRequireCSRF(t *testing.T) {
+	env := newTestEnv(t)
+	rec := env.do(http.MethodPost, "/api/v1/auth/sign-up", map[string]string{"email": "nocsrf@example.test"})
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("= %d, want 202 with no CSRF token", rec.Code)
+	}
 }

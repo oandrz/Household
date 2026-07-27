@@ -76,6 +76,7 @@ func run() error {
 	invites := postgres.NewInviteRepo(db)
 	spaces := postgres.NewSpaceRepo(db)
 	notifications := postgres.NewNotificationRepo(db)
+	signups := postgres.NewSignupRepo(db)
 
 	hasher := crypto.NewArgon2Hasher(cfg.Argon2Time, cfg.Argon2MemoryKiB, cfg.Argon2Threads)
 	tokens := crypto.NewTokenGenerator()
@@ -116,6 +117,17 @@ func run() error {
 		Spaces:        spaces,
 		Notifications: notifications,
 	})
+	signupSvc := usecase.NewSignupService(usecase.SignupDeps{
+		Signups:    signups,
+		Users:      users,
+		Sessions:   sessions,
+		Mailer:     mailer,
+		Hasher:     hasher,
+		Tokens:     tokens,
+		Clock:      sysClock,
+		SessionTTL: httpadapter.SessionTTL,
+		BaseURL:    cfg.AppBaseURL,
+	})
 
 	srv := &http.Server{
 		Addr: fmt.Sprintf(":%d", cfg.Port),
@@ -125,6 +137,7 @@ func run() error {
 			Invites:     inviteSvc,
 			Members:     memberSvc,
 			Households:  householdSvc,
+			Signups:     signupSvc,
 			Users:       users,
 			Memberships: memberships,
 			Sessions:    sessions,
