@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -92,5 +93,23 @@ func TestRunRefusesToSeedOutsideDevelopmentBeforeConnecting(t *testing.T) {
 	}
 	if elapsed > 2*time.Second {
 		t.Fatalf("run took %v to refuse; want it to refuse before ever attempting to connect", elapsed)
+	}
+}
+
+// TestRunPruneRefusesAWindowUnderTheFloor proves the seven-day floor is
+// enforced before either repository is ever touched: signups and attempts
+// are both nil here, so a Prune call reaching either one would panic on a
+// nil pointer dereference rather than merely delete the wrong rows. The
+// floor exists because domain.LockoutPolicy.Window is 15 minutes -- deleting
+// a login_attempts row still inside that window would clear a live lockout,
+// turning a cleanup command into a way to unlock a household somebody is
+// actively guessing at.
+func TestRunPruneRefusesAWindowUnderTheFloor(t *testing.T) {
+	err := runPrune(context.Background(), nil, nil, 3*24*time.Hour)
+	if err == nil {
+		t.Fatal("runPrune(3 days) = nil, want a refusal")
+	}
+	if !strings.Contains(err.Error(), "must be at least 7 days") {
+		t.Fatalf("err = %v, want it to name the 7-day floor", err)
 	}
 }

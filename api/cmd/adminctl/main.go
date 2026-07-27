@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"golang.org/x/term"
 
@@ -42,10 +43,15 @@ func main() {
 const usage = `usage: adminctl <command> [flags]
 
 commands:
-  seed                                        seed the design's household in development
-  reset-password --email=<email>              set a member's password (read from stdin)
-  unlock-household                            clear the seeded household's failed sign-in attempts
-  create-invite --email= --name= --role=      invite a new member (role: owner or limited)
+  seed                                          seed the design's household in development
+  reset-password --email=<email>                set a member's password (read from stdin)
+  unlock-household [--email=]                   clear a household's failed sign-in attempts (any
+                                                 member's address; defaults to the seeded owner)
+  create-invite --email= --name= --role=        invite a new member (role: owner or limited);
+    [--capabilities=] [--inviter-email=]        the household is resolved from --inviter-email
+                                                 (any member's address; defaults to the seeded owner)
+  prune [--older-than=30]                       delete consumed/expired signups and login attempts
+                                                 older than this many days (minimum 7)
 `
 
 func run(args []string) error {
@@ -116,7 +122,7 @@ func run(args []string) error {
 	case "reset-password":
 		return runResetPassword(ctx, args[1:], users, hasher, sessions)
 	case "unlock-household":
-		return runUnlockHousehold(ctx, users, memberships, loginAttempts)
+		return runUnlockHousehold(ctx, args[1:], users, memberships, loginAttempts)
 	case "create-invite":
 		return runCreateInvite(ctx, args[1:], usecase.InviteDeps{
 			Invites: invites,
@@ -127,6 +133,15 @@ func run(args []string) error {
 			Clock:   sysClock,
 			BaseURL: cfg.AppBaseURL,
 		}, users, memberships)
+	case "prune":
+		fs := flag.NewFlagSet("prune", flag.ContinueOnError)
+		fs.SetOutput(io.Discard) // see the matching comment in runResetPassword
+		days := fs.Int("older-than", 30, "delete consumed/expired rows older than this many days")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return runPrune(ctx, postgres.NewSignupRepo(db), loginAttempts,
+			time.Duration(*days)*24*time.Hour)
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", args[0], usage)
 	}
@@ -249,14 +264,20 @@ func readPassword(prompt string) (string, error) {
 	return string(raw), nil
 }
 
-// runUnlockHousehold resolves "the household" through Andreas's own
-// membership. There is exactly one household per deployment and no
-// household-listing endpoint at all, so the seeded owner's email is the one
-// stable handle adminctl has for it -- the same resolution create-invite
-// uses below.
-func runUnlockHousehold(ctx context.Context, users usecase.UserRepository,
+// runUnlockHousehold resolves the household through --email, any member's
+// address -- see resolveHouseholdByEmail for why that replaced resolving
+// "the household" through the seeded owner alone.
+func runUnlockHousehold(ctx context.Context, args []string, users usecase.UserRepository,
 	memberships usecase.MembershipRepository, attempts usecase.LoginAttemptRepository) error {
-	householdID, err := resolveSeededHousehold(ctx, users, memberships)
+	fs := flag.NewFlagSet("unlock-household", flag.ContinueOnError)
+	fs.SetOutput(io.Discard) // see the matching comment in runResetPassword
+	email := fs.String("email", usecase.AndreasEmail,
+		"any member's address in the household to act on; defaults to the seeded owner")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	householdID, _, err := resolveHouseholdByEmail(ctx, users, memberships, *email, "email")
 	if err != nil {
 		return err
 	}
@@ -277,6 +298,8 @@ func runCreateInvite(ctx context.Context, args []string, deps usecase.InviteDeps
 	name := fs.String("name", "", "the invitee's display name")
 	roleFlag := fs.String("role", "", "owner or limited")
 	capsFlag := fs.String("capabilities", "", "comma-separated: calendar,chores,money,marriage")
+	inviterEmail := fs.String("inviter-email", usecase.AndreasEmail,
+		"any member's address in the household to invite into; defaults to the seeded owner")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -304,7 +327,7 @@ func runCreateInvite(ctx context.Context, args []string, deps usecase.InviteDeps
 		return err
 	}
 
-	householdID, andreasID, err := resolveSeededHouseholdAndOwner(ctx, users, memberships)
+	householdID, inviterID, err := resolveHouseholdByEmail(ctx, users, memberships, *inviterEmail, "inviter-email")
 	if err != nil {
 		return err
 	}
@@ -316,7 +339,7 @@ func runCreateInvite(ctx context.Context, args []string, deps usecase.InviteDeps
 	deps.Tokens = captured
 	inviteSvc := usecase.NewInviteService(deps)
 
-	if err := inviteSvc.Create(ctx, householdID, andreasID, *name, *email, role, caps); err != nil {
+	if err := inviteSvc.Create(ctx, householdID, inviterID, *name, *email, role, caps); err != nil {
 		return fmt.Errorf("create invite: %w", err)
 	}
 
@@ -324,28 +347,76 @@ func runCreateInvite(ctx context.Context, args []string, deps usecase.InviteDeps
 	return nil
 }
 
-// resolveSeededHousehold and resolveSeededHouseholdAndOwner both find "the"
-// household through usecase.AndreasEmail -- see runUnlockHousehold's doc
-// comment for why that is the right (only) handle available.
-func resolveSeededHousehold(ctx context.Context, users usecase.UserRepository, memberships usecase.MembershipRepository) (string, error) {
-	householdID, _, err := resolveSeededHouseholdAndOwner(ctx, users, memberships)
-	return householdID, err
-}
-
-func resolveSeededHouseholdAndOwner(ctx context.Context, users usecase.UserRepository,
-	memberships usecase.MembershipRepository) (householdID, andreasID string, err error) {
-	andreas, err := users.ByEmail(ctx, usecase.AndreasEmail)
+// resolveHouseholdByEmail finds the household the given address belongs to,
+// along with that user's id. It replaces a version that resolved "the
+// household" through usecase.AndreasEmail, which was correct only while there
+// was exactly one household per deployment -- self-serve sign-up ended that,
+// and an operator unlocking the wrong customer's household is a worse failure
+// than having to type an address.
+//
+// AndreasEmail remains the default in development so `make unlock-household`
+// keeps working with no arguments against a seeded database.
+//
+// flagName is the caller's flag for this address (e.g. "email" for
+// unlock-household, "inviter-email" for create-invite, which already has its
+// own --email for the invitee) -- it names the right flag in the error below
+// rather than pointing at one that means something else in that command.
+func resolveHouseholdByEmail(ctx context.Context, users usecase.UserRepository,
+	memberships usecase.MembershipRepository, email, flagName string) (householdID, userID string, err error) {
+	user, err := users.ByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
-			return "", "", errors.New(`no seeded household found; run "make seed" first`)
+			return "", "", fmt.Errorf("no account for %q; pass --%s with a member's address", email, flagName)
 		}
-		return "", "", fmt.Errorf("look up the seeded household: %w", err)
+		return "", "", fmt.Errorf("look up %q: %w", email, err)
 	}
-	membership, err := memberships.ByUser(ctx, andreas.ID)
+	membership, err := memberships.ByUser(ctx, user.ID)
 	if err != nil {
-		return "", "", fmt.Errorf("resolve the household: %w", err)
+		if errors.Is(err, domain.ErrNotFound) {
+			return "", "", fmt.Errorf("%q has an account but belongs to no household", email)
+		}
+		return "", "", fmt.Errorf("resolve the household for %q: %w", email, err)
 	}
-	return membership.HouseholdID, andreas.ID, nil
+	return membership.HouseholdID, user.ID, nil
+}
+
+// pruneFloor is the shortest retention window `prune` will accept. It is far
+// outside domain.LockoutPolicy.Window (15 minutes), because deleting a
+// login_attempts row still inside that window would clear a live lockout --
+// which would turn a cleanup command into a way to unlock a household that is
+// actively being guessed at. The floor is enforced rather than documented so
+// nobody can reach that state with a plausible-looking flag value.
+const pruneFloor = 7 * 24 * time.Hour
+
+// runPrune deletes consumed/expired signups and login attempts older than
+// olderThan. See pruneFloor for why a window under seven days is refused
+// rather than merely discouraged.
+func runPrune(ctx context.Context, signups usecase.SignupRepository,
+	attempts usecase.LoginAttemptRepository, olderThan time.Duration) error {
+	if olderThan < pruneFloor {
+		return fmt.Errorf("--older-than must be at least %d days: pruning login attempts inside the "+
+			"lockout window would clear a live lockout", int(pruneFloor.Hours()/24))
+	}
+	before := time.Now().Add(-olderThan)
+
+	prunedSignups, err := signups.Prune(ctx, before)
+	if err != nil {
+		return fmt.Errorf("prune signups: %w", err)
+	}
+	// login_attempts is pruned here rather than in its own command because
+	// ClearFailures -- the only thing that ever deleted from it -- is scoped
+	// WHERE household_id = $1, which never matches the NULL rows an
+	// unknown-address sign-in attempt records. Those rows were deleted by
+	// nothing at all, and a public sign-in endpoint means a stranger can create
+	// them without limit.
+	prunedAttempts, err := attempts.Prune(ctx, before)
+	if err != nil {
+		return fmt.Errorf("prune login attempts: %w", err)
+	}
+
+	fmt.Printf("Pruned %d signups and %d login attempts older than %s.\n",
+		prunedSignups, prunedAttempts, before.Format(time.RFC3339))
+	return nil
 }
 
 // capturingTokens wraps the real TokenGenerator, recording the raw value of
