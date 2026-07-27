@@ -85,3 +85,18 @@ export const acceptInviteRequestSchema = z.object({
   displayName: z.string(),
 });
 export type AcceptInviteRequest = z.infer<typeof acceptInviteRequestSchema>;
+
+// signUpPreviewSchema is GET /auth/sign-up/:token's body.
+export const signUpPreviewSchema = z.object({ email: z.string() });
+export type SignUpPreview = z.infer<typeof signUpPreviewSchema>;
+
+// currencySchema mirrors currencyDTO (api/internal/adapter/http/currency_handlers.go).
+export const currencySchema = z.object({
+  code: z.string(),
+  // Go marks `symbol` `omitempty`, so it is absent for codes we have no symbol
+  // for -- optional here for the same reason spaceDTO.requiredCapability is.
+  symbol: z.string().optional(),
+  name: z.string(),
+});
+export const currencyListSchema = z.object({ currencies: z.array(currencySchema) });
+export type Currency = z.infer<typeof currencySchema>;

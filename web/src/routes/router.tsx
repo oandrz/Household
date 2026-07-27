@@ -4,7 +4,8 @@
 // so there is no generated route tree to import instead.
 //
 // Shape:
-//   /sign-in, /sign-in/magic, /invite/$token       -- public, pre-auth
+//   /sign-in, /sign-in/magic, /invite/$token,
+//   /sign-up, /sign-up/$token                       -- public, pre-auth (see routes/publicRoutes.ts)
 //   RequireAuth (pathless)                          -- redirects to /sign-in on a 401
 //     AppShell (pathless)                           -- sidebar + outlet
 //       /            Overview      (slice 5 placeholder)
@@ -25,6 +26,8 @@ import {
 import { InviteScreen } from "../features/auth/InviteScreen";
 import { MagicLinkConsumeScreen } from "../features/auth/MagicLinkConsumeScreen";
 import { SignInScreen } from "../features/auth/SignInScreen";
+import { SignUpScreen } from "../features/auth/SignUpScreen";
+import { SignUpCompleteScreen } from "../features/auth/SignUpCompleteScreen";
 import { useMe } from "../features/auth/useAuth";
 import { PlaceholderPage } from "../features/placeholder/PlaceholderPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
@@ -90,6 +93,32 @@ const inviteRoute = createRoute({
   component: function InviteRouteComponent() {
     const { token } = useParams({ from: "/invite/$token" });
     return <InviteScreen token={token} />;
+  },
+});
+
+const signUpRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/sign-up",
+  component: function SignUpRouteComponent() {
+    const me = useMe();
+    // Same "already signed in -> enter the app" wrapper the sign-in route
+    // uses: someone with a live session has no use for a create-household
+    // form.
+    if (me.isSuccess) return <Navigate to="/" replace />;
+    return <SignUpScreen />;
+  },
+});
+
+const signUpCompleteRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/sign-up/$token",
+  // Deliberately does NOT bounce an already-signed-in caller, for the same
+  // reason inviteRoute does not: the link is often opened on a shared device
+  // that is already signed in as someone else, and dropping that visitor on
+  // the dashboard with no explanation would be worse than showing the form.
+  component: function SignUpCompleteRouteComponent() {
+    const { token } = useParams({ from: "/sign-up/$token" });
+    return <SignUpCompleteScreen token={token} />;
   },
 });
 
@@ -171,6 +200,8 @@ export const routeTree = rootRoute.addChildren([
   signInRoute,
   signInMagicRoute,
   inviteRoute,
+  signUpRoute,
+  signUpCompleteRoute,
   authenticatedRoute.addChildren([
     shellRoute.addChildren([
       indexRoute,

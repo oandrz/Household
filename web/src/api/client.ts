@@ -1,6 +1,7 @@
 // The single entry point for talking to the Go service. Every request goes
 // through here so that credentials, the CSRF header and error decoding are
 // handled in exactly one place.
+import { PRE_AUTH_API_PREFIXES } from "../routes/publicRoutes";
 
 export class ApiError extends Error {
   readonly code: string;
@@ -42,8 +43,9 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): voi
   unauthorizedHandler = handler;
 }
 
-// preAuthPathPrefixes are the request paths a 401 must never react to: every
-// one of them is reachable before any session exists, so a 401 from one of
+// PRE_AUTH_API_PREFIXES (imported above, from routes/publicRoutes.ts) names
+// the request paths a 401 must never react to: every one of them is
+// reachable before any session exists, so a 401 from one of
 // them means "that specific attempt failed" (a wrong password, an expired
 // magic link, a bad invite token), not "the session this tab thought it had
 // is gone." Reacting to a 401 there would clear the cache and bounce a
@@ -68,14 +70,8 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): voi
 // installed handler itself is responsible for consulting. Do not try to fix
 // that here by adding "/api/v1/auth/me" to this list: that would silence the
 // 401 this handler exists for everywhere, not just on those two screens.
-const preAuthPathPrefixes = [
-  "/api/v1/auth/sign-in",
-  "/api/v1/auth/magic-link",
-  "/api/v1/invites/",
-];
-
 function isPreAuthRequest(path: string): boolean {
-  return preAuthPathPrefixes.some((prefix) => path.startsWith(prefix));
+  return PRE_AUTH_API_PREFIXES.some((prefix) => path.startsWith(prefix));
 }
 
 function readCookie(name: string): string | undefined {

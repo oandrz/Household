@@ -9,6 +9,7 @@
 // authScreen enum, which only has Sign in / Invited / Wrong password /
 // Signed in).
 import { type FormEvent, useEffect, useRef, useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { ApiError } from "../../api/client";
 import { apiErrorMessage, isPlausibleEmail, triesLeftPhrase } from "./copy";
 import { MagicLinkSentPanel } from "./MagicLinkSentPanel";
@@ -300,6 +301,13 @@ export function SignInScreen() {
               <span>{magicLinkErrorMessage}</span>
             </div>
           )}
+
+          <div className="mt-[18px] border-t border-hairline pt-[15px] text-center text-[12.5px] text-muted">
+            <span>No household yet? </span>
+            <Link to="/sign-up" className="cursor-pointer font-semibold text-accent">
+              Create one
+            </Link>
+          </div>
         </div>
 
         <p className="text-center text-xs leading-relaxed text-muted">

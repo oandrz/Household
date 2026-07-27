@@ -26,6 +26,8 @@
 // already-authenticated shell route (e.g. /settings) getting a 401 from
 // /auth/me is untouched by this and still triggers the real reaction, which
 // is the behaviour the finding this handler was built for needs.
+import { PUBLIC_ROUTE_PREFIXES } from "../routes/publicRoutes";
+
 interface RedirectableRouter {
   state: { location: { pathname: string } };
   navigate(opts: { to: string; replace?: boolean }): unknown;
@@ -35,14 +37,12 @@ interface ClearableQueryClient {
   clear(): void;
 }
 
-// publicRoutePrefixes names every route whose own component calls useMe()
-// (directly or, for the invite screen, indirectly through InviteScreen)
-// while genuinely reachable with no session at all. "/sign-in" covers both
-// /sign-in and /sign-in/magic; "/invite/" covers /invite/$token.
-const publicRoutePrefixes = ["/sign-in", "/invite/"];
-
+// PUBLIC_ROUTE_PREFIXES (imported above, from routes/publicRoutes.ts) names
+// every route whose own component calls useMe() (directly or, for the invite
+// screen, indirectly through InviteScreen) while genuinely reachable with no
+// session at all.
 export function isOnPublicRoute(pathname: string): boolean {
-  return publicRoutePrefixes.some((prefix) => pathname.startsWith(prefix));
+  return PUBLIC_ROUTE_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
 // createUnauthorizedHandler builds the callback main.tsx installs via

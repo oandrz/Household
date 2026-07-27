@@ -6,11 +6,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ApiError, apiFetch } from "../../api/client";
 import {
+  currencyListSchema,
   meQuerySchema,
+  signUpPreviewSchema,
   type AcceptInviteRequest,
+  type Currency,
   type Me,
   type MagicLinkRequest,
   type SignInRequest,
+  type SignUpPreview,
 } from "./schemas";
 
 export const meQueryKey = ["me"] as const;
@@ -155,6 +159,87 @@ export function useAcceptInvite() {
       const { token, ...request } = vars;
       const body = await apiFetch<unknown>(
         `/api/v1/invites/${encodeURIComponent(token)}/accept`,
+        { method: "POST", body: JSON.stringify(request) },
+      );
+      return meQuerySchema.parse(body);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: meQueryKey });
+    },
+  });
+}
+
+// POST /auth/sign-up always answers 202 with the same body, whether or not
+// the address has an account (see signup_handlers.go's handleSignUp doc
+// comment -- byte-identical to handleRequestMagicLink's answer). Nothing
+// here can tell the difference, and nothing should try: the screen says
+// "check your email" either way.
+export function useRequestSignUp() {
+  return useMutation({
+    mutationFn: (vars: { email: string }) =>
+      apiFetch<{ status: string }>("/api/v1/auth/sign-up", {
+        method: "POST",
+        body: JSON.stringify(vars),
+      }),
+  });
+}
+
+async function fetchSignUpPreview(token: string): Promise<SignUpPreview> {
+  const body = await apiFetch<unknown>(
+    `/api/v1/auth/sign-up/${encodeURIComponent(token)}`,
+  );
+  return signUpPreviewSchema.parse(body);
+}
+
+export function useSignUpPreview(token: string) {
+  return useQuery({
+    queryKey: ["sign-up-preview", token] as const,
+    queryFn: () => fetchSignUpPreview(token),
+    // A spent or expired token will never become valid by retrying, and each
+    // retry costs the caller a wait before they see the message telling them
+    // what to do instead.
+    retry: false,
+  });
+}
+
+async function fetchCurrencies(): Promise<{ currencies: Currency[] }> {
+  const body = await apiFetch<unknown>("/api/v1/currencies");
+  return currencyListSchema.parse(body);
+}
+
+// Consumed by the sign-up completion screen's currency select (Task 31); the
+// endpoint itself is public (see currency_handlers.go), so this can be
+// called before any session exists.
+export function useCurrencies() {
+  return useQuery({
+    queryKey: ["currencies"] as const,
+    queryFn: fetchCurrencies,
+    // The active ISO 4217 list does not change during a session.
+    staleTime: Infinity,
+  });
+}
+
+// completeSignUp provisions the household and signs the new owner in through
+// the same completeSignIn tail sign-in, magic-link consumption and invite
+// acceptance use (see signup_handlers.go's handleCompleteSignUp), so all four
+// answer with the identical me bundle and the identical pair of cookies.
+//
+// Invalidates rather than seeds ['me'] directly -- matching useSignIn and
+// useAcceptInvite above, not useConsumeMagicLink's setQueryData, so all four
+// session-creating mutations behave identically here.
+export function useCompleteSignUp() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: {
+      token: string;
+      householdName: string;
+      displayName: string;
+      primaryCurrency: string;
+      password: string;
+    }): Promise<Me> => {
+      const { token, ...request } = vars;
+      const body = await apiFetch<unknown>(
+        `/api/v1/auth/sign-up/${encodeURIComponent(token)}/complete`,
         { method: "POST", body: JSON.stringify(request) },
       );
       return meQuerySchema.parse(body);

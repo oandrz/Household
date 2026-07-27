@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
 import { stubFetchRoutes } from "../../test/fetchStub";
 import { SignInScreen } from "./SignInScreen";
 
@@ -36,18 +42,36 @@ const meBody = {
   spaces: [],
 };
 
-function renderSignIn() {
+// Wrapped in a router (Task 30 added a <Link to="/sign-up"> footer to
+// SignInScreen, which throws outside any router context) and, unlike
+// renderWithRouter, awaited internally rather than at every call site: a bare
+// synchronous render() here leaves RouterProvider's own initial match/
+// transition unresolved (its internal Transitioner component updates state
+// after mount), so the very next synchronous getByText/fireEvent call in most
+// of this file's existing tests would hit an empty document. Wrapping the
+// render in `act` and awaiting it once, here, keeps every existing assertion
+// below synchronous rather than rewriting 19 tests to `find*`.
+async function renderSignIn() {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
       mutations: { retry: false },
     },
   });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <SignInScreen />
-    </QueryClientProvider>,
-  );
+  const rootRoute = createRootRoute({ component: () => <SignInScreen /> });
+  const router = createRouter({
+    routeTree: rootRoute,
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+  let result!: ReturnType<typeof render>;
+  await act(async () => {
+    result = render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+  });
+  return result;
 }
 
 afterEach(() => {
@@ -55,13 +79,25 @@ afterEach(() => {
 });
 
 describe("SignInScreen", () => {
-  it("renders the design's welcome copy", () => {
-    renderSignIn();
+  it("renders the design's welcome copy", async () => {
+    await renderSignIn();
 
     expect(screen.getByText("Welcome back.")).toBeInTheDocument();
     expect(
       screen.getByText("Sign in to pick up where you both left off."),
     ).toBeInTheDocument();
+  });
+
+  // Task 30: the design's footer link into sign-up -- the only entry point
+  // into the create-household flow from this screen.
+  it("links to /sign-up from the 'No household yet?' footer", async () => {
+    await renderSignIn();
+
+    expect(screen.getByText("No household yet?")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Create one" })).toHaveAttribute(
+      "href",
+      "/sign-up",
+    );
   });
 
   it("submits valid credentials to POST /api/v1/auth/sign-in exactly once", async () => {
@@ -71,7 +107,7 @@ describe("SignInScreen", () => {
     const fetchMock = stubFetchRoutes({
       [`POST ${SIGN_IN_URL}`]: { status: 200, body: meBody },
     });
-    renderSignIn();
+    await renderSignIn();
 
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "andreas@hearth.family" },
@@ -104,7 +140,7 @@ describe("SignInScreen", () => {
         },
       },
     });
-    renderSignIn();
+    await renderSignIn();
 
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "andreas@hearth.family" },
@@ -134,7 +170,7 @@ describe("SignInScreen", () => {
         },
       },
     });
-    renderSignIn();
+    await renderSignIn();
 
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "andreas@hearth.family" },
@@ -166,7 +202,7 @@ describe("SignInScreen", () => {
         },
       },
     });
-    renderSignIn();
+    await renderSignIn();
 
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "andreas@hearth.family" },
@@ -208,7 +244,7 @@ describe("SignInScreen", () => {
         },
       },
     });
-    renderSignIn();
+    await renderSignIn();
 
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "andreas@hearth.family" },
@@ -244,7 +280,7 @@ describe("SignInScreen", () => {
         },
       },
     });
-    renderSignIn();
+    await renderSignIn();
 
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "andreas@hearth.family" },
@@ -290,7 +326,7 @@ describe("SignInScreen", () => {
       throw new Error(`unexpected fetch call: ${method} ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
-    renderSignIn();
+    await renderSignIn();
 
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "andreas@hearth.family" },
@@ -318,10 +354,10 @@ describe("SignInScreen", () => {
   // (both are type="button"), so neither honours the email field's
   // `required` attribute -- clicking with an empty field used to post
   // straight to the API.
-  it("shows an inline message and makes no request when Forgot? is clicked with an empty email", () => {
+  it("shows an inline message and makes no request when Forgot? is clicked with an empty email", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    renderSignIn();
+    await renderSignIn();
 
     fireEvent.click(screen.getByRole("button", { name: "Forgot?" }));
 
@@ -331,10 +367,10 @@ describe("SignInScreen", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("shows an inline message and makes no request when Email me... is clicked with an empty email", () => {
+  it("shows an inline message and makes no request when Email me... is clicked with an empty email", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    renderSignIn();
+    await renderSignIn();
 
     fireEvent.click(
       screen.getByRole("button", { name: "Email me a one-time sign-in link" }),
@@ -346,10 +382,10 @@ describe("SignInScreen", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("shows an inline message when the email does not look like an email address", () => {
+  it("shows an inline message when the email does not look like an email address", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    renderSignIn();
+    await renderSignIn();
 
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "not-an-email" },
@@ -384,7 +420,7 @@ describe("SignInScreen", () => {
         body: { error: { code: "RATE_LIMITED", message: "Too many requests. Try again later." } },
       },
     });
-    renderSignIn();
+    await renderSignIn();
 
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "andreas@hearth.family" },
@@ -413,7 +449,7 @@ describe("SignInScreen", () => {
     const fetchMock = stubFetchRoutes({
       [`POST ${MAGIC_LINK_URL}`]: { status: 202, body: { status: "accepted" } },
     });
-    renderSignIn();
+    await renderSignIn();
 
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "andreas@hearth.family" },
@@ -436,8 +472,8 @@ describe("SignInScreen", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("has a password field with type=password and autoComplete=current-password", () => {
-    renderSignIn();
+  it("has a password field with type=password and autoComplete=current-password", async () => {
+    await renderSignIn();
 
     const passwordField = screen.getByLabelText("Password");
     expect(passwordField).toHaveAttribute("type", "password");
@@ -454,7 +490,7 @@ describe("SignInScreen", () => {
         body: { error: { code: "RATE_LIMITED", message: "Too many requests. Try again later." } },
       },
     });
-    renderSignIn();
+    await renderSignIn();
 
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "andreas@hearth.family" },
@@ -491,7 +527,7 @@ describe("SignInScreen", () => {
         },
       ],
     });
-    renderSignIn();
+    await renderSignIn();
 
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "andreas@hearth.family" },
@@ -516,7 +552,7 @@ describe("SignInScreen", () => {
   it("falls back to a generic message when sign-in rejects with something that isn't an ApiError", async () => {
     const fetchMock = vi.fn(() => Promise.reject(new TypeError("Failed to fetch")));
     vi.stubGlobal("fetch", fetchMock);
-    renderSignIn();
+    await renderSignIn();
 
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "andreas@hearth.family" },
@@ -543,7 +579,7 @@ describe("SignInScreen", () => {
         },
       ],
     });
-    renderSignIn();
+    await renderSignIn();
 
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "andreas@hearth.family" },
@@ -607,7 +643,7 @@ describe("SignInScreen", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    renderSignIn();
+    await renderSignIn();
 
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "andreas@hearth.family" },
