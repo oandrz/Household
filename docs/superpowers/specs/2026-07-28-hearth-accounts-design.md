@@ -214,6 +214,28 @@ is stated on screen** — "2 accounts not included: no exchange rate for USD".
 A net worth quietly missing an account looks identical to a correct one, which
 is the failure worth preventing.
 
+**The reachable case is not a mixed-currency household — it is Settings.** An
+owner can change the household's primary currency on a screen that already
+exists. A household whose accounts are all in SGD, switching its primary to
+EUR, turns *every* account unconvertible at once: net worth goes blank and the
+screen would otherwise say "4 accounts not included: no exchange rate for SGD"
+to a household whose accounts are all in one currency. That is an ordinary
+action, not an exotic one, and it is the state most likely to be hit.
+
+So the Finances screen distinguishes two cases with different copy. **Some
+accounts unconvertible** — net worth is shown, with the exclusion line beneath
+it. **Every account unconvertible** — no net worth figure at all, and a plain
+explanation that no exchange rate is available between the household's currency
+and the accounts it holds, naming the currencies involved so the way out
+(change the primary currency back, or wait for a live rate source) is
+discoverable. A net worth of zero must never be shown here; zero is a claim
+about the household's money, and the truth is that we cannot compute it.
+
+Warning the owner *before* a primary-currency change that would strand every
+account is the better product answer and is deferred, not rejected — it belongs
+to the Settings screen, needs its own copy and test, and the state it prevents
+is visible and reversible without it. Section 12 records it.
+
 Restricting accounts to the household's primary or secondary currency was
 rejected: a self-serve household currently has its secondary set equal to its
 primary with no screen to change it (the existing 🟡 in the tracker), so that
@@ -308,7 +330,6 @@ CREATE TABLE accounts (
     visible_to_limited_members boolean   NOT NULL DEFAULT false,
     archived_at              timestamptz,
     created_at               timestamptz NOT NULL DEFAULT now(),
-    updated_at               timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT liabilities_are_not_negative CHECK (
         type NOT IN ('loan', 'credit_card') OR opening_balance_minor >= 0
     )
@@ -342,6 +363,13 @@ sequential scan.
 A household's primary currency can change in Settings; an account's balance was
 denominated in whatever it was denominated in, and rewriting it would silently
 restate history.
+
+**There is no `updated_at`**, deliberately. No existing table has one —
+`households`, `users` and `memberships` all carry only `created_at` or
+`joined_at` — and a column named "last updated" that nothing maintains is a
+lie the next reader will believe. The question it would answer for an account,
+"when was this balance last true", is already answered better by
+`opening_balance_as_of`.
 
 ---
 
@@ -612,6 +640,11 @@ separately: how many were left out for having no exchange rate, and how many
 because their toggle is off. The fixes are different — one is "we cannot", the
 other is "you chose" — so they are not merged into one number.
 
+**No account convertible at all** — no net worth figure, and the explanation
+from decision 6 naming the currencies involved. Never a zero. This is the state
+a household lands in by changing its primary currency in Settings, so it is a
+first-class screen state rather than an error.
+
 **A limited member** — the accounts shared with them, no figures. If nothing has
 been shared, a plain explanation rather than an empty list, so it does not read
 as a broken page.
@@ -635,6 +668,9 @@ tested:
   accounts totals correctly.
 - An account with no available rate is excluded from net worth *and* named in
   `ExcludedNoRate`.
+- When *no* account can be converted, the summary reports no net worth figure
+  rather than a zero — the state a primary-currency change in Settings
+  produces.
 - An account with `count_toward_net_worth` off is absent from the total and
   present in the breakdown.
 - Archived accounts are in neither.
@@ -728,3 +764,6 @@ mixed-currency household, so a single-currency test suite would never see it.
 - **The secondary-currency picker** (the existing 🟡). Decision 6 works around
   its absence rather than closing it; a household still cannot choose what its
   second currency is.
+- **A warning in Settings before a primary-currency change strands every
+  account.** Decision 6. It belongs to the Settings screen, needs its own copy
+  and test, and the state it prevents is visible and reversible without it.
