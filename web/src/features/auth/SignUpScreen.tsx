@@ -11,7 +11,7 @@
 //
 // Forgot?, the "or" divider and the magic-link button are all absent because
 // the design gates them on authNotCreate.
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { apiErrorMessage, isPlausibleEmail } from "./copy";
 import { CheckYourEmailPanel } from "./CheckYourEmailPanel";
@@ -28,6 +28,32 @@ export function SignUpScreen() {
 
   const requestSignUp = useRequestSignUp();
 
+  // Fix round 1, Finding 1: an error belongs to the screen it was raised in
+  // (a failed resend belongs to the sent panel, not the form `onBack` returns
+  // to), so it must not survive a transition between the two -- clearing it
+  // only inside onBack's handler would cover just that one path, not any
+  // future path back to the form. Keying this off `sent` itself, the same way
+  // SignInScreen's identical fix (round 2, Finding 1) keys off `mode`, covers
+  // all of them.
+  //
+  // This alone is not enough (SignInScreen's round 3, Finding 1 applies here
+  // too): it only clears an error that already exists at the moment `sent`
+  // changes. It does nothing for a request that is still in flight when the
+  // user navigates away and only settles afterwards -- "Send another link"
+  // has no pending guard on "Use a different address", so that interleaving
+  // is reachable here exactly as it is there. `sentRef` gives onSuccess/
+  // onError a way to check, at settle time, whether the request is still
+  // relevant to the state it started in; see submit() below.
+  useEffect(() => {
+    setError(null);
+    setValidationError(null);
+  }, [sent]);
+
+  const sentRef = useRef(sent);
+  useEffect(() => {
+    sentRef.current = sent;
+  }, [sent]);
+
   function submit() {
     if (requestSignUp.isPending) return;
 
@@ -41,11 +67,27 @@ export function SignUpScreen() {
     }
     setValidationError(null);
     setError(null);
+
+    // Captured now, not read later: this is whether the request started from
+    // the form (false) or the sent panel's resend (true). onSuccess/onError
+    // below compare it against sentRef.current (the *latest* value, which a
+    // plain closure over `sent` could never see) at the moment the request
+    // actually settles. If the user has since navigated away -- clicked "Use
+    // a different address" while this exact resend was still in flight --
+    // the settled result is scoped to a screen that's no longer current, and
+    // is dropped rather than applied.
+    const startedInSent = sent;
     requestSignUp.mutate(
       { email: trimmed },
       {
-        onSuccess: () => setSent(true),
-        onError: (err) => setError(err),
+        onSuccess: () => {
+          if (sentRef.current !== startedInSent) return;
+          setSent(true);
+        },
+        onError: (err) => {
+          if (sentRef.current !== startedInSent) return;
+          setError(err);
+        },
       },
     );
   }
