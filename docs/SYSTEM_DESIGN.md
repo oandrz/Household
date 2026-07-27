@@ -213,10 +213,13 @@ to a real address and so are not on that path.
 Three test matrices walk the live router and assert this: every non-public
 route rejects an unauthenticated caller, every mutating route requires CSRF,
 and every owner-gated route rejects a limited member. A route added without
-its guard fails a test rather than shipping — all three matrices name the
-sign-up and currency routes explicitly rather than exempting a whole prefix,
-so a future route added under `/auth/sign-up` is walked and checked like any
-other rather than silently waved through.
+its guard fails a test rather than shipping. All four sign-up-and-currency
+routes are named explicitly, rather than exempted by prefix, in the
+unauthenticated matrix; the CSRF and owner matrices name the two mutating ones
+among them (`POST /auth/sign-up`, `POST /auth/sign-up/{token}/complete`) —
+the two GETs are not mutating and so are not walked by those two matrices at
+all. A route added later under `/auth/sign-up` is therefore checked like any
+other, not silently waved through by a prefix skip.
 
 ---
 

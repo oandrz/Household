@@ -1,6 +1,8 @@
 # Hearth — feature tracker
 
-Every feature in `design/Household Dashboard.dc.html`, and whether it exists yet.
+Every feature in `design/Household Dashboard.dc.html`, and whether it exists
+yet — plus a handful of rows the design does not draw, where a design feature
+needed them to exist (see "Where things stand" below).
 
 **Legend**
 
@@ -129,8 +131,8 @@ The full checklist is at the end of `docs/LEARNING.md`.
 | Space templates — Kids, Home, Travel, Blank | 🟡 | Offered; they set a suggested name and visibility. They create no pages, because custom space pages are out of scope |
 | Currency list (`GET /api/v1/currencies`) | ✅ | One server-served ISO 4217 list — only two-minor-unit codes are offered, since `Money.String()` hard-codes two decimal places. The frontend stopped keeping its own `CURRENCY_SYMBOLS` table; this backs both this panel and the sign-up form's currency select |
 | Currency and region — primary currency | ✅ | |
-| Currency and region — show second currency | ✅ | |
-| Currency and region — choose the second currency | 🟡 | No control exists to pick *what* the second currency is — only whether to show it. A household that enables the toggle cannot choose what to compare against. Self-serve sign-up sets a household's second currency equal to its primary and leaves the toggle off, which makes this gap reachable by any stranger who signs up, not only Andreas & Christine |
+| Currency and region — show second currency | ✅ | The toggle only — whether the second currency is shown. What it *is* is the row below |
+| Currency and region — choose the second currency | 🟡 | No control exists to pick *what* the second currency is. A household that enables the toggle cannot choose what to compare against. Self-serve sign-up sets a household's second currency equal to its primary and leaves the toggle off, which makes this gap reachable by any stranger who signs up, not only Andreas & Christine |
 | Currency and region — FX rate | 🟡 | The mode is stored and editable, but the rate itself is a fixed table. A live provider drops in behind the existing port |
 | Notifications — bill due reminders | ✅ | |
 | Notifications — overspend alerts | ✅ | |
