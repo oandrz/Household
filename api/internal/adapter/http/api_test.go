@@ -1368,6 +1368,37 @@ func TestSignUpStaysSilentPastTheRateLimit(t *testing.T) {
 	}
 }
 
+// TestSignUpPassesThroughThePerIPLimiter is unlike every other sign-up test in
+// this file: it proves the router's *wiring*, not the limiter type in
+// isolation (middleware_ratelimit_test.go already covers ipRateLimiter and
+// rateLimitByIP directly). Every other sign-up test here sends too few
+// requests to ever reach signUpRequestsPerIPPerHour, so none of them would
+// notice if router.go's su.Use(rateLimitByIP(...)) line were ever deleted.
+// This one sends enough to find out.
+//
+// httptest.NewRequest gives every request in this file the same fixed
+// RemoteAddr, so repeated calls through env.do share one bucket exactly as a
+// real repeat caller would.
+func TestSignUpPassesThroughThePerIPLimiter(t *testing.T) {
+	env := newTestEnv(t)
+
+	// signUpRequestsPerIPPerHour (router.go) is unexported and this package is
+	// httpadapter_test, so its value is repeated here as a literal -- keep the
+	// two in lockstep if that constant ever changes.
+	const perIPLimit = 10
+	for i := 0; i < perIPLimit; i++ {
+		rec := env.do(http.MethodPost, "/api/v1/auth/sign-up",
+			map[string]string{"email": "ip-limited@example.test"})
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("request %d = %d, want 202", i, rec.Code)
+		}
+	}
+
+	rec := env.do(http.MethodPost, "/api/v1/auth/sign-up",
+		map[string]string{"email": "ip-limited@example.test"})
+	assertErrorResponse(t, rec, http.StatusTooManyRequests, "RATE_LIMITED")
+}
+
 // signUpMeBundle mirrors the shape of meResponseBody (auth_handlers.go) for
 // decoding the sign-up completion response. meResponseBody itself is
 // unexported outside package httpadapter -- this package is httpadapter_test
