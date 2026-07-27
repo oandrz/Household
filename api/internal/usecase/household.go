@@ -3,7 +3,6 @@ package usecase
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/andreasoentoro/hearth/api/internal/domain"
@@ -111,16 +110,17 @@ func (s *HouseholdService) Update(ctx context.Context, h domain.Household) (doma
 	return s.d.Households.Update(ctx, h)
 }
 
-// normalizeCurrency uppercases a currency code and validates it through
-// domain.NewMoney -- the single reference for what a valid currency code
-// looks like, shared by both of Update's currency fields so the two checks
-// cannot drift apart.
+// normalizeCurrency validates a currency code through domain.ParseCurrency --
+// the single reference for what a valid code looks like, shared by both of
+// Update's currency fields so the two checks cannot drift apart. It no longer
+// uppercases first: ParseCurrency does that itself, and NewMoney (which this
+// used to call) now delegates to the same function.
+//
+// The error is returned as-is rather than re-wrapped: ParseCurrency already
+// wraps ErrInvalidMoney, which is the sentinel adapter/http/errors.go maps to
+// 422 INVALID_CURRENCY. Wrapping it twice added nothing.
 func normalizeCurrency(currency string) (string, error) {
-	upper := strings.ToUpper(currency)
-	if _, err := domain.NewMoney(0, upper); err != nil {
-		return "", fmt.Errorf("%w: %v", domain.ErrInvalidMoney, err)
-	}
-	return upper, nil
+	return domain.ParseCurrency(currency)
 }
 
 // Spaces lists the spaces visible to one membership, via

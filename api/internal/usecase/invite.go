@@ -203,22 +203,32 @@ func (s *InviteService) Preview(ctx context.Context, token string) (InvitePrevie
 	}, nil
 }
 
-// checkInviteLive reports the specific reason an invite can no longer be
-// used, distinguishing an already-accepted invite (409, per the spec) from
-// an expired one (410) -- a distinction InviteRepository.Accept's own
-// no-rows case cannot make, because its guarded UPDATE collapses both into
-// the same zero-rows result. Reading accepted_at and expires_at ourselves,
-// via ByTokenHash, is what lets Preview and Accept report the two apart;
+// checkInviteLive reports the specific reason an invite can no longer be used,
+// distinguishing an already-accepted invite (409, per the spec) from an
+// expired one (410) -- a distinction InviteRepository.Accept's own no-rows case
+// cannot make, because its guarded UPDATE collapses both into the same
+// zero-rows result. Reading accepted_at and expires_at ourselves, via
+// ByTokenHash, is what lets Preview and Accept report the two apart;
 // InviteRepository.Accept's answer is then authoritative only for the race
 // window between this read and that write.
+//
+// The consumed-before-expired ordering now lives in domain.TokenLifecycle,
+// shared with sign-up. The sentinels stay invite-specific because the HTTP
+// layer maps them to different statuses with different copy.
 func checkInviteLive(details InviteDetails, now time.Time) error {
-	if details.AcceptedAt != nil {
+	switch domain.TokenLifecycle(now, details.ExpiresAt, details.AcceptedAt) {
+	case domain.TokenLive:
+		return nil
+	case domain.TokenConsumed:
 		return domain.ErrInviteAlreadyAccepted
-	}
-	if !details.ExpiresAt.After(now) {
+	case domain.TokenExpired:
+		return domain.ErrInviteExpired
+	default:
+		// A state this switch does not recognise must fail closed rather than
+		// treat the invite as usable. Adding a TokenState without adding a
+		// case here refuses the invite; it does not silently accept it.
 		return domain.ErrInviteExpired
 	}
-	return nil
 }
 
 // Accept turns an invite into a real account: it hashes the chosen password,

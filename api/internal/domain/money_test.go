@@ -8,26 +8,43 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
-// NewMoney's currency check is structural -- three uppercase letters -- not a
-// membership check against the real ISO 4217 currency list. This test name
-// used to claim it rejected "an unknown currency", which it never verified:
-// it only ever tried malformed strings. TestNewMoneyAcceptsAnyWellFormedCode
-// below pins down the other half of that behaviour.
-func TestNewMoneyRejectsMalformedCurrencyStrings(t *testing.T) {
-	if _, err := domain.NewMoney(100, "sgd"); err == nil {
-		t.Fatal("expected lowercase currency to be rejected")
-	}
+// NewMoney's currency check now delegates to domain.ParseCurrency, the single
+// membership check against the active ISO 4217 list, rather than the old
+// structural check of "three uppercase letters". A currency string with the
+// wrong number of letters is still rejected regardless of case.
+func TestNewMoneyRejectsWrongLengthCurrencyStrings(t *testing.T) {
 	if _, err := domain.NewMoney(100, "SG"); err == nil {
 		t.Fatal("expected a two-letter currency to be rejected")
 	}
+	if _, err := domain.NewMoney(100, "SGDX"); err == nil {
+		t.Fatal("expected a four-letter currency to be rejected")
+	}
 }
 
-func TestNewMoneyAcceptsAnyWellFormedCode(t *testing.T) {
-	// "QQQ" is three uppercase letters and not a real ISO 4217 currency.
-	// NewMoney accepts it anyway: the domain package has no currency
-	// registry and does not claim to validate against one.
-	if _, err := domain.NewMoney(100, "QQQ"); err != nil {
-		t.Fatalf("unexpected error for a well-formed but nonexistent code: %v", err)
+// NewMoney now normalises a lowercase code through ParseCurrency instead of
+// rejecting it -- it used to require the caller to have already uppercased
+// the string, which sign-up's stranger-supplied input cannot be trusted to
+// have done.
+func TestNewMoneyNormalisesLowercaseCurrency(t *testing.T) {
+	m, err := domain.NewMoney(100, "sgd")
+	if err != nil {
+		t.Fatalf("NewMoney(sgd): %v", err)
+	}
+	if m.Currency != "SGD" {
+		t.Fatalf("Currency = %q, want %q", m.Currency, "SGD")
+	}
+}
+
+// NewMoney now validates against the active ISO 4217 list via ParseCurrency,
+// rather than accepting any three uppercase letters. This used to be named
+// TestNewMoneyAcceptsAnyWellFormedCode and asserted the opposite of this,
+// using "QQQ" as its exemplar of a well-formed but nonexistent code. ZZZ is
+// three uppercase letters, which is all NewMoney used to check, and it is not
+// an ISO 4217 code -- sign-up is the first place a stranger picks this value,
+// so it must be refused.
+func TestNewMoneyRejectsAWellFormedNonCurrency(t *testing.T) {
+	if _, err := domain.NewMoney(100, "ZZZ"); !errors.Is(err, domain.ErrInvalidMoney) {
+		t.Fatalf("NewMoney(ZZZ) error = %v, want ErrInvalidMoney", err)
 	}
 }
 

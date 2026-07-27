@@ -9,16 +9,16 @@ type Money struct {
 	Currency string
 }
 
+// NewMoney validates the currency through ParseCurrency, which is the single
+// reference for what a valid code is. It used to check only "three uppercase
+// letters", which accepted ZZZ -- fine while the only codes in the system came
+// from a migration default, wrong the moment sign-up let a stranger choose one.
 func NewMoney(amount int64, currency string) (Money, error) {
-	if len(currency) != 3 {
-		return Money{}, fmt.Errorf("currency must be three letters, got %q", currency)
+	code, err := ParseCurrency(currency)
+	if err != nil {
+		return Money{}, err
 	}
-	for _, r := range currency {
-		if r < 'A' || r > 'Z' {
-			return Money{}, fmt.Errorf("currency must be uppercase, got %q", currency)
-		}
-	}
-	return Money{Amount: amount, Currency: currency}, nil
+	return Money{Amount: amount, Currency: code}, nil
 }
 
 func (m Money) Add(other Money) (Money, error) {
