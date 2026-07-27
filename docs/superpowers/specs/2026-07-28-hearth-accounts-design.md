@@ -149,9 +149,23 @@ it to a child would let them edit the family's balances, and nothing in the
 design suggests that is intended. So reads need `money`; writes need `money`
 **and** owner.
 
-The guards stack rather than substitute. An owner whose Money switch has been
-turned off still cannot write, because both must pass. That is the fail-closed
-direction.
+The guards stack rather than substitute — but not for the reason it first
+appears. **An owner without the `money` capability is not a representable
+state.** `domain.ValidateMembershipChange` (`internal/domain/identity.go:123`)
+refuses any owner who does not hold every capability, and every creation path
+grants `AllCapabilities()`. So `requireCapability(CapMoney)` on a write route is
+redundant *given today's invariant*.
+
+It is stacked anyway, deliberately: the alternative is for the write routes to
+depend on a rule enforced in a different layer for a different reason. If the
+owner-holds-everything invariant is ever relaxed — and it is a product decision,
+not a law — every write route that had leaned on it would silently open. The
+cost of the redundant guard is one middleware call; the cost of the coupling is
+a security regression with no failing test.
+
+**This means there is no test that can prove the stacking matters**, because the
+state it defends against cannot be constructed. Section 8 says so where the test
+list would otherwise imply one exists.
 
 A fifth "manage money" capability — letting an adult see finances without
 editing them — was considered and rejected: it is a new switch in Settings that
@@ -685,11 +699,22 @@ existing ones:
 
 **HTTP — the important ones**, because this is the first capability-gated
 route. The route-walk matrices in `api/internal/adapter/http/api_test.go` extend
-to cover every accounts route against every caller shape: no session; a session
-without `money`; a limited member with `money`; an owner without `money`; an
-owner with `money`. The fourth is the one people forget — an owner whose Money
-switch is off must still be refused on writes, which only passes if the guards
-are genuinely stacked rather than one standing in for the other.
+to cover every accounts route against every caller shape that can exist: no
+session; a signed-in member without `money`; a limited member **with** `money`;
+an owner.
+
+**The third is the one that needs a new fixture.** `testEnv`'s limited member
+holds `calendar` and `chores` only (`api_test.go:267`), so as things stand every
+accounts write route would refuse them at `requireCapability` and the
+owner-gated matrix would pass without ever exercising `requireOwner` — a
+vacuous green. The env gains a second limited member who *does* hold `money`,
+and that is the caller the owner matrix uses for these routes.
+
+**There is no "owner without `money`" case**, because it cannot be built:
+`domain.ValidateMembershipChange` refuses an owner missing any capability. The
+guard is still stacked, for the reason decision 4 gives; it simply has no
+reachable state to be tested against, and pretending otherwise would mean
+writing a test that asserts nothing.
 
 The redaction test asserts the limited member's response has **no balance key at
 all**. Asserting `balance === 0` would pass against exactly the bug it exists to
