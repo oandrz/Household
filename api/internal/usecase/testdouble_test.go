@@ -13,6 +13,25 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
+// readLog records the sequence of repository reads a service performed, in
+// order. SignupService.Request's contract is that the same reads happen, in
+// the same order, on every branch -- a read that is *skipped* on one branch
+// is the exact defect RequestMagicLink shipped with (see auth.go's
+// RequestMagicLink doc comment), and no assertion about return values can
+// catch it. Only an ordered log can.
+//
+// It is wired into the synchronous read methods only (userDouble.ByEmail,
+// signupDouble.CountSince, signupDouble.CountForEmailSince) -- never into
+// mailerDouble, which is called from sendAsync's background goroutine. This
+// type carries no mutex, and a log write from that goroutine racing a test's
+// log.seq() read would be exactly the kind of bug -race is run to catch, not
+// something this double should paper over.
+type readLog struct{ calls []string }
+
+func (l *readLog) record(name string) { l.calls = append(l.calls, name) }
+func (l *readLog) seq() []string      { return l.calls }
+func (l *readLog) reset()             { l.calls = nil }
+
 // --- Clock, hasher, token generator -----------------------------------
 
 type fixedClock struct{ now time.Time }
@@ -55,14 +74,33 @@ func (h *fakeHasher) verifyCallsWithEncoded(encoded string) int {
 	return n
 }
 
-type seqTokens struct{ n int }
+type seqTokens struct {
+	n int
+
+	// failNextErr arms a one-shot failure for the next NewToken call, the
+	// same one-shot pattern as the other doubles' failNext* hooks. It exists
+	// so a signup test can exercise "token generation failed" -- entropy
+	// exhaustion in the real generator -- without needing any change to
+	// HashToken, which callers still use to look up the failed request's own
+	// address hash.
+	failNextErr error
+}
 
 func (t *seqTokens) NewToken() (string, []byte, error) {
+	if t.failNextErr != nil {
+		err := t.failNextErr
+		t.failNextErr = nil
+		return "", nil, err
+	}
 	t.n++
 	raw := fmt.Sprintf("token-%d", t.n)
 	return raw, t.HashToken(raw), nil
 }
 func (t *seqTokens) HashToken(raw string) []byte { return []byte("hash:" + raw) }
+
+// failNext arms failNextErr: the next NewToken call returns err instead of a
+// token, and every call after that succeeds normally again.
+func (t *seqTokens) failNext(err error) { t.failNextErr = err }
 
 // --- UserRepository ------------------------------------------------------
 
@@ -80,6 +118,12 @@ type userDouble struct {
 	// itself; only the mailer double's state is touched from a background
 	// goroutine.
 	byEmailCalls int
+
+	// log, when set, additionally records "Users.ByEmail" into a shared
+	// readLog -- SignupService.Request's ordered-read test uses this (see
+	// readLog's doc comment). nil by default so every other fixture that
+	// builds a userDouble is unaffected.
+	log *readLog
 
 	// members is set once, after construction (userDouble and
 	// membershipDouble each need a reference to the other), and used only by
@@ -110,6 +154,9 @@ func (d *userDouble) put(u usecase.StoredUser) {
 
 func (d *userDouble) ByEmail(_ context.Context, email string) (usecase.StoredUser, error) {
 	d.byEmailCalls++
+	if d.log != nil {
+		d.log.record("Users.ByEmail")
+	}
 	id, ok := d.byEmail[email]
 	if !ok {
 		return usecase.StoredUser{}, domain.ErrNotFound
@@ -776,15 +823,49 @@ type signupDouble struct {
 	rows map[string]*signupRow // keyed by string(tokenHash)
 	n    int
 
-	// provisionCalls counts Provision invocations, successful or not, so a
-	// test can confirm exactly one provision happened for one request -- the
-	// same question userDouble.count/membershipDouble.count answer for
-	// invite acceptance.
-	provisionCalls int
+	// log, when set, additionally records "Signups.CountSince" and
+	// "Signups.CountForEmailSince" into a shared readLog -- see readLog's
+	// doc comment. nil by default so every other fixture that builds a
+	// signupDouble is unaffected.
+	log *readLog
 
-	// failNextProvision arms a one-shot failure for the next Provision call,
-	// the same one-shot pattern as the other doubles' failNext* hooks.
-	failNextProvision error
+	// emailCountOverride and globalCountOverride force CountForEmailSince and
+	// CountSince to report a value regardless of how many rows actually
+	// exist, so a test can put an address "at its hourly limit" or the
+	// service "over its daily ceiling" without first creating however many
+	// real rows that would take. A map entry's presence (not its value) is
+	// what "overridden" means for emailCountOverride, so a forced count of 0
+	// is still distinguishable from "no override set"; globalCountOverride
+	// is a pointer for the identical reason.
+	emailCountOverride  map[string]int
+	globalCountOverride *int
+
+	// provisions counts Provision invocations, successful or not, so a test
+	// can confirm exactly one provision happened for one request -- the same
+	// question userDouble.count/membershipDouble.count answer for invite
+	// acceptance. Named provisions, not provisionCalls, so it does not
+	// collide with the provisionCalls() method below -- Go forbids a field
+	// and a method sharing a name on the same type.
+	provisions int
+
+	// failProvide arms a one-shot failure for the next Provision call, the
+	// same one-shot pattern as the other doubles' failNext* hooks. Named
+	// failProvide, not failNextProvision, for the same reason provisions is
+	// not named provisionCalls: failNextProvision is the method a test calls
+	// to arm it.
+	failProvide error
+
+	// failCreate arms a one-shot failure for the next Create call, letting a
+	// signup test simulate "the signup insert fails" (a statement timeout, a
+	// connection blip) the same way failProvide simulates a failed
+	// Provision.
+	failCreate error
+
+	// lastPasswordHash records the passwordHash argument Provision was most
+	// recently handed, so a test can confirm Complete hashed the caller's
+	// password before ever reaching the repository rather than passing it
+	// through raw.
+	lastPasswordHash string
 }
 
 func newSignupDouble(clock *fixedClock, households *householdDouble, users *userDouble,
@@ -792,18 +873,45 @@ func newSignupDouble(clock *fixedClock, households *householdDouble, users *user
 	return &signupDouble{
 		clock: clock, households: households, users: users, members: members,
 		spaces: spaces, notifications: notifications, rows: map[string]*signupRow{},
+		emailCountOverride: map[string]int{},
 	}
 }
 
-// failNextSignupProvision arms failNextProvision: the next Provision call
-// returns err instead of provisioning anything, and every call after that
-// succeeds normally again.
-func (d *signupDouble) failNextSignupProvision(err error) {
-	d.failNextProvision = err
+// failNextProvision arms failProvide: the next Provision call returns err
+// instead of provisioning anything, and every call after that succeeds
+// normally again.
+func (d *signupDouble) failNextProvision(err error) { d.failProvide = err }
+
+// failNextCreate arms failCreate: the next Create call returns err instead of
+// persisting a row, and every call after that succeeds normally again.
+func (d *signupDouble) failNextCreate(err error) { d.failCreate = err }
+
+// setEmailCount forces the next CountForEmailSince call for this exact
+// address to report n, regardless of how many rows for it actually exist.
+func (d *signupDouble) setEmailCount(email string, n int) { d.emailCountOverride[email] = n }
+
+// setGlobalCount forces the next CountSince call to report n, regardless of
+// how many rows actually exist.
+func (d *signupDouble) setGlobalCount(n int) { d.globalCountOverride = &n }
+
+// markConsumed stamps the row for tokenHash consumed at at, for a test that
+// needs a signup which has already been used -- Preview and Complete must
+// both report ErrSignupAlreadyUsed for it, not ErrTokenExpired.
+func (d *signupDouble) markConsumed(tokenHash []byte, at time.Time) {
+	if row, ok := d.rows[string(tokenHash)]; ok {
+		row.ConsumedAt = &at
+	}
 }
 
-// count reports how many signup rows have ever been created.
-func (d *signupDouble) count() int { return len(d.rows) }
+// createCount reports how many signup rows have ever been created.
+func (d *signupDouble) createCount() int { return len(d.rows) }
+
+// provisionCalls is a read of provisions, the matching accessor to the
+// method-vs-field naming split provisions/failProvide use above.
+func (d *signupDouble) provisionCalls() int { return d.provisions }
+
+// lastProvisionPasswordHash is a read of lastPasswordHash.
+func (d *signupDouble) lastProvisionPasswordHash() string { return d.lastPasswordHash }
 
 func (d *signupDouble) byID(signupID string) *signupRow {
 	for _, row := range d.rows {
@@ -815,6 +923,11 @@ func (d *signupDouble) byID(signupID string) *signupRow {
 }
 
 func (d *signupDouble) Create(_ context.Context, email string, tokenHash []byte, expiresAt time.Time) error {
+	if d.failCreate != nil {
+		err := d.failCreate
+		d.failCreate = nil
+		return err
+	}
 	d.n++
 	d.rows[string(tokenHash)] = &signupRow{
 		ID: fmt.Sprintf("signup-%d", d.n), Email: email,
@@ -835,8 +948,16 @@ func (d *signupDouble) ByTokenHash(_ context.Context, tokenHash []byte) (usecase
 
 // CountForEmailSince mirrors CountSignupsForEmailSince: created_at >= since,
 // matched by address, with no join through users -- there is no user to join
-// to for a brand-new address.
+// to for a brand-new address. An override set via setEmailCount takes
+// precedence over the real count, for a test that wants an address "at its
+// hourly limit" without creating that many rows.
 func (d *signupDouble) CountForEmailSince(_ context.Context, email string, since time.Time) (int, error) {
+	if d.log != nil {
+		d.log.record("Signups.CountForEmailSince")
+	}
+	if n, ok := d.emailCountOverride[email]; ok {
+		return n, nil
+	}
 	n := 0
 	for _, row := range d.rows {
 		if row.Email == email && !row.CreatedAt.Before(since) {
@@ -847,8 +968,16 @@ func (d *signupDouble) CountForEmailSince(_ context.Context, email string, since
 }
 
 // CountSince mirrors CountSignupsSince: created_at >= since, over every row
-// regardless of address.
+// regardless of address. An override set via setGlobalCount takes precedence
+// over the real count, for the same reason CountForEmailSince's override
+// does.
 func (d *signupDouble) CountSince(_ context.Context, since time.Time) (int, error) {
+	if d.log != nil {
+		d.log.record("Signups.CountSince")
+	}
+	if d.globalCountOverride != nil {
+		return *d.globalCountOverride, nil
+	}
 	n := 0
 	for _, row := range d.rows {
 		if !row.CreatedAt.Before(since) {
@@ -876,11 +1005,12 @@ func (d *signupDouble) CountSince(_ context.Context, since time.Time) (int, erro
 // exactly the defect this method is supposed to make impossible.
 func (d *signupDouble) Provision(ctx context.Context, signupID, passwordHash string,
 	b usecase.HouseholdBlueprint) (usecase.ProvisionedHousehold, error) {
-	d.provisionCalls++
+	d.provisions++
+	d.lastPasswordHash = passwordHash
 
-	if d.failNextProvision != nil {
-		err := d.failNextProvision
-		d.failNextProvision = nil
+	if d.failProvide != nil {
+		err := d.failProvide
+		d.failProvide = nil
 		return usecase.ProvisionedHousehold{}, err
 	}
 
@@ -1005,14 +1135,23 @@ type signupMail struct {
 // of racing it. Waiting on a channel rather than sleeping is what keeps
 // these tests race-detector-clean and non-flaky.
 type mailerDouble struct {
-	mu             sync.Mutex
-	magicLinks     []sentMail
-	invites        []sentMail
-	signupLinks    []signupMail
-	signupExisting []signupMail
-	failNext       error
-	panicNext      string
-	sent           chan struct{}
+	mu                     sync.Mutex
+	magicLinks             []sentMail
+	invites                []sentMail
+	signupLinks            []signupMail
+	existingAccountNotices []signupMail
+	failNext               error
+	panicNext              string
+
+	// sendErr, unlike failNext, is not one-shot: it stays armed until cleared,
+	// mirroring a relay that is down for the rest of the test rather than one
+	// bad send. It gates only the two sign-up sends -- SendSignupLink and
+	// SendSignupForExistingAccount -- because failNext already covers
+	// SendMagicLink's one-shot failure case and nothing here needs to change
+	// that behaviour.
+	sendErr error
+
+	sent chan struct{}
 }
 
 func newMailerDouble() *mailerDouble {
@@ -1088,10 +1227,17 @@ func (d *mailerDouble) lastInviteURL() string {
 // slices rather than sharing one -- so a test can assert *which* of the two
 // sign-up emails went out, the same distinction that oracle
 // (SendSignupForExistingAccount's doc comment in ports.go) depends on a test
-// being able to make.
+// being able to make. Both are signalled through the same sent channel every
+// other Send* method uses, and both honour sendErr, since
+// SignupService.sendAsync fires them off the request path exactly as
+// sendMagicLinkAsync does.
 func (d *mailerDouble) SendSignupLink(_ context.Context, to, url string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	defer d.signalSent()
+	if d.sendErr != nil {
+		return d.sendErr
+	}
 	d.signupLinks = append(d.signupLinks, signupMail{To: to, URL: url})
 	return nil
 }
@@ -1099,8 +1245,22 @@ func (d *mailerDouble) SendSignupLink(_ context.Context, to, url string) error {
 func (d *mailerDouble) SendSignupForExistingAccount(_ context.Context, to, signInURL string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.signupExisting = append(d.signupExisting, signupMail{To: to, URL: signInURL})
+	defer d.signalSent()
+	if d.sendErr != nil {
+		return d.sendErr
+	}
+	d.existingAccountNotices = append(d.existingAccountNotices, signupMail{To: to, URL: signInURL})
 	return nil
+}
+
+// failEverySend arms sendErr: every subsequent SendSignupLink and
+// SendSignupForExistingAccount call returns err instead of recording a sent
+// mail, until a test clears it (no test currently does; the scenario it
+// models -- a relay that stays down -- has no reason to recover mid-test).
+func (d *mailerDouble) failEverySend(err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.sendErr = err
 }
 
 // signupLinksSentCount is a mutex-guarded read of len(signupLinks).
@@ -1118,11 +1278,12 @@ func (d *mailerDouble) lastSignupLinkURL() string {
 	return d.signupLinks[len(d.signupLinks)-1].URL
 }
 
-// signupExistingSentCount is a mutex-guarded read of len(signupExisting).
-func (d *mailerDouble) signupExistingSentCount() int {
+// existingAccountNoticesSentCount is a mutex-guarded read of
+// len(existingAccountNotices).
+func (d *mailerDouble) existingAccountNoticesSentCount() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return len(d.signupExisting)
+	return len(d.existingAccountNotices)
 }
 
 // signalSent must be called with mu held. The channel is large enough that
@@ -1157,6 +1318,37 @@ func (d *mailerDouble) waitForSend(t *testing.T) {
 	case <-d.sent:
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for the async magic-link send")
+	}
+}
+
+// waitForSends is waitForSend's counted form: it drains n signals from sent,
+// each with the same generous timeout, for a signup test that needs to know
+// the background send has landed before reading signupLinks or
+// existingAccountNotices. Like waitForSend, it exists because the send is
+// fire-and-forget from SignupService.Request's point of view -- by the time
+// Request returns, sendAsync's goroutine may not have run yet.
+func (d *mailerDouble) waitForSends(t *testing.T, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		select {
+		case <-d.sent:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for async send %d of %d", i+1, n)
+		}
+	}
+}
+
+// assertNoSendsWithin is the one place a signup test waits on the clock
+// rather than a synchronization channel, because proving a *negative* about
+// an asynchronous send -- "nothing was sent" -- has no alternative: there is
+// no event to wait for when the correct behaviour is that no event occurs.
+// It fails the test if any send signal arrives before d elapses.
+func (d *mailerDouble) assertNoSendsWithin(t *testing.T, wait time.Duration) {
+	t.Helper()
+	select {
+	case <-d.sent:
+		t.Fatal("a send happened when none was expected")
+	case <-time.After(wait):
 	}
 }
 
