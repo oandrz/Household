@@ -1,9 +1,9 @@
 # Hearth — learning log
 
-Every defect found while building slices 0 and 1, and what each one teaches.
-Written because almost none of them were caught by a failing test — they were
-caught by someone asking the right question about code that looked fine and had
-a green suite.
+Every defect found while building slices 0, 1 and self-serve sign-up, and what
+each one teaches. Written because almost none of them were caught by a failing
+test — they were caught by someone asking the right question about code that
+looked fine and had a green suite.
 
 **Read the patterns first.** They are where the value is. The catalogue below
 them is evidence, and a place to check when you touch that area.
@@ -48,6 +48,10 @@ appear?"
   different endpoint entirely.
 - `-run Lock` matched two of six lockout tests, so "six tests pass" was never
   what was verified.
+- A task brief's quoted test filters (`-run TestHousehold`, `-run TestInvite`)
+  matched **zero** tests in this repo — `go test` reports "no tests to run" for
+  a filter that matches nothing, and exits zero. A filter copied from a brief
+  is not evidence anything ran; run the whole package.
 
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration.
@@ -117,9 +121,19 @@ output.
   relay turned a non-nil result into a discrete membership signal.
 - Rate-limited requests were **faster** than unknown ones, because the count
   query joins through `users` and a stranger can never reach the limit.
+- Sign-up's per-address limit counted rows in `signups`, but only the
+  fresh-address branch ever wrote one — the registered-address branch answered
+  `202` with an "already have an account" mail without touching the table its
+  own limit was supposedly counted from. Four requests for one registered
+  address sent four such mails, then forty, then four hundred: the same
+  mailbox oracle this endpoint exists to close, expressed as unbounded mail
+  *volume* rather than a discrete signal, on the one branch nobody thought to
+  check was gated. The test that should have caught it passed anyway — its
+  double let a caller force the counter's state directly (`setEmailCount`), a
+  state no amount of real traffic sent through the real path could produce.
 
 **Ask what a caller can measure, not what it is told:** status, body, timing,
-number of round trips, whether an email arrived.
+number of round trips, whether an email arrived — and how much of it.
 
 ### 7. Floating versions break builds you did not touch
 
@@ -145,6 +159,50 @@ to `@latest`.
 
 **A config value that nothing reads is a lie. A guard that names one thing while
 protecting another is worse.**
+
+### 9. A DELETE scoped to a deliberately-nullable column spares exactly the rows that column's nullability exists to create
+
+- `ClearFailures` is `DELETE FROM login_attempts WHERE household_id = $1 AND
+  succeeded = false` — the right statement for clearing a *member's* failed
+  attempts. But `household_id` is nullable on purpose, so an attempt against
+  an address nobody recognises can still be recorded without revealing
+  whether it exists (`migrations/00002_identity.sql`). `household_id = $1`
+  cannot match `NULL`, so every row a stranger's failed guess ever created was
+  deleted by nothing, ever, while every row a real member created was cleared
+  on their next success. `login_attempts` was already unbounded before this
+  slice touched it; `signups` (this slice's own new table) does not have the
+  same defect only because nothing scopes its pruner to a household at all.
+- Found by asking "which tables can a stranger grow at will?", not by a test —
+  nothing failed, because nothing had ever asserted the unreachable rows got
+  cleaned up. `adminctl prune` now covers both tables, with a floor that
+  refuses to prune inside `domain.LockoutPolicy.Window` — deleting a row still
+  inside it would clear a live lockout as a side effect of "cleanup".
+
+**When a column is nullable for a stated reason, ask what a filter on it
+silently excludes.** A cleanup query scoped the same way a lookup query is
+scoped inherits that query's blind spot for free.
+
+### 10. Slicing a string by position, and "simple" case mapping, both assume one character is one unit
+
+- `initialOf` took `displayName[:1]` — one *byte* — to get an avatar's first
+  letter. Every ASCII name worked by accident; every multi-byte UTF-8 name
+  (anything outside Latin, plus accented Latin) produced an invalid fragment
+  that rendered as the replacement character, permanently, because there is no
+  profile-edit endpoint to fix it. Invisible for as long as every name in the
+  seed and every test fixture was ASCII.
+- Fixing that to slice the first *rune* surfaced a second, narrower gap:
+  `strings.ToUpper` is Go's *simple* case mapping, which leaves German `ß`
+  alone rather than expanding it to `SS` — simple mapping is defined to be
+  one-rune-to-one-rune, and `ß`→`SS` is not. The fix uses
+  `golang.org/x/text/cases.Upper(language.Und)`, which performs full
+  (language-independent) case mapping and can turn one rune into two, which is
+  *why* `avatar_initial` widened from `char(1)` to `text` in the same
+  migration — a one-rune expansion that `char(1)` would otherwise reject
+  outright.
+
+**Code that assumes "the first character" fits in one byte, or that upper-casing
+never changes a string's length, is written for ASCII and will not say so.**
+Both assumptions are invisible until a name that isn't ASCII reaches them.
 
 ---
 
@@ -181,6 +239,16 @@ protecting another is worse.**
 - Deleting a membership leaves the `users` row alive. Three separate symptoms
   traced to that one fact, and no task owned "what if this email already
   exists".
+- Widening a sqlc-generated params struct (`CreateHouseholdParams` gained two
+  currency fields) does not fail the build at a call site that omits the new
+  fields. sqlc generates a keyed struct literal, so Go silently zero-values
+  whatever a caller leaves out; `go build` and `go vet` both stay green — a
+  plan that predicted a compile error here was wrong. The existing round-trip
+  test asserting the persisted values, not the compiler, is what would have
+  caught a dropped field. The same keyed-literal blind spot applies to any Go
+  struct, not just sqlc's, which is why a later task re-checked all 17 call
+  sites of the higher-level `HouseholdRepository.Create` by hand for the
+  identical reason.
 
 ### HTTP layer
 
@@ -202,6 +270,14 @@ route with a missing guard has no second line of defence.
   that confused introspecting the middleware chain with observing its behaviour.
   You do not need to compare function values; you need to send a request without
   a token and assert 403.
+- `chi.middleware.RealIP` resolves the caller's address from the first
+  non-empty of `True-Client-IP`, `X-Real-IP`, then `X-Forwarded-For` — with no
+  configured trust list, so whichever of those the *client* sets outranks
+  whatever the reverse proxy appends. The sign-up per-IP limiter added here is
+  the first thing in this codebase that ever made `clientIP` a security
+  decision, and it is exactly as strong as the edge's header rewriting, no
+  stronger: one `curl -H "X-Real-IP: <vary>"` per request defeats it unless
+  the proxy blanks the client-supplied headers first.
 
 ### Frontend
 
@@ -217,6 +293,17 @@ route with a missing guard has no second line of defence.
 - Business rules were re-implemented client-side (the four-capability list,
   twice), which also made a required 422 path impossible for the UI to produce
   and therefore untested.
+- A stale error survived `SignUpScreen`'s sent-panel → form transition: a
+  failed resend, then "Use a different address", left the resend failure
+  showing under the email field. Sibling of a defect already fixed once in
+  `SignInScreen` (there, keyed off `mode` rather than cleared inside one
+  handler) — the fix did not carry to the newer screen because nothing grepped
+  for the shape.
+- A task brief's own test snippet asserted on TanStack Router's `path`, which
+  strips the leading slash on a child route (`trimPathLeft`); `fullPath`
+  reconstructs it and is what a router-walk test must read instead. Would have
+  failed against a *correct* implementation — verified against the router's
+  own source, not assumed from the property's name.
 
 ### Tooling and infrastructure
 
@@ -233,6 +320,12 @@ route with a missing guard has no second line of defence.
   `air` was only installed inside the image.
 - `readCookie` split on every `=`, truncating base64 CSRF tokens. Every mutating
   request would have failed with 403.
+- A brief told the implementer to add `--email` to `create-invite`, which
+  already declares `fs.String("email", ...)` for the invitee's address. Two
+  flags of the same name on one `FlagSet` panic **at runtime**, the first time
+  the flag set is parsed — `go build` and `go vet` both pass. Renamed to
+  `--inviter-email`, with the flag name threaded through so each caller's own
+  error names the flag it actually means.
 
 ---
 

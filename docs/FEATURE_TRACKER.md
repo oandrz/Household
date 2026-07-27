@@ -11,21 +11,26 @@ Every feature in `design/Household Dashboard.dc.html`, and whether it exists yet
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 31 of 83 features built or partly built. Everything
-complete belongs to entry, identity and household settings; nothing in Money,
-Marriage, Family or Overview has been started.
+**Where things stand:** 36 of 88 features built or partly built. Everything
+complete still belongs to entry, identity and household settings; nothing in
+Money, Marriage, Family or Overview has been started. Five of the rows below
+have no mockup of their own — the provisioning transaction behind self-serve
+sign-up, the currency list endpoint, and `adminctl prune` — because the
+design's own "Create household" screen (the `authScreen` state, and the
+sign-in footer's "No household yet? Create one") is what makes each of them
+necessary, and none has anywhere else to live in this tracker.
 
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
-| Entry & authentication | 8 | 1 | 0 | 0 |
+| Entry & authentication | 10 | 1 | 0 | 0 |
 | Navigation shell | 6 | 0 | 1 | 0 |
-| Household settings | 13 | 3 | 2 | 0 |
+| Household settings | 15 | 4 | 2 | 0 |
 | Overview (home) | 0 | 0 | 8 | 0 |
 | Money | 0 | 0 | 24 | 0 |
 | Marriage | 0 | 0 | 13 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **27** | **4** | **50** | **2** |
+| **Total** | **31** | **5** | **50** | **2** |
 
 ---
 
@@ -90,6 +95,8 @@ The full checklist is at the end of `docs/LEARNING.md`.
 | Magic link — request | ✅ | Always answers the same way whether or not the address exists |
 | Magic link — sent panel | ✅ | Carries retry copy; the send is fire-and-forget so nothing else prompts it |
 | Magic link — consume and sign in | ✅ | Works while the household is locked; that is the recovery path |
+| Create household (self-serve sign-up) | ✅ | `POST /auth/sign-up` answers `202 {"status":"accepted"}` identically for a fresh, already-registered or rate-limited address — the same enumeration-safe contract as magic link. The design's single create card is split across two screens (email only, then the rest) so the person who clicks the mailed link supplies their own details, never a stranger's |
+| Household provisioning | ✅ | One transaction creates the household, the owner, their membership, the three builtin spaces and notification preferences, with the sign-up token consumed first so two completions of one link can never both succeed |
 | Invite acceptance | ✅ | Shows inviter, household and role; warns if you are already signed in as someone else |
 | Sign out | ✅ | From the sidebar footer, returns to sign-in |
 | "Forgot?" password recovery | 🟡 | Present, and triggers a magic link. There is no separate password-reset flow — recovery is `make reset-password` from the command line |
@@ -120,13 +127,16 @@ The full checklist is at the end of `docs/LEARNING.md`.
 | Spaces list with audiences | ✅ | |
 | New space (modal) | 🟡 | Everyone and Parents only work. **Custom is shown disabled** — per-space membership is not built, and the design marks custom space pages "not built" too |
 | Space templates — Kids, Home, Travel, Blank | 🟡 | Offered; they set a suggested name and visibility. They create no pages, because custom space pages are out of scope |
+| Currency list (`GET /api/v1/currencies`) | ✅ | One server-served ISO 4217 list — only two-minor-unit codes are offered, since `Money.String()` hard-codes two decimal places. The frontend stopped keeping its own `CURRENCY_SYMBOLS` table; this backs both this panel and the sign-up form's currency select |
 | Currency and region — primary currency | ✅ | |
 | Currency and region — show second currency | ✅ | |
+| Currency and region — choose the second currency | 🟡 | No control exists to pick *what* the second currency is — only whether to show it. A household that enables the toggle cannot choose what to compare against. Self-serve sign-up sets a household's second currency equal to its primary and leaves the toggle off, which makes this gap reachable by any stranger who signs up, not only Andreas & Christine |
 | Currency and region — FX rate | 🟡 | The mode is stored and editable, but the rate itself is a fixed table. A live provider drops in behind the existing port |
 | Notifications — bill due reminders | ✅ | |
 | Notifications — overspend alerts | ✅ | |
 | Notifications — monthly retro reminder | ✅ | |
 | Notifications — weekly family digest | ✅ | |
+| Retention pruning (`adminctl prune`) | ✅ | No UI — `cmd/adminctl prune --older-than=<days>` deletes consumed/expired `signups` and stale `login_attempts` past the cutoff. Refuses anything under a seven-day floor so it can never reach inside `domain.LockoutPolicy.Window` and clear a lockout that is still live |
 | Connected accounts | ⬜ | Belongs with Money. Note that automatic bank sync is not available to an app like this — see Money below |
 
 ## 4 · Overview (home)

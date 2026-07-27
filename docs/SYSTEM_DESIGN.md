@@ -4,8 +4,10 @@ How the system is put together, how a request moves through it, and what the
 data looks like. Written so an engineer new to the project can orient in one
 sitting.
 
-**Scope:** what exists today — slices 0 and 1. Money, Marriage, Family and
-Overview are not built; see `docs/FEATURE_TRACKER.md`.
+**Scope:** what exists today — slices 0 and 1, plus self-serve sign-up and
+household provisioning, which shipped ahead of slice 2 in the build order (see
+`docs/HANDOVER.md`). Money, Marriage, Family and Overview are not built; see
+`docs/FEATURE_TRACKER.md`.
 
 ---
 
@@ -37,14 +39,24 @@ the Go service; in production nginx serves the built bundle and proxies the same
 path. There is no CORS configuration anywhere, because there is never a
 cross-origin request.
 
-`api` declares `depends_on: migrate` with `service_completed_successfully`, so
-the schema is always applied before the service starts — including when someone
-runs `docker compose up` directly rather than `make up`.
+`api` declares `depends_on: migrate` with `service_completed_successfully`, so a
+fresh `docker compose up` always applies the schema before `api` starts. That
+guarantee has a gap `make up` does not close: Compose only re-evaluates a
+`depends_on` condition when it recreates the *depending* service, so a stack
+left running across a newly added migration keeps its already-succeeded
+`migrate` container and never reruns it — `make up` against an already-running
+stack silently misses new migrations. `make dev-local` sidesteps this by
+running `make migrate` explicitly before it starts anything; `make up` and a
+bare `docker compose up` do not. See `docs/HANDOVER.md`.
 
-**Production differs in two ways that matter:** the `web` container is nginx
-serving static files, and TLS termination in front is mandatory — cookies are
+**Production differs in three ways that matter:** the `web` container is nginx
+serving static files; TLS termination in front is mandatory — cookies are
 `Secure` outside development, so without TLS the browser never returns the
-session cookie.
+session cookie; and only nginx's config sets `X-Real-IP` to `$remote_addr` and
+suppresses `True-Client-IP`, which is what stops a client from spoofing the
+sign-up per-IP rate limiter's key (§4). Development has no nginx service at
+all — Vite proxies `/api` straight to `api:8080` with no header rewriting — so
+the per-IP limiter is fully spoofable there; see `docs/HANDOVER.md`.
 
 ---
 
@@ -57,7 +69,7 @@ enforces it mechanically — including in test files.
 graph TD
     subgraph cmd["cmd/"]
         Main["cmd/api — wiring"]
-        Admin["cmd/adminctl — seed, reset-password,<br/>unlock-household, create-invite"]
+        Admin["cmd/adminctl — seed, reset-password,<br/>unlock-household, create-invite, prune"]
     end
 
     subgraph adapters["internal/adapter/ — implements the ports"]
@@ -72,6 +84,7 @@ graph TD
     subgraph usecase["internal/usecase/ — services + ports.go"]
         Auth["AuthService"]
         Invite["InviteService"]
+        Signup["SignupService"]
         Member["MemberService"]
         House["HouseholdService"]
         Seed["Seed"]
@@ -116,7 +129,7 @@ points inward, which is why every service is testable against in-memory doubles.
 | Port | Implemented by | Notes |
 |---|---|---|
 | `UserRepository` | `adapter/postgres` | Includes the transactional `CreateWithMembership` |
-| `HouseholdRepository`, `MembershipRepository`, `SessionRepository`, `MagicLinkRepository`, `LoginAttemptRepository`, `InviteRepository`, `SpaceRepository`, `NotificationRepository` | `adapter/postgres` | Nine narrow repositories rather than one wide one |
+| `HouseholdRepository`, `MembershipRepository`, `SessionRepository`, `MagicLinkRepository`, `LoginAttemptRepository`, `InviteRepository`, `SignupRepository`, `SpaceRepository`, `NotificationRepository` | `adapter/postgres` | Ten narrow repositories rather than one wide one |
 | `PasswordHasher`, `TokenGenerator` | `adapter/crypto` | argon2id with cost from config; tokens are random, stored hashed |
 | `Mailer` | `adapter/mail` | SMTP; TLS policy and credentials from config |
 | `Clock` | `adapter/clock` | So lockout windows and expiry are deterministic in tests |
@@ -125,6 +138,13 @@ points inward, which is why every service is testable against in-memory doubles.
 `BankSyncProvider` is specified but has no consumer yet — it arrives with the
 Money slice, with manual and CSV adapters. Automatic sync via SGFinDex is not
 available to an app like this.
+
+`LoginAttemptRepository` and `SignupRepository` both carry a `Prune(ctx,
+before)` method, added together because both back the two tables a stranger
+can grow without ever holding an account (§6 explains why). `adminctl prune`
+is their only caller, and refuses an `--older-than` under seven days so it can
+never reach inside `domain.LockoutPolicy.Window` and clear a lockout that is
+still live.
 
 ---
 
@@ -138,7 +158,7 @@ graph TD
     Req["Request"] --> RID["RequestID · RealIP · Recoverer<br/>(recoverer writes the standard error envelope)"]
     RID --> Public{"Public route?"}
 
-    Public -->|"sign-in, magic-link,<br/>magic-link/consume,<br/>invites/{token}"| Handler
+    Public -->|"sign-in, magic-link,<br/>magic-link/consume,<br/>invites/{token},<br/>sign-up*, currencies"| Handler
     Public -->|no| Session["requireSession<br/>reads hearth_session cookie,<br/>re-reads membership from the DB,<br/>extends when under a day remains"]
 
     Session --> Safe{"GET or HEAD?"}
@@ -162,6 +182,13 @@ graph TD
 A capability change therefore takes effect on the caller's very next request;
 session revocation is belt-and-braces rather than the enforcement mechanism.
 
+`POST /auth/sign-up` is the one public route wrapped in an extra middleware,
+`rateLimitByIP` — a per-process, in-memory token bucket keyed on the request's
+resolved IP (10/hour). It is the only sign-up route that can trigger outbound
+mail without a token already proving an address, so it is the one an unbounded
+loop would hit; the preview and complete routes need a token that was mailed
+to a real address and so are not on that path.
+
 ### Route table
 
 | Method | Path | Guards |
@@ -169,19 +196,27 @@ session revocation is belt-and-braces rather than the enforcement mechanism.
 | POST | `/auth/sign-in` | none — this *is* the credential check |
 | POST | `/auth/magic-link` | none — always 202 |
 | POST | `/auth/magic-link/consume` | none — the token is the credential |
+| POST | `/auth/sign-up` | none, plus a per-IP token bucket (10/hour) — always 202, the same silent contract as magic-link |
+| GET | `/auth/sign-up/{token}` | none — the token is the credential |
+| POST | `/auth/sign-up/{token}/complete` | none |
 | GET | `/auth/me` | session |
 | POST | `/auth/sign-out` | session · CSRF |
 | GET | `/invites/{token}` | none — the token is the credential |
 | POST | `/invites/{token}/accept` | none |
+| GET | `/currencies` | none — read before a session exists (sign-up's currency select) and after one (Settings) |
 | GET | `/household`, `/household/members`, `/spaces`, `/notification-preferences` | session |
 | PATCH | `/household`, `/notification-preferences` | session · CSRF · owner |
 | POST | `/household/members/invite`, `/spaces` | session · CSRF · owner |
 | PATCH · DELETE | `/household/members/{id}` | session · CSRF · owner |
 | GET | `/healthz`, `/readyz` | none — outside `/api/v1` |
 
-Two test matrices walk the live router and assert this: every non-public route
-rejects an unauthenticated caller, and every owner-gated route rejects a limited
-member. A route added without its guard fails a test rather than shipping.
+Three test matrices walk the live router and assert this: every non-public
+route rejects an unauthenticated caller, every mutating route requires CSRF,
+and every owner-gated route rejects a limited member. A route added without
+its guard fails a test rather than shipping — all three matrices name the
+sign-up and currency routes explicitly rather than exempting a whole prefix,
+so a future route added under `/auth/sign-up` is walked and checked like any
+other rather than silently waved through.
 
 ---
 
@@ -281,6 +316,63 @@ All three writes are one transaction. Split apart, a failure in the middle leave
 an orphaned user holding the unique email index and the invite becomes
 permanently unacceptable. The invite is claimed *first*, so two concurrent
 accepts serialise on that row and the loser gets a clean conflict.
+
+### Self-serve sign-up — provisioning is one transaction
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant S as SignupService
+    participant R as SignupRepo
+    participant DB as Postgres
+
+    B->>S: POST /auth/sign-up/{token}/complete
+    S->>R: ByTokenHash, then TokenLifecycle
+    S->>S: validate household name, display name,<br/>currency, password
+    S->>S: hash password
+    S->>R: Provision(...)
+    R->>DB: BEGIN
+    R->>DB: consume signup (guarded UPDATE, first)
+    R->>DB: create household
+    R->>DB: create owner user
+    R->>DB: create owner membership
+    R->>DB: create the three builtin spaces
+    R->>DB: upsert notification preferences
+    R->>DB: COMMIT
+    S-->>B: 200 + session cookie, via the same completeSignIn<br/>sign-in and invite acceptance use
+```
+
+A household can now come into existence three ways: `adminctl seed`
+(development only), an invite accepted into a household that already exists,
+and this — a stranger with no prior relationship to anyone provisions their
+own. `Provision` is one transaction for the same reason
+`InviteRepository.Accept` is: a failure partway through would leave a `users`
+row occupying `users.email`'s unique index with no membership under it, and
+that address could then never sign up again — there is no retry that could
+create a second user with the same email.
+
+The signup is consumed *first*, before any insert — not last, the way it reads
+most naturally if you write it top-down. With consume-last, the guarded
+`UPDATE` would still run, but it would not be what stops two concurrent
+completions of one token: `users.email`'s unique index would be, because the
+second `CreateUser` collides on it. That gets the loser `409 ALREADY_EXISTS`
+instead of the correct `410 TOKEN_EXPIRED`, and turns the guard into
+decoration. Consume-first makes the guarded `UPDATE` itself the real
+serialiser — the same choice `InviteRepository.Accept` already made by
+marking the invite accepted before writing anything else.
+
+`Request` (not diagrammed — it always answers `202` with nothing to show for
+it) mirrors the magic-link flow's silence: the per-address count and the
+"does this address have an account" read both run unconditionally, in the
+same order, on every call. **Both branches now write a `signups` row** too —
+a fresh address via `Create`, a registered one via `CreateConsumed` (a row
+born already consumed, so it can never provision anything and its token is
+never mailed). That second write exists purely so the registered branch's own
+rate-limit counter advances: without it, an already-registered address could
+be sent unlimited "you already have an account" mail while a fresh address's
+mail stopped at three an hour — the exact oracle this endpoint exists to
+close, expressed as mail volume instead of a status code. See
+`docs/LEARNING.md`.
 
 ### What the frontend loads
 
@@ -429,16 +521,25 @@ web/src/
                        401 handling
   components/          generic primitives only (Modal, on native <dialog>)
   features/
-    auth/              sign-in, invite, magic-link screens and hooks
+    auth/              sign-in, invite, magic-link, sign-up screens and hooks
     shell/             AppShell, Sidebar, RequireAuth, RequireCapability
     settings/          members, spaces, currency, notifications
     placeholder/       named stand-ins for unbuilt areas
-  routes/router.tsx    the route tree
+  routes/router.tsx        the route tree
+  routes/publicRoutes.ts   the one list of pre-auth routes and API prefixes;
+                           a test walks the route tree and fails if a
+                           pre-auth screen escapes it
 ```
 
 **Route guards are presentation, not security.** The server enforces
 independently; `RequireAuth` and `RequireCapability` exist so the UI does not
 render something the user will be refused.
+
+`publicRoutes.ts` replaces two hand-maintained lists that used to live in
+`api/client.ts` and `api/unauthorizedRedirect.ts`, with nothing tying either to
+the route tree — the exact gap that once let the 401 handler bounce a pre-auth
+screen off itself. Sign-up added two more pre-auth routes and one more API
+prefix, which is what made the duplication stop being optional.
 
 ---
 
@@ -452,6 +553,8 @@ render something the user will be refused.
 | CSRF | double-submit cookie, compared in constant time, mutating methods only |
 | Mail | Mailpit in development; TLS policy and credentials from config elsewhere |
 | Seeding | `adminctl seed`, refused unless `APP_ENV=development` **and** the database host is local — both checked before the connection opens |
+| Retention | `adminctl prune --older-than=<days>` (default 30, floor 7) deletes consumed/expired `signups` and stale `login_attempts`; `magic_links`, `invites` and `sessions` still grow forever |
+| Rate limiting | Per-address (3/hour) and a global daily ceiling (200), both counted from `signups` so a restart cannot reset them; per-IP (10/hour) is an in-memory token bucket in the HTTP layer — process-local, spoofable in development (see §1) |
 | Health | `/healthz` ignores the database; `/readyz` pings it |
 
 ---
