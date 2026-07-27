@@ -35,6 +35,18 @@ func (r *SignupRepo) Create(ctx context.Context, email string, tokenHash []byte,
 	}), "create signup")
 }
 
+// CreateConsumed writes a row via CreateConsumedSignup, whose own doc comment
+// (queries/signup.sql) explains why: it is what makes
+// CountForEmailSince/CountSince advance for a registered address, the same
+// way Create advances them for a fresh one.
+func (r *SignupRepo) CreateConsumed(ctx context.Context, email string, tokenHash []byte, expiresAt time.Time) error {
+	return translate(r.q.CreateConsumedSignup(ctx, sqlcgen.CreateConsumedSignupParams{
+		Email:     email,
+		TokenHash: tokenHash,
+		ExpiresAt: timestamptz(expiresAt),
+	}), "create consumed signup")
+}
+
 func (r *SignupRepo) ByTokenHash(ctx context.Context, tokenHash []byte) (usecase.SignupDetails, error) {
 	row, err := r.q.GetSignupByTokenHash(ctx, tokenHash)
 	if err != nil {

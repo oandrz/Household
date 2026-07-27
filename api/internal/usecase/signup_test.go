@@ -78,6 +78,21 @@ func TestSignupRequestIsIndistinguishableAcrossBranches(t *testing.T) {
 				f.signups.failNextCreate(errors.New("statement timeout"))
 			},
 		},
+		{
+			// Sibling of "the signup insert fails" above, for the write the
+			// fix round added: a registered address's branch now writes a row
+			// too (CreateConsumed, not Create), and that write can fail in
+			// exactly the same way.
+			name:  "the signup insert fails for a registered address",
+			email: "dbdown2@example.test",
+			setUp: func(t *testing.T, f *signupFixture) {
+				f.users.put(usecase.StoredUser{
+					User:         domain.User{ID: "u2", Email: "dbdown2@example.test", DisplayName: "Ade"},
+					PasswordHash: "hashed:whatever",
+				})
+				f.signups.failNextCreate(errors.New("statement timeout"))
+			},
+		},
 	}
 
 	for _, b := range branches {
@@ -127,7 +142,7 @@ func TestSignupRequestMailsBothBranches(t *testing.T) {
 		}
 	})
 
-	t.Run("registered address gets an existing-account notice with no token", func(t *testing.T) {
+	t.Run("registered address gets an existing-account notice with no usable token", func(t *testing.T) {
 		f := newSignupFixture(t)
 		f.users.put(usecase.StoredUser{
 			User:         domain.User{ID: "u1", Email: "taken@example.test", DisplayName: "Ade"},
@@ -143,10 +158,22 @@ func TestSignupRequestMailsBothBranches(t *testing.T) {
 		if n := len(f.mailer.signupLinks); n != 0 {
 			t.Fatalf("sent %d signup links to a registered address, want 0", n)
 		}
-		// No signup row was written, so there is no token that could provision
-		// a second household for this address.
-		if f.signups.createCount() != 0 {
-			t.Fatalf("wrote %d signup rows for a registered address, want 0", f.signups.createCount())
+		// A signup row IS written here (fix round: this is what makes
+		// CountForEmailSince/CountSince advance for this branch, the same way
+		// they advance for a fresh one -- see Request's doc comment). But the
+		// row is written already-consumed, via CreateConsumed rather than
+		// Create, so it can never provision a second household for this
+		// address: Provision's guarded UPDATE (ConsumeSignup) requires
+		// consumed_at IS NULL.
+		if got := f.signups.createCount(); got != 1 {
+			t.Fatalf("wrote %d signup rows for a registered address, want 1 (a pre-consumed counter row)", got)
+		}
+		var consumed bool
+		for _, row := range f.signups.rows {
+			consumed = row.ConsumedAt != nil
+		}
+		if !consumed {
+			t.Fatal("the row written for a registered address must be pre-consumed, not a live token")
 		}
 	})
 
@@ -177,6 +204,50 @@ func TestSignupRequestMailsBothBranches(t *testing.T) {
 				}
 				f.mailer.assertNoSendsWithin(t, 100*time.Millisecond)
 			})
+		}
+	})
+}
+
+// TestSignupRequestRateLimitAppliesThroughRealCounters is the fix-round test:
+// it drives the per-address limit through the real CountForEmailSince path --
+// repeated calls to Request -- rather than through setEmailCount, which only
+// proves the shared `if` has the right shape, not that the counter it reads
+// is ever populated on both branches. Before the fix, CountForEmailSince
+// never saw a row for a registered address (nothing ever wrote one), so its
+// count stayed at zero forever and the registered subtest below would send an
+// existing-account notice on every one of the four calls instead of exactly
+// three.
+func TestSignupRequestRateLimitAppliesThroughRealCounters(t *testing.T) {
+	t.Run("a registered address gets no more than three existing-account notices", func(t *testing.T) {
+		f := newSignupFixture(t)
+		f.users.put(usecase.StoredUser{
+			User:         domain.User{ID: "u1", Email: "taken@example.test", DisplayName: "Ade"},
+			PasswordHash: "hashed:whatever",
+		})
+
+		for i := 0; i < 4; i++ {
+			if err := f.svc.Request(context.Background(), "taken@example.test"); err != nil {
+				t.Fatalf("Request #%d: %v", i+1, err)
+			}
+		}
+		f.mailer.waitForSends(t, 3)
+		if n := len(f.mailer.existingAccountNotices); n != 3 {
+			t.Fatalf("sent %d existing-account notices for 4 requests, want 3 -- "+
+				"the 4th call must be silently rate-limited, not mailed", n)
+		}
+	})
+
+	t.Run("a fresh address gets no more than three sign-up links", func(t *testing.T) {
+		f := newSignupFixture(t)
+
+		for i := 0; i < 4; i++ {
+			if err := f.svc.Request(context.Background(), "fresh@example.test"); err != nil {
+				t.Fatalf("Request #%d: %v", i+1, err)
+			}
+		}
+		f.mailer.waitForSends(t, 3)
+		if n := len(f.mailer.signupLinks); n != 3 {
+			t.Fatalf("sent %d signup links for 4 requests, want 3", n)
 		}
 	})
 }

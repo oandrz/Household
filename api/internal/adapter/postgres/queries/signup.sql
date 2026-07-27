@@ -2,6 +2,19 @@
 INSERT INTO signups (email, token_hash, expires_at)
 VALUES ($1, $2, $3);
 
+-- CreateConsumedSignup writes a signup row that is already consumed at insert
+-- time. It exists so SignupService.Request can rate-limit a registered
+-- address by the same counters (CountSignupsForEmailSince,
+-- CountSignupsSince) a fresh address is limited by: those counters read this
+-- table regardless of consumed_at, but nothing ever wrote a row here for the
+-- registered branch before this query existed, so its counters stayed at
+-- zero forever and the limit never fired for it. A row inserted through this
+-- query can never provision anything -- ConsumeSignup's guard requires
+-- consumed_at IS NULL -- so it exists solely to be counted, never mailed.
+-- name: CreateConsumedSignup :exec
+INSERT INTO signups (email, token_hash, expires_at, consumed_at)
+VALUES ($1, $2, $3, now());
+
 -- name: GetSignupByTokenHash :one
 SELECT id, email, expires_at, consumed_at
 FROM signups

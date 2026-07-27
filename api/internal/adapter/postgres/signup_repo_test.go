@@ -39,6 +39,52 @@ func TestSignupRepoRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSignupRepoCreateConsumedWritesAnInertCounterRow exercises
+// CreateConsumedSignup for real, against a real Postgres instance -- nothing
+// else in this package or in usecase's tests ever executes that SQL, since
+// signupDouble only simulates it. It confirms the fix-round property the
+// query exists for: the row is written already consumed, so it counts toward
+// CountForEmailSince (what fixes the rate-limit finding) but can never
+// provision anything.
+func TestSignupRepoCreateConsumedWritesAnInertCounterRow(t *testing.T) {
+	db := openTestDB(t)
+	repo := postgres.NewSignupRepo(db)
+	ctx := context.Background()
+
+	expires := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
+	hash := []byte("consumed-hash-eeeeeeeeeeeeeeeeee")
+	if err := repo.CreateConsumed(ctx, "taken@example.test", hash, expires); err != nil {
+		t.Fatalf("CreateConsumed: %v", err)
+	}
+
+	got, err := repo.ByTokenHash(ctx, hash)
+	if err != nil {
+		t.Fatalf("ByTokenHash: %v", err)
+	}
+	if got.ConsumedAt == nil {
+		t.Fatal("ConsumedAt is nil, want it stamped at insert time")
+	}
+	if got.Email != "taken@example.test" {
+		t.Fatalf("Email = %q, want taken@example.test", got.Email)
+	}
+
+	count, err := repo.CountForEmailSince(ctx, "taken@example.test", time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("CountForEmailSince: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("CountForEmailSince = %d, want 1 -- this is the entire reason CreateConsumed exists", count)
+	}
+
+	blueprint, err := usecase.NewSignupBlueprint("Someone Else's Household", "Stranger", "SGD")
+	if err != nil {
+		t.Fatalf("NewSignupBlueprint: %v", err)
+	}
+	if _, err := repo.Provision(ctx, got.ID, "hashed-password", blueprint); !errors.Is(err, domain.ErrTokenExpired) {
+		t.Fatalf("error = %v, want domain.ErrTokenExpired -- a pre-consumed row must never provision a household", err)
+	}
+}
+
 func TestSignupRepoByTokenHashReportsNotFound(t *testing.T) {
 	repo := postgres.NewSignupRepo(openTestDB(t))
 	_, err := repo.ByTokenHash(context.Background(), []byte("no-such-hash-bbbbbbbbbbbbbbbbbbb"))

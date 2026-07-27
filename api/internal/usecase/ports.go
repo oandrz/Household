@@ -229,12 +229,28 @@ type ProvisionedHousehold struct {
 
 type SignupRepository interface {
 	Create(ctx context.Context, email string, tokenHash []byte, expiresAt time.Time) error
+	// CreateConsumed writes a signup row that is already consumed at insert
+	// time -- consumed_at is set to now in the same statement, not stamped
+	// afterward. SignupService.Request calls this on the already-registered
+	// branch instead of Create, so that branch also advances
+	// CountForEmailSince/CountSince: those counters read every row in this
+	// table regardless of consumed_at, but before this method existed,
+	// nothing was ever written here for a registered address, so its
+	// counters stayed at zero forever and signupPerHourLimit/
+	// signupGlobalDailyLimit never fired for that branch no matter how many
+	// requests arrived (see the fix-round note in signup.go's Request doc
+	// comment). A row created this way can never provision anything --
+	// Provision's guarded UPDATE (ConsumeSignup) requires consumed_at IS
+	// NULL -- so it exists solely to be counted, and its token is never
+	// mailed to anyone.
+	CreateConsumed(ctx context.Context, email string, tokenHash []byte, expiresAt time.Time) error
 	ByTokenHash(ctx context.Context, tokenHash []byte) (SignupDetails, error)
 	// CountForEmailSince counts sign-up requests for one address since a
-	// cutoff. Unlike MagicLinkRepository.CountSince it does not join through
-	// users -- there is no user to join to -- so it can report a non-zero count
-	// for an address with no account, and must: a limit that could only be hit
-	// by a registered address would itself distinguish the two.
+	// cutoff, over rows written by both Create and CreateConsumed. Unlike
+	// MagicLinkRepository.CountSince it does not join through users -- there
+	// is no user to join to -- so it can report a non-zero count for an
+	// address with no account, and must: a limit that could only be hit by
+	// a registered address would itself distinguish the two.
 	CountForEmailSince(ctx context.Context, email string, since time.Time) (int, error)
 	// CountSince counts every sign-up request since a cutoff, for the global
 	// daily mail ceiling. It reads the table rather than an in-memory counter

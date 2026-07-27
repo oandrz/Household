@@ -65,6 +65,31 @@ func (q *Queries) CountSignupsSince(ctx context.Context, createdAt pgtype.Timest
 	return count, err
 }
 
+const createConsumedSignup = `-- name: CreateConsumedSignup :exec
+INSERT INTO signups (email, token_hash, expires_at, consumed_at)
+VALUES ($1, $2, $3, now())
+`
+
+type CreateConsumedSignupParams struct {
+	Email     string
+	TokenHash []byte
+	ExpiresAt pgtype.Timestamptz
+}
+
+// CreateConsumedSignup writes a signup row that is already consumed at insert
+// time. It exists so SignupService.Request can rate-limit a registered
+// address by the same counters (CountSignupsForEmailSince,
+// CountSignupsSince) a fresh address is limited by: those counters read this
+// table regardless of consumed_at, but nothing ever wrote a row here for the
+// registered branch before this query existed, so its counters stayed at
+// zero forever and the limit never fired for it. A row inserted through this
+// query can never provision anything -- ConsumeSignup's guard requires
+// consumed_at IS NULL -- so it exists solely to be counted, never mailed.
+func (q *Queries) CreateConsumedSignup(ctx context.Context, arg CreateConsumedSignupParams) error {
+	_, err := q.db.Exec(ctx, createConsumedSignup, arg.Email, arg.TokenHash, arg.ExpiresAt)
+	return err
+}
+
 const createSignup = `-- name: CreateSignup :exec
 INSERT INTO signups (email, token_hash, expires_at)
 VALUES ($1, $2, $3)

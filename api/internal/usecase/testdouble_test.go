@@ -936,6 +936,26 @@ func (d *signupDouble) Create(_ context.Context, email string, tokenHash []byte,
 	return nil
 }
 
+// CreateConsumed mirrors CreateConsumedSignup: a row is written exactly like
+// Create's, except ConsumedAt is stamped at insertion rather than left nil.
+// It shares failCreate with Create -- both are "the signup insert failed",
+// and a test arming one has no reason to care which of the two branches
+// happens to call it.
+func (d *signupDouble) CreateConsumed(_ context.Context, email string, tokenHash []byte, expiresAt time.Time) error {
+	if d.failCreate != nil {
+		err := d.failCreate
+		d.failCreate = nil
+		return err
+	}
+	d.n++
+	now := d.clock.Now()
+	d.rows[string(tokenHash)] = &signupRow{
+		ID: fmt.Sprintf("signup-%d", d.n), Email: email,
+		CreatedAt: now, ExpiresAt: expiresAt, ConsumedAt: &now,
+	}
+	return nil
+}
+
 func (d *signupDouble) ByTokenHash(_ context.Context, tokenHash []byte) (usecase.SignupDetails, error) {
 	row, ok := d.rows[string(tokenHash)]
 	if !ok {

@@ -81,7 +81,7 @@ type SignupPreview struct {
 // observable difference between those would let a caller discover which
 // addresses are registered.
 //
-// Three properties make that true, and all three are load-bearing:
+// Four properties make that true, and all four are load-bearing:
 //
 //  1. All three reads below run unconditionally, in this fixed order, on every
 //     call. RequestMagicLink once returned as soon as its rate-limit check
@@ -94,13 +94,30 @@ type SignupPreview struct {
 //     relay cannot make the fresh-address branch measurably slower than the
 //     others.
 //
-//  3. Everything after the branch point -- token generation, the INSERT, the
-//     send -- is reachable only by a fresh, under-limit address, so a
-//     propagated error from any of them would be a discrete yes/no oracle for
-//     "is this address registered", cheaper to exploit than any timing
-//     measurement. Each is logged at error level with a hashed address and
-//     returns nil instead. ANYONE ADDING A STEP BELOW THE BRANCH POINT OWES IT
-//     THE SAME TREATMENT.
+//  3. Both branches write a signups row, through Create or CreateConsumed,
+//     using the same generated token -- not just the same reads, the same
+//     writes. This closed a fix-round finding: CountForEmailSince/CountSince
+//     count rows in that table, and the only writer used to be Create on the
+//     fresh branch. An already-registered address's counters therefore never
+//     advanced no matter how many requests arrived for it, so the shared
+//     rate-limit check below gated the fresh branch in practice and the
+//     registered branch never -- POST /auth/sign-up four times for a
+//     registered address sent four (then forty, then four hundred)
+//     "you already have an account" mails with no ceiling, which is the exact
+//     mailbox oracle SendSignupForExistingAccount's own doc comment exists to
+//     close, expressed as unbounded volume rather than presence-or-absence.
+//     CreateConsumed's row can never provision anything (Provision's guarded
+//     UPDATE requires consumed_at IS NULL) and its token is never mailed; it
+//     exists solely to be counted, so the limit is now real on both branches,
+//     which is what CountForEmailSince's doc comment already claimed.
+//
+//  4. Everything after the branch point -- token generation, the INSERT, the
+//     send -- is reachable by both a fresh and a registered under-limit
+//     address, so a propagated error from any of them would be a discrete
+//     yes/no oracle for "is this address registered", cheaper to exploit than
+//     any timing measurement. Each is logged at error level with a hashed
+//     address and returns nil instead. ANYONE ADDING A STEP BELOW THE BRANCH
+//     POINT OWES IT THE SAME TREATMENT.
 func (s *SignupService) Request(ctx context.Context, email string) error {
 	now := s.d.Clock.Now()
 
@@ -121,7 +138,8 @@ func (s *SignupService) Request(ctx context.Context, email string) error {
 	// Both limits gate both branches. If only the fresh-address branch were
 	// gated, someone could flood a registered address's inbox with
 	// existing-account notices, and the differing behaviour would itself
-	// distinguish the two cases.
+	// distinguish the two cases. This check is only as real as the counters
+	// it reads, which is why every branch below writes a row for it to count.
 	if addressCount >= signupPerHourLimit || globalCount >= signupGlobalDailyLimit {
 		slog.Info("sign-up request declined by a rate limit",
 			"email_hash", hashPrefix(s.d.Tokens.HashToken(email), 12),
@@ -131,22 +149,35 @@ func (s *SignupService) Request(ctx context.Context, email string) error {
 		return nil
 	}
 
-	if alreadyRegistered {
-		// No token, no signup row: there is nothing for this person to
-		// provision. The mail still goes, because its absence would be the
-		// oracle.
-		s.sendAsync(func(ctx context.Context) error {
-			return s.d.Mailer.SendSignupForExistingAccount(ctx, email, s.d.BaseURL+"/sign-in")
-		}, email, "existing account notice")
-		return nil
-	}
-
+	// One token generated here, before the branch, and used by whichever
+	// branch runs -- not because the registered branch's token is ever used
+	// for anything (it is never mailed and its row is inserted pre-consumed),
+	// but so a token-generation failure is handled identically for both
+	// branches by construction, rather than by two copies of the same
+	// failure-handling code.
 	raw, hash, err := s.d.Tokens.NewToken()
 	if err != nil {
 		slog.Error("sign-up token generation failed",
 			"error", err, "email_hash", hashPrefix(s.d.Tokens.HashToken(email), 12))
 		return nil
 	}
+
+	if alreadyRegistered {
+		// This row can never provision anything -- see CreateConsumed's doc
+		// comment in ports.go -- and its token is never mailed. It exists so
+		// this branch's own CountForEmailSince/CountSince advance, the same
+		// way Create makes the fresh branch's advance below.
+		if err := s.d.Signups.CreateConsumed(ctx, email, hash, now.Add(SignupTTL)); err != nil {
+			slog.Error("sign-up persistence failed (existing-account counter row)",
+				"error", err, "email_hash", hashPrefix(s.d.Tokens.HashToken(email), 12))
+			return nil
+		}
+		s.sendAsync(func(ctx context.Context) error {
+			return s.d.Mailer.SendSignupForExistingAccount(ctx, email, s.d.BaseURL+"/sign-in")
+		}, email, "existing account notice")
+		return nil
+	}
+
 	if err := s.d.Signups.Create(ctx, email, hash, now.Add(SignupTTL)); err != nil {
 		slog.Error("sign-up persistence failed",
 			"error", err, "email_hash", hashPrefix(s.d.Tokens.HashToken(email), 12))
