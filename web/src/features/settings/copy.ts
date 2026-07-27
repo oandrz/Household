@@ -49,16 +49,10 @@ export function spaceAudienceLabel(space: {
   return "Everyone";
 }
 
-// "SGD (S$)" -- only the currencies this household's design and seed data
-// actually use. An unrecognised code renders as the bare code rather than
-// guessing at a symbol the backend hasn't told us.
-const CURRENCY_SYMBOLS: Record<string, string> = {
-  SGD: "S$",
-  IDR: "Rp",
-  USD: "$",
-};
-
-export function currencyLabel(code: string): string {
-  const symbol = CURRENCY_SYMBOLS[code];
+// The symbol now comes from GET /api/v1/currencies rather than a list
+// maintained here -- one list, and it lives in the backend. Callers that have
+// not loaded the currency list yet pass nothing and get the bare code, which is
+// what an unrecognised code always rendered as.
+export function currencyLabel(code: string, symbol?: string): string {
   return symbol ? `${code} (${symbol})` : code;
 }

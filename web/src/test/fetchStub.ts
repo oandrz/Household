@@ -8,7 +8,17 @@
 // passing by accident.
 import { vi } from "vitest";
 
-export type RouteResponse = { status: number; body: unknown };
+export type RouteResponse = {
+  status: number;
+  body: unknown;
+  // Optional per-route hook invoked with the parsed request body (JSON.parse'd
+  // from `init.body`, or undefined if the request carried none) whenever this
+  // route is matched. Kept here, not as a global fetch spy, so the stub stays
+  // the single place a test describes the network -- a test that wants to
+  // assert what a component posted reads it from the same map it registered
+  // the response in, rather than reaching into fetchMock.mock.calls.
+  capture?: (body: unknown) => void;
+};
 
 // A route may be given one response (returned for every call to it) or a
 // list (consumed in order; the last entry repeats once the list runs out --
@@ -38,6 +48,10 @@ export function stubFetchRoutes(routes: Record<string, RouteEntry>) {
       );
     }
     const next = queue.length > 1 ? queue.shift()! : queue[0];
+    if (next.capture) {
+      const rawBody = init?.body;
+      next.capture(typeof rawBody === "string" ? JSON.parse(rawBody) : rawBody);
+    }
     return new Response(JSON.stringify(next.body), {
       status: next.status,
       headers: { "Content-Type": "application/json" },

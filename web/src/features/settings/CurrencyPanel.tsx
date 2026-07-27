@@ -13,7 +13,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../../api/client";
 import { apiErrorMessage } from "../auth/copy";
 import { householdSchema, type Household } from "../auth/schemas";
-import { useMe } from "../auth/useAuth";
+import { useCurrencies, useMe } from "../auth/useAuth";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { currencyLabel } from "./copy";
 
@@ -67,7 +67,16 @@ export function CurrencyPanel() {
   const me = useMe();
   const household = useHousehold();
   const updateHousehold = useUpdateHousehold();
+  const currencies = useCurrencies();
   const isOwner = me.data?.membership.role === "owner";
+
+  // The served list is the one place a symbol comes from now -- see
+  // copy.ts's currencyLabel. An unrecognised or not-yet-loaded code simply
+  // has no match here, and currencyLabel already renders the bare code for
+  // that case.
+  const primarySymbol = currencies.data?.currencies.find(
+    (c) => c.code === household.data?.primaryCurrency,
+  )?.symbol;
 
   // currencyInput mirrors household.data.primaryCurrency until the owner
   // starts typing (currencyTouched) -- the "derive state from props during
@@ -148,7 +157,7 @@ export function CurrencyPanel() {
               </form>
             ) : (
               <span className="rounded-lg border border-hairline px-3 py-1.5 font-semibold text-ink">
-                {currencyLabel(household.data.primaryCurrency)}
+                {currencyLabel(household.data.primaryCurrency, primarySymbol)}
               </span>
             )}
           </div>

@@ -10,6 +10,21 @@ import { CurrencyPanel } from "./CurrencyPanel";
 
 const ME_URL = "/api/v1/auth/me";
 const HOUSEHOLD_URL = "/api/v1/household";
+const CURRENCIES_URL = "/api/v1/currencies";
+
+// CurrencyPanel now calls useCurrencies() unconditionally (it needs the
+// served symbol for the non-owner label), so every test's stub must answer
+// it -- matching this codebase's rule that every request a component can
+// make gets registered, not just the ones a given test happens to assert on.
+function currenciesFixture() {
+  return {
+    currencies: [
+      { code: "SGD", symbol: "S$", name: "Singapore dollar" },
+      { code: "IDR", symbol: "Rp", name: "Indonesian rupiah" },
+      { code: "USD", symbol: "$", name: "US dollar" },
+    ],
+  };
+}
 
 function householdFixture(overrides: Partial<Household> = {}): Household {
   return {
@@ -60,6 +75,7 @@ describe("CurrencyPanel", () => {
     stubFetchRoutes({
       [`GET ${ME_URL}`]: { status: 200, body: meFixture("limited") },
       [`GET ${HOUSEHOLD_URL}`]: { status: 200, body: householdFixture() },
+      [`GET ${CURRENCIES_URL}`]: { status: 200, body: currenciesFixture() },
     });
     renderPanel();
 
@@ -74,6 +90,7 @@ describe("CurrencyPanel", () => {
     const fetchMock = stubFetchRoutes({
       [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
       [`GET ${HOUSEHOLD_URL}`]: { status: 200, body: householdFixture({ showSecondaryCurrency: true }) },
+      [`GET ${CURRENCIES_URL}`]: { status: 200, body: currenciesFixture() },
       [`PATCH ${HOUSEHOLD_URL}`]: {
         status: 200,
         body: householdFixture({ showSecondaryCurrency: false }),
@@ -98,6 +115,7 @@ describe("CurrencyPanel", () => {
     stubFetchRoutes({
       [`GET ${ME_URL}`]: { status: 200, body: meFixture("limited") },
       [`GET ${HOUSEHOLD_URL}`]: { status: 200, body: householdFixture() },
+      [`GET ${CURRENCIES_URL}`]: { status: 200, body: currenciesFixture() },
     });
     renderPanel();
 
@@ -109,6 +127,7 @@ describe("CurrencyPanel", () => {
     const fetchMock = stubFetchRoutes({
       [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
       [`GET ${HOUSEHOLD_URL}`]: { status: 200, body: householdFixture({ primaryCurrency: "SGD" }) },
+      [`GET ${CURRENCIES_URL}`]: { status: 200, body: currenciesFixture() },
       [`PATCH ${HOUSEHOLD_URL}`]: {
         status: 200,
         body: householdFixture({ primaryCurrency: "USD" }),
@@ -136,6 +155,7 @@ describe("CurrencyPanel", () => {
     stubFetchRoutes({
       [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
       [`GET ${HOUSEHOLD_URL}`]: { status: 200, body: householdFixture({ primaryCurrency: "SGD" }) },
+      [`GET ${CURRENCIES_URL}`]: { status: 200, body: currenciesFixture() },
     });
     renderPanel();
 
@@ -158,6 +178,7 @@ describe("CurrencyPanel", () => {
     stubFetchRoutes({
       [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
       [`GET ${HOUSEHOLD_URL}`]: { status: 200, body: householdFixture({ primaryCurrency: "SGD" }) },
+      [`GET ${CURRENCIES_URL}`]: { status: 200, body: currenciesFixture() },
       [`PATCH ${HOUSEHOLD_URL}`]: {
         status: 422,
         body: { error: { code: "INVALID_CURRENCY", message: "That currency code is not valid." } },
