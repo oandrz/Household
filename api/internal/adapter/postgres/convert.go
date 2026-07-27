@@ -174,4 +174,5 @@ var (
 	_ usecase.InviteRepository       = (*InviteRepo)(nil)
 	_ usecase.SpaceRepository        = (*SpaceRepo)(nil)
 	_ usecase.NotificationRepository = (*NotificationRepo)(nil)
+	_ usecase.SignupRepository       = (*SignupRepo)(nil)
 )
