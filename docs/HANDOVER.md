@@ -246,8 +246,8 @@ refused.
   proxies `/api` straight to `api:8080` with no header rewriting — so the
   per-IP limiter stays fully spoofable in development, and the pending browser
   walk (§1) cannot exercise the fix either way. The global daily mail ceiling
-  (200/day, counted from `signups`) is what actually bounds the damage in the
-  meantime.
+  (1000/day, reset at midnight, counted from `signups`) is what actually bounds
+  the damage in the meantime.
 
 ---
 

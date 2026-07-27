@@ -25,16 +25,32 @@ const (
 	// silent, like every other branch.
 	signupPerHourLimit = 3
 
-	// signupGlobalDailyLimit is the backstop for the case both the per-address
+	// SignupGlobalDailyLimit is the backstop for the case both the per-address
 	// and per-IP limits are being worked at once. It is counted from the
 	// signups table rather than an in-memory counter, so restarting the API
-	// cannot reset it.
+	// cannot reset it, and it is evaluated against the calendar day (see
+	// startOfDay), not a rolling 24 hours -- see Request's use of it below.
 	//
 	// Sign-up is open to anyone (a deliberate product decision), which makes
 	// this the last thing standing between the SMTP relay and a stranger with a
-	// loop. Raising it is a decision about how much mail the relay may send on
-	// a stranger's behalf, not a tuning knob.
-	signupGlobalDailyLimit = 200
+	// loop. The two ways of getting this number wrong are not symmetric. Too
+	// high, and a bad day costs the relay up to this many mails -- recoverable,
+	// and visible in relay metrics and cost. Too low, and onboarding silently
+	// stops: every sign-up still answers 202, nothing is mailed, and that looks
+	// exactly like nobody signing up, not like a limit tripping. For a
+	// household product, a busy real day is dozens of sign-ups; 1000 is far
+	// enough above that to never bind for legitimate traffic while still being
+	// a real ceiling against a determined loop spread across many addresses
+	// and IPs.
+	//
+	// Exported (not signupGlobalDailyLimit) solely so
+	// TestSignUpRateLimitsCompose, in the httpadapter package's test suite, can
+	// assert signUpRequestsPerIPPerHour * 24 < SignupGlobalDailyLimit without
+	// an import cycle: usecase has no import on httpadapter, and httpadapter
+	// already imports usecase in production code (router.go), so exporting
+	// this adds no new edge to the dependency graph, only visibility for a
+	// test that reads both constants.
+	SignupGlobalDailyLimit = 1000
 
 	// signupSendTimeout bounds the background send so a wedged relay cannot
 	// leak goroutines forever. Generous because nothing waits on it.
@@ -77,18 +93,32 @@ type SignupPreview struct {
 
 // Request is deliberately quiet. It returns nil for a fresh address, an address
 // that already has an account, an address over its hourly limit, a day over the
-// global mail ceiling, and every internal failure below the branch point. Any
-// observable difference between those would let a caller discover which
-// addresses are registered.
+// global mail ceiling, an implausibly-formed address, and every internal
+// failure below the branch point. Any observable difference between those
+// would let a caller discover which addresses are registered.
 //
-// Four properties make that true, and all four are load-bearing:
+// Before any of that, isPlausibleEmail is checked, and a failure returns nil
+// immediately -- before any of the reads or writes below ever run. That is
+// deliberately not one of the four properties below: it is not making two
+// branches indistinguishable, it is refusing to spend a counted read or a
+// signups row on input that cannot possibly be a real address at all
+// ("", "not-an-email"). That is safe precisely because the check is a pure
+// function of the string itself, independent of whether any particular
+// address is registered -- it rejects "" identically no matter what the users
+// or signups tables contain, so it cannot become the registration oracle an
+// error return from the reads below would be. See isPlausibleEmail's own doc
+// comment for what it does and does not guard against.
+//
+// Four properties make the rest of it true, and all four are load-bearing:
 //
 //  1. All three reads below run unconditionally, in this fixed order, on every
-//     call. RequestMagicLink once returned as soon as its rate-limit check
-//     decided the outcome, which made the *number of repository reads*
-//     distinguish the rate-limited case just as surely as an error would have.
-//     A read that is skipped on one branch is the defect; the ordered read log
-//     in signup_test.go is what defends against it.
+//     call that reaches them (every call whose address passed the
+//     plausibility gate above). RequestMagicLink once returned as soon as its
+//     rate-limit check decided the outcome, which made the *number of
+//     repository reads* distinguish the rate-limited case just as surely as
+//     an error would have. A read that is skipped on one branch of an address
+//     that passed the gate is the defect; the ordered read log in
+//     signup_test.go is what defends against it.
 //
 //  2. Mail is sent off the request path (see sendAsync), so a slow or wedged
 //     relay cannot make the fresh-address branch measurably slower than the
@@ -119,9 +149,20 @@ type SignupPreview struct {
 //     address and returns nil instead. ANYONE ADDING A STEP BELOW THE BRANCH
 //     POINT OWES IT THE SAME TREATMENT.
 func (s *SignupService) Request(ctx context.Context, email string) error {
+	// A budget guard, not a correctness check -- see isPlausibleEmail's doc
+	// comment. Checked before the Clock, before every read, before any write:
+	// {"email":""} must not advance a rate-limit counter or write a countable
+	// signups row for free.
+	if !isPlausibleEmail(email) {
+		return nil
+	}
+
 	now := s.d.Clock.Now()
 
-	globalCount, err := s.d.Signups.CountSince(ctx, now.Add(-24*time.Hour))
+	// startOfDay, not now.Add(-24*time.Hour): the global ceiling resets at
+	// midnight, not on a rolling 24-hour trailing window. See startOfDay's own
+	// doc comment for which zone "midnight" means here and why.
+	globalCount, err := s.d.Signups.CountSince(ctx, startOfDay(now))
 	if err != nil {
 		return err
 	}
@@ -140,8 +181,33 @@ func (s *SignupService) Request(ctx context.Context, email string) error {
 	// existing-account notices, and the differing behaviour would itself
 	// distinguish the two cases. This check is only as real as the counters
 	// it reads, which is why every branch below writes a row for it to count.
-	if addressCount >= signupPerHourLimit || globalCount >= signupGlobalDailyLimit {
-		slog.Info("sign-up request declined by a rate limit",
+	//
+	// The two limits are checked separately, in this order, and logged at
+	// different levels, even though both still return nil identically to the
+	// caller (see the doc comment above -- the log level is for the operator,
+	// not the caller, and a different *response* on either branch would be
+	// exactly the enumeration oracle this whole design exists to prevent).
+	// Global is checked first so that every request arriving while the global
+	// ceiling is breached is logged loudly, regardless of whether that
+	// request's own address also happens to be over its hourly limit --
+	// checking address-first would silently downgrade those requests to
+	// routine Info noise and hide the outage on exactly the traffic most
+	// likely to be causing it. Per-address tripping is ordinary and expected
+	// (one caller gets a quiet no-op); the global ceiling tripping means the
+	// platform is either under attack or succeeding beyond plan, and either
+	// way a human needs to find out from something other than a customer
+	// complaining that sign-up mail never arrived.
+	if globalCount >= SignupGlobalDailyLimit {
+		slog.Error("sign-up request declined by the global daily mail ceiling",
+			"email_hash", hashPrefix(s.d.Tokens.HashToken(email), 12),
+			"address_count", addressCount,
+			"global_count", globalCount,
+			"global_daily_limit", SignupGlobalDailyLimit,
+		)
+		return nil
+	}
+	if addressCount >= signupPerHourLimit {
+		slog.Info("sign-up request declined by the per-address rate limit",
 			"email_hash", hashPrefix(s.d.Tokens.HashToken(email), 12),
 			"address_count", addressCount,
 			"global_count", globalCount,
@@ -189,6 +255,26 @@ func (s *SignupService) Request(ctx context.Context, email string) error {
 		return s.d.Mailer.SendSignupLink(ctx, email, url)
 	}, email, "sign-up link")
 	return nil
+}
+
+// startOfDay returns midnight for t, in t's own location -- t.Location(), not
+// a hardcoded time.UTC. Which zone that resolves to is therefore a property of
+// the Clock this service is built with, not of this function: the production
+// Clock (adapter/clock.System.Now) already normalizes every reading to UTC
+// (see its own doc comment), so in production this computes UTC midnight --
+// but it gets there by asking the clock what "today" is, the same rule
+// Request already follows for every other use of "now" in this file (never
+// reach for wall-clock time directly; only the injected Clock, which is also
+// why this codebase's tests can move the clock across this exact boundary
+// without sleeping). "Midnight" is ambiguous across zones by nature, so this
+// is recorded as a decision, not a default: were this service ever run with a
+// Clock that did not normalize to UTC, the daily ceiling would reset at that
+// Clock's own midnight, which is the point -- "today starting over" is
+// whichever zone the Clock reports, not a fixed zone baked into this
+// function.
+func startOfDay(t time.Time) time.Time {
+	y, m, d := t.Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, t.Location())
 }
 
 // sendAsync fires a send off the request path and returns immediately, for the

@@ -184,7 +184,7 @@ session revocation is belt-and-braces rather than the enforcement mechanism.
 
 `POST /auth/sign-up` is the one public route wrapped in an extra middleware,
 `rateLimitByIP` — a per-process, in-memory token bucket keyed on the request's
-resolved IP (10/hour). It is the only sign-up route that can trigger outbound
+resolved IP (5/hour). It is the only sign-up route that can trigger outbound
 mail without a token already proving an address, so it is the one an unbounded
 loop would hit; the preview and complete routes need a token that was mailed
 to a real address and so are not on that path.
@@ -196,7 +196,7 @@ to a real address and so are not on that path.
 | POST | `/auth/sign-in` | none — this *is* the credential check |
 | POST | `/auth/magic-link` | none — always 202 |
 | POST | `/auth/magic-link/consume` | none — the token is the credential |
-| POST | `/auth/sign-up` | none, plus a per-IP token bucket (10/hour) — always 202, the same silent contract as magic-link |
+| POST | `/auth/sign-up` | none, plus a per-IP token bucket (5/hour) — always 202, the same silent contract as magic-link |
 | GET | `/auth/sign-up/{token}` | none — the token is the credential |
 | POST | `/auth/sign-up/{token}/complete` | none |
 | GET | `/auth/me` | session |
@@ -557,7 +557,7 @@ prefix, which is what made the duplication stop being optional.
 | Mail | Mailpit in development; TLS policy and credentials from config elsewhere |
 | Seeding | `adminctl seed`, refused unless `APP_ENV=development` **and** the database host is local — both checked before the connection opens |
 | Retention | `adminctl prune --older-than=<days>` (default 30, floor 7) deletes consumed/expired `signups` and stale `login_attempts`; `magic_links`, `invites` and `sessions` still grow forever |
-| Rate limiting | Per-address (3/hour) and a global daily ceiling (200), both counted from `signups` so a restart cannot reset them; per-IP (10/hour) is an in-memory token bucket in the HTTP layer — process-local, spoofable in development (see §1) |
+| Rate limiting | Per-address (3/hour) and a global daily ceiling (1000, reset at midnight, not a rolling 24 hours), both counted from `signups` so a restart cannot reset them; per-IP (5/hour) is an in-memory token bucket in the HTTP layer — process-local, spoofable in development (see §1). The per-IP limit binds before the global one by construction (5 × 24 = 120 ≪ 1000) so one IP alone can never exhaust the global ceiling |
 | Health | `/healthz` ignores the database; `/readyz` pings it |
 
 ---

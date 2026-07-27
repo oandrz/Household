@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
 func TestIPRateLimiterCountsPerIPAndResets(t *testing.T) {
@@ -35,6 +37,35 @@ func TestClientIPStripsThePort(t *testing.T) {
 	r.RemoteAddr = "203.0.113.7:54321"
 	if got := clientIP(r); got != "203.0.113.7" {
 		t.Fatalf("clientIP = %q, want 203.0.113.7", got)
+	}
+}
+
+// TestSignUpRateLimitsCompose is the regression guard for the whole-branch
+// review defect: 10/hour per IP composed with a 200/day global ceiling meant
+// a single IP, entirely within its own budget, could exhaust the global
+// ceiling alone (10 * 24 = 240 > 200) -- after which every sign-up silently
+// answered 202 and mailed nothing for up to a day, for every address, with no
+// one told. signUpRequestsPerIPPerHour must bind before
+// usecase.SignupGlobalDailyLimit ever could, so this asserts the arithmetic
+// directly rather than trusting two numbers in two files to stay in sync by
+// coincidence.
+//
+// This lives here, in package httpadapter, not in package usecase: the two
+// constants are unexported in their own packages, and Go's visibility rules
+// mean an unexported identifier is invisible outside its defining package
+// regardless of import direction -- an external test package for either one
+// (httpadapter_test or usecase_test) could not reach the other's unexported
+// constant, and usecase cannot import httpadapter without an import cycle
+// (httpadapter already imports usecase). signUpRequestsPerIPPerHour is
+// already reachable here for free, this file being internal to package
+// httpadapter; SignupGlobalDailyLimit was exported from usecase specifically
+// so this assertion has somewhere it can actually run, rather than being
+// skipped -- see its own doc comment in usecase/signup.go.
+func TestSignUpRateLimitsCompose(t *testing.T) {
+	if got := signUpRequestsPerIPPerHour * 24; got >= usecase.SignupGlobalDailyLimit {
+		t.Fatalf("signUpRequestsPerIPPerHour (%d) * 24 = %d, want < usecase.SignupGlobalDailyLimit (%d) -- "+
+			"a single IP within its own hourly budget could exhaust the global daily ceiling alone",
+			signUpRequestsPerIPPerHour, got, usecase.SignupGlobalDailyLimit)
 	}
 }
 

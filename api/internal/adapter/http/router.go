@@ -12,10 +12,25 @@ import (
 
 // signUpRequestsPerIPPerHour bounds one client's sign-up requests. The
 // per-address limit in SignupService is bypassed by varying the address; this is
-// what actually bounds outbound mail. 10 is generous for a household setting
+// what actually bounds outbound mail. 5 is generous for a household setting
 // itself up (one request, maybe a couple of retries) and far below what a loop
 // needs to be useful.
-const signUpRequestsPerIPPerHour = 10
+//
+// This limit must bind before usecase.SignupGlobalDailyLimit, the global
+// daily mail ceiling, and the arithmetic has to be checked whenever either
+// number changes: signUpRequestsPerIPPerHour * 24 is the most mail a single
+// IP can ever cause in a day while staying entirely within its own budget. If
+// that figure reaches the global ceiling, one address, never having been
+// rate-limited itself, can silently exhaust the platform's entire daily mail
+// budget -- and because the global ceiling's own failure mode is silent (every
+// sign-up still answers 202 and mails nothing, for up to a day, with no
+// caller-visible signal), nobody finds out from a complaint the way they would
+// from this limit's very loud, very local 429. The asymmetry is the whole
+// reason this limit exists: it must trip first, for one caller, long before
+// the shared ceiling ever could. TestSignUpRateLimitsCompose
+// (middleware_ratelimit_test.go) asserts the inequality so raising either
+// number in isolation fails a test instead of silently reopening this.
+const signUpRequestsPerIPPerHour = 5
 
 // Deps carries everything the HTTP layer needs. Handlers receive their
 // collaborators through this struct rather than reaching for globals.

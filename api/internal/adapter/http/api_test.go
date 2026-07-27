@@ -1356,10 +1356,16 @@ func TestSignUpAnswersIdenticallyForEveryAddress(t *testing.T) {
 	}
 }
 
-// Repeating the same request past the hourly limit must not change the answer.
+// Repeating the same request past the hourly limit must not change the
+// answer. 5 attempts, not more: every request through env.do shares the same
+// fixed RemoteAddr (see TestSignUpPassesThroughThePerIPLimiter's doc comment),
+// so this loop is already spending this test's own per-IP budget
+// (signUpRequestsPerIPPerHour) as well as the per-address one this test is
+// actually about -- a 6th call here would hit the per-IP limiter instead and
+// prove nothing about the per-address limit this test exists to check.
 func TestSignUpStaysSilentPastTheRateLimit(t *testing.T) {
 	env := newTestEnv(t)
-	for i := 0; i < 6; i++ {
+	for i := 0; i < 5; i++ {
 		rec := env.do(http.MethodPost, "/api/v1/auth/sign-up",
 			map[string]string{"email": "persistent@example.test"})
 		if rec.Code != http.StatusAccepted {
@@ -1384,8 +1390,11 @@ func TestSignUpPassesThroughThePerIPLimiter(t *testing.T) {
 
 	// signUpRequestsPerIPPerHour (router.go) is unexported and this package is
 	// httpadapter_test, so its value is repeated here as a literal -- keep the
-	// two in lockstep if that constant ever changes.
-	const perIPLimit = 10
+	// two in lockstep if that constant ever changes. Requests beyond
+	// signupPerHourLimit (3, per-address) for this one address are still
+	// silently declined by SignupService.Request itself and still answer 202
+	// -- only the per-IP limiter answers 429, and only past this count.
+	const perIPLimit = 5
 	for i := 0; i < perIPLimit; i++ {
 		rec := env.do(http.MethodPost, "/api/v1/auth/sign-up",
 			map[string]string{"email": "ip-limited@example.test"})
