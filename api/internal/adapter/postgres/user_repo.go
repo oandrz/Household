@@ -130,29 +130,33 @@ func (r *UserRepo) SetPasswordHash(ctx context.Context, userID, hash string) err
 	}), "set password hash")
 }
 
-// initialOf derives the avatar initial from a display name. It slices the
-// first *rune*, not the first byte: name[:1] took one byte of what may be a
-// multi-byte UTF-8 sequence, so "Émile" produced an invalid fragment that
-// rendered as the replacement character -- permanently, since there is no
-// profile-edit endpoint to correct it.
+// initialOf derives the avatar initial from a display name.
 //
-// The result can be more than one character: cases.Upper().String("ß") is "SS".
-// users.avatar_initial is text (migration 00003) rather than char(1) for
-// exactly that case.
+// It takes the first *rune*, not the first byte: the old name[:1] byte slice
+// took one byte of what may be a multi-byte UTF-8 sequence, so every non-ASCII
+// name got an invalid fragment that rendered as the replacement character --
+// permanently, since there is no profile-edit endpoint to correct it.
+//
+// It uses cases.Upper(language.Und) rather than strings.ToUpper, because the
+// standard library applies simple case mapping only: 'ß' does not uppercase
+// at all. Full case mapping is what a user-supplied name from an unknown script
+// deserves. language.Und (undefined/root) is used because the locale is
+// genuinely unknown at initial creation time. The result can be more than one
+// character: cases.Upper(language.Und).String("ß") is "SS". users.avatar_initial
+// is text (migration 00003) rather than char(1) for exactly this case.
 //
 // A rune is not always a whole grapheme cluster -- an emoji built from a
-// zero-width joiner sequence yields only its first component here. Handling
-// that properly needs golang.org/x/text, and this file is in an adapter so the
-// dependency would be legal, but a single rune is the correct fix for the
-// actual defect and a name beginning with a ZWJ sequence still produces valid,
-// renderable UTF-8.
+// zero-width joiner sequence yields only its first component here. Proper
+// handling would need golang.org/x/text/grapheme, adding a second dependency,
+// but a single rune is the correct fix for the actual defect and a name
+// beginning with a ZWJ sequence still produces valid, renderable UTF-8.
 func initialOf(displayName string) string {
 	name := strings.TrimSpace(displayName)
 	if name == "" {
 		return "?"
 	}
 	first := []rune(name)[0]
-	return cases.Upper(language.English).String(string(first))
+	return cases.Upper(language.Und).String(string(first))
 }
 
 // pgUniqueViolation is the Postgres SQLSTATE for a unique-constraint

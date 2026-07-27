@@ -26,6 +26,10 @@ func TestInitialOfHandlesNonASCIINames(t *testing.T) {
 		{"empty falls back", "", "?"},
 		{"whitespace only falls back", "   ", "?"},
 		{"uppercase can grow a rune", "ßeta", "SS"},
+		// language.Und, not language.Turkish: under Turkish case rules 'i' uppercases
+		// to 'İ' (dotted). A display name's locale is unknown, so the root mapping is
+		// the only defensible choice, and this pins it.
+		{"turkish i uses root mapping", "istanbul", "I"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := initialOf(tc.displayName); got != tc.want {
