@@ -27,6 +27,17 @@ type TokenGenerator interface {
 type Mailer interface {
 	SendMagicLink(ctx context.Context, to, name, url string) error
 	SendInvite(ctx context.Context, to, name, inviterName, url string) error
+	// SendSignupLink mails the create-household link. There is no name
+	// parameter: at sign-up-request time nobody has told us one, and inventing
+	// a greeting from the local part of the address would read worse than
+	// having none.
+	SendSignupLink(ctx context.Context, to, url string) error
+	// SendSignupForExistingAccount mails "you already have an account" with no
+	// token. It is as load-bearing as SendSignupLink, not a courtesy: if only
+	// the fresh-address branch sent mail, the *absence* of an email would tell
+	// anyone who can observe the mailbox that the address is registered, which
+	// is the oracle the identical 202 exists to prevent.
+	SendSignupForExistingAccount(ctx context.Context, to, signInURL string) error
 }
 
 // StoredUser carries the password hash, which never leaves the usecase layer.
@@ -84,7 +95,15 @@ type UserRepository interface {
 type HouseholdRepository interface {
 	Get(ctx context.Context, householdID string) (domain.Household, error)
 	Update(ctx context.Context, h domain.Household) (domain.Household, error)
-	Create(ctx context.Context, name, familyName string) (domain.Household, error)
+	// Create writes a household from a fully-populated domain.Household.
+	// It takes the value rather than (name, familyName) so no caller depends on
+	// the table's currency column defaults -- Seed used to, silently, and a
+	// self-serve household needs different values.
+	//
+	// h.ID is ignored (the database assigns it) and h.FXRateMode is ignored
+	// (the column default 'auto' is the only value the CHECK constraint makes
+	// safe to assume at creation time).
+	Create(ctx context.Context, h domain.Household) (domain.Household, error)
 }
 
 // MemberView is a membership joined to its user, which is what every consumer
@@ -135,6 +154,15 @@ type LoginAttemptRepository interface {
 	// same countdown a member does and cannot tell the two apart.
 	FailuresSinceForEmail(ctx context.Context, email string, since time.Time) ([]time.Time, error)
 	ClearFailures(ctx context.Context, householdID string) error
+	// Prune deletes attempts older than before, including the
+	// NULL-household_id rows an unknown-address attempt records -- which
+	// ClearFailures cannot reach, because it is scoped WHERE household_id = $1
+	// and that never matches NULL.
+	//
+	// The caller is responsible for a cutoff well outside
+	// domain.LockoutPolicy.Window. Deleting a row still inside that window
+	// would clear a live lockout: a security regression dressed as a cleanup.
+	Prune(ctx context.Context, before time.Time) (int64, error)
 }
 
 type InviteDetails struct {
@@ -182,6 +210,63 @@ type InviteRepository interface {
 	// expired.
 	Accept(ctx context.Context, inviteID, email, passwordHash, displayName string,
 		householdID string, role domain.Role, caps domain.Capabilities) (AcceptedInvite, error)
+}
+
+// SignupDetails is a pending sign-up, read back by token.
+type SignupDetails struct {
+	ID         string
+	Email      string
+	ExpiresAt  time.Time
+	ConsumedAt *time.Time
+}
+
+// ProvisionedHousehold is what a successful provision produces.
+type ProvisionedHousehold struct {
+	UserID       string
+	HouseholdID  string
+	MembershipID string
+}
+
+type SignupRepository interface {
+	Create(ctx context.Context, email string, tokenHash []byte, expiresAt time.Time) error
+	ByTokenHash(ctx context.Context, tokenHash []byte) (SignupDetails, error)
+	// CountForEmailSince counts sign-up requests for one address since a
+	// cutoff. Unlike MagicLinkRepository.CountSince it does not join through
+	// users -- there is no user to join to -- so it can report a non-zero count
+	// for an address with no account, and must: a limit that could only be hit
+	// by a registered address would itself distinguish the two.
+	CountForEmailSince(ctx context.Context, email string, since time.Time) (int, error)
+	// CountSince counts every sign-up request since a cutoff, for the global
+	// daily mail ceiling. It reads the table rather than an in-memory counter
+	// so restarting the API cannot reset the ceiling.
+	CountSince(ctx context.Context, since time.Time) (int, error)
+	// Provision creates the household, the owner user, the owner membership,
+	// every builtin space and the notification preferences, and stamps the
+	// signup consumed -- all in one transaction. Either all of it happens or
+	// none of it does.
+	//
+	// The owner's email address is read from the signup row this transaction is
+	// already touching; it is deliberately NOT a parameter. The address that
+	// gets an account must be the one the mailed token actually proved, and
+	// passing it in would let a caller substitute a different one between
+	// SignupService.Complete's read and this write.
+	//
+	// A partial provision leaves a users row occupying users.email's unique
+	// index with no membership under it, which makes that address permanently
+	// unable to sign up again: a retry could never create a second user with
+	// it. That is the same failure InviteRepository.Accept's doc comment
+	// describes, and this method exists for the same reason.
+	//
+	// Returns domain.ErrTokenExpired, with nothing written, when the signup is
+	// no longer usable -- consumed or expired. Like InviteRepository.Accept's
+	// guarded UPDATE this collapses the two cases into one zero-rows result and
+	// cannot tell them apart; SignupService.Complete's own TokenLifecycle read
+	// is what distinguishes them for a caller, and this answer is authoritative
+	// only for the race window between that read and this write.
+	Provision(ctx context.Context, signupID, passwordHash string,
+		b HouseholdBlueprint) (ProvisionedHousehold, error)
+	// Prune deletes consumed and expired rows older than before.
+	Prune(ctx context.Context, before time.Time) (int64, error)
 }
 
 type SpaceRepository interface {

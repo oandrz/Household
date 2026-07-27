@@ -48,3 +48,15 @@ func (r *LoginAttemptRepo) FailuresSinceForEmail(ctx context.Context, email stri
 func (r *LoginAttemptRepo) ClearFailures(ctx context.Context, householdID string) error {
 	return translate(r.q.ClearFailures(ctx, uuid(householdID)), "clear failures")
 }
+
+// Prune wraps PruneLoginAttempts. See LoginAttemptRepository.Prune's doc
+// comment in ports.go for the NULL-household_id rows this reaches that
+// ClearFailures cannot, and the caller's obligation to pass a cutoff well
+// outside domain.LockoutPolicy.Window.
+func (r *LoginAttemptRepo) Prune(ctx context.Context, before time.Time) (int64, error) {
+	n, err := r.q.PruneLoginAttempts(ctx, timestamptz(before))
+	if err != nil {
+		return 0, translate(err, "prune login attempts")
+	}
+	return n, nil
+}

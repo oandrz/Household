@@ -14,35 +14,6 @@ import (
 // can move it.
 const inviteTTL = 7 * 24 * time.Hour
 
-// minInvitePasswordLength is Accept's password floor. It is a usecase-level
-// rule, not a domain one -- domain has no notion of a password at all -- so
-// it lives here rather than in internal/domain, exactly as SignInFailedError
-// (also a usecase-only concept) lives in auth.go rather than domain.
-const minInvitePasswordLength = 12
-
-// ErrPasswordTooShort is Accept's rejection when the chosen password is
-// under minInvitePasswordLength characters. It is a usecase sentinel, not a
-// domain one, for the same reason minInvitePasswordLength is defined here:
-// domain has no password concept to attach an error to.
-var ErrPasswordTooShort = errors.New("password must be at least 12 characters")
-
-// maxPasswordLength is the ceiling applied everywhere a caller-supplied
-// password reaches PasswordHasher, in both InviteService.Accept (below) and
-// AuthService.SignIn (auth.go): argon2id's cost scales with the size of the
-// string it hashes, so with no upper bound a caller could force an
-// arbitrarily expensive hash by submitting a multi-megabyte password --
-// uncapped CPU cost fronted directly by an HTTP endpoint. 256 characters is
-// far beyond any legitimate human-chosen or generator-produced password.
-const maxPasswordLength = 256
-
-// ErrPasswordTooLong is Accept's rejection when the chosen password exceeds
-// maxPasswordLength. SignIn enforces the identical ceiling but never
-// surfaces this error: a too-long password there must fail exactly like a
-// wrong password -- same error, same shape -- so SignIn folds the case into
-// its ordinary invalid-credentials path (see AuthService.verifyPassword in
-// auth.go) instead of returning a distinguishable sentinel.
-var ErrPasswordTooLong = errors.New("password must be at most 256 characters")
-
 // ErrInviteeAlreadyRegistered is Create's rejection of an invite to an email
 // address that already has a users row. Without this check, Create wrote the
 // invite and sent the mail anyway -- InviteRepo.Accept unconditionally calls
@@ -243,11 +214,8 @@ func checkInviteLive(details InviteDetails, now time.Time) error {
 // never be accepted by anyone, ever (see InviteRepository.Accept's doc
 // comment in ports.go).
 func (s *InviteService) Accept(ctx context.Context, token, password, displayName string) (SignInResult, error) {
-	if len(password) < minInvitePasswordLength {
-		return SignInResult{}, ErrPasswordTooShort
-	}
-	if len(password) > maxPasswordLength {
-		return SignInResult{}, ErrPasswordTooLong
+	if err := validatePassword(password); err != nil {
+		return SignInResult{}, err
 	}
 
 	now := s.d.Clock.Now()

@@ -108,6 +108,27 @@ func (m *SMTPMailer) SendInvite(ctx context.Context, to, name, inviterName, url 
 	return m.send(ctx, to, subject, body)
 }
 
+// SendSignupLink mails the create-household link. No name: the sign-up request
+// carries only an address.
+func (m *SMTPMailer) SendSignupLink(ctx context.Context, to, url string) error {
+	body := "Welcome to Hearth.\n\n" +
+		"Use this link to set up your household. It works once, and expires in 24 hours.\n\n" +
+		url + "\n\n" +
+		"If you did not ask for this, you can ignore this email -- nothing has been created.\n"
+	return m.send(ctx, to, "Set up your Hearth household", body)
+}
+
+// SendSignupForExistingAccount answers a sign-up request for an address that
+// already has an account. It carries no token, and it exists so that both
+// branches of a sign-up request send mail -- if only the fresh branch did, the
+// absence of an email would reveal that an address is registered.
+func (m *SMTPMailer) SendSignupForExistingAccount(ctx context.Context, to, signInURL string) error {
+	body := "You already have a Hearth account for this address.\n\n" +
+		"Sign in here:\n\n" + signInURL + "\n\n" +
+		"If you have forgotten your password, that page can email you a one-time sign-in link.\n"
+	return m.send(ctx, to, "You already have a Hearth account", body)
+}
+
 func (m *SMTPMailer) send(ctx context.Context, to, subject, body string) error {
 	msg := gomail.NewMsg()
 	if err := msg.From(m.from); err != nil {

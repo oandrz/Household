@@ -72,7 +72,10 @@ func TestUserRepoCreateWithMembershipCreatesBothRowsAtomically(t *testing.T) {
 	users := postgres.NewUserRepo(db)
 	members := postgres.NewMembershipRepo(db)
 
-	h, err := households.Create(ctx, "Andreas & Christine", "Oentoro")
+	h, err := households.Create(ctx, domain.Household{
+		Name: "Andreas & Christine", FamilyName: "Oentoro",
+		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
+	})
 	if err != nil {
 		t.Fatalf("create household: %v", err)
 	}
@@ -130,7 +133,10 @@ func TestUserRepoCreateWithMembershipRollsBackOnMembershipConstraintViolation(t 
 	households := postgres.NewHouseholdRepo(db)
 	users := postgres.NewUserRepo(db)
 
-	h, err := households.Create(ctx, "Andreas & Christine", "Oentoro")
+	h, err := households.Create(ctx, domain.Household{
+		Name: "Andreas & Christine", FamilyName: "Oentoro",
+		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
+	})
 	if err != nil {
 		t.Fatalf("create household: %v", err)
 	}

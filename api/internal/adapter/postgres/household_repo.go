@@ -44,16 +44,17 @@ func (r *HouseholdRepo) Update(ctx context.Context, h domain.Household) (domain.
 		row.ShowSecondaryCurrency, row.SecondaryCurrency, row.FxRateMode), nil
 }
 
-func (r *HouseholdRepo) Create(ctx context.Context, name, familyName string) (domain.Household, error) {
-	// Task 25 replaces these literals with the caller's HouseholdBlueprint;
-	// they reproduce the column defaults exactly so this change is
-	// behaviour-neutral.
+// Create writes h. h.ID and h.FXRateMode are ignored: the database assigns
+// the id, and fx_rate_mode keeps its column default ('auto'), which the CHECK
+// constraint makes the only safe value to assume at creation time -- see
+// HouseholdRepository.Create's doc comment in ports.go.
+func (r *HouseholdRepo) Create(ctx context.Context, h domain.Household) (domain.Household, error) {
 	row, err := r.q.CreateHousehold(ctx, sqlcgen.CreateHouseholdParams{
-		Name:                  name,
-		FamilyName:            familyName,
-		PrimaryCurrency:       "SGD",
-		ShowSecondaryCurrency: true,
-		SecondaryCurrency:     "IDR",
+		Name:                  h.Name,
+		FamilyName:            h.FamilyName,
+		PrimaryCurrency:       h.PrimaryCurrency,
+		ShowSecondaryCurrency: h.ShowSecondaryCurrency,
+		SecondaryCurrency:     h.SecondaryCurrency,
 	})
 	if err != nil {
 		return domain.Household{}, translate(err, "create household")

@@ -464,6 +464,23 @@ func (d *loginAttemptDouble) ClearFailures(_ context.Context, householdID string
 	return nil
 }
 
+// Prune mirrors PruneLoginAttempts: every row with At before the cutoff is
+// deleted, including the NULL-HouseholdID rows ClearFailures cannot reach,
+// and the count of deleted rows is returned.
+func (d *loginAttemptDouble) Prune(_ context.Context, before time.Time) (int64, error) {
+	kept := make([]attemptRecord, 0, len(d.records))
+	var deleted int64
+	for _, r := range d.records {
+		if r.At.Before(before) {
+			deleted++
+			continue
+		}
+		kept = append(kept, r)
+	}
+	d.records = kept
+	return deleted, nil
+}
+
 // --- MagicLinkRepository ------------------------------------------------
 
 type magicLinkRow struct {
@@ -729,12 +746,253 @@ func (d *inviteDouble) Accept(ctx context.Context, inviteID, email, passwordHash
 	return usecase.AcceptedInvite{UserID: user.ID, MembershipID: created.ID, HouseholdID: created.HouseholdID}, nil
 }
 
+// --- SignupRepository -------------------------------------------------
+
+type signupRow struct {
+	ID         string
+	Email      string
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+	ConsumedAt *time.Time
+}
+
+// signupDouble plays the same role postgres's (future) SignupRepo plays over
+// Postgres: Provision performs the household, owner user, owner membership,
+// builtin-space and notification-preference writes together, mirroring the
+// one-transaction guarantee the real Provision gives (see its doc comment in
+// ports.go). It holds the same household/user/membership/space/notification
+// doubles the rest of the fixture uses, rather than private state of its own,
+// so a test can check "exactly one household, exactly one user, exactly one
+// membership" through those doubles after calling SignupService.Complete --
+// exactly the pattern inviteDouble already establishes for Accept.
+type signupDouble struct {
+	clock         *fixedClock
+	households    *householdDouble
+	users         *userDouble
+	members       *membershipDouble
+	spaces        *spaceDouble
+	notifications *notificationDouble
+
+	rows map[string]*signupRow // keyed by string(tokenHash)
+	n    int
+
+	// provisionCalls counts Provision invocations, successful or not, so a
+	// test can confirm exactly one provision happened for one request -- the
+	// same question userDouble.count/membershipDouble.count answer for
+	// invite acceptance.
+	provisionCalls int
+
+	// failNextProvision arms a one-shot failure for the next Provision call,
+	// the same one-shot pattern as the other doubles' failNext* hooks.
+	failNextProvision error
+}
+
+func newSignupDouble(clock *fixedClock, households *householdDouble, users *userDouble,
+	members *membershipDouble, spaces *spaceDouble, notifications *notificationDouble) *signupDouble {
+	return &signupDouble{
+		clock: clock, households: households, users: users, members: members,
+		spaces: spaces, notifications: notifications, rows: map[string]*signupRow{},
+	}
+}
+
+// failNextSignupProvision arms failNextProvision: the next Provision call
+// returns err instead of provisioning anything, and every call after that
+// succeeds normally again.
+func (d *signupDouble) failNextSignupProvision(err error) {
+	d.failNextProvision = err
+}
+
+// count reports how many signup rows have ever been created.
+func (d *signupDouble) count() int { return len(d.rows) }
+
+func (d *signupDouble) byID(signupID string) *signupRow {
+	for _, row := range d.rows {
+		if row.ID == signupID {
+			return row
+		}
+	}
+	return nil
+}
+
+func (d *signupDouble) Create(_ context.Context, email string, tokenHash []byte, expiresAt time.Time) error {
+	d.n++
+	d.rows[string(tokenHash)] = &signupRow{
+		ID: fmt.Sprintf("signup-%d", d.n), Email: email,
+		CreatedAt: d.clock.Now(), ExpiresAt: expiresAt,
+	}
+	return nil
+}
+
+func (d *signupDouble) ByTokenHash(_ context.Context, tokenHash []byte) (usecase.SignupDetails, error) {
+	row, ok := d.rows[string(tokenHash)]
+	if !ok {
+		return usecase.SignupDetails{}, domain.ErrNotFound
+	}
+	return usecase.SignupDetails{
+		ID: row.ID, Email: row.Email, ExpiresAt: row.ExpiresAt, ConsumedAt: row.ConsumedAt,
+	}, nil
+}
+
+// CountForEmailSince mirrors CountSignupsForEmailSince: created_at >= since,
+// matched by address, with no join through users -- there is no user to join
+// to for a brand-new address.
+func (d *signupDouble) CountForEmailSince(_ context.Context, email string, since time.Time) (int, error) {
+	n := 0
+	for _, row := range d.rows {
+		if row.Email == email && !row.CreatedAt.Before(since) {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// CountSince mirrors CountSignupsSince: created_at >= since, over every row
+// regardless of address.
+func (d *signupDouble) CountSince(_ context.Context, since time.Time) (int, error) {
+	n := 0
+	for _, row := range d.rows {
+		if !row.CreatedAt.Before(since) {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// Provision mirrors the real Provision's guarded consume-then-build: a
+// signup that is already consumed or expired reports domain.ErrTokenExpired,
+// collapsing the two cases into one answer exactly as
+// InviteRepository.Accept's guarded UPDATE does, with nothing written in
+// either case. Otherwise it builds the household from b, creates the owner
+// user and membership, seeds the builtin spaces and sets the notification
+// preferences, and stamps the signup consumed.
+//
+// Every write is undone on any later step's failure -- the same
+// all-or-nothing guarantee userDouble.CreateWithMembership gives its two
+// writes, extended here to five. This is not a nicety: Provision's whole
+// reason to exist is that a partial provision leaves a users row occupying
+// users.email's unique index with no membership under it, permanently
+// blocking that address (see Provision's doc comment in ports.go). A double
+// that left a partial write in place on a mid-sequence failure would hide
+// exactly the defect this method is supposed to make impossible.
+func (d *signupDouble) Provision(ctx context.Context, signupID, passwordHash string,
+	b usecase.HouseholdBlueprint) (usecase.ProvisionedHousehold, error) {
+	d.provisionCalls++
+
+	if d.failNextProvision != nil {
+		err := d.failNextProvision
+		d.failNextProvision = nil
+		return usecase.ProvisionedHousehold{}, err
+	}
+
+	row := d.byID(signupID)
+	if row == nil || domain.TokenLifecycle(d.clock.Now(), row.ExpiresAt, row.ConsumedAt) != domain.TokenLive {
+		return usecase.ProvisionedHousehold{}, domain.ErrTokenExpired
+	}
+
+	household, err := d.households.Create(ctx, b.Household())
+	if err != nil {
+		return usecase.ProvisionedHousehold{}, err
+	}
+
+	user, err := d.users.Create(ctx, row.Email, passwordHash, b.OwnerDisplayName)
+	if err != nil {
+		delete(d.households.rows, household.ID)
+		return usecase.ProvisionedHousehold{}, err
+	}
+
+	membership, err := domain.NewMembership("", household.ID, user.ID, b.OwnerRole, b.OwnerCapabilities)
+	if err != nil {
+		d.users.rollback(user)
+		delete(d.households.rows, household.ID)
+		return usecase.ProvisionedHousehold{}, err
+	}
+	created, err := d.members.Create(ctx, membership)
+	if err != nil {
+		d.users.rollback(user)
+		delete(d.households.rows, household.ID)
+		return usecase.ProvisionedHousehold{}, err
+	}
+
+	var madeSpaceIDs []string
+	for _, s := range domain.BuiltinSpaces(household.ID) {
+		created2, err := d.spaces.Create(ctx, s)
+		if err != nil {
+			d.removeSpaces(madeSpaceIDs)
+			_ = d.members.Delete(ctx, household.ID, created.ID)
+			d.users.rollback(user)
+			delete(d.households.rows, household.ID)
+			return usecase.ProvisionedHousehold{}, err
+		}
+		madeSpaceIDs = append(madeSpaceIDs, created2.ID)
+	}
+
+	if _, err := d.notifications.Upsert(ctx, household.ID, b.Notifications); err != nil {
+		d.removeSpaces(madeSpaceIDs)
+		_ = d.members.Delete(ctx, household.ID, created.ID)
+		d.users.rollback(user)
+		delete(d.households.rows, household.ID)
+		return usecase.ProvisionedHousehold{}, err
+	}
+
+	now := d.clock.Now()
+	row.ConsumedAt = &now
+
+	return usecase.ProvisionedHousehold{
+		UserID: user.ID, HouseholdID: household.ID, MembershipID: created.ID,
+	}, nil
+}
+
+// removeSpaces undoes a partial run of Provision's builtin-space loop, for
+// its own rollback paths -- spaceDouble has no Delete of its own (nothing
+// else in this codebase ever removes a space), so this reaches into its
+// rows directly rather than adding a method no real caller needs.
+func (d *signupDouble) removeSpaces(ids []string) {
+	if len(ids) == 0 {
+		return
+	}
+	drop := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		drop[id] = true
+	}
+	kept := d.spaces.rows[:0]
+	for _, s := range d.spaces.rows {
+		if !drop[s.ID] {
+			kept = append(kept, s)
+		}
+	}
+	d.spaces.rows = kept
+}
+
+// Prune mirrors PruneSignups: created_at < before AND (consumed or expired).
+// A live, unexpired row is never pruned no matter how old before is.
+func (d *signupDouble) Prune(_ context.Context, before time.Time) (int64, error) {
+	var deleted int64
+	for hash, row := range d.rows {
+		expiredOrConsumed := row.ConsumedAt != nil || !row.ExpiresAt.After(d.clock.Now())
+		if row.CreatedAt.Before(before) && expiredOrConsumed {
+			delete(d.rows, hash)
+			deleted++
+		}
+	}
+	return deleted, nil
+}
+
+var _ usecase.SignupRepository = (*signupDouble)(nil)
+
 // --- Mailer ---------------------------------------------------------
 
 type sentMail struct {
 	To   string
 	Name string
 	URL  string
+}
+
+// signupMail is sentMail without a Name: neither SendSignupLink nor
+// SendSignupForExistingAccount carries one (see Mailer's doc comments in
+// ports.go for why).
+type signupMail struct {
+	To  string
+	URL string
 }
 
 // mailerDouble is touched from two goroutines now that
@@ -747,12 +1005,14 @@ type sentMail struct {
 // of racing it. Waiting on a channel rather than sleeping is what keeps
 // these tests race-detector-clean and non-flaky.
 type mailerDouble struct {
-	mu         sync.Mutex
-	magicLinks []sentMail
-	invites    []sentMail
-	failNext   error
-	panicNext  string
-	sent       chan struct{}
+	mu             sync.Mutex
+	magicLinks     []sentMail
+	invites        []sentMail
+	signupLinks    []signupMail
+	signupExisting []signupMail
+	failNext       error
+	panicNext      string
+	sent           chan struct{}
 }
 
 func newMailerDouble() *mailerDouble {
@@ -822,6 +1082,47 @@ func (d *mailerDouble) lastInviteURL() string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.invites[len(d.invites)-1].URL
+}
+
+// SendSignupLink and SendSignupForExistingAccount record into their own
+// slices rather than sharing one -- so a test can assert *which* of the two
+// sign-up emails went out, the same distinction that oracle
+// (SendSignupForExistingAccount's doc comment in ports.go) depends on a test
+// being able to make.
+func (d *mailerDouble) SendSignupLink(_ context.Context, to, url string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.signupLinks = append(d.signupLinks, signupMail{To: to, URL: url})
+	return nil
+}
+
+func (d *mailerDouble) SendSignupForExistingAccount(_ context.Context, to, signInURL string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.signupExisting = append(d.signupExisting, signupMail{To: to, URL: signInURL})
+	return nil
+}
+
+// signupLinksSentCount is a mutex-guarded read of len(signupLinks).
+func (d *mailerDouble) signupLinksSentCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.signupLinks)
+}
+
+// lastSignupLinkURL is a mutex-guarded read of the most recently sent
+// sign-up link email's URL.
+func (d *mailerDouble) lastSignupLinkURL() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.signupLinks[len(d.signupLinks)-1].URL
+}
+
+// signupExistingSentCount is a mutex-guarded read of len(signupExisting).
+func (d *mailerDouble) signupExistingSentCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.signupExisting)
 }
 
 // signalSent must be called with mu held. The channel is large enough that
@@ -935,14 +1236,15 @@ func (d *householdDouble) Update(_ context.Context, h domain.Household) (domain.
 	return h, nil
 }
 
-// Create mirrors CreateHousehold's schema defaults (migrations/00002_identity.sql):
-// SGD primary, IDR secondary, shown, auto FX mode.
-func (d *householdDouble) Create(_ context.Context, name, familyName string) (domain.Household, error) {
+// Create mirrors HouseholdRepo.Create: it persists every field on h except ID
+// (assigned here, the way the database assigns it) and FXRateMode (always
+// "auto", the column default -- see that repo's doc comment in
+// internal/adapter/postgres/household_repo.go for why nothing else is safe to
+// assume at creation time).
+func (d *householdDouble) Create(_ context.Context, h domain.Household) (domain.Household, error) {
 	d.n++
-	h := domain.Household{
-		ID: fmt.Sprintf("household-%d", d.n), Name: name, FamilyName: familyName,
-		PrimaryCurrency: "SGD", ShowSecondaryCurrency: true, SecondaryCurrency: "IDR", FXRateMode: "auto",
-	}
+	h.ID = fmt.Sprintf("household-%d", d.n)
+	h.FXRateMode = "auto"
 	d.rows[h.ID] = h
 	return h, nil
 }

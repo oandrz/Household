@@ -55,6 +55,10 @@ type noopMailer struct{}
 
 func (noopMailer) SendMagicLink(context.Context, string, string, string) error      { return nil }
 func (noopMailer) SendInvite(context.Context, string, string, string, string) error { return nil }
+func (noopMailer) SendSignupLink(context.Context, string, string) error             { return nil }
+func (noopMailer) SendSignupForExistingAccount(context.Context, string, string) error {
+	return nil
+}
 
 // testEnv wires the full router against a disposable Postgres database, with
 // one seeded household carrying an owner and a limited (non-owner) member,
@@ -157,7 +161,10 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 	env := &testEnv{router: router}
 
 	ctx := context.Background()
-	h, err := households.Create(ctx, "Andreas & Christine", "Oentoro")
+	h, err := households.Create(ctx, domain.Household{
+		Name: "Andreas & Christine", FamilyName: "Oentoro",
+		PrimaryCurrency: "SGD", ShowSecondaryCurrency: true, SecondaryCurrency: "IDR",
+	})
 	if err != nil {
 		t.Fatalf("create household: %v", err)
 	}

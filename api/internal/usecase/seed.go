@@ -119,9 +119,7 @@ func Seed(ctx context.Context, d SeedDeps) (SeedResult, error) {
 		return SeedResult{}, err
 	}
 
-	if _, err := d.Notifications.Upsert(ctx, household.ID, NotificationPreferences{
-		BillReminders: true, OverspendAlerts: true, RetroReminder: true, WeeklyDigest: true,
-	}); err != nil {
+	if _, err := d.Notifications.Upsert(ctx, household.ID, DefaultNotificationPreferences()); err != nil {
 		return SeedResult{}, fmt.Errorf("set notification preferences: %w", err)
 	}
 
@@ -170,7 +168,20 @@ func ensureHouseholdAndAndreas(ctx context.Context, d SeedDeps) (domain.Househol
 		return domain.Household{}, "", fmt.Errorf("check for existing seed: %w", err)
 	}
 
-	household, err := d.Households.Create(ctx, householdName, familyName)
+	blueprint, err := NewSignupBlueprint(householdName, "Andreas", "SGD")
+	if err != nil {
+		return domain.Household{}, "", fmt.Errorf("build the seed blueprint: %w", err)
+	}
+	// The design's household is the one place that keeps the dual-currency
+	// display on: Andreas and Christine genuinely track SGD against IDR. A
+	// self-serve household gets secondary == primary and the toggle off (see
+	// NewSignupBlueprint), so these three are overridden here rather than
+	// baked into the blueprint constructor.
+	blueprint.FamilyName = familyName
+	blueprint.SecondaryCurrency = "IDR"
+	blueprint.ShowSecondaryCurrency = true
+
+	household, err := d.Households.Create(ctx, blueprint.Household())
 	if err != nil {
 		return domain.Household{}, "", fmt.Errorf("create household: %w", err)
 	}
@@ -180,12 +191,14 @@ func ensureHouseholdAndAndreas(ctx context.Context, d SeedDeps) (domain.Househol
 		return domain.Household{}, "", fmt.Errorf("hash development password: %w", err)
 	}
 
-	andreasMembership, err := domain.NewMembership("", household.ID, "", domain.RoleOwner, domain.AllCapabilities())
+	andreasMembership, err := domain.NewMembership("", household.ID, "",
+		blueprint.OwnerRole, blueprint.OwnerCapabilities)
 	if err != nil {
 		return domain.Household{}, "", fmt.Errorf("build andreas's membership: %w", err)
 	}
 
-	andreas, _, err := d.Users.CreateWithMembership(ctx, AndreasEmail, passwordHash, "Andreas", andreasMembership)
+	andreas, _, err := d.Users.CreateWithMembership(ctx, AndreasEmail, passwordHash,
+		blueprint.OwnerDisplayName, andreasMembership)
 	if err != nil {
 		return domain.Household{}, "", fmt.Errorf("create andreas: %w", err)
 	}

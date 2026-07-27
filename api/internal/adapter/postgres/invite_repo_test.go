@@ -17,7 +17,10 @@ func TestInviteLifecycle(t *testing.T) {
 	users := postgres.NewUserRepo(db)
 	invites := postgres.NewInviteRepo(db)
 
-	h, err := households.Create(ctx, "Andreas & Christine", "Oentoro")
+	h, err := households.Create(ctx, domain.Household{
+		Name: "Andreas & Christine", FamilyName: "Oentoro",
+		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
+	})
 	if err != nil {
 		t.Fatalf("create household: %v", err)
 	}
@@ -78,7 +81,10 @@ func TestInviteAcceptCreatesUserAndMembershipAtomically(t *testing.T) {
 	members := postgres.NewMembershipRepo(db)
 	invites := postgres.NewInviteRepo(db)
 
-	h, err := households.Create(ctx, "Andreas & Christine", "Oentoro")
+	h, err := households.Create(ctx, domain.Household{
+		Name: "Andreas & Christine", FamilyName: "Oentoro",
+		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
+	})
 	if err != nil {
 		t.Fatalf("create household: %v", err)
 	}
@@ -138,7 +144,10 @@ func TestInviteAcceptIsSingleUse(t *testing.T) {
 	users := postgres.NewUserRepo(db)
 	invites := postgres.NewInviteRepo(db)
 
-	h, err := households.Create(ctx, "Andreas & Christine", "Oentoro")
+	h, err := households.Create(ctx, domain.Household{
+		Name: "Andreas & Christine", FamilyName: "Oentoro",
+		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
+	})
 	if err != nil {
 		t.Fatalf("create household: %v", err)
 	}
@@ -183,7 +192,10 @@ func TestInviteAcceptRollsBackOnMembershipConstraintViolation(t *testing.T) {
 	users := postgres.NewUserRepo(db)
 	invites := postgres.NewInviteRepo(db)
 
-	h, err := households.Create(ctx, "Andreas & Christine", "Oentoro")
+	h, err := households.Create(ctx, domain.Household{
+		Name: "Andreas & Christine", FamilyName: "Oentoro",
+		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
+	})
 	if err != nil {
 		t.Fatalf("create household: %v", err)
 	}
@@ -232,7 +244,10 @@ func TestLiveInviteForEmail(t *testing.T) {
 	users := postgres.NewUserRepo(db)
 	invites := postgres.NewInviteRepo(db)
 
-	h, err := households.Create(ctx, "Andreas & Christine", "Oentoro")
+	h, err := households.Create(ctx, domain.Household{
+		Name: "Andreas & Christine", FamilyName: "Oentoro",
+		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
+	})
 	if err != nil {
 		t.Fatalf("create household: %v", err)
 	}
@@ -262,7 +277,10 @@ func TestLiveInviteForEmail(t *testing.T) {
 	}
 
 	// A different household's invite for the same address must not surface.
-	h2, err := households.Create(ctx, "A Different Household", "Someone Else")
+	h2, err := households.Create(ctx, domain.Household{
+		Name: "A Different Household", FamilyName: "Someone Else",
+		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
+	})
 	if err != nil {
 		t.Fatalf("create second household: %v", err)
 	}

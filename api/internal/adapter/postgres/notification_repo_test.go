@@ -16,7 +16,10 @@ func TestNotificationPreferencesRoundTrip(t *testing.T) {
 	households := postgres.NewHouseholdRepo(db)
 	notifications := postgres.NewNotificationRepo(db)
 
-	h, err := households.Create(ctx, "H", "H")
+	h, err := households.Create(ctx, domain.Household{
+		Name: "H", FamilyName: "H",
+		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
+	})
 	if err != nil {
 		t.Fatalf("create household: %v", err)
 	}

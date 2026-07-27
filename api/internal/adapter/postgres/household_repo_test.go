@@ -14,16 +14,36 @@ func TestHouseholdRepoRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	households := postgres.NewHouseholdRepo(db)
 
-	created, err := households.Create(ctx, "Andreas & Christine", "Oentoro")
+	// PrimaryCurrency, SecondaryCurrency and ShowSecondaryCurrency deliberately
+	// differ from the households table's own column defaults (SGD/IDR/true):
+	// Create now takes a fully-populated domain.Household rather than
+	// (name, familyName), and CreateHouseholdParams is a keyed sqlc struct --
+	// if a field were dropped from the params literal in household_repo.go,
+	// Go would silently zero-value it and the column default would mask the
+	// bug. Asserting values that differ from the defaults is what makes this
+	// test actually prove Create forwards the caller's values, not just that
+	// it forwards *some* values coincidentally equal to what the old
+	// hardcoded literals already were. FXRateMode is asserted separately as
+	// "auto" because Create ignores it by design (see
+	// HouseholdRepository.Create's doc comment) -- the column default is the
+	// only value the CHECK constraint makes safe to assume at creation time.
+	//
+	// These values also deliberately differ from what Update sets below, so
+	// that step still proves Update writes every field rather than finding
+	// it already at the target value.
+	created, err := households.Create(ctx, domain.Household{
+		Name: "Andreas & Christine", FamilyName: "Oentoro",
+		PrimaryCurrency: "GBP", SecondaryCurrency: "JPY", ShowSecondaryCurrency: false,
+	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if created.ID == "" {
 		t.Fatal("Create did not return an id — uuidToString must have failed")
 	}
-	if created.PrimaryCurrency != "SGD" || created.SecondaryCurrency != "IDR" ||
-		!created.ShowSecondaryCurrency || created.FXRateMode != "auto" {
-		t.Fatalf("defaults not applied: %+v", created)
+	if created.PrimaryCurrency != "GBP" || created.SecondaryCurrency != "JPY" ||
+		created.ShowSecondaryCurrency || created.FXRateMode != "auto" {
+		t.Fatalf("Create did not forward the caller's household: %+v", created)
 	}
 
 	// Change every field, including Name and SecondaryCurrency -- the two
@@ -32,7 +52,7 @@ func TestHouseholdRepoRoundTrip(t *testing.T) {
 	// error over a partial write.
 	want := domain.Household{
 		ID: created.ID, Name: "The Oentoro Household", FamilyName: "Tan",
-		PrimaryCurrency: "USD", ShowSecondaryCurrency: false,
+		PrimaryCurrency: "USD", ShowSecondaryCurrency: true,
 		SecondaryCurrency: "EUR", FXRateMode: "manual",
 	}
 	updated, err := households.Update(ctx, want)
