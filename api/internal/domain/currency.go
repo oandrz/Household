@@ -137,14 +137,47 @@ func ParseCurrency(code string) (string, error) {
 	return upper, nil
 }
 
-// CurrencyMinorUnits reports how many decimal places a currency has. The bool
-// is false for an unknown code, exactly as a map lookup would be.
-func CurrencyMinorUnits(code string) (int, bool) {
-	c, ok := byCode[strings.ToUpper(strings.TrimSpace(code))]
-	if !ok {
-		return 0, false
+// SelectableCurrencies returns the active ISO 4217 currencies a household may
+// choose as its primary currency: only those with MinorUnits == 2.
+// Money.String() is fmt.Sprintf("%s%s %d.%02d", ...) -- two decimal places,
+// hard-coded -- so a household that picked JPY (0) or KWD (3) would have
+// every amount rendered wrong. GET /api/v1/currencies (the sign-up form's own
+// list) and ParseSelectableCurrency both read this, so the list offered and
+// the list sign-up actually accepts cannot drift apart.
+//
+// ParseCurrency stays permissive and does not call this: the household PATCH
+// path has always accepted arbitrary codes and must not start rejecting
+// stored data. Only sign-up -- where a currency is chosen for the first time
+// -- goes through this gate, via ParseSelectableCurrency below.
+//
+// WHEN Money LEARNS ABOUT MINOR UNITS, DELETE BOTH THIS FUNCTION AND
+// ParseSelectableCurrency. This filter is the only thing keeping either list
+// short.
+func SelectableCurrencies() []Currency {
+	all := ActiveCurrencies()
+	out := make([]Currency, 0, len(all))
+	for _, c := range all {
+		if c.MinorUnits == 2 {
+			out = append(out, c)
+		}
 	}
-	return c.MinorUnits, true
+	return out
+}
+
+// ParseSelectableCurrency is ParseCurrency plus the two-minor-unit gate
+// SelectableCurrencies applies -- see that function's doc comment for why --
+// for a caller that is choosing a currency for the first time (sign-up)
+// rather than reading one that already exists (the household PATCH path,
+// which stays on ParseCurrency alone).
+func ParseSelectableCurrency(code string) (string, error) {
+	upper, err := ParseCurrency(code)
+	if err != nil {
+		return "", err
+	}
+	if byCode[upper].MinorUnits != 2 {
+		return "", fmt.Errorf("%w: %q is not a two-minor-unit currency", ErrInvalidMoney, code)
+	}
+	return upper, nil
 }
 
 // ActiveCurrencies returns the whole active list, sorted by code. It copies,

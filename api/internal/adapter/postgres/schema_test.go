@@ -102,8 +102,10 @@ func TestSignupsSchema(t *testing.T) {
 	})
 }
 
-// The reason avatar_initial was widened: strings.ToUpper can grow a rune, and
-// char(1) rejects the result outright.
+// The reason avatar_initial was widened: cases.Upper(language.Und) (used by
+// initialOf, not strings.ToUpper -- the standard library applies simple case
+// mapping only and leaves 'ß' unchanged) can grow a rune, and char(1) rejects
+// the result outright.
 func TestAvatarInitialHoldsAMultiCharacterUppercase(t *testing.T) {
 	db := openTestDB(t)
 	pool := db.Pool()

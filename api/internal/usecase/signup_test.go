@@ -231,6 +231,12 @@ func TestSignupRequestRateLimitAppliesThroughRealCounters(t *testing.T) {
 			}
 		}
 		f.mailer.waitForSends(t, 3)
+		// waitForSends(t, 3) only proves 3 sends landed -- it drains exactly
+		// that many and returns, so a 4th async send in flight would not yet
+		// have arrived and this test would pass whether or not the 4th
+		// request was actually rate-limited. This is the negative half of the
+		// assertion: nothing more arrives in the time a 4th send would need.
+		f.mailer.assertNoSendsWithin(t, 100*time.Millisecond)
 		if n := len(f.mailer.existingAccountNotices); n != 3 {
 			t.Fatalf("sent %d existing-account notices for 4 requests, want 3 -- "+
 				"the 4th call must be silently rate-limited, not mailed", n)
@@ -246,6 +252,10 @@ func TestSignupRequestRateLimitAppliesThroughRealCounters(t *testing.T) {
 			}
 		}
 		f.mailer.waitForSends(t, 3)
+		// Same reasoning as the registered-address subtest above: draining 3
+		// signals does not rule out a 4th arriving moments later, so a 4th
+		// send must be actively ruled out, not merely un-observed.
+		f.mailer.assertNoSendsWithin(t, 100*time.Millisecond)
 		if n := len(f.mailer.signupLinks); n != 3 {
 			t.Fatalf("sent %d signup links for 4 requests, want 3", n)
 		}
@@ -358,6 +368,24 @@ func TestSignupComplete(t *testing.T) {
 		}
 		if f.signups.provisionCalls() != 0 {
 			t.Fatal("Provision was called for a rejected currency")
+		}
+	})
+
+	t.Run("a currency Money cannot render is refused before anything is written", func(t *testing.T) {
+		f := newSignupFixture(t)
+		token := f.issueSignup(t, "founder@example.test", f.clock.Now().Add(usecase.SignupTTL))
+		// JPY is a well-formed, active ISO 4217 code -- domain.ParseCurrency
+		// alone would accept it -- but it has zero minor units, and
+		// domain.Money.String() hard-codes two decimal places. Sign-up must
+		// refuse it through the same domain.SelectableCurrencies gate GET
+		// /api/v1/currencies filters through, or a client posting directly
+		// (bypassing the form's own currency list) provisions a household
+		// every amount renders 100x wrong.
+		if _, err := f.svc.Complete(context.Background(), token, "Ade & Kris", "Ade", "JPY", "a-long-enough-password"); !errors.Is(err, domain.ErrInvalidMoney) {
+			t.Fatalf("error = %v, want domain.ErrInvalidMoney", err)
+		}
+		if f.signups.provisionCalls() != 0 {
+			t.Fatal("Provision was called for a currency Money cannot render")
 		}
 	})
 

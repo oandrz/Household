@@ -224,9 +224,23 @@ export function useCurrencies() {
 // acceptance use (see signup_handlers.go's handleCompleteSignUp), so all four
 // answer with the identical me bundle and the identical pair of cookies.
 //
-// Invalidates rather than seeds ['me'] directly -- matching useSignIn and
-// useAcceptInvite above, not useConsumeMagicLink's setQueryData, so all four
-// session-creating mutations behave identically here.
+// Seeds ['me'] with setQueryData rather than only invalidating -- matching
+// useConsumeMagicLink above, not useSignIn/useAcceptInvite's invalidate-only,
+// because this route can be reached with a *stale* ['me'] already sitting in
+// the cache. signUpCompleteRoute deliberately does not bounce an
+// already-signed-in caller away (router.tsx, for the same shared-device
+// reason inviteRoute doesn't), so this screen is reachable via same-tab
+// navigation from an authenticated screen, within the default 5-minute
+// gcTime of that previous session's ['me'] query. invalidateQueries alone
+// only marks an *inactive* query stale -- it does not refetch it -- so a
+// fresh useMe observer that mounts right after (e.g. AppShell, once this
+// screen navigates to "/") would synchronously render that stale,
+// previous-owner data (isPending: false, wrong household) before the
+// background refetch its own staleness triggers has resolved. setQueryData
+// replaces the cache with this response's own bundle up front, so there is
+// nothing stale left to flash. invalidateQueries is kept alongside it
+// anyway, for any other tab/observer sharing this queryClient that might
+// already be watching ['me'].
 export function useCompleteSignUp() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -244,7 +258,8 @@ export function useCompleteSignUp() {
       );
       return meQuerySchema.parse(body);
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      queryClient.setQueryData(meQueryKey, data);
       queryClient.invalidateQueries({ queryKey: meQueryKey });
     },
   });

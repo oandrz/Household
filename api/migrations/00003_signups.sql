@@ -34,11 +34,14 @@ CREATE INDEX signups_created_idx ON signups (created_at DESC);
 
 -- avatar_initial was char(1). One character is enough for a single letter in
 -- any script, so this is not about non-ASCII names fitting -- it is about
--- strings.ToUpper growing a rune: German 'ß' uppercases to "SS", two
--- characters, which char(1) rejects outright. Nobody could reach that before,
--- because initialOf sliced bytes and produced mojibake long before it reached
--- the column; fixing initialOf to slice runes is what makes the expansion
--- case reachable. text also leaves room for a future profile editor to store a
+-- cases.Upper(language.Und) (golang.org/x/text) growing a rune: German 'ß'
+-- uppercases to "SS", two characters, which char(1) rejects outright.
+-- strings.ToUpper cannot do this -- it applies simple case mapping only, and
+-- leaves 'ß' unchanged -- which is exactly why initialOf uses cases.Upper
+-- instead (see user_repo.go). Nobody could reach the expansion before, because
+-- initialOf sliced bytes and produced mojibake long before it reached the
+-- column; fixing initialOf to slice runes is what makes the expansion case
+-- reachable. text also leaves room for a future profile editor to store a
 -- two-character initial.
 ALTER TABLE users ALTER COLUMN avatar_initial TYPE text;
 

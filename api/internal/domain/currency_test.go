@@ -32,26 +32,42 @@ func TestParseCurrencyRejectsWrongLength(t *testing.T) {
 	}
 }
 
-func TestCurrencyMinorUnits(t *testing.T) {
-	for _, tc := range []struct {
-		code string
-		want int
-	}{
-		{"SGD", 2},
-		{"IDR", 2},
-		{"JPY", 0},
-		{"KWD", 3},
-	} {
-		got, ok := CurrencyMinorUnits(tc.code)
-		if !ok {
-			t.Fatalf("CurrencyMinorUnits(%s): not found", tc.code)
-		}
-		if got != tc.want {
-			t.Fatalf("CurrencyMinorUnits(%s) = %d, want %d", tc.code, got, tc.want)
+// SelectableCurrencies must include the common two-minor-unit currencies and
+// exclude every currency Money.String()'s hard-coded two decimal places would
+// render wrong.
+func TestSelectableCurrenciesOffersOnlyTwoMinorUnitCodes(t *testing.T) {
+	got := SelectableCurrencies()
+	if len(got) < 100 {
+		t.Fatalf("got %d currencies, want the two-minor-unit majority of ISO 4217", len(got))
+	}
+	units := map[string]int{}
+	for _, c := range got {
+		units[c.Code] = c.MinorUnits
+	}
+	for _, code := range []string{"SGD", "IDR", "USD"} {
+		if u, ok := units[code]; !ok || u != 2 {
+			t.Fatalf("%s missing or has %d minor units, want present with 2", code, u)
 		}
 	}
-	if _, ok := CurrencyMinorUnits("ZZZ"); ok {
-		t.Fatal("CurrencyMinorUnits(ZZZ): want not found")
+	for _, code := range []string{"JPY", "KWD", "ISK"} {
+		if _, ok := units[code]; ok {
+			t.Fatalf("%s is selectable, but Money.String() renders its minor units wrong", code)
+		}
+	}
+}
+
+func TestParseSelectableCurrency(t *testing.T) {
+	if got, err := ParseSelectableCurrency("sgd"); err != nil || got != "SGD" {
+		t.Fatalf("ParseSelectableCurrency(sgd) = (%q, %v), want (SGD, nil)", got, err)
+	}
+	// JPY is a well-formed, active ISO 4217 code -- ParseCurrency alone would
+	// accept it -- but its zero minor units is exactly what this gate exists
+	// to refuse.
+	if _, err := ParseSelectableCurrency("JPY"); !errors.Is(err, ErrInvalidMoney) {
+		t.Fatalf("ParseSelectableCurrency(JPY) error = %v, want ErrInvalidMoney", err)
+	}
+	if _, err := ParseSelectableCurrency("ZZZ"); !errors.Is(err, ErrInvalidMoney) {
+		t.Fatalf("ParseSelectableCurrency(ZZZ) error = %v, want ErrInvalidMoney", err)
 	}
 }
 

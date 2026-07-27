@@ -1458,6 +1458,20 @@ func TestSignUpPreviewAndComplete(t *testing.T) {
 		assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "INVALID_CURRENCY")
 	})
 
+	// JPY is a well-formed, active ISO 4217 code -- unlike ZZZ above -- but it
+	// has zero minor units, and domain.Money.String() hard-codes two decimal
+	// places. GET /api/v1/currencies never offers it (see
+	// TestCurrenciesIsPublicAndOnlyOffersTwoMinorUnitCodes), but this proves
+	// the same rule holds for a client that posts the code directly, bypassing
+	// the form's own currency list.
+	t.Run("a currency Money cannot render is 422", func(t *testing.T) {
+		rec := env.do(http.MethodPost, "/api/v1/auth/sign-up/"+token+"/complete", map[string]string{
+			"householdName": "Ade & Kris", "displayName": "Ade", "primaryCurrency": "JPY",
+			"password": "a-long-enough-password",
+		})
+		assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "INVALID_CURRENCY")
+	})
+
 	t.Run("a short password is 422", func(t *testing.T) {
 		rec := env.do(http.MethodPost, "/api/v1/auth/sign-up/"+token+"/complete", map[string]string{
 			"householdName": "Ade & Kris", "displayName": "Ade", "primaryCurrency": "SGD",

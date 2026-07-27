@@ -65,7 +65,12 @@ func NewSignupBlueprint(householdName, displayName, currency string) (HouseholdB
 	if owner == "" {
 		return HouseholdBlueprint{}, ErrDisplayNameRequired
 	}
-	code, err := domain.ParseCurrency(currency)
+	// ParseSelectableCurrency, not ParseCurrency: a currency chosen for the
+	// first time at sign-up must be one domain.Money can actually render, not
+	// merely one ISO 4217 recognises -- see domain.SelectableCurrencies for
+	// why, and household.go's normalizeCurrency for the PATCH path, which
+	// stays on ParseCurrency because it must keep accepting stored data.
+	code, err := domain.ParseSelectableCurrency(currency)
 	if err != nil {
 		return HouseholdBlueprint{}, err
 	}
