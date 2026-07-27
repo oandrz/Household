@@ -45,7 +45,16 @@ func (r *HouseholdRepo) Update(ctx context.Context, h domain.Household) (domain.
 }
 
 func (r *HouseholdRepo) Create(ctx context.Context, name, familyName string) (domain.Household, error) {
-	row, err := r.q.CreateHousehold(ctx, sqlcgen.CreateHouseholdParams{Name: name, FamilyName: familyName})
+	// Task 25 replaces these literals with the caller's HouseholdBlueprint;
+	// they reproduce the column defaults exactly so this change is
+	// behaviour-neutral.
+	row, err := r.q.CreateHousehold(ctx, sqlcgen.CreateHouseholdParams{
+		Name:                  name,
+		FamilyName:            familyName,
+		PrimaryCurrency:       "SGD",
+		ShowSecondaryCurrency: true,
+		SecondaryCurrency:     "IDR",
+	})
 	if err != nil {
 		return domain.Household{}, translate(err, "create household")
 	}

@@ -78,6 +78,15 @@ type Session struct {
 	RevokedAt   pgtype.Timestamptz
 }
 
+type Signup struct {
+	ID         pgtype.UUID
+	Email      string
+	TokenHash  []byte
+	ExpiresAt  pgtype.Timestamptz
+	ConsumedAt pgtype.Timestamptz
+	CreatedAt  pgtype.Timestamptz
+}
+
 type Space struct {
 	ID                 pgtype.UUID
 	HouseholdID        pgtype.UUID

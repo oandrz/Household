@@ -51,14 +51,19 @@ func (q *Queries) CountRecentMagicLinks(ctx context.Context, arg CountRecentMagi
 }
 
 const createHousehold = `-- name: CreateHousehold :one
-INSERT INTO households (name, family_name) VALUES ($1, $2)
-RETURNING id, name, family_name, primary_currency, show_secondary_currency,
-          secondary_currency, fx_rate_mode
+INSERT INTO households (name, family_name, primary_currency,
+                        show_secondary_currency, secondary_currency)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, name, family_name, primary_currency,
+          show_secondary_currency, secondary_currency, fx_rate_mode
 `
 
 type CreateHouseholdParams struct {
-	Name       string
-	FamilyName string
+	Name                  string
+	FamilyName            string
+	PrimaryCurrency       string
+	ShowSecondaryCurrency bool
+	SecondaryCurrency     string
 }
 
 type CreateHouseholdRow struct {
@@ -72,7 +77,13 @@ type CreateHouseholdRow struct {
 }
 
 func (q *Queries) CreateHousehold(ctx context.Context, arg CreateHouseholdParams) (CreateHouseholdRow, error) {
-	row := q.db.QueryRow(ctx, createHousehold, arg.Name, arg.FamilyName)
+	row := q.db.QueryRow(ctx, createHousehold,
+		arg.Name,
+		arg.FamilyName,
+		arg.PrimaryCurrency,
+		arg.ShowSecondaryCurrency,
+		arg.SecondaryCurrency,
+	)
 	var i CreateHouseholdRow
 	err := row.Scan(
 		&i.ID,
@@ -450,7 +461,9 @@ func (q *Queries) GetLiveSession(ctx context.Context, tokenHash []byte) (GetLive
 
 const getMembershipByUser = `-- name: GetMembershipByUser :one
 SELECT id, household_id, user_id, role, capabilities
-FROM memberships WHERE user_id = $1 LIMIT 1
+FROM memberships WHERE user_id = $1
+ORDER BY joined_at, id
+LIMIT 1
 `
 
 type GetMembershipByUserRow struct {
@@ -461,6 +474,11 @@ type GetMembershipByUserRow struct {
 	Capabilities []string
 }
 
+// ByUser cannot take a household scope -- sign-in resolves the household from
+// it -- so it remains LIMIT 1 while one account belongs to exactly one
+// household. The ORDER BY makes which row it picks deterministic rather than
+// whatever the planner returns first, so if that invariant is ever broken the
+// failure is reproducible instead of intermittent.
 func (q *Queries) GetMembershipByUser(ctx context.Context, userID pgtype.UUID) (GetMembershipByUserRow, error) {
 	row := q.db.QueryRow(ctx, getMembershipByUser, userID)
 	var i GetMembershipByUserRow
@@ -747,6 +765,28 @@ func (q *Queries) NextSpacePosition(ctx context.Context, householdID pgtype.UUID
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const pruneLoginAttempts = `-- name: PruneLoginAttempts :execrows
+DELETE FROM login_attempts WHERE at < $1
+`
+
+// PruneLoginAttempts deletes attempts older than the cutoff, including the
+// NULL-household_id rows an unknown-address sign-in attempt records.
+// ClearFailures cannot reach those: it is scoped WHERE household_id = $1, and
+// household_id = $1 never matches NULL. So the rows a member generates are the
+// only ones anything ever deleted, and the rows a stranger generates were
+// deleted by nothing at all.
+//
+// The caller is responsible for a cutoff well outside
+// domain.LockoutPolicy.Window. Deleting a row still inside that window would
+// clear a live lockout -- a security regression dressed as a cleanup.
+func (q *Queries) PruneLoginAttempts(ctx context.Context, at pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneLoginAttempts, at)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const recordLoginAttempt = `-- name: RecordLoginAttempt :exec

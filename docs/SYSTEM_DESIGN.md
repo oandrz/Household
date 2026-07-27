@@ -332,7 +332,7 @@ erDiagram
         citext email "nullable — children have none"
         text password_hash "nullable"
         text display_name
-        char avatar_initial
+        text avatar_initial
     }
     memberships {
         uuid id PK
@@ -366,6 +366,13 @@ erDiagram
         timestamptz expires_at
         timestamptz consumed_at
     }
+    signups {
+        uuid id PK
+        citext email
+        bytea token_hash
+        timestamptz expires_at
+        timestamptz consumed_at "nullable"
+    }
     login_attempts {
         uuid id PK
         uuid household_id FK "nullable"
@@ -387,12 +394,24 @@ erDiagram
 
 Notes that are not obvious from the shapes:
 
-- **Only hashes are stored** — passwords, session tokens, magic-link tokens and
-  invite tokens. A raw token exists in memory and in an email, never in a column.
-- **Every table except `users` carries `household_id`**, so scoping is structural.
-  Repository methods take it as their first argument after the context.
+- **Only hashes are stored** — passwords, session tokens, magic-link tokens,
+  invite tokens and sign-up tokens. A raw token exists in memory and in an
+  email, never in a column.
+- **Every household-scoped table carries `household_id`**, so scoping is
+  structural. Repository methods take it as their first argument after the
+  context. `magic_links` and `signups` are the exceptions: a magic link
+  identifies a user, not a membership, so it scopes through `user_id`
+  instead; a sign-up identifies a verified address with no user or
+  household behind it yet, so it has neither.
 - **`login_attempts` allows both foreign keys to be null**, so an attempt against
   an unknown address is recorded without revealing whether it exists.
+- **`signups` has no `user_id`**, unlike `magic_links`. There is no user yet —
+  only a verified address — which is also why the row carries no household
+  name or display name: those are collected on the screen the mailed token
+  leads to, after verification, so a stranger cannot submit a sign-up for
+  someone else's address with a household of their own choosing. `email` is
+  deliberately not unique; several live tokens for one address are fine,
+  and the first one consumed wins.
 - **Database constraints mirror the domain rules** rather than trusting the
   application: a limited member cannot hold `marriage`, an owner must hold all
   four capabilities, and capabilities must come from the known set.

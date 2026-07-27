@@ -38,9 +38,11 @@ RETURNING id, name, family_name, primary_currency, show_secondary_currency,
           secondary_currency, fx_rate_mode;
 
 -- name: CreateHousehold :one
-INSERT INTO households (name, family_name) VALUES ($1, $2)
-RETURNING id, name, family_name, primary_currency, show_secondary_currency,
-          secondary_currency, fx_rate_mode;
+INSERT INTO households (name, family_name, primary_currency,
+                        show_secondary_currency, secondary_currency)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, name, family_name, primary_currency,
+          show_secondary_currency, secondary_currency, fx_rate_mode;
 
 -- name: ListMemberships :many
 SELECT m.id, m.household_id, m.user_id, m.role, m.capabilities,
@@ -49,9 +51,16 @@ FROM memberships m JOIN users u ON u.id = m.user_id
 WHERE m.household_id = $1
 ORDER BY m.role DESC, u.display_name;
 
+-- ByUser cannot take a household scope -- sign-in resolves the household from
+-- it -- so it remains LIMIT 1 while one account belongs to exactly one
+-- household. The ORDER BY makes which row it picks deterministic rather than
+-- whatever the planner returns first, so if that invariant is ever broken the
+-- failure is reproducible instead of intermittent.
 -- name: GetMembershipByUser :one
 SELECT id, household_id, user_id, role, capabilities
-FROM memberships WHERE user_id = $1 LIMIT 1;
+FROM memberships WHERE user_id = $1
+ORDER BY joined_at, id
+LIMIT 1;
 
 -- name: CreateMembership :one
 INSERT INTO memberships (household_id, user_id, role, capabilities)
@@ -171,3 +180,16 @@ SET bill_reminders = excluded.bill_reminders,
     retro_reminder = excluded.retro_reminder,
     weekly_digest = excluded.weekly_digest
 RETURNING household_id, bill_reminders, overspend_alerts, retro_reminder, weekly_digest;
+
+-- PruneLoginAttempts deletes attempts older than the cutoff, including the
+-- NULL-household_id rows an unknown-address sign-in attempt records.
+-- ClearFailures cannot reach those: it is scoped WHERE household_id = $1, and
+-- household_id = $1 never matches NULL. So the rows a member generates are the
+-- only ones anything ever deleted, and the rows a stranger generates were
+-- deleted by nothing at all.
+--
+-- The caller is responsible for a cutoff well outside
+-- domain.LockoutPolicy.Window. Deleting a row still inside that window would
+-- clear a live lockout -- a security regression dressed as a cleanup.
+-- name: PruneLoginAttempts :execrows
+DELETE FROM login_attempts WHERE at < $1;
