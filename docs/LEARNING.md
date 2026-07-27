@@ -204,6 +204,34 @@ scoped inherits that query's blind spot for free.
 never changes a string's length, is written for ASCII and will not say so.**
 Both assumptions are invisible until a name that isn't ASCII reaches them.
 
+### 11. Layered limits have asymmetric failure modes, and the one that fails silently and globally must never bind first
+
+- Sign-up had a per-IP limit of 10/hour and a global daily mail ceiling of
+  200. Each looked right alone. Together they did not compose: 10 × 24 = 240
+  > 200, so a single IP, entirely inside its own hourly budget, could
+  exhaust the global ceiling by itself. Once that ceiling trips, **every**
+  sign-up on the platform silently answers `202` and mails nothing, for up
+  to 24 hours, with nobody told.
+- The same slice had no server-side email format validation, so
+  `{"email":""}` still wrote a countable row into `signups` — a zero-cost
+  way to spend either limit's budget, which makes any ceiling negotiable for
+  free rather than merely tight.
+- Found by a whole-branch review reading the two numbers together, after
+  both limits had already shipped clean and reviewed on their own — not by
+  a test. Neither per-task review could have caught it: each limit was
+  correct within the scope of its own task, and the composition only exists
+  across two separate commits.
+
+**A per-IP `429` inconveniences one caller and announces itself. A global
+ceiling tripping is invisible, platform-wide, and indistinguishable from
+"nobody is signing up today."** The cheap, reversible limit must bite before
+the expensive, silent one — and something must assert that relationship,
+because two constants in different packages drift independently. The guard
+here is a test, `TestSignUpRateLimitsCompose`, asserting
+`signUpRequestsPerIPPerHour * 24 < SignupGlobalDailyLimit` against the live
+constants — which is the entire reason `SignupGlobalDailyLimit` is exported
+at all.
+
 ---
 
 ## Catalogue by area
@@ -278,6 +306,13 @@ route with a missing guard has no second line of defence.
   decision, and it is exactly as strong as the edge's header rewriting, no
   stronger: one `curl -H "X-Real-IP: <vary>"` per request defeats it unless
   the proxy blanks the client-supplied headers first.
+- `signUpRequestsPerIPPerHour` (10/hour) and `usecase.SignupGlobalDailyLimit`
+  (200/day) each shipped correct and reviewed on their own, and did not
+  compose: one IP, entirely inside its own hourly budget, could exhaust the
+  global ceiling alone (10 × 24 = 240 > 200), after which sign-up silently
+  mailed nothing platform-wide for up to a day. Now 5/hour and 1000/day,
+  with `TestSignUpRateLimitsCompose` asserting the arithmetic against the
+  live constants so the two cannot drift apart unnoticed again.
 
 ### Frontend
 

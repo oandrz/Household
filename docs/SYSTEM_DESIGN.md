@@ -91,7 +91,7 @@ graph TD
     end
 
     subgraph domain["internal/domain/ — rules, stdlib only"]
-        Rules["Money · Role · Capability<br/>Membership · Space · LockoutPolicy<br/>typed errors"]
+        Rules["Money · Currency · Role · Capability<br/>Membership · Space · LockoutPolicy<br/>typed errors"]
     end
 
     Main --> HTTP
@@ -119,6 +119,13 @@ points inward, which is why every service is testable against in-memory doubles.
   further up.
 - **No service takes an actor parameter.** Services enforce what is *valid*;
   middleware enforces who is *asking*. Authorisation exists in exactly one place.
+- **Which currencies are selectable is a domain rule, not an HTTP filter.**
+  `domain.ParseCurrency` stays permissive — it accepts any active ISO 4217
+  code, because the household `PATCH` path has always accepted arbitrary
+  active codes and must keep accepting whatever is already stored.
+  `domain.SelectableCurrencies`/`ParseSelectableCurrency` add a second, tighter
+  gate on top for the one path that is choosing a currency for the first time.
+  See §5's self-serve sign-up flow.
 
 ---
 
@@ -344,6 +351,24 @@ sequenceDiagram
     R->>DB: COMMIT
     S-->>B: 200 + session cookie, via the same completeSignIn<br/>sign-in and invite acceptance use
 ```
+
+The `validate ... currency ...` step runs the currency the caller chose
+through `domain.ParseSelectableCurrency`, not the more permissive
+`domain.ParseCurrency` that the household `PATCH` path uses. `ParseCurrency`
+is the single reference for "is this a currency at all" and stays that way —
+it must keep accepting whatever currency is already stored on an existing
+household. `ParseSelectableCurrency` adds a second, narrower gate on top:
+only ISO 4217 codes with two minor units, the same list
+`domain.SelectableCurrencies()` filters `GET /api/v1/currencies` down to, so
+the sign-up form's own currency select and what `Complete` will actually
+accept cannot drift apart. The reason either gate exists at all is
+`Money.String()`: it renders an amount as `fmt.Sprintf("%s%s %d.%02d", ...)` —
+two decimal places, hard-coded — so a household provisioned with, say, JPY
+(0 minor units) or KWD (3) would have had every amount rendered 100× wrong
+from the moment it existed. Delete `SelectableCurrencies` and
+`ParseSelectableCurrency` only once `Money` itself knows about minor units;
+until then they are what keeps the sign-up path from offering a currency the
+money path cannot render.
 
 A household can now come into existence three ways: `adminctl seed`
 (development only), an invite accepted into a household that already exists,

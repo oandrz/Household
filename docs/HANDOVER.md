@@ -198,8 +198,19 @@ the reasoning for each. The headlines:
 - **The lock is uncapped**, so repeated guessing can hold a household locked
   indefinitely. Accepted: magic link is deliberately ungated and is the way back
   in.
+- **Sign-up's rate-limit numbers (per-IP 5/hour, global 1000/day, reset at
+  midnight) were changed deliberately by the product owner**, after a
+  whole-branch review found the previous pair (10/hour, 200/day) did not
+  compose — one IP alone, inside its own hourly budget, could exhaust the
+  global ceiling, after which sign-up silently mailed nothing platform-wide
+  for up to a day. The two failure modes are asymmetric: a per-IP `429` is
+  cheap and self-announcing, a tripped global ceiling is silent and
+  platform-wide, so the global number must stay one that legitimate traffic
+  never approaches. Do not change either number without re-reading
+  `docs/LEARNING.md`'s pattern 11 and re-checking
+  `TestSignUpRateLimitsCompose`, the test that asserts the two stay composed.
 
-Both are documented in the code at the point a future editor would change them.
+All three are documented in the code at the point a future editor would change them.
 
 ### Worth doing when convenient
 
