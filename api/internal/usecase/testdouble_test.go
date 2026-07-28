@@ -1791,6 +1791,42 @@ func (r *fakeAccountRepo) MembershipBelongsToHousehold(_ context.Context, househ
 	return r.memberships[membershipID] == householdID, nil
 }
 
+// fakeCategoryRepo records how many times EnsureSeeded actually inserted, so a
+// test can tell "seeded once" from "seeded on every call".
+type fakeCategoryRepo struct {
+	categories []domain.Category
+	seeds      int
+}
+
+func (f *fakeCategoryRepo) List(_ context.Context, householdID string, includeArchived bool) ([]domain.Category, error) {
+	out := []domain.Category{}
+	for _, c := range f.categories {
+		if c.HouseholdID != householdID {
+			continue
+		}
+		if c.IsArchived() && !includeArchived {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+func (f *fakeCategoryRepo) EnsureSeeded(_ context.Context, householdID string, starter []domain.Category) error {
+	for _, c := range f.categories {
+		if c.HouseholdID == householdID {
+			return nil
+		}
+	}
+	f.seeds++
+	for i, c := range starter {
+		c.ID = fmt.Sprintf("cat-%d", i+1)
+		c.HouseholdID = householdID
+		f.categories = append(f.categories, c)
+	}
+	return nil
+}
+
 // staticTestRates knows the one pair fx.StaticProvider knows, and errors on
 // everything else -- so a test for the no-rate branch does not have to invent
 // a second, differently-behaved double.
