@@ -103,6 +103,23 @@ run it before adding a fourth site.
   failed as collateral damage instead. Both implementers noticed on their own,
   devised a more surgical mutation that isolated the one claim in question,
   and reported both attempts rather than only the one that worked.
+- A comment on `FinancesPage.test.tsx`'s archive-toggle test claimed to be
+  "the end-to-end proof" that `invalidateAccounts` (`useAccounts.ts`) returns
+  its `Promise.all` rather than firing it and forgetting. Disproven: dropping
+  the `return` left that test, and six siblings in the same file, green.
+  Two TanStack Query / Testing Library facts combine to make this the
+  general shape to watch for, not just an accounts-specific slip:
+  `queryClient.invalidateQueries` dispatches its refetch whether or not the
+  caller awaits the promise it returns, and `await findByText(...)` polls
+  the rendered DOM, not mutation state — so a test built on "the list
+  eventually shows the right thing" cannot tell "settled because the
+  refetch actually landed" apart from "settled because nobody waited for
+  it." What the `return` actually gates is `isPending` (here, the
+  Archive/Restore button's `disabled` prop), and only a test that asserts
+  on *that* — holding the refetch open with a deferred promise, per
+  `SignInScreen.test.tsx`'s existing pattern — can tell the two apart.
+  Corrected to describe only what it proves, with a second test added
+  alongside it that asserts the disabled state directly.
 
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
