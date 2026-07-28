@@ -8,6 +8,21 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Account struct {
+	ID                      pgtype.UUID
+	HouseholdID             pgtype.UUID
+	Nickname                string
+	Type                    string
+	OwnerMembershipID       pgtype.UUID
+	OpeningBalanceMinor     int64
+	OpeningBalanceCurrency  string
+	OpeningBalanceAsOf      pgtype.Date
+	CountTowardNetWorth     bool
+	VisibleToLimitedMembers bool
+	ArchivedAt              pgtype.Timestamptz
+	CreatedAt               pgtype.Timestamptz
+}
+
 type Household struct {
 	ID                    pgtype.UUID
 	Name                  string
