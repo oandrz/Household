@@ -1535,12 +1535,17 @@ func (s *AccountService) Summary(ctx context.Context, householdID string, views 
 	}
 
 	byType := map[domain.AccountType]domain.Money{}
-	converted := 0
+	// considered counts the accounts this summary is actually about, which is
+	// not len(views): an archived account is skipped entirely below, and
+	// counting it here would make a household whose every account is archived
+	// report "we cannot compute this" when the honest answer is a genuine zero.
+	considered, converted := 0, 0
 
 	for _, view := range views {
 		if view.Account.IsArchived() {
 			continue
 		}
+		considered++
 
 		inPrimary, err := s.convert(ctx, view.Balance, primary)
 		if err != nil {
@@ -1589,7 +1594,7 @@ func (s *AccountService) Summary(ctx context.Context, householdID string, views 
 		}
 	}
 
-	if len(views) > 0 && converted == 0 {
+	if considered > 0 && converted == 0 {
 		summary.Computable = false
 	}
 
