@@ -24,10 +24,13 @@ const (
 // ParseAccountType refuses anything it does not recognise. The default is the
 // point: a type arrives from a request body or a database column, so it is a
 // value this code did not construct, and guessing at an unknown one would put
-// an account on the wrong side of net worth. It does not trim or case-fold --
-// the only writers are this API and this API's own migration, and accepting
-// "CASH " here would mean the database CHECK constraint and this function
-// disagreed about what is valid.
+// an account on the wrong side of net worth.
+//
+// It does not trim or case-fold, unlike ParseCurrency, because nobody hand-
+// types this value: it comes from a fixed five-option select, or from a column
+// this API itself wrote. Leniency here would have no one to serve, and a value
+// arriving in an unexpected shape is a signal that something upstream is wrong
+// rather than something to quietly repair.
 func ParseAccountType(s string) (AccountType, error) {
 	switch AccountType(s) {
 	case AccountCash:
