@@ -160,6 +160,28 @@ func toCapabilities(ss []string) domain.Capabilities {
 	return caps
 }
 
+// dateOnly converts a domain time into the pgtype.Date that
+// opening_balance_as_of is stored as. The column is a date, not a
+// timestamptz, deliberately: "the balance was true on the 26th" is a calendar
+// fact, and storing an instant would make it depend on the zone the request
+// arrived from.
+//
+// t.Date() is why this holds: it reads the calendar day out of t in t's own
+// location, before any conversion happens. t.UTC().Truncate(24*time.Hour)
+// looks equivalent but is not -- it converts to UTC first and truncates
+// second, so it silently changes the calendar day for anything not already
+// UTC midnight (07:00 SGT on the 26th is 23:00 UTC on the 25th, and
+// truncating that lands on the 25th). Every existing caller happens to pass
+// UTC midnight today, which is exactly why that bug shipped once already
+// with all tests green; see
+// TestOpeningBalanceAsOfKeepsItsCalendarDayRegardlessOfZone.
+func dateOnly(t time.Time) pgtype.Date {
+	y, m, d := t.Date()
+	return pgtype.Date{Time: time.Date(y, m, d, 0, 0, 0, 0, time.UTC), Valid: true}
+}
+
+func dateToTime(d pgtype.Date) time.Time { return d.Time }
+
 // Compile-time confirmation that every repository satisfies its port.
 // Nothing in internal/usecase constructs these yet -- that is Task 12's job
 // -- so without this, a signature drift from ports.go would not surface
@@ -175,4 +197,5 @@ var (
 	_ usecase.SpaceRepository        = (*SpaceRepo)(nil)
 	_ usecase.NotificationRepository = (*NotificationRepo)(nil)
 	_ usecase.SignupRepository       = (*SignupRepo)(nil)
+	_ usecase.AccountRepository      = (*AccountRepo)(nil)
 )
