@@ -18,9 +18,19 @@ func newAccountService(t *testing.T) (*usecase.AccountService, *fakeAccountRepo)
 	t.Helper()
 	repo := newFakeAccountRepo()
 	repo.memberships["m-1"] = "h-1"
+
+	// Populated with a primary currency because Summary (Task 36) is the first
+	// caller that reads Households -- Create/Update/List/SetArchived never
+	// touch it, so an empty double was enough until now.
+	households := newHouseholdDouble()
+	households.put(domain.Household{
+		ID: "h-1", Name: "Andreas & Christine", FamilyName: "Oentoro",
+		PrimaryCurrency: "SGD", ShowSecondaryCurrency: true, SecondaryCurrency: "IDR", FXRateMode: "auto",
+	})
+
 	svc := usecase.NewAccountService(usecase.AccountDeps{
 		Accounts:   repo,
-		Households: newHouseholdDouble(),
+		Households: households,
 		FX:         staticTestRates{},
 		Clock:      &fixedClock{now: fixedNow},
 	})
