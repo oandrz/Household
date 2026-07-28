@@ -2947,9 +2947,15 @@ export function formatMoney(
     maximumFractionDigits: digits,
   }).format(magnitude);
 
-  // A known symbol butts against the digits (S$8,240.55); a bare code needs a
-  // space (BRL 1,000.00) or it reads as one token.
-  const prefix = symbol ? symbol : `${currency} `;
+  // A glyph symbol butts against the digits (S$8,240.55, €1,000.00); a symbol
+  // spelled with letters needs a space or it reads as one token -- "Rp" gives
+  // "Rp85,400,000" without it, and "RM"/"CHF" are the same. A bare code, which
+  // is always letters, gets the space by the same rule.
+  const prefix = symbol
+    ? /[A-Za-z]$/.test(symbol)
+      ? `${symbol} `
+      : symbol
+    : `${currency} `;
   const sign = amountMinor < 0 ? MINUS : "";
   return `${sign}${prefix}${formatted}`;
 }
