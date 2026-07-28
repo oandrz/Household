@@ -25,6 +25,12 @@ var (
 	ErrInvalidMoney                 = errors.New("money value is invalid")
 	ErrOwnerMustHoldAllCapabilities = errors.New("an owner must hold every capability")
 
+	ErrUnknownAccountType         = errors.New("unknown account type")
+	ErrAccountNicknameRequired    = errors.New("an account nickname is required")
+	ErrLiabilityBalanceNegative   = errors.New("a debt's balance is the amount owed and cannot be negative")
+	ErrOpeningBalanceInFuture     = errors.New("an opening balance cannot be dated in the future")
+	ErrAccountOwnerNotInHousehold = errors.New("that member is not in this household")
+
 	// ErrAlreadyExists mirrors ErrNotFound: a row that must be unique
 	// already exists. It exists so an adapter can translate a Postgres
 	// unique-violation (SQLSTATE 23505) into something usecase code can
