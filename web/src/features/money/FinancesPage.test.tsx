@@ -184,6 +184,100 @@ describe("FinancesPage", () => {
     expect(screen.queryByText("S$0.00")).not.toBeInTheDocument();
   });
 
+  // Pins the fix for "archiving the last account makes it permanently
+  // unrestorable": before this, FirstRunPanel had no "Show archived" toggle
+  // at all, so a household reduced to zero live accounts had no way back to
+  // the one it had just archived. The list can only go from one row to none
+  // here if useSetAccountArchived's onSuccess promise actually resolved and
+  // the refetch below it landed -- invalidateAccounts (useAccounts.ts)
+  // returns its Promise.all rather than firing it and forgetting, and this
+  // is the end-to-end proof of that (deferred finding 7): a fired-and-
+  // forgotten invalidation would leave the mutation "settled" before the
+  // second GET below ever resolved, and this test would hang waiting for
+  // text that never arrives instead of passing for the wrong reason.
+  it("keeps the archived toggle reachable after archiving a household's only account", async () => {
+    const oneAccount = {
+      id: "a1", nickname: "DBS Everyday", type: "cash",
+      ownerMembershipId: null, ownerName: null,
+      balance: { amountMinor: 824055, currency: "SGD" },
+      balanceAsOf: "2026-07-26",
+      countTowardNetWorth: true, visibleToLimitedMembers: false,
+      archivedAt: null,
+    };
+    const zeroSummary = {
+      currency: "SGD", computable: true, netWorthMinor: 0,
+      assetsMinor: 0, liabilitiesMinor: 0,
+      breakdown: [], excludedNoRate: [], excludedByChoice: 0,
+    };
+
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture("owner") },
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/accounts": [
+        {
+          status: 200,
+          body: {
+            accounts: [oneAccount],
+            summary: {
+              currency: "SGD", computable: true, netWorthMinor: 824055,
+              assetsMinor: 824055, liabilitiesMinor: 0,
+              breakdown: [{ type: "cash", totalMinor: 824055 }],
+              excludedNoRate: [], excludedByChoice: 0,
+            },
+          },
+        },
+        { status: 200, body: { accounts: [], summary: zeroSummary } },
+      ],
+      "POST /api/v1/accounts/a1/archive": {
+        status: 200,
+        body: { ...oneAccount, archivedAt: "2026-07-28T00:00:00Z" },
+      },
+    });
+
+    renderWithRouter(<FinancesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Archive DBS Everyday" }));
+
+    expect(await screen.findByText(FINANCES_COPY.emptyTitle)).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: FINANCES_COPY.archivedToggle })).toBeInTheDocument();
+  });
+
+  // The other half of the same fix: FirstRunPanel must stay put when its own
+  // toggle is switched on and there is still nothing to show, rather than
+  // falling through to the three cards below with no accounts behind them.
+  // This is the state a household that has never held an account reaches the
+  // instant it tries the toggle -- distinct from the test above, where the
+  // toggle is never touched -- and it only exists because `rows` is
+  // parameterised by `includeArchived` (useAccounts.ts): switching the
+  // toggle refetches GET /api/v1/accounts?include_archived=true, which for a
+  // true first-run household still answers with zero rows.
+  it("stays on the first-run panel when its own toggle finds nothing archived either", async () => {
+    const zeroSummary = {
+      currency: "SGD", computable: true, netWorthMinor: 0,
+      assetsMinor: 0, liabilitiesMinor: 0,
+      breakdown: [], excludedNoRate: [], excludedByChoice: 0,
+    };
+
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture("owner") },
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [], summary: zeroSummary } },
+      "GET /api/v1/accounts?include_archived=true": {
+        status: 200,
+        body: { accounts: [], summary: zeroSummary },
+      },
+    });
+
+    renderWithRouter(<FinancesPage />);
+
+    fireEvent.click(
+      await screen.findByRole("switch", { name: FINANCES_COPY.archivedToggle }),
+    );
+
+    expect(await screen.findByText(FINANCES_COPY.emptyTitle)).toBeInTheDocument();
+    expect(screen.queryByText("Net worth")).not.toBeInTheDocument();
+  });
+
   // A limited member's response carries no summary and no amounts. The page
   // must not synthesise either, and their own "+ Add account" stays hidden --
   // Task 40's create form is owner-only, same as the button that opens it.

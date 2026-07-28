@@ -9,6 +9,7 @@
 // time, not a series.
 import { useState } from "react";
 import { useMe } from "../auth/useAuth";
+import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { AccountModal } from "./AccountModal";
 import { AccountsPanel } from "./AccountsPanel";
 import { BreakdownCard } from "./BreakdownCard";
@@ -30,10 +31,34 @@ function PageHeader() {
 // accounts at all is computable and genuinely zero") -- showing that as
 // "Net worth S$0.00" would be truthful but useless, next to a blank breakdown
 // and an empty accounts list saying the same nothing three times over.
-function FirstRunPanel({ canAdd }: { canAdd: boolean }) {
+//
+// Carries its own "Show archived" toggle, the one AccountsPanel would
+// otherwise own, because AccountsPanel isn't mounted here at all. Without it,
+// an owner who archives their household's only account has no way back: the
+// list empties, this panel takes over, and there is nothing on it to ask for
+// the archived view -- exactly the household decision 8's restore guarantee
+// exists for, and the one the browser walk never caught because the seeded
+// household always had several accounts.
+function FirstRunPanel({
+  canAdd,
+  includeArchived,
+  onIncludeArchivedChange,
+}: {
+  canAdd: boolean;
+  includeArchived: boolean;
+  onIncludeArchivedChange: (next: boolean) => void;
+}) {
   const [addOpen, setAddOpen] = useState(false);
   return (
     <div className="flex flex-col items-center gap-3 rounded-xl border border-hairline bg-card px-10 py-16 text-center">
+      <div className="flex w-full items-center justify-end gap-1.5 text-[11px] text-muted">
+        <ToggleSwitch
+          checked={includeArchived}
+          onChange={() => onIncludeArchivedChange(!includeArchived)}
+          label={FINANCES_COPY.archivedToggle}
+        />
+        {FINANCES_COPY.archivedToggle}
+      </div>
       <p className="text-sm font-semibold text-ink">{FINANCES_COPY.emptyTitle}</p>
       <p className="max-w-sm text-[13px] text-muted">{FINANCES_COPY.emptyBody}</p>
       {canAdd && (
@@ -92,11 +117,24 @@ export function FinancesPage() {
     );
   }
 
-  if (rows.length === 0 && !includeArchived) {
+  // Not `rows.length === 0 && !includeArchived`. A household that has never
+  // held an account still fetches zero rows once its own new toggle above
+  // flips `includeArchived` to true (there is nothing archived to return
+  // either) -- keeping the old `&& !includeArchived` clause would then read
+  // that as "not the empty-household state" and fall through to the three
+  // cards below with nothing behind them: "Net worth S$0.00" next to a blank
+  // breakdown, exactly what this panel exists to prevent. `rows.length === 0`
+  // alone means "nothing to show for the toggle's current position," which
+  // is correct regardless of which position that is.
+  if (rows.length === 0) {
     return (
       <div className="flex flex-col gap-5 px-9 py-8">
         <PageHeader />
-        <FirstRunPanel canAdd={isOwner} />
+        <FirstRunPanel
+          canAdd={isOwner}
+          includeArchived={includeArchived}
+          onIncludeArchivedChange={setIncludeArchived}
+        />
       </div>
     );
   }
