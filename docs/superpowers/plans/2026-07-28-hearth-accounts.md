@@ -1948,8 +1948,16 @@ Append to `api/internal/adapter/postgres/convert.go`:
 // timestamptz, deliberately: "the balance was true on the 26th" is a calendar
 // fact, and storing an instant would make it depend on the zone the request
 // arrived from.
+//
+// It reads the calendar day out of t's own location and rebuilds midnight from
+// those components. The obvious-looking t.UTC().Truncate(24*time.Hour) is
+// wrong: Truncate works on the absolute instant, so converting to UTC first
+// moves 07:00 on the 26th in Singapore back to the 25th -- silently changing
+// the day the person actually meant, which is the one thing this function
+// exists to preserve.
 func dateOnly(t time.Time) pgtype.Date {
-	return pgtype.Date{Time: t.UTC().Truncate(24 * time.Hour), Valid: true}
+	y, m, d := t.Date()
+	return pgtype.Date{Time: time.Date(y, m, d, 0, 0, 0, 0, time.UTC), Valid: true}
 }
 
 func dateToTime(d pgtype.Date) time.Time { return d.Time }
