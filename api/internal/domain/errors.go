@@ -26,6 +26,10 @@ var (
 	ErrOwnerMustHoldAllCapabilities = errors.New("an owner must hold every capability")
 
 	ErrUnknownAccountType         = errors.New("unknown account type")
+	// ErrUnknownCategoryKind is returned for a category kind this code did not
+	// construct -- a database column holding something other than expense or
+	// income.
+	ErrUnknownCategoryKind = errors.New("unknown category kind")
 	ErrAccountNicknameRequired    = errors.New("an account nickname is required")
 	ErrLiabilityBalanceNegative   = errors.New("a debt's balance is the amount owed and cannot be negative")
 	ErrOpeningBalanceInFuture     = errors.New("an opening balance cannot be dated in the future")
