@@ -9,7 +9,8 @@
 //   RequireAuth (pathless)                          -- redirects to /sign-in on a 401
 //     AppShell (pathless)                           -- sidebar + outlet
 //       /            Overview      (slice 5 placeholder)
-//       /money, /money/$    RequireCapability("money")    -> Money      (slice 2 placeholder)
+//       /money       RequireCapability("money") -> Finances (Task 39; slice 2's first real page)
+//       /money/$     RequireCapability("money") -> Money    (slice 2 placeholder; Transactions/Budget/Goals/Bills)
 //       /marriage, /marriage/$ RequireCapability("marriage") -> Marriage (slice 3 placeholder)
 //       /family/calendar                            -- Family (slice 4 placeholder); unconditional,
 //                                                       per domain.BuiltinSpaces Family carries no
@@ -29,6 +30,7 @@ import { SignInScreen } from "../features/auth/SignInScreen";
 import { SignUpScreen } from "../features/auth/SignUpScreen";
 import { SignUpCompleteScreen } from "../features/auth/SignUpCompleteScreen";
 import { useMe } from "../features/auth/useAuth";
+import { FinancesPage } from "../features/money/FinancesPage";
 import { PlaceholderPage } from "../features/placeholder/PlaceholderPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { AppShell } from "../features/shell/AppShell";
@@ -151,7 +153,10 @@ const moneyGuardRoute = createRoute({
 const moneyIndexRoute = createRoute({
   getParentRoute: () => moneyGuardRoute,
   path: "/",
-  component: () => <PlaceholderPage page="Money" slice={2} />,
+  // Task 39 replaces the placeholder with the real Finances screen; the
+  // splat route below keeps it -- Transactions, Budget, Goals and Bills
+  // (moneySplatRoute's siblings under /money/*) don't exist yet.
+  component: FinancesPage,
 });
 const moneySplatRoute = createRoute({
   getParentRoute: () => moneyGuardRoute,
