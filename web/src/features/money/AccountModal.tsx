@@ -36,6 +36,23 @@ export type AccountFormValues = {
   visibleToLimitedMembers: boolean;
 };
 
+// The PATCH route's own body. openingBalanceMinor/openingBalanceCurrency are
+// optional here -- and genuinely omitted from the request, not just
+// undefined -- unless the person actually touched Balance or Currency. See
+// handleSubmit: an edit that only changes the nickname must never resend a
+// balance derived from what the field displays, because the display can
+// truncate a value the create path itself could never produce (an IDR/VND
+// account whose stored minor units aren't a multiple of 100 -- unreachable
+// from this form, but not prevented anywhere else: a direct API call, a CSV
+// import or a future bank-sync adapter all could). Resending it regardless
+// would move the stored figure by up to 99 minor units as a side effect of
+// an edit that never touched it.
+export type AccountEditValues = Omit<
+  AccountFormValues,
+  "openingBalanceMinor" | "openingBalanceCurrency"
+> &
+  Partial<Pick<AccountFormValues, "openingBalanceMinor" | "openingBalanceCurrency">>;
+
 // The household member list this modal's Owner select needs. Shares
 // MembersPanel's own ["household", "members"] query key (not exported from
 // there, so re-declared here) rather than a differently-keyed fetch of the
@@ -112,9 +129,20 @@ export function AccountModal({
   const [ownerMembershipId, setOwnerMembershipId] = useState<string | null>(
     account?.ownerMembershipId ?? null,
   );
+  // account.balance is the account's *current* balance (opening balance plus
+  // every transaction since -- usecase/ports.go's own doc comment on
+  // AccountView.Balance), and this prefill sends whatever the person leaves
+  // here straight back as openingBalanceMinor. The two are the same number
+  // today only because there is no transactions table yet: once Transactions
+  // ships, prefilling from the current balance and writing it back as the
+  // *opening* balance would rewrite history on every edit that touches this
+  // field. The real-patch handling in handleSubmit below (only send the
+  // balance when it was actually touched) protects the untouched case; a
+  // touched edit will need this prefill to read from opening balance instead.
   const [balanceInput, setBalanceInput] = useState(() =>
     account?.balance ? minorUnitsToInputValue(account.balance.amountMinor, account.balance.currency) : "",
   );
+  const [balanceTouched, setBalanceTouched] = useState(false);
   const [currency, setCurrency] = useState(() => account?.balance?.currency ?? "");
   const [currencyTouched, setCurrencyTouched] = useState(false);
   const [asOf, setAsOf] = useState(account?.balanceAsOf ?? today());
@@ -138,13 +166,15 @@ export function AccountModal({
 
   const mutation = isEditing ? updateAccount : createAccount;
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
+  // Parses and validates the Balance field, setting the field error and
+  // returning null on either failure. Shared by both submit paths below so
+  // "not a number" and "that number has the wrong sign" can't drift between
+  // create and edit.
+  function parseValidatedBalance(): number | null {
     const minorUnits = toMinorUnits(balanceInput, currency);
     if (minorUnits === null) {
       setBalanceError("Enter an amount, like 8240.55.");
-      return;
+      return null;
     }
     // The same rule domain.AccountType.SignedNetWorthAmount enforces, said
     // where someone can act on it. The backend refuses a negative debt
@@ -155,26 +185,53 @@ export function AccountModal({
       setBalanceError(
         "Enter what you owe as a positive amount. Hearth adds the minus sign for a loan or credit card.",
       );
-      return;
+      return null;
     }
-    setBalanceError(null);
+    return minorUnits;
+  }
 
-    const body: AccountFormValues = {
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const commonFields = {
       nickname,
       type,
       ownerMembershipId,
-      openingBalanceMinor: minorUnits,
-      openingBalanceCurrency: currency,
       openingBalanceAsOf: asOf,
       countTowardNetWorth,
       visibleToLimitedMembers,
     };
 
     if (isEditing) {
-      updateAccount.mutate({ id: account.id, ...body }, { onSuccess: onClose });
-    } else {
-      createAccount.mutate(body, { onSuccess: onClose });
+      // Real-patch handling: openingBalanceMinor/openingBalanceCurrency are
+      // included only when the person actually touched Balance or Currency.
+      // usecase.AccountUpdate treats an absent field as "leave this alone"
+      // (TestUpdateIsARealPatch pins that on the Go side), so an edit that
+      // never goes near the balance can never resend a value derived from
+      // whatever the field happens to display -- see balanceInput's own
+      // comment for why that display can disagree with the stored figure.
+      const balanceWasTouched = balanceTouched || currencyTouched;
+      let patch: AccountEditValues = commonFields;
+      if (balanceWasTouched) {
+        const minorUnits = parseValidatedBalance();
+        if (minorUnits === null) return;
+        patch = { ...commonFields, openingBalanceMinor: minorUnits, openingBalanceCurrency: currency };
+      }
+      setBalanceError(null);
+      updateAccount.mutate({ id: account.id, ...patch }, { onSuccess: onClose });
+      return;
     }
+
+    const minorUnits = parseValidatedBalance();
+    if (minorUnits === null) return;
+    setBalanceError(null);
+
+    const body: AccountFormValues = {
+      ...commonFields,
+      openingBalanceMinor: minorUnits,
+      openingBalanceCurrency: currency,
+    };
+    createAccount.mutate(body, { onSuccess: onClose });
   }
 
   return (
@@ -246,7 +303,10 @@ export function AccountModal({
               inputMode="decimal"
               required
               value={balanceInput}
-              onChange={(event) => setBalanceInput(event.target.value)}
+              onChange={(event) => {
+                setBalanceTouched(true);
+                setBalanceInput(event.target.value);
+              }}
               className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
             />
           </div>

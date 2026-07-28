@@ -5,7 +5,15 @@ import { stubFetchRoutes } from "../../test/fetchStub";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { AccountModal } from "./AccountModal";
 
-afterEach(() => vi.unstubAllGlobals());
+const ORIGINAL_TZ = process.env.TZ;
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  // Only the timezone test below touches these; harmless no-ops otherwise.
+  vi.useRealTimers();
+  if (ORIGINAL_TZ === undefined) delete process.env.TZ;
+  else process.env.TZ = ORIGINAL_TZ;
+});
 
 // AccountModal reads the household's primary currency off useMe() (to
 // default the Balance currency select for a fresh "add" form) and this
@@ -196,5 +204,84 @@ describe("AccountModal", () => {
     // (account_handlers.go): posting JSON null here would leave Christine as
     // the owner. Only "" actually clears it to Shared.
     expect(patched).toMatchObject({ ownerMembershipId: "" });
+  });
+
+  // Real-patch handling: an edit that never goes near Balance or Currency
+  // must never resend either field. Without this, opening an account whose
+  // stored minor units aren't an exact multiple of 100 -- unreachable from
+  // this form, but not prevented anywhere else (a direct API call, a CSV
+  // import, a future bank-sync adapter) -- to change only its nickname would
+  // prefill Balance from a truncated display value and PATCH that back,
+  // silently moving the stored figure by up to 99 minor units.
+  it("does not resend the balance when an edit never touches it", async () => {
+    let patched: unknown;
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/household/members": NO_MEMBERS,
+      "PATCH /api/v1/accounts/a1": {
+        status: 200,
+        body: {
+          id: "a1", nickname: "DBS Everyday (renamed)", type: "cash",
+          ownerMembershipId: null, ownerName: null,
+          balance: { amountMinor: 824055, currency: "SGD" },
+          balanceAsOf: "2026-07-26",
+          countTowardNetWorth: true, visibleToLimitedMembers: false,
+          archivedAt: null,
+        },
+        capture: (body) => { patched = body; },
+      },
+    });
+
+    renderWithRouter(
+      <AccountModal
+        open
+        onClose={() => {}}
+        account={{
+          id: "a1", nickname: "DBS Everyday", type: "cash",
+          ownerMembershipId: null, ownerName: null,
+          balance: { amountMinor: 824055, currency: "SGD" },
+          balanceAsOf: "2026-07-26",
+          countTowardNetWorth: true, visibleToLimitedMembers: false,
+          archivedAt: null,
+        }}
+      />,
+    );
+
+    fireEvent.change(await screen.findByLabelText("Nickname"), {
+      target: { value: "DBS Everyday (renamed)" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(patched).toBeDefined());
+    expect(patched).not.toHaveProperty("openingBalanceMinor");
+    expect(patched).not.toHaveProperty("openingBalanceCurrency");
+    expect(patched).toMatchObject({ nickname: "DBS Everyday (renamed)" });
+  });
+
+  // today() (AccountModal.tsx) reads the *local* calendar date rather than
+  // converting through UTC -- this branch has already produced three bugs of
+  // exactly that class (f61407d "stop refusing today's date east of UTC",
+  // f17be2d "fix dateOnly, the third instance of one mistake", and the plan
+  // correction behind both), so this is the fourth site with the same hazard
+  // and the only one that had no test. `toFake: ["Date"]` freezes only what
+  // `new Date()` returns, leaving setTimeout alone -- the router's own
+  // pending-state transition and findByLabelText's polling both still need
+  // real timers to ever resolve.
+  it("defaults Balance as of to the local calendar day, not the UTC one", async () => {
+    process.env.TZ = "Pacific/Midway"; // UTC-11
+    vi.useFakeTimers({ toFake: ["Date"] });
+    // 05:00 UTC on 1 Jan is still 18:00 on 31 Dec in Pacific/Midway.
+    vi.setSystemTime(new Date("2026-01-01T05:00:00Z"));
+
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/household/members": NO_MEMBERS,
+    });
+
+    renderWithRouter(<AccountModal open onClose={() => {}} />);
+
+    expect(await screen.findByLabelText("Balance as of")).toHaveValue("2025-12-31");
   });
 });

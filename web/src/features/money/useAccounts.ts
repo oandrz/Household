@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../../api/client";
 import { accountSchema, accountsResponseSchema, type Account, type AccountsResponse } from "./schemas";
-import type { AccountFormValues } from "./AccountModal";
+import type { AccountEditValues, AccountFormValues } from "./AccountModal";
 
 export function accountsQueryKey(includeArchived: boolean) {
   return ["accounts", { includeArchived }] as const;
@@ -52,7 +52,14 @@ export function useCreateAccount() {
 export function useUpdateAccount() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: { id: string } & AccountFormValues): Promise<Account> => {
+    // AccountEditValues, not AccountFormValues: openingBalanceMinor/
+    // openingBalanceCurrency are only present on `vars` when AccountModal
+    // actually saw Balance or Currency touched. Spreading `body` below keeps
+    // that absence intact all the way to JSON.stringify -- a field this
+    // object never had is a field the request never mentions, which is what
+    // lets usecase.AccountUpdate's nil-means-unchanged handling leave the
+    // stored balance exactly as it was.
+    mutationFn: async (vars: { id: string } & AccountEditValues): Promise<Account> => {
       const { id, ...body } = vars;
       const payload = {
         ...body,
