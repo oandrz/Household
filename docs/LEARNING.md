@@ -442,6 +442,16 @@ route with a missing guard has no second line of defence.
   unrecognised value and this code — the same fail-closed rule as the
   `Role`/`Visibility` switch statements above, just written as a condition
   polarity instead of a missing `default`.
+- The same redaction gate above fixed the *role* axis (whitelist `Role ==
+  RoleOwner`) but left the *field* axis a blacklist: the handler built the
+  full `accountDTO` and nilled `Balance`/`BalanceAsOf` by name. A new money-
+  carrying field added to the struct later would reach every limited member
+  with no test going red, because the existing test only checked that those
+  two named fields were absent — true regardless of what else leaked
+  alongside them. Fixed in the test, not the handler: it now asserts the
+  redacted account's *exact* JSON key set, so adding a field forces a
+  decision at the one moment it matters, instead of a rebuild-by-whitelist
+  that risks drifting the other way.
 
 ### Frontend
 
@@ -485,6 +495,30 @@ route with a missing guard has no second line of defence.
   definition-of-done walk at its very first "add an account" step. Found by
   reading `FinancesPage.tsx`'s own branching, not by a test; `FirstRunPanel`
   got its own button wired to the same modal.
+- `FirstRunPanel` had no "Show archived" toggle at all, so an owner who
+  archived their household's only account had no way back to it: the list
+  emptied, `FirstRunPanel` took over, and nothing on it could ask for the
+  archived view — decision 8's restore guarantee broken for exactly the
+  household most likely to trigger it. The 15/15 browser walk never caught
+  it because the seeded household always kept several accounts, so the
+  single-account case never came up. The fix has two halves and both are
+  required: the toggle moved into `FirstRunPanel`, and the branch condition
+  dropped its `&& !includeArchived` clause. Dropping only the clause without
+  adding the toggle leaves the state unreachable in a different way; keeping
+  the clause after adding the toggle reintroduces a second bug one level
+  down — a truly-empty household that tries the new toggle anyway falls
+  through to the three-card zero state (`S$0.00` beside a blank breakdown),
+  because switching `includeArchived` on still returns zero rows when there
+  is nothing archived either. Both halves are mutation-tested separately:
+  reverting either one turns exactly one of the two new tests red.
+- `AccountModal`'s balance-parse error reused one message
+  ("Enter an amount, like 8240.55.") for two different failures. Switching
+  Currency to a no-decimal one (IDR, VND) without touching Balance is a
+  common edit path — the balance display doesn't change on a currency
+  switch — and it produces exactly that message next to a field showing
+  precisely the figure it's being told to enter. Failing closed was already
+  right; the copy just needed to name the actual cause instead of restating
+  the input back at the person looking at it.
 
 ### Tooling and infrastructure
 
