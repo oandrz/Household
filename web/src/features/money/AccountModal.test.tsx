@@ -63,8 +63,13 @@ describe("AccountModal", () => {
       "GET /api/v1/auth/me": { status: 200, body: meFixture() },
       "GET /api/v1/currencies": CURRENCIES,
       "GET /api/v1/household/members": NO_MEMBERS,
+      // 201, matching what POST /accounts actually answers (account_handlers.go's
+      // writeAccount): apiFetch treats every non-204 2xx identically (parses
+      // the body, returns it), so this isn't load-bearing for the test to
+      // pass, but stubbing the status this route actually sends is what a
+      // fixture is for.
       "POST /api/v1/accounts": {
-        status: 200,
+        status: 201,
         body: {
           id: "a1", nickname: "DBS Everyday", type: "cash",
           ownerMembershipId: null, ownerName: null,
