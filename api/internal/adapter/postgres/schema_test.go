@@ -228,27 +228,35 @@ func TestTransactionSchemaRefusesNonsenseRows(t *testing.T) {
 		name string
 		sql  string
 		args []any
+		// constraint is the name the violation must carry, not just the fact
+		// that some insert failed. Later tasks map this exact name to a
+		// domain error (see the brief's Interfaces section); a rename here
+		// would leave every subtest green while breaking that mapping.
+		constraint string
 	}{
 		{
 			name: "an expense with a destination account",
 			sql: `INSERT INTO transactions (household_id, kind, occurred_on, description,
 			          from_account_id, to_account_id, amount_minor, amount_currency)
 			      VALUES ($1, 'expense', DATE '2026-07-18', 'Cold Storage', $2, $3, 5230, 'SGD')`,
-			args: []any{householdID, from, to},
+			args:       []any{householdID, from, to},
+			constraint: "accounts_match_kind",
 		},
 		{
 			name: "a transfer with only one leg",
 			sql: `INSERT INTO transactions (household_id, kind, occurred_on, description,
 			          from_account_id, amount_minor, amount_currency)
 			      VALUES ($1, 'transfer', DATE '2026-07-18', 'To BCA', $2, 50000, 'SGD')`,
-			args: []any{householdID, from},
+			args:       []any{householdID, from},
+			constraint: "accounts_match_kind",
 		},
 		{
 			name: "a transfer from an account to itself",
 			sql: `INSERT INTO transactions (household_id, kind, occurred_on, description,
 			          from_account_id, to_account_id, amount_minor, amount_currency)
 			      VALUES ($1, 'transfer', DATE '2026-07-18', 'Round trip', $2, $2, 50000, 'SGD')`,
-			args: []any{householdID, from},
+			args:       []any{householdID, from},
+			constraint: "accounts_match_kind",
 		},
 		{
 			name: "a received amount with no currency",
@@ -256,7 +264,8 @@ func TestTransactionSchemaRefusesNonsenseRows(t *testing.T) {
 			          from_account_id, to_account_id, amount_minor, amount_currency,
 			          received_amount_minor)
 			      VALUES ($1, 'transfer', DATE '2026-07-18', 'To BCA', $2, $3, 50000, 'SGD', 49800)`,
-			args: []any{householdID, from, to},
+			args:       []any{householdID, from, to},
+			constraint: "received_amount_pairs",
 		},
 		{
 			name: "a received amount on an expense",
@@ -264,14 +273,16 @@ func TestTransactionSchemaRefusesNonsenseRows(t *testing.T) {
 			          from_account_id, amount_minor, amount_currency,
 			          received_amount_minor, received_amount_currency)
 			      VALUES ($1, 'expense', DATE '2026-07-18', 'Cold Storage', $2, 5230, 'SGD', 5230, 'SGD')`,
-			args: []any{householdID, from},
+			args:       []any{householdID, from},
+			constraint: "received_amount_is_a_transfer_thing",
 		},
 		{
 			name: "a transfer carrying a category",
 			sql: `INSERT INTO transactions (household_id, kind, occurred_on, description,
 			          from_account_id, to_account_id, amount_minor, amount_currency, category_id)
 			      VALUES ($1, 'transfer', DATE '2026-07-18', 'To BCA', $2, $3, 50000, 'SGD', $4)`,
-			args: []any{householdID, from, to, categoryID},
+			args:       []any{householdID, from, to, categoryID},
+			constraint: "transfer_has_no_category",
 		},
 		{
 			name: "a zero amount",
@@ -279,13 +290,21 @@ func TestTransactionSchemaRefusesNonsenseRows(t *testing.T) {
 			          from_account_id, amount_minor, amount_currency)
 			      VALUES ($1, 'expense', DATE '2026-07-18', 'Free', $2, 0, 'SGD')`,
 			args: []any{householdID, from},
+			// Not one of the named constraints in the brief's Interfaces
+			// section: this is the plain inline CHECK on amount_minor, and
+			// Postgres names an unlabelled column check <table>_<column>_check.
+			constraint: "transactions_amount_minor_check",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := db.Pool().Exec(ctx, tc.sql, tc.args...); err == nil {
+			_, err := db.Pool().Exec(ctx, tc.sql, tc.args...)
+			if err == nil {
 				t.Fatal("the database accepted it")
+			}
+			if !strings.Contains(err.Error(), tc.constraint) {
+				t.Fatalf("err = %v, want a %s violation", err, tc.constraint)
 			}
 		})
 	}
