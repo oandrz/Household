@@ -2,7 +2,7 @@
 SHELL := /bin/bash
 COMPOSE := docker compose
 
-.PHONY: help dev dev-local up down restart logs ps migrate migrate-down migrate-new \
+.PHONY: help dev dev-local up down restart logs ps urls migrate migrate-down migrate-new \
         test test-api test-web lint lint-arch lint-web typecheck fmt psql shell-api build sqlc \
         seed reset-password unlock-household
 
@@ -10,8 +10,9 @@ help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
 	  | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
-dev: ## Start everything and tail the logs — http://localhost:5173
+dev: ## Start everything and tail the logs — app http://localhost:5173, mail http://localhost:8025
 	$(COMPOSE) up -d postgres mailpit
+	@$(MAKE) --no-print-directory urls
 	$(COMPOSE) up --build api web
 
 dev-local: ## Run api and web natively, infra in Docker (Ctrl-C stops both)
@@ -19,6 +20,7 @@ dev-local: ## Run api and web natively, infra in Docker (Ctrl-C stops both)
 	@test -f .env || { echo ".env is required for dev-local; copy .env.example to .env first"; exit 1; }
 	$(COMPOSE) up -d postgres mailpit
 	$(MAKE) migrate
+	@$(MAKE) --no-print-directory urls
 	@set -a; . ./.env; set +a; \
 	 trap 'kill 0' EXIT INT TERM; \
 	 (cd api && air -c .air.toml 2>&1 | sed 's/^/[api] /') & \
@@ -27,6 +29,15 @@ dev-local: ## Run api and web natively, infra in Docker (Ctrl-C stops both)
 
 up: ## Start everything in the background
 	$(COMPOSE) up -d --build postgres mailpit api web
+	@$(MAKE) --no-print-directory urls
+
+# These are host-side Compose port mappings, so they live here rather than in
+# the API's own startup log: the api process only knows the addresses it uses on
+# the Compose network (it logs "sending mail" with smtp_addr=mailpit:1025), and
+# cannot know which host port, if any, Mailpit's UI is published on.
+urls: ## Print the local URLs for a running stack
+	@echo "  app   http://localhost:5173"
+	@echo "  mail  http://localhost:8025   (Mailpit — every outbound mail lands here)"
 
 down: ## Stop everything and remove the containers
 	$(COMPOSE) down

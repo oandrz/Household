@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"log/slog"
 	"net"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/andreasoentoro/hearth/api/internal/config"
 	"github.com/andreasoentoro/hearth/api/internal/testsupport"
 )
 
@@ -54,5 +57,59 @@ func TestRunReturnsErrorWhenListenFails(t *testing.T) {
 	// if a future change makes run() error out earlier than the bind.
 	if !strings.Contains(runErr.Error(), "listen and serve") {
 		t.Fatalf("expected a listen-and-serve error, got: %v", runErr)
+	}
+}
+
+// TestLogStartupAddressesReportsBothAddresses pins what startup prints: the
+// listener's own address and the SMTP server mail goes through. The SMTP line
+// is the reason this test exists -- it was previously absent, so a service
+// pointed at the wrong mail host looked identical at startup to one pointed at
+// the right one.
+//
+// It calls logStartupAddresses directly rather than run(), because run() needs
+// a real Postgres and a whole Postgres container is not a reasonable price for
+// checking two log lines.
+func TestLogStartupAddressesReportsBothAddresses(t *testing.T) {
+	var buf bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	logStartupAddresses(config.Config{
+		AppEnv:      "development",
+		SMTPAddr:    "mailpit:1025",
+		SMTPTLSMode: "none",
+	}, ":8080")
+
+	logged := buf.String()
+	for _, want := range []string{`addr=:8080`, `env=development`, `smtp_addr=mailpit:1025`, `tls_mode=none`} {
+		if !strings.Contains(logged, want) {
+			t.Errorf("startup log is missing %s\ngot: %s", want, logged)
+		}
+	}
+}
+
+// TestLogStartupAddressesNeverLogsSMTPCredentials guards the obvious mistake in
+// the change above: printing the mail configuration is useful, printing the
+// relay's password is a credential leak into every log sink downstream.
+func TestLogStartupAddressesNeverLogsSMTPCredentials(t *testing.T) {
+	var buf bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	logStartupAddresses(config.Config{
+		AppEnv:       "production",
+		SMTPAddr:     "smtp.example.com:587",
+		SMTPUsername: "hearth-relay-user",
+		SMTPPassword: "correct-horse-battery-staple",
+		SMTPTLSMode:  "mandatory",
+	}, ":8080")
+
+	logged := buf.String()
+	for _, secret := range []string{"hearth-relay-user", "correct-horse-battery-staple"} {
+		if strings.Contains(logged, secret) {
+			t.Errorf("startup log leaked an SMTP credential (%q)\ngot: %s", secret, logged)
+		}
 	}
 }

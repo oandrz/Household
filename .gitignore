@@ -5,3 +5,6 @@
 api/tmp/
 web/node_modules/
 web/dist/
+
+# JetBrains project files — per-developer, not per-project
+.idea/

@@ -167,7 +167,7 @@ func run() error {
 	serveErr := make(chan error, 1)
 
 	go func() {
-		slog.Info("listening", "addr", srv.Addr, "env", cfg.AppEnv)
+		logStartupAddresses(cfg, srv.Addr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("server stopped", "error", err)
 			serveErr <- err
@@ -197,4 +197,22 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+// logStartupAddresses reports the two addresses an operator needs at the one
+// moment they are watching: the port this process listens on, and the SMTP
+// server it sends through. Mail is on the recovery path -- magic link is the
+// only way back into a locked household -- and the send is fire-and-forget
+// (see usecase/auth.go's sendMagicLinkAsync), so nothing downstream ever
+// surfaces a wrong SMTP target. Printing it here is what lets someone tell
+// "pointed at the wrong host" from "the relay refused it", and in development
+// it is the reminder that mail lands in Mailpit rather than a real inbox.
+//
+// SMTPUsername and SMTPPassword are deliberately absent: credentials never go
+// to a log, and SMTPTLSMode is the field that actually explains a silent
+// failure, because a relay reached under the wrong TLS policy fails the same
+// way an unreachable one does.
+func logStartupAddresses(cfg config.Config, listenAddr string) {
+	slog.Info("listening", "addr", listenAddr, "env", cfg.AppEnv)
+	slog.Info("sending mail", "smtp_addr", cfg.SMTPAddr, "tls_mode", cfg.SMTPTLSMode)
 }
