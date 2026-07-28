@@ -1,9 +1,9 @@
 # Hearth — learning log
 
-Every defect found while building slices 0, 1 and self-serve sign-up, and what
-each one teaches. Written because almost none of them were caught by a failing
-test — they were caught by someone asking the right question about code that
-looked fine and had a green suite.
+Every defect found while building slices 0, 1, self-serve sign-up and Accounts
+(slice 2's first feature), and what each one teaches. Written because almost
+none of them were caught by a failing test — they were caught by someone
+asking the right question about code that looked fine and had a green suite.
 
 **Read the patterns first.** They are where the value is. The catalogue below
 them is evidence, and a place to check when you touch that area.
@@ -17,7 +17,7 @@ gets rebuilt.
 
 ### 1. Fixing an instance rarely fixes the class
 
-This happened **five times**. Every time, the fix was correct and the sibling
+This happened **six times**. Every time, the fix was correct and the sibling
 kept the bug.
 
 - `PATCH` implemented as `PUT` — fixed in `/household` and
@@ -30,10 +30,26 @@ kept the bug.
 - A pending-guard added to one control, not to its neighbour.
 - `ErrInvalidMoney` mapped off 500 in the same round `fxRateMode` was left
   unvalidated and still 500ing.
+- `time.Truncate` operates on the absolute instant, not on a calendar day in a
+  particular location — and that misunderstanding shipped at more than one
+  site on the accounts branch before anyone named it. An opening-balance
+  "not in the future" check compared `asOf.Truncate(24 * time.Hour)` against
+  `now.Truncate(24 * time.Hour)`, which refused *today's* date for part of
+  every day east of UTC; fixed to allow a day of slack instead of truncating
+  either side. The identical mistake then surfaced in the Postgres adapter's
+  `dateOnly` helper, which turns `opening_balance_as_of` into a stored date:
+  converting to UTC before truncating moved 07:00 on the 26th in Singapore
+  back to the 25th. The frontend's own `today()` reads local calendar
+  components on purpose and got the logic right the first time, but shipped
+  with no test, on the stated belief that pinning it needed a
+  `vitest.config.ts` timezone change — a reviewer disproved that belief
+  (`process.env.TZ` already works in the test runner) and the test was added
+  in the same task.
 
 **When you fix something, grep for its shape before you close it.** The question
 that finds these is not "is this fixed?" but "where else does this pattern
-appear?"
+appear?" `Truncate` is now that grep for date-and-location bugs specifically —
+run it before adding a fourth site.
 
 ### 2. A test that cannot fail protects nothing
 
@@ -52,9 +68,63 @@ appear?"
   matched **zero** tests in this repo — `go test` reports "no tests to run" for
   a filter that matches nothing, and exits zero. A filter copied from a brief
   is not evidence anything ran; run the whole package.
+- The owner-gated route-walk matrix (`TestOwnerOnlyRoutesRejectALimitedMember`)
+  would have refused every accounts write route at `requireCapability` and
+  never reached `requireOwner`, because the existing limited-member fixture
+  holds no `money` capability — a vacuous green, spotted while writing the
+  accounts spec rather than by a failing test. The fixture gained a second
+  limited member who does hold `money`, so the walk's caller can fail on
+  `requireOwner` specifically instead of being turned away one guard earlier.
+  A matrix proves nothing unless the caller can get past every guard except
+  the one under test.
+- Deleting `NetWorthSummary`'s domain-ordered breakdown loop (replacing it with
+  a bare range over the `byType` map) left every test green across eight fresh
+  processes, so the rule that two identical requests must not reshuffle the
+  chart had nothing behind it. A five-type ordering test, where map iteration
+  lands on the sorted order by chance only one time in 120, is what actually
+  discriminates.
+- Two `FinancesPage` test assertions used a synchronous `getByText` inside an
+  already-awaited card, so they never actually waited on the `useCurrencies` /
+  `useMe` queries their own subject depended on — both passed only because,
+  in practice, every mocked fetch in that test happened to settle within the
+  same microtask batch. A reviewer proved it by adding a 20ms delay to one
+  unrelated stubbed route: both assertions broke, deterministically, on a
+  change to code neither of them exercises.
+- Two separate mutation checks in this plan did not discriminate on the first
+  attempt. One (validate a patch built only from its non-nil fields, instead
+  of the merged account) made three tests fail, but the one the check was
+  meant to pin failed for the *wrong* reason (`ErrAccountNicknameRequired`,
+  because an isolated `Type: &loan` patch has no nickname) rather than the
+  reason it claims to catch (`ErrLiabilityBalanceNegative`) — broad,
+  wrong-reason failure proves a mutation breaks *something*, not the specific
+  thing it names. The other (`Math.round` in place of a float-safe parse) left
+  the *named* test green outright, because `Math.round` happens to repair the
+  exact float error that test exists to catch, and a different, unrelated test
+  failed as collateral damage instead. Both implementers noticed on their own,
+  devised a more surgical mutation that isolated the one claim in question,
+  and reported both attempts rather than only the one that worked.
+- A comment on `FinancesPage.test.tsx`'s archive-toggle test claimed to be
+  "the end-to-end proof" that `invalidateAccounts` (`useAccounts.ts`) returns
+  its `Promise.all` rather than firing it and forgetting. Disproven: dropping
+  the `return` left that test, and six siblings in the same file, green.
+  Two TanStack Query / Testing Library facts combine to make this the
+  general shape to watch for, not just an accounts-specific slip:
+  `queryClient.invalidateQueries` dispatches its refetch whether or not the
+  caller awaits the promise it returns, and `await findByText(...)` polls
+  the rendered DOM, not mutation state — so a test built on "the list
+  eventually shows the right thing" cannot tell "settled because the
+  refetch actually landed" apart from "settled because nobody waited for
+  it." What the `return` actually gates is `isPending` (here, the
+  Archive/Restore button's `disabled` prop), and only a test that asserts
+  on *that* — holding the refetch open with a deferred promise, per
+  `SignInScreen.test.tsx`'s existing pattern — can tell the two apart.
+  Corrected to describe only what it proves, with a second test added
+  alongside it that asserts the disabled state directly.
 
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
-restore it. If it stays green, the test is decoration.
+restore it. If it stays green, the test is decoration — and if it goes red for
+a different reason than the one you meant to prove, that is not yet proof
+either; sharpen the mutation until the failure names the claim.
 
 ### 3. The simulated environment lied
 
@@ -68,9 +138,28 @@ restore it. If it stays green, the test is decoration.
 - The 401 redirect handler bounced every invitee off the invite screen. Green
   suite — because the handler defaults to null and every test installed a stub
   instead of the real wiring.
+- The accounts browser walk answered `500 INTERNAL` on every route, and **the
+  API logged nothing** — impossible on its face, since the only two code paths
+  that produce that response (`logAndWriteInternal`, `recoverer`) both log
+  before writing. An hour went into re-reading the code for a bug that was not
+  there. The cause was not simulated but *assumed*: this machine runs two
+  Docker engines, and a five-hour-old Docker Desktop stack was silently
+  holding the host ports colima's stack needed, so the browser and every
+  `curl` reached stale code while every `docker compose` command managed a
+  container nobody could see or log. The tell was in the response the whole
+  time — the request ID's hostname prefix never matched the running
+  container, and the per-process request counter never reset across a
+  restart, neither of which is possible for a process actually being
+  restarted — and went unread because nobody checked which process was
+  actually answering.
 
 **If a behaviour depends on the platform, verify it in the platform.** A real
-browser found three defects that jsdom structurally could not observe.
+browser found three defects that jsdom structurally could not observe. And
+when a service returns an error it did not log, stop debugging the code and
+confirm you are talking to the process you think you are — an assumed
+environment that is not the one running is the same trap as a simulated one
+that cannot tell the truth, and every hypothesis about the code will be wrong
+for as long as the premise is.
 
 ### 4. Guards scoped to the wrong interval
 
@@ -101,9 +190,21 @@ reviewer found it by building a probe rather than reading the diff.
 - A failed session revocation returned a bare error indistinguishable from "the
   change did not happen" — while the change *had* happened and the member's old
   session stayed live.
+- The account edit modal forwarded the create mutation's request body shape
+  to `PATCH /accounts/{id}` unchanged. The backend's real-patch convention
+  treats a nil pointer as "leave this field alone", and JSON `null` decodes to
+  that same nil — indistinguishable from the field being absent. The form
+  models "Shared" as `null` (correct for *create*, where null and omission
+  both default to shared), so selecting "Shared" while editing an owned
+  account silently left the previous owner in place instead of clearing it —
+  the PATCH answered 200 and changed nothing. Found by tracing the wire type
+  through both sides of the same field, not by a failing test; fixed with a
+  `null -> ""` translation on the update path only, and a dedicated test now
+  asserts the PATCH body itself carries `""`.
 
 **Any two writes that must both happen need a transaction or a loud failure.**
-And a function that accepts a field must persist it or refuse it.
+And a function that accepts a field must persist it or refuse it — silently
+keeping the old value is the same failure wearing a 200.
 
 ### 6. Enumeration oracles are rarely in the error code
 
@@ -232,6 +333,31 @@ here is a test, `TestSignUpRateLimitsCompose`, asserting
 constants — which is the entire reason `SignupGlobalDailyLimit` is exported
 at all.
 
+### 12. A sum over mixed currencies must convert before it adds
+
+`domain.Money.Add` refuses to add two different currencies, by design.
+Summing a household's accounts before converting each into the primary
+currency would therefore not merely be wrong — it would fail outright, but
+only once the household actually holds a second currency. A single-currency
+household, or a test suite built only from single-currency fixtures, never
+reaches the line that would catch it.
+
+- `AccountService.Summary` converts each account into the household's
+  primary currency through `Rate.Apply` *before* any `Add` — specified this
+  way from the start, not discovered as a defect, because `domain.Money.Add`
+  already refuses to add two currencies and the spec named the ordering
+  explicitly. Mutation-checked by reordering the loop to sum raw balances
+  first and convert once at the end: exactly `TestSummaryConvertsBeforeAdding`
+  went red, with `domain.ErrCurrencyMismatch` surfacing through the same
+  SGD/IDR pair the design's own seed household holds. Every single-currency
+  test in the same file stayed green — which is the point. An ordering bug
+  here is invisible until a household actually holds two currencies.
+
+**A rule that only breaks under a second data point needs a test built from
+that second data point.** Writing the mixed-currency test from the design's
+own IDR account, rather than from the happy path, is what gave this rule
+anything to prove itself against.
+
 ---
 
 ## Catalogue by area
@@ -254,6 +380,14 @@ at all.
 - `switch` statements on `Role` and `Visibility` had no `default`, so an
   unrecognised value — which arrives from a text column — skipped validation
   entirely. **Fail closed on values you did not construct.**
+- `NetWorthSummary.Computable`'s guard was `len(views) > 0 && converted == 0`,
+  which counts archived accounts — the loop skips them outright before either
+  counter increments, so a household whose only accounts were archived would
+  have reported "we cannot compute your net worth" for what this same feature's
+  own rule calls a genuine and computable zero. Caught by the implementer
+  before it shipped, not by a test; fixed with a `considered` counter
+  incremented only for non-archived views, judged separately from the raw row
+  count.
 
 ### Database and repositories
 
@@ -313,6 +447,43 @@ route with a missing guard has no second line of defence.
   mailed nothing platform-wide for up to a day. Now 5/hour and 1000/day,
   with `TestSignUpRateLimitsCompose` asserting the arithmetic against the
   live constants so the two cannot drift apart unnoticed again.
+- The accounts redaction gate tested `Role == RoleLimited` — blacklisting the
+  untrusted role instead of naming the trusted one. Identical behaviour
+  today, since `owner` and `limited` are the only two roles, and silently
+  wrong the day a third arrives (an adult who is not an owner, which this
+  product will plausibly want): that role would receive every balance and
+  the net worth, with no test going red, because the state is not yet
+  representable to test against. Rewritten to test `Role != RoleOwner`
+  instead. `Role` arrives from a database column that `convert.go` casts
+  rather than parses, so only a CHECK constraint stands between an
+  unrecognised value and this code — the same fail-closed rule as the
+  `Role`/`Visibility` switch statements above, just written as a condition
+  polarity instead of a missing `default`.
+- The same redaction gate above fixed the *role* axis (whitelist `Role ==
+  RoleOwner`) but left the *field* axis a blacklist: the handler built the
+  full `accountDTO` and nilled `Balance`/`BalanceAsOf` by name. A new money-
+  carrying field added to the struct later would reach every limited member
+  with no test going red, because the existing test only checked that those
+  two named fields were absent — true regardless of what else leaked
+  alongside them. Fixed in the test, not the handler: it now asserts the
+  redacted account's *exact* JSON key set, so adding a field forces a
+  decision at the one moment it matters, instead of a rebuild-by-whitelist
+  that risks drifting the other way.
+- The accounts redaction's sibling, found but deliberately not fixed here
+  (it belongs to a different feature): `member_handlers.go`'s
+  `toMemberViewDTO` builds the full `userDTO` and blanks `Email` by name —
+  the identical field-axis-blacklist shape as `redactedAccounts` above, just
+  emptied rather than nilled. `TestMemberListWithholdsEmailsFromALimitedMember`
+  (`api_test.go`) decodes the response into `memberListEntry`, a fixed struct
+  with a fixed set of fields — `json.Decode` silently drops any key the
+  struct doesn't declare, so a new field added to `userDTO` later would be
+  invisible to every assertion in that test, the same way an unasserted key
+  set was invisible to the accounts test before it was fixed. Latent, not
+  live: nothing leaks today, because the email is blanked rather than
+  omitted, so the wire shape is already stable either way. Left as a trap
+  for the day someone adds a second personal field to `userDTO` and the test
+  still goes green. Tracked as
+  [issue #1](https://github.com/oandrz/Household/issues/1).
 
 ### Frontend
 
@@ -339,6 +510,47 @@ route with a missing guard has no second line of defence.
   reconstructs it and is what a router-walk test must read instead. Would have
   failed against a *correct* implementation — verified against the router's
   own source, not assumed from the property's name.
+- A task brief's own `formatMoney` code butted every currency symbol directly
+  against the digits (`Rp85,400,000`), contradicting the same brief's own IDR
+  test (`Rp 85,400,000`) — neither could have been right as given. Fixed with
+  a rule keyed on whether the symbol ends in a Latin letter, checked against
+  all 18 currencies the backend serves. The same brief's flat, all-optional
+  `Summary` schema also could not be narrowed by TypeScript after
+  `if (!summary.computable)`, which would have forced a non-null assertion at
+  the exact spot the DTO exists to prevent one; replaced with a discriminated
+  union keyed on `computable`.
+- The accounts feature's own file list left `FinancesPage.tsx` off, and wiring
+  only `AccountsPanel`'s "+ Add account" button — as the file list implied —
+  would have left account creation completely unreachable for a household
+  with zero accounts: `AccountsPanel` is not mounted at all in that state,
+  `FirstRunPanel` renders instead. Would have failed the feature's own
+  definition-of-done walk at its very first "add an account" step. Found by
+  reading `FinancesPage.tsx`'s own branching, not by a test; `FirstRunPanel`
+  got its own button wired to the same modal.
+- `FirstRunPanel` had no "Show archived" toggle at all, so an owner who
+  archived their household's only account had no way back to it: the list
+  emptied, `FirstRunPanel` took over, and nothing on it could ask for the
+  archived view — decision 8's restore guarantee broken for exactly the
+  household most likely to trigger it. The 15/15 browser walk never caught
+  it because the seeded household always kept several accounts, so the
+  single-account case never came up. The fix has two halves and both are
+  required: the toggle moved into `FirstRunPanel`, and the branch condition
+  dropped its `&& !includeArchived` clause. Dropping only the clause without
+  adding the toggle leaves the state unreachable in a different way; keeping
+  the clause after adding the toggle reintroduces a second bug one level
+  down — a truly-empty household that tries the new toggle anyway falls
+  through to the three-card zero state (`S$0.00` beside a blank breakdown),
+  because switching `includeArchived` on still returns zero rows when there
+  is nothing archived either. Both halves are mutation-tested separately:
+  reverting either one turns exactly one of the two new tests red.
+- `AccountModal`'s balance-parse error reused one message
+  ("Enter an amount, like 8240.55.") for two different failures. Switching
+  Currency to a no-decimal one (IDR, VND) without touching Balance is a
+  common edit path — the balance display doesn't change on a currency
+  switch — and it produces exactly that message next to a field showing
+  precisely the figure it's being told to enter. Failing closed was already
+  right; the copy just needed to name the actual cause instead of restating
+  the input back at the person looking at it.
 
 ### Tooling and infrastructure
 
@@ -367,7 +579,9 @@ route with a missing guard has no second line of defence.
 ## Before you call something done
 
 1. `make lint && make test` — both, on the tree you are about to integrate.
-2. Mutate at least one new test: break the code, watch it fail, restore.
+2. Mutate at least one new test: break the code, watch it fail *for the
+   reason you expect*, restore. A mutation that kills a different test, or
+   fails on the right test for the wrong reason, has not proven anything yet.
 3. Grep for the shape of anything you fixed. Siblings are the norm here.
 4. If it touches the browser, open a browser.
 5. If it accepts caller input, ask what a caller can measure.

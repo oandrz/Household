@@ -217,10 +217,13 @@ const (
 // ParseAccountType refuses anything it does not recognise. The default is the
 // point: a type arrives from a request body or a database column, so it is a
 // value this code did not construct, and guessing at an unknown one would put
-// an account on the wrong side of net worth. It does not trim or case-fold --
-// the only writers are this API and this API's own migration, and accepting
-// "CASH " here would mean the database CHECK constraint and this function
-// disagreed about what is valid.
+// an account on the wrong side of net worth.
+//
+// It does not trim or case-fold, unlike ParseCurrency, because nobody hand-
+// types this value: it comes from a fixed five-option select, or from a column
+// this API itself wrote. Leniency here would have no one to serve, and a value
+// arriving in an unexpected shape is a signal that something upstream is wrong
+// rather than something to quietly repair.
 func ParseAccountType(s string) (AccountType, error) {
 	switch AccountType(s) {
 	case AccountCash:
@@ -724,11 +727,29 @@ func TestCreateRefusesACurrencyTheMoneyPathRendersWrong(t *testing.T) {
 func TestCreateRefusesAFutureOpeningBalanceDate(t *testing.T) {
 	svc, _ := newAccountService(t)
 	in := validNewAccount()
-	in.OpeningBalanceAsOf = fixedNow.AddDate(0, 0, 1)
+	in.OpeningBalanceAsOf = fixedNow.AddDate(0, 0, 7)
 
 	_, err := svc.Create(context.Background(), in)
 	if !errors.Is(err, domain.ErrOpeningBalanceInFuture) {
 		t.Fatalf("err = %v, want ErrOpeningBalanceInFuture", err)
+	}
+}
+
+// TestCreateAcceptsTodayFromAnyTimezone is the reason the future check carries
+// a day of tolerance. No household stores a timezone, so at 17:00 UTC it is
+// already tomorrow in Singapore -- and a household there entering today's
+// balance must not be refused for eight hours out of every twenty-four.
+//
+// The clock here reads 09:00 UTC on the 28th; the date is the 29th, which is
+// "today" for any household east of UTC+9. Real zones span UTC-12 to UTC+14,
+// so one day of slack covers all of them.
+func TestCreateAcceptsTodayFromAnyTimezone(t *testing.T) {
+	svc, _ := newAccountService(t)
+	in := validNewAccount()
+	in.OpeningBalanceAsOf = time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC)
+
+	if _, err := svc.Create(context.Background(), in); err != nil {
+		t.Fatalf("Create: %v -- a household in UTC+8 cannot enter today's balance", err)
 	}
 }
 
@@ -1164,13 +1185,19 @@ func (s *AccountService) validate(ctx context.Context, a *domain.Account) error 
 	}
 	a.OpeningBalance.Currency = code
 
-	// Compared by calendar day, not by instant: opening_balance_as_of is a
-	// date column, and a balance stated as true "today" must not be refused
-	// because the request arrived at 09:00 and Clock.Now() reads 08:59 in
-	// another zone.
-	now := s.d.Clock.Now().UTC()
-	asOf := a.OpeningBalanceAsOf.UTC()
-	if asOf.Truncate(24 * time.Hour).After(now.Truncate(24 * time.Hour)) {
+	// A whole day of tolerance, deliberately. This product stores no timezone
+	// for a household, so the server cannot know what "today" means to the
+	// person filling in the form: at 17:00 UTC it is already tomorrow in
+	// Singapore, and a household there entering today's balance would be
+	// refused for eight hours out of every twenty-four. Real zones span UTC-12
+	// to UTC+14, so one day of slack covers every one of them.
+	//
+	// The asymmetry is what makes this the right trade: accepting a balance
+	// dated a day early costs nothing -- it is a figure the owner typed and can
+	// edit -- while refusing a genuine "today" is a wall with no way past it
+	// and no explanation that would make sense to the person hitting it. The
+	// check exists to catch a typo like 2062, not to police the date line.
+	if a.OpeningBalanceAsOf.After(s.d.Clock.Now().AddDate(0, 0, 1)) {
 		return domain.ErrOpeningBalanceInFuture
 	}
 
@@ -1267,6 +1294,11 @@ func account(t *testing.T, kind domain.AccountType, minor int64, currency string
 }
 
 func notCounted(v *usecase.AccountView) { v.Account.CountTowardNetWorth = false }
+
+func archived(v *usecase.AccountView) {
+	at := time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC)
+	v.Account.ArchivedAt = &at
+}
 
 // TestSummarySubtractsDebtsFromAssets is the design's own Finances figures in
 // miniature: assets minus liabilities, in the household's primary currency.
@@ -1398,6 +1430,83 @@ func TestSummaryKeepsAnUncountedAccountInTheBreakdown(t *testing.T) {
 	}
 }
 
+// TestSummaryBreakdownIsOrderedByType pins the rule that the bars do not
+// reshuffle between two identical requests. Go randomises map iteration, so
+// building the breakdown by ranging over the byType map would order it
+// differently run to run -- and a chart whose bars swap places on a refresh
+// reads as a bug in the numbers, not in the sort.
+//
+// Five types are used deliberately: with map iteration the odds of landing on
+// the sorted order by chance are 1 in 120, so this test fails almost every run
+// against the wrong implementation rather than occasionally.
+func TestSummaryBreakdownIsOrderedByType(t *testing.T) {
+	svc, _ := newAccountService(t)
+
+	got, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{
+		account(t, domain.AccountCreditCard, 12_000, "SGD"),
+		account(t, domain.AccountProperty, 8_856_000, "SGD"),
+		account(t, domain.AccountCash, 100_000, "SGD"),
+		account(t, domain.AccountLoan, 1_450_000, "SGD"),
+		account(t, domain.AccountInvestment, 11_230_000, "SGD"),
+	})
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+
+	want := domain.AccountTypes()
+	if len(got.Breakdown) != len(want) {
+		t.Fatalf("Breakdown = %d entries, want %d", len(got.Breakdown), len(want))
+	}
+	for i, wantType := range want {
+		if got.Breakdown[i].Type != wantType {
+			t.Errorf("Breakdown[%d].Type = %q, want %q -- assets before debts, in domain order",
+				i, got.Breakdown[i].Type, wantType)
+		}
+	}
+}
+
+// TestSummarySkipsArchivedAccounts: archived means out of the picture, not
+// hidden but still counted. It leaves the total and its type's bar together.
+func TestSummarySkipsArchivedAccounts(t *testing.T) {
+	svc, _ := newAccountService(t)
+
+	live := account(t, domain.AccountCash, 100_000, "SGD")
+	gone := account(t, domain.AccountInvestment, 900_000, "SGD", archived)
+
+	got, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{live, gone})
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if got.NetWorth.Amount != 100_000 {
+		t.Errorf("NetWorth = %d, want 100000", got.NetWorth.Amount)
+	}
+	if len(got.Breakdown) != 1 || got.Breakdown[0].Type != domain.AccountCash {
+		t.Errorf("Breakdown = %+v, want only the live cash account", got.Breakdown)
+	}
+}
+
+// TestSummaryOfAnAllArchivedHouseholdIsAGenuineZero is why the Computable
+// guard counts the accounts this summary is *about* rather than len(views).
+// Every account here is archived, so the loop skips all of them and nothing
+// converts -- but the honest answer is zero, not "we cannot work this out".
+// Guarding on len(views) would report the latter.
+func TestSummaryOfAnAllArchivedHouseholdIsAGenuineZero(t *testing.T) {
+	svc, _ := newAccountService(t)
+
+	got, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{
+		account(t, domain.AccountCash, 100_000, "SGD", archived),
+	})
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if !got.Computable {
+		t.Fatal("Computable = false, want true -- an all-archived household has a real zero")
+	}
+	if got.NetWorth.Amount != 0 {
+		t.Errorf("NetWorth = %d, want 0", got.NetWorth.Amount)
+	}
+}
+
 // TestSummaryBreakdownDrawsOnlyPopulatedTypes: the chart is one bar per type
 // that has an account, not a fixed five, so a household with two cash accounts
 // does not get three empty bars.
@@ -1508,12 +1617,17 @@ func (s *AccountService) Summary(ctx context.Context, householdID string, views 
 	}
 
 	byType := map[domain.AccountType]domain.Money{}
-	converted := 0
+	// considered counts the accounts this summary is actually about, which is
+	// not len(views): an archived account is skipped entirely below, and
+	// counting it here would make a household whose every account is archived
+	// report "we cannot compute this" when the honest answer is a genuine zero.
+	considered, converted := 0, 0
 
 	for _, view := range views {
 		if view.Account.IsArchived() {
 			continue
 		}
+		considered++
 
 		inPrimary, err := s.convert(ctx, view.Balance, primary)
 		if err != nil {
@@ -1562,7 +1676,7 @@ func (s *AccountService) Summary(ctx context.Context, householdID string, views 
 		}
 	}
 
-	if len(views) > 0 && converted == 0 {
+	if considered > 0 && converted == 0 {
 		summary.Computable = false
 	}
 
@@ -1834,8 +1948,16 @@ Append to `api/internal/adapter/postgres/convert.go`:
 // timestamptz, deliberately: "the balance was true on the 26th" is a calendar
 // fact, and storing an instant would make it depend on the zone the request
 // arrived from.
+//
+// It reads the calendar day out of t's own location and rebuilds midnight from
+// those components. The obvious-looking t.UTC().Truncate(24*time.Hour) is
+// wrong: Truncate works on the absolute instant, so converting to UTC first
+// moves 07:00 on the 26th in Singapore back to the 25th -- silently changing
+// the day the person actually meant, which is the one thing this function
+// exists to preserve.
 func dateOnly(t time.Time) pgtype.Date {
-	return pgtype.Date{Time: t.UTC().Truncate(24 * time.Hour), Valid: true}
+	y, m, d := t.Date()
+	return pgtype.Date{Time: time.Date(y, m, d, 0, 0, 0, 0, time.UTC), Valid: true}
 }
 
 func dateToTime(d pgtype.Date) time.Time { return d.Time }
@@ -2363,7 +2485,16 @@ func handleListAccounts(deps Deps) http.HandlerFunc {
 		// The redaction is here, in the handler, not in AccountService: it is a
 		// rule about who is asking, and services in this codebase never take an
 		// actor.
-		if scope.Membership.Role == domain.RoleLimited {
+		//
+		// The condition names the role that may see everything, rather than the
+		// role that may not. Those are the same test while `owner` and `limited`
+		// are the only roles, and they stop being the same the day a third one
+		// arrives -- the "adult who is not an owner" this product will plausibly
+		// want. Written the other way round, that new role would silently
+		// receive every balance and the net worth, and no test in the suite
+		// would go red. Role comes from a database column, and this codebase
+		// fails closed on values it did not construct.
+		if scope.Membership.Role != domain.RoleOwner {
 			WriteJSON(w, http.StatusOK, accountsResponse{Accounts: redactedAccounts(views)})
 			return
 		}
@@ -2816,9 +2947,15 @@ export function formatMoney(
     maximumFractionDigits: digits,
   }).format(magnitude);
 
-  // A known symbol butts against the digits (S$8,240.55); a bare code needs a
-  // space (BRL 1,000.00) or it reads as one token.
-  const prefix = symbol ? symbol : `${currency} `;
+  // A glyph symbol butts against the digits (S$8,240.55, €1,000.00); a symbol
+  // spelled with letters needs a space or it reads as one token -- "Rp" gives
+  // "Rp85,400,000" without it, and "RM"/"CHF" are the same. A bare code, which
+  // is always letters, gets the space by the same rule.
+  const prefix = symbol
+    ? /[A-Za-z]$/.test(symbol)
+      ? `${symbol} `
+      : symbol
+    : `${currency} `;
   const sign = amountMinor < 0 ? MINUS : "";
   return `${sign}${prefix}${formatted}`;
 }

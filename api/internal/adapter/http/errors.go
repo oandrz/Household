@@ -165,6 +165,17 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, usecase.ErrDisplayNameRequired):
 		WriteError(w, http.StatusUnprocessableEntity, "DISPLAY_NAME_REQUIRED",
 			"Your name is required.", nil)
+	case errors.Is(err, domain.ErrAccountNicknameRequired):
+		WriteError(w, http.StatusUnprocessableEntity, "NICKNAME_REQUIRED", "An account name is required.", nil)
+	case errors.Is(err, domain.ErrUnknownAccountType):
+		WriteError(w, http.StatusUnprocessableEntity, "INVALID_TYPE", "That account type is not recognised.", nil)
+	case errors.Is(err, domain.ErrLiabilityBalanceNegative):
+		WriteError(w, http.StatusUnprocessableEntity, "INVALID_BALANCE",
+			"Enter what you owe as a positive amount — Hearth subtracts it for you.", nil)
+	case errors.Is(err, domain.ErrOpeningBalanceInFuture):
+		WriteError(w, http.StatusUnprocessableEntity, "INVALID_AS_OF", "That date is in the future.", nil)
+	case errors.Is(err, domain.ErrAccountOwnerNotInHousehold):
+		WriteError(w, http.StatusUnprocessableEntity, "INVALID_OWNER", "That person is not in this household.", nil)
 	case errors.Is(err, domain.ErrAlreadyExists):
 		// Every service that means a genuine, nameable conflict already
 		// translates domain.ErrAlreadyExists into its own sentinel before

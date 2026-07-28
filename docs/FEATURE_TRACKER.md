@@ -13,14 +13,20 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 36 of 88 features built or partly built. Everything
-complete still belongs to entry, identity and household settings; nothing in
-Money, Marriage, Family or Overview has been started. Five of the rows below
-have no mockup of their own — the provisioning transaction behind self-serve
-sign-up, the currency list endpoint, and `adminctl prune` — because the
-design's own "Create household" screen (the `authScreen` state, and the
-sign-in footer's "No household yet? Create one") is what makes each of them
-necessary, and none has anywhere else to live in this tracker.
+**Where things stand:** 41 of 91 features built or partly built. Money now has
+its first feature — Accounts — built: a household records what it owns and
+owes by hand and sees a net worth built from it. Nothing else in Money is
+started yet, and nothing in Marriage, Family or Overview has been started.
+Five of the rows below have no mockup of their own — the provisioning
+transaction behind self-serve sign-up, the currency list endpoint, and
+`adminctl prune` — because the design's own "Create household" screen (the
+`authScreen` state, and the sign-in footer's "No household yet? Create one")
+is what makes each of them necessary, and none has anywhere else to live in
+this tracker. Accounts adds three more design-less rows, for a different
+reason each: archive and restore, which the design never draws anywhere in
+Money (see the Finances table below); and two ⬜ rows — custom account types
+and a warning before a primary-currency change strands every account — for
+work the accounts spec named and deliberately deferred rather than built.
 
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
@@ -28,11 +34,11 @@ necessary, and none has anywhere else to live in this tracker.
 | Navigation shell | 6 | 0 | 1 | 0 |
 | Household settings | 15 | 4 | 2 | 0 |
 | Overview (home) | 0 | 0 | 8 | 0 |
-| Money | 0 | 0 | 24 | 0 |
+| Money | 4 | 1 | 22 | 0 |
 | Marriage | 0 | 0 | 13 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **31** | **5** | **50** | **2** |
+| **Total** | **35** | **6** | **48** | **2** |
 
 ---
 
@@ -54,8 +60,12 @@ lint-arch` enforces this mechanically, including in test files.
   `invite.go` does invites. When a file starts needing "and" to describe it,
   split it.
 - **Open/closed** — extend by adding an adapter, not by editing a service.
-  `FXRateProvider` and `BankSyncProvider` exist precisely so a real rate source
-  or a real aggregator can arrive without touching the code that uses them.
+  `FXRateProvider` exists precisely so a real rate source can arrive without
+  touching the code that uses it. `BankSyncProvider` does not exist:
+  Accounts, Money's first feature, ships manual entry only, which needs no
+  port at all — a port with one implementation and no second caller is the
+  wrong shape. One arrives when CSV import gives it a second implementation
+  to abstract over.
 - **Liskov** — an adapter must honour its port's whole contract, including
   errors. A missing row surfaces as `domain.ErrNotFound`, never `pgx.ErrNoRows`.
   A caller must not need to know which implementation it has.
@@ -161,20 +171,60 @@ and Marriage retro — so it depends on Money, Family and Marriage existing firs
 
 ## 5 · Money
 
-Nothing started. This is the largest area and the recommended next slice.
+Its first feature, Accounts, is built. Everything else here — Transactions,
+Budget, Goals, Bills — is still to come; this is still the largest area.
 
 **Finances**
 
 | Feature | State |
 |---|---|
-| Net worth with 12-month trend | ⬜ |
-| Assets and liabilities breakdown | ⬜ |
-| Accounts by owner, with SGD/IDR split | ⬜ |
+| Net worth with 12-month trend | 🟡 |
+| Assets and liabilities breakdown | ✅ |
+| Accounts by owner, with SGD/IDR split | ✅ |
 | Recent transactions strip | ⬜ |
 | Link account — step 1, choose source | ⬜ |
 | Link account — step 2, authorise | ⬜ |
 | Link account — step 3, details and ownership | ⬜ |
-| Manual account entry | ⬜ |
+| Manual account entry | ✅ |
+| Archive and restore | ✅ |
+| Custom account types | ⬜ |
+| Warning in Settings before a primary-currency change strands every account | ⬜ |
+
+**Net worth is missing only its 12-month trend.** The figure itself — assets
+minus liabilities, converting each account into the household's primary
+currency before summing — is built and shown live. The trend needs balance
+snapshots: a second table, and a separate decision about when a snapshot gets
+written (nightly? on every balance change? on read?). Deferred as its own
+small spec, not folded into this one.
+
+**Archive and restore is not drawn anywhere in the design.** There is no
+remove control on the design's own account form or accounts list. An account
+is never deleted — archiving stamps a timestamp, and a "Show archived" view
+lists archived accounts with a restore action, so a mistake is recoverable.
+
+**Custom account types and the primary-currency-change warning are deferred,
+not missing by accident.** Five fixed types (`cash`, `investment`, `property`,
+`loan`, `credit_card`) cover the design's own breakdown bars; a household
+that wants something more specific, like "Gold savings" or "Arisan", names it
+in the free-text nickname on a `cash` account instead. Custom types would also
+need to be seeded at household creation, which reaches into the self-serve
+sign-up provisioning transaction for a feature nobody has asked for yet — the
+wrong trade today. The currency-change warning belongs to the Settings
+screen: an owner changing the household's primary currency can strand every
+account with no exchange rate to the new one, and the design has no copy or
+control for warning them first. The state it would prevent is visible and
+reversible without the warning (the screen already says when no account can
+be converted, and changing the currency back restores the figure), which is
+why this is deferred rather than treated as a defect.
+
+**Link account — steps 1 and 2 of the design's chooser will not be built as
+drawn.** SGFinDex access to real bank data is restricted to licensed
+financial institutions (see the bank-sync note below), so the design's
+"Connect a Singapore bank" card can never turn on. A chooser with one
+permanently dead branch teaches nothing, so `+ Add account` opens step 3's
+own form directly — built and counted as *Manual account entry* above, not as
+a separate "step 3" row, since it is the same shipped modal under a different
+name.
 
 **Automatic bank sync is not buildable here.** SGFinDex access is restricted to
 licensed financial institutions. The design's Singpass flow will be shown

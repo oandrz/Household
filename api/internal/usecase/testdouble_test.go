@@ -1709,3 +1709,102 @@ func mustHash(t *testing.T, hasher usecase.PasswordHasher, plain string) string 
 	}
 	return hash
 }
+
+// --- AccountRepository ---------------------------------------------------
+
+// fakeAccountRepo is the in-memory AccountRepository every AccountService test
+// runs against. memberships maps a membership id to the household it belongs
+// to, which is all MembershipBelongsToHousehold needs to answer.
+type fakeAccountRepo struct {
+	accounts    map[string]domain.Account
+	memberships map[string]string
+	nextID      int
+}
+
+func newFakeAccountRepo() *fakeAccountRepo {
+	return &fakeAccountRepo{
+		accounts:    map[string]domain.Account{},
+		memberships: map[string]string{},
+	}
+}
+
+func (r *fakeAccountRepo) List(_ context.Context, householdID string, includeArchived bool) ([]usecase.AccountView, error) {
+	var out []usecase.AccountView
+	for _, a := range r.accounts {
+		if a.HouseholdID != householdID {
+			continue
+		}
+		if a.IsArchived() && !includeArchived {
+			continue
+		}
+		out = append(out, usecase.AccountView{
+			Account: a,
+			Balance: a.OpeningBalance,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Account.ID < out[j].Account.ID })
+	return out, nil
+}
+
+func (r *fakeAccountRepo) Get(_ context.Context, householdID, accountID string) (usecase.AccountView, error) {
+	a, ok := r.accounts[accountID]
+	if !ok || a.HouseholdID != householdID {
+		return usecase.AccountView{}, domain.ErrNotFound
+	}
+	return usecase.AccountView{Account: a, Balance: a.OpeningBalance}, nil
+}
+
+func (r *fakeAccountRepo) Create(_ context.Context, a domain.Account) (domain.Account, error) {
+	r.nextID++
+	a.ID = fmt.Sprintf("acct-%d", r.nextID)
+	a.ArchivedAt = nil
+	r.accounts[a.ID] = a
+	return a, nil
+}
+
+func (r *fakeAccountRepo) Update(_ context.Context, a domain.Account) (domain.Account, error) {
+	existing, ok := r.accounts[a.ID]
+	if !ok || existing.HouseholdID != a.HouseholdID {
+		return domain.Account{}, domain.ErrNotFound
+	}
+	a.ArchivedAt = existing.ArchivedAt
+	r.accounts[a.ID] = a
+	return a, nil
+}
+
+func (r *fakeAccountRepo) SetArchived(_ context.Context, householdID, accountID string, archived bool, at time.Time) (domain.Account, error) {
+	a, ok := r.accounts[accountID]
+	if !ok || a.HouseholdID != householdID {
+		return domain.Account{}, domain.ErrNotFound
+	}
+	if archived {
+		stamp := at
+		a.ArchivedAt = &stamp
+	} else {
+		a.ArchivedAt = nil
+	}
+	r.accounts[accountID] = a
+	return a, nil
+}
+
+func (r *fakeAccountRepo) MembershipBelongsToHousehold(_ context.Context, householdID, membershipID string) (bool, error) {
+	return r.memberships[membershipID] == householdID, nil
+}
+
+// staticTestRates knows the one pair fx.StaticProvider knows, and errors on
+// everything else -- so a test for the no-rate branch does not have to invent
+// a second, differently-behaved double.
+type staticTestRates struct{}
+
+func (staticTestRates) Rate(_ context.Context, from, to string) (usecase.Rate, error) {
+	switch {
+	case from == to:
+		return usecase.Rate{Numerator: 1, Denominator: 1}, nil
+	case from == "SGD" && to == "IDR":
+		return usecase.Rate{Numerator: 12_410, Denominator: 1}, nil
+	case from == "IDR" && to == "SGD":
+		return usecase.Rate{Numerator: 1, Denominator: 12_410}, nil
+	default:
+		return usecase.Rate{}, fmt.Errorf("no rate available for %s to %s", from, to)
+	}
+}

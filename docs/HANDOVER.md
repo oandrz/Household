@@ -9,19 +9,20 @@ in three months or someone new.
 
 ## 1. Where things stand
 
-Two of six slices are complete, reviewed and verified end to end in a browser.
-A third piece of work, self-serve sign-up, is also complete and reviewed —
-every task's code was reviewed clean, including fix rounds — but has **not**
-had its own browser walk yet. Say that plainly rather than letting "verified
-end to end" quietly absorb it: `make lint && make test` passing is not the
-same claim as a human clicking through it.
+Three of six slices are now walked end to end in a browser. Self-serve sign-up
+is complete and reviewed — every task's code was reviewed clean, including fix
+rounds — but **still** has not had its own browser walk. Say that plainly
+rather than letting "verified end to end" quietly absorb it: `make lint &&
+make test` passing is not the same claim as a human clicking through it.
+Accounts (slice 2's first feature) closed that gap for itself: its walk ran
+and passed, 15 of 15.
 
 | Slice | Contents | State |
 |---|---|---|
 | 0 — Skeleton | Clean-architecture layout, Docker, Compose, Make, migrations, health endpoints | **Done** |
 | 1 — Household & identity | Sign-in, magic link, invite acceptance, lockout, members, roles, capabilities, spaces, Settings | **Done** |
-| — Self-serve sign-up | Sign-up, household provisioning, an ISO 4217 currency allowlist and list endpoint, `adminctl prune`, a per-IP rate limiter | Code-complete; browser walk **pending** |
-| 2 — Money | Accounts, Transactions, Budget, Goals, Bills | Not started |
+| — Self-serve sign-up | Sign-up, household provisioning, an ISO 4217 currency allowlist and list endpoint, `adminctl prune`, a per-IP rate limiter | Code-complete; browser walk **still pending** |
+| 2 — Money | **Accounts**: manual entry, net worth, assets/liabilities breakdown, archive and restore — **done, browser walk 15/15**. Transactions, Budget, Goals, Bills: not started | In progress |
 | 3 — Marriage | Retros, Vision, Agreements | Not started |
 | 4 — Family | Calendar | Not started |
 | 5 — Overview | Read-only aggregation across 2–4 | Not started |
@@ -45,6 +46,27 @@ unlock-household --email` resolving the right household, and `adminctl prune`
 refusing a window under seven days among them. It has not been run. Start it
 from `make down && make up` (or an explicit `make migrate`), not a bare
 `make up` — see §5's Makefile item.
+
+Accounts' own definition of done is a 15-criterion walk, written down in
+`docs/superpowers/plans/2026-07-28-hearth-accounts.md` (Task 41). **Result: 15
+of 15 pass**, recorded in
+`docs/superpowers/plans/2026-07-28-hearth-accounts-verification.md` — the sign
+rule end to end (a loan reads positive in the accounts list and negative in
+net worth), convert-then-add against a real database (an IDR account raised
+net worth by the exchange rate's cent-accurate figure), the redaction at the
+wire (a limited member's response carries no `balance` key, no `balanceAsOf`,
+no `summary` at all), and the primary-currency-change state (switching to EUR
+blanks the net worth figure with a named explanation, never a zero) among
+them. The walk's own script had one defect: criterion 12 said "sign in as
+Kayla in a private window", which is not executable — seeded children are
+credential-less by design — so it was met instead by inviting a limited
+member with real credentials, which is the more realistic path anyway. Fixed
+in the record, not in the product.
+
+The walk itself lost most of its first hour to something unrelated to the
+feature: this machine runs two Docker engines, and a five-hour-old Docker
+Desktop stack was silently holding the host ports colima's stack needed. See
+`docs/LEARNING.md` for the lesson that cost the hour.
 
 Two screens the design marks "· not built" are deliberately absent: the **kids
 view** and **custom space pages**. That is the design's own scoping, not an
@@ -84,6 +106,12 @@ export DOCKER_HOST=unix:///Volumes/Oink_Machine/.colima/default/docker.sock
 export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
 ```
 
+This machine can also run Docker Desktop at the same time. If it is up, it
+silently wins host ports 5173/8080/8025 out from under colima's stack, so
+`make up` succeeds, `docker compose` manages colima's containers, and the
+browser and every `curl` still talk to whatever Docker Desktop published —
+check `docker ps` on both engines before concluding the code is broken.
+
 Mailpit catches all outbound mail at `http://localhost:8025`. Magic links and
 invites land there in development.
 
@@ -102,7 +130,7 @@ api/
 web/src/
   api/client.ts       apiFetch — the only way the app talks to the server
   components/         generic primitives only (Modal)
-  features/           auth, shell, settings, placeholder
+  features/           auth, shell, settings, money, placeholder
   routes/router.tsx   the route tree
 ```
 
@@ -129,52 +157,70 @@ that will manage it (a deferred, separate spec) so it earns real usage first
 — and a household has to be able to exist before there is anything for that
 console to administer.
 
-**Build slice 2 (Money) next.** It is still the largest, still the design's
-centre of gravity, and everything above it in the dependency order — now
-including self-serve sign-up — is done. Slice 5 (Overview) must still be last
-— it only aggregates, so building it early means stubbing everything it reads.
+**Slice 2 (Money) is under way.** Accounts, its first feature, is code-complete
+and reviewed; Transactions, Budget, Goals and Bills are not started. It is
+still the largest area and still the design's centre of gravity. Slice 5
+(Overview) must still be last — it only aggregates, so building it early means
+stubbing everything it reads.
 
 Each slice gets its own spec → plan → implementation cycle, the same way these
 did. The originating spec for slices 0–1 is
 `docs/superpowers/specs/2026-07-26-hearth-foundation-design.md`; self-serve
 sign-up's own is
-`docs/superpowers/specs/2026-07-27-hearth-self-serve-signup-design.md`. The
-completed plans beside them are worth skimming for house style before writing
-a fourth.
+`docs/superpowers/specs/2026-07-27-hearth-self-serve-signup-design.md`;
+Accounts' own is `docs/superpowers/specs/2026-07-28-hearth-accounts-design.md`.
+The completed plans beside them are worth skimming for house style before
+writing a fifth.
 
-### Before slice 2's first task
+### What Accounts closed, and what is next
 
-Three things the last review flagged as "must not be forgotten", all cheap now
-and expensive later — **none of them closed by self-serve sign-up**:
+Three things a prior review flagged as "must not be forgotten" before slice 2's
+first task. Accounts closes the first, upholds the second, and leaves the
+third for Transactions, Budget and Goals to pin:
 
-1. **`requireCapability` middleware exists and no route uses it.** The spec
-   promises the server enforces capabilities independently of the UI. That
-   promise is currently vacuous — there is no capability-gated route.
-   Self-serve sign-up added four new routes and all four are public; it did
-   not add the first capability-gated one, so the deadline moved but did not
-   close. Slice 2 adds the first one (`money`). Wire it, and extend the
-   route-walk test matrices in `api/internal/adapter/http/api_test.go` to
-   cover it.
-2. **The derived figures are the real business logic and the spec does not
-   define them.** The design shows `66% used`, `S$137/day left`, `on pace to
-   save S$1,780`, `4 of 4 on track`, net worth from assets minus liabilities,
-   and unspent budget rolling into a nominated goal at month end. Pin every
-   formula in slice 2's spec. If you do not, each implementer will invent one.
-3. **Money is `int64` minor units plus an ISO 4217 code, everywhere.**
-   `domain.Money` already refuses to mix currencies and refuses to wrap on
-   overflow. `usecase.Rate` is a fraction, not a scaled decimal, because IDR to
-   SGD cannot be represented otherwise. Do not add a `float64` to a monetary
-   path.
+1. **`requireCapability` middleware exists and no route uses it — closed.**
+   The spec promised the server enforces capabilities independently of the
+   UI; until Accounts, that promise was vacuous. `GET /api/v1/accounts` and
+   its four write routes are now gated on the `money` capability (reads) and
+   `money` plus owner (writes), and the route-walk test matrices in
+   `api/internal/adapter/http/api_test.go` cover them. See
+   `docs/SYSTEM_DESIGN.md` §4.
+2. **Money is `int64` minor units plus an ISO 4217 code, everywhere — held.**
+   `domain.Money` refuses to mix currencies; `AccountService.Summary` converts
+   each account into the household's primary currency before summing, for
+   exactly that reason (`docs/LEARNING.md`, pattern 12). No `float64` entered
+   a monetary path on either side of the stack.
+3. **The derived figures the design shows are still mostly undefined.** Net
+   worth (assets minus liabilities, converted per account) is now pinned and
+   built. `66% used`, `S$137/day left`, `on pace to save S$1,780`,
+   `4 of 4 on track`, and unspent budget rolling into a nominated goal at
+   month end are Transactions/Budget/Goals territory and still need pinning
+   in their own specs before an implementer invents one.
+
+**Transactions is the next feature.** It attaches to the accounts this slice
+built, and it must **inherit their visibility rule rather than invent one** —
+a limited member sees a transaction only if it belongs to an account already
+shared with them, the same `visible_to_limited_members` gate `AccountService`
+already enforces. It is also what turns `AccountView.Balance` from an opening
+balance into a real sum: today `Balance` equals `OpeningBalance` because there
+is nothing to add to it; `AccountRepository.List`'s doc comment already shapes
+the query as a sum for this reason, so Transactions adds a join rather than
+changing the contract.
 
 ### The seams slice 2 will use
 
-- **Bank sync is a port with no real implementation.** SGFinDex is restricted to
-  licensed institutions, so `BankSyncProvider` exists with manual and CSV
-  adapters behind it. The 3-step Link-account modal from the design is built
-  against that port; the SGFinDex branch is shown unavailable.
+- **Bank sync is not a port anyone has built.** SGFinDex is restricted to
+  licensed institutions, so `BankSyncProvider` does not exist, and Accounts —
+  Money's first feature — shipped without it: manual entry needs no port at
+  all, and a port with one implementation and no second caller is the wrong
+  shape. It arrives when CSV import gives it a second implementation to
+  abstract over. The design's 3-step Link-account modal was cut to one step
+  for the same reason: a chooser between "connect a bank" (permanently dead)
+  and "manual account" teaches nothing with only one live branch, so
+  `+ Add account` opens the manual form directly.
 - **The sidebar renders from `me.spaces`**, filtered and ordered by the server.
-  Slice 2 adds pages under the existing Money space; it does not touch the
-  sidebar.
+  Accounts added a real page under the existing Money space (Finances,
+  replacing its placeholder); it did not touch the sidebar.
 - **`components/Modal`** is the shared primitive. Roughly fifteen modals across
   slices 2–4 build on it. It reaches genuine `:modal` state — do not
   reintroduce a declarative `open` attribute.
@@ -214,16 +260,17 @@ All three are documented in the code at the point a future editor would change t
 
 ### Worth doing when convenient
 
-Three items previously listed here are now done, closed by self-serve sign-up:
-`preAuthPathPrefixes`/`publicRoutePrefixes` became one `web/src/routes/publicRoutes.ts`
-backed by a router-walk test; non-ASCII display names now get a correct avatar
-initial (`initialOf` slices the first rune and case-folds through
-`cases.Upper`, and `avatar_initial` widened to `text` for the rare expansion
-case); and backend currency validation now checks membership in a real ISO
-4217 allowlist (`domain.ParseCurrency`) rather than format only, so `ZZZ` is
-refused.
+Four items previously listed here are now done. Self-serve sign-up closed
+three: `preAuthPathPrefixes`/`publicRoutePrefixes` became one
+`web/src/routes/publicRoutes.ts` backed by a router-walk test; non-ASCII
+display names now get a correct avatar initial (`initialOf` slices the first
+rune and case-folds through `cases.Upper`, and `avatar_initial` widened to
+`text` for the rare expansion case); and backend currency validation now
+checks membership in a real ISO 4217 allowlist (`domain.ParseCurrency`) rather
+than format only, so `ZZZ` is refused. Accounts closed the fourth:
+`requireCapability` was unused and carried a deadline (§4 above) — it now
+gates the accounts routes, and the route-walk matrices exercise it.
 
-- `requireCapability` unused (see above — this one has a deadline).
 - `apiFetch` has no timeout or abort, so a request that never settles leaves its
   control disabled indefinitely.
 - `CurrencyPanel` and `NotificationsPanel` are correct but unprotected: neither
@@ -267,11 +314,13 @@ refused.
 
 These were each learned from a defect that shipped past a green test suite.
 
-- **Fix the class, not the instance.** Four times in this project a defect was
+- **Fix the class, not the instance.** Six times in this project a defect was
   fixed at one site while its siblings kept the bug — a PATCH corrected in two
   of three endpoints, an error oracle closed at the mailer and left two lines
-  away, a non-awaited invalidation fixed in one panel with two untouched. When
-  you fix something, grep for its shape.
+  away, a non-awaited invalidation fixed in one panel with two untouched, and
+  (most recently) a `time.Truncate`-and-location mistake that shipped at two
+  separate call sites before a third, correctly-written one got its test.
+  When you fix something, grep for its shape.
 - **Verify UI behaviour in a real browser.** jsdom's `<dialog>` is a stub, so
   five passing tests hid a modal that threw on every open in production. If a
   behaviour depends on the platform, a simulated DOM cannot tell you it works.

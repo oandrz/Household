@@ -15,6 +15,7 @@ import (
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/clock"
 	"github.com/andreasoentoro/hearth/api/internal/adapter/crypto"
+	"github.com/andreasoentoro/hearth/api/internal/adapter/fx"
 	httpadapter "github.com/andreasoentoro/hearth/api/internal/adapter/http"
 	"github.com/andreasoentoro/hearth/api/internal/adapter/mail"
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres"
@@ -128,6 +129,12 @@ func run() error {
 		SessionTTL: httpadapter.SessionTTL,
 		BaseURL:    cfg.AppBaseURL,
 	})
+	accountSvc := usecase.NewAccountService(usecase.AccountDeps{
+		Accounts:   postgres.NewAccountRepo(db),
+		Households: households,
+		FX:         fx.NewStaticProvider(),
+		Clock:      sysClock,
+	})
 
 	srv := &http.Server{
 		Addr: fmt.Sprintf(":%d", cfg.Port),
@@ -138,6 +145,7 @@ func run() error {
 			Members:     memberSvc,
 			Households:  householdSvc,
 			Signups:     signupSvc,
+			Accounts:    accountSvc,
 			Users:       users,
 			Memberships: memberships,
 			Sessions:    sessions,

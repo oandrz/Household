@@ -353,3 +353,49 @@ func mulOverflows(a, b int64) bool {
 type FXRateProvider interface {
 	Rate(ctx context.Context, from, to string) (Rate, error)
 }
+
+// AccountView is an account joined to its owner's display name, which is what
+// every consumer of the accounts list actually wants -- the same shape and the
+// same reason as MemberView above.
+//
+// Balance is the account's current balance: its opening balance plus every
+// transaction dated after Account.OpeningBalanceAsOf. There is no transactions
+// table yet, so today Balance always equals Account.OpeningBalance. It is a
+// separate field from the start so the next slice adds a join rather than
+// changing this struct's shape under its consumers.
+//
+// OwnerName is "" for a shared account, following the same "" <-> SQL NULL
+// convention as domain.Account.OwnerMembershipID.
+type AccountView struct {
+	Account   domain.Account
+	OwnerName string
+	Balance   domain.Money
+}
+
+type AccountRepository interface {
+	// List returns one household's accounts, ordered oldest first. Archived
+	// accounts are included only when includeArchived is true, and never
+	// contribute to any total regardless.
+	List(ctx context.Context, householdID string, includeArchived bool) ([]AccountView, error)
+	// Get reports domain.ErrNotFound when no account with this id exists in
+	// this household -- including when one exists in a different household,
+	// which must be indistinguishable from not existing at all.
+	Get(ctx context.Context, householdID, accountID string) (AccountView, error)
+	// Create writes a.OwnerMembershipID following the "" <-> SQL NULL
+	// convention: "" stores NULL, meaning shared. a.ID and a.ArchivedAt are
+	// ignored -- the database assigns the first and a new account is never
+	// born archived.
+	Create(ctx context.Context, a domain.Account) (domain.Account, error)
+	// Update replaces every mutable column. AccountService is what turns a
+	// partial PATCH into a complete Account; this port never merges.
+	Update(ctx context.Context, a domain.Account) (domain.Account, error)
+	// SetArchived stamps archived_at with at, or clears it when archived is
+	// false. Accounts are never deleted: transactions will reference these
+	// rows, and destroying an account would take its history with it.
+	SetArchived(ctx context.Context, householdID, accountID string, archived bool, at time.Time) (domain.Account, error)
+	// MembershipBelongsToHousehold answers whether a membership is in this
+	// household, so an account can never be assigned to a member of another
+	// one. It lives here rather than on MembershipRepository because that port
+	// is already consumed by sign-in and does not need widening for this.
+	MembershipBelongsToHousehold(ctx context.Context, householdID, membershipID string) (bool, error)
+}
