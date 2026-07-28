@@ -106,8 +106,11 @@ are load-bearing — read them before writing a service or a repository.
 - **Single responsibility** — one file, one job. When describing a file needs
   the word "and", split it.
 - **Open/closed** — extend by adding an adapter, not by editing a service.
-  `FXRateProvider` and `BankSyncProvider` exist so a real rate source or a real
-  aggregator can arrive without touching their callers.
+  `FXRateProvider` exists so a real rate source can arrive without touching
+  its callers. `BankSyncProvider` does not exist yet: manual account entry
+  needs no port, and one arrives when CSV import gives it a second
+  implementation to abstract over — a port with one implementation and no
+  second caller is the wrong shape.
 - **Liskov** — an adapter honours its port's whole contract, errors included. A
   caller must never need to know which implementation it holds.
 - **Interface segregation** — narrow ports for what a caller needs. Nine small

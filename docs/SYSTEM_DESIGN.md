@@ -4,10 +4,12 @@ How the system is put together, how a request moves through it, and what the
 data looks like. Written so an engineer new to the project can orient in one
 sitting.
 
-**Scope:** what exists today — slices 0 and 1, plus self-serve sign-up and
-household provisioning, which shipped ahead of slice 2 in the build order (see
-`docs/HANDOVER.md`). Money, Marriage, Family and Overview are not built; see
-`docs/FEATURE_TRACKER.md`.
+**Scope:** what exists today — slices 0 and 1, self-serve sign-up and
+household provisioning (which shipped ahead of slice 2 in the build order, see
+`docs/HANDOVER.md`), and Accounts — the first feature of slice 2 (Money): a
+household records what it owns and owes by hand and sees a net worth built
+from it. The rest of Money (Transactions, Budget, Goals, Bills) and all of
+Marriage, Family and Overview are not built; see `docs/FEATURE_TRACKER.md`.
 
 ---
 
@@ -87,6 +89,7 @@ graph TD
         Signup["SignupService"]
         Member["MemberService"]
         House["HouseholdService"]
+        Account["AccountService — net worth is<br/>composed here, not stored"]
         Seed["Seed"]
     end
 
@@ -137,14 +140,18 @@ points inward, which is why every service is testable against in-memory doubles.
 |---|---|---|
 | `UserRepository` | `adapter/postgres` | Includes the transactional `CreateWithMembership` |
 | `HouseholdRepository`, `MembershipRepository`, `SessionRepository`, `MagicLinkRepository`, `LoginAttemptRepository`, `InviteRepository`, `SignupRepository`, `SpaceRepository`, `NotificationRepository` | `adapter/postgres` | Ten narrow repositories rather than one wide one |
+| `AccountRepository` | `adapter/postgres` | Eleventh. Accounts joined to the owner's display name (`AccountView`); its `MembershipBelongsToHousehold` is what stops an account being assigned to a member of a different household |
 | `PasswordHasher`, `TokenGenerator` | `adapter/crypto` | argon2id with cost from config; tokens are random, stored hashed |
 | `Mailer` | `adapter/mail` | SMTP; TLS policy and credentials from config |
 | `Clock` | `adapter/clock` | So lockout windows and expiry are deterministic in tests |
-| `FXRateProvider` | `adapter/fx` | Static table today; a live provider drops in behind it |
+| `FXRateProvider` | `adapter/fx` | Static table today (SGD↔IDR only); a live provider drops in behind it. `AccountService` is its second caller, converting each account into the household's primary currency before summing (§5) |
 
-`BankSyncProvider` is specified but has no consumer yet — it arrives with the
-Money slice, with manual and CSV adapters. Automatic sync via SGFinDex is not
-available to an app like this.
+`BankSyncProvider` is specified but has no consumer yet. Accounts, the first
+feature built against this port table, shipped manual entry only and needed no
+port for it — a port with one implementation and no second caller is the wrong
+shape. It arrives when CSV import gives it a second implementation to
+abstract over, not automatically "with the Money slice". Automatic sync via
+SGFinDex is not available to an app like this.
 
 `LoginAttemptRepository` and `SignupRepository` both carry a `Prune(ctx,
 before)` method, added together because both back the two tables a stranger
@@ -168,7 +175,10 @@ graph TD
     Public -->|"sign-in, magic-link,<br/>magic-link/consume,<br/>invites/{token},<br/>sign-up*, currencies"| Handler
     Public -->|no| Session["requireSession<br/>reads hearth_session cookie,<br/>re-reads membership from the DB,<br/>extends when under a day remains"]
 
-    Session --> Safe{"GET or HEAD?"}
+    Session --> Cap{"Capability-gated<br/>route group?"}
+    Cap -->|"accounts: money"| RequireCap["requireCapability(cap)<br/>403 unless the caller's membership has it"]
+    Cap -->|"no — most routes"| Safe{"GET or HEAD?"}
+    RequireCap --> Safe
     Safe -->|yes| Handler
     Safe -->|no| CSRF["requireCSRF<br/>double-submit, constant-time compare"]
 
@@ -188,6 +198,22 @@ graph TD
 **The membership is re-read on every request**, never cached in the session row.
 A capability change therefore takes effect on the caller's very next request;
 session revocation is belt-and-braces rather than the enforcement mechanism.
+
+**Accounts are the first routes `requireCapability` ever gates.** The
+middleware existed since slice 1 with no route using it, which made the
+promise that the server enforces capabilities independently of the UI
+vacuous. It sits before the `GET`/`HEAD` check because reads need it too — a
+member without the `money` capability is refused `GET /api/v1/accounts` just
+as firmly as a write. On the four accounts write routes it is stacked ahead of
+`requireOwner`: today that is redundant, because
+`domain.ValidateMembershipChange` refuses an owner who does not hold every
+capability, so "an owner without `money`" is not a representable state — but
+the alternative is for these routes to lean on an invariant enforced in a
+different layer for a different reason, and if that invariant is ever relaxed
+every route depending on it would open silently. One extra middleware call is
+the cheaper price. (This is unrelated to the frontend's own `RequireCapability`
+component, §7 — a presentation guard that already existed for the `/money` and
+`/marriage` placeholders; this is the first time the *server* enforces one.)
 
 `POST /auth/sign-up` is the one public route wrapped in an extra middleware,
 `rateLimitByIP` — a per-process, in-memory token bucket keyed on the request's
@@ -215,6 +241,10 @@ to a real address and so are not on that path.
 | PATCH | `/household`, `/notification-preferences` | session · CSRF · owner |
 | POST | `/household/members/invite`, `/spaces` | session · CSRF · owner |
 | PATCH · DELETE | `/household/members/{id}` | session · CSRF · owner |
+| GET | `/accounts` | session · money |
+| POST | `/accounts` | session · money · CSRF · owner |
+| PATCH | `/accounts/{id}` | session · money · CSRF · owner |
+| POST | `/accounts/{id}/archive`, `/accounts/{id}/restore` | session · money · CSRF · owner |
 | GET | `/healthz`, `/readyz` | none — outside `/api/v1` |
 
 Three test matrices walk the live router and assert this: every non-public
@@ -227,6 +257,16 @@ among them (`POST /auth/sign-up`, `POST /auth/sign-up/{token}/complete`) —
 the two GETs are not mutating and so are not walked by those two matrices at
 all. A route added later under `/auth/sign-up` is therefore checked like any
 other, not silently waved through by a prefix skip.
+
+**The owner-gated matrix signs in as a second limited-member fixture** —
+`calendar`, `chores` **and** `money` — rather than the original one, which
+holds only `calendar` and `chores`. Signing in as the original would have had
+every accounts write route refused at `requireCapability` before the request
+ever reached `requireOwner`, so the walk would have passed without ever
+exercising the guard it is named after; see `docs/LEARNING.md`. Two more tests
+pin the capability gate and the redaction rule directly:
+`TestAccountsListRequiresTheMoneyCapability` and
+`TestAccountsAreRedactedForALimitedMember`.
 
 ---
 
@@ -402,6 +442,60 @@ mail stopped at three an hour — the exact oracle this endpoint exists to
 close, expressed as mail volume instead of a status code. See
 `docs/LEARNING.md`.
 
+### Accounts — net worth is composed on read, not stored
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant H as Handler
+    participant Repo as AccountRepository
+    participant Svc as AccountService
+    participant FX as FXRateProvider
+
+    B->>H: GET /api/v1/accounts
+    H->>Repo: List(householdID, includeArchived)
+    alt caller's role is not owner
+        H-->>B: 200 { accounts: only visible-to-limited rows,<br/>balance/balanceAsOf/summary all absent }
+    else owner
+        H->>Svc: Summary(householdID, views)
+        loop each live account
+            Svc->>FX: Rate(account currency, primary) unless already primary
+            Svc->>Svc: convert, then Add — domain.Money.Add<br/>refuses two different currencies
+        end
+        Svc-->>H: NetWorthSummary
+        H-->>B: 200 { accounts, summary }
+    end
+```
+
+One endpoint answers both halves of the screen — the list and the summary —
+because they describe the same set of rows and must agree; a second endpoint
+would mean writing the redaction rule below twice.
+
+**Convert, then add.** `domain.Money.Add` refuses to add two different
+currencies, deliberately, so summing raw balances first and converting after
+would fail the moment a household holds a second currency — invisible to a
+single-currency test. Each account converts into the household's primary
+currency before any `Add`; rounding happens once per account and the total is
+never re-rounded, so the figure is deterministic. See `docs/LEARNING.md`.
+
+**A limited member's response omits every amount, not just the totals.**
+Showing the family total while hiding individual balances was rejected: with
+the list of which accounts exist and a running total, the individual balances
+become inferable as accounts are added and removed. So `summary` is omitted
+entirely, and each visible account's `balance`/`balanceAsOf` keys are absent —
+not zeroed, because a zeroed balance still reads as a real one.
+
+**An unconvertible account doesn't vanish from the total silently, and an
+entirely unconvertible household never shows a zero.**
+`NetWorthSummary.Computable` is false only when at least one live account
+exists and none of them could be converted — the state a household reaches by
+changing its primary currency in Settings while `fx.StaticProvider` knows only
+SGD↔IDR. Zero is a claim about the household's money; the truth in that state
+is that it cannot be computed, so the screen says so instead of showing S$0.00.
+A household with no accounts at all is computable and genuinely zero — that
+distinction is why the guard counts non-archived accounts actually considered,
+not the raw row count (`docs/LEARNING.md`).
+
 ### What the frontend loads
 
 ```mermaid
@@ -432,6 +526,8 @@ erDiagram
     households ||--o{ spaces : has
     households ||--o{ login_attempts : scopes
     households ||--|| notification_preferences : has
+    households ||--o{ accounts : owns
+    memberships ||--o{ accounts : "may own (nullable = shared)"
     users ||--o{ memberships : holds
     users ||--o{ sessions : owns
     users ||--o{ magic_links : owns
@@ -510,6 +606,19 @@ erDiagram
         int position
         text required_capability
     }
+    accounts {
+        uuid id PK
+        uuid household_id FK
+        text nickname
+        text type "cash | investment | property | loan | credit_card"
+        uuid owner_membership_id FK "nullable — NULL means shared"
+        bigint opening_balance_minor
+        char opening_balance_currency
+        date opening_balance_as_of
+        bool count_toward_net_worth "default true"
+        bool visible_to_limited_members "default false"
+        timestamptz archived_at "nullable — never deleted"
+    }
 ```
 
 Notes that are not obvious from the shapes:
@@ -535,8 +644,31 @@ Notes that are not obvious from the shapes:
 - **Database constraints mirror the domain rules** rather than trusting the
   application: a limited member cannot hold `marriage`, an owner must hold all
   four capabilities, and capabilities must come from the known set.
+  `accounts` gets the same treatment: `liabilities_are_not_negative` refuses a
+  negative balance on a `loan` or `credit_card` row, mirroring the sign rule
+  `domain.AccountType.SignedNetWorthAmount` enforces in code — worth stating
+  twice because the failure it prevents (a debt counted as an asset) is silent
+  and wrong in the flattering direction.
 - **Money is `int64` minor units plus an ISO 4217 code** everywhere. `float64`
   never appears in a monetary path.
+- **`accounts.owner_membership_id` is nullable and means shared, not unset.**
+  There is deliberately no separate `is_shared` boolean — a row that both
+  names an owner and claims to be shared would have nothing to resolve that
+  disagreement. `ON DELETE SET NULL` is what makes a removed member's accounts
+  fall back to shared with no application code running.
+- **An account is archived, never deleted.** `archived_at` takes it out of the
+  accounts list, net worth and the breakdown, but a transaction that later
+  references it keeps working — there is nowhere in the design to remove an
+  account at all, so this is an addition the design does not draw.
+- **An account's currency lives on the row, not inherited from the
+  household.** A household's primary currency can change in Settings; the
+  account's balance was denominated in whatever it was denominated in, and
+  rewriting it on a household-currency change would silently restate history.
+- **There is deliberately no `updated_at` on `accounts`.** No other table in
+  this schema has one, nothing in the application would maintain it, and a
+  column named "last updated" that nothing ever changes is a lie the next
+  reader will believe. The question it would answer — when was this balance
+  last true — is answered better by `opening_balance_as_of`.
 
 ---
 
@@ -552,12 +684,20 @@ web/src/
     auth/              sign-in, invite, magic-link, sign-up screens and hooks
     shell/             AppShell, Sidebar, RequireAuth, RequireCapability
     settings/          members, spaces, currency, notifications
-    placeholder/       named stand-ins for unbuilt areas
+    money/             Finances page — net worth, breakdown and accounts
+                       cards, the add/edit modal, archive and restore
+    placeholder/       named stand-ins for unbuilt areas — /money/* (the
+                       four Money siblings still to come) renders theirs
   routes/router.tsx        the route tree
   routes/publicRoutes.ts   the one list of pre-auth routes and API prefixes;
                            a test walks the route tree and fails if a
                            pre-auth screen escapes it
 ```
+
+**Finances replaces the placeholder at `/money`**; `/money/$` (Transactions,
+Budget, Goals, Bills) keeps its own. The sidebar is untouched — it renders from
+the server's own filtered, ordered space list, and this feature adds nothing
+to it.
 
 **Route guards are presentation, not security.** The server enforces
 independently; `RequireAuth` and `RequireCapability` exist so the UI does not
