@@ -104,7 +104,10 @@ describe("FinancesPage", () => {
     // assertion can say *which* occurrence it means instead of asking
     // findByText to guess among four identical strings.
     const netWorthCard = await screen.findByRole("region", { name: "Net worth" });
-    expect(within(netWorthCard).getByText("S$8,240.55")).toBeInTheDocument();
+    // Awaiting the card only waits for the accounts query; the figure's
+    // symbol comes from the separate useCurrencies() query, so this needs its
+    // own await -- see FinancesPage.test.tsx's fix-round-1 report entry.
+    expect(await within(netWorthCard).findByText("S$8,240.55")).toBeInTheDocument();
 
     const breakdownCard = screen.getByRole("region", { name: "Assets & liabilities" });
     expect(within(breakdownCard).getByText("Cash & savings")).toBeInTheDocument();
@@ -112,7 +115,10 @@ describe("FinancesPage", () => {
 
     const accountsPanel = screen.getByRole("region", { name: "Accounts" });
     expect(within(accountsPanel).getByText("DBS Everyday")).toBeInTheDocument();
-    expect(within(accountsPanel).getByText(FINANCES_COPY.addAccount)).toBeInTheDocument();
+    // The button's visibility comes from useMe()'s isOwner, a query separate
+    // from the accounts fetch this test has otherwise awaited -- same reason
+    // as the net worth figure above.
+    expect(await within(accountsPanel).findByText(FINANCES_COPY.addAccount)).toBeInTheDocument();
   });
 
   // The state a household reaches by changing its primary currency in
