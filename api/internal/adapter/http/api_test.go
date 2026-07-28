@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -377,11 +378,12 @@ func (env *testEnv) authedGet(t *testing.T, path string, session *http.Cookie) *
 // /accounts as whichever caller is passed in and fails the test immediately
 // if that didn't succeed, so a broken create surfaces at the setup line
 // rather than as a confusing failure in whatever the real test goes on to
-// check.
+// check. 201, not 200: POST /accounts creates a row, the same as POST
+// /spaces and POST /household/members/invite.
 func (env *testEnv) mustCreateAccount(t *testing.T, session, csrf *http.Cookie, body map[string]any) {
 	t.Helper()
 	rec := env.authed(t, http.MethodPost, "/api/v1/accounts", body, session, csrf)
-	if rec.Code != http.StatusOK {
+	if rec.Code != http.StatusCreated {
 		t.Fatalf("create account: status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 }
@@ -1700,6 +1702,16 @@ func TestAccountsWriteRequiresOwnership(t *testing.T) {
 // ABSENT, not zero. A zeroed balance still reads as a real one, and a zeroed
 // net worth says "this family has nothing" -- a different and worse untruth
 // than saying nothing.
+//
+// The redacted entry's key set is asserted exactly, not just that "balance"
+// and "balanceAsOf" happen to be missing: redactedAccounts builds the field
+// nils onto the full accountDTO (account_handlers.go), which is a blacklist
+// on the field axis even though the role check ten lines above it is a
+// deliberate whitelist. A blacklist fails open -- add a new money-carrying
+// field to accountDTO later and every limited member receives it, with
+// nothing here going red, because "balance"/"balanceAsOf" absent would still
+// be true. Asserting the whole key set instead forces exactly that addition
+// to be a deliberate decision, at the one moment it matters.
 func TestAccountsAreRedactedForALimitedMember(t *testing.T) {
 	env := newTestEnv(t)
 	ownerSession, ownerCSRF := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -1738,11 +1750,35 @@ func TestAccountsAreRedactedForALimitedMember(t *testing.T) {
 	if entry["nickname"] != "OCBC Joint Savings" {
 		t.Errorf("nickname = %v, want the shared account", entry["nickname"])
 	}
-	for _, field := range []string{"balance", "balanceAsOf"} {
-		if _, present := entry[field]; present {
-			t.Errorf("%q is present for a limited member; it must be absent, not zeroed", field)
+
+	// The exact set accountDTO produces once Balance and BalanceAsOf are
+	// nilled out: both carry `omitempty`, so a nil pointer drops the key
+	// entirely rather than serialising as null. ID/OwnerMembershipID/
+	// OwnerName/ArchivedAt have no `omitempty` and stay present as null.
+	wantKeys := []string{
+		"id", "nickname", "type", "ownerMembershipId", "ownerName",
+		"countTowardNetWorth", "visibleToLimitedMembers", "archivedAt",
+	}
+	if len(entry) != len(wantKeys) {
+		t.Fatalf("redacted account has keys %v, want exactly %v", mapKeys(entry), wantKeys)
+	}
+	for _, k := range wantKeys {
+		if _, present := entry[k]; !present {
+			t.Errorf("redacted account is missing expected key %q (got %v)", k, mapKeys(entry))
 		}
 	}
+}
+
+// mapKeys is a decodeError-style test helper: it exists only to put a
+// readable key list into a failure message, since Go maps do not stringify
+// in a stable order on their own.
+func mapKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // TestOwnerSeesEveryAccountAndTheSummary is the control for the test above: a
@@ -1788,5 +1824,82 @@ func TestOwnerSeesEveryAccountAndTheSummary(t *testing.T) {
 	}
 	if !got.Summary.Computable || got.Summary.NetWorthMinor != -625_945 {
 		t.Errorf("summary = %+v, want a computable net worth of -625945 (824055 - 1450000)", got.Summary)
+	}
+}
+
+// TestAccountErrorCodesMatchTheSpecTable pins the wire contract for the design
+// doc's own §6.3 table at the one level nothing had asserted it before: each
+// of these five codes existed only as a string literal in errors.go and, for
+// two of them, a second literal in account_handlers.go, with nothing
+// confirming the two agreed or that either matched what the table promises.
+//
+// This is a contract test, not a regression test for a live breakage: today,
+// a wrong code costs nothing, because AccountModal's error paragraph falls
+// back to a generic message whenever apiErrorMessage doesn't recognise the
+// code it was given. The cost arrives the day a caller starts keying off one
+// of these strings specifically — a typo here would then fail silently,
+// against a suite that stayed green.
+func TestAccountErrorCodesMatchTheSpecTable(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	cases := []struct {
+		name string
+		body map[string]any
+		code string
+	}{
+		{
+			name: "a blank nickname",
+			body: map[string]any{
+				"nickname": "   ", "type": "cash",
+				"openingBalanceMinor": 100, "openingBalanceCurrency": "SGD",
+				"openingBalanceAsOf": "2026-07-26",
+			},
+			code: "NICKNAME_REQUIRED",
+		},
+		{
+			name: "a type this API does not recognise",
+			body: map[string]any{
+				"nickname": "Mystery account", "type": "bitcoin_wallet",
+				"openingBalanceMinor": 100, "openingBalanceCurrency": "SGD",
+				"openingBalanceAsOf": "2026-07-26",
+			},
+			code: "INVALID_TYPE",
+		},
+		{
+			name: "a loan entered as a negative balance",
+			body: map[string]any{
+				"nickname": "Car loan", "type": "loan",
+				"openingBalanceMinor": -145_000, "openingBalanceCurrency": "SGD",
+				"openingBalanceAsOf": "2026-07-26",
+			},
+			code: "INVALID_BALANCE",
+		},
+		{
+			name: "an opening balance dated in the future",
+			body: map[string]any{
+				"nickname": "DBS Everyday", "type": "cash",
+				"openingBalanceMinor": 100, "openingBalanceCurrency": "SGD",
+				"openingBalanceAsOf": "2099-01-01",
+			},
+			code: "INVALID_AS_OF",
+		},
+		{
+			name: "an owner who is not a member of this household",
+			body: map[string]any{
+				"nickname": "DBS Everyday", "type": "cash",
+				"openingBalanceMinor": 100, "openingBalanceCurrency": "SGD",
+				"openingBalanceAsOf": "2026-07-26",
+				"ownerMembershipId": "00000000-0000-0000-0000-000000000000",
+			},
+			code: "INVALID_OWNER",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := env.authed(t, http.MethodPost, "/api/v1/accounts", tc.body, session, csrf)
+			assertErrorResponse(t, rec, http.StatusUnprocessableEntity, tc.code)
+		})
 	}
 }

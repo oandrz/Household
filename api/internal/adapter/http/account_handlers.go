@@ -255,7 +255,7 @@ func handleCreateAccount(deps Deps) http.HandlerFunc {
 			MapDomainError(w, r, err)
 			return
 		}
-		writeAccount(w, r, deps, scope.HouseholdID, created.ID)
+		writeAccount(w, r, deps, scope.HouseholdID, created.ID, http.StatusCreated)
 	}
 }
 
@@ -291,7 +291,7 @@ func handleUpdateAccount(deps Deps) http.HandlerFunc {
 			MapDomainError(w, r, err)
 			return
 		}
-		writeAccount(w, r, deps, scope.HouseholdID, id)
+		writeAccount(w, r, deps, scope.HouseholdID, id, http.StatusOK)
 	}
 }
 
@@ -310,19 +310,27 @@ func setArchived(deps Deps, archived bool) http.HandlerFunc {
 			MapDomainError(w, r, err)
 			return
 		}
-		writeAccount(w, r, deps, scope.HouseholdID, id)
+		writeAccount(w, r, deps, scope.HouseholdID, id, http.StatusOK)
 	}
 }
 
 // writeAccount re-reads the account through Get so every mutating response
-// carries the owner's display name, which the write queries do not return.
-// It answers 200 with a body, never 204: apiFetch throws INVALID_RESPONSE on
+// carries the owner's display name, which the write queries do not return. It
+// always answers with a body, never 204: apiFetch throws INVALID_RESPONSE on
 // an ok response it cannot parse.
-func writeAccount(w http.ResponseWriter, r *http.Request, deps Deps, householdID, accountID string) {
+//
+// status is a parameter, not a constant, because the four callers do not
+// agree on it: create answers 201, matching this API's own convention for
+// POST /spaces and POST /household/members/invite, while update, archive and
+// restore all answer 200 -- they are edits to a row that already existed, not
+// the creation of one. The four used to share one status only because they
+// shared this function; once a caller needed to differ, giving the shared
+// code a parameter was cheaper than duplicating it just to vary that.
+func writeAccount(w http.ResponseWriter, r *http.Request, deps Deps, householdID, accountID string, status int) {
 	view, err := deps.Accounts.Get(r.Context(), householdID, accountID)
 	if err != nil {
 		MapDomainError(w, r, err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, toAccountDTO(view))
+	WriteJSON(w, status, toAccountDTO(view))
 }
