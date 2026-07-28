@@ -2701,7 +2701,7 @@ is a worse untruth than saying nothing."
 - Create: `web/src/features/money/schemas.ts`
 - Create: `web/src/features/money/copy.ts`
 - Create: `web/src/features/money/accountTypes.ts`
-- Create: `web/src/features/money/formatMoney.ts`
+- Create: `web/src/features/money/formatMoney.ts` (the formatter, `NO_DECIMAL_CURRENCIES`, and `toMinorUnits` — one module owns the scale)
 - Create: `web/src/features/money/formatMoney.test.ts`
 - Create: `web/src/features/money/useAccounts.ts`
 - Create: `web/src/features/money/FinancesPage.tsx`
@@ -2713,7 +2713,7 @@ is a worse untruth than saying nothing."
 
 **Interfaces:**
 - Consumes: `GET /api/v1/accounts` (Task 38), `apiFetch`, `useMe`, `useCurrencies`, `stubFetchRoutes`.
-- Produces: `formatMoney(minor, currency, symbol?)`, `useAccounts(includeArchived)`, `accountsResponseSchema`, `ACCOUNT_TYPE_LABELS`.
+- Produces: `formatMoney(minor, currency, symbol?)`, `toMinorUnits(input, currency)`, `NO_DECIMAL_CURRENCIES`, `useAccounts(includeArchived)`, `accountsResponseSchema`, `ACCOUNT_TYPE_LABELS`, `LIABILITY_TYPES`.
 
 - [ ] **Step 1: Write the failing formatter test**
 
@@ -2743,7 +2743,31 @@ describe("formatMoney", () => {
     expect(formatMoney(100000, "BRL")).toBe("BRL 1,000.00");
   });
 });
+
+describe("toMinorUnits", () => {
+  it("parses a figure whose cents would be wrong as a float", () => {
+    // 8240.55 * 100 is 824054.9999999999 in IEEE 754.
+    expect(toMinorUnits("8240.55", "SGD")).toBe(824055);
+    expect(toMinorUnits("0.29", "SGD")).toBe(29);
+  });
+
+  // The pair that catches a scale confusion: minor units are hundredths for
+  // every currency this app accepts, including IDR. Only the number of digits
+  // a person may type differs.
+  it("round-trips the design's IDR figure through both directions", () => {
+    expect(toMinorUnits("85400000", "IDR")).toBe(8540000000);
+    expect(formatMoney(8540000000, "IDR", "Rp")).toBe("Rp 85,400,000");
+  });
+
+  it("refuses more precision than the field offers", () => {
+    expect(toMinorUnits("8240.555", "SGD")).toBeNull();
+    expect(toMinorUnits("85400000.5", "IDR")).toBeNull();
+    expect(toMinorUnits("eight", "SGD")).toBeNull();
+  });
+});
 ```
+
+Import both from the same module: `import { formatMoney, toMinorUnits } from "./formatMoney";`
 
 - [ ] **Step 2: Run it to verify it fails**
 
@@ -2797,6 +2821,41 @@ export function formatMoney(
   const prefix = symbol ? symbol : `${currency} `;
   const sign = amountMinor < 0 ? MINUS : "";
   return `${sign}${prefix}${formatted}`;
+}
+
+// Minor units are ALWAYS hundredths, for every currency this app accepts:
+// domain.ParseSelectableCurrency admits only two-minor-unit codes, so IDR is
+// stored in hundredths of a rupiah exactly as SGD is stored in cents. The
+// no-decimal treatment above is a display and input convention -- how many
+// digits a person may type -- and never a change to the scale. Conflating the
+// two would store Rp 85,400,000 as 85400000 and render it back as Rp 854,000.
+const MINOR_UNITS_PER_MAJOR = 100;
+
+// toMinorUnits turns what someone typed ("8240.55") into what the API stores
+// (824055). It lives here, beside the formatter and NO_DECIMAL_CURRENCIES,
+// because one module has to own the scale -- a parser and a formatter that
+// disagree produce a figure that changes every time it round-trips.
+//
+// Splitting on the decimal point rather than multiplying a float by 100 is the
+// frontend half of the rule that no floating-point value enters a monetary
+// path. Returns null for anything that is not a number, which the caller shows
+// as a field error rather than posting a NaN.
+export function toMinorUnits(input: string, currency: string): number | null {
+  const trimmed = input.trim().replace(/,/g, "");
+  if (!/^-?\d+(\.\d+)?$/.test(trimmed)) return null;
+
+  const negative = trimmed.startsWith("-");
+  const [whole, fraction = ""] = trimmed.replace("-", "").split(".");
+  const allowedDecimals = NO_DECIMAL_CURRENCIES.has(currency) ? 0 : 2;
+
+  // More precision than the field offers is a typo, not a rounding problem.
+  // Refusing is honest; silently truncating "8240.555" to 8240.55 would change
+  // a figure the person is looking at.
+  if (fraction.length > allowedDecimals) return null;
+
+  const cents = fraction.padEnd(2, "0");
+  const minor = Number(whole) * MINOR_UNITS_PER_MAJOR + Number(cents);
+  return negative ? -minor : minor;
 }
 ```
 
@@ -3175,7 +3234,7 @@ there would say they have nothing."
 - Modify: `web/src/features/money/AccountsPanel.tsx`
 
 **Interfaces:**
-- Consumes: `components/Modal`, `POST/PATCH /api/v1/accounts`, the archive and restore routes, `useCurrencies`, the members list.
+- Consumes: `components/Modal`, `POST/PATCH /api/v1/accounts`, the archive and restore routes, `useCurrencies`, the members list, and `toMinorUnits` / `LIABILITY_TYPES` from Task 39.
 - Produces: `useCreateAccount()`, `useUpdateAccount()`, `useSetAccountArchived()`, `<AccountModal>`.
 
 - [ ] **Step 1: Add the mutations**
@@ -3296,7 +3355,9 @@ Expected: FAIL — cannot resolve `./AccountModal`.
 
 The design's `3c` panel on `components/Modal`, minus the connected-bank header strip, which describes a sync that does not exist. Fields, with the design's own labels: **Nickname**; **Owner** (a select listing every member of the household plus a "Shared" option, which posts `ownerMembershipId: null`); **Type** (the five labels from `ACCOUNT_TYPE_LABELS`); **Balance** with a currency select defaulting to the household's primary; a date input for the as-of date defaulting to today; and the two toggles on `components/ToggleSwitch` — **Count toward net worth**, defaulting on, and **Visible to kids** with the design's helper copy, defaulting off.
 
-Two things the component owns:
+**`toMinorUnits` is imported from `formatMoney.ts`, not written here.** Task 39 created and tested it; one module owns the scale, because a parser and a formatter that disagree produce a figure that changes every time it round-trips.
+
+Two things this component does own:
 
 ```tsx
 // AccountFormValues is exactly the POST body the create route accepts, so the
@@ -3312,59 +3373,16 @@ export type AccountFormValues = {
   visibleToLimitedMembers: boolean;
 };
 
-// The form takes a decimal string ("8240.55") and posts minor units (824055).
-// Splitting on the decimal point rather than multiplying a float by 100 is the
-// frontend half of the rule that no floating-point value enters a monetary
-// path: 8240.55 * 100 is 824054.9999999999 in IEEE 754, and Math.round hides
-// that for most inputs while quietly getting some wrong.
-//
-// Returns null for anything that is not a number, which the caller shows as a
-// field error rather than posting a NaN.
-//
-// Minor units are ALWAYS hundredths, for every currency this app accepts:
-// domain.ParseSelectableCurrency admits only two-minor-unit codes, so IDR is
-// stored in hundredths of a rupiah exactly as SGD is stored in cents. The
-// no-decimal treatment is a display and input convention -- how many digits a
-// person may type -- and never a change to the scale. Conflating the two
-// would store Rp 85,400,000 as 85400000 and render it back as Rp 854,000.
-const MINOR_UNITS_PER_MAJOR = 100;
-
-function toMinorUnits(input: string, currency: string): number | null {
-  const trimmed = input.trim().replace(/,/g, "");
-  if (!/^-?\d+(\.\d+)?$/.test(trimmed)) return null;
-
-  const negative = trimmed.startsWith("-");
-  const [whole, fraction = ""] = trimmed.replace("-", "").split(".");
-  const allowedDecimals = NO_DECIMAL_CURRENCIES.has(currency) ? 0 : 2;
-
-  // More precision than the field offers is a typo, not a rounding problem.
-  // Refusing is honest; silently truncating "8240.555" to 8240.55 would change
-  // a figure the person is looking at.
-  if (fraction.length > allowedDecimals) return null;
-
-  const cents = fraction.padEnd(2, "0");
-  const minor = Number(whole) * MINOR_UNITS_PER_MAJOR + Number(cents);
-  return negative ? -minor : minor;
-}
+// The same rule domain.AccountType.SignedNetWorthAmount enforces, said where
+// someone can act on it. The backend refuses a negative debt regardless (422
+// INVALID_BALANCE); this exists so the person finds out while they are still
+// looking at the field rather than after submitting.
+const minorUnits = toMinorUnits(balanceInput, currency);
+const debtIsNegative =
+  LIABILITY_TYPES.has(type) && minorUnits !== null && minorUnits < 0;
 ```
 
-Add these two cases to `formatMoney.test.ts` in Task 39 — they are the pair that catches the scale confusion, and each fails against the wrong implementation:
-
-```ts
-it("round-trips the design's IDR figure through both directions", () => {
-  // 8_540_000_000 hundredths-of-a-rupiah is Rp 85,400,000 -- the same scale
-  // SGD uses, displayed without its cents.
-  expect(formatMoney(8540000000, "IDR", "Rp")).toBe("Rp 85,400,000");
-});
-
-it("parses a figure whose cents would be wrong as a float", () => {
-  // 8240.55 * 100 is 824054.9999999999 in IEEE 754.
-  expect(toMinorUnits("8240.55", "SGD")).toBe(824055);
-  expect(toMinorUnits("0.29", "SGD")).toBe(29);
-});
-```
-
-`toMinorUnits` therefore lives in `formatMoney.ts` beside the formatter and the currency set, not in the modal — one module owns the scale, and the test above imports both halves of it from the same place.
+A `null` from `toMinorUnits` is its own field error ("Enter an amount, like 8240.55"), separate from the negative-debt message — "that is not a number" and "that number has the wrong sign" are different mistakes and deserve different copy.
 
 Export `NO_DECIMAL_CURRENCIES` from `formatMoney.ts` so this function and the formatter cannot disagree about which currencies have cents.
 
