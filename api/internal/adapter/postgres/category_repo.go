@@ -47,12 +47,21 @@ func (r *CategoryRepo) List(ctx context.Context, householdID string, includeArch
 
 // EnsureSeeded inserts the starter set for a household that has none.
 //
-// The count check is an optimisation, not the correctness argument: without it
-// every categories request would issue a thirteen-row insert that the unique
-// index throws away. The correctness comes from SeedCategories' ON CONFLICT DO
-// NOTHING, which is what makes two simultaneous first requests produce one set
-// rather than a duplicate-key error. Removing the count would still be
-// correct; removing the ON CONFLICT would not.
+// CountCategories has no archived_at filter, so "has none" counts archived
+// rows too: a household that archived its whole list still counts as
+// thirteen, and the count check below returns before ever reaching the
+// INSERT. That is what stops this sequential path from rebuilding over an
+// archived list -- not ON CONFLICT, which this path never even reaches. See
+// TestEnsureSeededDoesNotRebuildOverArchivedCategories's own comment.
+//
+// ON CONFLICT DO NOTHING on SeedCategories protects the case the count check
+// cannot: two concurrent first requests can both read count == 0 before
+// either has inserted, and both then attempt the same thirteen rows. It is
+// also the only protection left for a caller that reaches SeedCategories
+// directly, bypassing this count entirely --
+// TestSeedCategoriesRespectsTheUniqueKeyEvenWhenEveryRowIsArchived exercises
+// exactly that. Removing the count would still be correct, only slower;
+// removing ON CONFLICT would not.
 //
 // starter must carry exactly seedSize entries -- in practice always
 // domain.StarterCategories() -- because SeedCategories has no room to insert

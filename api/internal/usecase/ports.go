@@ -462,8 +462,12 @@ type CategoryRepository interface {
 	// read-then-write, which would race two simultaneous first requests into
 	// two starter sets.
 	//
-	// An archived category still occupies its unique key, so a household that
-	// cleared its list is not silently re-seeded over.
+	// An archived category still occupies its unique key. An implementation
+	// must count it as already seeded -- never treat "no live categories" as
+	// "has none" -- so a household that cleared its whole list is not
+	// silently re-seeded over; the unique key is the backstop of last resort,
+	// for any path that reaches the insert without going through that count
+	// at all.
 	EnsureSeeded(ctx context.Context, householdID string, starter []domain.Category) error
 }
 

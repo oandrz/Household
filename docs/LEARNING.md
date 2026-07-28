@@ -135,6 +135,25 @@ run it before adding a fourth site.
   A concurrency test that starts its goroutines with a bare loop is only
   proven to race if the work per goroutine already dwarfs connection setup;
   otherwise warm the pool and use a start barrier before trusting it.
+- Same task, a second instance, found by review after the first was already
+  fixed: `TestEnsureSeededDoesNotRebuildOverArchivedCategories`'s comment
+  credited the archived-row protection to `SeedCategories`' unique key and
+  `ON CONFLICT`. It does not reach either. `CountCategories` has no
+  `archived_at` filter, so a household with all thirteen categories archived
+  still counts as thirteen; `EnsureSeeded`'s `if count > 0 { return nil }`
+  fires before the second `EnsureSeeded` call in that test ever calls
+  `SeedCategories`. The test still pins something real — a cleared list stays
+  cleared — but the *reason* in the comment was wrong, and it would have
+  passed identically with `ON CONFLICT` deleted outright, same as the
+  concurrency test above. Fixed by correcting the comment to name the count
+  check, and by adding
+  `TestSeedCategoriesRespectsTheUniqueKeyEvenWhenEveryRowIsArchived`, which
+  calls the generated query directly — bypassing `EnsureSeeded`'s count check
+  — against an already-archived household, and does fail with a duplicate-key
+  error the moment `ON CONFLICT` is removed. Two short-circuit-shadowed tests
+  in one task, one caught only by review after the first was already
+  believed fixed, is the point of this section: a passing mutation check on
+  a *different* test in the same file is not evidence for this one.
 
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
