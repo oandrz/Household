@@ -727,11 +727,29 @@ func TestCreateRefusesACurrencyTheMoneyPathRendersWrong(t *testing.T) {
 func TestCreateRefusesAFutureOpeningBalanceDate(t *testing.T) {
 	svc, _ := newAccountService(t)
 	in := validNewAccount()
-	in.OpeningBalanceAsOf = fixedNow.AddDate(0, 0, 1)
+	in.OpeningBalanceAsOf = fixedNow.AddDate(0, 0, 7)
 
 	_, err := svc.Create(context.Background(), in)
 	if !errors.Is(err, domain.ErrOpeningBalanceInFuture) {
 		t.Fatalf("err = %v, want ErrOpeningBalanceInFuture", err)
+	}
+}
+
+// TestCreateAcceptsTodayFromAnyTimezone is the reason the future check carries
+// a day of tolerance. No household stores a timezone, so at 17:00 UTC it is
+// already tomorrow in Singapore -- and a household there entering today's
+// balance must not be refused for eight hours out of every twenty-four.
+//
+// The clock here reads 09:00 UTC on the 28th; the date is the 29th, which is
+// "today" for any household east of UTC+9. Real zones span UTC-12 to UTC+14,
+// so one day of slack covers all of them.
+func TestCreateAcceptsTodayFromAnyTimezone(t *testing.T) {
+	svc, _ := newAccountService(t)
+	in := validNewAccount()
+	in.OpeningBalanceAsOf = time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC)
+
+	if _, err := svc.Create(context.Background(), in); err != nil {
+		t.Fatalf("Create: %v -- a household in UTC+8 cannot enter today's balance", err)
 	}
 }
 
@@ -1167,13 +1185,19 @@ func (s *AccountService) validate(ctx context.Context, a *domain.Account) error 
 	}
 	a.OpeningBalance.Currency = code
 
-	// Compared by calendar day, not by instant: opening_balance_as_of is a
-	// date column, and a balance stated as true "today" must not be refused
-	// because the request arrived at 09:00 and Clock.Now() reads 08:59 in
-	// another zone.
-	now := s.d.Clock.Now().UTC()
-	asOf := a.OpeningBalanceAsOf.UTC()
-	if asOf.Truncate(24 * time.Hour).After(now.Truncate(24 * time.Hour)) {
+	// A whole day of tolerance, deliberately. This product stores no timezone
+	// for a household, so the server cannot know what "today" means to the
+	// person filling in the form: at 17:00 UTC it is already tomorrow in
+	// Singapore, and a household there entering today's balance would be
+	// refused for eight hours out of every twenty-four. Real zones span UTC-12
+	// to UTC+14, so one day of slack covers every one of them.
+	//
+	// The asymmetry is what makes this the right trade: accepting a balance
+	// dated a day early costs nothing -- it is a figure the owner typed and can
+	// edit -- while refusing a genuine "today" is a wall with no way past it
+	// and no explanation that would make sense to the person hitting it. The
+	// check exists to catch a typo like 2062, not to police the date line.
+	if a.OpeningBalanceAsOf.After(s.d.Clock.Now().AddDate(0, 0, 1)) {
 		return domain.ErrOpeningBalanceInFuture
 	}
 
