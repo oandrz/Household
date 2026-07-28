@@ -94,11 +94,29 @@ func TestCreateRefusesACurrencyTheMoneyPathRendersWrong(t *testing.T) {
 func TestCreateRefusesAFutureOpeningBalanceDate(t *testing.T) {
 	svc, _ := newAccountService(t)
 	in := validNewAccount()
-	in.OpeningBalanceAsOf = fixedNow.AddDate(0, 0, 1)
+	in.OpeningBalanceAsOf = fixedNow.AddDate(0, 0, 7)
 
 	_, err := svc.Create(context.Background(), in)
 	if !errors.Is(err, domain.ErrOpeningBalanceInFuture) {
 		t.Fatalf("err = %v, want ErrOpeningBalanceInFuture", err)
+	}
+}
+
+// TestCreateAcceptsTodayFromAnyTimezone is the reason the future check carries
+// a day of tolerance. No household stores a timezone, so at 17:00 UTC it is
+// already tomorrow in Singapore -- and a household there entering today's
+// balance must not be refused for eight hours out of every twenty-four.
+//
+// The clock here reads 09:00 UTC on the 28th; the date is the 29th, which is
+// "today" for any household east of UTC+9. Real zones span UTC-12 to UTC+14,
+// so one day of slack covers all of them.
+func TestCreateAcceptsTodayFromAnyTimezone(t *testing.T) {
+	svc, _ := newAccountService(t)
+	in := validNewAccount()
+	in.OpeningBalanceAsOf = time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC)
+
+	if _, err := svc.Create(context.Background(), in); err != nil {
+		t.Fatalf("Create: %v -- a household in UTC+8 cannot enter today's balance", err)
 	}
 }
 
