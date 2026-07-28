@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/andreasoentoro/hearth/api/internal/domain"
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
@@ -48,6 +49,7 @@ type Deps struct {
 	Members     *usecase.MemberService
 	Households  *usecase.HouseholdService
 	Signups     *usecase.SignupService
+	Accounts    *usecase.AccountService
 	Users       usecase.UserRepository
 	Memberships usecase.MembershipRepository
 	Sessions    usecase.SessionRepository
@@ -146,6 +148,27 @@ func NewRouter(deps Deps) http.Handler {
 					o.Patch("/household/members/{id}", handleUpdateMember(deps))
 					o.Delete("/household/members/{id}", handleRemoveMember(deps))
 					o.Post("/spaces", handleCreateSpace(deps))
+				})
+			})
+
+			// Accounts: the first capability-gated routes in the product. Reads
+			// need money; writes need money and owner, stacked -- see
+			// middleware_capability.go for why the redundancy is deliberate.
+			g.Group(func(a chi.Router) {
+				a.Use(requireCapability(domain.CapMoney))
+				a.Get("/accounts", handleListAccounts(deps))
+
+				a.Group(func(w chi.Router) {
+					w.Use(requireCSRF)
+					w.Use(requireOwner)
+					w.Post("/accounts", handleCreateAccount(deps))
+					w.Patch("/accounts/{id}", handleUpdateAccount(deps))
+					// Archive and restore are their own routes rather than a
+					// field on PATCH: if archiving were patchable, an ordinary
+					// edit that happened to include it would archive the account
+					// as a side effect of saving a nickname.
+					w.Post("/accounts/{id}/archive", handleArchiveAccount(deps))
+					w.Post("/accounts/{id}/restore", handleRestoreAccount(deps))
 				})
 			})
 		})

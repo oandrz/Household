@@ -64,24 +64,6 @@ func clearCSRFCookie(w http.ResponseWriter, deps Deps) {
 	})
 }
 
-// requireCapability answers 403 FORBIDDEN unless the caller's Scope carries
-// cap. No route in this task's spec is gated on a specific capability
-// (member and space mutations are gated on ownership instead, via
-// requireOwner below) -- this exists because the brief calls for it
-// explicitly, for a later task's routes to use.
-func requireCapability(cap domain.Capability) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			scope, ok := RequestScope(r)
-			if !ok || !scope.Membership.Capabilities.Has(cap) {
-				WriteError(w, http.StatusForbidden, "FORBIDDEN", "You do not have permission to do that.", nil)
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
 // requireOwner answers 403 FORBIDDEN unless the caller's Scope carries
 // domain.RoleOwner. It gates household member mutations and space creation.
 func requireOwner(next http.Handler) http.Handler {

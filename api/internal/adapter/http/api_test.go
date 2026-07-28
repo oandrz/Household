@@ -16,6 +16,7 @@ import (
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/clock"
 	"github.com/andreasoentoro/hearth/api/internal/adapter/crypto"
+	"github.com/andreasoentoro/hearth/api/internal/adapter/fx"
 	httpadapter "github.com/andreasoentoro/hearth/api/internal/adapter/http"
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres"
 	"github.com/andreasoentoro/hearth/api/internal/domain"
@@ -116,6 +117,18 @@ type testEnv struct {
 	limitedPassword   string
 	limitedMembership string
 
+	// moneyLimitedEmail is a limited member who holds the money capability --
+	// the state Settings' "off for kids by default" switch produces when an
+	// owner turns Money on for a child.
+	//
+	// It exists because env.limitedEmail holds only calendar and chores, so
+	// every accounts write route would refuse them at requireCapability and
+	// TestOwnerOnlyRoutesRejectALimitedMember would pass without ever
+	// exercising requireOwner -- a green that proves nothing about the guard
+	// it is named after.
+	moneyLimitedEmail    string
+	moneyLimitedPassword string
+
 	signupMailer *signupMailer
 }
 
@@ -199,6 +212,12 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 		SessionTTL: httpadapter.SessionTTL,
 		BaseURL:    "http://localhost:5173",
 	})
+	accountSvc := usecase.NewAccountService(usecase.AccountDeps{
+		Accounts:   postgres.NewAccountRepo(db),
+		Households: households,
+		FX:         fx.NewStaticProvider(),
+		Clock:      clk,
+	})
 
 	router := httpadapter.NewRouter(httpadapter.Deps{
 		Pinger:      db,
@@ -207,6 +226,7 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 		Members:     memberSvc,
 		Households:  householdSvc,
 		Signups:     signupSvc,
+		Accounts:    accountSvc,
 		Users:       users,
 		Memberships: memberships,
 		Sessions:    sessions,
@@ -271,6 +291,26 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 	}
 	env.limitedMembership = limitedMembership.ID
 
+	// moneyLimitedEmail: see its doc comment on testEnv for why a second
+	// limited member, holding money on top of calendar and chores, has to
+	// exist alongside env.limitedEmail.
+	env.moneyLimitedEmail = "maya@hearth.family"
+	env.moneyLimitedPassword = "ilovepocketmoney"
+	moneyLimitedHash, err := hasher.Hash(env.moneyLimitedPassword)
+	if err != nil {
+		t.Fatalf("hash money-limited password: %v", err)
+	}
+	moneyLimited, err := users.Create(ctx, env.moneyLimitedEmail, moneyLimitedHash, "Maya")
+	if err != nil {
+		t.Fatalf("create money-limited user: %v", err)
+	}
+	if _, err := memberships.Create(ctx, domain.Membership{
+		HouseholdID: h.ID, UserID: moneyLimited.ID, Role: domain.RoleLimited,
+		Capabilities: domain.Capabilities{domain.CapCalendar, domain.CapChores, domain.CapMoney},
+	}); err != nil {
+		t.Fatalf("create money-limited membership: %v", err)
+	}
+
 	return env
 }
 
@@ -319,6 +359,31 @@ func (env *testEnv) authed(t *testing.T, method, path string, body any, session,
 	rec := httptest.NewRecorder()
 	env.router.ServeHTTP(rec, req)
 	return rec
+}
+
+// authedGet issues an authenticated GET request: the session cookie only.
+// requireCSRF exempts GET entirely, so there is no csrf_token cookie or
+// X-CSRF-Token header to attach.
+func (env *testEnv) authedGet(t *testing.T, path string, session *http.Cookie) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.AddCookie(session)
+	rec := httptest.NewRecorder()
+	env.router.ServeHTTP(rec, req)
+	return rec
+}
+
+// mustCreateAccount is test setup, not an assertion in itself: it POSTs
+// /accounts as whichever caller is passed in and fails the test immediately
+// if that didn't succeed, so a broken create surfaces at the setup line
+// rather than as a confusing failure in whatever the real test goes on to
+// check.
+func (env *testEnv) mustCreateAccount(t *testing.T, session, csrf *http.Cookie, body map[string]any) {
+	t.Helper()
+	rec := env.authed(t, http.MethodPost, "/api/v1/accounts", body, session, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create account: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
 }
 
 // signIn signs in through the public API, exactly as a browser would, and
@@ -611,8 +676,8 @@ func TestEveryProtectedRouteRejectsAnUnauthenticatedCaller(t *testing.T) {
 	// (a routing regression, a chi API change), the loop above asserts
 	// nothing and the test would pass for the wrong reason.
 	t.Logf("checked %d protected routes", checked)
-	if checked < 12 {
-		t.Fatalf("checked %d protected routes, want at least 12 -- "+
+	if checked < 17 {
+		t.Fatalf("checked %d protected routes, want at least 17 -- "+
 			"the walk may not be enumerating routes correctly", checked)
 	}
 }
@@ -667,9 +732,16 @@ func TestLimitedMemberCannotCreateSpace(t *testing.T) {
 // above still individually pin the task's original eleven enumerated
 // behaviours verbatim; this walk is the exhaustive superset the
 // coordinator's route audit asked for.
+//
+// Signed in as env.moneyLimitedEmail, not env.limitedEmail: the plain limited
+// fixture holds only calendar and chores, so every accounts write route below
+// would refuse it at requireCapability before the request ever reached
+// requireOwner, and this walk would pass without ever exercising the guard
+// it is named after. env.moneyLimitedEmail also holds money and is still
+// limited, so every assertion this walk already made keeps holding.
 func TestOwnerOnlyRoutesRejectALimitedMember(t *testing.T) {
 	env := newTestEnv(t)
-	session, csrf := env.signIn(t, env.limitedEmail, env.limitedPassword)
+	session, csrf := env.signIn(t, env.moneyLimitedEmail, env.moneyLimitedPassword)
 
 	// Every entry is a mutating route that is correctly NOT owner-gated,
 	// with the reason it's exempt recorded alongside it.
@@ -735,8 +807,12 @@ func TestOwnerOnlyRoutesRejectALimitedMember(t *testing.T) {
 		t.Fatalf("chi.Walk: %v", err)
 	}
 	t.Logf("checked %d owner-gated candidate routes", checked)
-	if checked < 6 {
-		t.Fatalf("checked %d routes, want at least 6 -- "+
+	// 10, not the pre-accounts 6: the four accounts write routes are mutating
+	// and owner-gated too, and a floor left at the old count would still pass
+	// if all four vanished from the walk -- exactly the vacuous pass this
+	// guard exists to catch.
+	if checked < 10 {
+		t.Fatalf("checked %d routes, want at least 10 -- "+
 			"the walk may not be enumerating routes correctly", checked)
 	}
 }
@@ -811,8 +887,11 @@ func TestEveryMutatingRouteRequiresCSRF(t *testing.T) {
 		t.Fatalf("chi.Walk: %v", err)
 	}
 	t.Logf("checked %d mutating routes", checked)
-	if checked < 7 {
-		t.Fatalf("checked %d mutating routes, want at least 7 -- "+
+	// 11, not the pre-accounts 7: the same four accounts write routes are
+	// mutating and CSRF-gated too (see the identical reasoning on the 10
+	// floor above).
+	if checked < 11 {
+		t.Fatalf("checked %d mutating routes, want at least 11 -- "+
 			"the walk may not be enumerating routes correctly", checked)
 	}
 }
@@ -852,8 +931,8 @@ func TestMemberListRevealsEmailsToAnOwner(t *testing.T) {
 	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
 
 	members := env.getMembers(t, session)
-	if len(members) != 2 {
-		t.Fatalf("members = %d, want 2 (owner + limited)", len(members))
+	if len(members) != 3 {
+		t.Fatalf("members = %d, want 3 (owner + the two limited members)", len(members))
 	}
 	for _, m := range members {
 		if m.User.Email == "" {
@@ -1585,5 +1664,129 @@ func TestSignUpRoutesDoNotRequireCSRF(t *testing.T) {
 	rec := env.do(http.MethodPost, "/api/v1/auth/sign-up", map[string]string{"email": "nocsrf@example.test"})
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("= %d, want 202 with no CSRF token", rec.Code)
+	}
+}
+
+// --- Task 38: accounts, the first capability gate, and redaction ----------
+
+// TestAccountsListRequiresTheMoneyCapability is the first capability gate in
+// the product. Until this route existed, requireCapability was defined and
+// unused, so the promise that the server enforces capabilities independently
+// of the UI was vacuous.
+func TestAccountsListRequiresTheMoneyCapability(t *testing.T) {
+	env := newTestEnv(t)
+	session, _ := env.signIn(t, env.limitedEmail, env.limitedPassword) // calendar + chores
+
+	rec := env.authedGet(t, "/api/v1/accounts", session)
+	assertErrorResponse(t, rec, http.StatusForbidden, "FORBIDDEN")
+}
+
+// TestAccountsWriteRequiresOwnership is the half the capability gate does not
+// cover: a limited member who *does* hold money can read the screen and must
+// not be able to change it. Kids look, parents manage.
+func TestAccountsWriteRequiresOwnership(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.moneyLimitedEmail, env.moneyLimitedPassword)
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/accounts", map[string]any{
+		"nickname": "Sneaky", "type": "cash",
+		"openingBalanceMinor": 100, "openingBalanceCurrency": "SGD",
+		"openingBalanceAsOf": "2026-07-26",
+	}, session, csrf)
+	assertErrorResponse(t, rec, http.StatusForbidden, "FORBIDDEN")
+}
+
+// TestAccountsAreRedactedForALimitedMember asserts the amount fields are
+// ABSENT, not zero. A zeroed balance still reads as a real one, and a zeroed
+// net worth says "this family has nothing" -- a different and worse untruth
+// than saying nothing.
+func TestAccountsAreRedactedForALimitedMember(t *testing.T) {
+	env := newTestEnv(t)
+	ownerSession, ownerCSRF := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	// One visible to limited members, one not.
+	env.mustCreateAccount(t, ownerSession, ownerCSRF, map[string]any{
+		"nickname": "OCBC Joint Savings", "type": "cash",
+		"openingBalanceMinor": 4_690_000, "openingBalanceCurrency": "SGD",
+		"openingBalanceAsOf": "2026-07-26", "visibleToLimitedMembers": true,
+	})
+	env.mustCreateAccount(t, ownerSession, ownerCSRF, map[string]any{
+		"nickname": "DBS Everyday", "type": "cash",
+		"openingBalanceMinor": 824_055, "openingBalanceCurrency": "SGD",
+		"openingBalanceAsOf": "2026-07-26", "visibleToLimitedMembers": false,
+	})
+
+	session, _ := env.signIn(t, env.moneyLimitedEmail, env.moneyLimitedPassword)
+	rec := env.authedGet(t, "/api/v1/accounts", session)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body = %s)", rec.Code, rec.Body.String())
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if _, present := raw["summary"]; present {
+		t.Error("summary is present for a limited member; it must be omitted entirely")
+	}
+
+	accounts, ok := raw["accounts"].([]any)
+	if !ok || len(accounts) != 1 {
+		t.Fatalf("accounts = %v, want exactly the one shared account", raw["accounts"])
+	}
+	entry := accounts[0].(map[string]any)
+	if entry["nickname"] != "OCBC Joint Savings" {
+		t.Errorf("nickname = %v, want the shared account", entry["nickname"])
+	}
+	for _, field := range []string{"balance", "balanceAsOf"} {
+		if _, present := entry[field]; present {
+			t.Errorf("%q is present for a limited member; it must be absent, not zeroed", field)
+		}
+	}
+}
+
+// TestOwnerSeesEveryAccountAndTheSummary is the control for the test above: a
+// redaction test that passed because the endpoint returns nothing to anybody
+// would be worthless.
+func TestOwnerSeesEveryAccountAndTheSummary(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	env.mustCreateAccount(t, session, csrf, map[string]any{
+		"nickname": "DBS Everyday", "type": "cash",
+		"openingBalanceMinor": 824_055, "openingBalanceCurrency": "SGD",
+		"openingBalanceAsOf": "2026-07-26",
+	})
+	env.mustCreateAccount(t, session, csrf, map[string]any{
+		"nickname": "Car loan", "type": "loan",
+		"openingBalanceMinor": 1_450_000, "openingBalanceCurrency": "SGD",
+		"openingBalanceAsOf": "2026-07-26",
+	})
+
+	rec := env.authedGet(t, "/api/v1/accounts", session)
+	var got struct {
+		Accounts []struct {
+			Nickname string `json:"nickname"`
+			Balance  struct {
+				AmountMinor int64  `json:"amountMinor"`
+				Currency    string `json:"currency"`
+			} `json:"balance"`
+		} `json:"accounts"`
+		Summary *struct {
+			NetWorthMinor int64 `json:"netWorthMinor"`
+			Computable    bool  `json:"computable"`
+		} `json:"summary"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Accounts) != 2 {
+		t.Fatalf("accounts = %d, want 2", len(got.Accounts))
+	}
+	if got.Summary == nil {
+		t.Fatal("summary is missing for an owner")
+	}
+	if !got.Summary.Computable || got.Summary.NetWorthMinor != -625_945 {
+		t.Errorf("summary = %+v, want a computable net worth of -625945 (824055 - 1450000)", got.Summary)
 	}
 }
