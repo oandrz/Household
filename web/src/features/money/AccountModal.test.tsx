@@ -149,6 +149,59 @@ describe("AccountModal", () => {
     expect(await screen.findByText("Enter an amount, like 8240.55.")).toBeInTheDocument();
   });
 
+  // Pins the fix for the wrong copy on a currency switch mid-edit: an SGD
+  // account showing "8240.55" fails toMinorUnits the moment Currency moves to
+  // a no-decimal currency, even though Balance itself was never touched.
+  // Restating the figure back ("Enter an amount, like 8240.55.") describes
+  // exactly what's already in the field; the fix names the actual cause.
+  it("names the currency, not the figure, when Currency switches to one with no cents", async () => {
+    const currenciesWithIDR = {
+      status: 200,
+      body: {
+        currencies: [
+          { code: "SGD", symbol: "S$", name: "Singapore dollar" },
+          { code: "IDR", symbol: "Rp", name: "Indonesian rupiah" },
+        ],
+      },
+    };
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      "GET /api/v1/currencies": currenciesWithIDR,
+      "GET /api/v1/household/members": NO_MEMBERS,
+    });
+
+    renderWithRouter(
+      <AccountModal
+        open
+        onClose={() => {}}
+        account={{
+          id: "a1", nickname: "DBS Everyday", type: "cash",
+          ownerMembershipId: null, ownerName: null,
+          balance: { amountMinor: 824055, currency: "SGD" },
+          balanceAsOf: "2026-07-26",
+          countTowardNetWorth: true, visibleToLimitedMembers: false,
+          archivedAt: null,
+        }}
+      />,
+    );
+
+    expect(await screen.findByLabelText("Balance")).toHaveValue("8240.55");
+    // The Currency <select>'s own options only exist once useCurrencies()
+    // resolves -- setting .value to "IDR" before its <option> exists is a
+    // silent no-op in jsdom (as in a real browser), which would leave
+    // `currency` at "SGD" and defeat the whole scenario. Waiting for the
+    // option itself is the same "the field's value is ready but its options
+    // aren't yet" async gap the prefill test above waits out for Owner.
+    await screen.findByRole("option", { name: "IDR" });
+    fireEvent.change(screen.getByLabelText("Currency"), { target: { value: "IDR" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(
+      await screen.findByText("IDR doesn't use cents. Remove the decimal point."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Enter an amount, like 8240.55.")).not.toBeInTheDocument();
+  });
+
   it("prefills an existing account and PATCHes the change, clearing Owner to Shared", async () => {
     let patched: unknown;
     stubFetchRoutes({

@@ -173,6 +173,22 @@ export function AccountModal({
   function parseValidatedBalance(): number | null {
     const minorUnits = toMinorUnits(balanceInput, currency);
     if (minorUnits === null) {
+      // toMinorUnits also returns null when Balance still holds a figure with
+      // cents and Currency was just switched to a no-decimal one (IDR, VND)
+      // without touching Balance -- an SGD account showing "8240.55" stays
+      // exactly that after switching to IDR, so restating it back as "enter
+      // an amount, like 8240.55" describes the very thing already in the
+      // field rather than what actually went wrong. hasADecimalPoint is
+      // deliberately its own small check, not a reason toMinorUnits itself
+      // returned null: it only ever changes which of two messages is shown,
+      // never whether the value is accepted, so it staying in sync with
+      // toMinorUnits's own number format is a copy concern, not a
+      // correctness one.
+      const hasADecimalPoint = /^-?\d+\.\d+$/.test(balanceInput.trim().replace(/,/g, ""));
+      if (NO_DECIMAL_CURRENCIES.has(currency) && hasADecimalPoint) {
+        setBalanceError(`${currency} doesn't use cents. Remove the decimal point.`);
+        return null;
+      }
       setBalanceError("Enter an amount, like 8240.55.");
       return null;
     }
