@@ -80,10 +80,15 @@ func (t Transaction) CreditedAmount() Money {
 // there is no second row that could go missing. That invariant is a property
 // of the shape rather than a rule someone has to remember.
 //
-// It returns ok=false rather than a zero for an account it does not touch,
-// because zero is a real effect -- a caller must be able to tell "this
-// transaction moved nothing here" from "this transaction is not about this
-// account at all".
+// It returns ok=false in two cases. First, for any account the transaction
+// does not touch, because zero is a real effect -- a caller must be able to
+// tell "this transaction moved nothing here" from "this transaction is not
+// about this account at all". Second, for the unreachable overflow case when
+// the amount is math.MinInt64, which cannot be safely negated. The signature
+// returns bool rather than error: the overflow guard is unreachable through
+// any path this product ships (the database enforces positive amounts today),
+// and widening to error would ripple through every consumer in Tasks 7, 9
+// and 10. A caller must not read ok=false as proof the account was untouched.
 func (t Transaction) BalanceEffect(accountID string) (Money, bool) {
 	if accountID == "" {
 		return Money{}, false
@@ -92,11 +97,10 @@ func (t Transaction) BalanceEffect(accountID string) (Money, bool) {
 	case accountID == t.FromAccountID:
 		// math.MinInt64 has no positive counterpart in two's complement, so a
 		// naive negation would turn the largest possible outflow into an
-		// inflow. The amount is constrained positive at the database and in
-		// the service, so this is unreachable -- and it is guarded anyway, for
-		// the same reason AccountType.SignedNetWorthAmount guards it: when an
-		// amount flows out, negating it must not inadvertently turn it into an
-		// inflow.
+		// inflow. The amount is constrained positive at the database (see Task 1),
+		// making this unreachable -- and it is guarded anyway, for the same
+		// reason AccountType.SignedNetWorthAmount guards it: when an amount flows
+		// out, negating it must not inadvertently turn it into an inflow.
 		if t.Amount.Amount == math.MinInt64 {
 			return Money{}, false
 		}
