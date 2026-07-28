@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Me } from "../auth/schemas";
 import { stubFetchRoutes } from "../../test/fetchStub";
@@ -67,6 +67,36 @@ describe("FinancesPage", () => {
 
     expect(await screen.findByText("Nothing here yet.")).toBeInTheDocument();
     expect(screen.queryByText("Net worth")).not.toBeInTheDocument();
+  });
+
+  // AccountsPanel isn't mounted at all in this state (see FirstRunPanel
+  // above it in the branch), so its own "+ Add account" button -- wired
+  // first -- would never be reachable by exactly the household that needs
+  // account creation most: one with nothing in it yet. This is the other
+  // trigger for the same modal, and it has to open on its own.
+  it("opens the add-account modal from the first-run panel's own button", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture("owner") },
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/household/members": { status: 200, body: [] },
+      "GET /api/v1/accounts": {
+        status: 200,
+        body: {
+          accounts: [],
+          summary: {
+            currency: "SGD", computable: true, netWorthMinor: 0,
+            assetsMinor: 0, liabilitiesMinor: 0,
+            breakdown: [], excludedNoRate: [], excludedByChoice: 0,
+          },
+        },
+      },
+    });
+
+    renderWithRouter(<FinancesPage />);
+
+    fireEvent.click(await screen.findByText(FINANCES_COPY.addAccount));
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 
   it("shows net worth and one bar per populated type, gating + Add account to the owner", async () => {

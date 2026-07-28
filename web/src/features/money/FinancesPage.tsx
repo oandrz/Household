@@ -9,6 +9,7 @@
 // time, not a series.
 import { useState } from "react";
 import { useMe } from "../auth/useAuth";
+import { AccountModal } from "./AccountModal";
 import { AccountsPanel } from "./AccountsPanel";
 import { BreakdownCard } from "./BreakdownCard";
 import { FINANCES_COPY } from "./copy";
@@ -30,20 +31,26 @@ function PageHeader() {
 // "Net worth S$0.00" would be truthful but useless, next to a blank breakdown
 // and an empty accounts list saying the same nothing three times over.
 function FirstRunPanel({ canAdd }: { canAdd: boolean }) {
+  const [addOpen, setAddOpen] = useState(false);
   return (
     <div className="flex flex-col items-center gap-3 rounded-xl border border-hairline bg-card px-10 py-16 text-center">
       <p className="text-sm font-semibold text-ink">{FINANCES_COPY.emptyTitle}</p>
       <p className="max-w-sm text-[13px] text-muted">{FINANCES_COPY.emptyBody}</p>
       {canAdd && (
-        // Inert for now -- see AccountsPanel's identical button for why: the
-        // form it should open is Task 40's.
         <button
           type="button"
+          onClick={() => setAddOpen(true)}
           className="mt-2 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white"
         >
           {FINANCES_COPY.addAccount}
         </button>
       )}
+      {/* This is the *only* "+ Add account" a brand-new household can reach --
+          AccountsPanel isn't mounted at all in this state (see below), so
+          wiring just its button would leave account creation unreachable for
+          exactly the household that needs it first. Mounted only while open,
+          same reasoning as AccountsPanel's own copy of this comment. */}
+      {canAdd && addOpen && <AccountModal open onClose={() => setAddOpen(false)} />}
     </div>
   );
 }
