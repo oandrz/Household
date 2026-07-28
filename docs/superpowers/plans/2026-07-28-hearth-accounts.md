@@ -1295,6 +1295,11 @@ func account(t *testing.T, kind domain.AccountType, minor int64, currency string
 
 func notCounted(v *usecase.AccountView) { v.Account.CountTowardNetWorth = false }
 
+func archived(v *usecase.AccountView) {
+	at := time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC)
+	v.Account.ArchivedAt = &at
+}
+
 // TestSummarySubtractsDebtsFromAssets is the design's own Finances figures in
 // miniature: assets minus liabilities, in the household's primary currency.
 func TestSummarySubtractsDebtsFromAssets(t *testing.T) {
@@ -1422,6 +1427,83 @@ func TestSummaryKeepsAnUncountedAccountInTheBreakdown(t *testing.T) {
 	}
 	if len(got.Breakdown) != 2 {
 		t.Fatalf("Breakdown = %d entries, want 2 -- an uncounted account still has a bar", len(got.Breakdown))
+	}
+}
+
+// TestSummaryBreakdownIsOrderedByType pins the rule that the bars do not
+// reshuffle between two identical requests. Go randomises map iteration, so
+// building the breakdown by ranging over the byType map would order it
+// differently run to run -- and a chart whose bars swap places on a refresh
+// reads as a bug in the numbers, not in the sort.
+//
+// Five types are used deliberately: with map iteration the odds of landing on
+// the sorted order by chance are 1 in 120, so this test fails almost every run
+// against the wrong implementation rather than occasionally.
+func TestSummaryBreakdownIsOrderedByType(t *testing.T) {
+	svc, _ := newAccountService(t)
+
+	got, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{
+		account(t, domain.AccountCreditCard, 12_000, "SGD"),
+		account(t, domain.AccountProperty, 8_856_000, "SGD"),
+		account(t, domain.AccountCash, 100_000, "SGD"),
+		account(t, domain.AccountLoan, 1_450_000, "SGD"),
+		account(t, domain.AccountInvestment, 11_230_000, "SGD"),
+	})
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+
+	want := domain.AccountTypes()
+	if len(got.Breakdown) != len(want) {
+		t.Fatalf("Breakdown = %d entries, want %d", len(got.Breakdown), len(want))
+	}
+	for i, wantType := range want {
+		if got.Breakdown[i].Type != wantType {
+			t.Errorf("Breakdown[%d].Type = %q, want %q -- assets before debts, in domain order",
+				i, got.Breakdown[i].Type, wantType)
+		}
+	}
+}
+
+// TestSummarySkipsArchivedAccounts: archived means out of the picture, not
+// hidden but still counted. It leaves the total and its type's bar together.
+func TestSummarySkipsArchivedAccounts(t *testing.T) {
+	svc, _ := newAccountService(t)
+
+	live := account(t, domain.AccountCash, 100_000, "SGD")
+	gone := account(t, domain.AccountInvestment, 900_000, "SGD", archived)
+
+	got, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{live, gone})
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if got.NetWorth.Amount != 100_000 {
+		t.Errorf("NetWorth = %d, want 100000", got.NetWorth.Amount)
+	}
+	if len(got.Breakdown) != 1 || got.Breakdown[0].Type != domain.AccountCash {
+		t.Errorf("Breakdown = %+v, want only the live cash account", got.Breakdown)
+	}
+}
+
+// TestSummaryOfAnAllArchivedHouseholdIsAGenuineZero is why the Computable
+// guard counts the accounts this summary is *about* rather than len(views).
+// Every account here is archived, so the loop skips all of them and nothing
+// converts -- but the honest answer is zero, not "we cannot work this out".
+// Guarding on len(views) would report the latter.
+func TestSummaryOfAnAllArchivedHouseholdIsAGenuineZero(t *testing.T) {
+	svc, _ := newAccountService(t)
+
+	got, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{
+		account(t, domain.AccountCash, 100_000, "SGD", archived),
+	})
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if !got.Computable {
+		t.Fatal("Computable = false, want true -- an all-archived household has a real zero")
+	}
+	if got.NetWorth.Amount != 0 {
+		t.Errorf("NetWorth = %d, want 0", got.NetWorth.Amount)
 	}
 }
 
