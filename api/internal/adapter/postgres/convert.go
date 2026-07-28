@@ -53,9 +53,9 @@ func uuid(id string) pgtype.UUID {
 }
 
 // nullableUUID is uuid's counterpart for the few columns that are genuinely
-// optional at the schema level (login_attempts.household_id and .user_id),
-// where the port passes *string and a nil pointer must reach Postgres as
-// NULL, not as the zero UUID.
+// optional at the schema level (login_attempts.household_id and .user_id,
+// and accounts.owner_membership_id), where the port passes *string and a nil
+// pointer must reach Postgres as NULL, not as the zero UUID.
 func nullableUUID(id *string) pgtype.UUID {
 	if id == nil {
 		return pgtype.UUID{}
