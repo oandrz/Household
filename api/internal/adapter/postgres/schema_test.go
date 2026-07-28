@@ -277,6 +277,15 @@ func TestTransactionSchemaRefusesNonsenseRows(t *testing.T) {
 			constraint: "received_amount_is_a_transfer_thing",
 		},
 		{
+			name: "a negative received amount",
+			sql: `INSERT INTO transactions (household_id, kind, occurred_on, description,
+			          from_account_id, to_account_id, amount_minor, amount_currency,
+			          received_amount_minor, received_amount_currency)
+			      VALUES ($1, 'transfer', DATE '2026-07-18', 'To BCA', $2, $3, 50000, 'SGD', -100, 'SGD')`,
+			args:       []any{householdID, from, to},
+			constraint: "received_amount_is_positive",
+		},
+		{
 			name: "a transfer carrying a category",
 			sql: `INSERT INTO transactions (household_id, kind, occurred_on, description,
 			          from_account_id, to_account_id, amount_minor, amount_currency, category_id)
