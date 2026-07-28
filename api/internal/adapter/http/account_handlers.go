@@ -73,6 +73,11 @@ type accountsResponse struct {
 // redaction below twice, and a rule written twice is a rule fixed once.
 func handleListAccounts(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Every account route sits behind requireCapability (router.go), which
+		// already calls RequestScope and answers 403 for a caller it comes back
+		// false for -- so by the time any of the five handlers in this file
+		// runs, ok is guaranteed true and the explicit check other handlers make
+		// (e.g. handleGetHousehold) would be dead code here.
 		scope, _ := RequestScope(r)
 		includeArchived := r.URL.Query().Get("include_archived") == "true"
 
