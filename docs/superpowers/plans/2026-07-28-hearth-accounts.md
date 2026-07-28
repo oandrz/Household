@@ -2485,7 +2485,16 @@ func handleListAccounts(deps Deps) http.HandlerFunc {
 		// The redaction is here, in the handler, not in AccountService: it is a
 		// rule about who is asking, and services in this codebase never take an
 		// actor.
-		if scope.Membership.Role == domain.RoleLimited {
+		//
+		// The condition names the role that may see everything, rather than the
+		// role that may not. Those are the same test while `owner` and `limited`
+		// are the only roles, and they stop being the same the day a third one
+		// arrives -- the "adult who is not an owner" this product will plausibly
+		// want. Written the other way round, that new role would silently
+		// receive every balance and the net worth, and no test in the suite
+		// would go red. Role comes from a database column, and this codebase
+		// fails closed on values it did not construct.
+		if scope.Membership.Role != domain.RoleOwner {
 			WriteJSON(w, http.StatusOK, accountsResponse{Accounts: redactedAccounts(views)})
 			return
 		}
