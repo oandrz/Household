@@ -452,6 +452,21 @@ route with a missing guard has no second line of defence.
   redacted account's *exact* JSON key set, so adding a field forces a
   decision at the one moment it matters, instead of a rebuild-by-whitelist
   that risks drifting the other way.
+- The accounts redaction's sibling, found but deliberately not fixed here
+  (it belongs to a different feature): `member_handlers.go`'s
+  `toMemberViewDTO` builds the full `userDTO` and blanks `Email` by name —
+  the identical field-axis-blacklist shape as `redactedAccounts` above, just
+  emptied rather than nilled. `TestMemberListWithholdsEmailsFromALimitedMember`
+  (`api_test.go`) decodes the response into `memberListEntry`, a fixed struct
+  with a fixed set of fields — `json.Decode` silently drops any key the
+  struct doesn't declare, so a new field added to `userDTO` later would be
+  invisible to every assertion in that test, the same way an unasserted key
+  set was invisible to the accounts test before it was fixed. Latent, not
+  live: nothing leaks today, because the email is blanked rather than
+  omitted, so the wire shape is already stable either way. Left as a trap
+  for the day someone adds a second personal field to `userDTO` and the test
+  still goes green. Tracked as
+  [issue #1](https://github.com/oandrz/Household/issues/1).
 
 ### Frontend
 

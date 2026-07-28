@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Me } from "../auth/schemas";
 import { stubFetchRoutes } from "../../test/fetchStub";
@@ -187,14 +187,16 @@ describe("FinancesPage", () => {
   // Pins the fix for "archiving the last account makes it permanently
   // unrestorable": before this, FirstRunPanel had no "Show archived" toggle
   // at all, so a household reduced to zero live accounts had no way back to
-  // the one it had just archived. The list can only go from one row to none
-  // here if useSetAccountArchived's onSuccess promise actually resolved and
-  // the refetch below it landed -- invalidateAccounts (useAccounts.ts)
-  // returns its Promise.all rather than firing it and forgetting, and this
-  // is the end-to-end proof of that (deferred finding 7): a fired-and-
-  // forgotten invalidation would leave the mutation "settled" before the
-  // second GET below ever resolved, and this test would hang waiting for
-  // text that never arrives instead of passing for the wrong reason.
+  // the one it had just archived.
+  //
+  // This does NOT pin invalidateAccounts's `return` (useAccounts.ts) -- a
+  // reviewer showed that dropping it leaves this test (and the other six in
+  // this file) green, because `queryClient.invalidateQueries` dispatches its
+  // refetch regardless of whether the caller awaits the returned promise,
+  // and `findByText` below polls the DOM rather than mutation state, so it
+  // cannot tell "settled because the refetch landed" apart from "settled
+  // because nobody waited." See the dedicated test below this one for what
+  // the `return` actually gates.
   it("keeps the archived toggle reachable after archiving a household's only account", async () => {
     const oneAccount = {
       id: "a1", nickname: "DBS Everyday", type: "cash",
@@ -240,6 +242,120 @@ describe("FinancesPage", () => {
 
     expect(await screen.findByText(FINANCES_COPY.emptyTitle)).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: FINANCES_COPY.archivedToggle })).toBeInTheDocument();
+  });
+
+  // Pins invalidateAccounts's `return` (useAccounts.ts, deferred finding 7)
+  // directly, rather than through the DOM eventually catching up. What the
+  // `return` actually controls is when useSetAccountArchived's mutation is
+  // considered "settled": TanStack Query awaits a returned onSuccess promise
+  // before running a mutate()-level onSettled, and AccountsPanel's own
+  // per-row `pendingIds` (the Archive/Restore button's `disabled`) is cleared
+  // from exactly that onSettled. So the button must stay disabled for as
+  // long as the post-archive refetch is still in flight, and only that.
+  //
+  // stubFetchRoutes can't hold a response open, so this uses a hand-rolled
+  // fetch mock instead -- the same deferred-promise shape
+  // SignInScreen.test.tsx uses for its own in-flight assertion -- to keep the
+  // refetch GET unresolved until the test says so.
+  it("keeps the archive button disabled until the post-archive refetch settles", async () => {
+    const oneAccount = {
+      id: "a1", nickname: "DBS Everyday", type: "cash",
+      ownerMembershipId: null, ownerName: null,
+      balance: { amountMinor: 824055, currency: "SGD" },
+      balanceAsOf: "2026-07-26",
+      countTowardNetWorth: true, visibleToLimitedMembers: false,
+      archivedAt: null,
+    };
+    const zeroSummary = {
+      currency: "SGD", computable: true, netWorthMinor: 0,
+      assetsMinor: 0, liabilitiesMinor: 0,
+      breakdown: [], excludedNoRate: [], excludedByChoice: 0,
+    };
+
+    let accountsGetCount = 0;
+    let resolveRefetch!: () => void;
+
+    const jsonResponse = (status: number, body: unknown) =>
+      Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+    const fetchMock = vi.fn<
+      (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+    >((input, init) => {
+      const method = (init?.method ?? "GET").toUpperCase();
+      const url = String(input);
+
+      if (method === "GET" && url === "/api/v1/auth/me") {
+        return jsonResponse(200, meFixture("owner"));
+      }
+      if (method === "GET" && url === "/api/v1/currencies") {
+        return jsonResponse(200, CURRENCIES);
+      }
+      if (method === "GET" && url === "/api/v1/accounts") {
+        accountsGetCount += 1;
+        if (accountsGetCount === 1) {
+          return jsonResponse(200, {
+            accounts: [oneAccount],
+            summary: {
+              currency: "SGD", computable: true, netWorthMinor: 824055,
+              assetsMinor: 824055, liabilitiesMinor: 0,
+              breakdown: [{ type: "cash", totalMinor: 824055 }],
+              excludedNoRate: [], excludedByChoice: 0,
+            },
+          });
+        }
+        // The refetch invalidateAccounts's onSuccess kicks off. Held open
+        // until resolveRefetch() is called below, so the window between the
+        // archive POST settling and this GET settling is observable instead
+        // of collapsing to a single microtask batch.
+        return new Promise<Response>((resolve) => {
+          resolveRefetch = () =>
+            resolve(
+              new Response(JSON.stringify({ accounts: [], summary: zeroSummary }), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              }),
+            );
+        });
+      }
+      // include_archived=true is invalidated alongside the false-keyed query
+      // above, but it is never mounted here (FinancesPage defaults
+      // includeArchived to false and this test never touches the toggle), so
+      // invalidateQueries's default refetchType: "active" should mark it
+      // stale without refetching. Answered anyway, immediately, so a future
+      // TanStack Query version that refetches inactive queries too fails
+      // this test with a clear "unexpected fetch" message rather than a
+      // silent hang if this branch were absent.
+      if (method === "GET" && url === "/api/v1/accounts?include_archived=true") {
+        return jsonResponse(200, { accounts: [], summary: zeroSummary });
+      }
+      if (method === "POST" && url === "/api/v1/accounts/a1/archive") {
+        return jsonResponse(200, { ...oneAccount, archivedAt: "2026-07-28T00:00:00Z" });
+      }
+      throw new Error(`unexpected fetch call: ${method} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithRouter(<FinancesPage />);
+
+    const archiveButton = await screen.findByRole("button", { name: "Archive DBS Everyday" });
+    fireEvent.click(archiveButton);
+
+    // Marks the moment the archive POST has resolved and invalidateAccounts's
+    // onSuccess has run far enough to dispatch the refetch -- the checkpoint
+    // this whole test is built around. Everything asserted right after this
+    // line is asserted at that exact moment, before the held-open GET above
+    // has had any chance to settle.
+    await waitFor(() => expect(accountsGetCount).toBe(2));
+    expect(archiveButton).toBeDisabled();
+
+    resolveRefetch();
+
+    expect(await screen.findByText(FINANCES_COPY.emptyTitle)).toBeInTheDocument();
   });
 
   // The other half of the same fix: FirstRunPanel must stay put when its own
