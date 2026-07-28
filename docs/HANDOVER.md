@@ -9,20 +9,20 @@ in three months or someone new.
 
 ## 1. Where things stand
 
-Two of six slices are complete, reviewed and verified end to end in a browser.
-Two further pieces of work, self-serve sign-up and Accounts (slice 2's first
-feature), are also complete and reviewed — every task's code was reviewed
-clean, including fix rounds — but **neither** has had its own browser walk
-recorded yet. Say that plainly rather than letting "verified end to end"
-quietly absorb it: `make lint && make test` passing is not the same claim as a
-human clicking through it.
+Three of six slices are now walked end to end in a browser. Self-serve sign-up
+is complete and reviewed — every task's code was reviewed clean, including fix
+rounds — but **still** has not had its own browser walk. Say that plainly
+rather than letting "verified end to end" quietly absorb it: `make lint &&
+make test` passing is not the same claim as a human clicking through it.
+Accounts (slice 2's first feature) closed that gap for itself: its walk ran
+and passed, 15 of 15.
 
 | Slice | Contents | State |
 |---|---|---|
 | 0 — Skeleton | Clean-architecture layout, Docker, Compose, Make, migrations, health endpoints | **Done** |
 | 1 — Household & identity | Sign-in, magic link, invite acceptance, lockout, members, roles, capabilities, spaces, Settings | **Done** |
-| — Self-serve sign-up | Sign-up, household provisioning, an ISO 4217 currency allowlist and list endpoint, `adminctl prune`, a per-IP rate limiter | Code-complete; browser walk **pending** |
-| 2 — Money | **Accounts**: manual entry, net worth, assets/liabilities breakdown, archive and restore — code-complete, browser walk **pending**. Transactions, Budget, Goals, Bills: not started | In progress |
+| — Self-serve sign-up | Sign-up, household provisioning, an ISO 4217 currency allowlist and list endpoint, `adminctl prune`, a per-IP rate limiter | Code-complete; browser walk **still pending** |
+| 2 — Money | **Accounts**: manual entry, net worth, assets/liabilities breakdown, archive and restore — **done, browser walk 15/15**. Transactions, Budget, Goals, Bills: not started | In progress |
 | 3 — Marriage | Retros, Vision, Agreements | Not started |
 | 4 — Family | Calendar | Not started |
 | 5 — Overview | Read-only aggregation across 2–4 | Not started |
@@ -48,18 +48,25 @@ from `make down && make up` (or an explicit `make migrate`), not a bare
 `make up` — see §5's Makefile item.
 
 Accounts' own definition of done is a 15-criterion walk, written down in
-`docs/superpowers/plans/2026-07-28-hearth-accounts.md` (Task 41) — adding a
-cash account and a loan and watching net worth read correctly, a negative
-debt refused in the field, an IDR account rendering without decimals while
-net worth still converts it, an unconvertible-currency account named on
-screen rather than dropped, archiving and restoring an account, a
-primary-currency change in Settings blanking net worth with an explanation
-rather than a zero, and a limited member with Money switched on seeing
-accounts with no figures anywhere and a `403` on a direct `POST` — among
-them. Whether it has been run is recorded wherever this document is read
-next; check for
-`docs/superpowers/plans/2026-07-28-hearth-accounts-verification.md` before
-assuming either way.
+`docs/superpowers/plans/2026-07-28-hearth-accounts.md` (Task 41). **Result: 15
+of 15 pass**, recorded in
+`docs/superpowers/plans/2026-07-28-hearth-accounts-verification.md` — the sign
+rule end to end (a loan reads positive in the accounts list and negative in
+net worth), convert-then-add against a real database (an IDR account raised
+net worth by the exchange rate's cent-accurate figure), the redaction at the
+wire (a limited member's response carries no `balance` key, no `balanceAsOf`,
+no `summary` at all), and the primary-currency-change state (switching to EUR
+blanks the net worth figure with a named explanation, never a zero) among
+them. The walk's own script had one defect: criterion 12 said "sign in as
+Kayla in a private window", which is not executable — seeded children are
+credential-less by design — so it was met instead by inviting a limited
+member with real credentials, which is the more realistic path anyway. Fixed
+in the record, not in the product.
+
+The walk itself lost most of its first hour to something unrelated to the
+feature: this machine runs two Docker engines, and a five-hour-old Docker
+Desktop stack was silently holding the host ports colima's stack needed. See
+`docs/LEARNING.md` for the lesson that cost the hour.
 
 Two screens the design marks "· not built" are deliberately absent: the **kids
 view** and **custom space pages**. That is the design's own scoping, not an
@@ -98,6 +105,12 @@ and needs:
 export DOCKER_HOST=unix:///Volumes/Oink_Machine/.colima/default/docker.sock
 export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
 ```
+
+This machine can also run Docker Desktop at the same time. If it is up, it
+silently wins host ports 5173/8080/8025 out from under colima's stack, so
+`make up` succeeds, `docker compose` manages colima's containers, and the
+browser and every `curl` still talk to whatever Docker Desktop published —
+check `docker ps` on both engines before concluding the code is broken.
 
 Mailpit catches all outbound mail at `http://localhost:8025`. Magic links and
 invites land there in development.

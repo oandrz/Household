@@ -121,9 +121,28 @@ either; sharpen the mutation until the failure names the claim.
 - The 401 redirect handler bounced every invitee off the invite screen. Green
   suite — because the handler defaults to null and every test installed a stub
   instead of the real wiring.
+- The accounts browser walk answered `500 INTERNAL` on every route, and **the
+  API logged nothing** — impossible on its face, since the only two code paths
+  that produce that response (`logAndWriteInternal`, `recoverer`) both log
+  before writing. An hour went into re-reading the code for a bug that was not
+  there. The cause was not simulated but *assumed*: this machine runs two
+  Docker engines, and a five-hour-old Docker Desktop stack was silently
+  holding the host ports colima's stack needed, so the browser and every
+  `curl` reached stale code while every `docker compose` command managed a
+  container nobody could see or log. The tell was in the response the whole
+  time — the request ID's hostname prefix never matched the running
+  container, and the per-process request counter never reset across a
+  restart, neither of which is possible for a process actually being
+  restarted — and went unread because nobody checked which process was
+  actually answering.
 
 **If a behaviour depends on the platform, verify it in the platform.** A real
-browser found three defects that jsdom structurally could not observe.
+browser found three defects that jsdom structurally could not observe. And
+when a service returns an error it did not log, stop debugging the code and
+confirm you are talking to the process you think you are — an assumed
+environment that is not the one running is the same trap as a simulated one
+that cannot tell the truth, and every hypothesis about the code will be wrong
+for as long as the premise is.
 
 ### 4. Guards scoped to the wrong interval
 
