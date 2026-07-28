@@ -120,6 +120,21 @@ run it before adding a fourth site.
   `SignInScreen.test.tsx`'s existing pattern — can tell the two apart.
   Corrected to describe only what it proves, with a second test added
   alongside it that asserts the disabled state directly.
+- `TestEnsureSeededSurvivesConcurrentFirstRequests` (category seeding, Task 5)
+  fired eight bare `go func(i) { ... }(i)` goroutines against `EnsureSeeded`
+  and stayed green, five runs straight, with the `ON CONFLICT DO NOTHING`
+  deliberately removed from `SeedCategories`. The pool in `postgres.Open`
+  dials only one connection up front (`Ping`); each goroutine's first query
+  pays its own connection-dial latency, which was enough to serialise the
+  count-then-insert window the test exists to race. Warming the pool with
+  sixteen concurrent `List` calls first, then releasing every seeding
+  goroutine through the same closed channel, reproduced the race reliably —
+  the same code, unmutated, now fails 15/16 with
+  `constraint "categories_household_id_name_key": already exists` the moment
+  `ON CONFLICT` is removed, and is stably green five runs in a row restored.
+  A concurrency test that starts its goroutines with a bare loop is only
+  proven to race if the work per goroutine already dwarfs connection setup;
+  otherwise warm the pool and use a start barrier before trusting it.
 
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for

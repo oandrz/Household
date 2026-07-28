@@ -23,6 +23,16 @@ type Account struct {
 	CreatedAt               pgtype.Timestamptz
 }
 
+type Category struct {
+	ID          pgtype.UUID
+	HouseholdID pgtype.UUID
+	Name        string
+	Kind        string
+	SortOrder   int32
+	ArchivedAt  pgtype.Timestamptz
+	CreatedAt   pgtype.Timestamptz
+}
+
 type Household struct {
 	ID                    pgtype.UUID
 	Name                  string
@@ -111,6 +121,23 @@ type Space struct {
 	Position           int32
 	IsBuiltin          bool
 	RequiredCapability string
+}
+
+type Transaction struct {
+	ID                     pgtype.UUID
+	HouseholdID            pgtype.UUID
+	Kind                   string
+	OccurredOn             pgtype.Date
+	Description            string
+	CategoryID             pgtype.UUID
+	PaidByMembershipID     pgtype.UUID
+	FromAccountID          pgtype.UUID
+	ToAccountID            pgtype.UUID
+	AmountMinor            int64
+	AmountCurrency         string
+	ReceivedAmountMinor    *int64
+	ReceivedAmountCurrency *string
+	CreatedAt              pgtype.Timestamptz
 }
 
 type User struct {
