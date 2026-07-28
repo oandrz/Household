@@ -20,6 +20,7 @@ React + TypeScript frontend, Postgres, Docker Compose.
 - `docs/GUIDE.md` — how to use the product.
 - `docs/superpowers/specs/` and `docs/superpowers/plans/` — the specs and plans
   the work was built from.
+- Explain everything in simple, straightforward and easy to be understood by the junior engineer
 
 ## Keeping the docs current
 
