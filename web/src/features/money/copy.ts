@@ -29,4 +29,8 @@ export const FINANCES_COPY = {
   limitedEmpty: "No accounts have been shared with you yet.",
   archivedToggle: "Show archived",
   archivedEmpty: "No archived accounts.",
+  // The recent-transactions strip (Task 17). Deferred by the accounts spec
+  // for having no data -- Transactions now supplies it.
+  recentTransactions: "Recent transactions",
+  seeAll: "See all",
 } as const;

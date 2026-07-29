@@ -13,12 +13,14 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 43 of 91 features built or partly built. Money now has
+**Where things stand:** 44 of 91 features built or partly built. Money now has
 two features built — Accounts (a household records what it owns and owes by
 hand and sees a net worth built from it) and the Transactions ledger (logging,
 editing and deleting expenses, income and transfers, with filters and the five
-screen states the design and spec both call for). Nothing else in Money is
-started yet, and nothing in Marriage, Family or Overview has been started.
+screen states the design and spec both call for) — plus the recent-transactions
+strip on Finances, deferred by the accounts spec for having no data and now
+built with the ledger to read from. Nothing else in Money is started yet, and
+nothing in Marriage, Family or Overview has been started.
 Five of the rows below have no mockup of their own — the provisioning
 transaction behind self-serve sign-up, the currency list endpoint, and
 `adminctl prune` — because the design's own "Create household" screen (the
@@ -36,11 +38,11 @@ work the accounts spec named and deliberately deferred rather than built.
 | Navigation shell | 6 | 0 | 1 | 0 |
 | Household settings | 15 | 4 | 2 | 0 |
 | Overview (home) | 0 | 0 | 8 | 0 |
-| Money | 6 | 1 | 20 | 0 |
+| Money | 7 | 1 | 19 | 0 |
 | Marriage | 0 | 0 | 13 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **37** | **6** | **46** | **2** |
+| **Total** | **38** | **6** | **45** | **2** |
 
 ---
 
@@ -183,7 +185,7 @@ come; this is still the largest area.
 | Net worth with 12-month trend | 🟡 |
 | Assets and liabilities breakdown | ✅ |
 | Accounts by owner, with SGD/IDR split | ✅ |
-| Recent transactions strip | ⬜ |
+| Recent transactions strip | ✅ |
 | Link account — step 1, choose source | ⬜ |
 | Link account — step 2, authorise | ⬜ |
 | Link account — step 3, details and ownership | ⬜ |

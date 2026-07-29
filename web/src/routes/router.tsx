@@ -10,7 +10,8 @@
 //     AppShell (pathless)                           -- sidebar + outlet
 //       /            Overview      (slice 5 placeholder)
 //       /money       RequireCapability("money") -> Finances (Task 39; slice 2's first real page)
-//       /money/$     RequireCapability("money") -> Money    (slice 2 placeholder; Transactions/Budget/Goals/Bills)
+//       /money/transactions RequireCapability("money") -> Transactions (Task 17; the real ledger)
+//       /money/$     RequireCapability("money") -> Money    (slice 2 placeholder; Budget/Goals/Bills remain)
 //       /marriage, /marriage/$ RequireCapability("marriage") -> Marriage (slice 3 placeholder)
 //       /family/calendar                            -- Family (slice 4 placeholder); unconditional,
 //                                                       per domain.BuiltinSpaces Family carries no
@@ -31,6 +32,7 @@ import { SignUpScreen } from "../features/auth/SignUpScreen";
 import { SignUpCompleteScreen } from "../features/auth/SignUpCompleteScreen";
 import { useMe } from "../features/auth/useAuth";
 import { FinancesPage } from "../features/money/FinancesPage";
+import { TransactionsPage } from "../features/money/TransactionsPage";
 import { PlaceholderPage } from "../features/placeholder/PlaceholderPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { AppShell } from "../features/shell/AppShell";
@@ -154,9 +156,26 @@ const moneyIndexRoute = createRoute({
   getParentRoute: () => moneyGuardRoute,
   path: "/",
   // Task 39 replaces the placeholder with the real Finances screen; the
-  // splat route below keeps it -- Transactions, Budget, Goals and Bills
-  // (moneySplatRoute's siblings under /money/*) don't exist yet.
+  // splat route below keeps it -- Budget, Goals and Bills (moneySplatRoute's
+  // remaining siblings under /money/*) don't exist yet.
   component: FinancesPage,
+});
+// Task 17 gives Transactions its own route, a sibling of moneyIndexRoute
+// rather than folded into moneySplatRoute below. TanStack Router ranks a
+// literal path segment above a splat's "$" by specificity, so
+// "/money/transactions" resolves to this route over moneySplatRoute
+// regardless of which one is declared or added to addChildren([...]) first --
+// it is still declared and listed ahead of the splat here so the file reads
+// in the same order the router actually resolves it, not because that order
+// changes the outcome. Nested under moneyGuardRoute, not the shell: a route
+// hung off the shell directly would never run RequireCapability at all, and
+// a member without `money` would reach a ledger the sidebar never offered
+// them -- router.test.tsx's own "redirects a member without the money
+// capability away from /money/transactions" pins exactly this.
+const moneyTransactionsRoute = createRoute({
+  getParentRoute: () => moneyGuardRoute,
+  path: "transactions",
+  component: TransactionsPage,
 });
 const moneySplatRoute = createRoute({
   getParentRoute: () => moneyGuardRoute,
@@ -210,7 +229,7 @@ export const routeTree = rootRoute.addChildren([
   authenticatedRoute.addChildren([
     shellRoute.addChildren([
       indexRoute,
-      moneyGuardRoute.addChildren([moneyIndexRoute, moneySplatRoute]),
+      moneyGuardRoute.addChildren([moneyIndexRoute, moneyTransactionsRoute, moneySplatRoute]),
       marriageGuardRoute.addChildren([marriageIndexRoute, marriageSplatRoute]),
       familyCalendarRoute,
       settingsRoute,

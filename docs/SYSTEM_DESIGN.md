@@ -684,24 +684,30 @@ web/src/
     auth/              sign-in, invite, magic-link, sign-up screens and hooks
     shell/             AppShell, Sidebar, RequireAuth, RequireCapability
     settings/          members, spaces, currency, notifications
-    money/             Finances page — net worth, breakdown and accounts
-                       cards, the add/edit modal, archive and restore;
-                       the Transactions page — filterable ledger, the
-                       add/edit/delete transaction modal (Task 15's
-                       component, this is its only caller) — built but not
-                       yet mounted by the route tree (Task 17)
-    placeholder/       named stand-ins for unbuilt areas — /money/* (the
-                       four Money siblings still to come) renders theirs
+    money/             Finances page — net worth, breakdown, accounts and
+                       recent-transactions cards, the add/edit modal,
+                       archive and restore; the Transactions page —
+                       filterable ledger, the add/edit/delete transaction
+                       modal (Task 15's component, this is its only
+                       caller), mounted at /money/transactions (Task 17)
+    placeholder/       named stand-ins for unbuilt areas — /money/$ (Budget,
+                       Goals and Bills, still to come) renders theirs
   routes/router.tsx        the route tree
   routes/publicRoutes.ts   the one list of pre-auth routes and API prefixes;
                            a test walks the route tree and fails if a
                            pre-auth screen escapes it
 ```
 
-**Finances replaces the placeholder at `/money`**; `/money/$` (Transactions,
-Budget, Goals, Bills) keeps its own. The sidebar is untouched — it renders from
-the server's own filtered, ordered space list, and this feature adds nothing
-to it.
+**Finances replaces the placeholder at `/money`**, and now carries a
+recent-transactions strip — five newest, reading through the same
+`useTransactions({})` query the Transactions page's own default (unfiltered)
+state resolves to, so the two share one cache entry rather than the strip
+standing up a second endpoint. `/money/transactions` is a real route, a
+sibling of `/money` nested under the same `moneyGuardRoute` (a literal path
+segment beats `/money/$`'s catch-all, so it is declared and added to that
+route's children ahead of the splat). `/money/$` still covers Budget, Goals
+and Bills. The sidebar is untouched — it renders from the server's own
+filtered, ordered space list, and this feature adds nothing to it.
 
 **Route guards are presentation, not security.** The server enforces
 independently; `RequireAuth` and `RequireCapability` exist so the UI does not

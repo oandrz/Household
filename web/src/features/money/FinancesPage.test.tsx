@@ -5,12 +5,28 @@ import { stubFetchRoutes } from "../../test/fetchStub";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { FINANCES_COPY } from "./copy";
 import { FinancesPage } from "./FinancesPage";
+import type { Transaction } from "./transactionSchemas";
 
 afterEach(() => vi.unstubAllGlobals());
 
 const CURRENCIES = {
   status: 200,
   body: { currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }] },
+};
+
+// The strip's own query (RecentTransactionsCard reads useTransactions({}), the
+// same cache entry TransactionsPage's default filters resolve to -- see that
+// component's own comment) only mounts once FinancesPage reaches its
+// populated, three-card branch. Every test below that gets there needs this
+// registered, or stubFetchRoutes throws on the unregistered call; a first-run
+// or limited-member test never mounts the card at all, so it never needs this.
+const EMPTY_TRANSACTIONS = {
+  status: 200,
+  body: {
+    transactions: [],
+    nextCursor: null,
+    summary: { currency: "SGD", month: "2026-07", count: 0, spentMinor: 0, excludedNoRate: [] },
+  },
 };
 
 // useMe() is called both by this page (to gate FirstRunPanel's add button)
@@ -103,6 +119,7 @@ describe("FinancesPage", () => {
     stubFetchRoutes({
       "GET /api/v1/auth/me": { status: 200, body: meFixture("owner") },
       "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/transactions": EMPTY_TRANSACTIONS,
       "GET /api/v1/accounts": {
         status: 200,
         body: {
@@ -151,12 +168,98 @@ describe("FinancesPage", () => {
     expect(await within(accountsPanel).findByText(FINANCES_COPY.addAccount)).toBeInTheDocument();
   });
 
+  // Six fixtures, not five: a fixture of exactly five would pass whether the
+  // card slices to the newest five or simply renders everything it's given,
+  // which proves nothing about the slicing this card exists to do. The sixth
+  // ("Shopee", the oldest) must never render.
+  it("shows the five newest transactions with a link through to the ledger", async () => {
+    function txn(id: string, description: string): Transaction {
+      return {
+        id,
+        kind: "expense",
+        occurredOn: "2026-07-20",
+        description,
+        categoryId: null,
+        categoryName: "Groceries",
+        paidByMembershipId: null,
+        paidByName: null,
+        fromAccountId: "a1",
+        fromAccountName: "DBS Everyday",
+        toAccountId: null,
+        toAccountName: null,
+        amount: { amountMinor: 1050, currency: "SGD" },
+        receivedAmount: null,
+        beforeFromAccountOpeningBalance: false,
+        beforeToAccountOpeningBalance: null,
+      };
+    }
+    // Newest-first, matching the server's own keyset order (useTransactions.ts
+    // / TransactionsPage's own groupByDay comment) -- the card trusts that
+    // order rather than re-sorting, so the fixture has to carry it too.
+    const transactions = [
+      txn("t1", "Cold Storage"),
+      txn("t2", "NTUC"),
+      txn("t3", "Grab"),
+      txn("t4", "Netflix"),
+      txn("t5", "Spotify"),
+      txn("t6", "Shopee"),
+    ];
+
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture("owner") },
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/transactions": {
+        status: 200,
+        body: {
+          transactions,
+          nextCursor: null,
+          summary: { currency: "SGD", month: "2026-07", count: 6, spentMinor: 6300, excludedNoRate: [] },
+        },
+      },
+      "GET /api/v1/accounts": {
+        status: 200,
+        body: {
+          accounts: [{
+            id: "a1", nickname: "DBS Everyday", type: "cash",
+            ownerMembershipId: null, ownerName: null,
+            balance: { amountMinor: 824055, currency: "SGD" },
+            balanceAsOf: "2026-07-26",
+            countTowardNetWorth: true, visibleToLimitedMembers: false,
+            archivedAt: null,
+          }],
+          summary: {
+            currency: "SGD", computable: true, netWorthMinor: 824055,
+            assetsMinor: 824055, liabilitiesMinor: 0,
+            breakdown: [{ type: "cash", totalMinor: 824055 }],
+            excludedNoRate: [], excludedByChoice: 0,
+          },
+        },
+      },
+    });
+
+    renderWithRouter(<FinancesPage />);
+
+    expect(await screen.findByText(/recent transactions/i)).toBeInTheDocument();
+    // Five, not six: the design's strip is a preview, and "See all" is the
+    // way to the rest.
+    expect(screen.getAllByTestId("recent-transaction-row")).toHaveLength(5);
+    // Pins *which* five: the oldest of the six fixtures must be the one left
+    // out, not merely that some five of the six render.
+    expect(screen.queryByText("Shopee")).not.toBeInTheDocument();
+    expect(screen.getByText("Cold Storage")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /see all/i })).toHaveAttribute(
+      "href",
+      "/money/transactions",
+    );
+  });
+
   // The state a household reaches by changing its primary currency in
   // Settings. A zero here would say they have nothing.
   it("shows no figure at all when nothing can be converted", async () => {
     stubFetchRoutes({
       "GET /api/v1/auth/me": { status: 200, body: meFixture("owner") },
       "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/transactions": EMPTY_TRANSACTIONS,
       "GET /api/v1/accounts": {
         status: 200,
         body: {
@@ -215,6 +318,7 @@ describe("FinancesPage", () => {
     stubFetchRoutes({
       "GET /api/v1/auth/me": { status: 200, body: meFixture("owner") },
       "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/transactions": EMPTY_TRANSACTIONS,
       "GET /api/v1/accounts": [
         {
           status: 200,
@@ -294,6 +398,9 @@ describe("FinancesPage", () => {
       }
       if (method === "GET" && url === "/api/v1/currencies") {
         return jsonResponse(200, CURRENCIES);
+      }
+      if (method === "GET" && url === "/api/v1/transactions") {
+        return jsonResponse(200, EMPTY_TRANSACTIONS.body);
       }
       if (method === "GET" && url === "/api/v1/accounts") {
         accountsGetCount += 1;

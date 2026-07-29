@@ -1,12 +1,12 @@
 // The Money space's landing page. It replaces the placeholder at /money; the
-// four sibling pages (Transactions, Budget, Goals, Bills) keep theirs, and the
-// sidebar is untouched -- it renders from the server's space list.
+// three sibling pages (Budget, Goals, Bills) keep theirs -- Transactions has
+// its own real page now (Task 17), reached from this page's own strip below.
 //
-// The recent-transactions strip the design draws is deliberately absent: it
-// has no data until Transactions ships, and an empty card promising future
-// usefulness is a placeholder that looks considered. The historical net-worth
-// chart is absent for the same reason -- the API answers with one point in
-// time, not a series.
+// The recent-transactions strip the design draws was absent through the
+// accounts work: it had no data until Transactions shipped, and an empty card
+// promising future usefulness is a placeholder that looks considered. It has
+// data now. The historical net-worth chart stays absent for the same original
+// reason -- the API answers with one point in time, not a series.
 import { useState } from "react";
 import { useMe } from "../auth/useAuth";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
@@ -15,6 +15,7 @@ import { AccountsPanel } from "./AccountsPanel";
 import { BreakdownCard } from "./BreakdownCard";
 import { FINANCES_COPY } from "./copy";
 import { NetWorthCard } from "./NetWorthCard";
+import { RecentTransactionsCard } from "./RecentTransactionsCard";
 import { useAccounts } from "./useAccounts";
 
 function PageHeader() {
@@ -146,6 +147,16 @@ export function FinancesPage() {
         <NetWorthCard summary={summary} />
         <BreakdownCard summary={summary} />
       </div>
+      {/* Only reachable here, in the branch `summary` is present in -- which
+          is exactly the owner branch (the comment above this function's
+          `!summary` check: its absence is how a limited member's response is
+          shaped). Transactions decision 5 requires owner as well as `money`
+          for every transactions route ("a limited member has no Transactions
+          page at all" -- the ledger's amounts would reconstruct exactly the
+          balances accounts decision 5 hides), so this card must never mount
+          for a limited member; this branch already guarantees that without a
+          second, separate isOwner check. */}
+      <RecentTransactionsCard />
       <AccountsPanel
         accounts={rows}
         includeArchived={includeArchived}

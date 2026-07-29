@@ -334,6 +334,28 @@ run it before adding a fourth site.
   Owner/Type) is a default, not a rule that overrides the design outright
   when a fully keyboard-reachable alternative exists.
 
+- Task 17's own plan quoted a router test — a caller lacking the `money`
+  capability visiting `/money/transactions` must be refused — as the proof
+  that the new route sits under `moneyGuardRoute` rather than hung off the
+  shell beside it. Run before Step 3 added the route at all, it passed
+  outright: `/money/transactions` already fell through to `moneySplatRoute`,
+  the Money placeholder's own catch-all, which is *also* a child of
+  `moneyGuardRoute` and is gated by the identical `RequireCapability`
+  component. Rejection for a capability-less caller was never in question;
+  it was true before this task touched anything, for a reason unrelated to
+  the row it was meant to pin. The test still does the job the brief
+  actually wanted — mutating the route to hang off `shellRoute` directly
+  (confirmed by editing `router.tsx` and rerunning) leaves it red, because
+  an ungated `TransactionsPage` then tries to mount and hits stub routes
+  that were never registered — but by itself it gave no red/green signal
+  for "does the dedicated route exist," only for "is whatever handles this
+  path gated." Fixed by adding a second, positive test alongside it: a
+  caller who *does* hold `money` must actually see `TransactionsPage`'s own
+  content at that path, not the Money placeholder's. That one genuinely
+  failed before Step 3 and passed after — the pair together is what proves
+  both "the route exists" and "it's gated," where either test alone proves
+  only one.
+
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
 a different reason than the one you meant to prove, that is not yet proof
