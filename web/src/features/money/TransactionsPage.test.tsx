@@ -1,0 +1,341 @@
+// Follows FinancesPage.test.tsx's stub-and-provider setup: renderWithRouter
+// (this page carries a real `<Link to="/money">`, which throws outside a
+// router context) plus stubFetchRoutes for every request.
+//
+// fireEvent, not the brief's own "@testing-library/user-event" sketch --
+// that package isn't one of this project's dependencies (only
+// @testing-library/react and jest-dom are; TransactionModal.test.tsx hit the
+// same gap and settled on fireEvent for the same reason).
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { renderWithRouter } from "../../test/renderWithRouter";
+import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
+import { TransactionsPage } from "./TransactionsPage";
+import type { Account } from "./schemas";
+import type { MonthSummary, Transaction } from "./transactionSchemas";
+
+const CURRENCIES = {
+  status: 200,
+  body: { currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }] },
+};
+
+// The one account every fixture below attaches its transactions to.
+// "DBS Everyday" specifically, because the pre-opening-balance test asserts
+// the account's own *name* appears in the marker, not merely that some
+// marker rendered.
+function accountFixture(overrides: Partial<Account> = {}): Account {
+  return {
+    id: "a1",
+    nickname: "DBS Everyday",
+    type: "cash",
+    ownerMembershipId: null,
+    ownerName: null,
+    balance: { amountMinor: 500000, currency: "SGD" },
+    balanceAsOf: "2026-07-01",
+    countTowardNetWorth: true,
+    visibleToLimitedMembers: false,
+    archivedAt: null,
+    ...overrides,
+  };
+}
+
+// id "txn-1" and description "Cold Storage" are load-bearing: the edit and
+// delete tests assert PATCH/DELETE against "/api/v1/transactions/txn-1", and
+// the row-click tests find the row by its "Cold Storage" accessible name.
+function expenseFixture(overrides: Partial<Transaction> = {}): Transaction {
+  return {
+    id: "txn-1",
+    kind: "expense",
+    occurredOn: "2026-07-18",
+    description: "Cold Storage",
+    categoryId: null,
+    categoryName: null,
+    paidByMembershipId: null,
+    paidByName: null,
+    fromAccountId: "a1",
+    fromAccountName: "DBS Everyday",
+    toAccountId: null,
+    toAccountName: null,
+    amount: { amountMinor: 5230, currency: "SGD" },
+    receivedAmount: null,
+    beforeFromAccountOpeningBalance: false,
+    beforeToAccountOpeningBalance: null,
+    ...overrides,
+  };
+}
+
+// A same-currency transfer carrying a real bank fee as its receivedAmount --
+// the fixture the clearReceivedAmount test below edits into an expense.
+function transferFixture(overrides: Partial<Transaction> = {}): Transaction {
+  return {
+    id: "txn-1",
+    kind: "transfer",
+    occurredOn: "2026-07-18",
+    description: "Transfer to OCBC",
+    categoryId: null,
+    categoryName: null,
+    paidByMembershipId: null,
+    paidByName: null,
+    fromAccountId: "a1",
+    fromAccountName: "DBS Everyday",
+    toAccountId: "a2",
+    toAccountName: "OCBC 360",
+    amount: { amountMinor: 5000, currency: "SGD" },
+    receivedAmount: { amountMinor: 4980, currency: "SGD" },
+    beforeFromAccountOpeningBalance: false,
+    beforeToAccountOpeningBalance: false,
+    ...overrides,
+  };
+}
+
+type SummaryInput = Partial<MonthSummary> & { count: number; spentMinor: number };
+
+function fullSummary(input: SummaryInput): MonthSummary {
+  return {
+    currency: "SGD",
+    month: "2026-07",
+    excludedNoRate: [],
+    ...input,
+  };
+}
+
+// renderPage builds every route TransactionsPage fires on mount (currencies,
+// categories, household members, accounts, the unfiltered ledger) plus
+// whatever a given test additionally needs -- a *second*, differently-keyed
+// ledger route for the filtered case, or the PATCH/DELETE routes for
+// "txn-1". Registered every time (not just when a test exercises them):
+// stubFetchRoutes only complains about a route that is *called* and
+// unregistered, so an unused stub here is harmless.
+function renderPage(options: {
+  transactions: Transaction[];
+  summary: SummaryInput;
+  filtered?: { transactions: Transaction[]; summary: SummaryInput };
+  nextCursor?: string | null;
+  accounts?: Account[];
+}) {
+  const patched = vi.fn();
+  const deleted = vi.fn();
+
+  const routes: Record<string, RouteResponse | RouteResponse[]> = {
+    "GET /api/v1/currencies": CURRENCIES,
+    "GET /api/v1/categories": { status: 200, body: { categories: [] } },
+    "GET /api/v1/household/members": { status: 200, body: [] },
+    "GET /api/v1/accounts": {
+      status: 200,
+      body: { accounts: options.accounts ?? [accountFixture()] },
+    },
+    "GET /api/v1/transactions": {
+      status: 200,
+      body: {
+        transactions: options.transactions,
+        nextCursor: options.nextCursor ?? null,
+        summary: fullSummary(options.summary),
+      },
+    },
+    "PATCH /api/v1/transactions/txn-1": {
+      status: 200,
+      body: expenseFixture({ description: "Cold Storage — milk" }),
+      capture: (body) => patched("/api/v1/transactions/txn-1", body),
+    },
+    // body: undefined, not null -- a 204 is a null-body status by the Fetch
+    // spec, and stubFetchRoutes always constructs `new Response(...)` from
+    // whatever's here. `JSON.stringify(null)` is the string "null", a
+    // non-null body the real Response constructor refuses to pair with a 204
+    // (throws synchronously); `JSON.stringify(undefined)` is `undefined`,
+    // which is a legal null body. Caught by extending this test past the
+    // `deleted` spy (see the assertion below) -- the spy alone stayed green
+    // even while this exact mistake made the underlying request throw and
+    // the modal never close.
+    "DELETE /api/v1/transactions/txn-1": {
+      status: 204,
+      body: undefined,
+      capture: () => deleted("/api/v1/transactions/txn-1"),
+    },
+  };
+
+  if (options.filtered) {
+    routes["GET /api/v1/transactions?kind=income"] = {
+      status: 200,
+      body: {
+        transactions: options.filtered.transactions,
+        nextCursor: null,
+        summary: fullSummary(options.filtered.summary),
+      },
+    };
+  }
+
+  stubFetchRoutes(routes);
+
+  return { ...renderWithRouter(<TransactionsPage />), patched, deleted };
+}
+
+describe("TransactionsPage", () => {
+  it("shows the first-run panel when the household has logged nothing", async () => {
+    renderPage({ transactions: [], summary: { count: 0, spentMinor: 0 } });
+    expect(await screen.findByText(/nothing logged yet/i)).toBeInTheDocument();
+  });
+
+  // A household that filtered to "Income" and saw the first-run panel would
+  // think its ledger had been wiped. The unfiltered fixture carries a real
+  // row (so this genuinely starts non-empty) and the filtered response is
+  // registered under its own, differently-keyed route -- a stub that ignored
+  // the querystring would make this pass for the wrong reason.
+  it("distinguishes an empty ledger from filters that match nothing", async () => {
+    renderPage({
+      transactions: [expenseFixture()],
+      summary: { count: 1, spentMinor: 5230 },
+      filtered: { transactions: [], summary: { count: 0, spentMinor: 0 } },
+    });
+
+    fireEvent.change(await screen.findByLabelText(/kind/i), { target: { value: "income" } });
+
+    expect(await screen.findByText(/nothing matches those filters/i)).toBeInTheDocument();
+    expect(screen.queryByText(/nothing logged yet/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /clear filters/i })).toBeInTheDocument();
+  });
+
+  it("hides Load older transactions when there is no next cursor", async () => {
+    renderPage({
+      transactions: [expenseFixture()],
+      summary: { count: 1, spentMinor: 5230 },
+      nextCursor: null,
+    });
+    await screen.findByText("Cold Storage");
+    expect(screen.queryByRole("button", { name: /load older/i })).not.toBeInTheDocument();
+  });
+
+  it("shows Load older transactions when the server sent a cursor", async () => {
+    renderPage({
+      transactions: [expenseFixture()],
+      summary: { count: 1, spentMinor: 5230 },
+      nextCursor: "2026-07-16:txn-9",
+    });
+    expect(await screen.findByRole("button", { name: /load older/i })).toBeInTheDocument();
+  });
+
+  // A quietly short total looks identical to a correct one.
+  it("names the transactions left out of the month's spend", async () => {
+    renderPage({
+      transactions: [expenseFixture()],
+      summary: {
+        count: 1,
+        spentMinor: 0,
+        excludedNoRate: [{ transactionId: "txn-1", currency: "USD" }],
+      },
+    });
+    expect(await screen.findByText(/no exchange rate for USD/i)).toBeInTheDocument();
+  });
+
+  // Naming the account matters: a transfer can predate one side's opening
+  // balance and not the other's.
+  it("marks a row that predates its account's opening balance, naming the account", async () => {
+    renderPage({
+      transactions: [{ ...expenseFixture(), beforeFromAccountOpeningBalance: true }],
+      summary: { count: 1, spentMinor: 5230 },
+    });
+    expect(await screen.findByText(/before DBS Everyday's opening balance/i)).toBeInTheDocument();
+  });
+
+  it("disables Add transaction when the household has no accounts", async () => {
+    renderPage({ transactions: [], summary: { count: 0, spentMinor: 0 }, accounts: [] });
+    expect(await screen.findByRole("button", { name: /add transaction/i })).toBeDisabled();
+    expect(screen.getByText(/add an account first/i)).toBeInTheDocument();
+  });
+
+  // Editing is how a mistyped row gets corrected instead of deleted and
+  // retyped, and it is the only caller PATCH /transactions/{id} has. Without
+  // this the endpoint and its hook exist with nothing reaching them.
+  it("opens the modal populated when a row is clicked, and patches on save", async () => {
+    const { patched } = renderPage({
+      transactions: [expenseFixture()],
+      summary: { count: 1, spentMinor: 5230 },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: /Cold Storage/i }));
+
+    // Populated, not blank: an edit form that opens empty silently clears
+    // every field the person does not retype.
+    expect(screen.getByLabelText(/description/i)).toHaveValue("Cold Storage");
+    expect(screen.getByLabelText(/^amount/i)).toHaveValue("52.30");
+
+    fireEvent.change(screen.getByLabelText(/description/i), {
+      target: { value: "Cold Storage — milk" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
+
+    await waitFor(() =>
+      expect(patched).toHaveBeenCalledWith(
+        "/api/v1/transactions/txn-1",
+        // categoryId: "" (not null, and not absent) pins the null->""
+        // translation toUpdateBody exists for -- expenseFixture's own
+        // categoryId is null, and the PATCH route reads a *missing* or
+        // *null* categoryId as "leave alone" (a pointer field server-side),
+        // so sending the modal's null back verbatim would never actually
+        // clear a category. clearReceivedAmount: false pins that the flag is
+        // genuinely computed (this transaction never had a received amount
+        // to clear), not merely absent from the body.
+        expect.objectContaining({
+          description: "Cold Storage — milk",
+          categoryId: "",
+          clearReceivedAmount: false,
+        }),
+      ),
+    );
+  });
+
+  // The case toUpdateBody's clearReceivedAmount derivation exists for: a
+  // transfer with a real, stored bank fee, edited into a different kind.
+  // TransactionModal's own expense/income submit branch always sets
+  // receivedAmountMinor: null -- indistinguishable, on its own, from a
+  // non-transfer that never had a figure to begin with. Sending that null
+  // straight through would decode server-side as "leave alone" (the PATCH
+  // route's fields are pointers), silently stranding the old 49.80 in the
+  // database attached to what the UI now shows as a plain expense.
+  it("clears a stored received amount when editing turns a transfer into a non-transfer", async () => {
+    const { patched } = renderPage({
+      transactions: [transferFixture()],
+      summary: { count: 1, spentMinor: 0 },
+      accounts: [
+        accountFixture(),
+        accountFixture({ id: "a2", nickname: "OCBC 360" }),
+      ],
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: /Transfer to OCBC/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Expense" }));
+    fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
+
+    await waitFor(() =>
+      expect(patched).toHaveBeenCalledWith(
+        "/api/v1/transactions/txn-1",
+        expect.objectContaining({ clearReceivedAmount: true }),
+      ),
+    );
+    const body = patched.mock.calls[0][1];
+    expect(body).not.toHaveProperty("receivedAmountMinor");
+  });
+
+  it("removes a transaction and asks for confirmation first", async () => {
+    const { deleted } = renderPage({
+      transactions: [expenseFixture()],
+      summary: { count: 1, spentMinor: 5230 },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: /Cold Storage/i }));
+    fireEvent.click(screen.getByRole("button", { name: /delete/i }));
+    // In-page confirmation, never window.confirm: a native dialog blocks every
+    // browser event and would freeze an automated walk.
+    fireEvent.click(screen.getByRole("button", { name: /yes, delete/i }));
+
+    await waitFor(() => expect(deleted).toHaveBeenCalledWith("/api/v1/transactions/txn-1"));
+    // Proves the deletion actually completed, not merely that the request
+    // left: `capture` fires before stubFetchRoutes constructs its Response,
+    // so a request that throws *after* being captured (as a wrongly-shaped
+    // 204 stub does -- see the route's own comment above) would still
+    // satisfy the assertion above while TransactionModal's onSubmit .catch
+    // leaves the dialog open on a submitError. The dialog closing only
+    // happens from onClose, which only runs once onDelete's promise actually
+    // resolves.
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+});

@@ -250,6 +250,52 @@ run it before adding a fourth site.
   with. Added a category fixture with both kinds and a dedicated test,
   confirmed red by temporarily returning every category regardless of kind.
 
+- Same slice, Task 16 (the Transactions page): the brief's given test file
+  imported `userEvent` from `@testing-library/user-event` again — the exact
+  same wrong dependency Task 15's brief sketch used, in a different task's
+  brief, despite Task 15's own report already naming the gap and every real
+  modal test in this codebase already using `fireEvent`. Rewritten the same
+  way. The brief's `renderPage`, `expenseFixture` and `patched`/`deleted`
+  spies were also, as its own task instructions warned, guesses at shapes
+  that did not exist yet: `patched`/`deleted` needed building against
+  `stubFetchRoutes`'s real `capture` hook (parsed request body in, an
+  arbitrary call signature out), not assumed into existence. The mutation
+  check named in the brief (drop the "are filters set" condition, confirm
+  "distinguishes an empty ledger from filters that match nothing" goes red)
+  passed on the first try here — evidence that a brief's own suggested
+  mutation is not automatically suspect, only that it has to be checked
+  every time rather than assumed correct from the fact that it was written
+  down. Two further gaps survived every mutation check run before an advisor
+  pass caught them, both hiding behind an assertion that fired without
+  constraining enough to matter. First: the delete test's DELETE stub was
+  `{status: 204, body: null}` — `JSON.stringify(null)` is the four-character
+  string `"null"`, and `stubFetchRoutes` builds `new Response(...)` from
+  exactly that, which the Fetch spec's own `Response` constructor refuses to
+  do for a 204 (confirmed directly: `new Response(JSON.stringify(null),
+  {status: 204})` throws `TypeError: Invalid response status code 204`;
+  swapping in `body: undefined` — `JSON.stringify(undefined)` is
+  `undefined`, a legal null body — does not). Because `stubFetchRoutes`'s
+  `capture` hook records the request *before* constructing that `Response`,
+  the test's only assertion (the `deleted` spy) was satisfied even though
+  the fetch then threw, the mutation rejected, and `TransactionModal`'s own
+  `.catch` left the dialog open on a submit error the test never looked for.
+  No other test in this codebase had stubbed a 204 before, so this exact
+  interaction — `stubFetchRoutes` plus a null-body status — was untried
+  territory. Fixed the stub (`body: undefined`) and added a permanent
+  `expect(screen.queryByRole("dialog")).not.toBeInTheDocument()` assertion,
+  since a spy recorded before a throw cannot tell a completed action from a
+  merely-attempted one. Second: the edit test's PATCH-body assertion used
+  `expect.objectContaining({ description: ... })` — true of a request that
+  also happened to carry a wrong `categoryId` or a hardcoded
+  `clearReceivedAmount: false`, which is exactly the pointer-semantics
+  translation this task's own headline requirement exists to get right (see
+  the Frontend catalogue entry below). Extended the assertion to also pin
+  `categoryId: ""` and `clearReceivedAmount: false`, and added a dedicated
+  new test for the case those two fields don't cover between them — a
+  transfer edited into a different kind, which must send
+  `clearReceivedAmount: true`. All three fixes mutation-confirmed: each
+  breaks exactly the test built to catch it and no other.
+
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
 a different reason than the one you meant to prove, that is not yet proof
@@ -680,6 +726,27 @@ route with a missing guard has no second line of defence.
   precisely the figure it's being told to enter. Failing closed was already
   right; the copy just needed to name the actual cause instead of restating
   the input back at the person looking at it.
+- Editing a transaction through `TransactionModal` (Task 15) resends every
+  field's *current* value on submit, including the ones that are legitimately
+  empty — `categoryId: null` for "no category" chosen, `receivedAmountMinor:
+  null` for a non-transfer or an optional field left blank. The PATCH route's
+  own fields are all pointers (`*string`/`*int64`, `transaction_handlers.go`)
+  where a `null` in the JSON body and the key being absent entirely decode to
+  the identical Go `nil` — "leave this alone." Forwarding the modal's `null`
+  straight into the request body would make clearing a category (or a
+  transfer's stored received amount back out) silently do nothing: the old
+  value survives the exact request that was supposed to remove it, invisible
+  behind a form now showing the field blank. `categoryId`, `paidByMembershipId`,
+  `fromAccountId` and `toAccountId` need `?? ""` before the request is built —
+  the same empty-string sentinel the create route's own zero-value default
+  already uses for "no category." `receivedAmountMinor` has no honest empty
+  sentinel of its own (`0` is a real, if invalid, amount), which is exactly why
+  the API gives it a separate `clearReceivedAmount` boolean instead
+  (`TransactionUpdate.ClearReceivedAmount`, `usecase/transaction.go`) — derived
+  in `TransactionsPage.tsx` from whether the transaction had a received amount
+  *before* the edit and does not *after*, not from the new value in isolation,
+  because "the new value is null" alone is true both when a transfer's fee was
+  genuinely just cleared and every time a non-transfer's form submits at all.
 
 ### Tooling and infrastructure
 

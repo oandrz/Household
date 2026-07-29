@@ -685,7 +685,11 @@ web/src/
     shell/             AppShell, Sidebar, RequireAuth, RequireCapability
     settings/          members, spaces, currency, notifications
     money/             Finances page — net worth, breakdown and accounts
-                       cards, the add/edit modal, archive and restore
+                       cards, the add/edit modal, archive and restore;
+                       the Transactions page — filterable ledger, the
+                       add/edit/delete transaction modal (Task 15's
+                       component, this is its only caller) — built but not
+                       yet mounted by the route tree (Task 17)
     placeholder/       named stand-ins for unbuilt areas — /money/* (the
                        four Money siblings still to come) renders theirs
   routes/router.tsx        the route tree

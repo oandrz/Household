@@ -13,9 +13,11 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 41 of 91 features built or partly built. Money now has
-its first feature — Accounts — built: a household records what it owns and
-owes by hand and sees a net worth built from it. Nothing else in Money is
+**Where things stand:** 43 of 91 features built or partly built. Money now has
+two features built — Accounts (a household records what it owns and owes by
+hand and sees a net worth built from it) and the Transactions ledger (logging,
+editing and deleting expenses, income and transfers, with filters and the five
+screen states the design and spec both call for). Nothing else in Money is
 started yet, and nothing in Marriage, Family or Overview has been started.
 Five of the rows below have no mockup of their own — the provisioning
 transaction behind self-serve sign-up, the currency list endpoint, and
@@ -34,11 +36,11 @@ work the accounts spec named and deliberately deferred rather than built.
 | Navigation shell | 6 | 0 | 1 | 0 |
 | Household settings | 15 | 4 | 2 | 0 |
 | Overview (home) | 0 | 0 | 8 | 0 |
-| Money | 4 | 1 | 22 | 0 |
+| Money | 6 | 1 | 20 | 0 |
 | Marriage | 0 | 0 | 13 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **35** | **6** | **48** | **2** |
+| **Total** | **37** | **6** | **46** | **2** |
 
 ---
 
@@ -171,8 +173,8 @@ and Marriage retro — so it depends on Money, Family and Marriage existing firs
 
 ## 5 · Money
 
-Its first feature, Accounts, is built. Everything else here — Transactions,
-Budget, Goals, Bills — is still to come; this is still the largest area.
+Accounts and Transactions are built. Budget, Goals and Bills are still to
+come; this is still the largest area.
 
 **Finances**
 
@@ -235,10 +237,30 @@ a real aggregator could later fill.
 
 | Feature | State |
 |---|---|
-| Full ledger with filters | ⬜ |
+| Full ledger with filters | ✅ |
 | Inline category editing | ⬜ |
-| Add transaction (modal) | ⬜ |
+| Add transaction (modal) | ✅ |
 | Export CSV | ⬜ |
+
+**Full ledger with filters and Add transaction share one modal, add and edit
+alike** — the same `TransactionModal` Task 15 built, opened blank for a new
+row and opened populated for an existing one clicked from the ledger. That
+click-to-edit path is also the only caller `PATCH /transactions/{id}` has, and
+its own Delete control (behind an in-page confirmation, never
+`window.confirm`) is the only caller `DELETE /transactions/{id}` has. The
+ledger itself covers all five screen states the spec's section 7.1 names:
+first run, filters matching nothing (deliberately different copy from first
+run, so a household that filtered to nothing doesn't think its ledger was
+wiped), transactions excluded from the month's spend for want of an exchange
+rate, a row dated before its account's opening balance (naming the account,
+since a transfer can predate one side and not the other), and a disabled Add
+button when the household has no accounts yet to attach a transaction to.
+
+**Inline category editing and Export CSV are the two pieces of the design's
+Transactions screen still unbuilt.** Changing a transaction's category today
+means opening the same edit modal used for everything else, not clicking the
+category text directly in the ledger row. CSV export has no button anywhere
+yet.
 
 **Budget**
 
