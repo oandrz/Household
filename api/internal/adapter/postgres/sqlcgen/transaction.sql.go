@@ -307,6 +307,237 @@ func (q *Queries) ListCategoriesIncludingArchived(ctx context.Context, household
 	return items, nil
 }
 
+const listTransactions = `-- name: ListTransactions :many
+SELECT t.id, t.household_id, t.kind, t.occurred_on, t.description,
+       t.category_id, t.paid_by_membership_id, t.from_account_id, t.to_account_id,
+       t.amount_minor, t.amount_currency,
+       t.received_amount_minor, t.received_amount_currency, t.created_at,
+       c.name AS category_name,
+       u.display_name AS paid_by_name,
+       fa.nickname AS from_account_name,
+       ta.nickname AS to_account_name,
+       (fa.id IS NOT NULL AND t.occurred_on <= fa.opening_balance_as_of) AS before_from_opening,
+       (ta.id IS NOT NULL AND t.occurred_on <= ta.opening_balance_as_of) AS before_to_opening
+FROM transactions t
+LEFT JOIN categories  c  ON c.id  = t.category_id
+LEFT JOIN memberships m  ON m.id  = t.paid_by_membership_id
+LEFT JOIN users       u  ON u.id  = m.user_id
+LEFT JOIN accounts    fa ON fa.id = t.from_account_id
+LEFT JOIN accounts    ta ON ta.id = t.to_account_id
+WHERE t.household_id = $1
+  AND ($2::text IS NULL OR t.kind = $2::text)
+  AND ($3::uuid IS NULL
+       OR t.from_account_id = $3::uuid
+       OR t.to_account_id   = $3::uuid)
+  AND ($4::uuid IS NULL OR t.category_id = $4::uuid)
+  AND ($5::uuid IS NULL OR t.paid_by_membership_id = $5::uuid)
+  AND ($6::date IS NULL
+       OR (t.occurred_on >= $6::date
+           AND t.occurred_on < ($6::date + INTERVAL '1 month')))
+  AND ($7::date IS NULL
+       OR (t.occurred_on, t.id) < ($7::date, $8::uuid))
+ORDER BY t.occurred_on DESC, t.id DESC
+LIMIT $9
+`
+
+type ListTransactionsParams struct {
+	HouseholdID pgtype.UUID
+	Kind        *string
+	AccountID   pgtype.UUID
+	CategoryID  pgtype.UUID
+	PaidBy      pgtype.UUID
+	MonthStart  pgtype.Date
+	CursorDate  pgtype.Date
+	CursorID    pgtype.UUID
+	RowLimit    int32
+}
+
+type ListTransactionsRow struct {
+	ID                     pgtype.UUID
+	HouseholdID            pgtype.UUID
+	Kind                   string
+	OccurredOn             pgtype.Date
+	Description            string
+	CategoryID             pgtype.UUID
+	PaidByMembershipID     pgtype.UUID
+	FromAccountID          pgtype.UUID
+	ToAccountID            pgtype.UUID
+	AmountMinor            int64
+	AmountCurrency         string
+	ReceivedAmountMinor    *int64
+	ReceivedAmountCurrency *string
+	CreatedAt              pgtype.Timestamptz
+	CategoryName           *string
+	PaidByName             *string
+	FromAccountName        *string
+	ToAccountName          *string
+	BeforeFromOpening      *bool
+	BeforeToOpening        *bool
+}
+
+// ListTransactions serves the ledger and all five of its filters.
+//
+// Each filter is written as `(sqlc.narg(x)::type IS NULL OR column = ...)`, so
+// an unset filter is a no-op inside one prepared statement rather than a
+// separate query per combination. Thirty-two hand-written variants would drift
+// from each other, and a concatenated string would be an injection surface.
+//
+// The account filter matches EITHER side: a transfer belongs in the ledger of
+// both accounts it touches.
+//
+// The keyset predicate is the row-value comparison (occurred_on, id) < (cursor
+// date, cursor id), which matches transactions_household_date_idx exactly.
+// Comparing the pair rather than the date alone is what makes two transactions
+// on the same day page correctly.
+//
+// LIMIT is $N + 1 in the caller, not here: the extra row is how the caller
+// learns another page exists without counting the table.
+func (q *Queries) ListTransactions(ctx context.Context, arg ListTransactionsParams) ([]ListTransactionsRow, error) {
+	rows, err := q.db.Query(ctx, listTransactions,
+		arg.HouseholdID,
+		arg.Kind,
+		arg.AccountID,
+		arg.CategoryID,
+		arg.PaidBy,
+		arg.MonthStart,
+		arg.CursorDate,
+		arg.CursorID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTransactionsRow
+	for rows.Next() {
+		var i ListTransactionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.HouseholdID,
+			&i.Kind,
+			&i.OccurredOn,
+			&i.Description,
+			&i.CategoryID,
+			&i.PaidByMembershipID,
+			&i.FromAccountID,
+			&i.ToAccountID,
+			&i.AmountMinor,
+			&i.AmountCurrency,
+			&i.ReceivedAmountMinor,
+			&i.ReceivedAmountCurrency,
+			&i.CreatedAt,
+			&i.CategoryName,
+			&i.PaidByName,
+			&i.FromAccountName,
+			&i.ToAccountName,
+			&i.BeforeFromOpening,
+			&i.BeforeToOpening,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const monthTotalsQuery = `-- name: MonthTotalsQuery :many
+SELECT t.id, t.household_id, t.kind, t.occurred_on, t.description,
+       t.category_id, t.paid_by_membership_id, t.from_account_id, t.to_account_id,
+       t.amount_minor, t.amount_currency,
+       t.received_amount_minor, t.received_amount_currency, t.created_at,
+       c.name AS category_name,
+       u.display_name AS paid_by_name,
+       fa.nickname AS from_account_name,
+       ta.nickname AS to_account_name,
+       (fa.id IS NOT NULL AND t.occurred_on <= fa.opening_balance_as_of) AS before_from_opening,
+       (ta.id IS NOT NULL AND t.occurred_on <= ta.opening_balance_as_of) AS before_to_opening
+FROM transactions t
+LEFT JOIN categories  c  ON c.id  = t.category_id
+LEFT JOIN memberships m  ON m.id  = t.paid_by_membership_id
+LEFT JOIN users       u  ON u.id  = m.user_id
+LEFT JOIN accounts    fa ON fa.id = t.from_account_id
+LEFT JOIN accounts    ta ON ta.id = t.to_account_id
+WHERE t.household_id = $1
+  AND t.occurred_on >= $2::date
+  AND t.occurred_on < ($2::date + INTERVAL '1 month')
+ORDER BY t.occurred_on DESC, t.id DESC
+`
+
+type MonthTotalsQueryParams struct {
+	HouseholdID pgtype.UUID
+	Column2     pgtype.Date
+}
+
+type MonthTotalsQueryRow struct {
+	ID                     pgtype.UUID
+	HouseholdID            pgtype.UUID
+	Kind                   string
+	OccurredOn             pgtype.Date
+	Description            string
+	CategoryID             pgtype.UUID
+	PaidByMembershipID     pgtype.UUID
+	FromAccountID          pgtype.UUID
+	ToAccountID            pgtype.UUID
+	AmountMinor            int64
+	AmountCurrency         string
+	ReceivedAmountMinor    *int64
+	ReceivedAmountCurrency *string
+	CreatedAt              pgtype.Timestamptz
+	CategoryName           *string
+	PaidByName             *string
+	FromAccountName        *string
+	ToAccountName          *string
+	BeforeFromOpening      *bool
+	BeforeToOpening        *bool
+}
+
+// MonthTotalsQuery returns every transaction in one calendar month. The
+// service converts each amount into the household's primary currency before
+// summing, which SQL cannot do -- the FX provider lives in the usecase layer.
+func (q *Queries) MonthTotalsQuery(ctx context.Context, arg MonthTotalsQueryParams) ([]MonthTotalsQueryRow, error) {
+	rows, err := q.db.Query(ctx, monthTotalsQuery, arg.HouseholdID, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MonthTotalsQueryRow
+	for rows.Next() {
+		var i MonthTotalsQueryRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.HouseholdID,
+			&i.Kind,
+			&i.OccurredOn,
+			&i.Description,
+			&i.CategoryID,
+			&i.PaidByMembershipID,
+			&i.FromAccountID,
+			&i.ToAccountID,
+			&i.AmountMinor,
+			&i.AmountCurrency,
+			&i.ReceivedAmountMinor,
+			&i.ReceivedAmountCurrency,
+			&i.CreatedAt,
+			&i.CategoryName,
+			&i.PaidByName,
+			&i.FromAccountName,
+			&i.ToAccountName,
+			&i.BeforeFromOpening,
+			&i.BeforeToOpening,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const seedCategories = `-- name: SeedCategories :exec
 INSERT INTO categories (household_id, name, kind, sort_order)
 VALUES

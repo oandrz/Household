@@ -129,3 +129,77 @@ RETURNING id, household_id, kind, occurred_on, description, category_id,
 DELETE FROM transactions
 WHERE household_id = $1 AND id = $2
 RETURNING id;
+
+-- ListTransactions serves the ledger and all five of its filters.
+--
+-- Each filter is written as `(sqlc.narg(x)::type IS NULL OR column = ...)`, so
+-- an unset filter is a no-op inside one prepared statement rather than a
+-- separate query per combination. Thirty-two hand-written variants would drift
+-- from each other, and a concatenated string would be an injection surface.
+--
+-- The account filter matches EITHER side: a transfer belongs in the ledger of
+-- both accounts it touches.
+--
+-- The keyset predicate is the row-value comparison (occurred_on, id) < (cursor
+-- date, cursor id), which matches transactions_household_date_idx exactly.
+-- Comparing the pair rather than the date alone is what makes two transactions
+-- on the same day page correctly.
+--
+-- LIMIT is $N + 1 in the caller, not here: the extra row is how the caller
+-- learns another page exists without counting the table.
+-- name: ListTransactions :many
+SELECT t.id, t.household_id, t.kind, t.occurred_on, t.description,
+       t.category_id, t.paid_by_membership_id, t.from_account_id, t.to_account_id,
+       t.amount_minor, t.amount_currency,
+       t.received_amount_minor, t.received_amount_currency, t.created_at,
+       c.name AS category_name,
+       u.display_name AS paid_by_name,
+       fa.nickname AS from_account_name,
+       ta.nickname AS to_account_name,
+       (fa.id IS NOT NULL AND t.occurred_on <= fa.opening_balance_as_of) AS before_from_opening,
+       (ta.id IS NOT NULL AND t.occurred_on <= ta.opening_balance_as_of) AS before_to_opening
+FROM transactions t
+LEFT JOIN categories  c  ON c.id  = t.category_id
+LEFT JOIN memberships m  ON m.id  = t.paid_by_membership_id
+LEFT JOIN users       u  ON u.id  = m.user_id
+LEFT JOIN accounts    fa ON fa.id = t.from_account_id
+LEFT JOIN accounts    ta ON ta.id = t.to_account_id
+WHERE t.household_id = $1
+  AND (sqlc.narg('kind')::text IS NULL OR t.kind = sqlc.narg('kind')::text)
+  AND (sqlc.narg('account_id')::uuid IS NULL
+       OR t.from_account_id = sqlc.narg('account_id')::uuid
+       OR t.to_account_id   = sqlc.narg('account_id')::uuid)
+  AND (sqlc.narg('category_id')::uuid IS NULL OR t.category_id = sqlc.narg('category_id')::uuid)
+  AND (sqlc.narg('paid_by')::uuid IS NULL OR t.paid_by_membership_id = sqlc.narg('paid_by')::uuid)
+  AND (sqlc.narg('month_start')::date IS NULL
+       OR (t.occurred_on >= sqlc.narg('month_start')::date
+           AND t.occurred_on < (sqlc.narg('month_start')::date + INTERVAL '1 month')))
+  AND (sqlc.narg('cursor_date')::date IS NULL
+       OR (t.occurred_on, t.id) < (sqlc.narg('cursor_date')::date, sqlc.narg('cursor_id')::uuid))
+ORDER BY t.occurred_on DESC, t.id DESC
+LIMIT sqlc.arg('row_limit');
+
+-- MonthTotalsQuery returns every transaction in one calendar month. The
+-- service converts each amount into the household's primary currency before
+-- summing, which SQL cannot do -- the FX provider lives in the usecase layer.
+-- name: MonthTotalsQuery :many
+SELECT t.id, t.household_id, t.kind, t.occurred_on, t.description,
+       t.category_id, t.paid_by_membership_id, t.from_account_id, t.to_account_id,
+       t.amount_minor, t.amount_currency,
+       t.received_amount_minor, t.received_amount_currency, t.created_at,
+       c.name AS category_name,
+       u.display_name AS paid_by_name,
+       fa.nickname AS from_account_name,
+       ta.nickname AS to_account_name,
+       (fa.id IS NOT NULL AND t.occurred_on <= fa.opening_balance_as_of) AS before_from_opening,
+       (ta.id IS NOT NULL AND t.occurred_on <= ta.opening_balance_as_of) AS before_to_opening
+FROM transactions t
+LEFT JOIN categories  c  ON c.id  = t.category_id
+LEFT JOIN memberships m  ON m.id  = t.paid_by_membership_id
+LEFT JOIN users       u  ON u.id  = m.user_id
+LEFT JOIN accounts    fa ON fa.id = t.from_account_id
+LEFT JOIN accounts    ta ON ta.id = t.to_account_id
+WHERE t.household_id = $1
+  AND t.occurred_on >= $2::date
+  AND t.occurred_on < ($2::date + INTERVAL '1 month')
+ORDER BY t.occurred_on DESC, t.id DESC;

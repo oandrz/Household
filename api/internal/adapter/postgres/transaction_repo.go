@@ -179,12 +179,121 @@ func toTransactionViewFromGet(row sqlcgen.GetTransactionRow) usecase.Transaction
 	)
 }
 
-// List and MonthTotals arrive in Task 8. Declared here so TransactionRepo
-// satisfies usecase.TransactionRepository and main.go can wire it.
+// List asks for one row more than the caller wanted. That extra row is the
+// whole "is there another page" answer -- a COUNT(*) over a filtered ledger
+// costs a scan to learn something the page itself already implies.
 func (r *TransactionRepo) List(ctx context.Context, householdID string, f usecase.TransactionFilter) ([]usecase.TransactionView, error) {
-	return nil, nil // Task 8
+	limit := f.Limit
+	if limit <= 0 {
+		limit = defaultTransactionLimit
+	}
+	if limit > maxTransactionLimit {
+		limit = maxTransactionLimit
+	}
+
+	params := sqlcgen.ListTransactionsParams{
+		HouseholdID: uuid(householdID),
+		RowLimit:    int32(limit + 1),
+	}
+	if f.Kind != "" {
+		kind := f.Kind
+		params.Kind = &kind
+	}
+	if f.AccountID != "" {
+		params.AccountID = nullableUUID(&f.AccountID)
+	}
+	if f.CategoryID != "" {
+		params.CategoryID = nullableUUID(&f.CategoryID)
+	}
+	if f.PaidByMembershipID != "" {
+		params.PaidBy = nullableUUID(&f.PaidByMembershipID)
+	}
+	if !f.Month.IsZero() {
+		params.MonthStart = dateOnly(startOfMonth(f.Month))
+	}
+	// Both cursor halves or neither: a date with no id cannot order two
+	// transactions on the same day, and the row-value comparison would compare
+	// against a NULL id and return nothing at all.
+	if !f.CursorDate.IsZero() && f.CursorID != "" {
+		params.CursorDate = dateOnly(f.CursorDate)
+		params.CursorID = nullableUUID(&f.CursorID)
+	}
+
+	rows, err := r.q.ListTransactions(ctx, params)
+	if err != nil {
+		return nil, translate(err, "list transactions")
+	}
+	out := make([]usecase.TransactionView, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, toTransactionViewFromList(row))
+	}
+	return out, nil
 }
 
+// MonthTotals returns every transaction in one calendar month; the service
+// converts each amount into the household's primary currency and sums it,
+// which SQL cannot do -- the FX provider lives one layer up.
 func (r *TransactionRepo) MonthTotals(ctx context.Context, householdID string, month time.Time) ([]usecase.TransactionView, error) {
-	return nil, nil // Task 8
+	rows, err := r.q.MonthTotalsQuery(ctx, sqlcgen.MonthTotalsQueryParams{
+		HouseholdID: uuid(householdID),
+		Column2:     dateOnly(startOfMonth(month)),
+	})
+	if err != nil {
+		return nil, translate(err, "month totals")
+	}
+	out := make([]usecase.TransactionView, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, toTransactionViewFromMonthTotals(row))
+	}
+	return out, nil
+}
+
+const (
+	// defaultTransactionLimit matches the ledger's own page size. maxTransactionLimit
+	// is what stops a caller asking for the whole ledger in one request --
+	// nothing in the UI sends a limit at all, so this only ever bounds a
+	// hand-written request.
+	defaultTransactionLimit = 50
+	maxTransactionLimit     = 200
+)
+
+// startOfMonth normalises any instant to the first day of its month, in UTC.
+// occurred_on is a date column and this product stores no timezone per
+// household, so a month is a calendar month and not a range of instants.
+func startOfMonth(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
+}
+
+func toTransactionViewFromList(row sqlcgen.ListTransactionsRow) usecase.TransactionView {
+	return buildTransactionView(
+		toTransaction(sqlcgen.Transaction{
+			ID: row.ID, HouseholdID: row.HouseholdID, Kind: row.Kind,
+			OccurredOn: row.OccurredOn, Description: row.Description,
+			CategoryID: row.CategoryID, PaidByMembershipID: row.PaidByMembershipID,
+			FromAccountID: row.FromAccountID, ToAccountID: row.ToAccountID,
+			AmountMinor: row.AmountMinor, AmountCurrency: row.AmountCurrency,
+			ReceivedAmountMinor:    row.ReceivedAmountMinor,
+			ReceivedAmountCurrency: row.ReceivedAmountCurrency,
+			CreatedAt:              row.CreatedAt,
+		}),
+		row.CategoryName, row.PaidByName, row.FromAccountName, row.ToAccountName,
+		row.BeforeFromOpening, row.BeforeToOpening,
+	)
+}
+
+func toTransactionViewFromMonthTotals(row sqlcgen.MonthTotalsQueryRow) usecase.TransactionView {
+	return buildTransactionView(
+		toTransaction(sqlcgen.Transaction{
+			ID: row.ID, HouseholdID: row.HouseholdID, Kind: row.Kind,
+			OccurredOn: row.OccurredOn, Description: row.Description,
+			CategoryID: row.CategoryID, PaidByMembershipID: row.PaidByMembershipID,
+			FromAccountID: row.FromAccountID, ToAccountID: row.ToAccountID,
+			AmountMinor: row.AmountMinor, AmountCurrency: row.AmountCurrency,
+			ReceivedAmountMinor:    row.ReceivedAmountMinor,
+			ReceivedAmountCurrency: row.ReceivedAmountCurrency,
+			CreatedAt:              row.CreatedAt,
+		}),
+		row.CategoryName, row.PaidByName, row.FromAccountName, row.ToAccountName,
+		row.BeforeFromOpening, row.BeforeToOpening,
+	)
 }

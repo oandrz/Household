@@ -8,6 +8,7 @@ import (
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres"
 	"github.com/andreasoentoro/hearth/api/internal/domain"
+	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
 func july(day int) time.Time {
@@ -379,5 +380,198 @@ func TestUpdateChangesEveryMutableFieldAtOnce(t *testing.T) {
 	}
 	if got.ReceivedAmount == nil || *got.ReceivedAmount != received {
 		t.Fatalf("receivedAmount = %+v, want %+v", got.ReceivedAmount, received)
+	}
+}
+
+// The reason paging is keyset and not offset. With OFFSET, inserting a row
+// dated between page one and page two shifts every later row by one, so the
+// reader either sees a transaction twice or never sees it at all -- silently,
+// in a list of their own money.
+//
+// The 17th gets a second transaction, on purpose. With every date otherwise
+// distinct, a keyset predicate that compares the date alone and one that
+// compares the (occurred_on, id) pair return identical results -- there is
+// never a tie for them to disagree over. The duplicate lands exactly on the
+// page-one/page-two boundary (page size 4, so the boundary is row 4 of the
+// 5 returned), which is the one place a date-only cursor drops a row a
+// row-value cursor would keep: it excludes the whole boundary date, not just
+// the boundary row.
+func TestPagingIsStableWhenARowIsInsertedMidScroll(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewTransactionRepo(db)
+	householdID := insertTestHousehold(t, db)
+	dbs := insertTestAccount(t, db, householdID, "DBS", "SGD")
+
+	// Ten transactions, one per day, newest 20 July.
+	var day17IDs []string
+	for day := 11; day <= 20; day++ {
+		created, err := repo.Create(ctx, domain.Transaction{
+			HouseholdID: householdID, Kind: domain.TransactionExpense,
+			OccurredOn: july(day), Description: "Day " + time.Month(7).String(),
+			FromAccountID: dbs, Amount: domain.Money{Amount: int64(day), Currency: "SGD"},
+		})
+		if err != nil {
+			t.Fatalf("create day %d: %v", day, err)
+		}
+		if day == 17 {
+			day17IDs = append(day17IDs, created.ID)
+		}
+	}
+	// The 17th's second row -- see the comment above for why it exists.
+	secondOn17, err := repo.Create(ctx, domain.Transaction{
+		HouseholdID: householdID, Kind: domain.TransactionExpense,
+		OccurredOn: july(17), Description: "Second transaction on the 17th",
+		FromAccountID: dbs, Amount: domain.Money{Amount: 1700, Currency: "SGD"},
+	})
+	if err != nil {
+		t.Fatalf("create second 17 July: %v", err)
+	}
+	day17IDs = append(day17IDs, secondOn17.ID)
+
+	first, err := repo.List(ctx, householdID, usecase.TransactionFilter{Limit: 4})
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	// Limit+1, so the caller can tell there is another page without a second
+	// query.
+	if len(first) != 5 {
+		t.Fatalf("first page returned %d rows, want limit+1 = 5", len(first))
+	}
+	last := first[3]
+
+	// Confirms the fixture landed where its comment says: the boundary is the
+	// 17th. If a future edit changes the loop bounds without updating this,
+	// this fails loudly instead of quietly testing nothing.
+	if !last.Transaction.OccurredOn.Equal(july(17)) {
+		t.Fatalf("page boundary landed on %v, want 17 July -- the fixture and this test have drifted apart",
+			last.Transaction.OccurredOn)
+	}
+	var sibling string
+	for _, id := range day17IDs {
+		if id != last.Transaction.ID {
+			sibling = id
+		}
+	}
+	if sibling == "" {
+		t.Fatalf("could not find the cursor row's 17 July sibling among %v", day17IDs)
+	}
+
+	// Someone else logs a transaction dated in the middle of what we are
+	// reading.
+	if _, err := repo.Create(ctx, domain.Transaction{
+		HouseholdID: householdID, Kind: domain.TransactionExpense,
+		OccurredOn: july(15), Description: "Inserted mid-scroll",
+		FromAccountID: dbs, Amount: domain.Money{Amount: 999, Currency: "SGD"},
+	}); err != nil {
+		t.Fatalf("insert mid-scroll: %v", err)
+	}
+
+	second, err := repo.List(ctx, householdID, usecase.TransactionFilter{
+		Limit:      4,
+		CursorDate: last.Transaction.OccurredOn,
+		CursorID:   last.Transaction.ID,
+	})
+	if err != nil {
+		t.Fatalf("second page: %v", err)
+	}
+
+	seen := map[string]bool{}
+	for _, v := range first[:4] {
+		seen[v.Transaction.ID] = true
+	}
+	foundSibling := false
+	for _, v := range second {
+		if seen[v.Transaction.ID] {
+			t.Fatalf("transaction %s appeared on both pages", v.Transaction.ID)
+		}
+		if v.Transaction.OccurredOn.After(last.Transaction.OccurredOn) {
+			t.Fatalf("page two contains %v, newer than the cursor %v",
+				v.Transaction.OccurredOn, last.Transaction.OccurredOn)
+		}
+		if v.Transaction.ID == sibling {
+			foundSibling = true
+		}
+	}
+	// This is the assertion the date-only mutation cannot pass: comparing
+	// only the date excludes every row dated the cursor's day, including this
+	// sibling, which the row-value comparison correctly keeps.
+	if !foundSibling {
+		t.Fatalf("page two is missing %s, the cursor's own sibling on 17 July -- "+
+			"a date-only cursor drops the whole boundary date, not just the boundary row", sibling)
+	}
+}
+
+// An account filter that only matched from_account_id would hide money
+// arriving in the account someone selected -- half of what they asked for.
+func TestTheAccountFilterMatchesBothSidesOfATransfer(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewTransactionRepo(db)
+	householdID := insertTestHousehold(t, db)
+	dbs := insertTestAccount(t, db, householdID, "DBS", "SGD")
+	ocbc := insertTestAccount(t, db, householdID, "OCBC", "SGD")
+
+	if _, err := repo.Create(ctx, domain.Transaction{
+		HouseholdID: householdID, Kind: domain.TransactionTransfer,
+		OccurredOn: july(18), Description: "To savings",
+		FromAccountID: dbs, ToAccountID: ocbc,
+		Amount: domain.Money{Amount: 50000, Currency: "SGD"},
+	}); err != nil {
+		t.Fatalf("create transfer: %v", err)
+	}
+
+	for _, accountID := range []string{dbs, ocbc} {
+		got, err := repo.List(ctx, householdID, usecase.TransactionFilter{
+			AccountID: accountID, Limit: 20,
+		})
+		if err != nil {
+			t.Fatalf("list for %s: %v", accountID, err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("account filter returned %d rows for one side of a transfer, want 1", len(got))
+		}
+	}
+}
+
+func TestMonthTotalsCoversTheWholeMonthAndNothingElse(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewTransactionRepo(db)
+	householdID := insertTestHousehold(t, db)
+	dbs := insertTestAccount(t, db, householdID, "DBS", "SGD")
+
+	days := []time.Time{
+		time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC), // out, previous month
+		july(1),                                      // in, first day
+		july(31),                                     // in, last day
+		time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC),  // out, next month
+	}
+	for i, day := range days {
+		if _, err := repo.Create(ctx, domain.Transaction{
+			HouseholdID: householdID, Kind: domain.TransactionExpense,
+			OccurredOn: day, Description: "Row", FromAccountID: dbs,
+			Amount: domain.Money{Amount: int64(i + 1), Currency: "SGD"},
+		}); err != nil {
+			t.Fatalf("create %v: %v", day, err)
+		}
+	}
+
+	got, err := repo.MonthTotals(ctx, householdID, july(15))
+	if err != nil {
+		t.Fatalf("month totals: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("July contains %d transactions, want the 1st and the 31st only", len(got))
+	}
+	// Not just the count: the specific boundary rows, so a bug that swaps in
+	// the wrong pair of rows (right count, wrong dates) cannot pass by
+	// coincidence.
+	gotDates := map[string]bool{}
+	for _, v := range got {
+		gotDates[v.Transaction.OccurredOn.Format("2006-01-02")] = true
+	}
+	if !gotDates[july(1).Format("2006-01-02")] || !gotDates[july(31).Format("2006-01-02")] {
+		t.Fatalf("month totals returned dates %v, want exactly 1 and 31 July", gotDates)
 	}
 }

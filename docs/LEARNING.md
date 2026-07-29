@@ -185,6 +185,28 @@ run it before adding a fourth site.
   what it actually proves rather than deleted, since the household-cascade
   property it does prove is still real coverage.
 
+- Same slice, Task 8: the brief's own
+  `TestPagingIsStableWhenARowIsInsertedMidScroll` created ten transactions on
+  ten *different* days, then paged with a keyset cursor. A cursor comparing
+  only the date and one comparing the `(date, id)` pair return identical
+  results whenever no two rows share a date — there is never a tie for them to
+  disagree over — so the brief's own mutation instruction (weaken the
+  predicate to date-only, confirm red) would have reported a false pass
+  against its own fixture. Caught before ever running the mutation, by tracing
+  the parent task's explicit question rather than trusting the brief's test as
+  given. Fixed two things together, because the assertions had the same gap
+  as the fixture: added a second transaction dated onto the page boundary
+  (deterministic given the loop bounds and page size, not random — with days
+  11–20 and a page of 4, the boundary row is always the 17th), and added an
+  explicit "the boundary's sibling row must appear on page two" assertion.
+  That second part mattered on its own: the existing assertions (no id on
+  both pages, nothing newer than the cursor) do not notice a row that simply
+  vanishes, and a date-only predicate's actual failure mode here is silently
+  dropping the whole boundary date, not duplicating a row — a duplicate-only
+  check would have stayed green even with the fixture fixed. Confirmed the
+  mutation red (`page two is missing ..., the cursor's own sibling on 17
+  July`) before restoring.
+
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
 a different reason than the one you meant to prove, that is not yet proof
