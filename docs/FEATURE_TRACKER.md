@@ -13,7 +13,7 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 44 of 91 features built or partly built. Money now has
+**Where things stand:** 45 of 92 features built or partly built. Money now has
 two features built — Accounts (a household records what it owns and owes by
 hand and sees a net worth built from it) and the Transactions ledger (logging,
 editing and deleting expenses, income and transfers, with filters and the five
@@ -31,6 +31,10 @@ reason each: archive and restore, which the design never draws anywhere in
 Money (see the Finances table below); and two ⬜ rows — custom account types
 and a warning before a primary-currency change strands every account — for
 work the accounts spec named and deliberately deferred rather than built.
+Transactions adds one more: **Categories**, whose list and seeding this
+feature needed even though the design draws category management only inside
+Budget's "Edit categories" screen — the one screen that will get its own row
+here, unbuilt, once Budget exists.
 
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
@@ -38,11 +42,11 @@ work the accounts spec named and deliberately deferred rather than built.
 | Navigation shell | 6 | 0 | 1 | 0 |
 | Household settings | 15 | 4 | 2 | 0 |
 | Overview (home) | 0 | 0 | 8 | 0 |
-| Money | 7 | 1 | 19 | 0 |
+| Money | 8 | 1 | 19 | 0 |
 | Marriage | 0 | 0 | 13 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **38** | **6** | **45** | **2** |
+| **Total** | **39** | **6** | **45** | **2** |
 
 ---
 
@@ -264,10 +268,34 @@ it there directly, so a correction made on an older page is not left showing
 its stale, pre-edit value.
 
 **Inline category editing and Export CSV are the two pieces of the design's
-Transactions screen still unbuilt.** Changing a transaction's category today
-means opening the same edit modal used for everything else, not clicking the
-category text directly in the ledger row. CSV export has no button anywhere
-yet.
+Transactions screen still unbuilt, for different reasons.** Changing a
+transaction's category today means opening the same edit modal used for
+everything else, not clicking the category text directly in the ledger row —
+a second control for the one field the modal already edits is more surface
+for the same outcome, so it is deferred rather than missing by accident.
+Export CSV is deferred for a structural reason (the transactions spec's
+decision 7): `apiFetch` is the only way the frontend talks to the server and
+throws on an ok response it cannot parse as JSON, so a CSV download needs its
+own non-JSON response path out of the frontend, with its own guard and its
+own test. Building the file client-side from what the ledger has already
+fetched was rejected for the same decision: with keyset pagination, that would
+silently omit every row past the first page and produce a file that looks
+right but isn't.
+
+**Categories**
+
+| Feature | State |
+|---|---|
+| Category list, seeded on first use | ✅ |
+
+**The list and the seeding are built; editing the list is not.** The starter
+set of thirteen categories (`domain.StarterCategories()`) is created the first
+time a household's own list is read — by `GET /api/v1/categories` or the
+transaction modal's dropdown — not at household creation, so provisioning a
+new household stays untouched by a feature it does not need. Renaming, adding
+and archiving a category is Budget's "Edit categories" screen, not this one;
+the design draws category management only there, which is why this feature
+adds a row the design itself has no mockup for.
 
 **Budget**
 

@@ -1,9 +1,10 @@
 # Hearth — learning log
 
-Every defect found while building slices 0, 1, self-serve sign-up and Accounts
-(slice 2's first feature), and what each one teaches. Written because almost
-none of them were caught by a failing test — they were caught by someone
-asking the right question about code that looked fine and had a green suite.
+Every defect found while building slices 0, 1, self-serve sign-up, Accounts and
+Transactions (slice 2's first two features), and what each one teaches.
+Written because almost none of them were caught by a failing test — they were
+caught by someone asking the right question about code that looked fine and
+had a green suite.
 
 **Read the patterns first.** They are where the value is. The catalogue below
 them is evidence, and a place to check when you touch that area.
@@ -220,6 +221,43 @@ run it before adding a fourth site.
   mutation red (`page two is missing ..., the cursor's own sibling on 17
   July`) before restoring.
 
+- Same slice, Task 11: `TestSpendCountsATransactionDatedBeforeTheAccountsOpeningBalance`
+  (`internal/usecase/monthsummary_test.go`) asserts that a transaction dated
+  before its account's opening balance still counts toward the month's spend
+  — the split decision 6 pins: excluded from the balance, still counted as
+  spend, because the money was actually spent. `MonthSummary` decides that by
+  reading `TransactionView.BeforeFromAccountOpening`, but neither test double
+  the brief supplied (`fakeAccountLookup`, `fakeTransactionRepo`) ever set
+  that field anywhere — it is populated only by the real Postgres join in
+  `adapter/postgres/transaction_repo.go`. The flag was permanently `nil` in
+  every run of this test, so a `MonthSummary` that actively filtered out
+  `BeforeFromAccountOpening` rows — the exact opposite of the rule being
+  tested — would have seen nothing to filter and passed identically;
+  confirmed by injecting exactly that filter and watching the test stay
+  green. Fixed by giving `fakeTransactionRepo` a
+  `markBeforeFromAccountOpening` setter, called on the transaction under test
+  before `MonthSummary` runs — the double now actually simulates the
+  condition its own name claims to test, and the same injected filter now
+  fails for the right reason (`spent = 0, want 840`).
+
+- Same slice, Task 13: `TestTransactionRoutesRequireMoneyAndOwner`
+  (`internal/adapter/http/api_test.go`) walks the new transactions and
+  categories routes to prove each requires `money` and owner. The test
+  harness builds its own `httpadapter.Deps` in `newTestEnvWithClock`, entirely
+  separate from `main.go`'s wiring, and the brief's own instructions covered
+  wiring `Transactions`/`Categories` into `main.go` only — never into the
+  harness's copy. With those fields left nil, every owner request panicked on
+  a nil pointer inside the handler and was recovered by `recoverer` into a
+  bare `500`. The test's own assertion was `rec.Code != 401 && rec.Code !=
+  403` — true of *any* status that isn't one of those two, 500 included — so
+  three of five routes 500'd on a dependency that was never wired, and the
+  test passed as if it had proven the guard. Found by reading debug logging,
+  not by the assertion going red. Fixed by wiring the harness's `Deps` the
+  same way `main.go` is, and replacing the two-way exclusion with an exact
+  expected status per route, so a route whose handler never ran fails loudly
+  instead of sliding through a check built to reject only two specific
+  numbers.
+
 - Same slice, Task 15 (the Log-a-transaction modal): the brief's given test
   file imported `userEvent` from `@testing-library/user-event`, which is not a
   dependency of this project at all — only `@testing-library/react` and
@@ -355,6 +393,21 @@ run it before adding a fourth site.
   failed before Step 3 and passed after — the pair together is what proves
   both "the route exists" and "it's gated," where either test alone proves
   only one.
+
+**One feature — Transactions, Tasks 5 through 17 — accounts for nine of the
+entries above this line, more than any other piece of work in this log.**
+They are not nine copies of the same mistake. A short-circuit (a count
+check reached, and returned, before the clause under test). A serialised race
+(concurrent goroutines that all paid the same one-time connection-dial cost
+before any of them raced anything). A shared guard (a route already refused
+for a reason that had nothing to do with the row the test was named after).
+An unwired fixture (a test harness's own dependencies left nil, caught only
+because a loose assertion happened not to distinguish 500 from success). And,
+twice, a value that was simply never set — a fake double never told to
+simulate the condition its own test claims to exercise, or a `<select>`
+option chosen that did not exist in the fixture list. None of the nine were
+caught by the test itself failing; every one needed a person to ask whether
+the test could ever have gone red in the first place.
 
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
@@ -646,6 +699,38 @@ anything to prove itself against.
   struct, not just sqlc's, which is why a later task re-checked all 17 call
   sites of the higher-level `HouseholdRepository.Create` by hand for the
   identical reason.
+- The instinct on `transactions.from_account_id`/`to_account_id` was `ON
+  DELETE RESTRICT` — the application never deletes an account, only archives
+  it, so a restrict looked free. It would have broken deleting a *household*:
+  the household cascade reaches its own accounts, and a restrict from
+  transactions would block that cascade partway through, with no way to
+  remove a household that had ever recorded a transaction. `ON DELETE
+  CASCADE` is correct precisely because the clause is unreachable in ordinary
+  use and must not stand in the way the one time it fires. Found by reasoning
+  about the cascade before the schema shipped, not by a test — a test that
+  deletes a household with transactions still in it now exists
+  (`TestDeletingAMemberKeepsTheirTransactionsAndDeletingAHouseholdTakesThemAway`;
+  see pattern 2 above for what that same test's own comment got wrong about
+  what it proves).
+- `TransactionRepo.List` builds its optional filters as the standard "`IS
+  NULL OR column = $n`" form — no filter means match everything. But
+  `uuid()`'s own doc comment promises that a malformed id "matches no row,"
+  and parsing a garbage string produces `pgtype.UUID{Valid: false}`, which
+  reads as SQL `NULL` — indistinguishable, in that `IS NULL OR ...` form, from
+  an *absent* filter. A garbage `accountId` therefore silently became "no
+  account filter" and returned the whole household's ledger: the opposite of
+  what the same helper's own comment promises, and the opposite of `Kind`, a
+  plain string that fails closed on the same kind of bad input (an
+  unrecognised value can never equal any row's `kind` column, so it correctly
+  returns nothing). Fixed by checking `id.Valid` explicitly for every
+  optional uuid filter (`AccountID`, `CategoryID`, `PaidByMembershipID`) and
+  returning an empty result when it is false, rather than falling through to
+  a query that cannot tell "invalid" from "unset." The repository guard is
+  not the only line of defence: the handler itself already refuses a
+  malformed `account_id`/`category_id`/`paid_by` at `422` before the
+  repository is ever called, and the paging cursor's id half is checked
+  separately again in `decodeCursor`, deliberately, since `TransactionRepository.List`
+  has no `Valid` guard on `CursorID` the way it does on the other three.
 
 ### HTTP layer
 
@@ -807,6 +892,21 @@ route with a missing guard has no second line of defence.
   *before* the edit and does not *after*, not from the new value in isolation,
   because "the new value is null" alone is true both when a transfer's fee was
   genuinely just cleared and every time a non-transfer's form submits at all.
+- `TransactionModal`'s Amount-received field used one flag
+  (`receivedAmountTouched`) to gate two independent rules: whether to clear
+  the field on a genuine currency-pair change, and whether to mirror it to
+  Amount sent for a same-currency transfer. Typing a same-currency transfer
+  fee (dbs → ocbc, both SGD) set the flag; changing the destination
+  afterwards to a different-currency account (bca, IDR) left the old figure
+  sitting in the field, because the touched flag now suppressed the clear it
+  was never meant to gate — the amount would have submitted under the *new*
+  currency's minor units, silently misvalued. One flag answering two
+  questions is what let a rule written for the second question block the
+  first. Fixed by splitting it into two independent states: a
+  `currencyPairKey`/`lastCurrencyPairKey` comparison that unconditionally
+  clears Amount received the moment the actual currency pair changes, leaving
+  `receivedAmountTouched` to govern only the same-currency mirroring it was
+  named for.
 
 ### Tooling and infrastructure
 
