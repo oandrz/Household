@@ -16,7 +16,7 @@
 import { type FormEvent, useState } from "react";
 import { Modal } from "../../components/Modal";
 import { apiErrorMessage } from "../auth/copy";
-import { minorUnitsToInputValue, toMinorUnits } from "./formatMoney";
+import { describeAmountError, minorUnitsToInputValue, toMinorUnits } from "./formatMoney";
 import { TRANSACTIONS_COPY } from "./transactionCopy";
 import { useCategories } from "./useTransactions";
 import type { Account } from "./schemas";
@@ -166,8 +166,16 @@ export function TransactionModal({
     setReceivedAmountError(null);
 
     const amountMinor = toMinorUnits(amountInput, primaryCurrency);
-    if (amountMinor === null || amountMinor <= 0) {
-      setAmountError("Enter an amount, like 52.30.");
+    if (amountMinor === null) {
+      // describeAmountError distinguishes "not a number" from "this currency
+      // doesn't use cents" -- the same distinction AccountModal's Balance
+      // field makes, shared so the two forms can't answer it differently for
+      // the same currency (e.g. logging an expense against an IDR account).
+      setAmountError(describeAmountError(amountInput, primaryCurrency, "52.30"));
+      return;
+    }
+    if (amountMinor <= 0) {
+      setAmountError("Enter an amount greater than zero.");
       return;
     }
 
@@ -180,8 +188,12 @@ export function TransactionModal({
         }
       } else {
         const parsed = toMinorUnits(receivedAmountInput, toCurrency ?? "");
-        if (parsed === null || parsed <= 0) {
-          setReceivedAmountError("Enter an amount, like 52.30.");
+        if (parsed === null) {
+          setReceivedAmountError(describeAmountError(receivedAmountInput, toCurrency ?? "", "52.30"));
+          return;
+        }
+        if (parsed <= 0) {
+          setReceivedAmountError("Enter an amount greater than zero.");
           return;
         }
         receivedAmountMinor = parsed;

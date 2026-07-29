@@ -214,6 +214,24 @@ describe("TransactionModal", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
+  // Sibling of AccountModal's own "names the currency, not the figure" test:
+  // logging an expense against an IDR account (bca, in these fixtures -- and
+  // the design's own "Transfer to BCA" row) with a figure that still has
+  // cents must not tell the person to type back the exact thing they typed.
+  it("names the currency, not the figure, when the account takes no cents", () => {
+    renderModal();
+
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "Warung" } });
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "50000.50" } });
+    fireEvent.change(screen.getByLabelText(/account/i), { target: { value: "bca" } });
+    fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
+
+    expect(
+      screen.getByText("IDR doesn't use cents. Remove the decimal point."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Enter an amount, like 52.30.")).not.toBeInTheDocument();
+  });
+
   it("prefills every field from an existing transaction for editing", () => {
     renderModal({ initial: EXPENSE_TRANSACTION });
 

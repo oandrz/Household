@@ -46,6 +46,19 @@ kept the bug.
   (`process.env.TZ` already works in the test runner) and the test was added
   in the same task.
 
+- Same slice, Task 15: `AccountModal`'s Balance field distinguishes "not a
+  number" from "this currency doesn't use cents" (a switch to IDR/VND without
+  touching the figure), with a comment explaining why restating the number
+  back is the wrong message for the second case. `TransactionModal`'s first
+  draft of Amount/Amount received had only the generic message, reachable the
+  same way — logging an expense against the seeded household's own IDR
+  account (BCA) with a figure that still has cents. Not caught by a failing
+  test (none existed yet for this path in the new component); caught by a
+  reviewer reading the sibling code before declaring the task done. Fixed by
+  moving the distinction out of `AccountModal` into a shared
+  `describeAmountError` helper in `formatMoney.ts`, used by both fields in
+  both components, and adding a test plus a mutation check to each.
+
 **When you fix something, grep for its shape before you close it.** The question
 that finds these is not "is this fixed?" but "where else does this pattern
 appear?" `Truncate` is now that grep for date-and-location bugs specifically —

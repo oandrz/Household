@@ -19,7 +19,7 @@ import { apiErrorMessage } from "../auth/copy";
 import { useCurrencies, useMe } from "../auth/useAuth";
 import { membersListSchema, type MemberView } from "../settings/schemas";
 import { ACCOUNT_TYPES, ACCOUNT_TYPE_LABELS, LIABILITY_TYPES } from "./accountTypes";
-import { minorUnitsToInputValue, NO_DECIMAL_CURRENCIES, toMinorUnits } from "./formatMoney";
+import { describeAmountError, minorUnitsToInputValue, toMinorUnits } from "./formatMoney";
 import { useCreateAccount, useUpdateAccount } from "./useAccounts";
 import type { Account, AccountType } from "./schemas";
 
@@ -157,18 +157,10 @@ export function AccountModal({
       // without touching Balance -- an SGD account showing "8240.55" stays
       // exactly that after switching to IDR, so restating it back as "enter
       // an amount, like 8240.55" describes the very thing already in the
-      // field rather than what actually went wrong. hasADecimalPoint is
-      // deliberately its own small check, not a reason toMinorUnits itself
-      // returned null: it only ever changes which of two messages is shown,
-      // never whether the value is accepted, so it staying in sync with
-      // toMinorUnits's own number format is a copy concern, not a
-      // correctness one.
-      const hasADecimalPoint = /^-?\d+\.\d+$/.test(balanceInput.trim().replace(/,/g, ""));
-      if (NO_DECIMAL_CURRENCIES.has(currency) && hasADecimalPoint) {
-        setBalanceError(`${currency} doesn't use cents. Remove the decimal point.`);
-        return null;
-      }
-      setBalanceError("Enter an amount, like 8240.55.");
+      // field rather than what actually went wrong. describeAmountError is
+      // shared with TransactionModal's Amount/Amount received fields so the
+      // two forms can't answer "what's wrong with 8240.55 in IDR" differently.
+      setBalanceError(describeAmountError(balanceInput, currency, "8240.55"));
       return null;
     }
     // The same rule domain.AccountType.SignedNetWorthAmount enforces, said

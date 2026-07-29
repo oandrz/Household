@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatMoney, toMinorUnits } from "./formatMoney";
+import { describeAmountError, formatMoney, toMinorUnits } from "./formatMoney";
 
 describe("formatMoney", () => {
   it("renders the design's SGD figure", () => {
@@ -41,5 +41,21 @@ describe("toMinorUnits", () => {
     expect(toMinorUnits("8240.555", "SGD")).toBeNull();
     expect(toMinorUnits("85400000.5", "IDR")).toBeNull();
     expect(toMinorUnits("eight", "SGD")).toBeNull();
+  });
+});
+
+describe("describeAmountError", () => {
+  // Restating the figure back ("Enter an amount, like 8240.55") would
+  // describe exactly what's already in the field when the actual problem is
+  // that IDR doesn't take a decimal point at all -- named explicitly instead.
+  it("names the currency when a real number has more decimals than it allows", () => {
+    expect(describeAmountError("85400000.50", "IDR", "8240.55")).toBe(
+      "IDR doesn't use cents. Remove the decimal point.",
+    );
+  });
+
+  it("falls back to the generic message for anything that isn't a number", () => {
+    expect(describeAmountError("eight", "SGD", "8240.55")).toBe("Enter an amount, like 8240.55.");
+    expect(describeAmountError("eight", "IDR", "8240.55")).toBe("Enter an amount, like 8240.55.");
   });
 });

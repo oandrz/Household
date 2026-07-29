@@ -109,3 +109,24 @@ export function minorUnitsToInputValue(amountMinor: number, currency: string): s
   const value = decimals === 0 ? String(whole) : `${whole}.${String(cents).padStart(2, "0")}`;
   return negative ? `-${value}` : value;
 }
+
+// Chooses the message for a monetary field toMinorUnits refused: "not a
+// number" when that is what actually went wrong, or the currency-specific
+// message when the figure is a real number but has more decimals than the
+// currency allows -- typically a currency switching to a no-decimal one (IDR,
+// VND) without the amount itself being touched. Originally lived only inside
+// AccountModal's Balance validation, whose own comment explains why the
+// currency-specific message matters: restating the figure back ("Enter an
+// amount, like 8240.55") describes exactly what is already in the field
+// rather than what is wrong with it. Moved here once TransactionModal needed
+// the same distinction for Amount and Amount received -- two fields making
+// this decision independently is the same "components disagree about 52.30"
+// risk toMinorUnits's own comment warns about, just for the error message
+// instead of the parsed value.
+export function describeAmountError(input: string, currency: string, example: string): string {
+  const hasADecimalPoint = /^-?\d+\.\d+$/.test(input.trim().replace(/,/g, ""));
+  if (NO_DECIMAL_CURRENCIES.has(currency) && hasADecimalPoint) {
+    return `${currency} doesn't use cents. Remove the decimal point.`;
+  }
+  return `Enter an amount, like ${example}.`;
+}
