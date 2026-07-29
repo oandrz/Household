@@ -4,11 +4,15 @@ Walked 2026-07-29 against the `transactions` worktree, in a real browser
 (Playwright driving Chromium) on a wiped database: `make down`, `docker volume
 rm hearth_hearth-pgdata`, `make up && make seed`.
 
-**Result: 15 of 15 criteria pass**, plus the three carried-forward items and
-the modal open/trap/Escape/backdrop check. One defect was found and fixed —
-a keyboard focus indicator missing on the ledger's Kind filter — and the
-first attempt at that fix was itself caught half-wrong by the same walk (see
-"What the fix's own near-miss showed", below).
+**Result: 15 of 15 criteria pass; one of the three carried-forward items
+failed and was fixed.** That item — carried item C, the Kind filter's
+keyboard behaviour — had no visible focus ring at all on first walk: a real
+defect, not a criterion-wording issue. It was fixed, re-walked, and now
+passes; the modal open/trap/Escape/backdrop check and the other two carried
+items all passed on the first walk. The fix's own first attempt was itself
+caught half-wrong by this same walk (see "Carried item C, in full", below) —
+say that plainly rather than letting "15 of 15" read as "nothing was
+found."
 
 Screenshots referenced below are in
 `docs/superpowers/plans/2026-07-29-hearth-transactions-screenshots/`.
