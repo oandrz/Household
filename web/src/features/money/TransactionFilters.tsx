@@ -31,7 +31,8 @@ export type TransactionFilterValues = {
 
 const SELECT_CLASS =
   "rounded-lg border border-hairline bg-card px-3 py-1.5 text-[12.5px] text-label";
-const LABEL_CLASS = "text-[10.5px] font-semibold uppercase tracking-wide text-muted";
+const LABEL_CLASS =
+  "text-[10.5px] font-semibold uppercase tracking-wide text-muted";
 
 // value "" is "All" -- the same empty-string-means-unset convention every
 // other filter here uses, so toQueryString (useTransactions.ts) omits it from
@@ -64,24 +65,48 @@ export function TransactionFilters({
       <fieldset className="m-0 flex flex-col gap-1 border-0 p-0">
         <legend className={LABEL_CLASS}>Kind</legend>
         <div className="flex overflow-hidden rounded-lg border border-hairline">
-          {KIND_OPTIONS.map((option, index) => (
-            <label
-              key={option.value || "all"}
-              className={`cursor-pointer px-3 py-1.5 text-[12.5px] font-semibold ${
-                index > 0 ? "border-l border-hairline" : ""
-              } ${values.kind === option.value ? "bg-ink text-white" : "bg-card text-label"}`}
-            >
-              <input
-                type="radio"
-                name="txn-filter-kind"
-                value={option.value}
-                checked={values.kind === option.value}
-                onChange={(event) => set("kind", event.target.value)}
-                className="sr-only"
-              />
-              {option.label}
-            </label>
-          ))}
+          {KIND_OPTIONS.map((option, index) => {
+            const selected = values.kind === option.value;
+            return (
+              <label
+                key={option.value || "all"}
+                className={`cursor-pointer px-3 py-1.5 text-[12.5px] font-semibold has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset ${
+                  // The ring colour has to change with the pill's own
+                  // background: `ring-accent` (a dark green) is invisible
+                  // inset against the selected pill's `bg-ink`, which is
+                  // nearly the same darkness -- confirmed by two browser-walk
+                  // screenshots of a focused, selected pill being pixel-
+                  // identical before and after the first fix. `ring-white`
+                  // reads against `bg-ink`; `ring-accent` still reads against
+                  // the unselected pill's light `bg-card`.
+                  selected
+                    ? "has-[:focus-visible]:ring-white"
+                    : "has-[:focus-visible]:ring-accent"
+                } ${
+                  index > 0 ? "border-l border-hairline" : ""
+                } ${selected ? "bg-ink text-white" : "bg-card text-label"}`}
+              >
+                {/* The real, keyboard-operable radio is `sr-only` -- visually
+                  hidden but still focusable -- so the pill drawn by this
+                  label is the only thing a sighted user sees. Without the
+                  has-[:focus-visible] ring above, arrow-keying or Tabbing
+                  through this group moved focus with no visible sign of it:
+                  a selected pill and a selected-and-focused pill were pixel
+                  identical, an unselected-and-focused one just as blank as
+                  before. The browser walk this task exists for (jsdom cannot
+                  drive real Tab/arrow-key focus) is what caught it. */}
+                <input
+                  type="radio"
+                  name="txn-filter-kind"
+                  value={option.value}
+                  checked={values.kind === option.value}
+                  onChange={(event) => set("kind", event.target.value)}
+                  className="sr-only"
+                />
+                {option.label}
+              </label>
+            );
+          })}
         </div>
       </fieldset>
 

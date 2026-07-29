@@ -16,7 +16,9 @@ import type { MonthSummary, Transaction } from "./transactionSchemas";
 
 const CURRENCIES = {
   status: 200,
-  body: { currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }] },
+  body: {
+    currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }],
+  },
 };
 
 // The one account every fixture below attaches its transactions to.
@@ -88,7 +90,10 @@ function transferFixture(overrides: Partial<Transaction> = {}): Transaction {
   };
 }
 
-type SummaryInput = Partial<MonthSummary> & { count: number; spentMinor: number };
+type SummaryInput = Partial<MonthSummary> & {
+  count: number;
+  spentMinor: number;
+};
 
 function fullSummary(input: SummaryInput): MonthSummary {
   return {
@@ -181,7 +186,12 @@ function renderPage(options: {
 
   stubFetchRoutes(routes);
 
-  return { ...renderWithRouter(<TransactionsPage />), patched, deleted, posted };
+  return {
+    ...renderWithRouter(<TransactionsPage />),
+    patched,
+    deleted,
+    posted,
+  };
 }
 
 describe("TransactionsPage", () => {
@@ -208,9 +218,52 @@ describe("TransactionsPage", () => {
     // screen-reader user does with a native radio group.
     fireEvent.click(await screen.findByRole("radio", { name: "Income" }));
 
-    expect(await screen.findByText(/nothing matches those filters/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/nothing matches those filters/i),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/nothing logged yet/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /clear filters/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /clear filters/i }),
+    ).toBeInTheDocument();
+  });
+
+  // The Kind radio's real, keyboard-operable <input> is `sr-only` -- visually
+  // hidden -- so the pill drawn by its <label> is the only thing a sighted
+  // user sees. The Task 19 browser walk found that Tabbing or arrow-keying
+  // through this group moved focus with no visible sign of it at all: jsdom's
+  // fireEvent.click above cannot exercise real keyboard focus, so nothing
+  // caught the label never reacting to the input's :focus-visible state. This
+  // pins the fix's className -- it does not, and cannot in jsdom, prove the
+  // ring actually renders on screen; that half was proved by the browser
+  // walk itself (see docs/superpowers/plans/
+  // 2026-07-29-hearth-transactions-verification.md, carried item C).
+  //
+  // Two colours, not one: the walk's first fix used a single dark-green ring
+  // for every pill, and two screenshots of the selected-and-focused "Expense"
+  // pill came back pixel-identical before and after that fix -- a dark ring
+  // inset against the selected pill's near-black background is invisible.
+  // The selected ("All", the default kind) and unselected ("Income") pills
+  // now carry different ring colours for exactly that reason, so this test
+  // checks both rather than either alone.
+  it("gives the Kind radio group's label a focus-visible ring class, in a colour that reads against its own background", async () => {
+    renderPage({
+      transactions: [expenseFixture()],
+      summary: { count: 1, spentMinor: 5230 },
+    });
+
+    const selectedLabel = (
+      await screen.findByRole("radio", { name: "All" })
+    ).closest("label");
+    const unselectedLabel = screen
+      .getByRole("radio", { name: "Income" })
+      .closest("label");
+
+    expect(selectedLabel?.className).toMatch(
+      /has-\[:focus-visible\]:ring-white/,
+    );
+    expect(unselectedLabel?.className).toMatch(
+      /has-\[:focus-visible\]:ring-accent/,
+    );
   });
 
   it("hides Load older transactions when there is no next cursor", async () => {
@@ -220,7 +273,9 @@ describe("TransactionsPage", () => {
       nextCursor: null,
     });
     await screen.findByText("Cold Storage");
-    expect(screen.queryByRole("button", { name: /load older/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /load older/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows Load older transactions when the server sent a cursor", async () => {
@@ -229,7 +284,9 @@ describe("TransactionsPage", () => {
       summary: { count: 1, spentMinor: 5230 },
       nextCursor: "2026-07-16:txn-9",
     });
-    expect(await screen.findByRole("button", { name: /load older/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: /load older/i }),
+    ).toBeInTheDocument();
   });
 
   // A quietly short total looks identical to a correct one.
@@ -242,22 +299,34 @@ describe("TransactionsPage", () => {
         excludedNoRate: [{ transactionId: "txn-1", currency: "USD" }],
       },
     });
-    expect(await screen.findByText(/no exchange rate for USD/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/no exchange rate for USD/i),
+    ).toBeInTheDocument();
   });
 
   // Naming the account matters: a transfer can predate one side's opening
   // balance and not the other's.
   it("marks a row that predates its account's opening balance, naming the account", async () => {
     renderPage({
-      transactions: [{ ...expenseFixture(), beforeFromAccountOpeningBalance: true }],
+      transactions: [
+        { ...expenseFixture(), beforeFromAccountOpeningBalance: true },
+      ],
       summary: { count: 1, spentMinor: 5230 },
     });
-    expect(await screen.findByText(/before DBS Everyday's opening balance/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/before DBS Everyday's opening balance/i),
+    ).toBeInTheDocument();
   });
 
   it("disables Add transaction when the household has no accounts", async () => {
-    renderPage({ transactions: [], summary: { count: 0, spentMinor: 0 }, accounts: [] });
-    expect(await screen.findByRole("button", { name: /add transaction/i })).toBeDisabled();
+    renderPage({
+      transactions: [],
+      summary: { count: 0, spentMinor: 0 },
+      accounts: [],
+    });
+    expect(
+      await screen.findByRole("button", { name: /add transaction/i }),
+    ).toBeDisabled();
     expect(screen.getByText(/add an account first/i)).toBeInTheDocument();
   });
 
@@ -270,7 +339,9 @@ describe("TransactionsPage", () => {
       summary: { count: 1, spentMinor: 5230 },
     });
 
-    fireEvent.click(await screen.findByRole("button", { name: /Cold Storage/i }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Cold Storage/i }),
+    );
 
     // Populated, not blank: an edit form that opens empty silently clears
     // every field the person does not retype.
@@ -320,7 +391,9 @@ describe("TransactionsPage", () => {
       ],
     });
 
-    fireEvent.click(await screen.findByRole("button", { name: /Transfer to OCBC/i }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Transfer to OCBC/i }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Expense" }));
     fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
 
@@ -340,13 +413,17 @@ describe("TransactionsPage", () => {
       summary: { count: 1, spentMinor: 5230 },
     });
 
-    fireEvent.click(await screen.findByRole("button", { name: /Cold Storage/i }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Cold Storage/i }),
+    );
     fireEvent.click(screen.getByRole("button", { name: /delete/i }));
     // In-page confirmation, never window.confirm: a native dialog blocks every
     // browser event and would freeze an automated walk.
     fireEvent.click(screen.getByRole("button", { name: /yes, delete/i }));
 
-    await waitFor(() => expect(deleted).toHaveBeenCalledWith("/api/v1/transactions/txn-1"));
+    await waitFor(() =>
+      expect(deleted).toHaveBeenCalledWith("/api/v1/transactions/txn-1"),
+    );
     // Proves the deletion actually completed, not merely that the request
     // left: `capture` fires before stubFetchRoutes constructs its Response,
     // so a request that throws *after* being captured (as a wrongly-shaped
@@ -355,7 +432,9 @@ describe("TransactionsPage", () => {
     // leaves the dialog open on a submitError. The dialog closing only
     // happens from onClose, which only runs once onDelete's promise actually
     // resolves.
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
   });
 
   // Review round, finding 2: nothing in this suite exercised the create path
@@ -368,7 +447,9 @@ describe("TransactionsPage", () => {
       summary: { count: 1, spentMinor: 5230 },
     });
 
-    fireEvent.click(await screen.findByRole("button", { name: /add transaction/i }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /add transaction/i }),
+    );
 
     // Blank, not populated -- the opposite of the edit test's own assertion:
     // opening Add must never carry another row's values into a new one.
@@ -378,13 +459,18 @@ describe("TransactionsPage", () => {
     fireEvent.change(screen.getByLabelText(/description/i), {
       target: { value: "Kopitiam lunch" },
     });
-    fireEvent.change(screen.getByLabelText(/^amount/i), { target: { value: "8.40" } });
+    fireEvent.change(screen.getByLabelText(/^amount/i), {
+      target: { value: "8.40" },
+    });
     fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
 
     await waitFor(() =>
       expect(posted).toHaveBeenCalledWith(
         "/api/v1/transactions",
-        expect.objectContaining({ description: "Kopitiam lunch", amountMinor: 840 }),
+        expect.objectContaining({
+          description: "Kopitiam lunch",
+          amountMinor: 840,
+        }),
       ),
     );
   });
@@ -416,7 +502,10 @@ describe("TransactionsPage", () => {
       summary: { count: 2, spentMinor: 6710 },
       nextCursor: "cursor-1",
       extraRoutes: {
-        "GET /api/v1/transactions?cursor=cursor-1": { status: 200, body: olderPage },
+        "GET /api/v1/transactions?cursor=cursor-1": {
+          status: 200,
+          body: olderPage,
+        },
         "PATCH /api/v1/transactions/txn-2": {
           status: 200,
           body: expenseFixture({
@@ -463,7 +552,10 @@ describe("TransactionsPage", () => {
       summary: { count: 2, spentMinor: 6710 },
       nextCursor: "cursor-1",
       extraRoutes: {
-        "GET /api/v1/transactions?cursor=cursor-1": { status: 200, body: olderPage },
+        "GET /api/v1/transactions?cursor=cursor-1": {
+          status: 200,
+          body: olderPage,
+        },
         "DELETE /api/v1/transactions/txn-2": { status: 204, body: undefined },
       },
     });
@@ -473,6 +565,8 @@ describe("TransactionsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /delete/i }));
     fireEvent.click(screen.getByRole("button", { name: /yes, delete/i }));
 
-    await waitFor(() => expect(screen.queryByText("Grab")).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.queryByText("Grab")).not.toBeInTheDocument(),
+    );
   });
 });
