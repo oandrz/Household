@@ -154,6 +154,36 @@ run it before adding a fourth site.
   in one task, one caught only by review after the first was already
   believed fixed, is the point of this section: a passing mutation check on
   a *different* test in the same file is not evidence for this one.
+- Same slice, Task 7: `TestDeletingAMemberKeepsTheirTransactionsAndDeletingAHouseholdTakesThemAway`'s
+  final assertion — `DELETE FROM households` must succeed — carried the
+  comment "The cascade RESTRICT would have blocked," claiming to prove
+  `transactions.from_account_id`/`to_account_id` are `ON DELETE CASCADE` and
+  not `RESTRICT`. Mutating both columns to `RESTRICT` and rerunning left the
+  test green. The confound is one level less obvious than the other entries
+  here, because the test *did* delete something and the delete *did*
+  succeed — it looked exactly like the proof it claimed to be.
+  `transactions.household_id` is itself `ON DELETE CASCADE` from
+  `households`, so deleting the household fires two independent RI cascades
+  at once: one deletes the household's accounts, the other deletes the
+  household's transactions directly via `household_id`. In this environment
+  the `household_id` cascade ran first, removing the transaction row before
+  the accounts cascade ever reached the account it referenced — so the
+  (mutated) `RESTRICT` on `from_account_id`/`to_account_id` had nothing left
+  to restrict against by the time it was checked, and passed trivially. A
+  household-level delete can prove `households` cascades to `transactions`
+  end-to-end; it cannot, by itself, prove anything about which FK action a
+  *different*, indirectly-cascaded column carries, whenever another path to
+  the same row's deletion exists. What would have caught it sooner: asking
+  "does this test exercise the column under test directly, or only as a
+  side effect of a bigger deletion with its own path to the same result?"
+  before trusting a comment that names a specific constraint. Fixed by
+  adding `TestDeletingAnAccountTakesItsTransactionsWithIt`, which deletes an
+  account directly — the household and the referencing transaction both
+  still otherwise present — for both `from_account_id` and `to_account_id`;
+  that is exactly the shape `RESTRICT` would block, with no second cascade
+  path to confound it. The original test's comment was corrected to say
+  what it actually proves rather than deleted, since the household-cascade
+  property it does prove is still real coverage.
 
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for

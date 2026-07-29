@@ -53,6 +53,20 @@ func insertTestMembership(t *testing.T, db *postgres.DB, householdID, displayNam
 	return membershipID
 }
 
+// insertTestCategory gives the Update test a category to attach and then
+// clear, for the same reason insertTestAccount avoids AccountRepo.
+func insertTestCategory(t *testing.T, db *postgres.DB, householdID, name string) string {
+	t.Helper()
+	var id string
+	err := db.Pool().QueryRow(context.Background(),
+		`INSERT INTO categories (household_id, name, kind, sort_order) VALUES ($1, $2, 'expense', 1) RETURNING id`,
+		householdID, name).Scan(&id)
+	if err != nil {
+		t.Fatalf("insert category %s: %v", name, err)
+	}
+	return id
+}
+
 func TestTransactionRoundTrips(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -276,5 +290,94 @@ func TestDeletingAnAccountTakesItsTransactionsWithIt(t *testing.T) {
 	}
 	if _, err := repo.Get(ctx, householdID, income.ID); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("get after to_account_id's account was deleted = %v, want ErrNotFound", err)
+	}
+}
+
+// Update's own param block has thirteen fields, hand-mapped from the domain
+// type field by field -- exactly the shape a copy-paste slip (writing one
+// field's source value into an adjacent field's slot) survives compilation
+// and every other test in this file. This changes more than one field of
+// different kinds in the same update, on purpose: a plain value (kind,
+// description, amount), both directions of the "" <-> NULL convention on two
+// different optional ids in the same call (to_account_id and
+// paid_by_membership_id go from unset to set; category_id goes from set to
+// unset), and the received-amount pair together (nil to a real pair) --
+// received_amount_is_a_transfer_thing is why this update also turns the
+// transaction into a transfer, the only kind that permits one.
+func TestUpdateChangesEveryMutableFieldAtOnce(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewTransactionRepo(db)
+	householdID := insertTestHousehold(t, db)
+	dbs := insertTestAccount(t, db, householdID, "DBS", "SGD")
+	ocbc := insertTestAccount(t, db, householdID, "OCBC", "SGD")
+	groceries := insertTestCategory(t, db, householdID, "Groceries")
+	membershipID := insertTestMembership(t, db, householdID, "Christine")
+
+	created, err := repo.Create(ctx, domain.Transaction{
+		HouseholdID:   householdID,
+		Kind:          domain.TransactionExpense,
+		OccurredOn:    july(18),
+		Description:   "Cold Storage",
+		CategoryID:    groceries,
+		FromAccountID: dbs,
+		Amount:        domain.Money{Amount: 5230, Currency: "SGD"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	received := domain.Money{Amount: 620000000, Currency: "IDR"}
+	updated, err := repo.Update(ctx, domain.Transaction{
+		ID:                 created.ID,
+		HouseholdID:        householdID,
+		Kind:               domain.TransactionTransfer,
+		OccurredOn:         july(19),
+		Description:        "Moved to OCBC",
+		CategoryID:         "",           // set -> unset: a transfer carries no category
+		PaidByMembershipID: membershipID, // unset -> set
+		FromAccountID:      dbs,          // unchanged
+		ToAccountID:        ocbc,         // unset -> set
+		Amount:             domain.Money{Amount: 50000, Currency: "SGD"},
+		ReceivedAmount:     &received, // nil -> set
+	})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.ID != created.ID {
+		t.Fatalf("update changed the id: %q, want %q", updated.ID, created.ID)
+	}
+
+	view, err := repo.Get(ctx, householdID, created.ID)
+	if err != nil {
+		t.Fatalf("get after update: %v", err)
+	}
+	got := view.Transaction
+	if got.Kind != domain.TransactionTransfer {
+		t.Fatalf("kind = %q, want transfer", got.Kind)
+	}
+	if got.Description != "Moved to OCBC" {
+		t.Fatalf("description = %q, want %q", got.Description, "Moved to OCBC")
+	}
+	if !got.OccurredOn.Equal(july(19)) {
+		t.Fatalf("occurredOn = %v, want %v", got.OccurredOn, july(19))
+	}
+	if got.Amount != (domain.Money{Amount: 50000, Currency: "SGD"}) {
+		t.Fatalf("amount = %+v, want 50000 SGD", got.Amount)
+	}
+	if got.CategoryID != "" {
+		t.Fatalf("categoryId = %q, want \"\" -- a transfer carries no category", got.CategoryID)
+	}
+	if got.PaidByMembershipID != membershipID {
+		t.Fatalf("paidByMembershipId = %q, want %q", got.PaidByMembershipID, membershipID)
+	}
+	if got.FromAccountID != dbs {
+		t.Fatalf("fromAccountId = %q, want %q", got.FromAccountID, dbs)
+	}
+	if got.ToAccountID != ocbc {
+		t.Fatalf("toAccountId = %q, want %q", got.ToAccountID, ocbc)
+	}
+	if got.ReceivedAmount == nil || *got.ReceivedAmount != received {
+		t.Fatalf("receivedAmount = %+v, want %+v", got.ReceivedAmount, received)
 	}
 }
