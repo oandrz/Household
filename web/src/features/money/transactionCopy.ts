@@ -40,6 +40,22 @@ export const TRANSACTIONS_COPY = {
   amountReceived: "Amount received",
   amountReceivedHint: (currency: string) =>
     `What actually arrived, in ${currency}.`,
+
+  // The Log-a-transaction modal (Task 15). One title for both add and edit --
+  // AccountModal keeps a single "Account details" title for the same reason:
+  // the fields say what's being edited, so a second title would only repeat
+  // that.
+  logTransaction: "Log a transaction",
+  saveTransaction: "Save transaction",
+  noCategory: "No category",
+
+  deleteTransaction: "Delete transaction",
+  // Said plainly rather than offered as an undo that doesn't exist -- a
+  // transaction is hard deleted (transaction_handlers.go's
+  // handleDeleteTransaction), so "delete" has to mean it here.
+  deleteConfirmBody: "This transaction will be permanently deleted. This can't be undone.",
+  deleteConfirmAction: "Yes, delete it",
+  deleteCancelAction: "Keep it",
 } as const;
 
 // Note for whoever builds the filter UI (Task 16): a malformed filter id in

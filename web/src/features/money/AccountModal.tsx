@@ -19,7 +19,7 @@ import { apiErrorMessage } from "../auth/copy";
 import { useCurrencies, useMe } from "../auth/useAuth";
 import { membersListSchema, type MemberView } from "../settings/schemas";
 import { ACCOUNT_TYPES, ACCOUNT_TYPE_LABELS, LIABILITY_TYPES } from "./accountTypes";
-import { NO_DECIMAL_CURRENCIES, toMinorUnits } from "./formatMoney";
+import { minorUnitsToInputValue, NO_DECIMAL_CURRENCIES, toMinorUnits } from "./formatMoney";
 import { useCreateAccount, useUpdateAccount } from "./useAccounts";
 import type { Account, AccountType } from "./schemas";
 
@@ -83,27 +83,6 @@ function today(): string {
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const day = String(now.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
-}
-
-// The inverse of toMinorUnits, needed only to prefill the balance field when
-// editing an existing account. Not the same function as toMinorUnits (which
-// parses what someone typed) or formatMoney (which adds thousands separators,
-// a currency symbol and a typographic minus sign, none of which belong in an
-// editable input) -- but it agrees with both on the one fact that matters:
-// minor units are always hundredths, and NO_DECIMAL_CURRENCIES is a display
-// convention, never a change to that scale.
-function minorUnitsToInputValue(amountMinor: number, currency: string): string {
-  const negative = amountMinor < 0;
-  const magnitude = Math.abs(amountMinor);
-  const cents = magnitude % 100;
-  // Subtracting the exact remainder before dividing keeps this an exact
-  // integer division -- (magnitude - cents) is always a multiple of 100 -- so
-  // no floating-point rounding enters a figure the person is about to see and
-  // edit.
-  const whole = (magnitude - cents) / 100;
-  const decimals = NO_DECIMAL_CURRENCIES.has(currency) ? 0 : 2;
-  const value = decimals === 0 ? String(whole) : `${whole}.${String(cents).padStart(2, "0")}`;
-  return negative ? `-${value}` : value;
 }
 
 export function AccountModal({

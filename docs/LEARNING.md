@@ -207,6 +207,36 @@ run it before adding a fourth site.
   mutation red (`page two is missing ..., the cursor's own sibling on 17
   July`) before restoring.
 
+- Same slice, Task 15 (the Log-a-transaction modal): the brief's given test
+  file imported `userEvent` from `@testing-library/user-event`, which is not a
+  dependency of this project at all — only `@testing-library/react` and
+  `jest-dom` are installed, and every other modal test here (`AccountModal`,
+  `AccountsPanel`) already uses `fireEvent`. Run as given, the whole file would
+  have failed to import, not failed one assertion — caught before ever running
+  it, by trying to resolve the same failing-for-the-right-reason RED step this
+  checklist requires and getting a module-resolution error instead of a test
+  failure. Rewritten to use `fireEvent`, matching the rest of the codebase.
+  Separately, the same brief's account fixtures were the flattened
+  `{ id, nickname, currency }` guess `AccountsPanel.test.tsx`'s own comment
+  above the brief's code already warned about ("follow whatever shape ... this
+  project already builds its account fixtures with") — `schemas.ts`'s real
+  `Account` nests currency under `balance` — and its received-amount test
+  selected `"ocbc"` as the same-currency destination without that account
+  existing anywhere in the fixture list. Selecting a nonexistent `<option>` is
+  a silent no-op in both jsdom and a real browser, so the "optional within one
+  currency" half of that test would have run against whatever the destination
+  select's default already was, never actually exercising a same-currency
+  selection distinct from the later cross-currency one. Fixed by building full
+  `Account` fixtures (a small `account()` helper supplying every required
+  field) and adding `ocbc` as a real, second SGD account. A third gap had no
+  test at all in the brief: nothing checked that the Category dropdown
+  actually filters by kind, and the brief's own fixture only ever names one
+  category, which would make that filter untestable even if a test existed —
+  "no income categories shown for an expense" is true whether or not the
+  component filters, when income categories were never in the list to begin
+  with. Added a category fixture with both kinds and a dedicated test,
+  confirmed red by temporarily returning every category regardless of kind.
+
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
 a different reason than the one you meant to prove, that is not yet proof

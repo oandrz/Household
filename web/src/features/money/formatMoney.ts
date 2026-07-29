@@ -83,3 +83,29 @@ export function toMinorUnits(input: string, currency: string): number | null {
   const minor = Number(whole) * MINOR_UNITS_PER_MAJOR + Number(cents);
   return negative ? -minor : minor;
 }
+
+// The inverse of toMinorUnits, needed to prefill an editable field from a
+// stored figure -- AccountModal's Balance and TransactionModal's Amount /
+// Amount received all do this on open. Kept here, beside its inverse and
+// NO_DECIMAL_CURRENCIES, rather than duplicated per component: two components
+// each re-deriving "how many decimal places does this currency show" from
+// their own copy of that rule are two chances for the rule to drift, which is
+// exactly the failure toMinorUnits's own module comment already warns about.
+// Not the same function as formatMoney (which adds thousands separators, a
+// currency symbol and a typographic minus sign, none of which belong in an
+// editable input) -- but it agrees with both on the one fact that matters:
+// minor units are always hundredths, and NO_DECIMAL_CURRENCIES is a display
+// convention, never a change to that scale.
+export function minorUnitsToInputValue(amountMinor: number, currency: string): string {
+  const negative = amountMinor < 0;
+  const magnitude = Math.abs(amountMinor);
+  const cents = magnitude % 100;
+  // Subtracting the exact remainder before dividing keeps this an exact
+  // integer division -- (magnitude - cents) is always a multiple of 100 -- so
+  // no floating-point rounding enters a figure the person is about to see and
+  // edit.
+  const whole = (magnitude - cents) / 100;
+  const decimals = NO_DECIMAL_CURRENCIES.has(currency) ? 0 : 2;
+  const value = decimals === 0 ? String(whole) : `${whole}.${String(cents).padStart(2, "0")}`;
+  return negative ? `-${value}` : value;
+}
