@@ -296,6 +296,44 @@ run it before adding a fourth site.
   `clearReceivedAmount: true`. All three fixes mutation-confirmed: each
   breaks exactly the test built to catch it and no other.
 
+- Same slice, Task 16 review round: a human reviewer found two more gaps the
+  advisor pass above had not, both the same shape — a row in
+  `FEATURE_TRACKER.md` said ✅ ("built and verified") for a path nothing
+  verified. First, **`POST /api/v1/transactions` had no registered route in
+  the test file at all, and no test clicked "Add transaction"** — `handleCreate`
+  existed and was wired correctly, but was provably untouched by the suite;
+  "Add transaction (modal)" was marked ✅ regardless. Second, and worse
+  because it was a real bug, not just an absent test: rows loaded via "Load
+  older transactions" are held in local state (`olderRows`) outside the query
+  cache the update/delete mutations invalidate — so a transaction edited or
+  deleted while it happened to be showing on an appended page kept displaying
+  its stale, pre-edit value (or kept existing at all, for a delete) with no
+  staleness indicator, until a full reload. This was disclosed honestly in
+  the task's own report, but landed in the wrong place: `CLAUDE.md`'s own
+  rule is that a feature shipped with a known gap is 🟡 **with the gap
+  named**, not ✅ with the gap described only in a report nobody reads
+  before trusting the tracker. Both fixed rather than left as a documented
+  gap: `handleUpdate`/`handleDelete` now patch or remove the matching row in
+  `olderRows` directly from the mutation's own response, and a dedicated test
+  for each (create; edit-on-an-older-page; delete-on-an-older-page) was added
+  and red-before-green'd by reverting each fix in turn and confirming the
+  exact test built for it — and only that one — went red. The general
+  lesson: an honestly-disclosed known gap is not the same thing as a correctly
+  marked one, and "the report names it" does not substitute for the row
+  itself saying 🟡 and why.
+- Same review round, a design decision rather than a defect: `TransactionFilters.tsx`'s
+  Kind control was first built as a native `<select>`, on the reasoning that
+  a single settable value was the only way to keep it both keyboard-reachable
+  and queryable by label — a real constraint, but one that traded away the
+  design's own segmented control without asking first. Escalated rather than
+  assumed; the product owner ruled for rebuilding the real control (a
+  `<fieldset>`/`<legend>` grouping three real `<input type="radio">`s, one
+  per option, each independently queryable via
+  `getByRole("radio", { name: "Income" })`) — proof that the "native `<select>`
+  for testability" pattern this codebase leans on elsewhere (`AccountModal`'s
+  Owner/Type) is a default, not a rule that overrides the design outright
+  when a fully keyboard-reachable alternative exists.
+
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
 a different reason than the one you meant to prove, that is not yet proof

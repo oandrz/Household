@@ -100,21 +100,30 @@ function fullSummary(input: SummaryInput): MonthSummary {
 }
 
 // renderPage builds every route TransactionsPage fires on mount (currencies,
-// categories, household members, accounts, the unfiltered ledger) plus
-// whatever a given test additionally needs -- a *second*, differently-keyed
-// ledger route for the filtered case, or the PATCH/DELETE routes for
-// "txn-1". Registered every time (not just when a test exercises them):
-// stubFetchRoutes only complains about a route that is *called* and
-// unregistered, so an unused stub here is harmless.
+// categories, household members, accounts, the unfiltered ledger, and a
+// default POST route for Add) plus whatever a given test additionally needs
+// -- a *second*, differently-keyed ledger route for the filtered case, or the
+// PATCH/DELETE routes for "txn-1". Registered every time (not just when a
+// test exercises them): stubFetchRoutes only complains about a route that is
+// *called* and unregistered, so an unused stub here is harmless.
+//
+// extraRoutes merges in routes a specific test needs beyond the defaults
+// above (a second ledger page, a PATCH target for a transaction other than
+// "txn-1") -- stubFetchRoutes can only be called once per test (a second call
+// replaces the global fetch stub entirely, discarding every route the first
+// call registered), so every route a test needs has to go through this one
+// call.
 function renderPage(options: {
   transactions: Transaction[];
   summary: SummaryInput;
   filtered?: { transactions: Transaction[]; summary: SummaryInput };
   nextCursor?: string | null;
   accounts?: Account[];
+  extraRoutes?: Record<string, RouteResponse | RouteResponse[]>;
 }) {
   const patched = vi.fn();
   const deleted = vi.fn();
+  const posted = vi.fn();
 
   const routes: Record<string, RouteResponse | RouteResponse[]> = {
     "GET /api/v1/currencies": CURRENCIES,
@@ -131,6 +140,11 @@ function renderPage(options: {
         nextCursor: options.nextCursor ?? null,
         summary: fullSummary(options.summary),
       },
+    },
+    "POST /api/v1/transactions": {
+      status: 201,
+      body: expenseFixture({ id: "txn-new" }),
+      capture: (body) => posted("/api/v1/transactions", body),
     },
     "PATCH /api/v1/transactions/txn-1": {
       status: 200,
@@ -151,6 +165,7 @@ function renderPage(options: {
       body: undefined,
       capture: () => deleted("/api/v1/transactions/txn-1"),
     },
+    ...options.extraRoutes,
   };
 
   if (options.filtered) {
@@ -166,7 +181,7 @@ function renderPage(options: {
 
   stubFetchRoutes(routes);
 
-  return { ...renderWithRouter(<TransactionsPage />), patched, deleted };
+  return { ...renderWithRouter(<TransactionsPage />), patched, deleted, posted };
 }
 
 describe("TransactionsPage", () => {
@@ -187,7 +202,11 @@ describe("TransactionsPage", () => {
       filtered: { transactions: [], summary: { count: 0, spentMinor: 0 } },
     });
 
-    fireEvent.change(await screen.findByLabelText(/kind/i), { target: { value: "income" } });
+    // Kind is a labelled radio group (the design's own segmented control),
+    // not a single-value <select> -- clicking the "Income" option directly,
+    // rather than changing one element's value, is what a real keyboard/
+    // screen-reader user does with a native radio group.
+    fireEvent.click(await screen.findByRole("radio", { name: "Income" }));
 
     expect(await screen.findByText(/nothing matches those filters/i)).toBeInTheDocument();
     expect(screen.queryByText(/nothing logged yet/i)).not.toBeInTheDocument();
@@ -337,5 +356,123 @@ describe("TransactionsPage", () => {
     // happens from onClose, which only runs once onDelete's promise actually
     // resolves.
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  // Review round, finding 2: nothing in this suite exercised the create path
+  // at all before this test -- no POST route was registered and no test
+  // clicked Add, so handleCreate was provably untouched by the suite even
+  // though the tracker already called Add transaction built and verified.
+  it("opens the modal blank when Add is clicked, and posts on save", async () => {
+    const { posted } = renderPage({
+      transactions: [expenseFixture()],
+      summary: { count: 1, spentMinor: 5230 },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: /add transaction/i }));
+
+    // Blank, not populated -- the opposite of the edit test's own assertion:
+    // opening Add must never carry another row's values into a new one.
+    expect(screen.getByLabelText(/description/i)).toHaveValue("");
+    expect(screen.getByLabelText(/^amount/i)).toHaveValue("");
+
+    fireEvent.change(screen.getByLabelText(/description/i), {
+      target: { value: "Kopitiam lunch" },
+    });
+    fireEvent.change(screen.getByLabelText(/^amount/i), { target: { value: "8.40" } });
+    fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
+
+    await waitFor(() =>
+      expect(posted).toHaveBeenCalledWith(
+        "/api/v1/transactions",
+        expect.objectContaining({ description: "Kopitiam lunch", amountMinor: 840 }),
+      ),
+    );
+  });
+
+  // Review round, finding 1: olderRows (the rows "Load older transactions"
+  // appends) sits outside the query cache invalidateLedger refreshes, so a
+  // transaction edited while showing on an appended page used to keep
+  // displaying its pre-edit description in place until a full reload -- the
+  // row a household just corrected still showing the old figure, with no
+  // staleness indicator at all. Loads a second page, edits a row on it, and
+  // confirms the ledger shows the new description without any further
+  // reload.
+  it("shows an edited row's new value even when it sits on an already-loaded older page", async () => {
+    const olderPage = {
+      transactions: [
+        expenseFixture({
+          id: "txn-2",
+          description: "Grab",
+          occurredOn: "2026-07-17",
+          amount: { amountMinor: 1480, currency: "SGD" },
+        }),
+      ],
+      nextCursor: null,
+      summary: fullSummary({ count: 2, spentMinor: 6710 }),
+    };
+
+    renderPage({
+      transactions: [expenseFixture()],
+      summary: { count: 2, spentMinor: 6710 },
+      nextCursor: "cursor-1",
+      extraRoutes: {
+        "GET /api/v1/transactions?cursor=cursor-1": { status: 200, body: olderPage },
+        "PATCH /api/v1/transactions/txn-2": {
+          status: 200,
+          body: expenseFixture({
+            id: "txn-2",
+            description: "Grab — taxi",
+            occurredOn: "2026-07-17",
+            amount: { amountMinor: 1480, currency: "SGD" },
+          }),
+        },
+      },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: /load older/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /Grab/i }));
+
+    fireEvent.change(screen.getByLabelText(/description/i), {
+      target: { value: "Grab — taxi" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
+
+    expect(await screen.findByText("Grab — taxi")).toBeInTheDocument();
+    expect(screen.queryByText("Grab")).not.toBeInTheDocument();
+  });
+
+  // Same root cause as the test above, the delete half: a row deleted while
+  // sitting on an already-loaded older page must actually disappear, not
+  // keep showing a transaction that no longer exists.
+  it("removes a row from an already-loaded older page once it is deleted", async () => {
+    const olderPage = {
+      transactions: [
+        expenseFixture({
+          id: "txn-2",
+          description: "Grab",
+          occurredOn: "2026-07-17",
+          amount: { amountMinor: 1480, currency: "SGD" },
+        }),
+      ],
+      nextCursor: null,
+      summary: fullSummary({ count: 2, spentMinor: 6710 }),
+    };
+
+    renderPage({
+      transactions: [expenseFixture()],
+      summary: { count: 2, spentMinor: 6710 },
+      nextCursor: "cursor-1",
+      extraRoutes: {
+        "GET /api/v1/transactions?cursor=cursor-1": { status: 200, body: olderPage },
+        "DELETE /api/v1/transactions/txn-2": { status: 204, body: undefined },
+      },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: /load older/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /Grab/i }));
+    fireEvent.click(screen.getByRole("button", { name: /delete/i }));
+    fireEvent.click(screen.getByRole("button", { name: /yes, delete/i }));
+
+    await waitFor(() => expect(screen.queryByText("Grab")).not.toBeInTheDocument());
   });
 });

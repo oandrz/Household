@@ -244,17 +244,22 @@ a real aggregator could later fill.
 
 **Full ledger with filters and Add transaction share one modal, add and edit
 alike** — the same `TransactionModal` Task 15 built, opened blank for a new
-row and opened populated for an existing one clicked from the ledger. That
-click-to-edit path is also the only caller `PATCH /transactions/{id}` has, and
-its own Delete control (behind an in-page confirmation, never
-`window.confirm`) is the only caller `DELETE /transactions/{id}` has. The
-ledger itself covers all five screen states the spec's section 7.1 names:
-first run, filters matching nothing (deliberately different copy from first
-run, so a household that filtered to nothing doesn't think its ledger was
-wiped), transactions excluded from the month's spend for want of an exchange
-rate, a row dated before its account's opening balance (naming the account,
-since a transfer can predate one side and not the other), and a disabled Add
-button when the household has no accounts yet to attach a transaction to.
+row (its own test: blank fields, POSTs on save) and opened populated for an
+existing one clicked from the ledger. That click-to-edit path is also the
+only caller `PATCH /transactions/{id}` has, and its own Delete control
+(behind an in-page confirmation, never `window.confirm`) is the only caller
+`DELETE /transactions/{id}` has. The ledger itself covers all five screen
+states the spec's section 7.1 names: first run, filters matching nothing
+(deliberately different copy from first run, so a household that filtered to
+nothing doesn't think its ledger was wiped), transactions excluded from the
+month's spend for want of an exchange rate, a row dated before its account's
+opening balance (naming the account, since a transfer can predate one side
+and not the other), and a disabled Add button when the household has no
+accounts yet to attach a transaction to. "Load older transactions" appends a
+second page held in local state, separate from the reactive first page —
+editing or deleting a row that lives on an appended page patches or removes
+it there directly, so a correction made on an older page is not left showing
+its stale, pre-edit value.
 
 **Inline category editing and Export CSV are the two pieces of the design's
 Transactions screen still unbuilt.** Changing a transaction's category today

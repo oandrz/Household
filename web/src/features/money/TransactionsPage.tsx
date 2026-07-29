@@ -353,15 +353,31 @@ export function TransactionsPage() {
 
   async function handleUpdate(values: TransactionFormValues) {
     if (!editingTransaction) return;
-    await updateTransaction.mutateAsync({
-      id: editingTransaction.id,
+    const id = editingTransaction.id;
+    const updated = await updateTransaction.mutateAsync({
+      id,
       body: toUpdateBody(values, editingTransaction),
     });
+    // olderRows sits outside the query cache invalidateLedger refreshes (see
+    // fetchOlderPage's own comment): a transaction edited while it happens to
+    // be showing on an appended "Load older" page would otherwise keep
+    // displaying its pre-edit description and amount, in place, until a full
+    // reload -- the row a household just corrected still showing the old
+    // figure. Patched directly with the server's own response (not
+    // recomputed from `values`) so this can never disagree with what was
+    // actually persisted.
+    setOlderRows((prev) => prev.map((row) => (row.id === id ? updated : row)));
   }
 
   async function handleDelete() {
     if (!editingTransaction) return;
-    await deleteTransaction.mutateAsync(editingTransaction.id);
+    const id = editingTransaction.id;
+    await deleteTransaction.mutateAsync(id);
+    // Same reasoning as handleUpdate above: a deleted row sitting in
+    // olderRows is untouched by invalidateLedger's refetch of the reactive
+    // first page, and would otherwise keep showing a transaction that no
+    // longer exists.
+    setOlderRows((prev) => prev.filter((row) => row.id !== id));
   }
 
   const groups = groupByDay(rows);
