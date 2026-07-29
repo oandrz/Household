@@ -397,8 +397,8 @@ run it before adding a fourth site.
 **One feature — Transactions, Tasks 5 through 17 — accounts for nine of the
 entries above this line, more than any other piece of work in this log.**
 Counted, not estimated: nine dash-bullets above are Transactions' own — the
-two Task 5 entries, Task 7, Task 8, Task 11, Task 13, Task 15, and one from
-Task 16. A tenth Transactions bullet sits among them (the Task 16 review
+two Task 5 entries, Task 7, Task 8, Task 11, Task 13, Task 15, one from
+Task 16, and Task 17. A tenth Transactions bullet sits among them (the Task 16 review
 round entry naming a `POST /api/v1/transactions` route with no test behind
 it at all, and a stale-display bug on an appended page) and is deliberately
 not one of the nine: it is a route nobody wrote a test for, and a shipped
@@ -428,9 +428,14 @@ Walked in order, the nine are not nine copies of the same mistake:
 - **A value never set, again** (Task 15) — a `<select>` option chosen that
   did not exist in the fixture list, a silent no-op in both jsdom and a real
   browser.
-- **An assertion satisfied before the failure it should have caught**
-  (Task 16) — a spy recording the request before the response it stubbed
-  threw.
+- **Task 16's one bullet bundles two, not one** — counted once here, by
+  bullet, since the count above is of bullets rather than of individual
+  defects: **an assertion satisfied before the failure it should have
+  caught** (a spy recording the request before the response it stubbed
+  threw), and, separately, **an assertion too loose to pin the one claim it
+  named** (`objectContaining` true of a request that also carried a wrong
+  `categoryId` and a hardcoded `clearReceivedAmount`, missing the exact
+  pointer-semantics translation the task existed to get right).
 - **A shared guard** (Task 17) — a route refused for a reason that had
   nothing to do with the row the test was named after.
 
