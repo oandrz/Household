@@ -78,12 +78,19 @@ func run() error {
 	spaces := postgres.NewSpaceRepo(db)
 	notifications := postgres.NewNotificationRepo(db)
 	signups := postgres.NewSignupRepo(db)
+	accountRepo := postgres.NewAccountRepo(db)
+	categoryRepo := postgres.NewCategoryRepo(db)
+	transactionRepo := postgres.NewTransactionRepo(db)
 
 	hasher := crypto.NewArgon2Hasher(cfg.Argon2Time, cfg.Argon2MemoryKiB, cfg.Argon2Threads)
 	tokens := crypto.NewTokenGenerator()
 	sysClock := clock.System{}
 	mailer := mail.NewSMTPMailer(cfg.SMTPAddr, cfg.SMTPFrom, cfg.AppBaseURL,
 		cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPTLSMode)
+	// One provider instance, shared by accounts and transactions: both only
+	// ever read a rate, so there is no reason for each service to hold its
+	// own.
+	fxProvider := fx.NewStaticProvider()
 
 	authSvc := usecase.NewAuthService(usecase.AuthDeps{
 		Users:      users,
@@ -130,28 +137,42 @@ func run() error {
 		BaseURL:    cfg.AppBaseURL,
 	})
 	accountSvc := usecase.NewAccountService(usecase.AccountDeps{
-		Accounts:   postgres.NewAccountRepo(db),
+		Accounts:   accountRepo,
 		Households: households,
-		FX:         fx.NewStaticProvider(),
+		FX:         fxProvider,
+		Clock:      sysClock,
+	})
+	categorySvc := usecase.NewCategoryService(categoryRepo)
+	transactionSvc := usecase.NewTransactionService(usecase.TransactionDeps{
+		Transactions: transactionRepo,
+		// CategoryRepo also satisfies the narrower CategoryLookup that
+		// TransactionService declares -- one repository, two ports, each
+		// caller seeing only what it needs (interface segregation).
+		Categories: categoryRepo,
+		Accounts:   accountRepo,
+		Households: households,
+		FX:         fxProvider,
 		Clock:      sysClock,
 	})
 
 	srv := &http.Server{
 		Addr: fmt.Sprintf(":%d", cfg.Port),
 		Handler: httpadapter.NewRouter(httpadapter.Deps{
-			Pinger:      db,
-			Auth:        authSvc,
-			Invites:     inviteSvc,
-			Members:     memberSvc,
-			Households:  householdSvc,
-			Signups:     signupSvc,
-			Accounts:    accountSvc,
-			Users:       users,
-			Memberships: memberships,
-			Sessions:    sessions,
-			Tokens:      tokens,
-			Clock:       sysClock,
-			Secure:      !cfg.IsDevelopment(),
+			Pinger:       db,
+			Auth:         authSvc,
+			Invites:      inviteSvc,
+			Members:      memberSvc,
+			Households:   householdSvc,
+			Signups:      signupSvc,
+			Accounts:     accountSvc,
+			Transactions: transactionSvc,
+			Categories:   categorySvc,
+			Users:        users,
+			Memberships:  memberships,
+			Sessions:     sessions,
+			Tokens:       tokens,
+			Clock:        sysClock,
+			Secure:       !cfg.IsDevelopment(),
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 		// ReadTimeout bounds the whole request, not just its headers:

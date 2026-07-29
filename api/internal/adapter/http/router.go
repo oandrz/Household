@@ -43,18 +43,20 @@ const signUpRequestsPerIPPerHour = 5
 // Membership (Memberships.ByUser) to populate Scope. Every other Deps field
 // mirrors what the task brief names.
 type Deps struct {
-	Pinger      Pinger
-	Auth        *usecase.AuthService
-	Invites     *usecase.InviteService
-	Members     *usecase.MemberService
-	Households  *usecase.HouseholdService
-	Signups     *usecase.SignupService
-	Accounts    *usecase.AccountService
-	Users       usecase.UserRepository
-	Memberships usecase.MembershipRepository
-	Sessions    usecase.SessionRepository
-	Tokens      usecase.TokenGenerator
-	Clock       usecase.Clock
+	Pinger       Pinger
+	Auth         *usecase.AuthService
+	Invites      *usecase.InviteService
+	Members      *usecase.MemberService
+	Households   *usecase.HouseholdService
+	Signups      *usecase.SignupService
+	Accounts     *usecase.AccountService
+	Transactions *usecase.TransactionService
+	Categories   *usecase.CategoryService
+	Users        usecase.UserRepository
+	Memberships  usecase.MembershipRepository
+	Sessions     usecase.SessionRepository
+	Tokens       usecase.TokenGenerator
+	Clock        usecase.Clock
 	// Secure controls the Secure flag on the session and CSRF cookies. It is
 	// !cfg.IsDevelopment(): false only in development, so cookies still work
 	// over plain http on localhost.
@@ -169,6 +171,38 @@ func NewRouter(deps Deps) http.Handler {
 					// as a side effect of saving a nickname.
 					w.Post("/accounts/{id}/archive", handleArchiveAccount(deps))
 					w.Post("/accounts/{id}/restore", handleRestoreAccount(deps))
+				})
+			})
+
+			// Transactions requires money AND owner for reads as well as
+			// writes, which is deliberately unlike accounts above.
+			//
+			// A limited member's accounts view shows names with no amounts
+			// (accounts decision 5). Applied to a ledger that is a table whose
+			// every figure is blank, next to a "Spent this month" that has to
+			// be absent rather than zero -- a page that reads as broken. So
+			// for a limited member the money capability means "see which
+			// accounts this household has" and nothing further. Do not
+			// "simplify" this to match the accounts group.
+			g.Group(func(txn chi.Router) {
+				txn.Use(requireCapability(domain.CapMoney))
+				// The capability guard above is stacked on requireOwner below
+				// even though an owner without money is not a representable
+				// state today (domain.ValidateMembershipChange refuses it).
+				// This route must not lean on an invariant enforced in
+				// another layer for another reason: if that invariant were
+				// ever relaxed, this route would silently open with no
+				// failing test to catch it.
+				txn.Use(requireOwner)
+
+				txn.Get("/transactions", handleListTransactions(deps))
+				txn.Get("/categories", handleListCategories(deps))
+
+				txn.Group(func(w chi.Router) {
+					w.Use(requireCSRF)
+					w.Post("/transactions", handleCreateTransaction(deps))
+					w.Patch("/transactions/{id}", handleUpdateTransaction(deps))
+					w.Delete("/transactions/{id}", handleDeleteTransaction(deps))
 				})
 			})
 		})
