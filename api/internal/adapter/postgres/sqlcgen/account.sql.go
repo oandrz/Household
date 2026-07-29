@@ -63,7 +63,20 @@ func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (A
 }
 
 const getAccount = `-- name: GetAccount :one
-SELECT a.id, a.household_id, a.nickname, a.type, a.owner_membership_id, a.opening_balance_minor, a.opening_balance_currency, a.opening_balance_as_of, a.count_toward_net_worth, a.visible_to_limited_members, a.archived_at, a.created_at, u.display_name AS owner_name
+SELECT a.id, a.household_id, a.nickname, a.type, a.owner_membership_id, a.opening_balance_minor, a.opening_balance_currency, a.opening_balance_as_of, a.count_toward_net_worth, a.visible_to_limited_members, a.archived_at, a.created_at, u.display_name AS owner_name,
+       -- See ListAccounts above for why this is two filtered sums with a
+       -- strict > and why the incoming side prefers received_amount_minor.
+       -- Get and List must compute this the same way, or the two disagree
+       -- on the same account's balance.
+       (a.opening_balance_minor
+        - COALESCE((SELECT SUM(t.amount_minor) FROM transactions t
+                    WHERE t.from_account_id = a.id
+                      AND t.occurred_on > a.opening_balance_as_of), 0)
+        + COALESCE((SELECT SUM(COALESCE(t.received_amount_minor, t.amount_minor))
+                    FROM transactions t
+                    WHERE t.to_account_id = a.id
+                      AND t.occurred_on > a.opening_balance_as_of), 0)
+       )::bigint AS balance_minor
 FROM accounts a
 LEFT JOIN memberships m ON m.id = a.owner_membership_id
 LEFT JOIN users u ON u.id = m.user_id
@@ -89,6 +102,7 @@ type GetAccountRow struct {
 	ArchivedAt              pgtype.Timestamptz
 	CreatedAt               pgtype.Timestamptz
 	OwnerName               *string
+	BalanceMinor            int64
 }
 
 // GetAccount is scoped by household_id as well as id. Every account query in
@@ -112,13 +126,38 @@ func (q *Queries) GetAccount(ctx context.Context, arg GetAccountParams) (GetAcco
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.OwnerName,
+		&i.BalanceMinor,
 	)
 	return i, err
 }
 
 const listAccounts = `-- name: ListAccounts :many
 
-SELECT a.id, a.household_id, a.nickname, a.type, a.owner_membership_id, a.opening_balance_minor, a.opening_balance_currency, a.opening_balance_as_of, a.count_toward_net_worth, a.visible_to_limited_members, a.archived_at, a.created_at, u.display_name AS owner_name
+SELECT a.id, a.household_id, a.nickname, a.type, a.owner_membership_id, a.opening_balance_minor, a.opening_balance_currency, a.opening_balance_as_of, a.count_toward_net_worth, a.visible_to_limited_members, a.archived_at, a.created_at, u.display_name AS owner_name,
+       -- balance_minor is the opening balance plus every transaction dated
+       -- AFTER opening_balance_as_of. The strict > is load-bearing: a
+       -- transaction dated ON the opening date is already reflected in the
+       -- figure someone asserted was true that day, and counting it again
+       -- would make the account wrong by that transaction with nothing on
+       -- screen to explain it.
+       --
+       -- Two filtered sums rather than one, because an account can be the
+       -- source of one transfer and the destination of another. The incoming
+       -- side takes received_amount_minor when there is one: that is what
+       -- actually landed, in this account's own currency. Using amount_minor
+       -- there would add the sending account's currency to this one's.
+       --
+       -- No conversion happens here and none can: every figure in this
+       -- expression is already in this account's own currency.
+       (a.opening_balance_minor
+        - COALESCE((SELECT SUM(t.amount_minor) FROM transactions t
+                    WHERE t.from_account_id = a.id
+                      AND t.occurred_on > a.opening_balance_as_of), 0)
+        + COALESCE((SELECT SUM(COALESCE(t.received_amount_minor, t.amount_minor))
+                    FROM transactions t
+                    WHERE t.to_account_id = a.id
+                      AND t.occurred_on > a.opening_balance_as_of), 0)
+       )::bigint AS balance_minor
 FROM accounts a
 LEFT JOIN memberships m ON m.id = a.owner_membership_id
 LEFT JOIN users u ON u.id = m.user_id
@@ -140,6 +179,7 @@ type ListAccountsRow struct {
 	ArchivedAt              pgtype.Timestamptz
 	CreatedAt               pgtype.Timestamptz
 	OwnerName               *string
+	BalanceMinor            int64
 }
 
 // ListAccounts and ListAccountsIncludingArchived are two queries rather than
@@ -172,6 +212,7 @@ func (q *Queries) ListAccounts(ctx context.Context, householdID pgtype.UUID) ([]
 			&i.ArchivedAt,
 			&i.CreatedAt,
 			&i.OwnerName,
+			&i.BalanceMinor,
 		); err != nil {
 			return nil, err
 		}
@@ -184,7 +225,18 @@ func (q *Queries) ListAccounts(ctx context.Context, householdID pgtype.UUID) ([]
 }
 
 const listAccountsIncludingArchived = `-- name: ListAccountsIncludingArchived :many
-SELECT a.id, a.household_id, a.nickname, a.type, a.owner_membership_id, a.opening_balance_minor, a.opening_balance_currency, a.opening_balance_as_of, a.count_toward_net_worth, a.visible_to_limited_members, a.archived_at, a.created_at, u.display_name AS owner_name
+SELECT a.id, a.household_id, a.nickname, a.type, a.owner_membership_id, a.opening_balance_minor, a.opening_balance_currency, a.opening_balance_as_of, a.count_toward_net_worth, a.visible_to_limited_members, a.archived_at, a.created_at, u.display_name AS owner_name,
+       -- See ListAccounts above for why this is two filtered sums with a
+       -- strict > and why the incoming side prefers received_amount_minor.
+       (a.opening_balance_minor
+        - COALESCE((SELECT SUM(t.amount_minor) FROM transactions t
+                    WHERE t.from_account_id = a.id
+                      AND t.occurred_on > a.opening_balance_as_of), 0)
+        + COALESCE((SELECT SUM(COALESCE(t.received_amount_minor, t.amount_minor))
+                    FROM transactions t
+                    WHERE t.to_account_id = a.id
+                      AND t.occurred_on > a.opening_balance_as_of), 0)
+       )::bigint AS balance_minor
 FROM accounts a
 LEFT JOIN memberships m ON m.id = a.owner_membership_id
 LEFT JOIN users u ON u.id = m.user_id
@@ -206,6 +258,7 @@ type ListAccountsIncludingArchivedRow struct {
 	ArchivedAt              pgtype.Timestamptz
 	CreatedAt               pgtype.Timestamptz
 	OwnerName               *string
+	BalanceMinor            int64
 }
 
 func (q *Queries) ListAccountsIncludingArchived(ctx context.Context, householdID pgtype.UUID) ([]ListAccountsIncludingArchivedRow, error) {
@@ -231,6 +284,7 @@ func (q *Queries) ListAccountsIncludingArchived(ctx context.Context, householdID
 			&i.ArchivedAt,
 			&i.CreatedAt,
 			&i.OwnerName,
+			&i.BalanceMinor,
 		); err != nil {
 			return nil, err
 		}

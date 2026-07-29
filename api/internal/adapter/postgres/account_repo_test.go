@@ -312,3 +312,118 @@ func insertSecondHousehold(t *testing.T, db *postgres.DB) string {
 	t.Helper()
 	return insertTestHousehold(t, db)
 }
+
+// The doc comment on AccountRepository.List has promised this since Accounts
+// shipped: Balance is the opening balance plus every transaction dated after
+// opening_balance_as_of.
+func TestAccountBalanceSumsItsTransactions(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	accounts := postgres.NewAccountRepo(db)
+	transactions := postgres.NewTransactionRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	var accountID string
+	err := db.Pool().QueryRow(ctx,
+		`INSERT INTO accounts (household_id, nickname, type, opening_balance_minor,
+		                       opening_balance_currency, opening_balance_as_of)
+		 VALUES ($1, 'DBS Everyday', 'cash', 100000, 'SGD', DATE '2026-07-10') RETURNING id`,
+		householdID).Scan(&accountID)
+	if err != nil {
+		t.Fatalf("insert account: %v", err)
+	}
+
+	mustCreate := func(kind domain.TransactionKind, day int, minor int64, from, to string) {
+		t.Helper()
+		if _, err := transactions.Create(ctx, domain.Transaction{
+			HouseholdID: householdID, Kind: kind, OccurredOn: july(day),
+			Description: "Row", FromAccountID: from, ToAccountID: to,
+			Amount: domain.Money{Amount: minor, Currency: "SGD"},
+		}); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+	}
+
+	mustCreate(domain.TransactionExpense, 12, 5000, accountID, "")
+	mustCreate(domain.TransactionIncome, 14, 20000, "", accountID)
+	// Dated ON the opening date: already reflected in the figure someone
+	// asserted was true that day, so it must not be counted again.
+	mustCreate(domain.TransactionExpense, 10, 7777, accountID, "")
+	// Dated before it: same reasoning.
+	mustCreate(domain.TransactionExpense, 3, 9999, accountID, "")
+
+	views, err := accounts.List(ctx, householdID, false)
+	if err != nil {
+		t.Fatalf("list accounts: %v", err)
+	}
+	if len(views) != 1 {
+		t.Fatalf("got %d accounts, want 1", len(views))
+	}
+	// 100000 - 5000 + 20000
+	if got := views[0].Balance.Amount; got != 115000 {
+		t.Fatalf("balance = %d, want 115000 (opening 100000, -5000, +20000, "+
+			"and nothing from the two dated on or before the opening date)", got)
+	}
+	// Get must agree with List. Two queries computing one figure is where they
+	// drift.
+	view, err := accounts.Get(ctx, householdID, accountID)
+	if err != nil {
+		t.Fatalf("get account: %v", err)
+	}
+	if view.Balance.Amount != views[0].Balance.Amount {
+		t.Fatalf("Get says %d and List says %d", view.Balance.Amount, views[0].Balance.Amount)
+	}
+
+	// ListAccountsIncludingArchived carries its own copy of the same
+	// expression -- three queries computing one figure, not two -- so it gets
+	// its own assertion rather than trusting that copy-pasting the SQL also
+	// copy-pasted correctly.
+	all, err := accounts.List(ctx, householdID, true)
+	if err != nil {
+		t.Fatalf("list accounts including archived: %v", err)
+	}
+	if len(all) != 1 || all[0].Balance.Amount != views[0].Balance.Amount {
+		t.Fatalf("ListAccountsIncludingArchived balance = %+v, want %d to match List and Get",
+			all, views[0].Balance.Amount)
+	}
+}
+
+// The defect this prevents: crediting the destination with the amount that
+// left rather than what arrived would add Singapore dollars to a rupiah
+// balance -- the account ends up wrong by a factor of ten thousand.
+func TestACrossCurrencyTransferCreditsTheDestinationInItsOwnCurrency(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	accounts := postgres.NewAccountRepo(db)
+	transactions := postgres.NewTransactionRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	dbs := insertTestAccount(t, db, householdID, "DBS", "SGD")
+	bca := insertTestAccount(t, db, householdID, "BCA Tahapan", "IDR")
+
+	received := domain.Money{Amount: 620000000, Currency: "IDR"}
+	if _, err := transactions.Create(ctx, domain.Transaction{
+		HouseholdID: householdID, Kind: domain.TransactionTransfer,
+		OccurredOn: july(20), Description: "Transfer to BCA",
+		FromAccountID: dbs, ToAccountID: bca,
+		Amount: domain.Money{Amount: 50000, Currency: "SGD"}, ReceivedAmount: &received,
+	}); err != nil {
+		t.Fatalf("create transfer: %v", err)
+	}
+
+	views, err := accounts.List(ctx, householdID, false)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	byName := map[string]int64{}
+	for _, v := range views {
+		byName[v.Account.Nickname] = v.Balance.Amount
+	}
+	if byName["DBS"] != -50000 {
+		t.Fatalf("DBS balance = %d, want -50000", byName["DBS"])
+	}
+	if byName["BCA Tahapan"] != 620000000 {
+		t.Fatalf("BCA balance = %d, want 620000000 (the received amount, not the sent one)",
+			byName["BCA Tahapan"])
+	}
+}

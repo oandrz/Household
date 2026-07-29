@@ -159,14 +159,20 @@ func optionalIDToString(u pgtype.UUID) string {
 }
 
 // buildView is where AccountView.Balance is decided. It is the opening
-// balance today because there is no transactions table yet; when one
-// arrives, these queries grow a summed column and this is the only function
-// that changes. AccountView's shape does not, and neither does any caller.
-func buildView(a domain.Account, ownerName *string) usecase.AccountView {
+// balance plus every transaction dated after opening_balance_as_of, summed in
+// SQL -- see the balance_minor column in queries/account.sql for why the
+// comparison is strict and why the incoming side prefers
+// received_amount_minor.
+//
+// The currency is the account's own. Every transaction on an account is
+// denominated in that account's currency, so nothing here converts, and a
+// mixed-currency household's accounts each stay in their own unit until
+// AccountService.Summary converts them.
+func buildView(a domain.Account, ownerName *string, balanceMinor int64) usecase.AccountView {
 	return usecase.AccountView{
 		Account:   a,
 		OwnerName: stringOrEmpty(ownerName),
-		Balance:   a.OpeningBalance,
+		Balance:   domain.Money{Amount: balanceMinor, Currency: a.OpeningBalance.Currency},
 	}
 }
 
@@ -184,7 +190,7 @@ func toAccountView(row sqlcgen.ListAccountsRow) usecase.AccountView {
 		VisibleToLimitedMembers: row.VisibleToLimitedMembers,
 		ArchivedAt:              row.ArchivedAt,
 		CreatedAt:               row.CreatedAt,
-	}), row.OwnerName)
+	}), row.OwnerName, row.BalanceMinor)
 }
 
 func toAccountViewIncludingArchived(row sqlcgen.ListAccountsIncludingArchivedRow) usecase.AccountView {
@@ -201,7 +207,7 @@ func toAccountViewIncludingArchived(row sqlcgen.ListAccountsIncludingArchivedRow
 		VisibleToLimitedMembers: row.VisibleToLimitedMembers,
 		ArchivedAt:              row.ArchivedAt,
 		CreatedAt:               row.CreatedAt,
-	}), row.OwnerName)
+	}), row.OwnerName, row.BalanceMinor)
 }
 
 func toAccountViewFromGet(row sqlcgen.GetAccountRow) usecase.AccountView {
@@ -218,5 +224,5 @@ func toAccountViewFromGet(row sqlcgen.GetAccountRow) usecase.AccountView {
 		VisibleToLimitedMembers: row.VisibleToLimitedMembers,
 		ArchivedAt:              row.ArchivedAt,
 		CreatedAt:               row.CreatedAt,
-	}), row.OwnerName)
+	}), row.OwnerName, row.BalanceMinor)
 }
