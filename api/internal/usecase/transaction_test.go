@@ -16,9 +16,34 @@ import (
 // rather than leaning on an id nobody registered to mean the same thing.
 func transactionFixture(t *testing.T) (*usecase.TransactionService, *fakeTransactionRepo) {
 	t.Helper()
+	return newTransactionFixture(t, nil)
+}
+
+// transactionFixtureWithAccount is transactionFixture plus one extra account
+// under "house-1", for a test that needs a currency staticTestRates cannot
+// convert (e.g. USD) without inventing a second, differently-wired fixture.
+func transactionFixtureWithAccount(t *testing.T, accountID, currency string) (*usecase.TransactionService, *fakeTransactionRepo) {
+	t.Helper()
+	return newTransactionFixture(t, map[string]fakeAccountRecord{
+		accountID: {householdID: "house-1", currency: currency},
+	})
+}
+
+func newTransactionFixture(t *testing.T, extraAccounts map[string]fakeAccountRecord) (*usecase.TransactionService, *fakeTransactionRepo) {
+	t.Helper()
 	repo := &fakeTransactionRepo{}
 	households := newHouseholdDouble()
 	households.put(domain.Household{ID: "house-1", PrimaryCurrency: "SGD"})
+
+	accounts := map[string]fakeAccountRecord{
+		"dbs":           {householdID: "house-1", currency: "SGD"},
+		"ocbc":          {householdID: "house-1", currency: "SGD"},
+		"bca":           {householdID: "house-1", currency: "IDR"},
+		"someone-elses": {householdID: "other-house", currency: "SGD"},
+	}
+	for id, record := range extraAccounts {
+		accounts[id] = record
+	}
 
 	svc := usecase.NewTransactionService(usecase.TransactionDeps{
 		Transactions: repo,
@@ -27,12 +52,7 @@ func transactionFixture(t *testing.T) (*usecase.TransactionService, *fakeTransac
 			"cat-income":    domain.CategoryIncome,
 		}},
 		Accounts: &fakeAccountLookup{
-			accounts: map[string]fakeAccountRecord{
-				"dbs":           {householdID: "house-1", currency: "SGD"},
-				"ocbc":          {householdID: "house-1", currency: "SGD"},
-				"bca":           {householdID: "house-1", currency: "IDR"},
-				"someone-elses": {householdID: "other-house", currency: "SGD"},
-			},
+			accounts: accounts,
 			memberships: map[string]string{
 				"m-1":             "house-1",
 				"someone-elses-m": "other-house",

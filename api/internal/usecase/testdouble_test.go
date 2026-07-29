@@ -1850,6 +1850,25 @@ func (staticTestRates) Rate(_ context.Context, from, to string) (usecase.Rate, e
 type fakeTransactionRepo struct {
 	transactions []domain.Transaction
 	nextID       int
+
+	// beforeFromOpening is the set of transaction ids MonthTotals reports as
+	// dated before their from-account's opening balance -- the same
+	// BeforeFromAccountOpening flag the real repository computes via a join
+	// to Account.OpeningBalanceAsOf (see transaction_repo.go). This fake has
+	// no accounts to join against, so a test that needs the flag set marks it
+	// directly with markBeforeFromAccountOpening rather than the fake
+	// inferring it from a date comparison it cannot actually make.
+	beforeFromOpening map[string]bool
+}
+
+// markBeforeFromAccountOpening flags transactionID so MonthTotals reports its
+// BeforeFromAccountOpening as true, for a test proving that a transaction the
+// balance ignores still counts toward spend (decision 6).
+func (f *fakeTransactionRepo) markBeforeFromAccountOpening(transactionID string) {
+	if f.beforeFromOpening == nil {
+		f.beforeFromOpening = map[string]bool{}
+	}
+	f.beforeFromOpening[transactionID] = true
 }
 
 func (f *fakeTransactionRepo) Create(_ context.Context, t domain.Transaction) (domain.Transaction, error) {
@@ -1905,7 +1924,12 @@ func (f *fakeTransactionRepo) MonthTotals(_ context.Context, householdID string,
 			continue
 		}
 		if t.OccurredOn.Year() == month.Year() && t.OccurredOn.Month() == month.Month() {
-			out = append(out, usecase.TransactionView{Transaction: t})
+			view := usecase.TransactionView{Transaction: t}
+			if f.beforeFromOpening[t.ID] {
+				before := true
+				view.BeforeFromAccountOpening = &before
+			}
+			out = append(out, view)
 		}
 	}
 	return out, nil
