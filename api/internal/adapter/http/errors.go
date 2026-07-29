@@ -176,6 +176,33 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 		WriteError(w, http.StatusUnprocessableEntity, "INVALID_AS_OF", "That date is in the future.", nil)
 	case errors.Is(err, domain.ErrAccountOwnerNotInHousehold):
 		WriteError(w, http.StatusUnprocessableEntity, "INVALID_OWNER", "That person is not in this household.", nil)
+	case errors.Is(err, domain.ErrTransactionDescriptionRequired):
+		WriteError(w, http.StatusUnprocessableEntity, "DESCRIPTION_REQUIRED",
+			"Give this transaction a description.", nil)
+	case errors.Is(err, domain.ErrUnknownTransactionKind):
+		WriteError(w, http.StatusUnprocessableEntity, "INVALID_KIND",
+			"That is not a kind of transaction Hearth records.", nil)
+	case errors.Is(err, domain.ErrTransactionAmountNotPositive):
+		WriteError(w, http.StatusUnprocessableEntity, "INVALID_AMOUNT",
+			"Enter an amount greater than zero. Whether it adds or subtracts comes from the kind.", nil)
+	// One message for every wrong-account shape, including an account in
+	// another household: separate ones would tell a caller which ids are real
+	// elsewhere.
+	case errors.Is(err, domain.ErrTransactionAccountsInvalid):
+		WriteError(w, http.StatusUnprocessableEntity, "INVALID_ACCOUNTS",
+			"Choose accounts that match this kind of transaction.", nil)
+	case errors.Is(err, domain.ErrReceivedAmountRequired):
+		WriteError(w, http.StatusUnprocessableEntity, "RECEIVED_AMOUNT_REQUIRED",
+			"These accounts are in different currencies. Enter what actually arrived.", nil)
+	case errors.Is(err, domain.ErrReceivedAmountNotAllowed):
+		WriteError(w, http.StatusUnprocessableEntity, "RECEIVED_AMOUNT_NOT_ALLOWED",
+			"Only a transfer records an amount received.", nil)
+	case errors.Is(err, domain.ErrCategoryKindMismatch):
+		WriteError(w, http.StatusUnprocessableEntity, "INVALID_CATEGORY",
+			"That category does not belong to this kind of transaction.", nil)
+	case errors.Is(err, domain.ErrUnknownCategoryKind):
+		WriteError(w, http.StatusUnprocessableEntity, "INVALID_CATEGORY",
+			"That category does not belong to this kind of transaction.", nil)
 	case errors.Is(err, domain.ErrAlreadyExists):
 		// Every service that means a genuine, nameable conflict already
 		// translates domain.ErrAlreadyExists into its own sentinel before
