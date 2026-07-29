@@ -396,18 +396,46 @@ run it before adding a fourth site.
 
 **One feature — Transactions, Tasks 5 through 17 — accounts for nine of the
 entries above this line, more than any other piece of work in this log.**
-They are not nine copies of the same mistake. A short-circuit (a count
-check reached, and returned, before the clause under test). A serialised race
-(concurrent goroutines that all paid the same one-time connection-dial cost
-before any of them raced anything). A shared guard (a route already refused
-for a reason that had nothing to do with the row the test was named after).
-An unwired fixture (a test harness's own dependencies left nil, caught only
-because a loose assertion happened not to distinguish 500 from success). And,
-twice, a value that was simply never set — a fake double never told to
-simulate the condition its own test claims to exercise, or a `<select>`
-option chosen that did not exist in the fixture list. None of the nine were
-caught by the test itself failing; every one needed a person to ask whether
-the test could ever have gone red in the first place.
+Counted, not estimated: nine dash-bullets above are Transactions' own — the
+two Task 5 entries, Task 7, Task 8, Task 11, Task 13, Task 15, and one from
+Task 16. A tenth Transactions bullet sits among them (the Task 16 review
+round entry naming a `POST /api/v1/transactions` route with no test behind
+it at all, and a stale-display bug on an appended page) and is deliberately
+not one of the nine: it is a route nobody wrote a test for, and a shipped
+bug, not a test that ran and passed without discriminating — a different
+failure than the one this section is about, not a repetition of it. An
+eleventh, the segmented-control rebuild, is a design decision rather than a
+defect and was never a candidate.
+
+Walked in order, the nine are not nine copies of the same mistake:
+
+- **A serialised race** (Task 5's first entry) — concurrent goroutines that
+  all paid the same one-time connection-dial cost before any of them raced
+  anything.
+- **A short-circuit** (Task 5's second entry) — a count check reached, and
+  returned, before the clause under test.
+- **A confound** (Task 7) — a household-level delete proved the wrong
+  foreign key, because a second, indirect cascade reached the same row
+  first and left nothing for the direct one to restrict against.
+- **A fixture with no case to discriminate** (Task 8) — ten transactions on
+  ten distinct dates left a date-only cursor and a row-value cursor nothing
+  to disagree over.
+- **A value never set** (Task 11) — a fake double never told to simulate the
+  condition its own test claims to exercise.
+- **An unwired fixture** (Task 13) — a test harness's own dependencies left
+  nil, caught only because a loose assertion happened not to distinguish
+  `500` from success.
+- **A value never set, again** (Task 15) — a `<select>` option chosen that
+  did not exist in the fixture list, a silent no-op in both jsdom and a real
+  browser.
+- **An assertion satisfied before the failure it should have caught**
+  (Task 16) — a spy recording the request before the response it stubbed
+  threw.
+- **A shared guard** (Task 17) — a route refused for a reason that had
+  nothing to do with the row the test was named after.
+
+None of the nine were caught by the test itself failing; every one needed a
+person to ask whether the test could ever have gone red in the first place.
 
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
