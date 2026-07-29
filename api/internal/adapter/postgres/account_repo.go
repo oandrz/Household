@@ -17,6 +17,11 @@ func NewAccountRepo(db *DB) *AccountRepo {
 	return &AccountRepo{q: sqlcgen.New(db.Pool())}
 }
 
+// var _ pins AccountRepo to usecase.AccountLookup at compile time, the
+// narrower port TransactionService depends on -- the same reason
+// category_repo.go pins CategoryRepo to CategoryLookup.
+var _ usecase.AccountLookup = (*AccountRepo)(nil)
+
 func (r *AccountRepo) List(ctx context.Context, householdID string, includeArchived bool) ([]usecase.AccountView, error) {
 	if includeArchived {
 		rows, err := r.q.ListAccountsIncludingArchived(ctx, uuid(householdID))

@@ -6,7 +6,14 @@ import (
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres/sqlcgen"
 	"github.com/andreasoentoro/hearth/api/internal/domain"
+	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
+
+// var _ pins CategoryRepo to usecase.CategoryLookup at compile time. Nothing
+// currently constructs a TransactionService with a real *CategoryRepo (that
+// wiring is Task 12's), so without this line a wrong Kind signature here
+// would not surface until then.
+var _ usecase.CategoryLookup = (*CategoryRepo)(nil)
 
 // seedSize is how many rows SeedCategories inserts. The query is thirteen
 // literal VALUES rows rather than an unnest of arrays -- sqlc's query
@@ -109,6 +116,20 @@ func (r *CategoryRepo) BelongsToHousehold(ctx context.Context, householdID, cate
 		return false, translate(err, "check category household")
 	}
 	return ok, nil
+}
+
+// Kind answers what TransactionService's category validation needs: whether
+// a category is for spend or for income, so a transaction cannot be filed
+// under the wrong one.
+func (r *CategoryRepo) Kind(ctx context.Context, householdID, categoryID string) (domain.CategoryKind, error) {
+	kind, err := r.q.GetCategoryKind(ctx, sqlcgen.GetCategoryKindParams{
+		ID:          uuid(categoryID),
+		HouseholdID: uuid(householdID),
+	})
+	if err != nil {
+		return "", translate(err, "get category kind")
+	}
+	return domain.CategoryKind(kind), nil
 }
 
 func toCategory(c sqlcgen.Category) domain.Category {

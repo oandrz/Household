@@ -400,6 +400,20 @@ type AccountRepository interface {
 	MembershipBelongsToHousehold(ctx context.Context, householdID, membershipID string) (bool, error)
 }
 
+// AccountLookup is what TransactionService needs of accounts: the currency an
+// account is denominated in, whether it belongs to this household, and
+// whether a membership does too, for the paid-by check. Get returns
+// domain.ErrNotFound for an account in another household, the same as
+// AccountRepository.Get above -- "that account is not yours" must be
+// indistinguishable from "there is no such account" here as well.
+//
+// *postgres.AccountRepo already satisfies this: both methods exist on it
+// already, for AccountRepository above.
+type AccountLookup interface {
+	Get(ctx context.Context, householdID, accountID string) (AccountView, error)
+	MembershipBelongsToHousehold(ctx context.Context, householdID, membershipID string) (bool, error)
+}
+
 // TransactionView is a transaction joined to the names the ledger displays --
 // its category, who paid, and each account's nickname. Same shape and same
 // reason as MemberView and AccountView above: every consumer of the list wants
@@ -469,6 +483,15 @@ type CategoryRepository interface {
 	// for any path that reaches the insert without going through that count
 	// at all.
 	EnsureSeeded(ctx context.Context, householdID string, starter []domain.Category) error
+}
+
+// CategoryLookup is what TransactionService needs of categories: whether an
+// id is one of this household's, and what kind it is. Narrow on purpose -- it
+// does not need List or EnsureSeeded, and a port that hands it those is a
+// port that invites a service to seed as a side effect of validation.
+type CategoryLookup interface {
+	BelongsToHousehold(ctx context.Context, householdID, categoryID string) (bool, error)
+	Kind(ctx context.Context, householdID, categoryID string) (domain.CategoryKind, error)
 }
 
 type TransactionRepository interface {
