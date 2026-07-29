@@ -191,7 +191,17 @@ export function TransactionModal({
   // description), but that reasoning does not apply the first time a kind
   // switch turns the form into a transfer at all, and leaving it true there
   // would mean Amount received never prefills as the brief says it always does.
+  //
+  // The `next === kind` guard is load-bearing, not a redundant early return: a
+  // second review caught that every kind button calls this on every click,
+  // including a re-click of the kind already active. Without the guard, that
+  // re-click silently discarded whatever the person had already typed --
+  // a chosen category reverted to blank, and worse, a manually typed
+  // same-currency bank fee in Amount received was overwritten by the mirror
+  // behaviour the instant `receivedAmountTouched` got reset back to false.
+  // Both are real work disappearing from a click that changed nothing.
   function handleKindChange(next: TransactionKind) {
+    if (next === kind) return;
     setKind(next);
     setCategoryId("");
     if (next === "transfer") {
@@ -220,6 +230,14 @@ export function TransactionModal({
 
     let receivedAmountMinor: number | null = null;
     if (kind === "transfer") {
+      // .trim() here is deliberately broader than the field's own `required`
+      // attribute below, which only blocks a literally empty value -- a
+      // browser's constraint validation (and jsdom's) treats a whitespace-only
+      // string as "present" and lets the submit event through regardless.
+      // This check is what actually refuses that case: it is real, reachable
+      // code on that path, even though a literally empty required field never
+      // reaches this far at all (native validation stops the submit event
+      // first, the same as any other required input on this form).
       if (receivedAmountInput.trim() === "") {
         if (receivedAmountRequired) {
           setReceivedAmountError("Enter what actually arrived.");

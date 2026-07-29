@@ -311,16 +311,82 @@ describe("TransactionModal", () => {
 
     // The stale figure must not be submittable by accident either: without
     // retyping anything, submitting must not carry the discarded "120.00"
-    // forward. required+empty means jsdom's own constraint validation
-    // refuses the submit event before this component's handler ever runs
-    // (the same as a real browser), so onSubmit not being called is exactly
-    // what proves the old figure went nowhere -- the field-error path this
-    // component's handleSubmit also has for this case is unreachable here for
-    // that reason, not evidence of anything.
+    // forward. required+literally-empty means jsdom's own constraint
+    // validation refuses the submit event before this component's handler
+    // ever runs (the same as a real browser), so onSubmit not being called is
+    // exactly what proves the old figure went nowhere. This is a *narrower*
+    // claim than "handleSubmit's own required check is dead code" -- it is
+    // not: that check also catches a whitespace-only value, which native
+    // validation treats as present and lets through (see the dedicated test
+    // below), so it fires for real on that path even though it can't fire on
+    // this one.
     fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "Transfer to BCA" } });
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "500.00" } });
     fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
 
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  // Re-review finding: handleKindChange reset categoryId/receivedAmountTouched
+  // unconditionally, with no check that the clicked kind differs from the
+  // one already active -- and every kind button calls it on every click,
+  // including a re-click of the kind already showing. Picking a category,
+  // then clicking that same kind's own button again, silently reverted the
+  // select to blank.
+  it("keeps a chosen category when the already-active kind is clicked again", async () => {
+    renderModal();
+
+    const categorySelect = await screen.findByLabelText(/category/i);
+    await screen.findByRole("option", { name: "Groceries" });
+    fireEvent.change(categorySelect, { target: { value: "cat-groceries" } });
+    expect(categorySelect).toHaveValue("cat-groceries");
+
+    fireEvent.click(screen.getByRole("button", { name: "Expense" }));
+
+    expect(screen.getByLabelText(/category/i)).toHaveValue("cat-groceries");
+  });
+
+  // Same regression, the monetary path: a same-currency transfer's bank-fee
+  // figure -- typed by hand, and legitimately different from the amount
+  // sent -- must survive a re-click of the "Transfer" button already active,
+  // not be silently overwritten by the mirror-to-amount-sent behaviour.
+  it("keeps a manually typed received amount when the already-active Transfer kind is clicked again", () => {
+    renderModal();
+
+    fireEvent.click(screen.getByRole("button", { name: "Transfer" }));
+    fireEvent.change(screen.getByLabelText(/from account/i), { target: { value: "dbs" } });
+    fireEvent.change(screen.getByLabelText(/to account/i), { target: { value: "ocbc" } });
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "100.00" } });
+    fireEvent.change(screen.getByLabelText(/amount received/i), { target: { value: "98.50" } });
+    expect(screen.getByLabelText(/amount received/i)).toHaveValue("98.50");
+
+    fireEvent.click(screen.getByRole("button", { name: "Transfer" }));
+
+    expect(screen.getByLabelText(/amount received/i)).toHaveValue("98.50");
+  });
+
+  // Re-review finding: handleSubmit's own required check
+  // (receivedAmountInput.trim() === "") is deliberately broader than the
+  // field's native `required` attribute, which only blocks a literally empty
+  // value -- a browser (and jsdom) lets whitespace through as "present".
+  // Without this second check, a whitespace-only value would slip past
+  // native validation, reach handleSubmit, and (since toMinorUnits also
+  // rejects it) still be refused -- but proving that refusal actually fires
+  // is the point: it is what makes the "Enter what actually arrived" text
+  // real code, not a message native validation always pre-empts.
+  it("refuses a whitespace-only received amount even though native validation lets it through", () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderModal({ onSubmit });
+
+    fireEvent.click(screen.getByRole("button", { name: "Transfer" }));
+    fireEvent.change(screen.getByLabelText(/from account/i), { target: { value: "dbs" } });
+    fireEvent.change(screen.getByLabelText(/to account/i), { target: { value: "bca" } });
+    fireEvent.change(screen.getByLabelText(/amount received/i), { target: { value: "   " } });
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "Transfer to BCA" } });
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "500.00" } });
+    fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText(/enter what actually arrived/i)).toBeInTheDocument();
   });
 });
