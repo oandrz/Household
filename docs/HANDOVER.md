@@ -17,17 +17,35 @@ make test` passing is not the same claim as a human clicking through it.
 Accounts (slice 2's first feature) closed that gap for itself: its walk ran
 and passed, 15 of 15. Transactions (slice 2's second feature) is code-complete
 and reviewed the same way, seventeen tasks deep with every task's own review
-clean including fix rounds — but its browser walk (Task 19, fifteen
-criteria) has not run yet either. **[Placeholder — record Task 19's result
-here once it has run: pass/fail per criterion, and what was done about any
-failure, the same way the Accounts result below is recorded.]**
+clean including fix rounds — and its own browser walk (Task 19, fifteen
+criteria) has now run too. **Result: 15 of 15 pass**, recorded in
+`docs/superpowers/plans/2026-07-29-hearth-transactions-verification.md`. One
+real defect surfaced: the ledger's Kind filter (All/Expense/Income) hid its
+real, keyboard-focusable `<input type="radio">`s with `sr-only`, and the
+visible pill standing in for each one never reacted to the hidden input's
+own focus state — Tab and arrow-key navigation moved real focus with no
+visible indicator at all, catchable only in a real browser (`fireEvent.click`,
+what every existing test used, never presses a key). Fixed in
+`web/src/features/money/TransactionFilters.tsx`, and the fix's own first
+attempt was itself caught half-wrong by the same walk: a single ring colour
+was invisible against the selected pill's near-black background (two
+screenshots, before and after, came back byte-identical), so the ring colour
+had to become conditional on which of the two pill backgrounds it sits
+against. Pinned by a new, mutation-checked test in
+`TransactionsPage.test.tsx`. Two criteria were met by an interpreted rather
+than fully literal path — the sidebar reaches Transactions via Money →
+Finances → "See all" rather than a direct sub-link (by the design's own
+documented scoping), and the limited-member capability was granted via
+`adminctl create-invite --capabilities=money` before being additionally
+exercised through the Settings toggle Andreas would actually use — both
+recorded in the verification file rather than passed over quietly.
 
 | Slice | Contents | State |
 |---|---|---|
 | 0 — Skeleton | Clean-architecture layout, Docker, Compose, Make, migrations, health endpoints | **Done** |
 | 1 — Household & identity | Sign-in, magic link, invite acceptance, lockout, members, roles, capabilities, spaces, Settings | **Done** |
 | — Self-serve sign-up | Sign-up, household provisioning, an ISO 4217 currency allowlist and list endpoint, `adminctl prune`, a per-IP rate limiter | Code-complete; browser walk **still pending** |
-| 2 — Money | **Accounts**: manual entry, net worth, assets/liabilities breakdown, archive and restore — **done, browser walk 15/15**. **Transactions**: ledger, categories, filters, keyset paging, month-to-date spend — code-complete and reviewed; browser walk (Task 19) **pending**. Budget, Goals, Bills: not started | In progress |
+| 2 — Money | **Accounts**: manual entry, net worth, assets/liabilities breakdown, archive and restore — **done, browser walk 15/15**. **Transactions**: ledger, categories, filters, keyset paging, month-to-date spend — **done, browser walk 15/15**. Budget, Goals, Bills: not started | In progress |
 | 3 — Marriage | Retros, Vision, Agreements | Not started |
 | 4 — Family | Calendar | Not started |
 | 5 — Overview | Read-only aggregation across 2–4 | Not started |
@@ -83,10 +101,28 @@ opening balance saved and marked but still counted in "Spent this month," the
 five filters each narrowing the ledger with the account filter matching a
 transfer on both sides, keyset paging surviving a row inserted mid-scroll, and
 a limited member holding Money refused the ledger itself (reads included, not
-only writes) among them. **It has not been run yet.** [Placeholder — replace
-this sentence with the result once Task 19 has walked it: pass/fail per
-criterion and what was done about any failure, the same way the paragraph
-above records the Accounts walk.]
+only writes) among them. **Result: 15 of 15 pass**, recorded in
+`docs/superpowers/plans/2026-07-29-hearth-transactions-verification.md`. All
+seven money-movement criteria (expense, income, same-currency transfer,
+cross-currency transfer, a same-currency transfer's fee) reconciled to the
+cent against a real database, including the account-opening-date boundary
+that Task 9's designated mutation (`>` to `>=`) protects. One real defect
+came out of the walk rather than a false claim from a stub: the Kind
+filter's radios are `sr-only` and their visible label never reacted to the
+hidden input's own focus state, so keyboard navigation moved real focus
+with no visible sign of it at all — a defect no unit test using
+`fireEvent.click` could ever have pressed a key to find. Fixed, and the
+fix's own first version was itself caught half-wrong by the same walk
+before-and-after screenshots (a single ring colour disappeared against the
+selected pill's dark background) — pattern 3 of `docs/LEARNING.md` records
+both. Two criteria were met by an interpreted path rather than a fully
+literal one and are recorded as such in the verification file, the same
+standard the Accounts walk set for its own criterion 12: the sidebar
+reaches Transactions through Money → Finances → "See all" rather than a
+direct sub-link, by the design's own documented single-nav-item scoping;
+and the limited member's Money capability was granted at invite time via
+`adminctl` before also being exercised through the Settings toggle the
+criterion's wording names.
 
 Two screens the design marks "· not built" are deliberately absent: the **kids
 view** and **custom space pages**. That is the design's own scoping, not an

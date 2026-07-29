@@ -474,13 +474,37 @@ either; sharpen the mutation until the failure names the claim.
   restarted — and went unread because nobody checked which process was
   actually answering.
 
+- The Transactions ledger's Kind filter (All / Expense / Income) is a real
+  `<fieldset>` of `<input type="radio">`s, built keyboard-reachable on
+  purpose — but each radio is `sr-only` (visually hidden), so the `<label>`
+  pill wrapping it is the only thing a sighted user sees, and that label's
+  className never reacted to the radio's own `:focus-visible` state. Tabbing
+  or arrow-keying through the group moved real focus with **zero visible
+  sign of it** — `element.matches(':focus-visible')` was `true` throughout,
+  while the label's computed `outline` and `box-shadow` stayed `none`.
+  `fireEvent.click` in every existing test fires a click directly at the
+  element, the same shortcut jsdom's `<dialog>` stub takes, so nothing here
+  ever pressed Tab or an arrow key for real. The first fix (a single
+  `has-[:focus-visible]:ring-accent`) was itself caught half-wrong by the
+  same walk: two screenshots of the selected-and-focused pill, taken before
+  and after that fix, came back **pixel-identical**, because a dark-green
+  ring inset against the pill's own near-black selected background has no
+  contrast. The ring colour had to become conditional on the pill's own
+  background (white ring on the dark selected pill, accent ring on the light
+  unselected one) before it was visible in both states — a reminder that a
+  fix a screenshot diff would have caught in twenty seconds still went out
+  the first time, because nobody diffed the screenshots.
+
 **If a behaviour depends on the platform, verify it in the platform.** A real
-browser found three defects that jsdom structurally could not observe. And
+browser found four defects that jsdom structurally could not observe. And
 when a service returns an error it did not log, stop debugging the code and
 confirm you are talking to the process you think you are — an assumed
 environment that is not the one running is the same trap as a simulated one
 that cannot tell the truth, and every hypothesis about the code will be wrong
-for as long as the premise is.
+for as long as the premise is. A fix for one of those defects is also worth
+a second look with your own eyes, not just a passing assertion: a green test
+that only checks a class string is present says nothing about whether the
+color that class names actually shows up against its own background.
 
 ### 4. Guards scoped to the wrong interval
 
@@ -940,6 +964,15 @@ route with a missing guard has no second line of defence.
   clears Amount received the moment the actual currency pair changes, leaving
   `receivedAmountTouched` to govern only the same-currency mirroring it was
   named for.
+- The Transactions ledger's Kind filter hid its real `<input type="radio">`s
+  with `sr-only` and never gave the visible `<label>` pill a rule reacting to
+  the hidden input's `:focus-visible` state, so Tab and arrow-key navigation
+  moved real, `:focus-visible`-true focus with no visible indicator at all —
+  caught only by the Task 19 browser walk, since `fireEvent.click` (every
+  existing test) never presses a key. See pattern 3 for the fix's own
+  near-miss: a single ring colour was invisible on the selected pill's dark
+  background until the colour itself was made conditional on which
+  background it sits against.
 
 ### Tooling and infrastructure
 
