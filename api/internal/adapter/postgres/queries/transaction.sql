@@ -55,3 +55,77 @@ SELECT EXISTS (
 
 -- name: GetCategoryKind :one
 SELECT kind FROM categories WHERE id = $1 AND household_id = $2;
+
+-- transactionColumns is repeated in full in each query below rather than
+-- factored into a view: sqlc generates a distinct row struct per query, and a
+-- view would hide which columns each one actually reads.
+--
+-- The three LEFT JOINs are what let an expense (no destination), a shared
+-- transaction (no payer) and an uncategorised one come back as rows with NULL
+-- names rather than vanishing.
+--
+-- before_from_opening and before_to_opening are computed here, next to the
+-- dates they compare, so the rule that only transactions after an account's
+-- opening date move its balance lives in one place. <= against
+-- opening_balance_as_of, mirroring the strict > the balance sum will use in
+-- Task 9: a transaction dated *on* the opening date is already reflected in
+-- the figure someone asserted was true that day, so it must not also be
+-- counted as moving the balance forward from it.
+
+-- name: GetTransaction :one
+SELECT t.id, t.household_id, t.kind, t.occurred_on, t.description,
+       t.category_id, t.paid_by_membership_id, t.from_account_id, t.to_account_id,
+       t.amount_minor, t.amount_currency,
+       t.received_amount_minor, t.received_amount_currency, t.created_at,
+       c.name AS category_name,
+       u.display_name AS paid_by_name,
+       fa.nickname AS from_account_name,
+       ta.nickname AS to_account_name,
+       (fa.id IS NOT NULL AND t.occurred_on <= fa.opening_balance_as_of) AS before_from_opening,
+       (ta.id IS NOT NULL AND t.occurred_on <= ta.opening_balance_as_of) AS before_to_opening
+FROM transactions t
+LEFT JOIN categories  c  ON c.id  = t.category_id
+LEFT JOIN memberships m  ON m.id  = t.paid_by_membership_id
+LEFT JOIN users       u  ON u.id  = m.user_id
+LEFT JOIN accounts    fa ON fa.id = t.from_account_id
+LEFT JOIN accounts    ta ON ta.id = t.to_account_id
+WHERE t.household_id = $1 AND t.id = $2;
+
+-- name: CreateTransaction :one
+INSERT INTO transactions (
+    household_id, kind, occurred_on, description, category_id,
+    paid_by_membership_id, from_account_id, to_account_id,
+    amount_minor, amount_currency, received_amount_minor, received_amount_currency
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+RETURNING id, household_id, kind, occurred_on, description, category_id,
+          paid_by_membership_id, from_account_id, to_account_id,
+          amount_minor, amount_currency, received_amount_minor,
+          received_amount_currency, created_at;
+
+-- name: UpdateTransaction :one
+UPDATE transactions
+SET kind                     = $3,
+    occurred_on              = $4,
+    description              = $5,
+    category_id              = $6,
+    paid_by_membership_id    = $7,
+    from_account_id          = $8,
+    to_account_id            = $9,
+    amount_minor             = $10,
+    amount_currency          = $11,
+    received_amount_minor    = $12,
+    received_amount_currency = $13
+WHERE household_id = $1 AND id = $2
+RETURNING id, household_id, kind, occurred_on, description, category_id,
+          paid_by_membership_id, from_account_id, to_account_id,
+          amount_minor, amount_currency, received_amount_minor,
+          received_amount_currency, created_at;
+
+-- DeleteTransaction is scoped by household_id like every other query here, and
+-- returns the id so the caller can tell "removed" from "there was nothing to
+-- remove" without a second round trip. A transaction is hard deleted -- unlike
+-- an account, nothing references it, so nothing is orphaned.
+-- name: DeleteTransaction :one
+DELETE FROM transactions
+WHERE household_id = $1 AND id = $2
+RETURNING id;

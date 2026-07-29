@@ -199,4 +199,5 @@ var (
 	_ usecase.SignupRepository       = (*SignupRepo)(nil)
 	_ usecase.AccountRepository      = (*AccountRepo)(nil)
 	_ usecase.CategoryRepository     = (*CategoryRepo)(nil)
+	_ usecase.TransactionRepository  = (*TransactionRepo)(nil)
 )
