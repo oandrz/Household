@@ -303,3 +303,50 @@ func TestUpdateValidatesTheMergedResult(t *testing.T) {
 		t.Fatalf("switching an expense to a transfer kept its category = %v, want ErrCategoryKindMismatch", err)
 	}
 }
+
+// Update reads the stored transaction, merges a patch onto its own copy, and
+// validates that copy -- a rejected patch must leave the stored row exactly
+// as it was. ReceivedAmount is a pointer, so this is the one field a naive
+// merge (copying the struct but not what it points to) could still write
+// through to the repository's own value even when validation fails
+// afterwards and nothing is meant to persist. This same-currency-to
+// cross-currency patch is rejected for an unrelated reason (the category),
+// but only after validateReceivedAmount has already re-stamped the received
+// amount's currency for the *new* destination account -- exactly the write
+// that must land on Update's copy, never on the row Get returned.
+func TestARejectedUpdateDoesNotMutateTheStoredReceivedAmount(t *testing.T) {
+	svc, _ := transactionFixture(t)
+	ctx := context.Background()
+
+	received := int64(620000000)
+	created, err := svc.Create(ctx, usecase.NewTransaction{
+		HouseholdID: "house-1", Kind: "transfer",
+		OccurredOn:  time.Date(2026, 6, 29, 0, 0, 0, 0, time.UTC),
+		Description: "To BCA", FromAccountID: "dbs", ToAccountID: "bca",
+		AmountMinor: 50000, ReceivedAmountMinor: &received,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if created.ReceivedAmount == nil || created.ReceivedAmount.Currency != "IDR" {
+		t.Fatalf("received amount = %v, want 620000000 IDR", created.ReceivedAmount)
+	}
+
+	toAccount := "ocbc" // SGD, unlike bca's IDR -- gives validateReceivedAmount a currency to overwrite
+	category := "cat-groceries"
+	_, err = svc.Update(ctx, "house-1", created.ID, usecase.TransactionUpdate{
+		ToAccountID: &toAccount,
+		CategoryID:  &category,
+	})
+	if !errors.Is(err, domain.ErrCategoryKindMismatch) {
+		t.Fatalf("update = %v, want ErrCategoryKindMismatch (so nothing should have been persisted)", err)
+	}
+
+	stored, err := svc.Get(ctx, "house-1", created.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if stored.Transaction.ReceivedAmount == nil || stored.Transaction.ReceivedAmount.Currency != "IDR" {
+		t.Fatalf("stored received amount = %v, want untouched 620000000 IDR", stored.Transaction.ReceivedAmount)
+	}
+}

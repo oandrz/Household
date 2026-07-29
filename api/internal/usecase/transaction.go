@@ -121,6 +121,15 @@ func (s *TransactionService) Update(ctx context.Context, householdID, id string,
 		return domain.Transaction{}, err
 	}
 	t := view.Transaction
+	// t.ReceivedAmount is a pointer copied from view, not a value -- left
+	// alone, validate's currency-normalising write below would mutate
+	// whatever the repository handed back, not just this function's local
+	// copy. A service merging a patch must never write through to a value it
+	// did not allocate itself.
+	if t.ReceivedAmount != nil {
+		received := *t.ReceivedAmount
+		t.ReceivedAmount = &received
+	}
 
 	if patch.Kind != nil {
 		t.Kind = domain.TransactionKind(*patch.Kind)
