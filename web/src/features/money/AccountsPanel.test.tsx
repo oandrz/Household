@@ -42,10 +42,16 @@ const CURRENCIES = {
   body: { currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }] },
 };
 
+// balance and openingBalance differ, as they do on any account with a
+// transaction on it: S$8,000 asserted true on 26 July, S$240.55 of
+// transactions since. A fixture giving them the same figure cannot tell the
+// row's display (which wants the current one) from the edit form's prefill
+// (which wants the opening one), and both are asserted below.
 const LIVE_ACCOUNT: Account = {
   id: "a1", nickname: "DBS Everyday", type: "cash",
   ownerMembershipId: null, ownerName: null,
   balance: { amountMinor: 824055, currency: "SGD" },
+  openingBalance: { amountMinor: 800000, currency: "SGD" },
   balanceAsOf: "2026-07-26",
   countTowardNetWorth: true, visibleToLimitedMembers: false,
   archivedAt: null,
@@ -86,6 +92,12 @@ describe("AccountsPanel", () => {
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByLabelText("Nickname")).toHaveValue("DBS Everyday");
     expect(within(dialog).getByRole("button", { name: "Save" })).toBeInTheDocument();
+    // The row shows the current balance and the form asks for the opening
+    // one. Asserted here, at the level where a click actually opens the
+    // modal against a row's own Account object, because this is the seam the
+    // defect lived in: the modal was correct about every field it was given
+    // and wrong about which figure it was given for this one.
+    expect(within(dialog).getByLabelText("Starting balance")).toHaveValue("8000.00");
   });
 
   // AccountsPanel takes its rows as a prop rather than fetching them itself

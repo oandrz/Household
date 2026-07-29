@@ -30,9 +30,13 @@ function account(overrides: Partial<Account> & Pick<Account, "id" | "nickname" |
   };
 }
 
-const DBS = account({ id: "dbs", nickname: "DBS Everyday", balance: { amountMinor: 500000, currency: "SGD" } });
-const OCBC = account({ id: "ocbc", nickname: "OCBC 360", balance: { amountMinor: 200000, currency: "SGD" } });
-const BCA = account({ id: "bca", nickname: "BCA Tahapan", balance: { amountMinor: 900000000, currency: "IDR" } });
+// Each carries an openingBalance as well as a balance, because a real
+// accountDTO does (account_handlers.go). This component reads only the
+// currency off either, but a fixture that omits a field the server always
+// sends is how the next reader concludes the field is optional in practice.
+const DBS = account({ id: "dbs", nickname: "DBS Everyday", balance: { amountMinor: 500000, currency: "SGD" }, openingBalance: { amountMinor: 400000, currency: "SGD" } });
+const OCBC = account({ id: "ocbc", nickname: "OCBC 360", balance: { amountMinor: 200000, currency: "SGD" }, openingBalance: { amountMinor: 200000, currency: "SGD" } });
+const BCA = account({ id: "bca", nickname: "BCA Tahapan", balance: { amountMinor: 900000000, currency: "IDR" }, openingBalance: { amountMinor: 900000000, currency: "IDR" } });
 const ACCOUNTS = [DBS, OCBC, BCA];
 
 const MEMBERS = [

@@ -33,6 +33,7 @@ function accountFixture(overrides: Partial<Account> = {}): Account {
     ownerMembershipId: null,
     ownerName: null,
     balance: { amountMinor: 500000, currency: "SGD" },
+    openingBalance: { amountMinor: 400000, currency: "SGD" },
     balanceAsOf: "2026-07-01",
     countTowardNetWorth: true,
     visibleToLimitedMembers: false,

@@ -1769,15 +1769,19 @@ func TestAccountsWriteRequiresOwnership(t *testing.T) {
 // net worth says "this family has nothing" -- a different and worse untruth
 // than saying nothing.
 //
-// The redacted entry's key set is asserted exactly, not just that "balance"
-// and "balanceAsOf" happen to be missing: redactedAccounts builds the field
-// nils onto the full accountDTO (account_handlers.go), which is a blacklist
-// on the field axis even though the role check ten lines above it is a
-// deliberate whitelist. A blacklist fails open -- add a new money-carrying
-// field to accountDTO later and every limited member receives it, with
-// nothing here going red, because "balance"/"balanceAsOf" absent would still
-// be true. Asserting the whole key set instead forces exactly that addition
-// to be a deliberate decision, at the one moment it matters.
+// The redacted entry's key set is asserted exactly, not just that the amount
+// keys happen to be missing: redactedAccounts builds the field nils onto the
+// full accountDTO (account_handlers.go), which is a blacklist on the field
+// axis even though the role check ten lines above it is a deliberate
+// whitelist. A blacklist fails open -- add a new money-carrying field to
+// accountDTO later and every limited member receives it, with nothing here
+// going red, because the fields this test happened to name would still be
+// absent. Asserting the whole key set instead forces exactly that addition to
+// be a deliberate decision, at the one moment it matters. That is not
+// hypothetical: "openingBalance" was added to accountDTO after this test was
+// written, and this assertion is what caught it un-redacted. Naming the
+// blacklisted fields in this comment would have needed updating too, so it
+// deliberately does not.
 func TestAccountsAreRedactedForALimitedMember(t *testing.T) {
 	env := newTestEnv(t)
 	ownerSession, ownerCSRF := env.signIn(t, env.ownerEmail, env.ownerPassword)
