@@ -168,12 +168,16 @@ func decodeCursor(raw string) (time.Time, string, bool) {
 		return time.Time{}, "", false
 	}
 	id := raw[len(occurredOnLayout)+1:]
-	// The id half needs its own check: TransactionRepository.List has no
-	// Valid guard on CursorID the way it does for AccountID, CategoryID and
-	// PaidBy (see its comment at transaction_repo.go around the AccountID
-	// check) -- a garbage id here becomes a NULL row-value comparison and
-	// zero rows back, which is exactly the "looks like end-of-ledger"
-	// failure this function exists to refuse instead of silently producing.
+	// The id half needs its own check. Left to SQL, a garbage id arrives as
+	// NULL inside `(occurred_on, id) < (date, NULL)`, and that does not
+	// return zero rows: row comparison stops at the first unequal pair, so
+	// every transaction dated strictly before the cursor date still matches
+	// and only the ones dated ON it drop out. The page would look almost
+	// right, which is worse than looking empty -- a caller paging through the
+	// ledger would silently lose one day's rows and see the rest repeated.
+	// Refusing the cursor here, with a 422 that names the problem, is what
+	// stops that. TransactionRepository.List carries the matching fail-closed
+	// guard for the same value, so neither layer depends on the other.
 	if !isValidUUID(id) {
 		return time.Time{}, "", false
 	}

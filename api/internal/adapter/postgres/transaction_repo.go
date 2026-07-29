@@ -206,8 +206,10 @@ func (r *TransactionRepo) List(ctx context.Context, householdID string, f usecas
 	// ledger instead of the empty result a caller filtering on a nonsense id
 	// actually asked for -- fail-open, not fail-closed, on a value we did not
 	// construct. Checking Valid here and refusing early is what keeps this
-	// filter matching nothing, the same failure mode CursorID and Kind (a
-	// non-nullable Go type) already have for a bad value.
+	// filter matching nothing. Kind gets this for free (it is a non-nullable
+	// Go type, so a nonsense value simply matches no row); the cursor id does
+	// not, and carries its own Valid check further down for the reason
+	// spelled out there.
 	if f.AccountID != "" {
 		id := uuid(f.AccountID)
 		if !id.Valid {
@@ -233,11 +235,30 @@ func (r *TransactionRepo) List(ctx context.Context, householdID string, f usecas
 		params.MonthStart = dateOnly(startOfMonth(f.Month))
 	}
 	// Both cursor halves or neither: a date with no id cannot order two
-	// transactions on the same day, and the row-value comparison would compare
-	// against a NULL id and return nothing at all.
+	// transactions that share a day.
 	if !f.CursorDate.IsZero() && f.CursorID != "" {
+		// A malformed id reaches SQL as NULL, and a NULL on the right of a
+		// row-value comparison does NOT return nothing -- checked against the
+		// Postgres 17 this runs on. `(t.occurred_on, t.id) < (date, NULL)`
+		// stops at the first unequal pair: every row dated strictly before
+		// the cursor date compares true without the id being examined at all,
+		// and only rows dated ON the cursor date fall through to the NULL and
+		// drop out. So an unguarded bad cursor re-serves almost the whole
+		// page rather than returning nothing -- fail-open, the same direction
+		// as the three filters above, just less obviously.
+		//
+		// decodeCursor (transaction_handlers.go) refuses a malformed id with
+		// a 422 before this line can be reached, so no test in this suite can
+		// tell this guard from its absence. It is here regardless: this port
+		// must not depend on one particular caller having validated first,
+		// and "the id filters fail closed, the cursor does not" is exactly
+		// the kind of exception nobody remembers.
+		id := uuid(f.CursorID)
+		if !id.Valid {
+			return []usecase.TransactionView{}, nil
+		}
 		params.CursorDate = dateOnly(f.CursorDate)
-		params.CursorID = nullableUUID(&f.CursorID)
+		params.CursorID = id
 	}
 
 	rows, err := r.q.ListTransactions(ctx, params)

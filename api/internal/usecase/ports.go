@@ -359,10 +359,18 @@ type FXRateProvider interface {
 // same reason as MemberView above.
 //
 // Balance is the account's current balance: its opening balance plus every
-// transaction dated after Account.OpeningBalanceAsOf. There is no transactions
-// table yet, so today Balance always equals Account.OpeningBalance. It is a
-// separate field from the start so the next slice adds a join rather than
-// changing this struct's shape under its consumers.
+// transaction dated strictly after Account.OpeningBalanceAsOf, summed by the
+// repository. It is denominated in the account's own currency, because every
+// transaction on an account is; nothing here converts.
+//
+// It is a separate field from Account.OpeningBalance, and the two are
+// different numbers as soon as an account has a transaction on it. Balance
+// answers "what does this hold now"; Account.OpeningBalance answers "what did
+// someone assert it held on Account.OpeningBalanceAsOf", and is the only one
+// of the two a caller may ever write back. Reading Balance and storing it as
+// an opening balance moves the household's net worth by every transaction
+// since -- a real defect this project shipped in the account edit form, see
+// docs/LEARNING.md.
 //
 // OwnerName is "" for a shared account, following the same "" <-> SQL NULL
 // convention as domain.Account.OwnerMembershipID.
