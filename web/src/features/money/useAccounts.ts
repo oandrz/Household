@@ -54,11 +54,13 @@ export function useUpdateAccount() {
   return useMutation({
     // AccountEditValues, not AccountFormValues: openingBalanceMinor/
     // openingBalanceCurrency are only present on `vars` when AccountModal
-    // actually saw Balance or Currency touched. Spreading `body` below keeps
-    // that absence intact all the way to JSON.stringify -- a field this
-    // object never had is a field the request never mentions, which is what
-    // lets usecase.AccountUpdate's nil-means-unchanged handling leave the
-    // stored balance exactly as it was.
+    // actually saw Starting balance or Currency touched. Spreading `body`
+    // below keeps that absence intact all the way to JSON.stringify -- a
+    // field this object never had is a field the request never mentions,
+    // which is what lets usecase.AccountUpdate's nil-means-unchanged handling
+    // leave the stored *opening* balance exactly as it was. (The current
+    // balance is not writable from here at all: it is summed from the
+    // transactions, so it moves only when one of those does.)
     mutationFn: async (vars: { id: string } & AccountEditValues): Promise<Account> => {
       const { id, ...body } = vars;
       const payload = {
