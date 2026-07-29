@@ -62,9 +62,17 @@ type Transaction struct {
 }
 
 // CreditedAmount is what arrives in the destination account: the received
-// amount when one was recorded, and otherwise the amount that left. One
-// function so the balance sum, the ledger and any later reader cannot disagree
-// about which figure the destination gets.
+// amount when one was recorded, and otherwise the amount that left.
+//
+// No production code calls this or BalanceEffect below. Read that before
+// changing either: the balance every screen shows is summed in SQL, by the
+// balance_minor expression in adapter/postgres/queries/account.sql, and
+// editing these two would not move it by a cent. They are kept as the
+// domain's written statement of what a transaction does to an account -- the
+// rule in one readable place, tested in transaction_test.go -- and the SQL
+// carries its own copy of it. If a second reader ever needs this arithmetic
+// in Go (a projection, an import preview, an undo), this is the shape it
+// should take, and the SQL is what it has to agree with.
 func (t Transaction) CreditedAmount() Money {
 	if t.ReceivedAmount != nil {
 		return *t.ReceivedAmount
@@ -73,7 +81,9 @@ func (t Transaction) CreditedAmount() Money {
 }
 
 // BalanceEffect reports what this transaction does to the named account's
-// balance, and whether it touches that account at all.
+// balance, and whether it touches that account at all. Like CreditedAmount
+// above, it has no production caller today -- see that comment for why it is
+// still here and what actually computes the balances a household sees.
 //
 // A transfer supplies both of its effects from this one row, which is why a
 // transfer cannot change net worth: the two sides are the same money, and
@@ -85,10 +95,11 @@ func (t Transaction) CreditedAmount() Money {
 // tell "this transaction moved nothing here" from "this transaction is not
 // about this account at all". Second, for the unreachable overflow case when
 // the amount is math.MinInt64, which cannot be safely negated. The signature
-// returns bool rather than error: the overflow guard is unreachable through
-// any path this product ships (the database enforces positive amounts today),
-// and widening to error would ripple through every consumer in Tasks 7, 9
-// and 10. A caller must not read ok=false as proof the account was untouched.
+// returns bool rather than error because the overflow guard is unreachable
+// through any path this product ships -- the database enforces positive
+// amounts -- so an error return would be a second failure mode every future
+// caller has to handle in exchange for nothing. A caller must not read
+// ok=false as proof the account was untouched.
 func (t Transaction) BalanceEffect(accountID string) (Money, bool) {
 	if accountID == "" {
 		return Money{}, false

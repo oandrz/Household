@@ -8,6 +8,7 @@ import (
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres"
 	"github.com/andreasoentoro/hearth/api/internal/domain"
+	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
 // fixtureOwnerName is the display name newAccountFixture's membership is
@@ -385,6 +386,154 @@ func TestAccountBalanceSumsItsTransactions(t *testing.T) {
 	if len(all) != 1 || all[0].Balance.Amount != views[0].Balance.Amount {
 		t.Fatalf("ListAccountsIncludingArchived balance = %+v, want %d to match List and Get",
 			all, views[0].Balance.Amount)
+	}
+}
+
+// insertTestAccountAsOf is insertTestAccount with the two columns the
+// balance sum actually reads: the opening figure and the day it was true.
+// The transfer tests below need those to differ per account, which is the
+// whole point of the second one.
+func insertTestAccountAsOf(
+	t *testing.T, db *postgres.DB, householdID, nickname, currency string,
+	openingMinor int64, asOf time.Time,
+) string {
+	t.Helper()
+	var id string
+	err := db.Pool().QueryRow(context.Background(),
+		`INSERT INTO accounts (household_id, nickname, type, opening_balance_minor,
+		                       opening_balance_currency, opening_balance_as_of)
+		 VALUES ($1, $2, 'cash', $3, $4, $5) RETURNING id`,
+		householdID, nickname, openingMinor, currency, asOf).Scan(&id)
+	if err != nil {
+		t.Fatalf("insert account %s: %v", nickname, err)
+	}
+	return id
+}
+
+// balancesByNickname is what both transfer tests below assert against: two
+// accounts, read in one List call, so the pair's total is read from a single
+// consistent view rather than two.
+func balancesByNickname(t *testing.T, views []usecase.AccountView) map[string]int64 {
+	t.Helper()
+	out := map[string]int64{}
+	for _, v := range views {
+		out[v.Account.Nickname] = v.Balance.Amount
+	}
+	return out
+}
+
+// A same-currency transfer must leave the two accounts' total exactly where
+// it was: the money did not leave the household, it changed hands inside it.
+// This is the invariant transactions decision 2 (one row carrying both sides,
+// rather than two rows that can disagree) exists to protect, and the spec
+// asks for it asserted rather than assumed.
+//
+// It is asserted here, against Postgres, rather than against
+// domain.Transaction.BalanceEffect, because the arithmetic that ships is the
+// SQL in queries/account.sql -- see BalanceEffect's own doc comment. A domain
+// test would pass unchanged while the balance every screen shows went wrong.
+func TestASameCurrencyTransferLeavesTheTwoAccountsTotalUnchanged(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	accounts := postgres.NewAccountRepo(db)
+	transactions := postgres.NewTransactionRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	dbs := insertTestAccountAsOf(t, db, householdID, "DBS", "SGD", 100000, july(1))
+	ocbc := insertTestAccountAsOf(t, db, householdID, "OCBC", "SGD", 50000, july(1))
+	const openingTotal = 150000
+
+	if _, err := transactions.Create(ctx, domain.Transaction{
+		HouseholdID: householdID, Kind: domain.TransactionTransfer,
+		OccurredOn: july(20), Description: "Move to savings",
+		FromAccountID: dbs, ToAccountID: ocbc,
+		Amount: domain.Money{Amount: 30000, Currency: "SGD"},
+	}); err != nil {
+		t.Fatalf("create transfer: %v", err)
+	}
+
+	views, err := accounts.List(ctx, householdID, false)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	got := balancesByNickname(t, views)
+	// Equal and opposite, stated as two figures rather than only as a sum:
+	// a sum alone would still hold if both sides moved the same way by
+	// amounts that happened to cancel against the openings.
+	if got["DBS"] != 70000 || got["OCBC"] != 80000 {
+		t.Fatalf("balances = %v, want DBS 70000 and OCBC 80000 (S$300 moved from one to the other)", got)
+	}
+	if total := got["DBS"] + got["OCBC"]; total != openingTotal {
+		t.Fatalf("the pair totals %d after the transfer, want %d -- a transfer must not "+
+			"change what the household is worth", total, openingTotal)
+	}
+}
+
+// A transfer dated before one account's opening date and after the other's
+// moves exactly one of the two balances.
+//
+// The "flag" the spec names is not a field anywhere: it is the
+// `t.occurred_on > a.opening_balance_as_of` comparison inside
+// queries/account.sql, which is evaluated once per *account*, not once per
+// transaction. A single transaction-level boolean -- "is this transfer before
+// the opening date" -- has no answer here, because the honest answer is
+// "before one of them and after the other". This test is what makes that
+// distinction falsifiable: hoist the comparison to the transaction and one of
+// these two figures goes wrong.
+//
+// The pair's total does change here, and that is correct: OCBC's opening
+// figure is an assertion about 31 July that already accounts for money that
+// arrived on the 20th, so counting the transfer again would double it.
+func TestATransferStraddlingOneOpeningDateMovesOnlyThatSideOfIt(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	accounts := postgres.NewAccountRepo(db)
+	transactions := postgres.NewTransactionRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	// The transfer on the 20th is after DBS's opening date and before OCBC's.
+	dbs := insertTestAccountAsOf(t, db, householdID, "DBS", "SGD", 100000, july(1))
+	ocbc := insertTestAccountAsOf(t, db, householdID, "OCBC", "SGD", 50000, july(31))
+
+	created, err := transactions.Create(ctx, domain.Transaction{
+		HouseholdID: householdID, Kind: domain.TransactionTransfer,
+		OccurredOn: july(20), Description: "Move to savings",
+		FromAccountID: dbs, ToAccountID: ocbc,
+		Amount: domain.Money{Amount: 30000, Currency: "SGD"},
+	})
+	if err != nil {
+		t.Fatalf("create transfer: %v", err)
+	}
+
+	// The ledger's own note about this row must say the same thing the two
+	// balances do, and say it separately per side. One flag for both sides
+	// would have to be either true or false here, and each answer libels one
+	// of the two accounts.
+	view, err := transactions.Get(ctx, householdID, created.ID)
+	if err != nil {
+		t.Fatalf("get transfer: %v", err)
+	}
+	if view.BeforeFromAccountOpening == nil || *view.BeforeFromAccountOpening {
+		t.Fatalf("beforeFromAccountOpening = %v, want non-nil false -- 20 July is after DBS's 1 July opening",
+			view.BeforeFromAccountOpening)
+	}
+	if view.BeforeToAccountOpening == nil || !*view.BeforeToAccountOpening {
+		t.Fatalf("beforeToAccountOpening = %v, want non-nil true -- 20 July predates OCBC's 31 July opening",
+			view.BeforeToAccountOpening)
+	}
+
+	views, err := accounts.List(ctx, householdID, false)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	got := balancesByNickname(t, views)
+	if got["DBS"] != 70000 {
+		t.Fatalf("DBS balance = %d, want 70000 -- the transfer is after its opening date "+
+			"and must come off it", got["DBS"])
+	}
+	if got["OCBC"] != 50000 {
+		t.Fatalf("OCBC balance = %d, want its opening 50000 unchanged -- the transfer predates "+
+			"the day that figure was asserted true, so it is already in it", got["OCBC"])
 	}
 }
 
