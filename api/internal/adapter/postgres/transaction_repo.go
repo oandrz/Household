@@ -199,14 +199,35 @@ func (r *TransactionRepo) List(ctx context.Context, householdID string, f usecas
 		kind := f.Kind
 		params.Kind = &kind
 	}
+	// uuid() reports a malformed id with Valid: false, which the query's own
+	// "IS NULL OR column = ..." form cannot tell apart from an absent filter --
+	// both arrive as SQL NULL, and NULL means "no filter" there. Left
+	// unchecked, a malformed id would silently return the whole household's
+	// ledger instead of the empty result a caller filtering on a nonsense id
+	// actually asked for -- fail-open, not fail-closed, on a value we did not
+	// construct. Checking Valid here and refusing early is what keeps this
+	// filter matching nothing, the same failure mode CursorID and Kind (a
+	// non-nullable Go type) already have for a bad value.
 	if f.AccountID != "" {
-		params.AccountID = nullableUUID(&f.AccountID)
+		id := uuid(f.AccountID)
+		if !id.Valid {
+			return []usecase.TransactionView{}, nil
+		}
+		params.AccountID = id
 	}
 	if f.CategoryID != "" {
-		params.CategoryID = nullableUUID(&f.CategoryID)
+		id := uuid(f.CategoryID)
+		if !id.Valid {
+			return []usecase.TransactionView{}, nil
+		}
+		params.CategoryID = id
 	}
 	if f.PaidByMembershipID != "" {
-		params.PaidBy = nullableUUID(&f.PaidByMembershipID)
+		id := uuid(f.PaidByMembershipID)
+		if !id.Valid {
+			return []usecase.TransactionView{}, nil
+		}
+		params.PaidBy = id
 	}
 	if !f.Month.IsZero() {
 		params.MonthStart = dateOnly(startOfMonth(f.Month))

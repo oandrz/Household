@@ -543,9 +543,9 @@ func TestMonthTotalsCoversTheWholeMonthAndNothingElse(t *testing.T) {
 
 	days := []time.Time{
 		time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC), // out, previous month
-		july(1),                                      // in, first day
-		july(31),                                     // in, last day
-		time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC),  // out, next month
+		july(1),  // in, first day
+		july(31), // in, last day
+		time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC), // out, next month
 	}
 	for i, day := range days {
 		if _, err := repo.Create(ctx, domain.Transaction{
@@ -573,5 +573,133 @@ func TestMonthTotalsCoversTheWholeMonthAndNothingElse(t *testing.T) {
 	}
 	if !gotDates[july(1).Format("2006-01-02")] || !gotDates[july(31).Format("2006-01-02")] {
 		t.Fatalf("month totals returned dates %v, want exactly 1 and 31 July", gotDates)
+	}
+}
+
+// A malformed account id is a filter that matches nothing, not an absent
+// filter -- but uuid() reports a parse failure the same way it reports "not
+// set" (Valid: false), and the query's own "IS NULL OR column = ..." form
+// cannot tell the two apart: both arrive as SQL NULL, and NULL means "no
+// filter" there. Left unguarded, this fails open: a caller who mistypes an
+// account id would get back the household's whole ledger instead of the
+// empty page a filter that matches nothing should produce. CategoryID and
+// PaidByMembershipID share the same uuid()-backed pattern in List and are
+// exercised the same way here rather than in three near-identical tests.
+func TestListRefusesAMalformedIDFilterInsteadOfReturningEverything(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewTransactionRepo(db)
+	householdID := insertTestHousehold(t, db)
+	dbs := insertTestAccount(t, db, householdID, "DBS", "SGD")
+	groceries := insertTestCategory(t, db, householdID, "Groceries")
+	membershipID := insertTestMembership(t, db, householdID, "Christine")
+
+	if _, err := repo.Create(ctx, domain.Transaction{
+		HouseholdID: householdID, Kind: domain.TransactionExpense,
+		OccurredOn: july(18), Description: "Cold Storage",
+		CategoryID: groceries, PaidByMembershipID: membershipID, FromAccountID: dbs,
+		Amount: domain.Money{Amount: 100, Currency: "SGD"},
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	cases := []struct {
+		name   string
+		filter usecase.TransactionFilter
+	}{
+		{"account", usecase.TransactionFilter{AccountID: "not-a-uuid", Limit: 20}},
+		{"category", usecase.TransactionFilter{CategoryID: "not-a-uuid", Limit: 20}},
+		{"paidBy", usecase.TransactionFilter{PaidByMembershipID: "not-a-uuid", Limit: 20}},
+	}
+	for _, c := range cases {
+		got, err := repo.List(ctx, householdID, c.filter)
+		if err != nil {
+			t.Fatalf("%s: list: %v", c.name, err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("%s: malformed filter returned %d rows, want 0 -- a filter that "+
+				"cannot be parsed must match nothing, not the whole ledger", c.name, len(got))
+		}
+	}
+}
+
+// List's Month filter is the same two-boundary range predicate
+// (occurred_on >= start AND < start + 1 month) that MonthTotalsQuery already
+// carries -- a second, independent copy of "one calendar month" in the same
+// file. Reuses the fixture TestMonthTotalsCoversTheWholeMonthAndNothingElse
+// pins MonthTotalsQuery's copy with, so an edit to one boundary clause and
+// not the other has a test watching both.
+func TestListsMonthFilterCoversTheWholeMonthAndNothingElse(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewTransactionRepo(db)
+	householdID := insertTestHousehold(t, db)
+	dbs := insertTestAccount(t, db, householdID, "DBS", "SGD")
+
+	days := []time.Time{
+		time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC), // out, previous month
+		july(1),  // in, first day
+		july(31), // in, last day
+		time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC), // out, next month
+	}
+	for i, day := range days {
+		if _, err := repo.Create(ctx, domain.Transaction{
+			HouseholdID: householdID, Kind: domain.TransactionExpense,
+			OccurredOn: day, Description: "Row", FromAccountID: dbs,
+			Amount: domain.Money{Amount: int64(i + 1), Currency: "SGD"},
+		}); err != nil {
+			t.Fatalf("create %v: %v", day, err)
+		}
+	}
+
+	got, err := repo.List(ctx, householdID, usecase.TransactionFilter{Month: july(15), Limit: 20})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("July contains %d transactions, want the 1st and the 31st only", len(got))
+	}
+	gotDates := map[string]bool{}
+	for _, v := range got {
+		gotDates[v.Transaction.OccurredOn.Format("2006-01-02")] = true
+	}
+	if !gotDates[july(1).Format("2006-01-02")] || !gotDates[july(31).Format("2006-01-02")] {
+		t.Fatalf("month filter returned dates %v, want exactly 1 and 31 July", gotDates)
+	}
+}
+
+// A caller sending no Limit, or a very large one, must still get a bounded
+// page back -- nothing in the UI sends a limit at all today, but nothing
+// stops a hand-written request from asking for the whole ledger either.
+func TestListClampsAnOversizedLimit(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewTransactionRepo(db)
+	householdID := insertTestHousehold(t, db)
+	dbs := insertTestAccount(t, db, householdID, "DBS", "SGD")
+
+	// One more than the cap, so a correct clamp and an unclamped read would
+	// visibly disagree on the row count if the cap were not applied.
+	const overCap = 201
+	for i := 0; i < overCap; i++ {
+		if _, err := repo.Create(ctx, domain.Transaction{
+			HouseholdID: householdID, Kind: domain.TransactionExpense,
+			OccurredOn: july(1).AddDate(0, 0, -i), Description: "Row",
+			FromAccountID: dbs, Amount: domain.Money{Amount: 1, Currency: "SGD"},
+		}); err != nil {
+			t.Fatalf("create row %d: %v", i, err)
+		}
+	}
+
+	got, err := repo.List(ctx, householdID, usecase.TransactionFilter{Limit: 500})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	// maxTransactionLimit (200) + 1, the "is there another page" row -- not
+	// the 201 rows actually in the table and not the 501 the caller asked for.
+	const wantCapped = 201
+	if len(got) != wantCapped {
+		t.Fatalf("list with Limit: 500 returned %d rows, want %d (the 200-row cap, plus one)",
+			len(got), wantCapped)
 	}
 }

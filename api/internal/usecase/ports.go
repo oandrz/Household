@@ -475,6 +475,12 @@ type TransactionRepository interface {
 	// List returns one household's transactions, newest first, matching every
 	// filter that is set. It returns at most f.Limit+1 rows so the caller can
 	// tell whether another page exists without a second query.
+	//
+	// f.Limit <= 0 is treated as 50, and any f.Limit above 200 is clamped down
+	// to it -- both are the implementation's own constants, not configurable,
+	// so a caller (Task 12's handler) that passes through an unvalidated
+	// request-provided limit must know it can get back at most 201 rows, not
+	// limit+1, and that "no limit sent" does not mean "no cap applied."
 	List(ctx context.Context, householdID string, f TransactionFilter) ([]TransactionView, error)
 	// Get reports domain.ErrNotFound when no transaction with this id exists
 	// in this household -- including when one exists in a different household,
