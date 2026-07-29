@@ -40,6 +40,23 @@ documented scoping), and the limited-member capability was granted via
 exercised through the Settings toggle Andreas would actually use — both
 recorded in the verification file rather than passed over quietly.
 
+A final whole-branch review then found five more, one of them Critical and
+now fixed: making `AccountView.Balance` a real sum changed what that value
+*means*, and `AccountModal` — a file no task on the branch owned — went on
+prefilling its Balance input from it and writing the result back as the
+*opening* balance, so editing an account's currency silently restated
+today's figure as the opening one and moved the household's net worth. The
+wire now carries `openingBalance` alongside `balance` (both redacted for a
+limited member), the form reads and is labelled "Starting balance", and it
+shows the current balance read-only beside it. The other four were a port
+doc comment describing the pre-Transactions world, two missing
+balance-invariant tests the spec had named (a transfer leaves the pair's
+total unchanged; a transfer straddling one account's opening date moves
+exactly one balance and reports the two flags independently), two comments
+asserting a Postgres row-comparison behaviour Postgres does not have, and no
+test driving the three transactions write routes without a CSRF token.
+`docs/LEARNING.md` pattern 1 carries the Critical one in full.
+
 | Slice | Contents | State |
 |---|---|---|
 | 0 — Skeleton | Clean-architecture layout, Docker, Compose, Make, migrations, health endpoints | **Done** |

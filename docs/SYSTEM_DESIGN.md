@@ -492,7 +492,7 @@ sequenceDiagram
     B->>H: GET /api/v1/accounts
     H->>Repo: List(householdID, includeArchived)
     alt caller's role is not owner
-        H-->>B: 200 { accounts: only visible-to-limited rows,<br/>balance/balanceAsOf/summary all absent }
+        H-->>B: 200 { accounts: only visible-to-limited rows,<br/>balance/openingBalance/balanceAsOf/summary all absent }
     else owner
         H->>Svc: Summary(householdID, views)
         loop each live account
@@ -519,8 +519,11 @@ never re-rounded, so the figure is deterministic. See `docs/LEARNING.md`.
 Showing the family total while hiding individual balances was rejected: with
 the list of which accounts exist and a running total, the individual balances
 become inferable as accounts are added and removed. So `summary` is omitted
-entirely, and each visible account's `balance`/`balanceAsOf` keys are absent —
-not zeroed, because a zeroed balance still reads as a real one.
+entirely, and each visible account's `balance`/`openingBalance`/`balanceAsOf`
+keys are absent — not zeroed, because a zeroed balance still reads as a real
+one. `openingBalance` is redacted for the same reason as `balance`: it is an
+amount, and on a young account it is close enough to the current one to be
+just as revealing.
 
 **An unconvertible account doesn't vanish from the total silently, and an
 entirely unconvertible household never shows a zero.**
@@ -546,6 +549,17 @@ hiding (§5's Transactions flow, below). The sum happens once, in the
 repository's SQL; `AccountService.Summary` still converts and adds each
 account's already-summed balance exactly as it did before this feature,
 unchanged.
+
+**Which is why `accountDTO` now carries `openingBalance` as well as
+`balance`.** The two were one number until this feature, and a client that
+has only `balance` to prefill the account edit form from will write today's
+figure back as `opening_balance_minor` — moving the household's net worth by
+every transaction since, on an edit that never meant to touch the balance.
+The wire therefore carries both figures, the form is labelled "Starting
+balance" so the field cannot be mistaken for the one on the account row, and
+`AccountView`'s own doc comment says which of the two may ever be written
+back. A value whose meaning changes has to change its consumers with it;
+`docs/LEARNING.md` records what this cost when it did not.
 
 ### Transactions — the ledger and month-to-date spend, one request
 

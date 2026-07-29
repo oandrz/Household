@@ -18,8 +18,10 @@ gets rebuilt.
 
 ### 1. Fixing an instance rarely fixes the class
 
-This happened **six times**. Every time, the fix was correct and the sibling
-kept the bug.
+This happened **eight times** — one bullet each below. Almost every time, the
+fix was correct and the sibling kept the bug; the last one is the variant
+where nothing was broken at all until a field's meaning moved under a reader
+nobody thought to look at.
 
 - `PATCH` implemented as `PUT` — fixed in `/household` and
   `/notification-preferences`, missed in `/household/members/:id`. Found two
@@ -60,10 +62,48 @@ kept the bug.
   `describeAmountError` helper in `formatMoney.ts`, used by both fields in
   both components, and adding a test plus a mutation check to each.
 
+- Transactions slice, Task 9, found in the final whole-branch review.
+  `usecase.AccountView.Balance` changed from a copy of the opening balance
+  into a real SQL sum of the account's transactions. That is a change of
+  *meaning*, not of shape: nothing failed to compile, no test went red, and
+  every consumer kept reading the field it had always read. One of those
+  consumers was `AccountModal.tsx` — a file no task on the branch owned — which
+  prefilled its Balance input from `account.balance` and sent whatever was
+  left there back as `openingBalanceMinor`. Because the gate on that resend is
+  `balanceTouched || currencyTouched`, changing **only the Currency select**
+  was enough: an account with a S$1,000 opening balance and S$300 of
+  transactions since had its opening balance rewritten to S$1,300, Finances
+  then read S$1,600, nothing on screen said anything had happened, and each
+  such edit compounded the last. The modal's own comment had predicted this in
+  full — it named the failure, named its precondition ("the same number today
+  only because there is no transactions table yet"), and named the fix ("a
+  touched edit will need this prefill to read from opening balance instead").
+  The branch falsified the precondition and left the comment and the code
+  exactly as they were. Nor could the fix have been local: `accountDTO`
+  carried no opening-balance field at all, so there was nothing correct to
+  prefill *from* until the read side was built. Fixed by putting
+  `openingBalance` on the wire (redacted for a limited member alongside
+  `balance`, since it is just as revealing), prefilling from it with no
+  fallback to `balance`, relabelling the input "Starting balance" so it cannot
+  be mistaken for the figure on the account row, and showing the current
+  balance read-only beside it. `usecase/ports.go`'s doc comment still
+  described the old world too, while `account_repo.go`'s comment — for the
+  implementation of that same port — had been updated.
+
 **When you fix something, grep for its shape before you close it.** The question
 that finds these is not "is this fixed?" but "where else does this pattern
 appear?" `Truncate` is now that grep for date-and-location bugs specifically —
 run it before adding a fourth site.
+
+**And when you change what a value *means*, its readers are the class.** The
+compiler will not find them, because nothing about the type changed; only a
+grep for every reader will. Two habits fall out of this one. Sweep the
+consumers in the same change that moves the meaning, including the ones in
+files your task does not own — the producer and its readers are one change,
+not two. And treat a comment that says "this is only safe until X" as a debt
+that comes due: whoever ships X owns it. Here the comment was right, specific,
+and load-bearing, and it still did not stop the defect, because nothing made
+shipping Transactions go and read it.
 
 ### 2. A test that cannot fail protects nothing
 
