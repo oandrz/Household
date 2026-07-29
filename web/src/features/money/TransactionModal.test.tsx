@@ -232,11 +232,95 @@ describe("TransactionModal", () => {
     expect(screen.queryByText("Enter an amount, like 52.30.")).not.toBeInTheDocument();
   });
 
+  // The smaller symptom review finding 2 named alongside the main bug:
+  // receivedAmountTouched starts true when editing (so an already-stored
+  // transfer's figure is never silently recomputed), but that reasoning does
+  // not apply the first time editing a non-transfer switches its kind to
+  // Transfer at all -- the brief says the field is "always present, prefilled
+  // with the amount sent", and dbs (SGD, this transaction's own account) and
+  // ocbc (SGD, the next account in the fixture list) share a currency, so
+  // this is the optional/mirrored case, not the required one.
+  it("prefills amount received even when editing a non-transfer switches it into one", () => {
+    renderModal({ initial: EXPENSE_TRANSACTION });
+
+    fireEvent.click(screen.getByRole("button", { name: "Transfer" }));
+
+    expect(screen.getByLabelText(/amount received/i)).toHaveValue("52.30");
+  });
+
   it("prefills every field from an existing transaction for editing", () => {
     renderModal({ initial: EXPENSE_TRANSACTION });
 
     expect(screen.getByLabelText(/description/i)).toHaveValue("Cold Storage");
     expect(screen.getByLabelText(/^amount/i)).toHaveValue("52.30");
     expect(screen.getByLabelText(/account/i)).toHaveValue("dbs");
+  });
+
+  // Review finding 1: categoryId used to be set once and only ever changed by
+  // the select's own onChange -- switching kind changed which categories are
+  // *displayed* but never touched the held id. Picking Groceries on Expense,
+  // then switching to Income, left "cat-groceries" sitting in state while the
+  // select itself showed nothing selected; both submit branches sent it
+  // verbatim, and the backend refused it with a rejection that pointed at a
+  // field that looked empty.
+  it("does not carry a stale category id across a kind switch", async () => {
+    const { onSubmit } = renderModal({ onSubmit: vi.fn().mockResolvedValue(undefined) });
+
+    const categorySelect = await screen.findByLabelText(/category/i);
+    // The categories query resolves asynchronously; selecting "cat-groceries"
+    // before its <option> exists would be a silent no-op, same as selecting a
+    // not-yet-registered account -- so this waits for the option itself, not
+    // just the select, mirroring AccountModal.test.tsx's own IDR-option wait.
+    await screen.findByRole("option", { name: "Groceries" });
+    fireEvent.change(categorySelect, { target: { value: "cat-groceries" } });
+    expect(categorySelect).toHaveValue("cat-groceries");
+
+    fireEvent.click(screen.getByRole("button", { name: "Income" }));
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "Salary" } });
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "1000.00" } });
+    fireEvent.change(screen.getByLabelText(/account/i), { target: { value: "dbs" } });
+    fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0].categoryId).toBeNull();
+  });
+
+  // Review finding 2: receivedAmountTouched used to gate both "mirror the
+  // amount sent" and "clear + require on a currency mismatch". Typing a bank
+  // fee while dbs -> ocbc (both SGD) marks the field touched; changing the
+  // destination to bca (IDR) afterward must still clear it, because a figure
+  // typed under one currency is never valid to keep once the assumption
+  // changes -- left alone, "120.00" would be sent as receivedAmountMinor:
+  // 12000, silently reinterpreted as 120 *rupiah* instead of the 120 Singapore
+  // dollars it was typed as.
+  it("clears a received amount typed under one currency once the destination currency changes", () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderModal({ onSubmit });
+
+    fireEvent.click(screen.getByRole("button", { name: "Transfer" }));
+    fireEvent.change(screen.getByLabelText(/from account/i), { target: { value: "dbs" } });
+    fireEvent.change(screen.getByLabelText(/to account/i), { target: { value: "ocbc" } });
+    fireEvent.change(screen.getByLabelText(/amount received/i), { target: { value: "120.00" } });
+    expect(screen.getByLabelText(/amount received/i)).toHaveValue("120.00");
+
+    fireEvent.change(screen.getByLabelText(/to account/i), { target: { value: "bca" } });
+
+    const receivedField = screen.getByLabelText(/amount received/i);
+    expect(receivedField).toHaveValue("");
+    expect(receivedField).toBeRequired();
+
+    // The stale figure must not be submittable by accident either: without
+    // retyping anything, submitting must not carry the discarded "120.00"
+    // forward. required+empty means jsdom's own constraint validation
+    // refuses the submit event before this component's handler ever runs
+    // (the same as a real browser), so onSubmit not being called is exactly
+    // what proves the old figure went nowhere -- the field-error path this
+    // component's handleSubmit also has for this case is unreachable here for
+    // that reason, not evidence of anything.
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "Transfer to BCA" } });
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "500.00" } });
+    fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
+
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 });

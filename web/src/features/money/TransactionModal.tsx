@@ -141,16 +141,34 @@ export function TransactionModal({
   const receivedAmountRequired =
     kind === "transfer" && fromCurrency !== undefined && toCurrency !== undefined && fromCurrency !== toCurrency;
 
-  // Keeps Amount received mirroring Amount sent until the person overrides it,
-  // and clears it the moment the two accounts stop sharing a currency --
-  // computed during render (not an effect) so it settles before this render
-  // commits, the same pattern AccountModal's own currency-default uses.
-  if (kind === "transfer" && !receivedAmountTouched) {
-    if (!receivedAmountRequired && receivedAmountInput !== amountInput) {
-      setReceivedAmountInput(amountInput);
-    } else if (receivedAmountRequired && receivedAmountInput !== "") {
-      setReceivedAmountInput("");
-    }
+  // currencyPairKey identifies which currency pair Amount received's current
+  // value was computed under. Tracked in its own state, separately from
+  // receivedAmountTouched, because a review caught these as two independent
+  // events that a single flag cannot both gate: typing a bank fee while
+  // dbs -> ocbc (both SGD) marks the field touched, and touched used to also
+  // suppress clearing it when the destination then changed to bca (IDR) --
+  // "120.00" stayed in the field and would have been sent as
+  // receivedAmountMinor: 12000, silently reinterpreted as 120 *rupiah*
+  // instead of the 120 Singapore dollars it was typed as. A figure typed
+  // under one currency assumption is never valid to keep once the assumption
+  // changes, regardless of who put it there -- so this clears on a genuine
+  // change to the pair, unconditionally, while the mirror behaviour below
+  // stays the only thing receivedAmountTouched gates.
+  const currencyPairKey = `${fromCurrency ?? ""}:${toCurrency ?? ""}`;
+  const [lastCurrencyPairKey, setLastCurrencyPairKey] = useState(currencyPairKey);
+  if (kind === "transfer" && currencyPairKey !== lastCurrencyPairKey) {
+    setLastCurrencyPairKey(currencyPairKey);
+    setReceivedAmountInput("");
+    setReceivedAmountTouched(false);
+  }
+
+  // Keeps Amount received mirroring Amount sent until the person overrides it
+  // -- computed during render (not an effect) so it settles before this
+  // render commits, the same pattern AccountModal's own currency-default
+  // uses. Independent of the clear above: this only ever runs while nothing
+  // has invalidated the field's honesty first.
+  if (kind === "transfer" && !receivedAmountTouched && !receivedAmountRequired && receivedAmountInput !== amountInput) {
+    setReceivedAmountInput(amountInput);
   }
 
   const primaryAccount = kind === "transfer" ? fromAccount : accounts.find((a) => a.id === accountId);
@@ -159,6 +177,27 @@ export function TransactionModal({
   const relevantCategories = (categories.data ?? []).filter(
     (c) => c.kind === (kind === "income" ? "income" : "expense"),
   );
+
+  // A review caught categoryId surviving a kind switch: relevantCategories
+  // only filters what the select *displays*, and setKind on its own never
+  // touched the id actually held in state, so picking a category on Expense
+  // and then switching to Income left the old expense category id sitting in
+  // state -- invisible in the select (it isn't one of the options shown
+  // anymore) but still sent verbatim by both submit branches, which the
+  // backend refused with a rejection pointing at a field that looked empty.
+  // Also resets receivedAmountTouched whenever Transfer is (re)selected: it
+  // starts true when editing on purpose (an already-stored transfer's figure
+  // must not be silently recomputed just because the person changed the
+  // description), but that reasoning does not apply the first time a kind
+  // switch turns the form into a transfer at all, and leaving it true there
+  // would mean Amount received never prefills as the brief says it always does.
+  function handleKindChange(next: TransactionKind) {
+    setKind(next);
+    setCategoryId("");
+    if (next === "transfer") {
+      setReceivedAmountTouched(false);
+    }
+  }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -261,7 +300,7 @@ export function TransactionModal({
               key={k}
               type="button"
               aria-pressed={kind === k}
-              onClick={() => setKind(k)}
+              onClick={() => handleKindChange(k)}
               className={
                 kind === k
                   ? "flex-1 rounded-lg bg-accent py-2 text-center text-[13px] font-semibold text-white"
