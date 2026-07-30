@@ -81,6 +81,7 @@ func run() error {
 	accountRepo := postgres.NewAccountRepo(db)
 	categoryRepo := postgres.NewCategoryRepo(db)
 	transactionRepo := postgres.NewTransactionRepo(db)
+	budgetRepo := postgres.NewBudgetRepo(db)
 
 	hasher := crypto.NewArgon2Hasher(cfg.Argon2Time, cfg.Argon2MemoryKiB, cfg.Argon2Threads)
 	tokens := crypto.NewTokenGenerator()
@@ -154,6 +155,14 @@ func run() error {
 		FX:         fxProvider,
 		Clock:      sysClock,
 	})
+	budgetSvc := usecase.NewBudgetService(usecase.BudgetDeps{
+		Budgets:      budgetRepo,
+		Transactions: transactionRepo,
+		Categories:   categoryRepo,
+		Households:   households,
+		Members:      memberships,
+		FX:           fxProvider,
+	})
 
 	srv := &http.Server{
 		Addr: fmt.Sprintf(":%d", cfg.Port),
@@ -167,6 +176,7 @@ func run() error {
 			Accounts:     accountSvc,
 			Transactions: transactionSvc,
 			Categories:   categorySvc,
+			Budgets:      budgetSvc,
 			Users:        users,
 			Memberships:  memberships,
 			Sessions:     sessions,

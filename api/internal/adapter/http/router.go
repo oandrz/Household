@@ -52,6 +52,7 @@ type Deps struct {
 	Accounts     *usecase.AccountService
 	Transactions *usecase.TransactionService
 	Categories   *usecase.CategoryService
+	Budgets      *usecase.BudgetService
 	Users        usecase.UserRepository
 	Memberships  usecase.MembershipRepository
 	Sessions     usecase.SessionRepository
@@ -197,12 +198,24 @@ func NewRouter(deps Deps) http.Handler {
 
 				txn.Get("/transactions", handleListTransactions(deps))
 				txn.Get("/categories", handleListCategories(deps))
+				txn.Get("/budgets/{month}", handleGetBudgetMonth(deps))
+				txn.Get("/budgets/history", handleBudgetHistory(deps))
 
 				txn.Group(func(w chi.Router) {
 					w.Use(requireCSRF)
 					w.Post("/transactions", handleCreateTransaction(deps))
 					w.Patch("/transactions/{id}", handleUpdateTransaction(deps))
 					w.Delete("/transactions/{id}", handleDeleteTransaction(deps))
+				})
+
+				// PUT /budgets/{month} gets its own CSRF group rather than
+				// joining the one above -- the task brief that introduced
+				// this route pinned this exact shape, and keeping it
+				// distinct means budgets and transactions guards can each
+				// change without touching the other's route list.
+				txn.Group(func(w chi.Router) {
+					w.Use(requireCSRF)
+					w.Put("/budgets/{month}", handlePutBudgetMonth(deps))
 				})
 			})
 		})

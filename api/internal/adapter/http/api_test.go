@@ -224,13 +224,22 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 		Clock:      clk,
 	})
 	categorySvc := usecase.NewCategoryService(categoryRepo)
+	transactionRepo := postgres.NewTransactionRepo(db)
 	transactionSvc := usecase.NewTransactionService(usecase.TransactionDeps{
-		Transactions: postgres.NewTransactionRepo(db),
+		Transactions: transactionRepo,
 		Categories:   categoryRepo,
 		Accounts:     accountRepo,
 		Households:   households,
 		FX:           fxProvider,
 		Clock:        clk,
+	})
+	budgetSvc := usecase.NewBudgetService(usecase.BudgetDeps{
+		Budgets:      postgres.NewBudgetRepo(db),
+		Transactions: transactionRepo,
+		Categories:   categoryRepo,
+		Households:   households,
+		Members:      memberships,
+		FX:           fxProvider,
 	})
 
 	router := httpadapter.NewRouter(httpadapter.Deps{
@@ -243,6 +252,7 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 		Accounts:     accountSvc,
 		Transactions: transactionSvc,
 		Categories:   categorySvc,
+		Budgets:      budgetSvc,
 		Users:        users,
 		Memberships:  memberships,
 		Sessions:     sessions,

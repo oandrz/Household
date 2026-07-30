@@ -78,4 +78,13 @@ var (
 	// layer returns can carry a field-specific code.
 	ErrBudgetLineDuplicate = errors.New("a budget line's category is repeated")
 	ErrBudgetCapNegative   = errors.New("a budget cap cannot be negative")
+
+	// ErrBudgetCategoryUnknown is BudgetRepository.Upsert's own
+	// household-ownership check (validateLineCategories in the postgres
+	// adapter) failing: a budget line names a category id that either does
+	// not exist at all or belongs to a different household. Task 8's Save
+	// deliberately does not pre-check this -- see its own doc comment -- so
+	// this sentinel is what lets the HTTP layer turn that failure into a 422
+	// instead of an unmapped 500.
+	ErrBudgetCategoryUnknown = errors.New("a budget line's category does not belong to this household")
 )

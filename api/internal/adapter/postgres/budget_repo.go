@@ -206,7 +206,13 @@ func validateLineCategories(ctx context.Context, q *sqlcgen.Queries, householdID
 		return translate(err, "count budget line categories")
 	}
 	if int(count) != len(ids) {
-		return fmt.Errorf("postgres: a budget line's category does not belong to household %s", householdID)
+		// Wrapped, not translate()'d: this is an application-level check
+		// against a plain SELECT count, not a Postgres error code, so there
+		// is nothing for translate's pgconn.PgError switch to match. The
+		// wrap is what lets the HTTP layer's MapDomainError recognise this
+		// with errors.Is instead of falling through to an unmapped 500 --
+		// see domain.ErrBudgetCategoryUnknown's own doc comment.
+		return fmt.Errorf("postgres: household %s: %w", householdID, domain.ErrBudgetCategoryUnknown)
 	}
 	return nil
 }
