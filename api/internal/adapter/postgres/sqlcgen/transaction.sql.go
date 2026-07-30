@@ -63,12 +63,25 @@ type CreateCategoryParams struct {
 }
 
 // CreateCategory appends the new row to the end of the household's sort
-// order in the same statement as the insert -- not a separate
-// read-max-then-write -- so two concurrent creates cannot both read the same
-// max and collide on sort_order. A name collision (including against an
-// archived row, which keeps its slot in UNIQUE (household_id, name)) surfaces
-// as a 23505 that CategoryRepo.Create maps through translate to
-// domain.ErrCategoryNameTaken.
+// order, computed by the same statement as the insert rather than a separate
+// read-max-then-write -- that closes the round-trip window where a second
+// request's read could land between this one's read and its write.
+//
+// It does not close the window between two concurrent transactions: under
+// READ COMMITTED, two INSERTs that each begin before the other commits both
+// see the same pre-insert MAX(sort_order) and can both compute and commit
+// the same value -- there is no UNIQUE constraint on sort_order to make the
+// second one fail. Closing that window would need either an advisory lock
+// or a unique constraint, both rejected here: sort_order has no correctness
+// requirement, only a display one, so a tied value is cosmetic (two
+// categories drawn in the same slot, ListCategories' own ORDER BY sort_order,
+// name breaking the tie deterministically rather than leaving it to
+// whatever order Postgres happens to scan rows in) -- not a bug worth a lock
+// around every category creation.
+//
+// A name collision (including against an archived row, which keeps its slot
+// in UNIQUE (household_id, name)) surfaces as a 23505 that
+// CategoryRepo.Create maps through translate to domain.ErrCategoryNameTaken.
 func (q *Queries) CreateCategory(ctx context.Context, arg CreateCategoryParams) (Category, error) {
 	row := q.db.QueryRow(ctx, createCategory, arg.HouseholdID, arg.Name, arg.Kind)
 	var i Category
@@ -279,9 +292,14 @@ const listCategories = `-- name: ListCategories :many
 SELECT id, household_id, name, kind, sort_order, archived_at, created_at
 FROM categories
 WHERE household_id = $1 AND archived_at IS NULL
-ORDER BY sort_order
+ORDER BY sort_order, name
 `
 
+// ORDER BY sort_order, name: the name is a deterministic tie-break for two
+// rows that share a sort_order, which CreateCategory's own comment explains
+// can happen -- without it, a tie's relative order would depend on
+// whichever physical row order Postgres happens to scan, which can differ
+// between two reads of the exact same data.
 func (q *Queries) ListCategories(ctx context.Context, householdID pgtype.UUID) ([]Category, error) {
 	rows, err := q.db.Query(ctx, listCategories, householdID)
 	if err != nil {
@@ -314,7 +332,7 @@ const listCategoriesIncludingArchived = `-- name: ListCategoriesIncludingArchive
 SELECT id, household_id, name, kind, sort_order, archived_at, created_at
 FROM categories
 WHERE household_id = $1
-ORDER BY sort_order
+ORDER BY sort_order, name
 `
 
 func (q *Queries) ListCategoriesIncludingArchived(ctx context.Context, householdID pgtype.UUID) ([]Category, error) {

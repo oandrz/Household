@@ -133,11 +133,16 @@ func (r *CategoryRepo) Kind(ctx context.Context, householdID, categoryID string)
 }
 
 // Create adds one category at the end of the household's sort order.
-// CreateCategory's own query computes that position in the same INSERT, so
-// two concurrent creates cannot both read the same max and collide. A name
-// collision -- including against an archived row, which still occupies its
-// slot in UNIQUE (household_id, name) -- surfaces as a 23505 that translate
-// maps to domain.ErrCategoryNameTaken by constraint name.
+// CreateCategory's own comment explains what computing that position in the
+// same INSERT does and does not close: it removes the round-trip window a
+// separate read-then-write would have, but not the window between two
+// concurrent transactions under READ COMMITTED, where two creates can still
+// commit the same sort_order. That residual tie is accepted as cosmetic --
+// see CreateCategory's comment for why -- rather than closed with a lock or
+// a unique constraint. A name collision -- including against an archived
+// row, which still occupies its slot in UNIQUE (household_id, name) --
+// surfaces as a 23505 that translate maps to domain.ErrCategoryNameTaken by
+// constraint name.
 func (r *CategoryRepo) Create(ctx context.Context, c domain.Category) (domain.Category, error) {
 	row, err := r.q.CreateCategory(ctx, sqlcgen.CreateCategoryParams{
 		HouseholdID: uuid(c.HouseholdID),
