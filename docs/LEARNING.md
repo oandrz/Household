@@ -1250,6 +1250,29 @@ route with a missing guard has no second line of defence.
   refetch (e.g. after `save` invalidates its own query) cannot silently
   reseed a household's in-progress edits, since re-rendering the *outer*
   component doesn't remount the *inner* one.
+- `BudgetModal.tsx`'s row-building fallback for a category id the modal
+  can't name (`buildRows`, for a line whose category isn't in the active
+  `categories` prop -- reachable today via "Import last month" handing a
+  previous month's lines through unchanged, per BudgetPage.tsx's own
+  comment, when a capped category has since been archived) set `name` and
+  `originalName` from *two different* fallback expressions:
+  `found?.name ?? "Unknown category"` for one, `found?.name ?? ""` for the
+  other. Save's rename check is `row.name.trim() !== row.originalName` --
+  with those two fallbacks, an unresolved row is `"Unknown category" !==
+  ""`, unconditionally true, so every save on it queued
+  `PATCH /categories/{id} {name: "Unknown category"}`, silently renaming a
+  real (possibly archived) category. A same-value comment right above the
+  code ("Save would still submit its real id and cap unchanged") was
+  literally false the moment a rename fired alongside it — the comment
+  described the *intended* behaviour, not what the two-fallback code
+  actually did, and nothing checked the two against each other. Caught by a
+  pre-commit design review, not a test that already existed — the fix
+  computes the fallback name once and uses it for both fields, so an
+  unresolved row is structurally incapable of registering as renamed. A
+  comment describing what a value is *supposed* to be is not evidence about
+  what the code actually does — and "two expressions that are supposed to
+  agree" (here, two fallbacks for the same missing-name case) is exactly the
+  kind of pair a single shared variable removes the chance of drifting.
 
 ### Tooling and infrastructure
 

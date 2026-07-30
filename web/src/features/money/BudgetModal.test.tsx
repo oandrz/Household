@@ -266,6 +266,53 @@ describe("BudgetModal", () => {
     expect(mutatingCalls(fetchMock)).toEqual(["PATCH /api/v1/categories/cat-1", `PUT /api/v1/budgets/${MONTH}`]);
   });
 
+  // Regression: a line whose category isn't in the active `categories` prop
+  // (e.g. "Import last month" handing through a category archived since --
+  // BudgetPage.tsx's own comment says that handoff carries real ids
+  // unchanged, with no name-mapping) falls back to a placeholder display
+  // name. That fallback must never itself look like a rename: the row's
+  // `name` and `originalName` need to start out equal, or every save on an
+  // unresolved row queues a PATCH renaming a real category to the
+  // placeholder string.
+  it("never renames a category it can't name -- the unresolved-line fallback isn't a queued rename", async () => {
+    const { fetchMock } = renderModal(
+      {
+        initial: {
+          expectedIncomeMinor: 500000,
+          lines: [{ categoryId: "cat-gone", capMinor: 10000 }],
+          missing: [],
+        },
+        categories: [], // cat-gone is not in the active list this modal was handed
+      },
+      {
+        [`PUT /api/v1/budgets/${MONTH}`]: { status: 200, body: { budget: { expectedIncomeMinor: 500000, lines: [] } } },
+      },
+    );
+
+    await screen.findByLabelText("Expected income");
+    fireEvent.click(screen.getByRole("button", { name: "Save budget" }));
+
+    await waitFor(() => expect(mutatingCalls(fetchMock).length).toBeGreaterThan(0));
+    expect(mutatingCalls(fetchMock)).toEqual([`PUT /api/v1/budgets/${MONTH}`]);
+  });
+
+  // formatMoney renders a negative figure with U+2212 MINUS, not a hyphen --
+  // asserting against "-" here would pass vacuously even if that glyph were
+  // ever accidentally dropped.
+  it("shows Left to allocate as negative (U+2212 MINUS) when caps exceed income", async () => {
+    renderModal({
+      initial: {
+        expectedIncomeMinor: 50000,
+        lines: [{ categoryId: "cat-1", capMinor: 80000 }],
+        missing: [],
+      },
+    });
+
+    const leftToAllocate = await screen.findByTestId("budget-modal-left-to-allocate");
+    expect(leftToAllocate).toHaveTextContent("−");
+    expect(leftToAllocate).toHaveTextContent("SGD 300.00");
+  });
+
   it("Cancel discards everything queued -- no write is ever fired", async () => {
     const { fetchMock, onClose } = renderModal();
 

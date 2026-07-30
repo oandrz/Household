@@ -85,17 +85,25 @@ function buildRows(
 ): Row[] {
   return lines.map((line) => {
     const found = categories.find((c) => c.id === line.categoryId);
+    // A line whose category this modal cannot name (deleted is not possible
+    // -- there is no hard delete -- but a category this household's plain,
+    // active-only `categories` list doesn't carry, e.g. archived since the
+    // month it was capped, can reach here today: "Import last month" hands
+    // `prevMonthBudget.lines` straight through with no name-mapping).
+    // `name` and `originalName` MUST be the same fallback string, not two
+    // different ones ("Unknown category" vs "") -- Save's rename check is
+    // `row.name.trim() !== row.originalName`, and two different fallbacks
+    // would make that true unconditionally, firing a PATCH that silently
+    // renames a real (possibly archived) category to "Unknown category" on
+    // every save. Falling back to the same string on both sides is what
+    // keeps that comparison honest: still renders, still submits its real
+    // id and cap unchanged, but queues no rename nobody asked for.
+    const name = found?.name ?? "Unknown category";
     return {
       key: line.categoryId,
       categoryId: line.categoryId,
-      // A line whose category this modal cannot name (deleted is not
-      // possible -- there is no hard delete -- but a category this
-      // household's plain list doesn't carry, e.g. archived, could reach
-      // here from a future "Edit budget on an existing month" caller) still
-      // renders rather than throwing; Save would still submit its real id
-      // and cap unchanged.
-      name: found?.name ?? "Unknown category",
-      originalName: found?.name ?? "",
+      name,
+      originalName: name,
       capInput: minorUnitsToInputValue(line.capMinor, currency),
       archived: Boolean(found?.archived),
       queuedArchive: false,
