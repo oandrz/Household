@@ -32,6 +32,14 @@ export function useBudget(month: string) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
+  // `data` is deliberately left in place on a failed reload, and during a
+  // month switch it still holds the previous month's response while
+  // `loading` is true -- there is no synchronous "clear data" step here. The
+  // response carries its own `month` field for exactly this reason: a caller
+  // that needs to avoid rendering a stale month's figures under the new
+  // month's picker (the month-switch case Task 15's picker hits) must check
+  // `data?.month === month` itself rather than assume `data` is always
+  // current with the `month` argument.
   const reload = useCallback(async () => {
     setLoading(true);
     setError(null);

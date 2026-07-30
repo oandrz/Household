@@ -1,6 +1,10 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubFetchRoutes } from "../../test/fetchStub";
+import {
+  budgetHistoryResponseSchema,
+  categoryResponseSchema,
+} from "./budgetSchemas";
 import { useBudget } from "./useBudget";
 
 const julyResponse = {
@@ -206,5 +210,43 @@ describe("useBudget", () => {
 
     expect(result.current.error).not.toBeNull();
     expect(result.current.data).toBeUndefined();
+  });
+});
+
+// budgetHistoryResponseSchema and categoryResponseSchema aren't parsed by
+// useBudget itself (the History modal and the category-write responses are
+// Task 15/Task 14's job respectively, and useBudget's category calls
+// deliberately discard their response body and reload instead -- see the
+// "Category writes below" comment in useBudget.ts). Parsing a realistic wire
+// body here pins the two schemas against Task 9/10's actual DTOs now, rather
+// than leaving the first real drift to surface as an unexplained parse
+// throw two tasks from now.
+describe("budgetSchemas", () => {
+  it("parses a GET /budgets/history month row", () => {
+    const parsed = budgetHistoryResponseSchema.parse({
+      months: [
+        { month: "2026-07", budgetedMinor: 50000, spentMinor: 42000, closed: false },
+        { month: "2026-06", budgetedMinor: 50000, spentMinor: 61000, closed: true },
+      ],
+    });
+    expect(parsed.months).toHaveLength(2);
+    expect(parsed.months[1]).toEqual({
+      month: "2026-06",
+      budgetedMinor: 50000,
+      spentMinor: 61000,
+      closed: true,
+    });
+  });
+
+  it("parses a category write's {category} response", () => {
+    const parsed = categoryResponseSchema.parse({
+      category: { id: "cat-1", name: "Groceries", kind: "expense", archived: false },
+    });
+    expect(parsed.category).toEqual({
+      id: "cat-1",
+      name: "Groceries",
+      kind: "expense",
+      archived: false,
+    });
   });
 });
