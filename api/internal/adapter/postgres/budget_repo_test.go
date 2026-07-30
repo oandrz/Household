@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres"
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
@@ -141,6 +143,72 @@ func TestBudgetUpsertIsOneTransaction(t *testing.T) {
 	}
 	if after.Lines[0].CategoryID != groceries || after.Lines[0].Cap.Amount != 70000 {
 		t.Fatalf("after the failed Upsert: line = %+v, want the original groceries/70000 line unchanged", after.Lines[0])
+	}
+}
+
+// TestBudgetUpsertDuplicateCategoryLineRollsBackAndStaysAtTheBoundary covers
+// the case TestBudgetUpsertIsOneTransaction above cannot: there, the foreign
+// category fails validateLineCategories before any write runs, so nothing
+// pins pgx.BeginFunc's rollback once writes have already started. Here, two
+// lines share one category this household genuinely owns -- dedup means
+// validateLineCategories's count check passes, so the transaction proceeds
+// to UpsertBudget and DeleteBudgetLines, and only the *second*
+// InsertBudgetLine fails, against budget_lines' own UNIQUE (budget_id,
+// category_id). That failure has to unwind a transaction whose DELETE has
+// already executed, not merely refuse to start one.
+//
+// It also pins the adapter boundary: the 23505 this hits must translate into
+// domain.ErrAlreadyExists, the same as TestSpaceRepoRejectsADuplicateKeyWithErrAlreadyExists
+// pins for spaces, and must never expose the raw *pgconn.PgError -- "no
+// database type crosses out of the adapter layer" (CLAUDE.md).
+func TestBudgetUpsertDuplicateCategoryLineRollsBackAndStaysAtTheBoundary(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewBudgetRepo(db)
+	householdID := insertTestHousehold(t, db)
+	groceries := insertTestCategory(t, db, householdID, "Groceries")
+
+	_, err := repo.Upsert(ctx, domain.Budget{
+		HouseholdID: householdID,
+		Month:       month2026(time.October),
+		Lines: []domain.BudgetLine{
+			{CategoryID: groceries, Cap: moneyOf(55000)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("initial Upsert: %v", err)
+	}
+
+	_, err = repo.Upsert(ctx, domain.Budget{
+		HouseholdID: householdID,
+		Month:       month2026(time.October),
+		Lines: []domain.BudgetLine{
+			{CategoryID: groceries, Cap: moneyOf(80000)},
+			{CategoryID: groceries, Cap: moneyOf(80000)}, // same category twice
+		},
+	})
+	if err == nil {
+		t.Fatal("Upsert with a duplicate category line succeeded, want an error")
+	}
+	if !errors.Is(err, domain.ErrAlreadyExists) {
+		t.Fatalf("err = %v, want it to wrap domain.ErrAlreadyExists (translate's 23505 mapping)", err)
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		t.Fatalf("err = %v exposes a raw *pgconn.PgError; no database type may cross the adapter boundary", err)
+	}
+
+	after, err := repo.Get(ctx, householdID, month2026(time.October))
+	if err != nil {
+		t.Fatalf("Get after the failed Upsert: %v", err)
+	}
+	if len(after.Lines) != 1 {
+		t.Fatalf("after the failed Upsert: %d lines, want exactly the original 1 -- "+
+			"DeleteBudgetLines had already run before InsertBudgetLine failed, and the "+
+			"rollback still has to undo it", len(after.Lines))
+	}
+	if after.Lines[0].CategoryID != groceries || after.Lines[0].Cap.Amount != 55000 {
+		t.Fatalf("after the failed Upsert: line = %+v, want the original groceries/55000 line unchanged", after.Lines[0])
 	}
 }
 

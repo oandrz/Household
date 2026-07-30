@@ -75,15 +75,25 @@ func (r *BudgetRepo) Upsert(ctx context.Context, b domain.Budget) (domain.Budget
 		// existing line goes before any new one is written, in the same
 		// transaction as the parent upsert above.
 		if err := q.DeleteBudgetLines(ctx, budgetRow.ID); err != nil {
-			return fmt.Errorf("delete budget lines: %w", err)
+			return translate(err, "delete budget lines")
 		}
 		for _, line := range b.Lines {
+			// translate, not a plain fmt.Errorf wrap: a caller-submitted
+			// duplicate category id passes validateLineCategories (which
+			// dedupes before counting) and only fails here, against
+			// budget_lines' own UNIQUE (budget_id, category_id) -- by which
+			// point DeleteBudgetLines has already run inside this same
+			// transaction. Every statement in this transaction must return
+			// through translate for the same reason UpsertBudget does: no
+			// *pgconn.PgError may cross the adapter boundary, and this is
+			// the one call site that can otherwise carry one all the way to
+			// the usecase layer as a raw driver type.
 			if err := q.InsertBudgetLine(ctx, sqlcgen.InsertBudgetLineParams{
 				BudgetID:   budgetRow.ID,
 				CategoryID: uuid(line.CategoryID),
 				CapMinor:   line.Cap.Amount,
 			}); err != nil {
-				return fmt.Errorf("insert budget line: %w", err)
+				return translate(err, "insert budget line")
 			}
 		}
 
@@ -92,7 +102,7 @@ func (r *BudgetRepo) Upsert(ctx context.Context, b domain.Budget) (domain.Budget
 		// a currency the household didn't actually have at write time.
 		currency, err := q.GetHouseholdPrimaryCurrency(ctx, uuid(b.HouseholdID))
 		if err != nil {
-			return fmt.Errorf("get household primary currency: %w", err)
+			return translate(err, "get household primary currency")
 		}
 
 		result = toBudget(budgetRow.ID, budgetRow.HouseholdID, budgetRow.Month, budgetRow.ExpectedIncomeMinor,
@@ -193,7 +203,7 @@ func validateLineCategories(ctx context.Context, q *sqlcgen.Queries, householdID
 		CategoryIds: ids,
 	})
 	if err != nil {
-		return fmt.Errorf("count budget line categories: %w", err)
+		return translate(err, "count budget line categories")
 	}
 	if int(count) != len(ids) {
 		return fmt.Errorf("postgres: a budget line's category does not belong to household %s", householdID)
