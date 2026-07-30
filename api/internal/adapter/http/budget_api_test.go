@@ -495,3 +495,287 @@ func decodeBudgetHistoryMonths(t *testing.T, rec *httptest.ResponseRecorder) []s
 	}
 	return out
 }
+
+// --- Task 10: category create, rename, archive and restore routes ----------
+
+// TestCategoryWriteRoutesRequireMoneyAndOwner is
+// TestTransactionRoutesRequireMoneyAndOwner's matrix (transactions_api_test.go)
+// applied to the four category write routes, which sit in the same
+// money+owner group. wantOwner pins the exact status an owner receives, not
+// merely "not 401/403", for the same reason that file's comment gives: a
+// route wired with a nil deps.Categories would pass both guards and panic
+// into a 500, which a bare non-401/403 check would let slide by silently.
+//
+// POST and PATCH answer 400 for the owner case: requestRouteAs sends a nil
+// body, and decodeJSONBody refuses an empty one before either handler ever
+// reaches the service. Archive and restore need no body at all, so a real
+// guard pass against a made-up id reaches the service and comes back 404 --
+// proof the handler is wired, without needing an existing category here.
+func TestCategoryWriteRoutesRequireMoneyAndOwner(t *testing.T) {
+	env := newTestEnv(t)
+	zeroUUID := "00000000-0000-0000-0000-000000000000"
+
+	routes := []struct {
+		method, path string
+		wantOwner    int
+	}{
+		{http.MethodPost, "/api/v1/categories", http.StatusBadRequest},
+		{http.MethodPatch, "/api/v1/categories/" + zeroUUID, http.StatusBadRequest},
+		{http.MethodPost, "/api/v1/categories/" + zeroUUID + "/archive", http.StatusNotFound},
+		{http.MethodPost, "/api/v1/categories/" + zeroUUID + "/restore", http.StatusNotFound},
+	}
+
+	for _, route := range routes {
+		t.Run(route.method+" "+route.path, func(t *testing.T) {
+			rec := env.do(route.method, route.path, nil)
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("no session = %d, want 401 (body = %s)", rec.Code, rec.Body.String())
+			}
+
+			session, csrf := env.signIn(t, env.limitedEmail, env.limitedPassword)
+			rec = requestRouteAs(t, env, route.method, route.path, session, csrf)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("no money capability = %d, want 403 (body = %s)", rec.Code, rec.Body.String())
+			}
+
+			session, csrf = env.signIn(t, env.moneyLimitedEmail, env.moneyLimitedPassword)
+			rec = requestRouteAs(t, env, route.method, route.path, session, csrf)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("limited member holding money = %d, want 403 (body = %s)", rec.Code, rec.Body.String())
+			}
+
+			session, csrf = env.signIn(t, env.ownerEmail, env.ownerPassword)
+			rec = requestRouteAs(t, env, route.method, route.path, session, csrf)
+			if rec.Code != route.wantOwner {
+				t.Fatalf("owner = %d, want %d (body = %s)", rec.Code, route.wantOwner, rec.Body.String())
+			}
+		})
+	}
+}
+
+// TestCategoryWriteRoutesRequireCSRF mirrors TestBudgetWriteRouteRequiresCSRF
+// and TestTransactionWriteRoutesRequireCSRF for the four category write
+// routes: no token at all, and a token that does not match the cookie, both
+// refused by the CSRF_INVALID code specifically.
+func TestCategoryWriteRoutesRequireCSRF(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	zeroUUID := "00000000-0000-0000-0000-000000000000"
+
+	routes := []struct{ method, path string }{
+		{http.MethodPost, "/api/v1/categories"},
+		{http.MethodPatch, "/api/v1/categories/" + zeroUUID},
+		{http.MethodPost, "/api/v1/categories/" + zeroUUID + "/archive"},
+		{http.MethodPost, "/api/v1/categories/" + zeroUUID + "/restore"},
+	}
+
+	for _, route := range routes {
+		t.Run(route.method+" "+route.path, func(t *testing.T) {
+			req := httptest.NewRequest(route.method, route.path, nil)
+			req.AddCookie(session)
+			req.AddCookie(csrf)
+			rec := httptest.NewRecorder()
+			env.router.ServeHTTP(rec, req)
+			assertErrorResponse(t, rec, http.StatusForbidden, "CSRF_INVALID")
+
+			req2 := httptest.NewRequest(route.method, route.path, nil)
+			req2.AddCookie(session)
+			req2.AddCookie(csrf)
+			req2.Header.Set("X-CSRF-Token", "definitely-the-wrong-value")
+			rec2 := httptest.NewRecorder()
+			env.router.ServeHTTP(rec2, req2)
+			assertErrorResponse(t, rec2, http.StatusForbidden, "CSRF_INVALID")
+		})
+	}
+}
+
+// categoryBody decodes the {"category": {...}} shape every category write
+// route answers.
+type categoryBody struct {
+	Category struct {
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		Kind     string `json:"kind"`
+		Archived bool   `json:"archived"`
+	} `json:"category"`
+}
+
+func decodeCategoryBody(t *testing.T, rec *httptest.ResponseRecorder) categoryBody {
+	t.Helper()
+	var body categoryBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode category body: %v (body = %s)", err, rec.Body.String())
+	}
+	return body
+}
+
+// categoriesListBody decodes GET /categories' list shape, archived field
+// included -- the shape handleListCategories now answers either with or
+// without ?includeArchived=true.
+type categoriesListBody struct {
+	Categories []struct {
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		Kind     string `json:"kind"`
+		Archived bool   `json:"archived"`
+	} `json:"categories"`
+}
+
+// listHasCategory GETs path and reports whether categoryID appears anywhere
+// in the response -- the shared assertion both halves of
+// TestCategoryArchiveOmitsFromListRestoreUndoes need.
+func listHasCategory(t *testing.T, env *testEnv, session *http.Cookie, path, categoryID string) bool {
+	t.Helper()
+	rec := env.authedGet(t, path, session)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list %s: status = %d, body = %s", path, rec.Code, rec.Body.String())
+	}
+	var body categoriesListBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v (body = %s)", err, rec.Body.String())
+	}
+	for _, c := range body.Categories {
+		if c.ID == categoryID {
+			return true
+		}
+	}
+	return false
+}
+
+// TestCategoryCreateRenameRoundTrip is the brief's create-then-rename case:
+// Create trims the name and always answers CategoryExpense, and Rename
+// changes the name on the same row without disturbing its id or kind.
+func TestCategoryCreateRenameRoundTrip(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/categories",
+		map[string]any{"name": "  Helper's salary  "}, session, csrf)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	created := decodeCategoryBody(t, rec)
+	if created.Category.Name != "Helper's salary" {
+		t.Fatalf("create name = %q, want trimmed %q", created.Category.Name, "Helper's salary")
+	}
+	if created.Category.Kind != "expense" {
+		t.Fatalf("create kind = %q, want expense", created.Category.Kind)
+	}
+	if created.Category.Archived {
+		t.Fatal("newly created category archived = true, want false")
+	}
+
+	rec = env.authed(t, http.MethodPatch, "/api/v1/categories/"+created.Category.ID,
+		map[string]any{"name": "Nanny's salary"}, session, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rename: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	renamed := decodeCategoryBody(t, rec)
+	if renamed.Category.ID != created.Category.ID {
+		t.Fatalf("rename id = %q, want %q (same row)", renamed.Category.ID, created.Category.ID)
+	}
+	if renamed.Category.Name != "Nanny's salary" {
+		t.Fatalf("rename name = %q, want %q", renamed.Category.Name, "Nanny's salary")
+	}
+}
+
+// TestCategoryCreateRenameDuplicateNameIs409 is the brief's "duplicate name
+// -> 409 CATEGORY_NAME_TAKEN" case for both write routes that can collide:
+// Create against an existing starter-set name, and Rename of one category
+// onto another's name.
+func TestCategoryCreateRenameDuplicateNameIs409(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	_, existingName := env.firstExpenseCategory(t, session)
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/categories",
+		map[string]any{"name": existingName}, session, csrf)
+	assertErrorResponse(t, rec, http.StatusConflict, "CATEGORY_NAME_TAKEN")
+
+	rec = env.authed(t, http.MethodPost, "/api/v1/categories",
+		map[string]any{"name": "A brand new category"}, session, csrf)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	created := decodeCategoryBody(t, rec)
+
+	rec = env.authed(t, http.MethodPatch, "/api/v1/categories/"+created.Category.ID,
+		map[string]any{"name": existingName}, session, csrf)
+	assertErrorResponse(t, rec, http.StatusConflict, "CATEGORY_NAME_TAKEN")
+}
+
+// TestCategoryArchiveOmitsFromListRestoreUndoes is the brief's
+// "archive->list omits/includes correctly; restore undoes" case: the default
+// list (the transaction modal's dropdown) must stop offering an archived
+// category, ?includeArchived=true (Budget's "Edit categories" screen) must
+// keep showing it with archived: true, and Restore must put it straight back
+// in the default list.
+func TestCategoryArchiveOmitsFromListRestoreUndoes(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	categoryID, categoryName := env.firstExpenseCategory(t, session)
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/categories/"+categoryID+"/archive", nil, session, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("archive: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if archived := decodeCategoryBody(t, rec); !archived.Category.Archived {
+		t.Fatal("archive response archived = false, want true")
+	}
+
+	if listHasCategory(t, env, session, "/api/v1/categories", categoryID) {
+		t.Fatalf("default list still has %s after archiving", categoryID)
+	}
+
+	rec = env.authedGet(t, "/api/v1/categories?includeArchived=true", session)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list includeArchived: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var listBody categoriesListBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &listBody); err != nil {
+		t.Fatalf("decode: %v (body = %s)", err, rec.Body.String())
+	}
+	var found bool
+	for _, c := range listBody.Categories {
+		if c.ID != categoryID {
+			continue
+		}
+		found = true
+		if !c.Archived {
+			t.Fatal("includeArchived list shows archived = false, want true")
+		}
+		if c.Name != categoryName {
+			t.Fatalf("archived category name = %q, want %q", c.Name, categoryName)
+		}
+	}
+	if !found {
+		t.Fatalf("includeArchived=true list is missing %s entirely", categoryID)
+	}
+
+	rec = env.authed(t, http.MethodPost, "/api/v1/categories/"+categoryID+"/restore", nil, session, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("restore: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if restored := decodeCategoryBody(t, rec); restored.Category.Archived {
+		t.Fatal("restore response archived = true, want false")
+	}
+	if !listHasCategory(t, env, session, "/api/v1/categories", categoryID) {
+		t.Fatalf("default list still missing %s after restoring", categoryID)
+	}
+}
+
+// TestCategoryRenameUnknownIDIsNotFound is the matrix's not-found precedent
+// (TestAccountErrorCodesMatchTheSpecTable and TestTransactionRoutesRequireMoneyAndOwner's
+// zeroUUID delete case) applied to Rename: an id that is not this
+// household's -- here, one that does not exist at all, since this suite has
+// no second-household fixture to construct a real cross-household id from --
+// surfaces domain.ErrNotFound's 404 NOT_FOUND untranslated.
+func TestCategoryRenameUnknownIDIsNotFound(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	zeroUUID := "00000000-0000-0000-0000-000000000000"
+
+	rec := env.authed(t, http.MethodPatch, "/api/v1/categories/"+zeroUUID,
+		map[string]any{"name": "Anything"}, session, csrf)
+	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
+}

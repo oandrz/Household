@@ -39,10 +39,19 @@ func NewCategoryService(repo CategoryRepository) *CategoryService {
 // ever category action was a direct Create, bypassing List entirely, would
 // get one category and never the starter set.
 func (s *CategoryService) List(ctx context.Context, householdID string) ([]domain.Category, error) {
+	return s.ListFiltered(ctx, householdID, false)
+}
+
+// ListFiltered is List with control over whether archived rows come back
+// too. Budget's "Edit categories" screen needs both views of the same list --
+// the transaction modal's dropdown only ever wants the live one -- so this
+// takes the includeArchived flag List hard-codes to false, rather than
+// duplicating List's seeding logic in a second method.
+func (s *CategoryService) ListFiltered(ctx context.Context, householdID string, includeArchived bool) ([]domain.Category, error) {
 	if err := s.repo.EnsureSeeded(ctx, householdID, domain.StarterCategories()); err != nil {
 		return nil, err
 	}
-	return s.repo.List(ctx, householdID, false)
+	return s.repo.List(ctx, householdID, includeArchived)
 }
 
 // Create adds one category to a household's list. It is always
