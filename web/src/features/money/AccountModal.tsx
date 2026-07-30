@@ -70,7 +70,16 @@ const householdMembersQueryKey = ["household", "members"] as const;
 // balance" — true only of the seeded household. Real households get their
 // own limited members' names, and a household with none gets the generic
 // line rather than an invented family.
-function limitedMembersLine(members: MemberView[] | undefined): string {
+//
+// `undefined` means "not settled yet", not "no limited members" -- while
+// GET /household/members is still loading, `members` is undefined for the
+// same reason an empty household is, and treating the two alike would flash
+// the generic line for every household that does have limited members, for
+// as long as the request takes. Returning "" instead lets the caller render
+// nothing until the query settles, real names included, without a second
+// loading state of its own.
+function limitedMembersLine(members: MemberView[] | undefined, isPending: boolean): string {
+  if (isPending) return "";
   const names = (members ?? [])
     .filter((m) => m.role === "limited")
     .map((m) => m.user.displayName);
@@ -418,7 +427,7 @@ export function AccountModal({
           <div>
             <div className="text-[13px] text-ink">Visible to kids</div>
             <div className="mt-0.5 text-[11.5px] text-muted">
-              {limitedMembersLine(members.data)}
+              {limitedMembersLine(members.data, members.isPending)}
             </div>
           </div>
           <ToggleSwitch
