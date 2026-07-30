@@ -47,11 +47,11 @@ here, unbuilt, once Budget exists.
 | Navigation shell | 7 | 0 | 1 | 0 |
 | Household settings | 15 | 4 | 2 | 0 |
 | Overview (home) | 0 | 0 | 8 | 0 |
-| Money | 8 | 3 | 17 | 0 |
+| Money | 8 | 4 | 16 | 0 |
 | Marriage | 0 | 0 | 13 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **40** | **8** | **43** | **2** |
+| **Total** | **40** | **9** | **42** | **2** |
 
 ---
 
@@ -308,7 +308,7 @@ adds a row the design itself has no mockup for.
 | Feature | State |
 |---|---|
 | Envelope per category with pace | 🟡 |
-| Empty state with Family-of-four, 50/30/20 and import templates | ⬜ |
+| Empty state with Family-of-four, 50/30/20 and import templates | 🟡 |
 | Spending by person | 🟡 |
 | Edit budget (modal) | ⬜ |
 | Budget history (modal) | ⬜ |
@@ -317,11 +317,16 @@ adds a row the design itself has no mockup for.
 stat cards (Budgeted, Spent, Remaining, Daily pace), the per-category caps
 grid with the over state, and Spending by person all render live from `GET
 /budgets/{month}` — `BudgetPage.tsx` and its own card components, backed by
-`useBudget`. The gap in both 🟡 rows is the same one: there is no UI path yet
-to create the budget row this screen reads, only the API directly, so a
-household cannot reach this screen on its own until the empty state (with its
-"Create your first budget" panel and templates) and the Edit-budget modal
-exist.
+`useBudget`. The empty state (`budget: null`) now renders the design's real
+"No budget set for &lt;Month&gt; yet" panel, both templates and the
+conditional "Import last month" card, and every template's caps are computed
+for real (`budgetTemplates.ts`: exact name mapping onto the household's live
+categories, `missing` for anything unmatched, the 50/30/20 proportional
+split with its 20%-headroom flooring). The 🟡 is the same gap on both budget
+rows: a template click hands its computed prefill to a modal-stub
+(`data-testid="budget-modal-stub"`) rather than a real modal, so nothing can
+actually be saved yet — a household still cannot create a budget end to end
+until the Edit-budget modal (Task 14) replaces that stub.
 
 **Goals**
 

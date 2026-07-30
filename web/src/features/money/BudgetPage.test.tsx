@@ -20,6 +20,13 @@ const CURRENCIES = {
   body: { currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }] },
 };
 
+// BudgetPage always fetches the household's plain category list (needed for
+// the empty state's templates, whether or not the viewed month is unbudgeted
+// -- see BudgetPage.tsx's own comment on why the hook isn't gated), so every
+// test needs this stubbed. Empty by default; tests that exercise template
+// mapping override it via renderPage's extraRoutes.
+const CATEGORIES = { status: 200, body: { categories: [] } };
+
 // The design's own set-state numbers (Household Dashboard.dc.html's Budget
 // screen), scaled into minor units: S$5,200 budgeted, S$3,420 spent, S$1,780
 // remaining, S$137/day, Christine S$1,610, Andreas S$1,240. Dining out is
@@ -79,6 +86,7 @@ function renderPage(
 ) {
   stubFetchRoutes({
     "GET /api/v1/currencies": CURRENCIES,
+    "GET /api/v1/categories": CATEGORIES,
     "GET /api/v1/budgets/2026-07": { status: 200, body: response },
     ...extraRoutes,
   });
@@ -217,16 +225,123 @@ describe("BudgetPage", () => {
     expect(document.body.textContent).not.toMatch(/rolls into/i);
   });
 
-  it("renders a placeholder, not the stat cards, when the month has no budget row yet", async () => {
-    renderPage(budgetFixture({ budget: null }));
+  it("renders the design's empty state, not the stat cards, when the month has no budget row yet", async () => {
+    renderPage(budgetFixture({ budget: null }), {
+      // June (the previous month) is also unbudgeted -- no Import card.
+      "GET /api/v1/budgets/2026-06": { status: 200, body: budgetFixture({ budget: null, month: "2026-06" }) },
+    });
 
-    expect(await screen.findByTestId("budget-empty-placeholder")).toBeInTheDocument();
+    const empty = await screen.findByTestId("budget-empty-state");
+    expect(empty).toHaveTextContent("No budget set for July yet");
+    expect(empty).toHaveTextContent(
+      "A budget gives every dollar a job. Set a monthly cap per category and Hearth will track spending against it automatically from your linked accounts.",
+    );
+    expect(screen.getByTestId("budget-create-blank")).toHaveTextContent("Create your first budget");
+    expect(screen.getByTestId("budget-start-from-template")).toHaveTextContent("Start from a template");
+    expect(screen.getByTestId("budget-template-family-of-four")).toHaveTextContent("Family of four");
+    expect(screen.getByTestId("budget-template-fifty-thirty-twenty")).toHaveTextContent("50 / 30 / 20");
+
     expect(screen.queryByTestId("budget-stat-budgeted")).not.toBeInTheDocument();
+  });
+
+  it("hides the Import-last-month card when the previous month has no budget", async () => {
+    renderPage(budgetFixture({ budget: null }), {
+      "GET /api/v1/budgets/2026-06": { status: 200, body: budgetFixture({ budget: null, month: "2026-06" }) },
+    });
+
+    await screen.findByTestId("budget-empty-state");
+    expect(screen.queryByTestId("budget-template-import-last-month")).not.toBeInTheDocument();
+  });
+
+  it("shows the Import-last-month card, naming the previous month, once it has a real budget", async () => {
+    renderPage(budgetFixture({ budget: null }), {
+      "GET /api/v1/budgets/2026-06": { status: 200, body: budgetFixture({ month: "2026-06" }) },
+    });
+
+    const importCard = await screen.findByTestId("budget-template-import-last-month");
+    expect(importCard).toHaveTextContent("Import last month");
+    expect(importCard).toHaveTextContent("Copy June's caps");
+  });
+
+  // June's own fixture carries two real caps and an income figure -- not
+  // the vacuous zero-line budget the visibility test above uses -- because
+  // importing an all-zero month would prove nothing about the one thing
+  // this card exists for: carrying real caps (and expected income, spec
+  // decision 3) forward untouched, straight off the wire rather than
+  // through the two templates' name-mapping.
+  it("hands off the previous month's real lines and income, unchanged, on an Import click", async () => {
+    renderPage(budgetFixture({ budget: null }), {
+      "GET /api/v1/budgets/2026-06": {
+        status: 200,
+        body: budgetFixture({
+          month: "2026-06",
+          budget: {
+            expectedIncomeMinor: 520000,
+            lines: [
+              { categoryId: "cat-1", capMinor: 80000 },
+              { categoryId: "cat-2", capMinor: 45000 },
+            ],
+          },
+        }),
+      },
+    });
+
+    const importCard = await screen.findByTestId("budget-template-import-last-month");
+    importCard.click();
+
+    const stub = await screen.findByTestId("budget-modal-stub");
+    expect(stub).toHaveAttribute("data-prefill-lines", "2");
+    expect(stub).toHaveAttribute("data-prefill-income", "520000");
+  });
+
+  it("hands off a template click as a prefilled TemplatePrefill, mapped by category name", async () => {
+    renderPage(budgetFixture({ budget: null }), {
+      "GET /api/v1/categories": {
+        status: 200,
+        body: { categories: [{ id: "cat-groceries", name: "Groceries", kind: "expense" }] },
+      },
+      "GET /api/v1/budgets/2026-06": { status: 200, body: budgetFixture({ budget: null, month: "2026-06" }) },
+    });
+
+    const familyCard = await screen.findByTestId("budget-template-family-of-four");
+    familyCard.click();
+
+    // Only one of the ten design categories has a live match here
+    // (Groceries) -- the modal stub's prefill-lines count pins that the
+    // handoff carries the real computed prefill, not a hard-coded number.
+    const stub = await screen.findByTestId("budget-modal-stub");
+    expect(stub).toHaveAttribute("data-prefill-lines", "1");
+  });
+
+  it("opens the 50/30/20 template with zero lines and the income prompt -- the waiting-for-income state", async () => {
+    renderPage(budgetFixture({ budget: null }), {
+      "GET /api/v1/budgets/2026-06": { status: 200, body: budgetFixture({ budget: null, month: "2026-06" }) },
+    });
+
+    const fiftyThirtyTwentyCard = await screen.findByTestId("budget-template-fifty-thirty-twenty");
+    fiftyThirtyTwentyCard.click();
+
+    const stub = await screen.findByTestId("budget-modal-stub");
+    expect(stub).toHaveAttribute("data-prefill-lines", "0");
+    expect(stub).toHaveTextContent("Enter your expected income and we'll split it 50/30/20");
+  });
+
+  it("hands off `Create your first budget` as a blank (no prefill) modal", async () => {
+    renderPage(budgetFixture({ budget: null }), {
+      "GET /api/v1/budgets/2026-06": { status: 200, body: budgetFixture({ budget: null, month: "2026-06" }) },
+    });
+
+    const createBlank = await screen.findByTestId("budget-create-blank");
+    createBlank.click();
+
+    const stub = await screen.findByTestId("budget-modal-stub");
+    expect(stub).toHaveTextContent("Starting blank.");
   });
 
   it("surfaces a fetch failure as an alert rather than a blank screen", async () => {
     stubFetchRoutes({
       "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/categories": CATEGORIES,
       "GET /api/v1/budgets/2026-07": {
         status: 500,
         body: { error: { code: "INTERNAL", message: "Something broke." } },

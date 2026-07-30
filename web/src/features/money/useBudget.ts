@@ -38,6 +38,18 @@ async function fetchBudgetMonth(month: string): Promise<BudgetMonthResponse> {
   return budgetMonthResponseSchema.parse(body);
 }
 
+// Shifts a "YYYY-MM" string back one whole month, built the same way
+// BudgetPage.tsx's own shiftMonth is -- through Date's (year, monthIndex, 1)
+// constructor, so day-31-doesn't-exist-next-month is never an edge this has
+// to handle. Kept private to this file rather than importing BudgetPage.tsx's
+// copy: that function lives in the component, which this hook must not
+// depend on.
+function previousMonth(month: string): string {
+  const [year, monthNum] = month.split("-").map(Number);
+  const shifted = new Date(year, monthNum - 2, 1);
+  return `${shifted.getFullYear()}-${String(shifted.getMonth() + 1).padStart(2, "0")}`;
+}
+
 // Every category write below (create/rename/archive/restore) invalidates
 // both this month's budget key and the ledger's `categoriesQueryKey()` --
 // not just its own screen's cache. A category created, renamed or archived
@@ -68,6 +80,25 @@ export function useBudget(month: string) {
   const query = useQuery({
     queryKey: budgetQueryKey(month),
     queryFn: () => fetchBudgetMonth(month),
+  });
+
+  // Backs the empty state's "Import last month" card (Task 13), which only
+  // renders when the previous month actually has a budget to copy. Keyed
+  // through the same `budgetQueryKey` this hook already uses for `month`
+  // itself -- Task 15's month picker will land on this exact key when the
+  // household clicks back a month, so this fetch's cache entry is already
+  // warm by the time that happens, not a second query keyed differently
+  // for the same data.
+  //
+  // Gated on the current month being unbudgeted (`enabled` below) rather
+  // than firing unconditionally: a month that already has its own budget
+  // never shows the Import card, so there is nothing for this to answer
+  // yet -- no point spending a request every month switch to find out.
+  const prevMonth = previousMonth(month);
+  const prevMonthQuery = useQuery({
+    queryKey: budgetQueryKey(prevMonth),
+    queryFn: () => fetchBudgetMonth(prevMonth),
+    enabled: query.data?.budget === null,
   });
 
   const saveMutation = useMutation({
@@ -133,6 +164,22 @@ export function useBudget(month: string) {
     // deliberately doesn't), so the screen doesn't blank out on every save.
     loading: query.isLoading,
     error: query.error,
+    // The month string BudgetPage.tsx's "Import last month" card needs for
+    // its own label ("Copy June's caps") -- computed once here rather than
+    // twice, since this hook already has to know it to build the query key
+    // above.
+    prevMonth,
+    // `undefined` while the query hasn't resolved (or was never enabled --
+    // the current month already has a budget, so nothing to answer);
+    // `true`/`false` once it has. BudgetPage.tsx only renders the Import
+    // card once this is exactly `true`, never on the `undefined`
+    // "don't know yet" state, so the card can't flash in and then vanish.
+    prevMonthHasBudget: prevMonthQuery.data ? prevMonthQuery.data.budget !== null : undefined,
+    // The previous month's actual saved budget, for the Import card's
+    // prefill -- distinct from `prevMonthHasBudget` (a plain boolean the
+    // card's own visibility check reads) because building that prefill
+    // needs the real lines and income, not just whether they exist.
+    prevMonthBudget: prevMonthQuery.data?.budget ?? null,
     reload: async () => {
       await query.refetch();
     },

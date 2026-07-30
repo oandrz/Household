@@ -95,6 +95,10 @@ describe("useBudget", () => {
           budget: null,
         },
       },
+      // The empty-state month is unbudgeted, so this hook also fetches
+      // July (the previous month) for the "Import last month" card --
+      // see the two prevMonthHasBudget tests below.
+      "GET /api/v1/budgets/2026-07": { status: 200, body: julyResponse },
     });
 
     const { result } = renderUseBudget("2026-08");
@@ -106,6 +110,50 @@ describe("useBudget", () => {
     // computes these regardless of whether a budget row exists.
     expect(result.current.data?.spentMinor).toBe(15000);
     expect(result.current.data?.budgetedMinor).toBe(20000);
+  });
+
+  // The Task 13 "Import last month" card: absent when the previous month
+  // itself has no budget, present when it does. Both pinned at the hook
+  // level (BudgetPage.test.tsx pins the DOM consequence) so a future change
+  // to the enabled/gating logic breaks the test closest to the mistake.
+  it("exposes prevMonthHasBudget: false when the previous month is also unbudgeted", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/budgets/2026-08": { status: 200, body: { ...julyResponse, month: "2026-08", budget: null } },
+      "GET /api/v1/budgets/2026-07": { status: 200, body: { ...julyResponse, budget: null } },
+    });
+
+    const { result } = renderUseBudget("2026-08");
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await waitFor(() => expect(result.current.prevMonthHasBudget).toBe(false));
+    expect(result.current.prevMonth).toBe("2026-07");
+  });
+
+  it("exposes prevMonthHasBudget: true when the previous month has a real budget", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/budgets/2026-08": { status: 200, body: { ...julyResponse, month: "2026-08", budget: null } },
+      "GET /api/v1/budgets/2026-07": { status: 200, body: julyResponse },
+    });
+
+    const { result } = renderUseBudget("2026-08");
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await waitFor(() => expect(result.current.prevMonthHasBudget).toBe(true));
+  });
+
+  // The gating this hook depends on: no request to the previous month at
+  // all when the current month already has a budget -- there is nothing
+  // for the Import card to answer, so no reason to spend the request.
+  it("never fetches the previous month when the current month already has a budget", async () => {
+    const fetchMock = stubFetchRoutes({
+      "GET /api/v1/budgets/2026-07": { status: 200, body: julyResponse },
+    });
+
+    const { result } = renderUseBudget("2026-07");
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.prevMonthHasBudget).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("save PUTs the exact body then re-GETs the month", async () => {

@@ -1086,6 +1086,22 @@ route with a missing guard has no second line of defence.
   `SignInScreen` (there, keyed off `mode` rather than cleared inside one
   handler) — the fix did not carry to the newer screen because nothing grepped
   for the shape.
+- Task 13's brief named "Health" as one of the 50/30/20 template's needs-set
+  categories, then gave the proportional split's weight table
+  (`FAMILY_OF_FOUR_CAPS`) as exactly the ten Family-of-four categories, which
+  does not include Health — the same brief text says two things that cannot
+  both be followed literally (a needs category with "the family-of-four
+  weight" it does not have). Rather than guessing which clause to drop,
+  `budgetTemplates.ts`'s `splitPool` treats an unlisted name as weight zero
+  by construction (`FAMILY_OF_FOUR_CAPS[name] ?? 0`), so Health silently
+  funds nothing from either pool and — since it was never going to get a
+  line anyway — is not reported in `missing` either, which would have
+  wrongly told a household with a live "Health" category to go create one.
+  The resolution and the reasoning are both written at the point a future
+  reader would go looking for them (`NEEDS`'s own comment in
+  `budgetTemplates.ts`), not left implicit in the code's behaviour, so the
+  next person to touch this table sees the contradiction was noticed and
+  decided, not missed.
 - A task brief's own test snippet asserted on TanStack Router's `path`, which
   strips the leading slash on a child route (`trimPathLeft`); `fullPath`
   reconstructs it and is what a router-walk test must read instead. Would have

@@ -54,10 +54,30 @@ export const BUDGET_COPY = {
   excludedNoRate: (count: number) =>
     `${count} ${count === 1 ? "transaction is" : "transactions are"} not counted: no exchange rate.`,
 
-  // Task 13 builds the real empty state (the design's "Create your first
-  // budget" panel and templates); this is a holding placeholder so a month
-  // with no budget row still renders something rather than nothing.
-  emptyPlaceholder: "No budget set for this month yet.",
+  // The empty state (Household Dashboard.dc.html's Budget screen, "Set
+  // state" -> "never budgeted"). Task 12 shipped a holding placeholder here;
+  // this is the design's real copy, word for word.
+  emptyHeadline: (month: string) => `No budget set for ${month} yet`,
+  emptyBody:
+    "A budget gives every dollar a job. Set a monthly cap per category and Hearth will track spending against it automatically from your linked accounts.",
+  createFirstBudget: "Create your first budget",
+  startFromTemplate: "Start from a template",
+
+  templateFamilyOfFour: "Family of four",
+  // The design's own card reads "10 categories · SGD" -- spec decision 6
+  // is explicit that the "· SGD" is seed-data storytelling, not a currency
+  // rule, so this takes the household's real currency code as an argument
+  // rather than hard-coding SGD.
+  templateFamilyOfFourSubtitle: (currency: string) => `10 categories · ${currency}`,
+  templateFiftyThirtyTwenty: "50 / 30 / 20",
+  templateFiftyThirtyTwentySubtitle: "Needs · wants · savings",
+  templateImportLastMonth: "Import last month",
+  templateImportLastMonthSubtitle: (prevMonth: string) => `Copy ${prevMonth}'s caps`,
+
+  // Shown in the (Task 14) modal the instant the 50/30/20 card is clicked,
+  // while its prefill still has zero lines -- spec decision 6: that
+  // template "has nothing to split" without an income figure on file.
+  fiftyThirtyTwentyPrompt: "Enter your expected income and we'll split it 50/30/20",
 
   loadError: "Couldn't load your budget.",
 } as const;
