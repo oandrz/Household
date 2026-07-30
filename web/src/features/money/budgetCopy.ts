@@ -112,4 +112,29 @@ export const BUDGET_COPY = {
   // client-side, rather than waiting on a server response that never
   // carries it.
   categoryNameTaken: (name: string) => `"${name}" is already a category name in this household.`,
+
+  // BudgetHistoryModal.tsx (Task 15) copy below.
+  historyModalTitle: "Budget history",
+  historyModalSubtitle: (months: number, currency: string) =>
+    `Spent vs. budgeted, last ${months} months · ${currency}`,
+  historyAvgSpend: "Avg monthly spend",
+  historyAvgSaved: "Avg saved / month",
+  historyMonthsUnderBudget: "Months under budget",
+  // "N of D" -- D is closed *budgeted* months only (see
+  // BudgetHistoryModal.tsx's own comment on why the current month and any
+  // month with a zero-cap budget are excluded from both this and the two avg
+  // cards). "0 of 0" is a real, renderable value for a brand-new household
+  // with no closed months yet, not an error state.
+  historyMonthsUnderBudgetValue: (under: number, of: number) => `${under} of ${of}`,
+  historySoFar: "so far",
+  // The design's own footnote (Household Dashboard.dc.html's Budget history
+  // modal), naming the current month the same way BudgetPage.tsx's
+  // `monthNameOnly` does -- month only, no year.
+  historyFootnote: (monthName: string) => `* ${monthName} is still in progress. Click any month to open its full breakdown.`,
+  // Shown instead of the summary cards and table when `months` is empty --
+  // a brand-new household with no history yet, not a fetch failure (the page
+  // already has its own `loadError` for that). Matches emptyBody's plain,
+  // explanatory tone rather than a bare "Nothing here."
+  historyEmpty: "No budget history yet. Once a month closes, it shows up here.",
+  noValue: "—",
 } as const;

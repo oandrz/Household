@@ -90,14 +90,18 @@ function renderPage(
   response: BudgetMonthResponse,
   extraRoutes: Record<string, RouteResponse | RouteResponse[]> = {},
 ) {
-  stubFetchRoutes({
+  // Returns `fetchMock` alongside renderWithRouter's own result -- additive,
+  // every existing call site here ignores the return value entirely, and
+  // Task 15's own tests need it to assert *which* requests fired (and did
+  // not fire) rather than only what finally rendered.
+  const fetchMock = stubFetchRoutes({
     "GET /api/v1/currencies": CURRENCIES,
     "GET /api/v1/categories": CATEGORIES,
     "GET /api/v1/categories?includeArchived=true": NO_ARCHIVED_CATEGORIES,
     "GET /api/v1/budgets/2026-07": { status: 200, body: response },
     ...extraRoutes,
   });
-  return renderWithRouter(<BudgetPage />);
+  return { fetchMock, ...renderWithRouter(<BudgetPage />) };
 }
 
 beforeEach(() => {
@@ -358,5 +362,120 @@ describe("BudgetPage", () => {
     renderWithRouter(<BudgetPage />);
 
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+  });
+});
+
+// Task 15: History button + BudgetHistoryModal, the ‹ › picker, and the
+// Edit-budget entry point for a month that already has a budget (a gap
+// BudgetModal.tsx's own header comment left for this task -- see this
+// suite's own "opens Edit budget" test).
+describe("BudgetPage history modal and month picker", () => {
+  const HISTORY_ROUTE = "GET /api/v1/budgets/history?months=6";
+  const HISTORY_RESPONSE = {
+    status: 200,
+    body: {
+      months: [
+        { month: "2026-07", budgetedMinor: 520000, spentMinor: 342000, closed: false },
+        { month: "2026-06", budgetedMinor: 520000, spentMinor: 478000, closed: true },
+      ],
+    },
+  };
+
+  it("does not fetch budget history until the History modal is opened", async () => {
+    const { fetchMock } = renderPage(budgetFixture(), { [HISTORY_ROUTE]: HISTORY_RESPONSE });
+
+    await screen.findByTestId("budget-stat-budgeted");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/budgets/history"))).toBe(false);
+
+    screen.getByTestId("budget-history-button").click();
+
+    await screen.findByText("Budget history");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/budgets/history"))).toBe(true);
+  });
+
+  it("closes the History modal, switches the page's month and GETs it when a row is picked", async () => {
+    renderPage(budgetFixture(), {
+      [HISTORY_ROUTE]: HISTORY_RESPONSE,
+      "GET /api/v1/budgets/2026-06": { status: 200, body: budgetFixture({ month: "2026-06", spentMinor: 111100 }) },
+    });
+
+    await screen.findByTestId("budget-stat-budgeted");
+    screen.getByTestId("budget-history-button").click();
+
+    const rows = await screen.findAllByTestId("budget-history-row");
+    const juneRow = rows.find((row) => row.textContent?.includes("Jun 2026"));
+    expect(juneRow).toBeDefined();
+    juneRow!.click();
+
+    // The modal is gone...
+    await waitFor(() => expect(screen.queryByText("Budget history")).not.toBeInTheDocument());
+    // ...and the page switched to June, re-fetching and rendering its own
+    // figures rather than still showing July's under June's label (the
+    // exact failure useBudget.ts's own `["budget", month]` key comment
+    // warns a month switch must never produce).
+    expect(await screen.findByTestId("budget-stat-spent")).toHaveTextContent("S$1,111.00");
+    expect(await screen.findByTestId("budget-subtitle")).toHaveTextContent("June 2026");
+  });
+
+  it("moves one month back on ‹ and refetches that month", async () => {
+    renderPage(budgetFixture(), {
+      "GET /api/v1/budgets/2026-06": { status: 200, body: budgetFixture({ month: "2026-06" }) },
+    });
+
+    await screen.findByTestId("budget-stat-budgeted");
+    screen.getByLabelText("Previous month").click();
+
+    // `findByTestId` resolves the instant the (already-mounted) element
+    // exists, not once its content changes -- `waitFor` is what actually
+    // waits for the re-render the month switch triggers.
+    await waitFor(() => expect(screen.getByTestId("budget-subtitle")).toHaveTextContent("June 2026"));
+  });
+
+  it("moves one month forward on › and refetches that month", async () => {
+    renderPage(budgetFixture(), {
+      "GET /api/v1/budgets/2026-08": { status: 200, body: budgetFixture({ month: "2026-08" }) },
+    });
+
+    await screen.findByTestId("budget-stat-budgeted");
+    screen.getByLabelText("Next month").click();
+
+    await waitFor(() => expect(screen.getByTestId("budget-subtitle")).toHaveTextContent("August 2026"));
+  });
+
+  // The gap BudgetModal.tsx's own header comment flagged: Task 14 shipped
+  // the modal itself but no way to open it for a month that already has a
+  // budget -- only the empty state's template/blank clicks reached it. This
+  // pins the fix: Edit budget hands the modal the *existing* budget as its
+  // prefill, normalised the same way "Create your first budget" is.
+  it("opens Edit budget prefilled with the current month's existing income and lines", async () => {
+    renderPage(budgetFixture());
+
+    await screen.findByTestId("budget-stat-budgeted");
+    screen.getByTestId("budget-edit-button").click();
+
+    expect(await screen.findByLabelText("Expected income")).toHaveValue("5000.00");
+  });
+
+  it("hides History and Edit budget from the header when the month has no budget yet", async () => {
+    renderPage(budgetFixture({ budget: null }), {
+      "GET /api/v1/budgets/2026-06": { status: 200, body: budgetFixture({ budget: null, month: "2026-06" }) },
+    });
+
+    await screen.findByTestId("budget-empty-state");
+    expect(screen.queryByTestId("budget-history-button")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("budget-edit-button")).not.toBeInTheDocument();
+  });
+
+  // Same pin as the unit-level test in BudgetHistoryModal.test.tsx, at the
+  // integration level this time -- Export CSV is in the design's mockup but
+  // deferred (Task 15's own brief, "same reason as Task 12's rollover pin").
+  it("never renders an Export CSV control", async () => {
+    renderPage(budgetFixture(), { [HISTORY_ROUTE]: HISTORY_RESPONSE });
+
+    await screen.findByTestId("budget-stat-budgeted");
+    screen.getByTestId("budget-history-button").click();
+
+    await screen.findByText("Budget history");
+    expect(screen.queryByText(/export csv/i)).not.toBeInTheDocument();
   });
 });

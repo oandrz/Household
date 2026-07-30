@@ -1273,6 +1273,49 @@ route with a missing guard has no second line of defence.
   what the code actually does — and "two expressions that are supposed to
   agree" (here, two fallbacks for the same missing-name case) is exactly the
   kind of pair a single shared variable removes the chance of drifting.
+- Task 14 shipped `BudgetModal.tsx` and marked "Edit budget (modal)" ✅ in
+  `FEATURE_TRACKER.md` with the prose "a household can create and edit a
+  budget end to end now" — but the only things that ever opened the modal
+  were the empty state's template cards and "Create your first budget".
+  There was no button anywhere that opened it for a month that *already*
+  had one; `BudgetPage.tsx`'s populated branch (`data.budget !== null`)
+  rendered the four stat cards, the category grid and spending-by-person,
+  and nothing else. A household could create a budget once and then never
+  change it again through the UI. Every one of Task 14's 13 tests rendered
+  `BudgetModal` directly with props, which proves the modal works once
+  open — none of them opened it *from the page*, so nothing ever exercised
+  the one path that was missing. `docs/FEATURE_TRACKER.md`'s own ✅ was true
+  about the modal and false about the feature: "the modal exists" and "a
+  household can reach it" are two different claims, and only the narrower
+  one had a test behind it. Caught here only because Task 15's own work
+  touched the same header row (adding History) and `BudgetModal.tsx`'s own
+  header comment had left a forward note anticipating exactly this gap
+  ("a future 'Edit budget' entry point (Task 15) for an *existing* budget
+  would normalise the same way") — without that comment, a
+  reasonably-scoped History-only task could easily have shipped without
+  ever opening the file that would have shown the missing button. General
+  pattern: when a task's own tests only mount a component standalone, "is
+  this component correct" gets covered but "can anything actually reach
+  it" does not — a component with no verified trigger from its real parent
+  is not shipped, even if every prop-driven test is green. A page-level
+  integration test that opens the feature the way a person actually would
+  (click the real button, from the real page state) is the only thing that
+  would have caught this at the time it was introduced.
+- `BudgetHistoryModal.tsx`'s three summary cards (avg spend, avg saved,
+  months under budget) needed an explicit decision at two boundaries the
+  brief didn't spell out, both written down as comments *and* pinned by a
+  test that fails without the guard (not just asserted in prose): a closed
+  month that spent exactly its cap counts as *under* budget, matching
+  `BudgetStatCards.tsx`'s own treatment of a zero `remainingMinor` as
+  healthy, not over; and a closed month with every cap removed
+  (`budgetedMinor === 0`) is excluded from all three figures entirely,
+  rather than being treated as a 100%-over month or dragging every average
+  toward zero the way including it at face value would. Both guards were
+  mutation-tested (flipped, confirmed red, restored) precisely because a
+  green test against the *intended* boundary proves nothing if the fixture
+  never actually lands on that boundary — the first draft of "months under
+  budget" test data had no exact-cap month at all, so a `<=` vs `<` bug
+  would have passed silently.
 
 ### Tooling and infrastructure
 

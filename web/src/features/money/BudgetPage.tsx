@@ -23,6 +23,8 @@
 // Task 14 replaces, not something this task tries to half-build.
 import { useState } from "react";
 import { useCurrencies } from "../auth/useAuth";
+import { Modal } from "../../components/Modal";
+import { BudgetHistoryModal } from "./BudgetHistoryModal";
 import { BudgetModal } from "./BudgetModal";
 import { BUDGET_COPY } from "./budgetCopy";
 import { BudgetByPerson } from "./BudgetByPerson";
@@ -31,6 +33,7 @@ import { BudgetStatCards } from "./BudgetStatCards";
 import { familyOfFourTemplate, fiftyThirtyTwentyTemplate, type TemplatePrefill } from "./budgetTemplates";
 import { formatMoney } from "./formatMoney";
 import { useBudget } from "./useBudget";
+import { useBudgetHistory } from "./useBudgetHistory";
 import { useCategories } from "./useTransactions";
 import type { BudgetMonthResponse } from "./budgetSchemas";
 
@@ -126,6 +129,12 @@ export function BudgetPage() {
   // Task 14 owns the real modal; this page only decides what it should
   // open pre-filled with. `null` means no modal is open.
   const [modal, setModal] = useState<ModalState | null>(null);
+  // The History modal (Task 15). `useBudgetHistory`'s own `enabled` gate is
+  // this flag directly -- opening History is the only reason this page ever
+  // needs the /budgets/history request, so closing it stops the query
+  // mattering rather than firing on every Budget screen visit.
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const history = useBudgetHistory(historyOpen);
 
   if (budget.loading) {
     return <p className="p-9 text-xs text-muted">Loading…</p>;
@@ -159,6 +168,21 @@ export function BudgetPage() {
     // lines (budgetTemplates.ts's own comment), which is exactly the
     // waiting-for-income state the modal (Task 14) opens into.
     setModal({ prefill: fiftyThirtyTwentyTemplate(categoryList, 0), awaitingIncome: true });
+  }
+  // The Edit-budget entry point for a month that already has a budget --
+  // BudgetModal.tsx's own header comment anticipated this exact function
+  // ("a future 'Edit budget' entry point (Task 15) for an *existing* budget
+  // would normalise the same way"). `data.budget` is never null on this
+  // path (the header button that calls this only renders once the screen
+  // has already branched into the populated state below), but the guard
+  // stays rather than a non-null assertion -- the same "fail closed on a
+  // value you did not just construct" instinct as everywhere else here.
+  function openEditBudget() {
+    if (!data.budget) return;
+    setModal({
+      prefill: { expectedIncomeMinor: data.budget.expectedIncomeMinor, lines: data.budget.lines, missing: [] },
+      awaitingIncome: false,
+    });
   }
   function openImportLastMonth() {
     if (!budget.prevMonthBudget) return;
@@ -199,24 +223,54 @@ export function BudgetPage() {
               : monthLabel(data.month)}
           </p>
         </div>
-        <div className="flex items-center gap-3.5 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] text-muted">
-          <button
-            type="button"
-            aria-label="Previous month"
-            onClick={() => setMonth((current) => shiftMonth(current, -1))}
-            className="text-muted"
-          >
-            ‹
-          </button>
-          <span className="font-semibold text-ink">{monthLabel(data.month)}</span>
-          <button
-            type="button"
-            aria-label="Next month"
-            onClick={() => setMonth((current) => shiftMonth(current, 1))}
-            className="text-muted"
-          >
-            ›
-          </button>
+        {/* The design's header row groups the picker chip with History and
+            Edit budget in one flex container -- the picker itself stays
+            visible in every state (a household should be able to navigate
+            to a month with a budget from one that has none, e.g. to reach
+            "Import last month"'s source month), but History and Edit budget
+            only render once there is a budget to show history against or
+            edit -- matching the design's own mockup, which has no header
+            controls at all on the empty-state screen. */}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3.5 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] text-muted">
+            <button
+              type="button"
+              aria-label="Previous month"
+              onClick={() => setMonth((current) => shiftMonth(current, -1))}
+              className="text-muted"
+            >
+              ‹
+            </button>
+            <span className="font-semibold text-ink">{monthLabel(data.month)}</span>
+            <button
+              type="button"
+              aria-label="Next month"
+              onClick={() => setMonth((current) => shiftMonth(current, 1))}
+              className="text-muted"
+            >
+              ›
+            </button>
+          </div>
+          {data.budget !== null && (
+            <>
+              <button
+                type="button"
+                data-testid="budget-history-button"
+                onClick={() => setHistoryOpen(true)}
+                className="rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-muted"
+              >
+                {BUDGET_COPY.history}
+              </button>
+              <button
+                type="button"
+                data-testid="budget-edit-button"
+                onClick={openEditBudget}
+                className="rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white"
+              >
+                {BUDGET_COPY.editBudget}
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -299,22 +353,6 @@ export function BudgetPage() {
             )}
           </div>
 
-          {/* BudgetModal.tsx's own header comment explains why `initial` is
-              always a `TemplatePrefill`, never `null`: "Create your first
-              budget" (modal.prefill === null) is normalised here into the
-              blank shape rather than the modal branching on a union
-              internally -- there is no behavioural difference between "no
-              prefill" and "a prefill with zero lines and nothing missing." */}
-          {modal && (
-            <BudgetModal
-              month={data.month}
-              initial={modal.prefill ?? { expectedIncomeMinor: null, lines: [], missing: [] }}
-              categories={categoryList}
-              awaitingIncome={modal.awaitingIncome}
-              onClose={() => setModal(null)}
-              onSaved={() => setModal(null)}
-            />
-          )}
         </div>
       ) : (
         <>
@@ -365,6 +403,62 @@ export function BudgetPage() {
           )}
         </>
       )}
+
+      {/* Shared across both branches above -- a template/blank click from
+          the empty state and an Edit-budget click from the populated state
+          both open the same modal, so it renders once here rather than
+          twice (one copy per branch would drift). BudgetModal.tsx's own
+          header comment explains why `initial` is always a
+          `TemplatePrefill`, never `null`: "Create your first budget" and
+          Edit-budget's own `openEditBudget` above both normalise into the
+          same shape rather than the modal branching on a union internally --
+          there is no behavioural difference between "no prefill" and "a
+          prefill with zero lines and nothing missing." */}
+      {modal && (
+        <BudgetModal
+          month={data.month}
+          initial={modal.prefill ?? { expectedIncomeMinor: null, lines: [], missing: [] }}
+          categories={categoryList}
+          awaitingIncome={modal.awaitingIncome}
+          onClose={() => setModal(null)}
+          onSaved={() => setModal(null)}
+        />
+      )}
+
+      {/* The History modal (Task 15). Rendered only while `historyOpen` is
+          true -- `useBudgetHistory`'s own `enabled: historyOpen` above means
+          the request that backs it hasn't even fired before this point, so
+          a loading branch is real, not theoretical, on every open (never
+          served from a warm cache the way `useBudget`'s prevMonth query
+          sometimes is). Picking a row both switches this page's own month
+          state and closes the modal -- "the design's full breakdown is the
+          page itself" (this file's own header comment), not a second view
+          inside the modal. */}
+      {historyOpen &&
+        (history.error ? (
+          <Modal open onClose={() => setHistoryOpen(false)} title={BUDGET_COPY.historyModalTitle}>
+            <p role="alert" className="text-xs text-danger" data-testid="budget-history-error">
+              {BUDGET_COPY.loadError}
+            </p>
+          </Modal>
+        ) : history.data ? (
+          <BudgetHistoryModal
+            months={history.data.months}
+            currency={data.currency}
+            symbol={symbol}
+            onPickMonth={(pickedMonth) => {
+              setMonth(pickedMonth);
+              setHistoryOpen(false);
+            }}
+            onClose={() => setHistoryOpen(false)}
+          />
+        ) : (
+          <Modal open onClose={() => setHistoryOpen(false)} title={BUDGET_COPY.historyModalTitle}>
+            <p className="text-xs text-muted" data-testid="budget-history-loading">
+              Loading…
+            </p>
+          </Modal>
+        ))}
     </div>
   );
 }

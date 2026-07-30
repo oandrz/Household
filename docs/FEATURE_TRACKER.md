@@ -13,21 +13,23 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 51 of 94 features built or partly built (this update
-adds one row -- category rename/create/archive, folded into the Edit-budget
-modal -- and also fixes a pre-existing off-by-one: the previous "48 of 93"
-undercounted by one, since Built and Partial summed to 49, not 48). Money now has
-two features fully built — Accounts (a household records what it owns and
-owes by hand and sees a net worth built from it) and the Transactions ledger
-(logging, editing and deleting expenses, income and transfers, with filters
-and the five screen states the design and spec both call for) — plus the
-recent-transactions strip on Finances, deferred by the accounts spec for
-having no data and now built with the ledger to read from. Budget is most of
-the way there too: a household can now create a budget from scratch, from a
-template, or by importing last month's, and edit an existing one end to end
-(caps, renames, archives and all) — only the history modal and month-picker
-polish are still to come. Nothing else in Money is started yet, and nothing
-in Marriage, Family or Overview has been started.
+**Where things stand:** 51 of 93 features built or partly built (this update
+flips Budget history from ⬜ to ✅ -- no new row -- and, recounting from
+scratch rather than adjusting the previous line in place per this doc's own
+convention, also fixes a pre-existing off-by-one it carried forward from the
+last update: the count of ✅/🟡/⬜/🚫 rows in the tables below actually summed
+to 93, not the 94 stated, so Built+Partial was 51 of 93 even before this
+task's own change landed). Money now has three features fully built —
+Accounts (a household records what it owns and owes by hand and sees a net
+worth built from it), the Transactions ledger (logging, editing and deleting
+expenses, income and transfers, with filters and the five screen states the
+design and spec both call for), and Budget (create from scratch, from a
+template, or by importing last month's; edit an existing month end to end;
+and now review the last six months' spend-vs-budget in the History modal) —
+plus the recent-transactions strip on Finances, deferred by the accounts spec
+for having no data and now built with the ledger to read from. Nothing else
+in Money is started yet, and nothing in Marriage, Family or Overview has been
+started.
 Five of the rows below have no mockup of their own — the provisioning
 transaction behind self-serve sign-up, the currency list endpoint, and
 `adminctl prune` — because the design's own "Create household" screen (the
@@ -319,19 +321,19 @@ screen for.
 | Empty state with Family-of-four, 50/30/20 and import templates | ✅ |
 | Spending by person | ✅ |
 | Edit budget (modal) | ✅ |
-| Budget history (modal) | ⬜ |
+| Budget history (modal) | ✅ |
 
-**A household can create and edit a budget end to end now.** The four stat
-cards (Budgeted, Spent, Remaining, Daily pace), the per-category caps grid
-with the over state, and Spending by person all render live from `GET
-/budgets/{month}` — `BudgetPage.tsx` and its own card components, backed by
-`useBudget`. The empty state (`budget: null`) renders the design's real "No
-budget set for &lt;Month&gt; yet" panel, both templates and the conditional
-"Import last month" card, with every template's caps computed for real
-(`budgetTemplates.ts`: exact name mapping onto the household's live
+**A household can create, edit and review a budget end to end now.** The
+four stat cards (Budgeted, Spent, Remaining, Daily pace), the per-category
+caps grid with the over state, and Spending by person all render live from
+`GET /budgets/{month}` — `BudgetPage.tsx` and its own card components, backed
+by `useBudget`. The empty state (`budget: null`) renders the design's real
+"No budget set for &lt;Month&gt; yet" panel, both templates and the
+conditional "Import last month" card, with every template's caps computed for
+real (`budgetTemplates.ts`: exact name mapping onto the household's live
 categories, `missing` for anything unmatched, the 50/30/20 proportional split
 with its 20%-headroom flooring, computed live as income is typed). Clicking a
-template, or "Create your first budget", now opens the real Edit-budget modal
+template, or "Create your first budget", opens the real Edit-budget modal
 (`BudgetModal.tsx`) rather than a stub: three cards (expected income,
 Allocated, Left to allocate — the last two hidden as a pair while income is
 blank), one editable row per capped category (rename, cap, ✕ to drop the cap,
@@ -344,8 +346,25 @@ collision names the taken name (the server's own message doesn't carry it,
 so the modal composes it from the name it just attempted); a name that
 belongs to an *archived* category offers restore instead of silently 409ing
 on `categories_household_id_name_key` (the gotcha Task 13's review flagged).
-Only Budget history (the six-month summary modal and the page's own month
-picker beyond ‹ ›) is still unbuilt — Task 15.
+Task 15 closed a real gap Task 14 left behind: there was no way to *open* the
+Edit-budget modal for a month that already had one, only from the empty
+state's templates — a household could create a budget but never change it
+again through the UI. The header's own "Edit budget" button
+(`openEditBudget` in `BudgetPage.tsx`) now normalises the month's existing
+`budget.expectedIncomeMinor`/`lines` into the same prefill shape a template
+produces, exactly as `BudgetModal.tsx`'s own header comment anticipated this
+task would. Task 15 also shipped Budget history: a "History" button next to
+the ‹ › picker opens `BudgetHistoryModal.tsx`, fetching `GET
+/budgets/history?months=6` only while open (`useBudgetHistory.ts`, gated the
+same way `useBudget.ts`'s own prevMonth query is). Three summary cards (avg
+monthly spend, avg saved/month, months under budget) are computed over
+**closed, budgeted** months only — the current month (still "so far") and any
+closed month with every cap removed are excluded from all three, not
+zero-filled into the average. Clicking a row switches the page's own month
+state and closes the modal — the design's "full breakdown" is the Budget
+screen itself, not a second view inside the modal. Export CSV, drawn in the
+design's mockup, is deferred (same class as the rollover sentence Task 12
+pinned absent) and never implemented, not merely hidden.
 
 **Goals**
 
