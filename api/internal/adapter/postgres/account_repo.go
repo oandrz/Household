@@ -164,10 +164,10 @@ func optionalIDToString(u pgtype.UUID) string {
 }
 
 // buildView is where AccountView.Balance is decided. It is the opening
-// balance plus every transaction dated after opening_balance_as_of, summed in
-// SQL -- see the balance_minor column in queries/account.sql for why the
-// comparison is strict and why the incoming side prefers
-// received_amount_minor.
+// balance plus every transaction dated on or after opening_balance_as_of,
+// summed in SQL -- see the balance_minor column in queries/account.sql for
+// why the comparison is >= (start-of-day rule) and why the incoming side
+// prefers received_amount_minor.
 //
 // The currency is the account's own. Every transaction on an account is
 // denominated in that account's currency, so nothing here converts, and a

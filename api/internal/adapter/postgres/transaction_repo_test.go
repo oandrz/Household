@@ -124,9 +124,11 @@ func TestTransactionRoundTrips(t *testing.T) {
 			view.BeforeFromAccountOpening)
 	}
 
-	// A transaction dated exactly on the opening date is already reflected in
-	// the balance someone asserted was true that day -- the <= boundary, not
-	// a strict <, which is why before is true here and not on the 18th above.
+	// before_from_opening is a strict < against opening_balance_as_of
+	// (queries/transaction.sql), so a transaction dated exactly on the
+	// opening date is NOT before it -- false here, same as the 18th above.
+	// Only a transaction dated strictly earlier is before (see the block
+	// below).
 	onOpening, err := repo.Create(ctx, domain.Transaction{
 		HouseholdID:   householdID,
 		Kind:          domain.TransactionExpense,
@@ -142,9 +144,33 @@ func TestTransactionRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get on opening date: %v", err)
 	}
-	if onOpeningView.BeforeFromAccountOpening == nil || !*onOpeningView.BeforeFromAccountOpening {
-		t.Fatalf("beforeFromAccountOpening = %v, want non-nil true for a transaction on the opening date itself",
+	// Dated exactly ON the opening date: the opening balance is the balance
+	// at the START of that day (spec 2026-07-30, decision 1), so this row
+	// moves the balance and must NOT be marked.
+	if onOpeningView.BeforeFromAccountOpening == nil || *onOpeningView.BeforeFromAccountOpening {
+		t.Fatalf("beforeFromAccountOpening = %v, want non-nil false for a transaction on the opening date itself",
 			onOpeningView.BeforeFromAccountOpening)
+	}
+
+	// Dated strictly BEFORE the opening date: still excluded, still marked.
+	beforeOpening, err := repo.Create(ctx, domain.Transaction{
+		HouseholdID:   householdID,
+		Kind:          domain.TransactionExpense,
+		OccurredOn:    time.Date(2026, time.June, 30, 0, 0, 0, 0, time.UTC),
+		Description:   "Back-logged spend",
+		FromAccountID: dbs,
+		Amount:        domain.Money{Amount: 100, Currency: "SGD"},
+	})
+	if err != nil {
+		t.Fatalf("create before opening date: %v", err)
+	}
+	beforeView, err := repo.Get(ctx, householdID, beforeOpening.ID)
+	if err != nil {
+		t.Fatalf("get before opening date: %v", err)
+	}
+	if beforeView.BeforeFromAccountOpening == nil || !*beforeView.BeforeFromAccountOpening {
+		t.Fatalf("beforeFromAccountOpening = %v, want non-nil true for 30 June against a 1 July opening",
+			beforeView.BeforeFromAccountOpening)
 	}
 }
 

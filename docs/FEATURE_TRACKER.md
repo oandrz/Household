@@ -13,7 +13,7 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 45 of 92 features built or partly built. Money now has
+**Where things stand:** 46 of 93 features built or partly built. Money now has
 two features built — Accounts (a household records what it owns and owes by
 hand and sees a net worth built from it) and the Transactions ledger (logging,
 editing and deleting expenses, income and transfers, with filters and the five
@@ -39,14 +39,14 @@ here, unbuilt, once Budget exists.
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
 | Entry & authentication | 10 | 1 | 0 | 0 |
-| Navigation shell | 6 | 0 | 1 | 0 |
+| Navigation shell | 7 | 0 | 1 | 0 |
 | Household settings | 15 | 4 | 2 | 0 |
 | Overview (home) | 0 | 0 | 8 | 0 |
-| Money | 7 | 2 | 19 | 0 |
+| Money | 8 | 1 | 19 | 0 |
 | Marriage | 0 | 0 | 13 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **38** | **7** | **45** | **2** |
+| **Total** | **40** | **6** | **45** | **2** |
 
 ---
 
@@ -125,7 +125,8 @@ The full checklist is at the end of `docs/LEARNING.md`.
 
 | Feature | State | Notes |
 |---|---|---|
-| Sidebar grouped into spaces | ✅ | Rendered from the server's own filtered, ordered list — not a hard-coded menu |
+| Sidebar grouped into spaces | ✅ | Which spaces appear, and in what order — rendered from the server's own filtered, ordered list, never re-sorted or re-filtered client-side. Grouping a space's own pages under its label is the row below |
+| Sidebar's design 5a form — a space with several built pages renders as an uppercase group label plus one link per page | ✅ | `SPACE_PAGES` map in `Sidebar.tsx`; a space with one built page still renders as a single link. Money took this form once Transactions shipped a second page (Finances, Transactions); Marriage and Family still render as single links, having one page each. Active state is computed per link via `useMatchRoute`, not `Link`'s `activeProps` — `activeProps` merges its class onto the base class rather than replacing it, which shipped an active link with both an ink and an accent color class present at once and the accent never winning the cascade (`docs/LEARNING.md` pattern 3) |
 | Space visibility per member | ✅ | Money is capability-gated, Marriage is parents-only, Family is for everyone |
 | Household footer with members and plan | ✅ | "Free plan" is static text, as specified |
 | Modal primitive | ✅ | Native `<dialog>`; backdrop dismissal, Escape, focus trap. Slices 2–4 build on it |
@@ -243,7 +244,7 @@ a real aggregator could later fill.
 
 | Feature | State |
 |---|---|
-| Full ledger with filters | 🟡 — a transaction dated on its account's opening date does not move the balance or net worth, so nothing a household logs on day one changes any figure; fix specced in `docs/superpowers/specs/2026-07-30-hearth-finance-fixes-design.md` |
+| Full ledger with filters | ✅ — a transaction dated on its account's opening date now moves the balance and net worth: the opening balance is the figure at the *start* of its day, so the balance sum filters `occurred_on >= opening_balance_as_of` and the ledger's before-marker flips to strictly-before (`<`) to match. Was 🟡 from the Transactions merge until the finance-fixes round closed it; see `docs/superpowers/specs/2026-07-30-hearth-finance-fixes-design.md` decision 1 and `docs/LEARNING.md` pattern 13 |
 | Inline category editing | ⬜ |
 | Add transaction (modal) | ✅ |
 | Export CSV | ⬜ |

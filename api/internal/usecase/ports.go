@@ -359,7 +359,7 @@ type FXRateProvider interface {
 // same reason as MemberView above.
 //
 // Balance is the account's current balance: its opening balance plus every
-// transaction dated strictly after Account.OpeningBalanceAsOf, summed by the
+// transaction dated on or after Account.OpeningBalanceAsOf, summed by the
 // repository. It is denominated in the account's own currency, because every
 // transaction on an account is; nothing here converts.
 //

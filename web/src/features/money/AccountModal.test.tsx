@@ -425,4 +425,54 @@ describe("AccountModal", () => {
 
     expect(await screen.findByLabelText("Starting balance as of")).toHaveValue("2025-12-31");
   });
+
+  it("says the starting balance is the start-of-day figure", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/household/members": NO_MEMBERS,
+    });
+    renderWithRouter(<AccountModal open onClose={() => {}} />);
+    expect(
+      await screen.findByText(
+        "The balance at the start of that day — transactions dated that day count.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  // Fixture names must never be the design household's own (Kayla, Ethan --
+  // see docs/LEARNING.md pattern 14): if they were, the expected string here
+  // would equal the old hardcoded literal in limitedMembersLine, and a
+  // revert of that fix back to the literal would still make this test pass.
+  // "Mira" and "Jun" belong to no household this product ships with.
+  it("names the household's limited members under Visible to kids", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/household/members": {
+        status: 200,
+        body: [
+          { id: "m1", role: "owner", capabilities: ["money"], user: { id: "u1", email: "", displayName: "Dre", avatarInitial: "D" } },
+          { id: "m2", role: "limited", capabilities: [], user: { id: "u2", email: "", displayName: "Mira", avatarInitial: "M" } },
+          { id: "m3", role: "limited", capabilities: [], user: { id: "u3", email: "", displayName: "Jun", avatarInitial: "J" } },
+        ],
+      },
+    });
+    renderWithRouter(<AccountModal open onClose={() => {}} />);
+    expect(
+      await screen.findByText("Mira & Jun can see this account exists, not the balance"),
+    ).toBeInTheDocument();
+  });
+
+  it("falls back to generic copy when no member is limited", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/household/members": NO_MEMBERS,
+    });
+    renderWithRouter(<AccountModal open onClose={() => {}} />);
+    expect(
+      await screen.findByText("Limited members can see this account exists, not the balance"),
+    ).toBeInTheDocument();
+  });
 });

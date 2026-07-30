@@ -1,7 +1,9 @@
 # Hearth — learning log
 
-Every defect found while building slices 0, 1, self-serve sign-up, Accounts and
-Transactions (slice 2's first two features), and what each one teaches.
+Every defect found while building slices 0, 1, self-serve sign-up, Accounts,
+Transactions (slice 2's first two features) and the finance-fixes round that
+followed the owner's first real day-one use of Transactions, and what each
+one teaches.
 Written because almost none of them were caught by a failing test — they were
 caught by someone asking the right question about code that looked fine and
 had a green suite.
@@ -534,9 +536,30 @@ either; sharpen the mutation until the failure names the claim.
   unselected one) before it was visible in both states — a reminder that a
   fix a screenshot diff would have caught in twenty seconds still went out
   the first time, because nobody diffed the screenshots.
+- Finance-fixes round, the grouped sidebar's Money links (pattern 13): the
+  brief's own suggested mechanism, TanStack Router's `Link` `activeProps`,
+  merges its `className` onto the base `className` rather than replacing
+  it, so an active link carried both the base's baked-in `text-ink` and
+  `activeProps`' `text-accent` at once. Tailwind's cascade resolves color by
+  which utility's generated rule sits later in the *stylesheet*, not which
+  class token is later in the *class list* — `text-ink` always won,
+  regardless of which link was active. Every Sidebar test stayed green,
+  because a `toHaveClass("text-accent")` assertion only checks that the
+  token is present in the string jsdom hands back, never which color a real
+  cascade actually resolves to — the exact gap this pattern's own closing
+  sentence, written after the Kind filter's ring-colour near-miss, already
+  named. Found only by opening a real browser and reading
+  `getComputedStyle` directly: on `/money`, Finances computed to
+  `rgb(26, 107, 82)` (accent) and Transactions to `rgb(28, 27, 24)` (ink);
+  on `/money/transactions` the two should have reversed and did not —
+  `text-ink` was showing on whichever link was actually active, either way.
+  Fixed by making `NAV_ITEM_CLASS` layout-only, with every caller stating
+  its own single color class, and computing each Money link's active state
+  itself via `useMatchRoute` instead of `activeProps` — one color class per
+  link leaves nothing for the cascade to arbitrate.
 
 **If a behaviour depends on the platform, verify it in the platform.** A real
-browser found four defects that jsdom structurally could not observe. And
+browser found five defects that jsdom structurally could not observe. And
 when a service returns an error it did not log, stop debugging the code and
 confirm you are talking to the process you think you are — an assumed
 environment that is not the one running is the same trap as a simulated one
@@ -544,7 +567,9 @@ that cannot tell the truth, and every hypothesis about the code will be wrong
 for as long as the premise is. A fix for one of those defects is also worth
 a second look with your own eyes, not just a passing assertion: a green test
 that only checks a class string is present says nothing about whether the
-color that class names actually shows up against its own background.
+color that class names actually shows up against its own background — and
+the grouped-sidebar bullet above is that exact claim happening again, on a
+different component, after it was already written down here once.
 
 ### 4. Guards scoped to the wrong interval
 
@@ -743,6 +768,105 @@ that second data point.** Writing the mixed-currency test from the design's
 own IDR account, rather than from the happy path, is what gave this rule
 anything to prove itself against.
 
+### 13. A verification walk scripted from the spec cannot catch the spec's own mistake
+
+Transactions was walked 15 of 15, in a real browser, against a wiped
+database — the strongest verification this project does. It still did not
+survive the product owner's first real day-one use, because every one of
+those 15 criteria was itself derived from the spec, and the spec was the
+thing that was wrong, silent, or unexamined:
+
+- **Wrong.** Transactions spec decision 6 defined `AccountView.Balance` as
+  the opening balance plus every transaction dated strictly *after*
+  `opening_balance_as_of`, on the theory that a balance typed "as of" a date
+  already reflects that day's spending. The implementation matched the spec
+  exactly. The theory fails on the most natural flow in the product: create
+  an account today, with today as the default "as of," and log today's
+  dinner. The transaction saved, the ledger marked it "before" the opening
+  balance — wrong twice over, since it was same-day and the user never asked
+  for the exclusion — and the balance and net worth sat still. Every
+  day-one user hits this path; the walk never did, because nothing in the
+  spec asked "what happens on the day the account is opened?" (fixed by
+  decision 1 of `docs/superpowers/specs/2026-07-30-hearth-finance-fixes-design.md`:
+  the opening balance is now the figure at the *start* of its day, so a
+  same-day transaction counts — see the Money catalogue entry below and
+  `FEATURE_TRACKER.md`'s Transactions row).
+- **Silent.** `/money/transactions` existed and worked from the moment it
+  shipped. Its only entry point was a small "See all" link beside "Recent
+  transactions" on the Finances page — the design's own grouped sidebar
+  (label plus a link per built page) was never built for it, because
+  `Sidebar.tsx`'s own header comment had deliberately deferred grouping
+  "until a space has more than one destination," and nothing re-read that
+  comment once Transactions gave Money its second page. No criterion in the
+  walk ever asked "how would a stranger discover this page?", because
+  discoverability was never named as a thing to check — only the page's own
+  contents were.
+- **Unexamined.** The Add-account modal's "Visible to kids" copy read
+  "Kayla & Ethan can see this account exists, not the balance" — the seeded
+  household's own children, shipped as if it were generic product copy. The
+  walk clicked through the modal, saw text, and moved on: nothing in a
+  spec-derived checklist asks "whose names are these, and would they be
+  right for a different household?" A stranger who signed up for their own
+  account would meet someone else's children on their very first day.
+
+None of the three would have shown up in a checklist built only from the
+spec's own acceptance criteria, because in each case the spec (or the
+absence of one) *was* the defect. The check that catches this class is
+using the product the way a stranger would on day one — the household's own
+most natural first flow — not only the criteria the spec happened to write
+down. This is why `CLAUDE.md`'s definition of done now requires "test the
+product in a real browser before calling it done," added the day this
+round's spec was written; the sharper form of the rule — walk it as the
+user, not as the spec — is this pattern, and item 4 of this file's own
+closing checklist states it in operational terms.
+
+**A spec-derived verification walk is only as good as the spec.** Add one
+criterion no spec item implies: do the thing a first-time user would
+actually do, not the thing the spec remembered to ask about.
+
+### 14. Literal example data belongs to the seed, not the product
+
+The design mockup was built around one imagined household — Andreas &
+Christine, with children including Kayla and Ethan, Christine's accounts in
+Indonesia. Twice, that household's specifics were typed directly into
+rendered product copy rather than derived from whichever household is
+actually signed in, and both times a comment at the site admitted it:
+
+- `AccountModal.tsx`'s "Visible to kids" line hardcoded "Kayla & Ethan can
+  see this account exists, not the balance" — literal design copy, correct
+  only for the seeded household, sitting beside a member list the same
+  modal already fetches for its owner dropdown. Fixed by a
+  `limitedMembersLine` helper that names the household's actual limited
+  members (joined with commas and "&"), falling back to generic copy
+  ("Limited members can see this account exists, not the balance") when
+  there are none.
+- `CurrencyPanel.tsx`'s secondary-currency toggle hardcoded "For Christine's
+  Indonesian accounts." Its own comment named the debt outright — "Literal
+  design copy, true of this specific seeded household ... flagged in the
+  report, not solved here" — and the debt was left exactly where the
+  comment said it was until this round paid it off with a generic line,
+  "Shown alongside the primary currency."
+
+Both were harmless for as long as the seeded household was the only
+household in the system — the comment on each said so, in the words pattern
+1 already uses for this shape: a debt that comes due the day its stated
+precondition stops holding. Self-serve sign-up falsified that precondition
+for every real customer, and nothing about shipping self-serve sign-up
+touched either file to notice. Neither was caught by a test — a `stubFetchRoutes`
+member-list fixture built from the design's own names would have kept both
+tests green regardless, the same way a fixture-with-no-case-to-discriminate
+misses things elsewhere in this log. Found by the product owner asking "who
+is Ethan?", then by grepping the built frontend bundle for every rendered
+design-literal name (Andreas, Christine, Kayla, Ethan) to prove none of them
+still ship — comments may keep the names, since a comment explaining *why*
+a household exists in the seed is useful; a rendered string may not.
+
+**A comment admitting "this is only true of the seed" is not a fix — it is
+a marker for the fix that has not happened yet.** Grep for a design's own
+proper nouns in rendered strings before calling a feature built from a
+worked example done; a name that reads naturally in a mockup is a household
+inventing itself as a person the moment it renders for someone else's family.
+
 ---
 
 ## Catalogue by area
@@ -773,6 +897,20 @@ anything to prove itself against.
   before it shipped, not by a test; fixed with a `considered` counter
   incremented only for non-archived views, judged separately from the raw row
   count.
+- An account's balance excluded every transaction dated on its own
+  `opening_balance_as_of` day (`account_repo.go`'s two sum sites compared
+  `occurred_on > opening_balance_as_of`), matching Transactions spec
+  decision 6's "strictly after" rule exactly — the implementation was
+  correct against the spec and the spec was wrong (pattern 13). Fixed to
+  `occurred_on >= opening_balance_as_of`, with the two before-flags
+  (`beforeFromAccountOpeningBalance`/`beforeToAccountOpeningBalance`)
+  flipped to strictly-before (`<`) to match the new boundary. The sibling
+  hunt for this one change found five more prose statements of the old rule
+  outside the six SQL comparisons the plan named: `AccountView.Balance`'s
+  doc comment in `usecase/ports.go`, `account_repo_test.go`'s comment
+  referencing it, `domain.Account`'s `OpeningBalanceAsOf` doc comment,
+  `accountDTO`'s doc comment, the `00004_accounts.sql` migration's table
+  comment, and the frontend's mirrored comment in `schemas.ts`.
 
 ### Database and repositories
 
@@ -1013,6 +1151,17 @@ route with a missing guard has no second line of defence.
   near-miss: a single ring colour was invisible on the selected pill's dark
   background until the colour itself was made conditional on which
   background it sits against.
+- The grouped sidebar's Money links carried both `text-ink` and
+  `text-accent` at once on the active link, because `Link`'s `activeProps`
+  merges its className onto the base rather than replacing it; Tailwind's
+  cascade always resolved to `text-ink` regardless of which link was
+  active, invisible to every test asserting only that the class token was
+  present. See pattern 3.
+- The Add-account modal's "Visible to kids" copy and the currency panel's
+  secondary-currency copy each hardcoded the design mockup household's own
+  specifics (child names; "Christine's Indonesian accounts") as if they
+  were generic product copy, safe only while the seeded household was the
+  only one that existed. See pattern 14.
 
 ### Tooling and infrastructure
 
@@ -1045,7 +1194,10 @@ route with a missing guard has no second line of defence.
    reason you expect*, restore. A mutation that kills a different test, or
    fails on the right test for the wrong reason, has not proven anything yet.
 3. Grep for the shape of anything you fixed. Siblings are the norm here.
-4. If it touches the browser, open a browser.
+4. If it touches the browser, open a browser and walk it as a first-time
+   user would, not only against criteria the spec wrote down — a 15-of-15
+   walk scripted from the spec still missed the spec's own wrong decision,
+   a silent navigation gap and unexamined hardcoded copy (pattern 13).
 5. If it accepts caller input, ask what a caller can measure.
 6. If it writes twice, ask what happens when the second write fails.
 7. Add what you learned to this file.

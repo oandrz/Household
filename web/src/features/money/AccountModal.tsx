@@ -66,6 +66,33 @@ export type AccountEditValues = Omit<
 // that can drift.
 const householdMembersQueryKey = ["household", "members"] as const;
 
+// The design wrote "Kayla & Ethan can see this account exists, not the
+// balance" — true only of the seeded household. Real households get their
+// own limited members' names, and a household with none gets the generic
+// line rather than an invented family.
+//
+// `undefined` means "not settled yet", not "no limited members" -- while
+// GET /household/members is still loading, `members` is undefined for the
+// same reason an empty household is, and treating the two alike would flash
+// the generic line for every household that does have limited members, for
+// as long as the request takes. Returning "" instead lets the caller render
+// nothing until the query settles, real names included, without a second
+// loading state of its own.
+function limitedMembersLine(members: MemberView[] | undefined, isPending: boolean): string {
+  if (isPending) return "";
+  const names = (members ?? [])
+    .filter((m) => m.role === "limited")
+    .map((m) => m.user.displayName);
+  if (names.length === 0) {
+    return "Limited members can see this account exists, not the balance";
+  }
+  const list =
+    names.length === 1
+      ? names[0]
+      : `${names.slice(0, -1).join(", ")} & ${names[names.length - 1]}`;
+  return `${list} can see this account exists, not the balance`;
+}
+
 async function fetchHouseholdMembers(): Promise<MemberView[]> {
   const body = await apiFetch<unknown>("/api/v1/household/members");
   return membersListSchema.parse(body);
@@ -376,6 +403,10 @@ export function AccountModal({
             onChange={(event) => setAsOf(event.target.value)}
             className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
           />
+          <p className="text-[11.5px] leading-snug text-muted">
+            The balance at the start of that day — transactions dated that day
+            count.
+          </p>
         </div>
 
         <div className="flex items-center justify-between rounded-[10px] border border-hairline px-3.5 py-2.5">
@@ -395,12 +426,8 @@ export function AccountModal({
         <div className="flex items-center justify-between rounded-[10px] border border-hairline px-3.5 py-2.5">
           <div>
             <div className="text-[13px] text-ink">Visible to kids</div>
-            {/* Literal design copy, true of this specific seeded household --
-                the same non-generalised choice CurrencyPanel's "For
-                Christine's Indonesian accounts" row already makes, flagged
-                there for the same reason. */}
             <div className="mt-0.5 text-[11.5px] text-muted">
-              Kayla &amp; Ethan can see this account exists, not the balance
+              {limitedMembersLine(members.data, members.isPending)}
             </div>
           </div>
           <ToggleSwitch

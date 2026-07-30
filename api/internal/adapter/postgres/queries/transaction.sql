@@ -65,12 +65,11 @@ SELECT kind FROM categories WHERE id = $1 AND household_id = $2;
 -- names rather than vanishing.
 --
 -- before_from_opening and before_to_opening are computed here, next to the
--- dates they compare, so the rule that only transactions after an account's
--- opening date move its balance lives in one place. <= against
--- opening_balance_as_of, mirroring the strict > the balance sum will use in
--- Task 9: a transaction dated *on* the opening date is already reflected in
--- the figure someone asserted was true that day, so it must not also be
--- counted as moving the balance forward from it.
+-- dates they compare, so the rule lives in one place. Strict < against
+-- opening_balance_as_of, mirroring the >= the balance sum uses in
+-- queries/account.sql: the opening balance is the figure at the START of
+-- its day (spec 2026-07-30, decision 1), so only a transaction dated
+-- strictly before it is already inside that figure and excluded.
 
 -- name: GetTransaction :one
 SELECT t.id, t.household_id, t.kind, t.occurred_on, t.description,
@@ -81,8 +80,8 @@ SELECT t.id, t.household_id, t.kind, t.occurred_on, t.description,
        u.display_name AS paid_by_name,
        fa.nickname AS from_account_name,
        ta.nickname AS to_account_name,
-       (fa.id IS NOT NULL AND t.occurred_on <= fa.opening_balance_as_of) AS before_from_opening,
-       (ta.id IS NOT NULL AND t.occurred_on <= ta.opening_balance_as_of) AS before_to_opening
+       (fa.id IS NOT NULL AND t.occurred_on < fa.opening_balance_as_of) AS before_from_opening,
+       (ta.id IS NOT NULL AND t.occurred_on < ta.opening_balance_as_of) AS before_to_opening
 FROM transactions t
 LEFT JOIN categories  c  ON c.id  = t.category_id
 LEFT JOIN memberships m  ON m.id  = t.paid_by_membership_id
@@ -156,8 +155,8 @@ SELECT t.id, t.household_id, t.kind, t.occurred_on, t.description,
        u.display_name AS paid_by_name,
        fa.nickname AS from_account_name,
        ta.nickname AS to_account_name,
-       (fa.id IS NOT NULL AND t.occurred_on <= fa.opening_balance_as_of) AS before_from_opening,
-       (ta.id IS NOT NULL AND t.occurred_on <= ta.opening_balance_as_of) AS before_to_opening
+       (fa.id IS NOT NULL AND t.occurred_on < fa.opening_balance_as_of) AS before_from_opening,
+       (ta.id IS NOT NULL AND t.occurred_on < ta.opening_balance_as_of) AS before_to_opening
 FROM transactions t
 LEFT JOIN categories  c  ON c.id  = t.category_id
 LEFT JOIN memberships m  ON m.id  = t.paid_by_membership_id
@@ -191,8 +190,8 @@ SELECT t.id, t.household_id, t.kind, t.occurred_on, t.description,
        u.display_name AS paid_by_name,
        fa.nickname AS from_account_name,
        ta.nickname AS to_account_name,
-       (fa.id IS NOT NULL AND t.occurred_on <= fa.opening_balance_as_of) AS before_from_opening,
-       (ta.id IS NOT NULL AND t.occurred_on <= ta.opening_balance_as_of) AS before_to_opening
+       (fa.id IS NOT NULL AND t.occurred_on < fa.opening_balance_as_of) AS before_from_opening,
+       (ta.id IS NOT NULL AND t.occurred_on < ta.opening_balance_as_of) AS before_to_opening
 FROM transactions t
 LEFT JOIN categories  c  ON c.id  = t.category_id
 LEFT JOIN memberships m  ON m.id  = t.paid_by_membership_id
