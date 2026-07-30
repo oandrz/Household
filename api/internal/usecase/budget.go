@@ -59,14 +59,18 @@ type BudgetMonthView struct {
 }
 
 // BudgetHistoryMonth is one row of the History modal. Closed is false only
-// for the viewed month -- the month History was called with, not whichever
-// month happens to be "now" -- because the caller decides what "current"
-// means for the screen it is drawing.
+// for the month containing `today` -- the spec's History table calls out
+// "the current month" showing "so far" instead of a final result, and that
+// is the real calendar month, not whichever month a caller happened to
+// anchor the walk-back window on. Asking for history anchored on a past
+// month (the page's picker sitting on June while today is July) marks every
+// returned row Closed, June included: none of them is the month actually in
+// progress.
 type BudgetHistoryMonth struct {
 	Month    time.Time
 	Budgeted domain.Money
 	Spent    domain.Money
-	Closed   bool // false only for the viewed (current) month
+	Closed   bool // false only for the month containing `today`
 }
 
 // BudgetLineInput is one row Save receives: a category and its cap in minor
@@ -252,17 +256,18 @@ func (s *BudgetService) Month(ctx context.Context, householdID string, month, to
 	remaining := budgeted.Amount - spent.Amount
 	percentUsed, percentOK := domain.PercentUsed(spent.Amount, budgeted.Amount)
 	daysLeft := domain.DaysLeftInMonth(month, today)
-	// domain.DailyPace only knows Remaining and DaysLeft. The spec also hides
-	// this figure when "the viewed month is not the current one" -- but a
-	// *future* month still gets a full DaysLeftInMonth and can have
-	// Remaining > 0, so DailyPaceOK alone cannot express that half of the
-	// rule. This view carries no "is this the current month" flag to let a
-	// caller apply it either. Deliberately left to Task 9/11: the HTTP
-	// handler or the page already holds the clock and the requested month,
-	// so it is the one place that can compare them and hide the pace card
-	// for a future month without this method growing a today-vs-month
-	// dependency it does not otherwise need.
 	dailyPace, dailyPaceOK := domain.DailyPace(remaining, daysLeft)
+	// domain.DailyPace only knows Remaining and DaysLeft, so on its own it
+	// cannot enforce the spec's other condition: "hidden when ... the viewed
+	// month is not the current one." A *future* month still gets a full
+	// DaysLeftInMonth and can have Remaining > 0, so DailyPaceOK would
+	// otherwise come back true for a month that has not started yet. Only
+	// this method holds both `month` and `today`, so the comparison happens
+	// here rather than being pushed onto a caller that would have to
+	// duplicate it.
+	if !startOfMonth(month).Equal(startOfMonth(today)) {
+		dailyPace, dailyPaceOK = 0, false
+	}
 
 	return BudgetMonthView{
 		Currency:       primary,
@@ -429,7 +434,11 @@ func (s *BudgetService) Save(ctx context.Context, householdID string, month time
 // History reports the viewed month (if budgeted) plus up to `months` closed
 // months walked back from it, newest first, exactly the windowing
 // BudgetRepository.History's own doc comment pins -- a month without a
-// budget row is simply absent, never zero-filled.
+// budget row is simply absent, never zero-filled. `month` only decides that
+// window; it does not decide Closed (see BudgetHistoryMonth's doc comment)
+// -- `today` does, because "the current month" in the spec's History table
+// means the real one, not whichever month a caller anchored the walk-back
+// window on.
 //
 // Each row's Spent and Budgeted are computed by calling Month for that row's
 // own month, rather than re-deriving spend here a second way: the whole
@@ -442,7 +451,7 @@ func (s *BudgetService) History(ctx context.Context, householdID string, month, 
 		return nil, err
 	}
 
-	viewed := startOfMonth(month)
+	current := startOfMonth(today)
 	out := make([]BudgetHistoryMonth, 0, len(budgets))
 	for _, b := range budgets {
 		view, err := s.Month(ctx, householdID, b.Month, today)
@@ -453,7 +462,7 @@ func (s *BudgetService) History(ctx context.Context, householdID string, month, 
 			Month:    b.Month,
 			Budgeted: view.Budgeted,
 			Spent:    view.Spent,
-			Closed:   !startOfMonth(b.Month).Equal(viewed),
+			Closed:   !startOfMonth(b.Month).Equal(current),
 		})
 	}
 	return out, nil

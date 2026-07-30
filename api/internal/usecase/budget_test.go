@@ -141,6 +141,30 @@ func TestBudgetMonthComposesTheDesignsFigures(t *testing.T) {
 	if got.OverCount != 1 {
 		t.Fatalf("overCount = %d, want 1", got.OverCount)
 	}
+
+	// The fixture also has an income category ("cat-income"). Caps envelope
+	// spending only, so it must never get a Categories row -- exercising the
+	// Kind filter buildCategoryViews applies, not just asserting the two
+	// expense rows exist.
+	if len(got.Categories) != 2 {
+		t.Fatalf("categories = %+v, want exactly 2 (an income category must be excluded)", got.Categories)
+	}
+	if _, ok := findCategory(got.Categories, "cat-income"); ok {
+		t.Fatal("cat-income appeared in Categories -- an income category can never carry a cap")
+	}
+
+	// month == today's month here, so the pace card must be shown: today is
+	// Jul 18 (july.AddDate(0, 0, 17)), so 14 days left (Jul 18 through Jul 31
+	// inclusive), 14500 minor remaining, floored.
+	if !got.DailyPaceOK {
+		t.Fatal("dailyPaceOK = false, want true -- the viewed month is the current one")
+	}
+	if got.DaysLeft != 14 {
+		t.Fatalf("daysLeft = %d, want 14", got.DaysLeft)
+	}
+	if got.DailyPace != 1035 {
+		t.Fatalf("dailyPace = %d, want 1035 (14500/14, floored)", got.DailyPace)
+	}
 }
 
 // TestBudgetMonthSpentReusesTheMonthSummaryRule is the spec's "reused
@@ -185,6 +209,44 @@ func TestBudgetMonthSpentReusesTheMonthSummaryRule(t *testing.T) {
 	if len(got.ExcludedNoRate) != 1 || got.ExcludedNoRate[0].TransactionID != "tx-no-rate" ||
 		got.ExcludedNoRate[0].Currency != "USD" {
 		t.Fatalf("excluded = %v, want one USD transaction named tx-no-rate", got.ExcludedNoRate)
+	}
+}
+
+// TestBudgetMonthHidesDailyPaceForAFutureMonth: the spec hides "S$X/day
+// left" when Remaining <= 0 *or* the viewed month is not the current one.
+// domain.DailyPace alone only ever checks the first half -- a future month
+// still gets a full DaysLeftInMonth and, with nothing spent yet, Remaining >
+// 0, so without Month comparing `month` to `today` itself this would read as
+// available. August is budgeted, has no spend, and is unambiguously after
+// July (`today`): DaysLeft and Remaining are both positive here, which is
+// exactly what would let a naive implementation show the card.
+func TestBudgetMonthHidesDailyPaceForAFutureMonth(t *testing.T) {
+	f := newBudgetFixture(t)
+	ctx := context.Background()
+	august := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	today := time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC)
+
+	if _, err := f.svc.Save(ctx, "house-1", august, nil, []usecase.BudgetLineInput{
+		{CategoryID: "cat-groceries", CapMinor: 80000},
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	got, err := f.svc.Month(ctx, "house-1", august, today)
+	if err != nil {
+		t.Fatalf("month: %v", err)
+	}
+
+	if got.Remaining <= 0 || got.DaysLeft <= 0 {
+		t.Fatalf("remaining = %d, daysLeft = %d -- both must be positive for this test to actually exercise the guard",
+			got.Remaining, got.DaysLeft)
+	}
+	if got.DailyPaceOK {
+		t.Fatal("dailyPaceOK = true, want false -- August is not today's month (July), so the pace card must hide " +
+			"even though Remaining and DaysLeft are both positive")
+	}
+	if got.DailyPace != 0 {
+		t.Fatalf("dailyPace = %d, want 0 when hidden", got.DailyPace)
 	}
 }
 
@@ -382,5 +444,46 @@ func TestBudgetHistoryMarksOnlyTheCurrentMonthOpen(t *testing.T) {
 	}
 	if !got[2].Month.Equal(may) || !got[2].Closed {
 		t.Fatalf("row 2 = %+v, want May, Closed true", got[2])
+	}
+}
+
+// TestBudgetHistoryClosedFollowsTodayNotTheAnchorMonth pins which of
+// History's two time parameters governs "current": `today`, not `month`.
+// The previous test alone cannot tell them apart -- it always calls History
+// with `month` and `today` in the same calendar month, so implementing
+// Closed off either one passes it identically. Here the anchor is June while
+// today is July: none of the returned rows (June, May) is the month actually
+// in progress, so every row -- including the anchor month itself -- must
+// come back Closed.
+func TestBudgetHistoryClosedFollowsTodayNotTheAnchorMonth(t *testing.T) {
+	f := newBudgetFixture(t)
+	ctx := context.Background()
+
+	may := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	june := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	today := time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC)
+
+	for _, m := range []time.Time{may, june} {
+		if _, err := f.svc.Save(ctx, "house-1", m, nil, []usecase.BudgetLineInput{
+			{CategoryID: "cat-groceries", CapMinor: 10000},
+		}); err != nil {
+			t.Fatalf("save %v: %v", m, err)
+		}
+	}
+
+	// Anchor on June (not July, the month `today` actually falls in).
+	got, err := f.svc.History(ctx, "house-1", june, today, 3)
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+
+	if len(got) != 2 {
+		t.Fatalf("history = %+v, want exactly 2 rows (June, May)", got)
+	}
+	if !got[0].Month.Equal(june) || !got[0].Closed {
+		t.Fatalf("row 0 = %+v, want June, Closed true -- June is the query's anchor but not today's month", got[0])
+	}
+	if !got[1].Month.Equal(may) || !got[1].Closed {
+		t.Fatalf("row 1 = %+v, want May, Closed true", got[1])
 	}
 }
