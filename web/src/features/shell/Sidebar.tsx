@@ -11,7 +11,7 @@
 // built pages, so it renders as a label plus two links. SPACE_PAGES grows a
 // row per shipped page -- Budget, Goals and Bills join it once their pages
 // exist, not before, because a permanent grey "soon" row reads as broken.
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, useMatchRoute, useNavigate } from "@tanstack/react-router";
 import type { Me, Space } from "../auth/schemas";
 import { useSignOut } from "../auth/useAuth";
 
@@ -30,10 +30,19 @@ const SPACE_PAGES: Record<string, { label: string; to: string }[]> = {
   family: [{ label: "Family", to: "/family/calendar" }],
 };
 
-const NAV_ITEM_CLASS =
-  "rounded-lg px-2.5 py-2 text-[13.5px] font-semibold text-ink";
+// Layout only -- no color here. `text-ink`/`text-accent`/`text-muted` are
+// added by each caller instead of baked in, because Tailwind's cascade picks
+// whichever color utility's generated rule sits later in the stylesheet,
+// not whichever appears later in the `className` string. A link that always
+// carries both `text-ink` (from a shared base) and a conditional
+// `text-accent` renders ink even while active, no matter which one comes
+// last in the markup -- that shipped as a defect here (grouped Money links
+// never showed the accent). Give each link exactly one color class, chosen
+// by the caller, so there is nothing for the cascade to arbitrate.
+const NAV_ITEM_CLASS = "rounded-lg px-2.5 py-2 text-[13.5px] font-semibold";
 
 function SpaceLink({ space }: { space: Space }) {
+  const matchRoute = useMatchRoute();
   const pages = SPACE_PAGES[space.key];
   if (!pages) {
     return (
@@ -44,7 +53,11 @@ function SpaceLink({ space }: { space: Space }) {
   }
   if (pages.length === 1) {
     return (
-      <Link data-testid="sidebar-space" to={pages[0].to} className={NAV_ITEM_CLASS}>
+      <Link
+        data-testid="sidebar-space"
+        to={pages[0].to}
+        className={`${NAV_ITEM_CLASS} text-ink`}
+      >
         {space.name}
       </Link>
     );
@@ -57,18 +70,28 @@ function SpaceLink({ space }: { space: Space }) {
       >
         {space.name}
       </div>
-      {pages.map((page) => (
-        <Link
-          key={page.to}
-          data-testid="sidebar-space"
-          to={page.to}
-          className={NAV_ITEM_CLASS}
-          activeProps={{ className: `${NAV_ITEM_CLASS} text-accent` }}
-          activeOptions={{ exact: page.to === "/money" }}
-        >
-          {page.label}
-        </Link>
-      ))}
+      {pages.map((page) => {
+        // Computed here, not via Link's activeProps -- activeProps merges
+        // its className with the base className rather than replacing it,
+        // so the base's color class and the active color class would both
+        // be present at once (see the NAV_ITEM_CLASS comment). Doing the
+        // match ourselves means the Link only ever carries one color class.
+        // `matchRoute` defaults to an exact match (fuzzy: false), so
+        // "/money" only matches "/money" itself, never "/money/transactions"
+        // -- the same distinction Link's `activeOptions.exact` makes, kept
+        // here without needing that option.
+        const isActive = Boolean(matchRoute({ to: page.to }));
+        return (
+          <Link
+            key={page.to}
+            data-testid="sidebar-space"
+            to={page.to}
+            className={`${NAV_ITEM_CLASS} ${isActive ? "text-accent" : "text-ink"}`}
+          >
+            {page.label}
+          </Link>
+        );
+      })}
     </>
   );
 }
@@ -109,7 +132,7 @@ export function Sidebar({ me }: { me: Me }) {
 
       <div className="flex-1" />
 
-      <Link to="/settings" className={NAV_ITEM_CLASS}>
+      <Link to="/settings" className={`${NAV_ITEM_CLASS} text-ink`}>
         Settings
       </Link>
 
