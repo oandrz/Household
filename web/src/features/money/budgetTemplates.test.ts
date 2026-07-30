@@ -100,6 +100,35 @@ describe("fiftyThirtyTwentyTemplate", () => {
     }
   });
 
+  // Pins exact figures, not just "an integer under the bound" -- 333333 is
+  // exactly the income that catches a regression back to `incomeMinor * 0.3`
+  // (a `* 0.5`/`* 0.3` pool computed in float first, then floored, is wrong
+  // from the wrong starting point: 333333 * 0.3 === 99999.90000000001 in
+  // IEEE 754, one whole minor unit over the integer-division pool of 99999
+  // this test asserts against). CLAUDE.md's money rule: float never appears
+  // in a monetary path, and this is the one place income was ever multiplied
+  // by a decimal literal rather than divided as an integer.
+  it("computes the exact split for an income whose 30% is not float-exact", () => {
+    const incomeMinor = 333333;
+
+    const prefill = fiftyThirtyTwentyTemplate(ALL_NAMED, incomeMinor);
+
+    const byId = new Map(prefill.lines.map((line) => [line.categoryId, line.capMinor]));
+    expect(byId.get("c-groceries")).toBe(45351);
+    expect(byId.get("c-utilities")).toBe(18140);
+    expect(byId.get("c-transport")).toBe(17006);
+    expect(byId.get("c-insurance")).toBe(23809);
+    expect(byId.get("c-kids")).toBe(34013);
+    expect(byId.get("c-household")).toBe(14172);
+    expect(byId.get("c-petrol")).toBe(14172);
+    expect(byId.get("c-dining")).toBe(52940);
+    expect(byId.get("c-fun")).toBe(23529);
+    expect(byId.get("c-giving")).toBe(23529);
+
+    const sum = [...byId.values()].reduce((total, capMinor) => total + capMinor, 0);
+    expect(sum).toBe(266661);
+  });
+
   it("puts a needs/wants name with no live category into `missing`", () => {
     const withoutGroceries = ALL_NAMED.filter((c) => c.name !== "Groceries");
 

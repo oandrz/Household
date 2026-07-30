@@ -110,6 +110,17 @@ export function BudgetPage() {
   const [month, setMonth] = useState(() => currentMonth());
   const budget = useBudget(month);
   const currencies = useCurrencies();
+  // Unconditional, not gated behind `data.budget === null`: React's rules of
+  // hooks forbid calling it only inside the empty-state branch below (that
+  // branch doesn't exist yet at this point in the render), and the template
+  // cards need this list ready the instant a household clicks one, not a
+  // second request kicked off only after the click. This is deliberately
+  // `useCategories()`'s plain, non-archived list -- not `data.categories`
+  // (useBudget's per-month view, which includes archived categories so an
+  // old cap still renders on its own row). A template should never offer to
+  // prefill a cap onto a category the household archived; `data.categories`
+  // would let one leak through, and it uses `categoryId`, not the `id` the
+  // templates key their name-matching on.
   const categories = useCategories();
   // Task 14 owns the real modal; this page only decides what it should
   // open pre-filled with. `null` means no modal is open.

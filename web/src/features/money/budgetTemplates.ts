@@ -136,8 +136,15 @@ export function fiftyThirtyTwentyTemplate(
     return { expectedIncomeMinor: incomeMinor || null, lines: [], missing: [] };
   }
 
-  const needs = splitPool(NEEDS, categories, incomeMinor * 0.5);
-  const wants = splitPool(WANTS, categories, incomeMinor * 0.3);
+  // Integer division, not `* 0.5`/`* 0.3` -- CLAUDE.md's money rule is
+  // absolute: float never appears in a monetary path. `incomeMinor * 0.3` is
+  // not always exact (333333 * 0.3 === 99999.90000000001 in IEEE 754), which
+  // would hand splitPool a fractional pool it then floors from the wrong
+  // starting point. `incomeMinor * 3` stays an exact integer for any income
+  // a household could plausibly enter, so dividing that by 10 and flooring
+  // is exact where the float route wasn't.
+  const needs = splitPool(NEEDS, categories, Math.floor(incomeMinor / 2));
+  const wants = splitPool(WANTS, categories, Math.floor((incomeMinor * 3) / 10));
 
   return {
     expectedIncomeMinor: incomeMinor,

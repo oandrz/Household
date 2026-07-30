@@ -322,8 +322,8 @@ grid with the over state, and Spending by person all render live from `GET
 conditional "Import last month" card, and every template's caps are computed
 for real (`budgetTemplates.ts`: exact name mapping onto the household's live
 categories, `missing` for anything unmatched, the 50/30/20 proportional
-split with its 20%-headroom flooring). The 🟡 is the same gap on both budget
-rows: a template click hands its computed prefill to a modal-stub
+split with its 20%-headroom flooring). The 🟡 is the same gap on all three
+budget rows: a template click hands its computed prefill to a modal-stub
 (`data-testid="budget-modal-stub"`) rather than a real modal, so nothing can
 actually be saved yet — a household still cannot create a budget end to end
 until the Edit-budget modal (Task 14) replaces that stub.
