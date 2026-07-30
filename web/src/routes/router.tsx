@@ -18,7 +18,20 @@
 // Marriage and Family have no routes: both were placeholders reading
 // "Arriving in slice N", and the sidebar no longer offers them (see
 // Sidebar.tsx's SPACE_PAGES). Their URLs fall through to rootRoute's
-// notFoundComponent. Add the route back in the same change that builds the
+// notFoundComponent -- and rootRoute sits above the pathless
+// authenticatedRoute/shellRoute in this tree, not below them, so that
+// fall-through carries two consequences worth knowing before you next touch
+// this file. First, the 404 renders shell-less: AppShell never mounts for
+// it, so there is no sidebar and (today) no link back anywhere else --
+// visiting /marriage is a dead end, not a redirect to a page that offers a
+// way out. Second, RequireAuth never runs either, so a signed-out visitor
+// with an old /marriage bookmark now reaches bare "Page not found." text
+// instead of being bounced to /sign-in the way every real route bounces
+// them. Both are accepted for now because these are dead links to a feature
+// that doesn't exist yet, not routes anyone should be linking to -- but
+// they are exactly the kind of thing that stops being fine the moment
+// notFoundComponent grows real content, or a route moves relative to
+// authenticatedRoute. Add the route back in the same change that builds the
 // page, alongside its SPACE_PAGES entry -- and re-add RequireCapability for
 // Marriage, which is capability-gated.
 import {

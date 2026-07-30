@@ -131,6 +131,26 @@ describe("the real route tree", () => {
     expect(await screen.findByText("Arriving in slice 5.")).toBeInTheDocument();
   });
 
+  // Pins router.tsx's header comment: rootRoute's notFoundComponent sits
+  // above authenticatedRoute/shellRoute in this tree, so a deleted space's
+  // URL (task 2 removed /marriage) falls through to it rather than
+  // redirecting anywhere -- unlike every route still in the tree, which
+  // either mounts or bounces to /sign-in or /. No session is stubbed at
+  // all here, deliberately: if RequireAuth ran for this path the way it
+  // does for every real route, an unauthenticated visit would redirect to
+  // /sign-in and this test would time out waiting for a pathname that never
+  // arrives. That it doesn't redirect is exactly the second consequence the
+  // comment calls out, and the one most likely to surprise someone who
+  // moves notFoundComponent under the shell later.
+  it("leaves a deleted space's URL on the not-found page instead of redirecting", async () => {
+    stubFetchRoutes({ "GET /api/v1/auth/me": NO_SESSION });
+
+    const { router } = renderApp("/marriage");
+
+    expect(await screen.findByText("Page not found.")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/marriage");
+  });
+
   // Task 17: /money/transactions has to sit under moneyGuardRoute, not hung
   // off the shell beside it -- otherwise a member without the money
   // capability reaches a ledger because the guard that would have refused
