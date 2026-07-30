@@ -64,4 +64,10 @@ var (
 	// covers a collision with an archived row too -- an archived category
 	// still occupies its unique key, so its name is not free to reuse.
 	ErrCategoryNameTaken = errors.New("category name taken")
+
+	// ErrCategoryNameRequired is CategoryService's Create/Rename guard, the
+	// same shape as ErrAccountNicknameRequired: trim first, then refuse an
+	// empty result rather than storing a category nobody could tell apart on
+	// the Budget screen.
+	ErrCategoryNameRequired = errors.New("a category name is required")
 )

@@ -2,15 +2,14 @@ package usecase
 
 import (
 	"context"
+	"strings"
 
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
-// CategoryService is the household's spending taxonomy: one job, reading it.
-//
-// Nothing here renames, adds or archives a category. Those controls live on
-// Budget's "Edit categories" screen, which is the next feature; this service
-// exists so Transactions has a list to show and Budget has one to sum over.
+// CategoryService is the household's spending taxonomy: reading it, and the
+// writes Budget's "Edit categories" screen makes -- add, rename, archive,
+// restore. Transactions reads the same list this service seeds and writes.
 type CategoryService struct {
 	repo CategoryRepository
 }
@@ -36,4 +35,58 @@ func (s *CategoryService) List(ctx context.Context, householdID string) ([]domai
 		return nil, err
 	}
 	return s.repo.List(ctx, householdID, false)
+}
+
+// Create adds one category to a household's list. It is always
+// domain.CategoryExpense -- Budget's caps envelope spending only, an income
+// category has no cap to set, so the write path that makes one takes no kind
+// argument at all rather than trusting a caller to send the right one.
+//
+// A name colliding with an existing (live or archived) row surfaces as
+// domain.ErrCategoryNameTaken straight from the repository; this method does
+// not translate it.
+func (s *CategoryService) Create(ctx context.Context, householdID, name string) (domain.Category, error) {
+	name, err := validateCategoryName(name)
+	if err != nil {
+		return domain.Category{}, err
+	}
+	return s.repo.Create(ctx, domain.Category{
+		HouseholdID: householdID,
+		Name:        name,
+		Kind:        domain.CategoryExpense,
+	})
+}
+
+// Rename changes a category's name only, with the same trim-then-refuse-empty
+// rule as Create -- deliberately, so the two validations cannot drift apart.
+// A collision or an id outside this household passes through untranslated as
+// domain.ErrCategoryNameTaken or domain.ErrNotFound.
+func (s *CategoryService) Rename(ctx context.Context, householdID, categoryID, name string) (domain.Category, error) {
+	name, err := validateCategoryName(name)
+	if err != nil {
+		return domain.Category{}, err
+	}
+	return s.repo.Rename(ctx, householdID, categoryID, name)
+}
+
+// Archive retires a category without deleting it, so every transaction and
+// budget line that references it keeps its name. domain.ErrNotFound passes
+// through untranslated for an id outside this household.
+func (s *CategoryService) Archive(ctx context.Context, householdID, categoryID string) (domain.Category, error) {
+	return s.repo.SetArchived(ctx, householdID, categoryID, true)
+}
+
+// Restore reverses Archive. Same not-found contract.
+func (s *CategoryService) Restore(ctx context.Context, householdID, categoryID string) (domain.Category, error) {
+	return s.repo.SetArchived(ctx, householdID, categoryID, false)
+}
+
+// validateCategoryName trims surrounding whitespace and refuses an empty
+// result, the shared rule Create and Rename both apply.
+func validateCategoryName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", domain.ErrCategoryNameRequired
+	}
+	return name, nil
 }
