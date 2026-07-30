@@ -357,26 +357,47 @@ func TestBudgetsSchema(t *testing.T) {
 		}
 	})
 
-	t.Run("expected_income_minor is nullable", func(t *testing.T) {
-		var isNullable string
+	t.Run("expected_income_minor is nullable and has no default", func(t *testing.T) {
+		// A DEFAULT 0 column is just as "nullable" as one with no default --
+		// is_nullable alone can't tell them apart, and the whole point of the
+		// column (see the migration's comment) is that NULL and zero mean
+		// different things. Assert column_default is NULL, then prove it with
+		// a real insert that omits the column and reads NULL back.
+		var columnDefault *string
 		if err := pool.QueryRow(ctx,
-			`SELECT is_nullable FROM information_schema.columns
-			 WHERE table_name = 'budgets' AND column_name = 'expected_income_minor'`).Scan(&isNullable); err != nil {
+			`SELECT column_default FROM information_schema.columns
+			 WHERE table_name = 'budgets' AND column_name = 'expected_income_minor'`).Scan(&columnDefault); err != nil {
 			t.Fatalf("query: %v", err)
 		}
-		if isNullable != "YES" {
-			t.Fatalf("expected_income_minor is_nullable = %q, want YES", isNullable)
+		if columnDefault != nil {
+			t.Fatalf("expected_income_minor column_default = %q, want NULL (no default)", *columnDefault)
+		}
+
+		householdID := insertTestHousehold(t, db)
+		var readBack *int64
+		if err := pool.QueryRow(ctx,
+			`INSERT INTO budgets (household_id, month) VALUES ($1, DATE '2026-07-01')
+			 RETURNING expected_income_minor`, householdID).Scan(&readBack); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+		if readBack != nil {
+			t.Fatalf("expected_income_minor = %d, want NULL when not provided", *readBack)
 		}
 	})
 
 	t.Run("household_id and month are unique together", func(t *testing.T) {
 		householdID := insertTestHousehold(t, db)
-		insert := `INSERT INTO budgets (household_id, month) VALUES ($1, DATE '2026-07-01')`
-		if _, err := pool.Exec(ctx, insert, householdID); err != nil {
+		insert := `INSERT INTO budgets (household_id, month) VALUES ($1, $2)`
+		if _, err := pool.Exec(ctx, insert, householdID, "2026-07-01"); err != nil {
 			t.Fatalf("first insert: %v", err)
 		}
-		if _, err := pool.Exec(ctx, insert, householdID); err == nil {
+		if _, err := pool.Exec(ctx, insert, householdID, "2026-07-01"); err == nil {
 			t.Fatal("the database accepted a second budget for the same household and month")
+		}
+		// Discriminates the pair from a single-column UNIQUE on household_id
+		// alone: a different month for the same household must still succeed.
+		if _, err := pool.Exec(ctx, insert, householdID, "2026-08-01"); err != nil {
+			t.Fatalf("same household, different month: %v", err)
 		}
 	})
 
@@ -411,7 +432,14 @@ func TestBudgetLinesSchema(t *testing.T) {
 	pool := db.Pool()
 	ctx := context.Background()
 
-	newBudget := func(householdID string, month string) string {
+	// newBudget and newCategory take the caller's own *testing.T (like
+	// insertTestHousehold does) rather than closing over TestBudgetLinesSchema's
+	// t. A helper that calls t.Fatalf on the parent test, invoked from inside
+	// a t.Run subtest, unwinds the wrong goroutine's test: the subtest never
+	// gets a PASS/FAIL of its own and siblings can be skipped. See the RED
+	// evidence in the task report.
+	newBudget := func(t *testing.T, householdID string, month string) string {
+		t.Helper()
 		var id string
 		if err := pool.QueryRow(ctx,
 			`INSERT INTO budgets (household_id, month) VALUES ($1, $2) RETURNING id`,
@@ -420,7 +448,8 @@ func TestBudgetLinesSchema(t *testing.T) {
 		}
 		return id
 	}
-	newCategory := func(householdID, name string) string {
+	newCategory := func(t *testing.T, householdID, name string) string {
+		t.Helper()
 		var id string
 		if err := pool.QueryRow(ctx,
 			`INSERT INTO categories (household_id, name, kind, sort_order)
@@ -443,8 +472,8 @@ func TestBudgetLinesSchema(t *testing.T) {
 
 	t.Run("cap_minor must not be negative", func(t *testing.T) {
 		householdID := insertTestHousehold(t, db)
-		budgetID := newBudget(householdID, "2026-07-01")
-		categoryID := newCategory(householdID, "Groceries")
+		budgetID := newBudget(t, householdID, "2026-07-01")
+		categoryID := newCategory(t, householdID, "Groceries")
 
 		_, err := pool.Exec(ctx,
 			`INSERT INTO budget_lines (budget_id, category_id, cap_minor) VALUES ($1, $2, -100)`,
@@ -459,8 +488,8 @@ func TestBudgetLinesSchema(t *testing.T) {
 
 	t.Run("budget_id and category_id are unique together", func(t *testing.T) {
 		householdID := insertTestHousehold(t, db)
-		budgetID := newBudget(householdID, "2026-09-01")
-		categoryID := newCategory(householdID, "Dining out")
+		budgetID := newBudget(t, householdID, "2026-09-01")
+		categoryID := newCategory(t, householdID, "Dining out")
 
 		insert := `INSERT INTO budget_lines (budget_id, category_id, cap_minor) VALUES ($1, $2, 50000)`
 		if _, err := pool.Exec(ctx, insert, budgetID, categoryID); err != nil {
@@ -469,12 +498,18 @@ func TestBudgetLinesSchema(t *testing.T) {
 		if _, err := pool.Exec(ctx, insert, budgetID, categoryID); err == nil {
 			t.Fatal("the database accepted two lines for the same budget and category")
 		}
+		// Discriminates the pair from a single-column UNIQUE on budget_id
+		// alone: a different category on the same budget must still succeed.
+		otherCategoryID := newCategory(t, householdID, "Dining out 2")
+		if _, err := pool.Exec(ctx, insert, budgetID, otherCategoryID); err != nil {
+			t.Fatalf("same budget, different category: %v", err)
+		}
 	})
 
 	t.Run("deleting the budget cascades to its lines", func(t *testing.T) {
 		householdID := insertTestHousehold(t, db)
-		budgetID := newBudget(householdID, "2026-10-01")
-		categoryID := newCategory(householdID, "Transport")
+		budgetID := newBudget(t, householdID, "2026-10-01")
+		categoryID := newCategory(t, householdID, "Transport")
 
 		var lineID string
 		if err := pool.QueryRow(ctx,
@@ -496,8 +531,8 @@ func TestBudgetLinesSchema(t *testing.T) {
 
 	t.Run("deleting a category referenced by a line is refused", func(t *testing.T) {
 		householdID := insertTestHousehold(t, db)
-		budgetID := newBudget(householdID, "2026-11-01")
-		categoryID := newCategory(householdID, "Utilities")
+		budgetID := newBudget(t, householdID, "2026-11-01")
+		categoryID := newCategory(t, householdID, "Utilities")
 
 		if _, err := pool.Exec(ctx,
 			`INSERT INTO budget_lines (budget_id, category_id, cap_minor) VALUES ($1, $2, 30000)`,
