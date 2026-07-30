@@ -543,12 +543,14 @@ of `opening_balance_minor`; `AccountRepository`'s query has always shaped
 one: the query subtracts every transaction on the `from_account_id` side and
 adds every transaction — or its `received_amount_minor`, for the destination
 leg of a cross-currency transfer — on the `to_account_id` side, both filtered
-to `occurred_on > opening_balance_as_of`. That is the same exclusion
-Transactions' own ledger marks and explains on each affected row rather than
-hiding (§5's Transactions flow, below). The sum happens once, in the
-repository's SQL; `AccountService.Summary` still converts and adds each
-account's already-summed balance exactly as it did before this feature,
-unchanged.
+to `occurred_on >= opening_balance_as_of` — an opening balance is the figure
+at the *start* of its day, so a transaction dated on that same day already
+moves it (`docs/LEARNING.md`, pattern 13). That is the same boundary
+Transactions' own ledger marks strictly-before and explains on each affected
+row rather than hiding (§5's Transactions flow, below). The sum happens
+once, in the repository's SQL; `AccountService.Summary` still converts and
+adds each account's already-summed balance exactly as it did before this
+feature, unchanged.
 
 **Which is why `accountDTO` now carries `openingBalance` as well as
 `balance`.** The two were one number until this feature, and a client that
