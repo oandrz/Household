@@ -4,10 +4,14 @@ Walked 2026-07-30 against `fix/finance-day-one`, in a real browser (Chrome,
 driven via the Chrome DevTools MCP tools) on a wiped database: `make down`,
 `docker volume rm hearth_hearth-pgdata`, `make up && make seed`.
 
-**Result: 5 of 5 criteria pass on the first walk.** No product defect
-surfaced. One tooling snag did (criterion 3, below) — caught, corrected, and
-re-verified before recording pass, exactly as the "record a failure plainly"
-standard requires even when the failure was mine rather than the product's.
+**Result: 5 of 5 criteria pass.** No product defect surfaced. One tooling
+snag did (criterion 3, below): a date-setting failure meant the first pass
+at that criterion only proved it through an edit, not the create path the
+criterion actually names, so it was re-walked with a second, independent
+transaction built correctly from the start before being recorded as a pass
+— caught, corrected, and re-verified, exactly as the "record a failure
+plainly" standard requires even when the failure was mine rather than the
+product's.
 
 Screenshots referenced below are in
 `docs/superpowers/plans/2026-07-30-hearth-finance-fixes-screenshots/`.
@@ -113,25 +117,39 @@ reload) showed net worth and the account balance both at **S$1,184.50**
 "Spent this month" stayed at S$115.50 — income correctly did not move it.
 
 **Criterion 3 — excluded from the balance, marked with the account's name,
-still counted in month spend.** A third expense, "Old subscription charge"
-for S$50.00, was logged dated **2026-07-01** — before the account's own
-2026-07-30 opening date. The first attempt to set that date silently failed:
-the composite date control's `fill` call reported success and the
-accessibility snapshot echoed back `2026-07-01`, but the transaction actually
-saved with today's date — caught immediately by reopening the row's edit
-modal and seeing `2026-07-30` still there, not a product defect, a quirk of
-driving a native composite `<input type="date">` through this tool. Fixed by
-setting the underlying input's value with the DOM's native property setter
-and dispatching real `input`/`change` events, then re-saving; the row then
-correctly sorted under a `JUL 1` date header and read: **"Before Everyday
-Checking's opening balance — it doesn't change that balance."** — naming the
-account, not a generic message
-(`criterion-3-pre-opening-expense-marked.png`). Net worth and the account
-balance stayed at S$1,184.50, unmoved by the pre-opening expense
-(`criterion-3-balance-unchanged.png`), while "Spent this month" rose to
-S$165.50 (`115.50 + 50.00`) — excluded from the balance, but still counted in
-the month's spend, exactly as the criterion (and the same rule Task 2 fixed
-for balances) requires.
+still counted in month spend — proven on the create path, not just edit.**
+A third expense, "Old subscription charge" for S$50.00, was the first
+attempt at this criterion, meant to be dated 2026-07-01. Its date-setting
+went wrong in a way worth recording precisely: the composite date control's
+`fill` call reported success and the accessibility snapshot echoed back
+`2026-07-01`, but the transaction actually **saved** with today's date —
+caught by reopening the row's edit modal and seeing `2026-07-30` still
+there. That is a tooling quirk of driving a native composite
+`<input type="date">` through this tool, not a product defect, but it meant
+the fix (setting the underlying input's value with the DOM's native
+property setter, dispatching real `input`/`change` events, then saving
+again) only proved the criterion through an **edit**, not the "log an
+expense" the criterion actually names — a create handler that skips the
+pre-opening check while an update handler applies it would have been
+invisible to that walk. So the criterion was re-walked with a second,
+independent expense built the right way from the start: "Pre-opening
+streaming charge", S$22.00, with the date set via the native setter
+**before the first save**, confirmed at `2026-06-15` in the form, then
+saved exactly once. It landed correctly on that single save — sorted under
+a `JUN 15` date header and reading **"Before Everyday Checking's opening
+balance — it doesn't change that balance."** on the very first render,
+naming the account, not a generic message
+(`criterion-3-create-path-row-marked.png`). Net worth and the account
+balance stayed at S$1,184.50, unmoved by either pre-opening expense
+(`criterion-3-balance-unchanged.png`,
+`criterion-3-create-path-balance-unchanged.png`), while "Spent this month"
+stayed at S$165.50 for the June-dated expense (a different, correct rule —
+it's outside July, so it was never going to count toward July's spend) and
+had already risen to that figure for the July 1st one
+(`115.50 + 50.00`) — excluded from the balance, but still counted in the
+month it falls in, exactly as the criterion (and the same rule Task 2 fixed
+for balances) requires. Both the create path and the edit path are now
+proven, not just the one the tooling accident happened to land on.
 
 **Criterion 4 — exact-match, both directions, via `getComputedStyle`.**
 Checked with `getComputedStyle(el).color` against the sidebar's own
