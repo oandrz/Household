@@ -45,6 +45,58 @@ func (q *Queries) CountCategories(ctx context.Context, householdID pgtype.UUID) 
 	return count, err
 }
 
+const createCategory = `-- name: CreateCategory :one
+INSERT INTO categories (household_id, name, kind, sort_order)
+VALUES (
+    $1,
+    $2,
+    $3,
+    (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM categories WHERE household_id = $1)
+)
+RETURNING id, household_id, name, kind, sort_order, archived_at, created_at
+`
+
+type CreateCategoryParams struct {
+	HouseholdID pgtype.UUID
+	Name        string
+	Kind        string
+}
+
+// CreateCategory appends the new row to the end of the household's sort
+// order, computed by the same statement as the insert rather than a separate
+// read-max-then-write -- that closes the round-trip window where a second
+// request's read could land between this one's read and its write.
+//
+// It does not close the window between two concurrent transactions: under
+// READ COMMITTED, two INSERTs that each begin before the other commits both
+// see the same pre-insert MAX(sort_order) and can both compute and commit
+// the same value -- there is no UNIQUE constraint on sort_order to make the
+// second one fail. Closing that window would need either an advisory lock
+// or a unique constraint, both rejected here: sort_order has no correctness
+// requirement, only a display one, so a tied value is cosmetic (two
+// categories drawn in the same slot, ListCategories' own ORDER BY sort_order,
+// name breaking the tie deterministically rather than leaving it to
+// whatever order Postgres happens to scan rows in) -- not a bug worth a lock
+// around every category creation.
+//
+// A name collision (including against an archived row, which keeps its slot
+// in UNIQUE (household_id, name)) surfaces as a 23505 that
+// CategoryRepo.Create maps through translate to domain.ErrCategoryNameTaken.
+func (q *Queries) CreateCategory(ctx context.Context, arg CreateCategoryParams) (Category, error) {
+	row := q.db.QueryRow(ctx, createCategory, arg.HouseholdID, arg.Name, arg.Kind)
+	var i Category
+	err := row.Scan(
+		&i.ID,
+		&i.HouseholdID,
+		&i.Name,
+		&i.Kind,
+		&i.SortOrder,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createTransaction = `-- name: CreateTransaction :one
 INSERT INTO transactions (
     household_id, kind, occurred_on, description, category_id,
@@ -240,9 +292,14 @@ const listCategories = `-- name: ListCategories :many
 SELECT id, household_id, name, kind, sort_order, archived_at, created_at
 FROM categories
 WHERE household_id = $1 AND archived_at IS NULL
-ORDER BY sort_order
+ORDER BY sort_order, name
 `
 
+// ORDER BY sort_order, name: the name is a deterministic tie-break for two
+// rows that share a sort_order, which CreateCategory's own comment explains
+// can happen -- without it, a tie's relative order would depend on
+// whichever physical row order Postgres happens to scan, which can differ
+// between two reads of the exact same data.
 func (q *Queries) ListCategories(ctx context.Context, householdID pgtype.UUID) ([]Category, error) {
 	rows, err := q.db.Query(ctx, listCategories, householdID)
 	if err != nil {
@@ -275,7 +332,7 @@ const listCategoriesIncludingArchived = `-- name: ListCategoriesIncludingArchive
 SELECT id, household_id, name, kind, sort_order, archived_at, created_at
 FROM categories
 WHERE household_id = $1
-ORDER BY sort_order
+ORDER BY sort_order, name
 `
 
 func (q *Queries) ListCategoriesIncludingArchived(ctx context.Context, householdID pgtype.UUID) ([]Category, error) {
@@ -537,6 +594,40 @@ func (q *Queries) MonthTotalsQuery(ctx context.Context, arg MonthTotalsQueryPara
 	return items, nil
 }
 
+const renameCategory = `-- name: RenameCategory :one
+UPDATE categories
+SET name = $1
+WHERE id = $2 AND household_id = $3
+RETURNING id, household_id, name, kind, sort_order, archived_at, created_at
+`
+
+type RenameCategoryParams struct {
+	Name        string
+	ID          pgtype.UUID
+	HouseholdID pgtype.UUID
+}
+
+// RenameCategory scopes the UPDATE to household_id as well as id, so a
+// category id from another household returns no row -- CategoryRepo.Rename
+// turns that into domain.ErrNotFound via translate's pgx.ErrNoRows case, the
+// same as every other single-row lookup in this package -- rather than
+// silently renaming (impossible, the WHERE excludes it) or leaking whether
+// the id exists elsewhere.
+func (q *Queries) RenameCategory(ctx context.Context, arg RenameCategoryParams) (Category, error) {
+	row := q.db.QueryRow(ctx, renameCategory, arg.Name, arg.ID, arg.HouseholdID)
+	var i Category
+	err := row.Scan(
+		&i.ID,
+		&i.HouseholdID,
+		&i.Name,
+		&i.Kind,
+		&i.SortOrder,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const seedCategories = `-- name: SeedCategories :exec
 INSERT INTO categories (household_id, name, kind, sort_order)
 VALUES
@@ -655,6 +746,39 @@ func (q *Queries) SeedCategories(ctx context.Context, arg SeedCategoriesParams) 
 		arg.SortOrder13,
 	)
 	return err
+}
+
+const setCategoryArchived = `-- name: SetCategoryArchived :one
+UPDATE categories
+SET archived_at = CASE WHEN $1::boolean THEN COALESCE(archived_at, now()) ELSE NULL END
+WHERE id = $2 AND household_id = $3
+RETURNING id, household_id, name, kind, sort_order, archived_at, created_at
+`
+
+type SetCategoryArchivedParams struct {
+	Archived    bool
+	ID          pgtype.UUID
+	HouseholdID pgtype.UUID
+}
+
+// SetCategoryArchived stamps or clears archived_at depending on the caller's
+// boolean, scoped the same way RenameCategory is. The COALESCE is the whole
+// of "archiving is idempotent": archiving an already-archived row keeps its
+// first archived_at rather than moving it forward to now(), so two calls
+// (or a retry) never disagree about when a category was actually archived.
+func (q *Queries) SetCategoryArchived(ctx context.Context, arg SetCategoryArchivedParams) (Category, error) {
+	row := q.db.QueryRow(ctx, setCategoryArchived, arg.Archived, arg.ID, arg.HouseholdID)
+	var i Category
+	err := row.Scan(
+		&i.ID,
+		&i.HouseholdID,
+		&i.Name,
+		&i.Kind,
+		&i.SortOrder,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const updateTransaction = `-- name: UpdateTransaction :one

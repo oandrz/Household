@@ -58,4 +58,34 @@ var (
 	// test with errors.Is, instead of a generic wrapped driver error. Added
 	// in the Task 15 fix round (see task-15-report.md, "Fix round 2").
 	ErrAlreadyExists = errors.New("already exists")
+
+	// ErrCategoryNameTaken is UNIQUE (household_id, name) on categories,
+	// translated the same way ErrAlreadyExists is for other tables. It
+	// covers a collision with an archived row too -- an archived category
+	// still occupies its unique key, so its name is not free to reuse.
+	ErrCategoryNameTaken = errors.New("category name taken")
+
+	// ErrCategoryNameRequired is CategoryService's Create/Rename guard, the
+	// same shape as ErrAccountNicknameRequired: trim first, then refuse an
+	// empty result rather than storing a category nobody could tell apart on
+	// the Budget screen.
+	ErrCategoryNameRequired = errors.New("a category name is required")
+
+	// The budget sentinels. BudgetService.Save checks all three before
+	// BudgetRepository.Upsert ever runs, following the per-field sentinel
+	// convention above rather than a generic ErrValidation -- there is no
+	// such sentinel in this codebase, deliberately, so every 422 the HTTP
+	// layer returns can carry a field-specific code.
+	ErrBudgetLineDuplicate  = errors.New("a budget line's category is repeated")
+	ErrBudgetCapNegative    = errors.New("a budget cap cannot be negative")
+	ErrBudgetIncomeNegative = errors.New("a budget's expected income cannot be negative")
+
+	// ErrBudgetCategoryUnknown is BudgetRepository.Upsert's own
+	// household-ownership check (validateLineCategories in the postgres
+	// adapter) failing: a budget line names a category id that either does
+	// not exist at all or belongs to a different household. Task 8's Save
+	// deliberately does not pre-check this -- see its own doc comment -- so
+	// this sentinel is what lets the HTTP layer turn that failure into a 422
+	// instead of an unmapped 500.
+	ErrBudgetCategoryUnknown = errors.New("a budget line's category does not belong to this household")
 )

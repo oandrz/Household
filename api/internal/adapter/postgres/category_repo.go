@@ -132,6 +132,62 @@ func (r *CategoryRepo) Kind(ctx context.Context, householdID, categoryID string)
 	return domain.CategoryKind(kind), nil
 }
 
+// Create adds one category at the end of the household's sort order.
+// CreateCategory's own comment explains what computing that position in the
+// same INSERT does and does not close: it removes the round-trip window a
+// separate read-then-write would have, but not the window between two
+// concurrent transactions under READ COMMITTED, where two creates can still
+// commit the same sort_order. That residual tie is accepted as cosmetic --
+// see CreateCategory's comment for why -- rather than closed with a lock or
+// a unique constraint. A name collision -- including against an archived
+// row, which still occupies its slot in UNIQUE (household_id, name) --
+// surfaces as a 23505 that translate maps to domain.ErrCategoryNameTaken by
+// constraint name.
+func (r *CategoryRepo) Create(ctx context.Context, c domain.Category) (domain.Category, error) {
+	row, err := r.q.CreateCategory(ctx, sqlcgen.CreateCategoryParams{
+		HouseholdID: uuid(c.HouseholdID),
+		Name:        c.Name,
+		Kind:        string(c.Kind),
+	})
+	if err != nil {
+		return domain.Category{}, translate(err, "create category")
+	}
+	return toCategory(row), nil
+}
+
+// Rename changes the name only; RenameCategory's WHERE clause scopes the
+// UPDATE to householdID as well as categoryID, so a category id from another
+// household matches no row and translate turns that pgx.ErrNoRows into
+// domain.ErrNotFound. Same collision contract as Create.
+func (r *CategoryRepo) Rename(ctx context.Context, householdID, categoryID, name string) (domain.Category, error) {
+	row, err := r.q.RenameCategory(ctx, sqlcgen.RenameCategoryParams{
+		ID:          uuid(categoryID),
+		HouseholdID: uuid(householdID),
+		Name:        name,
+	})
+	if err != nil {
+		return domain.Category{}, translate(err, "rename category")
+	}
+	return toCategory(row), nil
+}
+
+// SetArchived stamps or clears archived_at. SetCategoryArchived's own
+// COALESCE is the "first stamp wins" rule: archiving an already-archived row
+// keeps its original archived_at instead of moving it forward to now(), so
+// two calls -- including a retry -- never disagree about when a category was
+// actually archived.
+func (r *CategoryRepo) SetArchived(ctx context.Context, householdID, categoryID string, archived bool) (domain.Category, error) {
+	row, err := r.q.SetCategoryArchived(ctx, sqlcgen.SetCategoryArchivedParams{
+		ID:          uuid(categoryID),
+		HouseholdID: uuid(householdID),
+		Archived:    archived,
+	})
+	if err != nil {
+		return domain.Category{}, translate(err, "set category archived")
+	}
+	return toCategory(row), nil
+}
+
 func toCategory(c sqlcgen.Category) domain.Category {
 	return domain.Category{
 		ID:          uuidToString(c.ID),

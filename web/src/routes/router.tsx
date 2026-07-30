@@ -11,7 +11,8 @@
 //       /            Overview      (slice 5 placeholder)
 //       /money       RequireCapability("money") -> Finances (Task 39; slice 2's first real page)
 //       /money/transactions RequireCapability("money") -> Transactions (Task 17; the real ledger)
-//       /money/$     RequireCapability("money") -> Money    (slice 2 placeholder; Budget/Goals/Bills remain)
+//       /money/budget RequireCapability("money") -> Budget (Task 11; BudgetPage stub -- Task 12 builds the real screen)
+//       /money/$     RequireCapability("money") -> Money    (slice 2 placeholder; Goals/Bills remain)
 //       /marriage, /marriage/$ RequireCapability("marriage") -> Marriage (slice 3 placeholder)
 //       /family/calendar                            -- Family (slice 4 placeholder); unconditional,
 //                                                       per domain.BuiltinSpaces Family carries no
@@ -31,6 +32,7 @@ import { SignInScreen } from "../features/auth/SignInScreen";
 import { SignUpScreen } from "../features/auth/SignUpScreen";
 import { SignUpCompleteScreen } from "../features/auth/SignUpCompleteScreen";
 import { useMe } from "../features/auth/useAuth";
+import { BudgetPage } from "../features/money/BudgetPage";
 import { FinancesPage } from "../features/money/FinancesPage";
 import { TransactionsPage } from "../features/money/TransactionsPage";
 import { PlaceholderPage } from "../features/placeholder/PlaceholderPage";
@@ -177,6 +179,19 @@ const moneyTransactionsRoute = createRoute({
   path: "transactions",
   component: TransactionsPage,
 });
+// A sibling of moneyTransactionsRoute, same reasoning: nested under
+// moneyGuardRoute (not the shell) so RequireCapability still runs, and
+// declared/listed ahead of moneySplatRoute below even though TanStack
+// Router would rank this literal segment above the splat's "$" regardless
+// of declaration order -- router.test.tsx's "redirects a member without the
+// money capability away from /money/budget" pins the guard, and its
+// positive counterpart pins that this route (not the splat's placeholder)
+// is what actually mounts.
+const moneyBudgetRoute = createRoute({
+  getParentRoute: () => moneyGuardRoute,
+  path: "budget",
+  component: BudgetPage,
+});
 const moneySplatRoute = createRoute({
   getParentRoute: () => moneyGuardRoute,
   path: "$",
@@ -229,7 +244,12 @@ export const routeTree = rootRoute.addChildren([
   authenticatedRoute.addChildren([
     shellRoute.addChildren([
       indexRoute,
-      moneyGuardRoute.addChildren([moneyIndexRoute, moneyTransactionsRoute, moneySplatRoute]),
+      moneyGuardRoute.addChildren([
+        moneyIndexRoute,
+        moneyTransactionsRoute,
+        moneyBudgetRoute,
+        moneySplatRoute,
+      ]),
       marriageGuardRoute.addChildren([marriageIndexRoute, marriageSplatRoute]),
       familyCalendarRoute,
       settingsRoute,

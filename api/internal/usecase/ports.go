@@ -491,6 +491,17 @@ type CategoryRepository interface {
 	// for any path that reaches the insert without going through that count
 	// at all.
 	EnsureSeeded(ctx context.Context, householdID string, starter []domain.Category) error
+	// Create adds one category at the end of the household's sort order.
+	// A name colliding with UNIQUE (household_id, name) — archived rows
+	// included — surfaces as domain.ErrCategoryNameTaken.
+	Create(ctx context.Context, c domain.Category) (domain.Category, error)
+	// Rename changes the name only, same collision contract as Create.
+	// domain.ErrNotFound when the id is not this household's.
+	Rename(ctx context.Context, householdID, categoryID, name string) (domain.Category, error)
+	// SetArchived stamps or clears archived_at. Archiving is idempotent,
+	// keeps every transaction and budget line referencing the row, and is
+	// the only removal that exists — there is no delete.
+	SetArchived(ctx context.Context, householdID, categoryID string, archived bool) (domain.Category, error)
 }
 
 // CategoryLookup is what TransactionService needs of categories: whether an
@@ -539,4 +550,21 @@ type TransactionRepository interface {
 	// whose answers could disagree is the trade this refuses. The FX provider
 	// lives in this layer, so the conversion cannot move down here anyway.
 	MonthTotals(ctx context.Context, householdID string, month time.Time) ([]TransactionView, error)
+}
+
+type BudgetRepository interface {
+	// Get returns one household-month's budget. domain.ErrNotFound means the
+	// month has never been budgeted — callers translate that to the empty
+	// state, not an error. month is any instant in the month.
+	Get(ctx context.Context, householdID string, month time.Time) (domain.Budget, error)
+	// Upsert replaces the month's budget wholesale in one transaction:
+	// parent row upserted on (household_id, month), lines deleted and
+	// rewritten. Full-replace, never merge — the modal always holds the
+	// entire budget, and replace makes removed rows unambiguous. b.ID and
+	// line IDs are ignored; the database assigns them.
+	Upsert(ctx context.Context, b domain.Budget) (domain.Budget, error)
+	// History returns the budgets for the closed months in [from, month),
+	// plus the viewed month if budgeted — newest first, months without a
+	// budget row simply absent, never zero-filled.
+	History(ctx context.Context, householdID string, month time.Time, months int) ([]domain.Budget, error)
 }

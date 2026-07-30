@@ -1,7 +1,8 @@
 # Hearth — handover
 
-Written 2026-07-27, after slices 0 and 1 shipped, and updated the same day once
-self-serve sign-up's code (not yet its browser walk — §1) was done too. This
+Written 2026-07-27, after slices 0 and 1 shipped, updated the same day once
+self-serve sign-up's code was done too, and again on 2026-07-30 when that
+slice's browser walk finally ran (§1). This
 is the document to read before picking the work back up, whether that is you
 in three months or someone new.
 
@@ -9,11 +10,17 @@ in three months or someone new.
 
 ## 1. Where things stand
 
-Three of six slices are now walked end to end in a browser. Self-serve sign-up
-is complete and reviewed — every task's code was reviewed clean, including fix
-rounds — but **still** has not had its own browser walk. Say that plainly
-rather than letting "verified end to end" quietly absorb it: `make lint &&
-make test` passing is not the same claim as a human clicking through it.
+Everything shipped so far is now walked end to end in a browser. Self-serve
+sign-up's own 15-criterion walk ran on 2026-07-30 — three days after its code
+was finished and reviewed — and **passed 15 of 15**, recorded in
+`docs/superpowers/plans/2026-07-27-hearth-signup-verification.md`. No product
+defect came out of it. Three criteria carry notes rather than silent passes:
+the rate-limit criterion needed the API restarted first (the per-IP limiter is
+in-memory and the walk's own earlier submissions had spent two of the five
+requests), the private-window invite acceptance was met by signing out in the
+same browser instead, and "four members" in Andreas's household reads as the
+seeded state — three accepted members plus Christine's deliberately pending
+invite.
 Accounts (slice 2's first feature) closed that gap for itself: its walk ran
 and passed, 15 of 15. Transactions (slice 2's second feature) is code-complete
 and reviewed the same way, seventeen tasks deep with every task's own review
@@ -63,8 +70,8 @@ test driving the three transactions write routes without a CSRF token.
 |---|---|---|
 | 0 — Skeleton | Clean-architecture layout, Docker, Compose, Make, migrations, health endpoints | **Done** |
 | 1 — Household & identity | Sign-in, magic link, invite acceptance, lockout, members, roles, capabilities, spaces, Settings | **Done** |
-| — Self-serve sign-up | Sign-up, household provisioning, an ISO 4217 currency allowlist and list endpoint, `adminctl prune`, a per-IP rate limiter | Code-complete; browser walk **still pending** |
-| 2 — Money | **Accounts**: manual entry, net worth, assets/liabilities breakdown, archive and restore — **done, browser walk 15/15**. **Transactions**: ledger, categories, filters, keyset paging, month-to-date spend — **done, browser walk 15/15**. Budget, Goals, Bills: not started | In progress |
+| — Self-serve sign-up | Sign-up, household provisioning, an ISO 4217 currency allowlist and list endpoint, `adminctl prune`, a per-IP rate limiter | **Done, browser walk 15/15** (2026-07-30) |
+| 2 — Money | **Accounts**: manual entry, net worth, assets/liabilities breakdown, archive and restore — **done, browser walk 15/15**. **Transactions**: ledger, categories, filters, keyset paging, month-to-date spend — **done, browser walk 15/15**. **Budget**: envelope per category with pace, empty state and templates, Edit-budget modal with category create/rename/archive, History modal and month picker — **done, browser walk 15/15** (2026-07-31, two defects found at criterion 9 and fixed mid-walk; see `docs/superpowers/plans/2026-07-30-hearth-budget-verification.md`). Accounts, Transactions, Budget built; Goals, Bills not started | In progress |
 | 3 — Marriage | Retros, Vision, Agreements | Not started |
 | 4 — Family | Calendar | Not started |
 | 5 — Overview | Read-only aggregation across 2–4 | Not started |
@@ -85,9 +92,12 @@ down in `docs/superpowers/plans/2026-07-27-hearth-self-serve-signup.md`
 across the first five rapid sign-ups and the per-IP limit correctly answering
 `429` on the sixth, `adminctl
 unlock-household --email` resolving the right household, and `adminctl prune`
-refusing a window under seven days among them. It has not been run. Start it
-from `make down && make up` (or an explicit `make migrate`), not a bare
-`make up` — see §5's Makefile item.
+refusing a window under seven days among them. **Result: 15 of 15 pass**, run
+2026-07-30 from a wiped database and recorded in
+`docs/superpowers/plans/2026-07-27-hearth-signup-verification.md` — including
+the notes on the three criteria that needed interpreting (the in-memory
+limiter restart, the sign-out-instead-of-private-window invite acceptance,
+and "four members" meaning the seeded three plus Christine's pending invite).
 
 Accounts' own definition of done is a 15-criterion walk, written down in
 `docs/superpowers/plans/2026-07-28-hearth-accounts.md` (Task 41). **Result: 15
@@ -173,7 +183,7 @@ Bare `make` lists every target. The ones you will actually use:
 | `make unlock-household` | clears a lockout without waiting 15 minutes |
 | `make migrate-new NAME=…` | runs through the pinned dev image, not a host binary |
 | `make lint` | arch lint, frontend typecheck, eslint, `go vet` |
-| `make test` | Go suite (needs Docker) plus 117 frontend tests |
+| `make test` | Go suite (needs Docker) plus 272 frontend tests |
 
 **Docker is colima on the original machine.** The Go suite uses testcontainers
 and needs:
@@ -234,11 +244,13 @@ that will manage it (a deferred, separate spec) so it earns real usage first
 — and a household has to be able to exist before there is anything for that
 console to administer.
 
-**Slice 2 (Money) is under way.** Accounts and Transactions, its first two
-features, are code-complete and reviewed; Budget, Goals and Bills are not
-started. It is still the largest area and still the design's centre of
-gravity. Slice 5 (Overview) must still be last — it only aggregates, so
-building it early means stubbing everything it reads.
+**Slice 2 (Money) is under way.** Accounts, Transactions and Budget, its
+first three features, are code-complete and reviewed — Budget's own browser
+walk (Task 17) has not run yet, so it is not counted as done the way Accounts
+and Transactions are (§1). Goals and Bills are not started. It is still the
+largest area and still the design's centre of gravity. Slice 5 (Overview)
+must still be last — it only aggregates, so building it early means stubbing
+everything it reads.
 
 Each slice gets its own spec → plan → implementation cycle, the same way these
 did. The originating spec for slices 0–1 is
@@ -247,50 +259,63 @@ sign-up's own is
 `docs/superpowers/specs/2026-07-27-hearth-self-serve-signup-design.md`;
 Accounts' own is `docs/superpowers/specs/2026-07-28-hearth-accounts-design.md`;
 Transactions' own is
-`docs/superpowers/specs/2026-07-29-hearth-transactions-design.md`. The
+`docs/superpowers/specs/2026-07-29-hearth-transactions-design.md`; Budget's
+own is `docs/superpowers/specs/2026-07-30-hearth-budget-design.md`. The
 completed plans beside them are worth skimming for house style before writing
-a fifth.
+a sixth.
 
-### What Accounts and Transactions closed, and what Budget must pin next
+### What Accounts, Transactions and Budget closed, and what Goals must pin next
 
 Three things a prior review flagged as "must not be forgotten" before slice 2's
 first task. Accounts closed the first, upheld the second, and pinned the start
-of the third; Transactions pinned two more figures of its own; Budget inherits
-what is left:
+of the third; Transactions pinned two more figures of its own, Budget pinned
+three more; Goals inherits what is left:
 
 1. **`requireCapability` middleware exists and no route uses it — closed.**
    The spec promised the server enforces capabilities independently of the
    UI; until Accounts, that promise was vacuous. `GET /api/v1/accounts` and
    its four write routes are now gated on the `money` capability (reads) and
-   `money` plus owner (writes); Transactions and Categories go further —
-   `money` **and** owner gate their reads too, not just their writes, because
-   a ledger with every figure blank reads as broken rather than merely
-   restricted (`docs/SYSTEM_DESIGN.md` §4). The route-walk test matrices in
-   `api/internal/adapter/http/api_test.go` cover both shapes.
+   `money` plus owner (writes); Transactions, Categories and Budget go
+   further — `money` **and** owner gate their reads too, not just their
+   writes, because a ledger, or a budget screen, with every figure blank
+   reads as broken rather than merely restricted (`docs/SYSTEM_DESIGN.md`
+   §4). The route-walk test matrices under `api/internal/adapter/http/`
+   cover all three shapes.
 2. **Money is `int64` minor units plus an ISO 4217 code, everywhere — held.**
    `domain.Money` refuses to mix currencies; `AccountService.Summary` and
    `TransactionService.MonthSummary` both convert into the household's primary
    currency before summing, for exactly that reason (`docs/LEARNING.md`,
-   pattern 12). No `float64` entered a monetary path on either side of the
-   stack.
+   pattern 12). Budget held the line too, once under real pressure: the
+   frontend's first 50/30/20 template split multiplied expected income by a
+   float literal (`incomeMinor * 0.3`) before flooring, which drifted by a
+   minor unit on at least one real income figure — caught in review, fixed
+   to integer-first arithmetic (`docs/LEARNING.md`, Domain and money
+   catalogue). No `float64` survived in a monetary path on either side of
+   the stack.
 3. **The derived figures the design shows are still mostly undefined.** Net
-   worth (Accounts) is pinned and built. Transactions pinned two more, and
-   only the two its own screen shows: `Count` ("247 in July") and `Spent`
-   ("Spent this month S$3,420.18" — expenses only, income and transfers
-   excluded). **`66% used`, `S$137/day left`, `on pace to save S$1,780`,
-   `4 of 4 on track`, and unspent budget rolling into a nominated goal at
-   month end are still undefined** and are Budget's and Goals' to pin, in
-   their own specs, before an implementer invents one.
+   worth (Accounts) is pinned and built. Transactions pinned two more —
+   `Count` ("247 in July") and `Spent` ("Spent this month S$3,420.18" —
+   expenses only, income and transfers excluded). Budget pinned three more of
+   its own: `66% used`, `S$137/day left` and `on pace to save S$1,780`, all
+   Remaining-based rather than a run-rate projection (Budget spec decision
+   2 — a projection can contradict the mockup's own numbers with the
+   mockup's own data). **`4 of 4 on track` and unspent budget rolling into a
+   nominated goal at month end are still undefined** and are Goals' to pin,
+   in its own spec, before an implementer invents one. Budget's own spec
+   named the rollover figure explicitly rather than inventing a stub for
+   it: the design's "Roll unspent into savings" toggle does not ship at
+   all — not stored-but-dormant — because a control that looks real and
+   does nothing is worse than a missing one (Budget spec decision 1,
+   `docs/FEATURE_TRACKER.md`'s Budget row).
 
-**Budget is the next feature.** It builds directly on Transactions: an
-envelope per category is a sum over `transactions` filtered by `category_id`
-and month, which `TransactionRepository.MonthTotals`'s shape already supports.
-**"Edit categories" — rename, add, archive, the design's three seeding
-templates — is Budget's screen, not Transactions'**, and the table it edits
-(`categories`) already exists and is already seeded; Budget adds the controls,
-not the data. Before writing any of it, pin the five figures named above —
-an implementer who invents a formula for "on pace to save" or "4 of 4 on
-track" without a decision recorded first is building on sand.
+**Goals is the next feature.** Budget's own screen already shows what is
+unspent each month; Goals is what gives a household somewhere to point it.
+Before writing any of it, pin the two figures still open above — an
+implementer who invents "4 of 4 on track" or the rollover mechanics (which
+goal receives the money, on what schedule, what happens to a goal that is
+deleted mid-rollover) without a decision recorded first is building on sand,
+the same warning Budget's own spec inherited from this section before it was
+written.
 
 ### The seams slice 2 will use
 
@@ -398,15 +423,23 @@ by the same index a name lookup uses):
 
 - **The goose `Down` migration for `00005_transactions.sql` is correct by
   inspection but no test has ever run it.** Every other migration in this
-  project is in the same position; this is not a new gap, just a fresh
-  reminder of an old one.
-- `api/internal/adapter/http/api_test.go` is now 2036 lines. It wants
-  splitting by feature area (auth, household, accounts, transactions) before
-  the next feature adds a fifth block to one file.
-- `web/src/features/money/TransactionsPage.tsx` is over 500 lines doing
-  fetch orchestration, pagination, PATCH-body translation and row rendering
-  together. Budget will add a similar page; split this one first rather than
-  copying the shape.
+  project is in the same position, `00006_budgets.sql` (Budget's own) now
+  included; this is not a new gap, just a fresh reminder of an old one.
+- `api/internal/adapter/http/api_test.go` split by feature area is
+  **done** — Budget's Task 1 did it before its own routes could add a fifth
+  block to the 2036-line file: `auth_api_test.go`, `household_api_test.go`,
+  `accounts_api_test.go`, `transactions_api_test.go` and
+  `budget_api_test.go` now each own their feature's route-walk matrices,
+  with `api_test.go` itself left holding only the shared test harness.
+- `web/src/features/money/TransactionsPage.tsx` is still over 500 lines
+  doing fetch orchestration, pagination, PATCH-body translation and row
+  rendering together — **not split**. Budget dodged repeating the shape
+  rather than fixing it: its own spec (decision 11) put `BudgetPage.tsx`'s
+  fetch orchestration in a dedicated hook (`useBudget.ts`) from day one
+  instead of copying `TransactionsPage.tsx`'s pattern and splitting later,
+  so `BudgetPage.tsx` itself never grew the debt. `TransactionsPage.tsx`
+  itself is exactly as it was; still worth splitting on its own before a
+  third page copies it wholesale.
 - `RecentTransactionsCard` has its own date formatter, duplicating one
   `TransactionsPage` already has. Small today; this is exactly the "fixed in
   one place, left in the sibling" shape pattern 1 warns about, so worth

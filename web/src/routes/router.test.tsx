@@ -15,7 +15,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { setUnauthorizedHandler } from "../api/client";
 import { createUnauthorizedHandler } from "../api/unauthorizedRedirect";
 import type { InvitePreview, Me } from "../features/auth/schemas";
@@ -104,6 +104,10 @@ afterEach(() => {
   // into the next test, where it would hold a reference to an unmounted
   // router.
   setUnauthorizedHandler(null);
+  // Real timers regardless of how the Budget test's own vi.useFakeTimers()
+  // above finished -- a thrown assertion partway through would otherwise
+  // leave every later test in this file running against a frozen clock.
+  vi.useRealTimers();
 });
 
 describe("the real route tree", () => {
@@ -225,6 +229,81 @@ describe("the real route tree", () => {
 
     expect(await screen.findByText("All transactions")).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/money/transactions");
+  });
+
+  // Task 11's analogue of the transactions redirect above: moneyBudgetRoute
+  // has to sit under moneyGuardRoute too, for the same reason -- a member
+  // without money must never reach the Budget screen.
+  it("redirects a member without the money capability away from /money/budget", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": {
+        status: 200,
+        body: meFixture({
+          membership: {
+            id: "membership-2",
+            householdId: "household-1",
+            userId: "user-2",
+            role: "limited",
+            capabilities: ["calendar", "chores"],
+          },
+          capabilities: ["calendar", "chores"],
+        }),
+      },
+    });
+
+    const { router } = renderApp("/money/budget");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    expect(await screen.findByText("Arriving in slice 5.")).toBeInTheDocument();
+  });
+
+  // The positive counterpart the redirect test above needs -- and the one
+  // that actually proves moneyBudgetRoute exists. Without it, the redirect
+  // test alone would still pass with no dedicated route at all: /money/budget
+  // falls through to moneySplatRoute, a sibling under the exact same
+  // RequireCapability parent, which redirects identically. This is the test
+  // that fails until moneyBudgetRoute is added to addChildren.
+  it("mounts the Budget page at /money/budget for a caller who has the money capability", async () => {
+    // Task 12 wired BudgetPage to useBudget/useCurrencies, so this now needs
+    // both stubbed -- BudgetPage.tsx's own currentMonth() reads the real
+    // calendar, so `Date` is faked to a fixed July 2026 day first (the same
+    // `toFake: ["Date"]` convention AccountModal.test.tsx's own today()
+    // tests use) to pin which month it requests.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-15T12:00:00Z"));
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      "GET /api/v1/currencies": {
+        status: 200,
+        body: { currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }] },
+      },
+      "GET /api/v1/budgets/2026-07": {
+        status: 200,
+        body: {
+          currency: "SGD",
+          month: "2026-07",
+          budget: null,
+          categories: [],
+          budgetedMinor: 0,
+          spentMinor: 0,
+          remainingMinor: 0,
+          percentUsed: 0,
+          percentOk: false,
+          daysLeft: 13,
+          dailyPaceMinor: 0,
+          dailyPaceOk: false,
+          byPerson: [],
+          excludedNoRate: 0,
+          overCount: 0,
+        },
+      },
+    });
+
+    const { router } = renderApp("/money/budget");
+
+    expect(await screen.findByTestId("budget-page")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/money/budget");
+    // Real timers restored in this file's shared afterEach below.
   });
 
   // Fix round 5, Finding 1 (critical): this is the exact reproduction the

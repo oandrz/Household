@@ -92,6 +92,24 @@ nobody thought to look at.
   described the old world too, while `account_repo.go`'s comment — for the
   implementation of that same port — had been updated.
 
+- `BudgetModal.tsx` had two category lists in play — `categories` (the
+  active-only prop) and an archived-inclusive fetch already wired up for
+  `addCategoryByName`'s restore-vs-create check — and `buildRows` read the
+  wrong one. Reopening Edit budget for a line whose category had been
+  archived since (the queue-archive flow saving it) rendered the row's
+  fallback name, "Unknown category," instead of the real name with an
+  archived marker; the page's own category grid, reading a different,
+  correct source, never showed the bug. The sibling function in the same
+  file had already solved "which list do I need" for its own purpose; the
+  fix nobody had made yet was making the *other* function use it too. Found
+  by Task 17's browser walk, not a test — every existing test's `categories`
+  prop happened to already agree with its `includeArchived=true` stub, so
+  the one case where they'd disagree (a category present in one, absent
+  from the other) was never constructed. See the Frontend catalogue for the
+  full fix, paired there with a second defect in the same modal (a
+  duplicate-name guard that refused with zero feedback) found by the same
+  walk.
+
 **When you fix something, grep for its shape before you close it.** The question
 that finds these is not "is this fixed?" but "where else does this pattern
 appear?" `Truncate` is now that grep for date-and-location bugs specifically —
@@ -480,6 +498,23 @@ Walked in order, the nine are not nine copies of the same mistake:
   pointer-semantics translation the task existed to get right).
 - **A shared guard** (Task 17) — a route refused for a reason that had
   nothing to do with the row the test was named after.
+- Budget slice, Task 2 (the `budgets`/`budget_lines` migration): review found
+  both `UNIQUE (household_id, month)` and `UNIQUE (budget_id, category_id)`
+  tested with only one case each — insert the pair, insert it again, assert
+  the second insert fails. A **single-column** `UNIQUE (household_id)` or
+  `UNIQUE (budget_id)` would have failed that exact test identically, since
+  the test's own two rows never varied the first column while holding the
+  second one fixed; the test proves "this pair collides," not "both columns
+  are in the key." Fixed by adding a same-`household_id`/different-`month`
+  case (and the `budget_lines` sibling), which only a real two-column key
+  passes. The same review also found `expected_income_minor`'s nullable
+  check asserting `is_nullable = 'YES'` from `information_schema` without
+  ever inserting a real `NULL` and reading it back — true of a column that
+  merely permits NULL and one that actually stores it identically — and the
+  schema tests' `newBudget`/`newCategory` helpers closing over the parent
+  `*testing.T` rather than each subtest's own, so a `Fatalf` inside one
+  subtest's setup would have failed whichever subtest happened to run last,
+  not the one that actually broke.
 
 None of the nine were caught by the test itself failing; every one needed a
 person to ask whether the test could ever have gone red in the first place.
@@ -515,6 +550,18 @@ either; sharpen the mutation until the failure names the claim.
   restart, neither of which is possible for a process actually being
   restarted — and went unread because nobody checked which process was
   actually answering.
+- The Budget walk hit the same trap inverted, with a new twist: colima
+  auto-started mid-session and silently took over the **default docker
+  context and both socket paths the CLI resolves**, while Docker Desktop's
+  hours-old stack kept the host ports. Two successive database wipes wiped a
+  fresh colima stack the browser never talked to, and the browser's session
+  "survived" the wipe — which read as an impossible auth bug (sessions live
+  in Postgres) until `docker info` on both sockets returned the *same*
+  engine ID and `docker --context desktop-linux ps` found the real stack.
+  The check that settles it in one command: `docker info --format
+  '{{.ID}}'` per socket/context, before believing anything else. When the
+  engines disagree with the ports, run every stack command with an explicit
+  `--context`.
 
 - The Transactions ledger's Kind filter (All / Expense / Income) is a real
   `<fieldset>` of `<input type="radio">`s, built keyboard-reachable on
@@ -536,6 +583,17 @@ either; sharpen the mutation until the failure names the claim.
   unselected one) before it was visible in both states — a reminder that a
   fix a screenshot diff would have caught in twenty seconds still went out
   the first time, because nobody diffed the screenshots.
+- The Budget screen's category and by-person progress bars used
+  `bg-hairline` (a 0.08-alpha border tint meant for 1px lines) as a bar
+  *track*, and the Categories card heading used `mb-4.5`, a spacing step
+  outside Tailwind's default scale. Both looked fine to `npx vitest run`:
+  jsdom renders no CSS at all, so nothing catches a class that resolves to a
+  colour too faint to see, or to a class that does not exist and generates
+  no rule whatsoever. Caught only by loading the real page and reading
+  `getComputedStyle` on the rendered elements — `bg-hairline` became the
+  app's own opaque `bg-canvas` (matched against a live `rgb(240, 238, 233)`
+  read-back) and `mb-4.5` became the explicit `mb-[18px]` the design's own
+  spacing called for.
 - Finance-fixes round, the grouped sidebar's Money links (pattern 13): the
   brief's own suggested mechanism, TanStack Router's `Link` `activeProps`,
   merges its `className` onto the base `className` rather than replacing
@@ -573,8 +631,8 @@ different component, after it was already written down here once.
 
 ### 4. Guards scoped to the wrong interval
 
-Twice, a fix closed the reported sequence and left the class open. Both times a
-reviewer found it by building a probe rather than reading the diff.
+Three times, a fix closed the reported sequence and left the class open. Each
+time a reviewer found it by building a probe rather than reading the diff.
 
 - Clearing an error **on mode change** could not cancel an error that arrived
   *after* the change — an abandoned request settling later rendered on a screen
@@ -582,6 +640,20 @@ reviewer found it by building a probe rather than reading the diff.
 - Disabling a control **while the mutation is pending** stopped too early,
   because `onSuccess` fired `invalidateQueries` without awaiting it. The mutation
   settled when the response arrived, not when the cache refreshed.
+- Budget slice, Task 8 review found two instances of the same shape in
+  `BudgetService`, in the same review pass. `History`'s `Closed` flag
+  compared each row against the walk-back **anchor month** instead of
+  today's real calendar month, so a page whose month picker sat on a past
+  month while History was open would have mislabelled every row, including
+  the anchor itself, as "so far" or vice versa — the interval the flag
+  claims to cover ("is this month over yet") is anchored to the wrong clock.
+  Separately, `DailyPaceOK` didn't check whether the *viewed* month was the
+  *current* one at all: a budgeted future month with no spend yet has a
+  positive `Remaining` and a full `DaysLeftInMonth`, so the pace card would
+  have shown a false "on pace" for a month that hasn't started. Both fixed
+  by anchoring the relevant comparison to `today` explicitly rather than to
+  whatever month the caller happened to be walking, with a test for each
+  that only distinguishes the two months when they actually differ.
 
 **Ask what interval the guard actually covers, and what can arrive outside it.**
 
@@ -824,6 +896,21 @@ closing checklist states it in operational terms.
 criterion no spec item implies: do the thing a first-time user would
 actually do, not the thing the spec remembered to ask about.
 
+The walk *scripts* themselves keep proving the adjacent, smaller point: every
+walk so far has shipped with at least one criterion that could not be executed
+as written. Accounts' criterion 12 said "sign in as Kayla," who is
+credential-less by design. Sign-up's (run 2026-07-30) had two: criterion 11
+asserts the per-IP limit's five-then-429 arithmetic, but the walk's own
+criteria 3 and 10 had already spent two of the five requests — the limiter is
+a fixed window per process, so the script's arithmetic only works from a fresh
+API process, which the script never says; and criterion 13 counts "four
+members" in Andreas's household where the seed deliberately creates three plus
+Christine's *pending* invite, which the members list does not show. Each was
+met by an interpreted path and fixed in the verification record, not the
+product. When writing a walk script, dry-run its arithmetic against the state
+the walk itself will have created by that step — a criterion that asserts a
+counter must say what the counter has already counted.
+
 ### 14. Literal example data belongs to the seed, not the product
 
 The design mockup was built around one imagined household — Andreas &
@@ -911,6 +998,46 @@ inventing itself as a person the moment it renders for someone else's family.
   referencing it, `domain.Account`'s `OpeningBalanceAsOf` doc comment,
   `accountDTO`'s doc comment, the `00004_accounts.sql` migration's table
   comment, and the frontend's mirrored comment in `schemas.ts`.
+- `domain.PercentUsed`'s rounding (add half the denominator before
+  truncating, for half-away-from-zero) only rounds correctly for a
+  non-negative numerator. A household with refunds exceeding the month's
+  spend has a negative net Spent, and adding a positive half-denominator to
+  a negative numerator rounds it *toward* zero instead of away from it —
+  `-338000` spent against a `520000` budget is exactly -65%, and the
+  unsigned formula returned -64. Fixed by making the rounding term
+  sign-aware (subtract half for a negative numerator, add for
+  non-negative), with a test for the exact -65% case and a second one at a
+  boundary the original formula's own test suite had never actually landed
+  on (127400/520000 = 24.5%, rounding up to 25 — "half rounds up" was
+  already asserted, but with a numerator that happened to give exactly
+  25.00%, never exercising the rounding term at all).
+- `web/src/features/money/budgetTemplates.ts`'s 50/30/20 split computed each
+  pool as `incomeMinor * 0.5` / `* 0.3` before flooring it into whole minor
+  units — `float64` arithmetic in a monetary path, the exact thing
+  `CLAUDE.md`'s money rule exists to keep out, and not hypothetical:
+  `333333 * 0.3 === 99999.90000000001` in JavaScript, so a pool that should
+  floor to exactly 99999 could floor one unit low depending which side of
+  the float error a given income landed on. Fixed to integer-first
+  division-then-multiplication, never a fractional float literal, with a
+  regression test pinned to the exact income that exposed the drift.
+- Budget slice, final review: `BudgetService.Save` refused a negative
+  `capMinor` (`domain.ErrBudgetCapNegative`, service check plus the
+  migration's `CHECK` on `cap_minor`) but had no equivalent guard for its
+  sibling field `expectedIncomeMinor` — neither a service check nor a
+  database constraint. `domain.NewMoney` does not itself reject a negative
+  amount (a transaction's `Money` can legitimately be negative), so a
+  direct owner+CSRF `PUT /budgets/{month}` with
+  `{"expectedIncomeMinor": -500000, "lines": []}` stored the value and
+  round-tripped on the next `GET`, unnoticed because every existing test
+  exercised the cap field's guard and never the income field's. Fixed with
+  the same per-field-sentinel shape as the cap check
+  (`domain.ErrBudgetIncomeNegative`, checked in `Save` before any repo
+  call, mapped to 422 `NEGATIVE_BUDGET_INCOME`). The lesson isn't the bug
+  itself but why it survived review as long as it did: two fields of the
+  same type (`int64` minor units, same `NewMoney` constructor, same
+  "can this be negative" question) got asymmetric treatment, and nothing
+  short of asking "what's the sibling field's guard, and does this one
+  have the same shape" would have caught it — see pattern 1.
 
 ### Database and repositories
 
@@ -919,6 +1046,41 @@ inventing itself as a person the moment it renders for someone else's family.
   the same file (`ConsumeMagicLink`).
 - A unique-violation surfaced as an opaque driver error because `translate` only
   special-cased `pgx.ErrNoRows`.
+- Budget slice, Task 5: four of `BudgetRepo.Upsert`'s own statements
+  (`DeleteBudgetLines`, `InsertBudgetLine`, `GetHouseholdPrimaryCurrency`,
+  `CountCategoriesInHousehold`) were wrapped with a plain `fmt.Errorf`
+  instead of `translate()`, the same "raw driver error crosses the adapter
+  boundary" shape as the bullet above, just at four new call sites instead
+  of the original one. Reachable for real: two lines in one `PUT` payload
+  naming the same category id both pass `validateLineCategories` (it
+  dedupes before counting), then the second `InsertBudgetLine` hits
+  `budget_lines`' own `UNIQUE (budget_id, category_id)` after
+  `DeleteBudgetLines` has already run inside the same transaction — a
+  `*pgconn.PgError` would have reached `usecase.BudgetService`, not
+  `domain.ErrAlreadyExists`. The existing test
+  (`TestBudgetUpsertIsOneTransaction`) couldn't have caught this: its own
+  failure happens before any write starts, so nothing in it ever pinned
+  `pgx.BeginFunc`'s rollback once writes were already underway. Fixed by
+  routing all four through `translate()` and adding
+  `TestBudgetUpsertDuplicateCategoryLineRollsBackAndStaysAtTheBoundary`,
+  which proves both the rollback undoes the `DELETE` and that the error
+  surfacing from it is `domain.ErrAlreadyExists` with no `*pgconn.PgError`
+  reachable via `errors.As`.
+- Budget slice, Task 6: `CategoryRepo.Create`'s own comment claimed its
+  single-statement `MAX(sort_order)+1` insert closed the concurrent-create
+  race entirely — a comment stating something the code does not actually
+  do, the same shape pattern 1's `buildRows` entry warns about. It closes
+  only the round-trip window (this process's own read then write); under
+  `READ COMMITTED`, two overlapping transactions can each read the same
+  pre-insert max and both commit the same `sort_order`, because
+  `sort_order` carries no unique constraint. Found by re-reading the claim
+  against the isolation level actually in use, not by a test — a tied
+  `sort_order` is cosmetic (display order, not correctness) and was judged
+  not worth an advisory lock or a unique constraint, so the fix corrected
+  the comment to name the residual race and the accepted trade-off rather
+  than closing it, and added `, name` as a tie-break to both `List` queries'
+  `ORDER BY` so a tie's *display* order stops depending on whichever row
+  order Postgres happens to scan on a given read.
 - `ListSpaces` ordered by `position` with no tiebreaker, so duplicates made
   sidebar order nondeterministic.
 - Deleting a membership leaves the `users` row alive. Three separate symptoms
@@ -1060,6 +1222,22 @@ route with a missing guard has no second line of defence.
   `SignInScreen` (there, keyed off `mode` rather than cleared inside one
   handler) — the fix did not carry to the newer screen because nothing grepped
   for the shape.
+- Task 13's brief named "Health" as one of the 50/30/20 template's needs-set
+  categories, then gave the proportional split's weight table
+  (`FAMILY_OF_FOUR_CAPS`) as exactly the ten Family-of-four categories, which
+  does not include Health — the same brief text says two things that cannot
+  both be followed literally (a needs category with "the family-of-four
+  weight" it does not have). Rather than guessing which clause to drop,
+  `budgetTemplates.ts`'s `splitPool` treats an unlisted name as weight zero
+  by construction (`FAMILY_OF_FOUR_CAPS[name] ?? 0`), so Health silently
+  funds nothing from either pool and — since it was never going to get a
+  line anyway — is not reported in `missing` either, which would have
+  wrongly told a household with a live "Health" category to go create one.
+  The resolution and the reasoning are both written at the point a future
+  reader would go looking for them (`NEEDS`'s own comment in
+  `budgetTemplates.ts`), not left implicit in the code's behaviour, so the
+  next person to touch this table sees the contradiction was noticed and
+  decided, not missed.
 - A task brief's own test snippet asserted on TanStack Router's `path`, which
   strips the leading slash on a child route (`trimPathLeft`); `fullPath`
   reconstructs it and is what a router-walk test must read instead. Would have
@@ -1162,6 +1340,182 @@ route with a missing guard has no second line of defence.
   specifics (child names; "Christine's Indonesian accounts") as if they
   were generic product copy, safe only while the seeded household was the
   only one that existed. See pattern 14.
+- `router.test.tsx`'s "mounts the Budget page" test stubbed only
+  `GET /api/v1/auth/me`, with its own comment explaining why: BudgetPage was
+  still Task 11's static stub, calling nothing else. Task 12 wired
+  `useBudget`/`useCurrencies` into that same component and the test broke on
+  the first run — `stubFetchRoutes` throws on any unregistered request, so a
+  router test that had been green was quietly asserting "the placeholder
+  never fetches," not "the real page mounts." The comment said exactly why
+  the gap existed and that it would need closing, which made the fix a
+  five-minute one instead of a debugging session, but a test whose pass
+  depends on a component staying a stub is a landmine for whoever un-stubs
+  it — worth writing that comment on every throwaway-stub test, not only
+  this one.
+- Task 12's first `useBudget.ts` was a hand-rolled `useState`/`useEffect`
+  fetch hook, with no precedent check against `useTransactions.ts`'s own
+  month-parameterised `useQuery`, already established for the identical
+  shape (a resource keyed by which month is being viewed). The deviation
+  was not free: it cost real behaviour, not just style. Category writes
+  had nothing invalidating `useTransactions`' own `categoriesQueryKey()`
+  cache entry, so a category created from the Budget modal would not have
+  shown up in the transaction modal's dropdown without a full reload; and
+  nothing kept `["budget", month]` as a structured query key, so switching
+  the page's month picker mid-fetch had no cache boundary stopping a
+  slower, stale response for the *old* month from landing after a faster
+  one for the *new* month already had. `useQuery`'s own key-based
+  cancellation is what `useTransactions.ts` got for free and this hook did
+  not. Found by review, not a failing test — both gaps are races or
+  cross-component effects a synchronous render-and-assert test does not
+  naturally reach. Fixed by rewriting onto `useQuery`/`useMutation`
+  matching the existing pattern exactly, with category writes now
+  invalidating both query keys and `save()` actually parsing `PUT`'s
+  response with `putBudgetResponseSchema` instead of leaving it uncalled.
+  Five of the rewritten hook's own mutation tests needed `waitFor` instead
+  of a synchronous post-act assertion, because TanStack Query's
+  `notifyManager` re-render notification lands one microtask after
+  `mutateAsync` resolves — the same timing `FinancesPage.test.tsx` had
+  already worked around, not a new discovery, just a new place the same
+  fact had to be applied again.
+- `useBudget.ts`'s `createCategory` discarded the created category entirely
+  (`mutationFn` returned `void`) and relied on invalidate-then-refetch for
+  every caller to pick the new row up later — fine for every caller that
+  existed at the time, all of which just needed the list to eventually
+  refresh. `BudgetModal.tsx` (Task 14) is a caller that needs the server's
+  own id *immediately*: its save flow POSTs a queued create, then has to put
+  that exact id into the next request's line set, and the pinned
+  create-then-PUT ordering test would have forced an extra `GET
+  /api/v1/categories` between the two to look the id back up by name --
+  noise in a sequence the test asserts on exactly. The fix was additive, not
+  a rewrite: parse the create response and return it
+  (`categoryResponseSchema.parse(raw).category`), which every existing
+  caller still ignores and the new one now needs. General shape: a mutation
+  hook that only ever invalidates-and-refetches is quietly assuming no
+  future caller needs this write's own result before its *next* write --
+  worth returning the parsed response even when today's callers throw it
+  away, since the alternative (a second read wedged into an otherwise
+  sequential write chain) is both slower and changes what an ordering test
+  is actually asserting.
+- `BudgetModal.tsx` calls `useBudget(month)` itself rather than taking a
+  bound `save`/`createCategory` as props, which makes `budget.data` -- and
+  the currency it carries -- unavailable on the component's first render
+  whenever the query cache isn't already warm (any standalone test, or a
+  slow first load). Seeding the form's row/income state from `initial` and
+  `currency` in a plain `useState(() => ...)` initializer at the top level
+  would make that seeding depend on load order: correct in the app (the
+  parent always already resolved the same query) but wrong the moment a
+  test renders the modal on a cold cache. Split into an outer component that
+  render-branches on `!budget.data` and an inner `BudgetModalForm` that only
+  mounts once data exists -- its `useState` initializers then run exactly
+  once, at the one moment they have real data, and a later background
+  refetch (e.g. after `save` invalidates its own query) cannot silently
+  reseed a household's in-progress edits, since re-rendering the *outer*
+  component doesn't remount the *inner* one.
+- `BudgetModal.tsx`'s row-building fallback for a category id the modal
+  can't name (`buildRows`, for a line whose category isn't in the active
+  `categories` prop -- reachable today via "Import last month" handing a
+  previous month's lines through unchanged, per BudgetPage.tsx's own
+  comment, when a capped category has since been archived) set `name` and
+  `originalName` from *two different* fallback expressions:
+  `found?.name ?? "Unknown category"` for one, `found?.name ?? ""` for the
+  other. Save's rename check is `row.name.trim() !== row.originalName` --
+  with those two fallbacks, an unresolved row is `"Unknown category" !==
+  ""`, unconditionally true, so every save on it queued
+  `PATCH /categories/{id} {name: "Unknown category"}`, silently renaming a
+  real (possibly archived) category. A same-value comment right above the
+  code ("Save would still submit its real id and cap unchanged") was
+  literally false the moment a rename fired alongside it — the comment
+  described the *intended* behaviour, not what the two-fallback code
+  actually did, and nothing checked the two against each other. Caught by a
+  pre-commit design review, not a test that already existed — the fix
+  computes the fallback name once and uses it for both fields, so an
+  unresolved row is structurally incapable of registering as renamed. A
+  comment describing what a value is *supposed* to be is not evidence about
+  what the code actually does — and "two expressions that are supposed to
+  agree" (here, two fallbacks for the same missing-name case) is exactly the
+  kind of pair a single shared variable removes the chance of drifting.
+- Task 14 shipped `BudgetModal.tsx` and marked "Edit budget (modal)" ✅ in
+  `FEATURE_TRACKER.md` with the prose "a household can create and edit a
+  budget end to end now" — but the only things that ever opened the modal
+  were the empty state's template cards and "Create your first budget".
+  There was no button anywhere that opened it for a month that *already*
+  had one; `BudgetPage.tsx`'s populated branch (`data.budget !== null`)
+  rendered the four stat cards, the category grid and spending-by-person,
+  and nothing else. A household could create a budget once and then never
+  change it again through the UI. Every one of Task 14's 13 tests rendered
+  `BudgetModal` directly with props, which proves the modal works once
+  open — none of them opened it *from the page*, so nothing ever exercised
+  the one path that was missing. `docs/FEATURE_TRACKER.md`'s own ✅ was true
+  about the modal and false about the feature: "the modal exists" and "a
+  household can reach it" are two different claims, and only the narrower
+  one had a test behind it. Caught here only because Task 15's own work
+  touched the same header row (adding History) and `BudgetModal.tsx`'s own
+  header comment had left a forward note anticipating exactly this gap
+  ("a future 'Edit budget' entry point (Task 15) for an *existing* budget
+  would normalise the same way") — without that comment, a
+  reasonably-scoped History-only task could easily have shipped without
+  ever opening the file that would have shown the missing button. General
+  pattern: when a task's own tests only mount a component standalone, "is
+  this component correct" gets covered but "can anything actually reach
+  it" does not — a component with no verified trigger from its real parent
+  is not shipped, even if every prop-driven test is green. A page-level
+  integration test that opens the feature the way a person actually would
+  (click the real button, from the real page state) is the only thing that
+  would have caught this at the time it was introduced.
+- `BudgetHistoryModal.tsx`'s three summary cards (avg spend, avg saved,
+  months under budget) needed an explicit decision at two boundaries the
+  brief didn't spell out, both written down as comments *and* pinned by a
+  test that fails without the guard (not just asserted in prose): a closed
+  month that spent exactly its cap counts as *under* budget, matching
+  `BudgetStatCards.tsx`'s own treatment of a zero `remainingMinor` as
+  healthy, not over; and a closed month with every cap removed
+  (`budgetedMinor === 0`) is excluded from all three figures entirely,
+  rather than being treated as a 100%-over month or dragging every average
+  toward zero the way including it at face value would. Both guards were
+  mutation-tested (flipped, confirmed red, restored) precisely because a
+  green test against the *intended* boundary proves nothing if the fixture
+  never actually lands on that boundary — the first draft of "months under
+  budget" test data had no exact-cap month at all, so a `<=` vs `<` bug
+  would have passed silently.
+- Task 17's browser walk found two more defects in `BudgetModal.tsx`, both
+  rooted in the same fact: the modal has two category lists, and only one
+  of its two consumers was reading the right one. **Defect A**: `buildRows`
+  resolved every row's name off `categories` (`BudgetPage.tsx`'s
+  active-only `useCategories()` prop), so a line whose category was
+  archived since it was capped fell to the shared fallback name from the
+  bug ledgered just above this one -- "Unknown category" -- even though
+  the same file's `addCategoryByName` already fetched
+  `GET /api/v1/categories?includeArchived=true` for its own restore-vs-create
+  check. The page's category grid renders "Petrol (archived)" correctly
+  because it reads `useBudget`'s own per-month `categories`, which always
+  carries archived rows -- a different, correct source the modal simply
+  never consulted. **Defect B**: the "+ Add a category -> New category..."
+  duplicate guard (`rows.some((row) => row.name === name)`) already existed
+  and worked, but refused with zero feedback -- no message, no row, and
+  (confirmed against the network log) no request at all -- reading as
+  nothing happened rather than as a rejection. Fixed together: the
+  archived-inclusive fetch moved out of `BudgetModalForm` and up into the
+  outer `BudgetModal`, gated alongside `useBudget`'s own `budget.data`
+  (with a fallback to the active-only prop on a genuine fetch failure, so
+  a broken archived-inclusive endpoint degrades instead of hanging the
+  modal on "Loading..." forever) so `buildRows`'s `useState` initializer
+  never runs before that data exists, and handed down as a new
+  `allCategories` prop used by both `buildRows` and `addCategoryByName` --
+  while `categories` stays exactly what the add-dropdown filters against,
+  since that list must never re-offer an archived category to pick again.
+  The duplicate guard now sets a dedicated inline error next to the add
+  control (reusing `categoryNameTaken`'s copy shape) instead of returning
+  silently, and `handleAddNewCategory` only clears the "New category..."
+  input on an actual add. Neither defect could have been caught by the
+  existing suite as written: every test's `categories` prop and its
+  `includeArchived=true` stub happened to already agree with each other
+  (a fixture gap the fix also had to correct, once `buildRows` started
+  depending on the second list), and no test ever typed an already-used
+  name into the add control and asserted on the *absence* of a network
+  call. Both new tests do; the archived-name one is mutation-checked
+  (reverting `buildRows`'s argument back to `categories` turns it red on
+  the display-name assertion, not just the incidental no-rename one, which
+  would have passed either way). See pattern 1.
 
 ### Tooling and infrastructure
 

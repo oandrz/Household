@@ -37,7 +37,20 @@ const maxRequestBodyBytes = 1024
 //
 // Usage: `var req someRequest; if !decodeJSONBody(w, r, &req) { return }`.
 func decodeJSONBody(w http.ResponseWriter, r *http.Request, dest any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	return decodeJSONBodyLimit(w, r, dest, maxRequestBodyBytes)
+}
+
+// decodeJSONBodyLimit is decodeJSONBody's general form, for the one route
+// whose legitimate body does not fit maxRequestBodyBytes' "a few hundred
+// bytes" assumption: PUT /budgets/{month} always carries the household's
+// entire category list as budget lines (full-replace, never a patch -- see
+// BudgetRepository.Upsert's own doc comment), and that list's length is not
+// bounded by this codebase (Task 10 adds category creation with no cap).
+// budget_handlers.go's maxBudgetRequestBodyBytes is the caller that needs
+// this; every other route keeps using the tighter default via
+// decodeJSONBody above.
+func decodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, dest any, maxBytes int64) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 	if err := json.NewDecoder(r.Body).Decode(dest); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
@@ -203,6 +216,20 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, domain.ErrUnknownCategoryKind):
 		WriteError(w, http.StatusUnprocessableEntity, "INVALID_CATEGORY",
 			"That category does not belong to this kind of transaction.", nil)
+	case errors.Is(err, domain.ErrCategoryNameTaken):
+		WriteError(w, http.StatusConflict, "CATEGORY_NAME_TAKEN", "A category with that name already exists.", nil)
+	case errors.Is(err, domain.ErrCategoryNameRequired):
+		WriteError(w, http.StatusUnprocessableEntity, "CATEGORY_NAME_REQUIRED", "A category name is required.", nil)
+	case errors.Is(err, domain.ErrBudgetLineDuplicate):
+		WriteError(w, http.StatusUnprocessableEntity, "DUPLICATE_BUDGET_LINE",
+			"Each category can only appear once in a budget.", nil)
+	case errors.Is(err, domain.ErrBudgetCapNegative):
+		WriteError(w, http.StatusUnprocessableEntity, "NEGATIVE_BUDGET_CAP", "A budget cap cannot be negative.", nil)
+	case errors.Is(err, domain.ErrBudgetIncomeNegative):
+		WriteError(w, http.StatusUnprocessableEntity, "NEGATIVE_BUDGET_INCOME", "Expected income cannot be negative.", nil)
+	case errors.Is(err, domain.ErrBudgetCategoryUnknown):
+		WriteError(w, http.StatusUnprocessableEntity, "UNKNOWN_BUDGET_CATEGORY",
+			"That category could not be found.", nil)
 	case errors.Is(err, domain.ErrAlreadyExists):
 		// Every service that means a genuine, nameable conflict already
 		// translates domain.ErrAlreadyExists into its own sentinel before

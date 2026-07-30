@@ -23,6 +23,22 @@ type Account struct {
 	CreatedAt               pgtype.Timestamptz
 }
 
+type Budget struct {
+	ID                  pgtype.UUID
+	HouseholdID         pgtype.UUID
+	Month               pgtype.Date
+	ExpectedIncomeMinor *int64
+	CreatedAt           pgtype.Timestamptz
+	UpdatedAt           pgtype.Timestamptz
+}
+
+type BudgetLine struct {
+	ID         pgtype.UUID
+	BudgetID   pgtype.UUID
+	CategoryID pgtype.UUID
+	CapMinor   int64
+}
+
 type Category struct {
 	ID          pgtype.UUID
 	HouseholdID pgtype.UUID

@@ -7,10 +7,10 @@
 //
 // The design's 5a sidebar groups each space into an uppercase label plus
 // several sub-page links (Finances/Transactions/Budget/... under Money, and
-// so on). That grouped form arrived with Transactions: Money now has two
-// built pages, so it renders as a label plus two links. SPACE_PAGES grows a
-// row per shipped page -- Budget, Goals and Bills join it once their pages
-// exist, not before, because a permanent grey "soon" row reads as broken.
+// so on). That grouped form arrived with Transactions and now carries Budget
+// too: Money renders as a label plus three links. SPACE_PAGES grows a row
+// per shipped page -- Goals and Bills join it once their pages exist, not
+// before, because a permanent grey "soon" row reads as broken.
 import { Link, useMatchRoute, useNavigate } from "@tanstack/react-router";
 import type { Me, Space } from "../auth/schemas";
 import { useSignOut } from "../auth/useAuth";
@@ -31,6 +31,7 @@ const SPACE_PAGES: Record<string, { label: string; to: string }[]> = {
   money: [
     { label: "Finances", to: "/money" },
     { label: "Transactions", to: "/money/transactions" },
+    { label: "Budget", to: "/money/budget" },
   ],
   marriage: [{ label: "Marriage", to: "/marriage" }],
   family: [{ label: "Family", to: "/family/calendar" }],
