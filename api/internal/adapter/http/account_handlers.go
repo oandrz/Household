@@ -26,8 +26,8 @@ type moneyDTO struct {
 // shape exists to make impossible.
 //
 // Balance and OpeningBalance are two different figures. Balance is what the
-// account holds now: the opening balance plus every transaction dated after
-// BalanceAsOf, summed in SQL (queries/account.sql). OpeningBalance is the
+// account holds now: the opening balance plus every transaction dated on or
+// after BalanceAsOf, summed in SQL (queries/account.sql). OpeningBalance is the
 // figure someone asserted was true on BalanceAsOf, and BalanceAsOf is the day
 // that assertion is about -- the two of them are one fact and are the pair a
 // client edits and PATCHes back as openingBalanceMinor/openingBalanceAsOf.

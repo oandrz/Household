@@ -314,9 +314,9 @@ func insertSecondHousehold(t *testing.T, db *postgres.DB) string {
 	return insertTestHousehold(t, db)
 }
 
-// The doc comment on AccountRepository.List has promised this since Accounts
-// shipped: Balance is the opening balance plus every transaction dated after
-// opening_balance_as_of.
+// The doc comment on AccountView.Balance has promised this since the
+// same-day rule shipped: Balance is the opening balance plus every
+// transaction dated on or after opening_balance_as_of.
 func TestAccountBalanceSumsItsTransactions(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -347,10 +347,10 @@ func TestAccountBalanceSumsItsTransactions(t *testing.T) {
 
 	mustCreate(domain.TransactionExpense, 12, 5000, accountID, "")
 	mustCreate(domain.TransactionIncome, 14, 20000, "", accountID)
-	// Dated ON the opening date: already reflected in the figure someone
-	// asserted was true that day, so it must not be counted again.
+	// Dated ON the opening date: the opening balance is the figure at the
+	// START of that day (spec 2026-07-30, decision 1), so this counts.
 	mustCreate(domain.TransactionExpense, 10, 7777, accountID, "")
-	// Dated before it: same reasoning.
+	// Dated before it: already inside the opening figure, still excluded.
 	mustCreate(domain.TransactionExpense, 3, 9999, accountID, "")
 
 	views, err := accounts.List(ctx, householdID, false)
@@ -360,10 +360,10 @@ func TestAccountBalanceSumsItsTransactions(t *testing.T) {
 	if len(views) != 1 {
 		t.Fatalf("got %d accounts, want 1", len(views))
 	}
-	// 100000 - 5000 + 20000
-	if got := views[0].Balance.Amount; got != 115000 {
-		t.Fatalf("balance = %d, want 115000 (opening 100000, -5000, +20000, "+
-			"and nothing from the two dated on or before the opening date)", got)
+	// 100000 - 5000 + 20000 - 7777
+	if got := views[0].Balance.Amount; got != 107223 {
+		t.Fatalf("balance = %d, want 107223 (opening 100000, -5000, +20000, -7777 on the "+
+			"opening date itself, and nothing from the one dated before it)", got)
 	}
 	// Get must agree with List. Two queries computing one figure is where they
 	// drift.

@@ -64,18 +64,18 @@ func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (A
 
 const getAccount = `-- name: GetAccount :one
 SELECT a.id, a.household_id, a.nickname, a.type, a.owner_membership_id, a.opening_balance_minor, a.opening_balance_currency, a.opening_balance_as_of, a.count_toward_net_worth, a.visible_to_limited_members, a.archived_at, a.created_at, u.display_name AS owner_name,
-       -- See ListAccounts above for why this is two filtered sums with a
-       -- strict > and why the incoming side prefers received_amount_minor.
+       -- See ListAccounts above for why this is two filtered sums with
+       -- >= and why the incoming side prefers received_amount_minor.
        -- Get and List must compute this the same way, or the two disagree
        -- on the same account's balance.
        (a.opening_balance_minor
         - COALESCE((SELECT SUM(t.amount_minor) FROM transactions t
                     WHERE t.from_account_id = a.id
-                      AND t.occurred_on > a.opening_balance_as_of), 0)
+                      AND t.occurred_on >= a.opening_balance_as_of), 0)
         + COALESCE((SELECT SUM(COALESCE(t.received_amount_minor, t.amount_minor))
                     FROM transactions t
                     WHERE t.to_account_id = a.id
-                      AND t.occurred_on > a.opening_balance_as_of), 0)
+                      AND t.occurred_on >= a.opening_balance_as_of), 0)
        )::bigint AS balance_minor
 FROM accounts a
 LEFT JOIN memberships m ON m.id = a.owner_membership_id
@@ -135,11 +135,12 @@ const listAccounts = `-- name: ListAccounts :many
 
 SELECT a.id, a.household_id, a.nickname, a.type, a.owner_membership_id, a.opening_balance_minor, a.opening_balance_currency, a.opening_balance_as_of, a.count_toward_net_worth, a.visible_to_limited_members, a.archived_at, a.created_at, u.display_name AS owner_name,
        -- balance_minor is the opening balance plus every transaction dated
-       -- AFTER opening_balance_as_of. The strict > is load-bearing: a
-       -- transaction dated ON the opening date is already reflected in the
-       -- figure someone asserted was true that day, and counting it again
-       -- would make the account wrong by that transaction with nothing on
-       -- screen to explain it.
+       -- ON OR AFTER opening_balance_as_of. The opening balance means the
+       -- figure at the START of that day (spec 2026-07-30-hearth-finance-
+       -- fixes, decision 1), so a transaction dated that same day counts —
+       -- the day-one flow (create an account today, log today's dinner)
+       -- must move the balance. A transaction dated strictly before stays
+       -- out: that history is already inside the figure someone asserted.
        --
        -- Two filtered sums rather than one, because an account can be the
        -- source of one transfer and the destination of another. The incoming
@@ -152,11 +153,11 @@ SELECT a.id, a.household_id, a.nickname, a.type, a.owner_membership_id, a.openin
        (a.opening_balance_minor
         - COALESCE((SELECT SUM(t.amount_minor) FROM transactions t
                     WHERE t.from_account_id = a.id
-                      AND t.occurred_on > a.opening_balance_as_of), 0)
+                      AND t.occurred_on >= a.opening_balance_as_of), 0)
         + COALESCE((SELECT SUM(COALESCE(t.received_amount_minor, t.amount_minor))
                     FROM transactions t
                     WHERE t.to_account_id = a.id
-                      AND t.occurred_on > a.opening_balance_as_of), 0)
+                      AND t.occurred_on >= a.opening_balance_as_of), 0)
        )::bigint AS balance_minor
 FROM accounts a
 LEFT JOIN memberships m ON m.id = a.owner_membership_id
@@ -226,16 +227,16 @@ func (q *Queries) ListAccounts(ctx context.Context, householdID pgtype.UUID) ([]
 
 const listAccountsIncludingArchived = `-- name: ListAccountsIncludingArchived :many
 SELECT a.id, a.household_id, a.nickname, a.type, a.owner_membership_id, a.opening_balance_minor, a.opening_balance_currency, a.opening_balance_as_of, a.count_toward_net_worth, a.visible_to_limited_members, a.archived_at, a.created_at, u.display_name AS owner_name,
-       -- See ListAccounts above for why this is two filtered sums with a
-       -- strict > and why the incoming side prefers received_amount_minor.
+       -- See ListAccounts above for why this is two filtered sums with
+       -- >= and why the incoming side prefers received_amount_minor.
        (a.opening_balance_minor
         - COALESCE((SELECT SUM(t.amount_minor) FROM transactions t
                     WHERE t.from_account_id = a.id
-                      AND t.occurred_on > a.opening_balance_as_of), 0)
+                      AND t.occurred_on >= a.opening_balance_as_of), 0)
         + COALESCE((SELECT SUM(COALESCE(t.received_amount_minor, t.amount_minor))
                     FROM transactions t
                     WHERE t.to_account_id = a.id
-                      AND t.occurred_on > a.opening_balance_as_of), 0)
+                      AND t.occurred_on >= a.opening_balance_as_of), 0)
        )::bigint AS balance_minor
 FROM accounts a
 LEFT JOIN memberships m ON m.id = a.owner_membership_id

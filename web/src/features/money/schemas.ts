@@ -26,12 +26,12 @@ const moneySchema = z.object({
 //
 // balance and openingBalance are two different figures and stopped being the
 // same number the day Transactions shipped. balance is what the account holds
-// now -- the opening balance plus every transaction dated after balanceAsOf,
-// summed in SQL (queries/account.sql). openingBalance is the figure someone
-// asserted was true on balanceAsOf, and it is the only one of the two that
-// may ever be written back as openingBalanceMinor. Anything editing the
-// stored opening balance reads openingBalance; anything displaying what the
-// account is worth today reads balance.
+// now -- the opening balance plus every transaction dated on or after
+// balanceAsOf, summed in SQL (queries/account.sql). openingBalance is the
+// figure someone asserted was true on balanceAsOf, and it is the only one of
+// the two that may ever be written back as openingBalanceMinor. Anything
+// editing the stored opening balance reads openingBalance; anything
+// displaying what the account is worth today reads balance.
 export const accountSchema = z.object({
   id: z.string(),
   nickname: z.string(),

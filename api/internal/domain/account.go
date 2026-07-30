@@ -94,9 +94,9 @@ func (t AccountType) SignedNetWorthAmount(m Money) (Money, error) {
 // to be shared, with nothing to resolve it.
 //
 // OpeningBalanceAsOf is load-bearing, not decoration. Once transactions exist,
-// only those dated after it count toward the derived balance; without it,
-// importing last month's transactions would subtract them from a balance that
-// already reflected them.
+// only those dated on or after it count toward the derived balance; without
+// it, importing last month's transactions would subtract them from a balance
+// that already reflected them.
 type Account struct {
 	ID                      string
 	HouseholdID             string

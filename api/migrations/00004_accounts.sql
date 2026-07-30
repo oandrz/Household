@@ -2,7 +2,7 @@
 
 -- accounts is what a household owns and owes. One row per account; the
 -- balance is an opening figure plus, from the next slice, every transaction
--- dated after opening_balance_as_of.
+-- dated on or after opening_balance_as_of.
 --
 -- There is deliberately no updated_at. No other table in this schema has one,
 -- nothing in the application would maintain it, and a column named "last
