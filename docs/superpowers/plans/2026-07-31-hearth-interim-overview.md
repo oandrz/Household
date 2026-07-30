@@ -50,6 +50,7 @@ The checklist is owner-only in all cases: a limited member can neither invite a 
 | `web/src/features/settings/MembersPanel.tsx` | modify | drops its private copy of that query |
 | `web/src/features/money/month.ts` | create | `currentMonth()`, the local-calendar "YYYY-MM" |
 | `web/src/features/money/BudgetPage.tsx` | modify | imports `currentMonth` instead of declaring it |
+| `web/src/features/money/useBudget.ts` | modify | gains an `enabled` option, so a caller who may not read a budget can hold the request without breaking the rules of hooks |
 | `web/src/features/overview/copy.ts` | create | every user-visible string on Overview |
 | `web/src/features/overview/OverviewPage.tsx` | create | layout, data fetching, and which shape to render |
 | `web/src/features/overview/BudgetCard.tsx` | create | this month's budget: percent used and the two figures behind it |
@@ -525,7 +526,42 @@ export function BudgetCard({ month }: { month: BudgetMonthResponse }) {
 }
 ```
 
-- [ ] **Step 5: Write OverviewPage**
+- [ ] **Step 5: Let `useBudget` be told not to fire**
+
+Overview must not ask for a budget on behalf of someone who may not read one. Calling the hook conditionally is not an option — that breaks the rules of hooks — and passing `""` as the month is worse than it looks: it sends `GET /api/v1/budgets/` for every limited member and leaves a failed query cached under `["budget", ""]`. The hook already uses `enabled` for its previous-month query; give the main one the same control.
+
+`web/src/features/money/useBudget.ts`:
+
+```ts
+// `enabled` exists for Overview, which renders for every member but may only
+// read a budget for an owner (GET /budgets/{month} is requireCapability(money)
+// AND requireOwner). A caller cannot skip the hook -- that breaks the rules of
+// hooks -- and passing a fake month would both fire a doomed request and cache
+// a failure under a key nobody meant to write. Defaults to true, so BudgetPage
+// is unaffected.
+export function useBudget(month: string, options: { enabled?: boolean } = {}) {
+  const queryClient = useQueryClient();
+  const enabled = options.enabled ?? true;
+
+  const query = useQuery({
+    queryKey: budgetQueryKey(month),
+    queryFn: () => fetchBudgetMonth(month),
+    enabled,
+  });
+```
+
+and the previous-month query's own gate becomes:
+
+```ts
+    enabled: enabled && query.data?.budget === null,
+```
+
+Leave every mutation in the hook alone — a mutation is only reached by a caller who already rendered the screen.
+
+Run: `cd web && npx vitest run src/features/money/BudgetPage.test.tsx src/features/money/useBudget.test.ts`
+Expected: PASS, unchanged. `enabled` defaults to true, so the existing caller's behaviour is identical.
+
+- [ ] **Step 6: Write OverviewPage**
 
 Create `web/src/features/overview/OverviewPage.tsx`:
 
@@ -555,9 +591,10 @@ export function OverviewPage() {
 
   const accounts = useAccounts(false);
   // Only an owner may read a budget at all, so a limited member must not even
-  // ask -- an unconditional call would spend a request to be told 403 and
-  // leave a failed query in the cache for no one to read.
-  const budget = useBudget(isOwner ? currentMonth() : "");
+  // ask -- the request would be answered 403 and leave a failed query in the
+  // cache for nobody to read. `enabled` (Step 5), not a fake month and not a
+  // conditional call.
+  const budget = useBudget(currentMonth(), { enabled: isOwner });
 
   return (
     <div className="flex flex-col gap-5 p-10">
@@ -581,14 +618,14 @@ export function OverviewPage() {
 }
 ```
 
-Check `useBudget`'s return shape before writing this — if it returns the query directly rather than `{ query }`, adjust `budget.query.data` to match. If passing `""` as the month is not something `useBudget` tolerates, add an `enabled` option to its `useQuery` rather than calling it conditionally; a hook called conditionally breaks the rules of hooks.
+Check `useBudget`'s return shape before writing this — if it returns the query directly rather than `{ query }`, adjust `budget.query.data` to match.
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [ ] **Step 7: Run the tests to verify they pass**
 
 Run: `cd web && npx vitest run src/features/overview/OverviewPage.test.tsx`
 Expected: PASS, all four cases.
 
-- [ ] **Step 7: Point `/` at it and delete the placeholder**
+- [ ] **Step 8: Point `/` at it and delete the placeholder**
 
 `web/src/routes/router.tsx`:
 
@@ -613,7 +650,7 @@ rmdir web/src/features/placeholder 2>/dev/null || true
 
 M1 deleted the marriage and family routes, so Overview was this component's last user.
 
-- [ ] **Step 8: Mutation-check**
+- [ ] **Step 9: Mutation-check**
 
 Remove the `isOwner` guard on the budget card:
 
@@ -624,7 +661,7 @@ Remove the `isOwner` guard on the budget card:
 Run: `cd web && npx vitest run src/features/overview/OverviewPage.test.tsx -t "no budget card to a limited member"`
 Expected: FAIL. Restore and confirm green.
 
-- [ ] **Step 9: Full suite, type-check, commit**
+- [ ] **Step 10: Full suite, type-check, commit**
 
 Run: `make test-web && make typecheck && make lint-web`
 Expected: PASS. `router.test.tsx` may assert the placeholder's text at `/` — update it to assert Overview's heading instead; the route's job did not change, only its component.

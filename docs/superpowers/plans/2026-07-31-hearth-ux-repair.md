@@ -269,7 +269,21 @@ The rest of the function is unchanged.
 Run: `cd web && npx vitest run src/features/shell/Sidebar.test.tsx`
 Expected: PASS, all cases including the file's existing four.
 
-If the existing test "renders only the spaces present in me.spaces" fails, read it first: it renders `meFixture([familySpace])` and asserts Family appears. Family is now hidden, so that test's fixture must change to a space that still renders — use `moneySpace` and assert "Finances" appears while a space absent from the payload does not. Keep the test's original point (the sidebar renders from the payload, not a hard-coded list); only its fixture changes.
+The existing test "renders only the spaces present in me.spaces" **will** fail: it renders `meFixture([familySpace])` and asserts Family appears, and Family is now hidden. Its point — the sidebar renders from the payload, not a hard-coded list — has to survive, and after this change `money` is the only builtin key in `SPACE_PAGES`, so two builtin spaces can no longer demonstrate it. Use `travelSpace` (already defined in Step 1) as the second fixture:
+
+```tsx
+  it("renders only the spaces present in me.spaces", async () => {
+    // travelSpace, not another builtin: `money` is the only builtin key left
+    // in SPACE_PAGES, so two builtin spaces cannot show that this renders
+    // from the payload rather than from a list in this file.
+    renderWithRouter(<Sidebar me={meFixture([travelSpace])} />);
+
+    expect(await screen.findByText("Travel")).toBeInTheDocument();
+    expect(screen.queryByText("Finances")).toBeNull();
+  });
+```
+
+Keep whatever the original test also asserted about ordering or `data-testid`; only the fixture and the two space names change.
 
 - [ ] **Step 5: Delete the four placeholder routes**
 
