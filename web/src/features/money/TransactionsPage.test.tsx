@@ -328,7 +328,30 @@ describe("TransactionsPage", () => {
     expect(
       await screen.findByRole("button", { name: /add transaction/i }),
     ).toBeDisabled();
-    expect(screen.getByText(/add an account first/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/add an account first, and transactions can attach to it/i),
+    ).toBeInTheDocument();
+  });
+
+  it("sends a household with no accounts to Finances from the empty state", async () => {
+    renderPage({
+      transactions: [],
+      summary: { count: 0, spentMinor: 0 },
+      accounts: [],
+    });
+
+    const link = await screen.findByRole("link", { name: /add an account/i });
+    expect(link).toHaveAttribute("href", "/money");
+    // The generic first-run copy would be a lie here: there is nothing to add
+    // an expense *to* yet.
+    expect(screen.queryByText(/nothing logged yet/i)).toBeNull();
+  });
+
+  it("keeps the generic first-run copy once an account exists", async () => {
+    renderPage({ transactions: [], summary: { count: 0, spentMinor: 0 } });
+
+    expect(await screen.findByText(/nothing logged yet/i)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /add an account/i })).toBeNull();
   });
 
   // Editing is how a mistyped row gets corrected instead of deleted and
