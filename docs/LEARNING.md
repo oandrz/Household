@@ -550,6 +550,18 @@ either; sharpen the mutation until the failure names the claim.
   restart, neither of which is possible for a process actually being
   restarted — and went unread because nobody checked which process was
   actually answering.
+- The Budget walk hit the same trap inverted, with a new twist: colima
+  auto-started mid-session and silently took over the **default docker
+  context and both socket paths the CLI resolves**, while Docker Desktop's
+  hours-old stack kept the host ports. Two successive database wipes wiped a
+  fresh colima stack the browser never talked to, and the browser's session
+  "survived" the wipe — which read as an impossible auth bug (sessions live
+  in Postgres) until `docker info` on both sockets returned the *same*
+  engine ID and `docker --context desktop-linux ps` found the real stack.
+  The check that settles it in one command: `docker info --format
+  '{{.ID}}'` per socket/context, before believing anything else. When the
+  engines disagree with the ports, run every stack command with an explicit
+  `--context`.
 
 - The Transactions ledger's Kind filter (All / Expense / Income) is a real
   `<fieldset>` of `<input type="radio">`s, built keyboard-reachable on
