@@ -58,7 +58,17 @@ const DEFAULT_INITIAL: TemplatePrefill = {
   missing: [],
 };
 
-const NO_ARCHIVED = { status: 200, body: { categories: [] } };
+// The archived-inclusive endpoint's default stub: in the real API this is
+// the household's *whole* roster (active + archived), not archived rows
+// alone, so a fixture representing "nothing is archived yet" has to still
+// carry the same active categories `CATEGORIES` above does -- buildRows
+// resolves every row's display name off this list (Defect A's fix), and a
+// bare `{ categories: [] }` would make every default-fixture row read as
+// "Unknown category" the same way the real bug did.
+const NO_ARCHIVED = {
+  status: 200,
+  body: { categories: CATEGORIES.map((c) => ({ ...c, archived: false })) },
+};
 
 function renderModal(
   props: Partial<Parameters<typeof BudgetModal>[0]> = {},
@@ -499,6 +509,79 @@ describe("BudgetModal", () => {
     expect(putBody).toMatchObject({
       lines: expect.arrayContaining([{ categoryId: "cat-archived-1", capMinor: 50000 }]),
     });
+  });
+
+  // Task 17 browser walk, Defect A: reopening Edit budget for a line whose
+  // category was archived since (the queue-archive flow saved it) rendered
+  // "Unknown category" instead of the real name -- BudgetCategoryGrid gets
+  // this right (it reads useBudget's own per-month `categories`, which
+  // always carries archived rows), but buildRows here was resolving names
+  // off the active-only `categories` prop, which by construction excludes
+  // exactly the category this line points at. The fix has to read the
+  // archived-inclusive list (already fetched for the archived-name gotcha
+  // below) for name resolution, while the add-dropdown keeps using the
+  // active-only prop.
+  it("names an archived category's line with its real name and the archived marker, not the unresolved-line fallback", async () => {
+    const { fetchMock } = renderModal(
+      {
+        initial: {
+          expectedIncomeMinor: 500000,
+          lines: [{ categoryId: "cat-petrol", capMinor: 12000 }],
+          missing: [],
+        },
+        categories: [], // active-only prop: Petrol is archived, so it's excluded here
+      },
+      {
+        "GET /api/v1/categories?includeArchived=true": {
+          status: 200,
+          body: { categories: [{ id: "cat-petrol", name: "Petrol", kind: "expense", archived: true }] },
+        },
+        [`PUT /api/v1/budgets/${MONTH}`]: { status: 200, body: { budget: { expectedIncomeMinor: 500000, lines: [] } } },
+      },
+    );
+
+    const row = await screen.findByTestId("budget-modal-row-cat-petrol");
+    expect(within(row).getByDisplayValue("Petrol")).toBeInTheDocument();
+    expect(row).toHaveTextContent("(archived)");
+    expect(screen.queryByText(/Unknown category/i)).not.toBeInTheDocument();
+
+    // Saving must queue no rename -- the row's name and originalName both
+    // resolved to "Petrol" from the same source, so this isn't a rename.
+    fireEvent.click(screen.getByRole("button", { name: "Save budget" }));
+    await waitFor(() => expect(mutatingCalls(fetchMock).length).toBeGreaterThan(0));
+    expect(mutatingCalls(fetchMock)).toEqual([`PUT /api/v1/budgets/${MONTH}`]);
+  });
+
+  // Task 17 browser walk, Defect B: typing an already-used name into "New
+  // category…" and clicking Add was a silent no-op -- the client-side
+  // duplicate guard (`rows.some((row) => row.name === name)`) returned with
+  // no row added and no feedback of any kind, not even a console warning.
+  // The fix keeps the same guard (same comparison, not touching matching
+  // semantics) but surfaces it as a visible inline error next to the add
+  // control, reusing the 409 CATEGORY_NAME_TAKEN copy shape.
+  it("shows an inline error and adds no row when the typed name duplicates a row already in the modal", async () => {
+    const { fetchMock } = renderModal(undefined, {
+      "POST /api/v1/categories": {
+        status: 201,
+        body: { category: { id: "cat-should-not-be-created", name: "Groceries", kind: "expense", archived: false } },
+      },
+    });
+
+    await screen.findByLabelText("Expected income");
+    const rowsBefore = screen.getAllByTestId(/^budget-modal-row-/).length;
+
+    fireEvent.change(screen.getByLabelText("+ Add a category"), { target: { value: "__new__" } });
+    fireEvent.change(screen.getByLabelText("New category name"), { target: { value: "Groceries" } });
+    fireEvent.click(within(screen.getByTestId("budget-modal-new-category-form")).getByRole("button", { name: "Add" }));
+
+    expect(await screen.findByText('"Groceries" is already a category name in this household.')).toBeInTheDocument();
+    expect(screen.getAllByTestId(/^budget-modal-row-/)).toHaveLength(rowsBefore);
+    expect((screen.getByLabelText("New category name") as HTMLInputElement).value).toBe("Groceries");
+    // Registered above so a regression shows as a clean assertion failure
+    // (an unexpected write in the list) rather than a stub-not-found
+    // rejection masking the real bug -- the house convention (see the
+    // multi-item-queue test's own comment on why).
+    expect(mutatingCalls(fetchMock)).toEqual([]);
   });
 
   describe("the 50/30/20 waiting-for-income state", () => {

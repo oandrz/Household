@@ -85,11 +85,12 @@ function buildRows(
 ): Row[] {
   return lines.map((line) => {
     const found = categories.find((c) => c.id === line.categoryId);
-    // A line whose category this modal cannot name (deleted is not possible
-    // -- there is no hard delete -- but a category this household's plain,
-    // active-only `categories` list doesn't carry, e.g. archived since the
-    // month it was capped, can reach here today: "Import last month" hands
-    // `prevMonthBudget.lines` straight through with no name-mapping).
+    // A line whose category this modal cannot name at all: there is no hard
+    // delete, so this is only reachable if `categories` (whatever list the
+    // caller handed in) somehow still doesn't carry the id -- e.g. a
+    // household deleted between the archived-inclusive fetch resolving and
+    // this render, or a genuinely stale id from "Import last month"'s
+    // straight-through handoff of `prevMonthBudget.lines`.
     // `name` and `originalName` MUST be the same fallback string, not two
     // different ones ("Unknown category" vs "") -- Save's rename check is
     // `row.name.trim() !== row.originalName`, and two different fallbacks
@@ -133,8 +134,32 @@ export function BudgetModal({
   onSaved: () => void;
 }) {
   const budget = useBudget(month);
+  // The household's real, include-archived category roster -- fetched here,
+  // one level up from BudgetModalForm, so it is ready (not still in flight)
+  // the moment that component's rows first build. Two callers need it once
+  // it lands: buildRows below (Defect A, Task 17's browser walk -- an
+  // archived category's line was rendering "Unknown category" because name
+  // resolution ran off the active-only `categories` prop) and the
+  // archived-name gotcha check in addCategoryByName (ledgered from Task 13's
+  // review). `categories` (the prop) stays active-only throughout and is
+  // still what the add-dropdown filters against -- that list must never
+  // offer an archived category to pick again.
+  const archivedAwareCategories = useQuery({
+    queryKey: ["categories", { includeArchived: true }] as const,
+    queryFn: async () => {
+      const raw = await apiFetch<unknown>("/api/v1/categories?includeArchived=true");
+      return categoriesWithArchivedResponseSchema.parse(raw).categories;
+    },
+  });
+  // Falls back to the active-only prop on a genuine fetch failure rather
+  // than hanging this modal on "Loading…" forever -- react-query gives up
+  // retrying eventually, and a failed archived-inclusive fetch must not turn
+  // into a modal a household can never open. That fallback reproduces
+  // today's pre-fix behaviour (the `cat-gone` unresolved-line test below)
+  // rather than a new failure mode.
+  const allCategories = archivedAwareCategories.data ?? (archivedAwareCategories.isError ? categories : null);
 
-  if (!budget.data) {
+  if (!budget.data || !allCategories) {
     return (
       <Modal open onClose={onClose} title={BUDGET_COPY.editBudget}>
         <p className="text-xs text-muted" data-testid="budget-modal-loading">
@@ -148,6 +173,7 @@ export function BudgetModal({
     <BudgetModalForm
       initial={initial}
       categories={categories}
+      allCategories={allCategories}
       awaitingIncome={awaitingIncome}
       currency={budget.data.currency}
       onClose={onClose}
@@ -171,6 +197,7 @@ export function BudgetModal({
 function BudgetModalForm({
   initial,
   categories,
+  allCategories,
   awaitingIncome,
   currency,
   onClose,
@@ -183,6 +210,7 @@ function BudgetModalForm({
 }: {
   initial: TemplatePrefill;
   categories: CategoryOption[];
+  allCategories: CategoryOption[];
   awaitingIncome: boolean;
   currency: string;
   onClose: () => void;
@@ -193,39 +221,49 @@ function BudgetModalForm({
   archiveCategory: ReturnType<typeof useBudget>["archiveCategory"];
   restoreCategory: ReturnType<typeof useBudget>["restoreCategory"];
 }) {
-  const [rows, setRows] = useState<Row[]>(() => buildRows(initial.lines, categories, currency));
+  const [rows, setRows] = useState<Row[]>(() => buildRows(initial.lines, allCategories, currency));
   const [missing, setMissing] = useState<string[]>(initial.missing);
   const [incomeInput, setIncomeInput] = useState(() =>
     initial.expectedIncomeMinor != null ? minorUnitsToInputValue(initial.expectedIncomeMinor, currency) : "",
   );
   const [addSelectValue, setAddSelectValue] = useState("");
   const [newCategoryName, setNewCategoryName] = useState("");
+  // Task 17 browser walk, Defect B: typing an already-used name into "New
+  // category…" and clicking Add was a silent no-op -- the duplicate guard
+  // below returned with no row added and no feedback at all. This surfaces
+  // that guard as a visible inline error next to the add control, reusing
+  // the 409 CATEGORY_NAME_TAKEN copy shape (categoryNameTaken below) since
+  // it is naming the same fact: this household already has a category by
+  // this name.
+  const [addCategoryError, setAddCategoryError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const tempKeyRef = useRef(0);
 
-  // The archived-name gotcha (ledgered from Task 13's review): a template's
-  // `missing` name, or a name typed into "New category…", might belong to a
-  // category this household already has -- just archived. Creating it again
-  // 409s on categories_household_id_name_key. This is the household's real,
-  // include-archived roster to check a name against before deciding whether
-  // "Add" means create or restore; `categories` (the prop) is active-only by
-  // construction and cannot answer that question on its own.
-  const archivedAwareCategories = useQuery({
-    queryKey: ["categories", { includeArchived: true }] as const,
-    queryFn: async () => {
-      const raw = await apiFetch<unknown>("/api/v1/categories?includeArchived=true");
-      return categoriesWithArchivedResponseSchema.parse(raw).categories;
-    },
-  });
-
-  function addCategoryByName(rawName: string) {
+  // Returns whether a row was actually added -- callers that reset the
+  // "New category…" input on success (handleAddNewCategory below) need to
+  // know the difference between "added" and "refused," since the taken-name
+  // refusal below must leave the typed value in place for the household to
+  // see what they typed and correct it.
+  function addCategoryByName(rawName: string): boolean {
     const name = rawName.trim();
-    if (!name) return;
-    if (rows.some((row) => row.name === name)) return;
+    if (!name) return false;
+    if (rows.some((row) => row.name === name)) {
+      setAddCategoryError(BUDGET_COPY.categoryNameTaken(name));
+      return false;
+    }
+    setAddCategoryError(null);
 
-    const known = archivedAwareCategories.data ?? categories;
-    const archivedMatch = known.find((c) => c.name === name && c.archived);
+    // The archived-name gotcha (ledgered from Task 13's review): a
+    // template's `missing` name, or a name typed into "New category…",
+    // might belong to a category this household already has -- just
+    // archived. Creating it again 409s on
+    // categories_household_id_name_key. `allCategories` is the household's
+    // real, include-archived roster this checks against before deciding
+    // whether "Add" means create or restore; `categories` (the prop) is
+    // active-only by construction and cannot answer that question on its
+    // own.
+    const archivedMatch = allCategories.find((c) => c.name === name && c.archived);
     if (archivedMatch) {
       setRows((prev) => [
         ...prev,
@@ -240,7 +278,7 @@ function BudgetModalForm({
           action: "restore",
         },
       ]);
-      return;
+      return true;
     }
 
     const activeMatch = categories.find((c) => c.name === name && !c.archived);
@@ -258,7 +296,7 @@ function BudgetModalForm({
           action: null,
         },
       ]);
-      return;
+      return true;
     }
 
     tempKeyRef.current += 1;
@@ -275,6 +313,7 @@ function BudgetModalForm({
         action: "create",
       },
     ]);
+    return true;
   }
 
   function handleIncomeChange(value: string) {
@@ -317,6 +356,11 @@ function BudgetModalForm({
 
   function handleAddSelectChange(value: string) {
     setAddSelectValue(value);
+    // Leaving "New category…" for something else hides the form the error
+    // is attached to (gated on addSelectValue === "__new__" below) -- clear
+    // it here too so a stale refusal from a previous attempt can't flash
+    // back in if the household reopens "New category…" later.
+    setAddCategoryError(null);
     if (value === "" || value === "__new__") return;
     const picked = categories.find((c) => c.id === value);
     if (!picked) return;
@@ -337,7 +381,11 @@ function BudgetModalForm({
   }
 
   function handleAddNewCategory() {
-    addCategoryByName(newCategoryName);
+    // Only clears the input and closes "New category…" on an actual add --
+    // a taken-name refusal (addCategoryByName returning false, and setting
+    // addCategoryError itself) must leave the typed value and the form
+    // exactly as the household left them, per Defect B's fix.
+    if (!addCategoryByName(newCategoryName)) return;
     setNewCategoryName("");
     setAddSelectValue("");
   }
@@ -589,6 +637,11 @@ function BudgetModalForm({
                 {BUDGET_COPY.addCategory}
               </button>
             </div>
+          )}
+          {addCategoryError !== null && (
+            <p role="alert" className="text-xs leading-snug text-danger" data-testid="budget-modal-add-category-error">
+              {addCategoryError}
+            </p>
           )}
         </div>
 

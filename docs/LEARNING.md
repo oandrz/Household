@@ -92,6 +92,24 @@ nobody thought to look at.
   described the old world too, while `account_repo.go`'s comment — for the
   implementation of that same port — had been updated.
 
+- `BudgetModal.tsx` had two category lists in play — `categories` (the
+  active-only prop) and an archived-inclusive fetch already wired up for
+  `addCategoryByName`'s restore-vs-create check — and `buildRows` read the
+  wrong one. Reopening Edit budget for a line whose category had been
+  archived since (the queue-archive flow saving it) rendered the row's
+  fallback name, "Unknown category," instead of the real name with an
+  archived marker; the page's own category grid, reading a different,
+  correct source, never showed the bug. The sibling function in the same
+  file had already solved "which list do I need" for its own purpose; the
+  fix nobody had made yet was making the *other* function use it too. Found
+  by Task 17's browser walk, not a test — every existing test's `categories`
+  prop happened to already agree with its `includeArchived=true` stub, so
+  the one case where they'd disagree (a category present in one, absent
+  from the other) was never constructed. See the Frontend catalogue for the
+  full fix, paired there with a second defect in the same modal (a
+  duplicate-name guard that refused with zero feedback) found by the same
+  walk.
+
 **When you fix something, grep for its shape before you close it.** The question
 that finds these is not "is this fixed?" but "where else does this pattern
 appear?" `Truncate` is now that grep for date-and-location bugs specifically —
@@ -1429,6 +1447,45 @@ route with a missing guard has no second line of defence.
   never actually lands on that boundary — the first draft of "months under
   budget" test data had no exact-cap month at all, so a `<=` vs `<` bug
   would have passed silently.
+- Task 17's browser walk found two more defects in `BudgetModal.tsx`, both
+  rooted in the same fact: the modal has two category lists, and only one
+  of its two consumers was reading the right one. **Defect A**: `buildRows`
+  resolved every row's name off `categories` (`BudgetPage.tsx`'s
+  active-only `useCategories()` prop), so a line whose category was
+  archived since it was capped fell to the shared fallback name from the
+  bug ledgered just above this one -- "Unknown category" -- even though
+  the same file's `addCategoryByName` already fetched
+  `GET /api/v1/categories?includeArchived=true` for its own restore-vs-create
+  check. The page's category grid renders "Petrol (archived)" correctly
+  because it reads `useBudget`'s own per-month `categories`, which always
+  carries archived rows -- a different, correct source the modal simply
+  never consulted. **Defect B**: the "+ Add a category -> New category..."
+  duplicate guard (`rows.some((row) => row.name === name)`) already existed
+  and worked, but refused with zero feedback -- no message, no row, and
+  (confirmed against the network log) no request at all -- reading as
+  nothing happened rather than as a rejection. Fixed together: the
+  archived-inclusive fetch moved out of `BudgetModalForm` and up into the
+  outer `BudgetModal`, gated alongside `useBudget`'s own `budget.data`
+  (with a fallback to the active-only prop on a genuine fetch failure, so
+  a broken archived-inclusive endpoint degrades instead of hanging the
+  modal on "Loading..." forever) so `buildRows`'s `useState` initializer
+  never runs before that data exists, and handed down as a new
+  `allCategories` prop used by both `buildRows` and `addCategoryByName` --
+  while `categories` stays exactly what the add-dropdown filters against,
+  since that list must never re-offer an archived category to pick again.
+  The duplicate guard now sets a dedicated inline error next to the add
+  control (reusing `categoryNameTaken`'s copy shape) instead of returning
+  silently, and `handleAddNewCategory` only clears the "New category..."
+  input on an actual add. Neither defect could have been caught by the
+  existing suite as written: every test's `categories` prop and its
+  `includeArchived=true` stub happened to already agree with each other
+  (a fixture gap the fix also had to correct, once `buildRows` started
+  depending on the second list), and no test ever typed an already-used
+  name into the add control and asserted on the *absence* of a network
+  call. Both new tests do; the archived-name one is mutation-checked
+  (reverting `buildRows`'s argument back to `categories` turns it red on
+  the display-name assertion, not just the incidental no-rename one, which
+  would have passed either way). See pattern 1.
 
 ### Tooling and infrastructure
 

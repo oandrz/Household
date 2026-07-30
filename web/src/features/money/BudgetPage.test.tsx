@@ -312,6 +312,15 @@ describe("BudgetPage", () => {
         status: 200,
         body: { categories: [{ id: "cat-groceries", name: "Groceries", kind: "expense" }] },
       },
+      // BudgetModal.tsx's own archived-inclusive fetch has to agree with the
+      // active-only list above -- the real backend answers both routes off
+      // the same household roster, and buildRows resolves every row's name
+      // off this one (Defect A's fix), not the active-only list this test
+      // overrode above.
+      "GET /api/v1/categories?includeArchived=true": {
+        status: 200,
+        body: { categories: [{ id: "cat-groceries", name: "Groceries", kind: "expense", archived: false }] },
+      },
       "GET /api/v1/budgets/2026-06": { status: 200, body: budgetFixture({ budget: null, month: "2026-06" }) },
     });
 
