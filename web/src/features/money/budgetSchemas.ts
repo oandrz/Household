@@ -11,7 +11,13 @@ import { z } from "zod";
 // `categorySchema` without that field; redefining rather than editing it
 // here is deliberate -- touching that file (and the ledger dropdown it
 // feeds) is out of this task's scope, so the two stay two names until a
-// later task reconciles them on purpose rather than by accident.
+// later task reconciles them on purpose rather than by accident. The failure
+// mode of picking the wrong one is silent, not a thrown error: zod strips
+// unknown keys by default rather than rejecting them, so parsing a
+// `{..., archived: true}` payload against transactionSchemas.ts's
+// archived-less sibling would not throw -- it would quietly drop `archived`
+// off the parsed object, and every "is this category archived" check
+// downstream would see `undefined` and read as false.
 export const categorySchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -94,10 +100,12 @@ export const budgetMonthResponseSchema = z.object({
 export type BudgetMonthResponse = z.infer<typeof budgetMonthResponseSchema>;
 
 // putBudgetResponseSchema mirrors putBudgetResponse -- PUT's own reply.
-// useBudget's `save` reloads the month after a successful PUT rather than
-// reading this response directly (the same re-GET shape the brief
-// describes), but the schema is still exported so a caller that does want
-// the immediate value has a parsed shape to reach for.
+// useBudget's `save` parses PUT's response with this schema (pinning it
+// against wire drift) but still invalidates and refetches the month
+// afterward rather than writing this value straight into the query cache --
+// the month response is the one place every derived figure (spent,
+// remaining, percent used, over count...) is computed together, and this
+// response carries none of that, only the saved budget itself.
 export const putBudgetResponseSchema = z.object({
   budget: budgetSchema,
 });

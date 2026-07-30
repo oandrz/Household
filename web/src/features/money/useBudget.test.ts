@@ -1,10 +1,9 @@
+import { createElement } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubFetchRoutes } from "../../test/fetchStub";
-import {
-  budgetHistoryResponseSchema,
-  categoryResponseSchema,
-} from "./budgetSchemas";
+import { budgetHistoryResponseSchema, categoryResponseSchema } from "./budgetSchemas";
 import { useBudget } from "./useBudget";
 
 const julyResponse = {
@@ -43,6 +42,24 @@ const julyResponseAfterSave = {
   budgetedMinor: 25000,
 };
 
+// A fresh QueryClient per test, `retry: false` so a stubbed 500 surfaces on
+// `.error` immediately instead of the hook waiting out react-query's
+// default retry backoff -- the same convention router.test.tsx's
+// `renderApp` and useTransactions.ts's callers already use. useBudget is
+// built on `useQuery`/`useMutation` (Task 11 fix round: it started as a
+// hand-rolled `useState`/`useEffect` pair, converted to match the house
+// precedent useTransactions.ts's own month-parameterized `useQuery` sets),
+// so every render here needs a real QueryClientProvider in scope, not just
+// the fetch stub.
+function renderUseBudget(month: string) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return renderHook(() => useBudget(month), {
+    wrapper: ({ children }) => createElement(QueryClientProvider, { client: queryClient }, children),
+  });
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -53,13 +70,41 @@ describe("useBudget", () => {
       "GET /api/v1/budgets/2026-07": { status: 200, body: julyResponse },
     });
 
-    const { result } = renderHook(() => useBudget("2026-07"));
+    const { result } = renderUseBudget("2026-07");
 
     expect(result.current.loading).toBe(true);
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     expect(result.current.error).toBeNull();
     expect(result.current.data?.month).toBe("2026-07");
+    expect(result.current.data?.budgetedMinor).toBe(20000);
+  });
+
+  // Task 9's empty state: no budget row for the month, but real spend
+  // figures still computed. `data.budget` has to come through as the literal
+  // `null` zod parsed it as, not `undefined` (which `?.` alone wouldn't
+  // distinguish from "hasn't loaded yet") and not coerced into an empty
+  // object.
+  it("exposes `budget: null` for the empty state without losing the real spend figures", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/budgets/2026-08": {
+        status: 200,
+        body: {
+          ...julyResponse,
+          month: "2026-08",
+          budget: null,
+        },
+      },
+    });
+
+    const { result } = renderUseBudget("2026-08");
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.error).toBeNull();
+    expect(result.current.data?.budget).toBeNull();
+    // The empty state still carries real spend -- BudgetService.Month
+    // computes these regardless of whether a budget row exists.
+    expect(result.current.data?.spentMinor).toBe(15000);
     expect(result.current.data?.budgetedMinor).toBe(20000);
   });
 
@@ -79,7 +124,7 @@ describe("useBudget", () => {
       },
     });
 
-    const { result } = renderHook(() => useBudget("2026-07"));
+    const { result } = renderUseBudget("2026-07");
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     await act(async () => {
@@ -94,9 +139,18 @@ describe("useBudget", () => {
       lines: [{ categoryId: "cat-1", capMinor: 25000 }],
     });
     // The re-GET's second response, not the first -- proves save() actually
-    // reloaded rather than the hook still showing whatever GET returned on
-    // mount.
-    expect(result.current.data?.budgetedMinor).toBe(25000);
+    // invalidated and refetched rather than the hook still showing whatever
+    // GET returned on mount. A `waitFor`, not a synchronous assertion right
+    // after `act`: `mutateAsync` resolving only guarantees
+    // `invalidateQueries`'s refetch has been *dispatched*, not that the
+    // query observer's `useSyncExternalStore` re-render has been flushed to
+    // this render's `result.current` yet (react-query's notifyManager
+    // batches that notification on its own microtask, one hop later than
+    // `act`'s single flush pass covers) -- the same reason this codebase's
+    // other invalidateQueries-driven UI tests (FinancesPage.test.tsx's
+    // archive-button ones) assert through `waitFor` rather than immediately
+    // after the triggering event.
+    await waitFor(() => expect(result.current.data?.budgetedMinor).toBe(25000));
   });
 
   it("createCategory POSTs to /api/v1/categories then reloads the month", async () => {
@@ -115,7 +169,7 @@ describe("useBudget", () => {
       },
     });
 
-    const { result } = renderHook(() => useBudget("2026-07"));
+    const { result } = renderUseBudget("2026-07");
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     await act(async () => {
@@ -123,7 +177,7 @@ describe("useBudget", () => {
     });
 
     expect(postBody).toEqual({ name: "Rent" });
-    expect(result.current.data?.budgetedMinor).toBe(25000);
+    await waitFor(() => expect(result.current.data?.budgetedMinor).toBe(25000));
   });
 
   it("renameCategory PATCHes /api/v1/categories/{id} then reloads", async () => {
@@ -142,7 +196,7 @@ describe("useBudget", () => {
       },
     });
 
-    const { result } = renderHook(() => useBudget("2026-07"));
+    const { result } = renderUseBudget("2026-07");
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     await act(async () => {
@@ -150,7 +204,7 @@ describe("useBudget", () => {
     });
 
     expect(patchBody).toEqual({ name: "Food" });
-    expect(result.current.data?.budgetedMinor).toBe(25000);
+    await waitFor(() => expect(result.current.data?.budgetedMinor).toBe(25000));
   });
 
   it("archiveCategory POSTs /api/v1/categories/{id}/archive then reloads", async () => {
@@ -165,14 +219,14 @@ describe("useBudget", () => {
       },
     });
 
-    const { result } = renderHook(() => useBudget("2026-07"));
+    const { result } = renderUseBudget("2026-07");
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     await act(async () => {
       await result.current.archiveCategory("cat-1");
     });
 
-    expect(result.current.data?.budgetedMinor).toBe(25000);
+    await waitFor(() => expect(result.current.data?.budgetedMinor).toBe(25000));
   });
 
   it("restoreCategory POSTs /api/v1/categories/{id}/restore then reloads", async () => {
@@ -187,14 +241,14 @@ describe("useBudget", () => {
       },
     });
 
-    const { result } = renderHook(() => useBudget("2026-07"));
+    const { result } = renderUseBudget("2026-07");
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     await act(async () => {
       await result.current.restoreCategory("cat-1");
     });
 
-    expect(result.current.data?.budgetedMinor).toBe(25000);
+    await waitFor(() => expect(result.current.data?.budgetedMinor).toBe(25000));
   });
 
   it("surfaces a fetch failure as `error`, not a thrown exception", async () => {
@@ -205,7 +259,7 @@ describe("useBudget", () => {
       },
     });
 
-    const { result } = renderHook(() => useBudget("2026-07"));
+    const { result } = renderUseBudget("2026-07");
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     expect(result.current.error).not.toBeNull();
@@ -215,12 +269,12 @@ describe("useBudget", () => {
 
 // budgetHistoryResponseSchema and categoryResponseSchema aren't parsed by
 // useBudget itself (the History modal and the category-write responses are
-// Task 15/Task 14's job respectively, and useBudget's category calls
-// deliberately discard their response body and reload instead -- see the
-// "Category writes below" comment in useBudget.ts). Parsing a realistic wire
-// body here pins the two schemas against Task 9/10's actual DTOs now, rather
-// than leaving the first real drift to surface as an unexplained parse
-// throw two tasks from now.
+// Task 15/Task 14's job respectively, and useBudget's category mutations
+// deliberately discard their response body and invalidate instead -- see
+// useBudget.ts's own comments). Parsing a realistic wire body here pins the
+// two schemas against Task 9/10's actual DTOs now, rather than leaving the
+// first real drift to surface as an unexplained parse throw two tasks from
+// now.
 describe("budgetSchemas", () => {
   it("parses a GET /budgets/history month row", () => {
     const parsed = budgetHistoryResponseSchema.parse({
