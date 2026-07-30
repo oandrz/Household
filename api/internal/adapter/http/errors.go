@@ -225,6 +225,8 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 			"Each category can only appear once in a budget.", nil)
 	case errors.Is(err, domain.ErrBudgetCapNegative):
 		WriteError(w, http.StatusUnprocessableEntity, "NEGATIVE_BUDGET_CAP", "A budget cap cannot be negative.", nil)
+	case errors.Is(err, domain.ErrBudgetIncomeNegative):
+		WriteError(w, http.StatusUnprocessableEntity, "NEGATIVE_BUDGET_INCOME", "Expected income cannot be negative.", nil)
 	case errors.Is(err, domain.ErrBudgetCategoryUnknown):
 		WriteError(w, http.StatusUnprocessableEntity, "UNKNOWN_BUDGET_CATEGORY",
 			"That category could not be found.", nil)

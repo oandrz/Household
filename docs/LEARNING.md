@@ -1020,6 +1020,24 @@ inventing itself as a person the moment it renders for someone else's family.
   the float error a given income landed on. Fixed to integer-first
   division-then-multiplication, never a fractional float literal, with a
   regression test pinned to the exact income that exposed the drift.
+- Budget slice, final review: `BudgetService.Save` refused a negative
+  `capMinor` (`domain.ErrBudgetCapNegative`, service check plus the
+  migration's `CHECK` on `cap_minor`) but had no equivalent guard for its
+  sibling field `expectedIncomeMinor` — neither a service check nor a
+  database constraint. `domain.NewMoney` does not itself reject a negative
+  amount (a transaction's `Money` can legitimately be negative), so a
+  direct owner+CSRF `PUT /budgets/{month}` with
+  `{"expectedIncomeMinor": -500000, "lines": []}` stored the value and
+  round-tripped on the next `GET`, unnoticed because every existing test
+  exercised the cap field's guard and never the income field's. Fixed with
+  the same per-field-sentinel shape as the cap check
+  (`domain.ErrBudgetIncomeNegative`, checked in `Save` before any repo
+  call, mapped to 422 `NEGATIVE_BUDGET_INCOME`). The lesson isn't the bug
+  itself but why it survived review as long as it did: two fields of the
+  same type (`int64` minor units, same `NewMoney` constructor, same
+  "can this be negative" question) got asymmetric treatment, and nothing
+  short of asking "what's the sibling field's guard, and does this one
+  have the same shape" would have caught it — see pattern 1.
 
 ### Database and repositories
 

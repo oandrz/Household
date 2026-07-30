@@ -370,11 +370,12 @@ func TestBudgetPutDuplicateCategoryDoesNotChangeTheSavedBudget(t *testing.T) {
 	assertBudgetRoundTrip(t, decodeBudgetBody(t, getRec), categoryID)
 }
 
-// TestBudgetSaveValidationErrors covers the remaining two per-field save
-// guards -- a negative cap and a category id that doesn't belong to this
-// household -- against one shared, never-successfully-saved month, since
-// neither case is expected to write anything for the follow-up-GET check
-// above to need repeating per case.
+// TestBudgetSaveValidationErrors covers the remaining three per-field save
+// guards -- a negative cap, a negative expected income, and a category id
+// that doesn't belong to this household -- against one shared,
+// never-successfully-saved month, since none of the cases is expected to
+// write anything, so one follow-up GET after all of them proves that rather
+// than repeating the same check per case.
 //
 // The unknown-category id doubles as this route's foreign-household check:
 // a budget month carries no household-scoped id in its own URL (unlike
@@ -396,14 +397,21 @@ func TestBudgetSaveValidationErrors(t *testing.T) {
 	unknownCategoryID := "00000000-0000-0000-0000-000000000000"
 
 	cases := []struct {
-		name  string
-		lines []map[string]any
-		code  string
+		name                string
+		lines               []map[string]any
+		expectedIncomeMinor *int64
+		code                string
 	}{
 		{
 			name:  "negative cap",
 			lines: []map[string]any{{"categoryId": categoryID, "capMinor": -100}},
 			code:  "NEGATIVE_BUDGET_CAP",
+		},
+		{
+			name:                "negative expected income",
+			lines:               []map[string]any{},
+			expectedIncomeMinor: int64Ptr(-500_000),
+			code:                "NEGATIVE_BUDGET_INCOME",
 		},
 		{
 			name:  "unknown category",
@@ -414,11 +422,37 @@ func TestBudgetSaveValidationErrors(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			rec := env.authed(t, http.MethodPut, path, map[string]any{"lines": c.lines}, session, csrf)
+			body := map[string]any{"lines": c.lines}
+			if c.expectedIncomeMinor != nil {
+				body["expectedIncomeMinor"] = *c.expectedIncomeMinor
+			}
+			rec := env.authed(t, http.MethodPut, path, body, session, csrf)
 			assertErrorResponse(t, rec, http.StatusUnprocessableEntity, c.code)
 		})
 	}
+
+	// None of the three cases above wrote anything, so this one follow-up
+	// GET is enough to prove the month is still exactly as unbudgeted as it
+	// started -- including for the negative-income case, whose own request
+	// carried no line to fail on independently.
+	getRec := env.authedGet(t, path, session)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("get: status = %d, body = %s", getRec.Code, getRec.Body.String())
+	}
+	got := decodeBudgetBody(t, getRec)
+	if got.Budget.ExpectedIncomeMinor != nil {
+		t.Fatalf("get expectedIncomeMinor = %v, want nil -- nothing should have been saved", *got.Budget.ExpectedIncomeMinor)
+	}
+	if len(got.Budget.Lines) != 0 {
+		t.Fatalf("get lines = %+v, want none -- nothing should have been saved", got.Budget.Lines)
+	}
 }
+
+// int64Ptr is a small literal-to-pointer helper for table-driven cases that
+// need to distinguish "field omitted" from "field sent as zero" -- the same
+// distinction BudgetService.Save's own nil-round-trips-as-nil comment
+// documents.
+func int64Ptr(v int64) *int64 { return &v }
 
 // TestBudgetHistoryMonthsIsClamped proves both ends of the [1, 24] clamp
 // against the same fixture: budgets one, twenty-three and thirty months

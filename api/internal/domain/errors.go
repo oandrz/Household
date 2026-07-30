@@ -71,13 +71,14 @@ var (
 	// the Budget screen.
 	ErrCategoryNameRequired = errors.New("a category name is required")
 
-	// The budget sentinels. BudgetService.Save checks both before
+	// The budget sentinels. BudgetService.Save checks all three before
 	// BudgetRepository.Upsert ever runs, following the per-field sentinel
 	// convention above rather than a generic ErrValidation -- there is no
 	// such sentinel in this codebase, deliberately, so every 422 the HTTP
 	// layer returns can carry a field-specific code.
-	ErrBudgetLineDuplicate = errors.New("a budget line's category is repeated")
-	ErrBudgetCapNegative   = errors.New("a budget cap cannot be negative")
+	ErrBudgetLineDuplicate  = errors.New("a budget line's category is repeated")
+	ErrBudgetCapNegative    = errors.New("a budget cap cannot be negative")
+	ErrBudgetIncomeNegative = errors.New("a budget's expected income cannot be negative")
 
 	// ErrBudgetCategoryUnknown is BudgetRepository.Upsert's own
 	// household-ownership check (validateLineCategories in the postgres

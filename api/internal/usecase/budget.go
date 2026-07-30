@@ -374,15 +374,23 @@ func (s *BudgetService) convert(ctx context.Context, m domain.Money, primary str
 // relabels to the household's primary currency regardless, but that must
 // never be the only thing standing between a bad currency and a stored row.
 //
-// A duplicate category id or a negative cap is refused before any repo call
-// -- domain.ErrBudgetLineDuplicate and domain.ErrBudgetCapNegative,
-// following the per-field sentinel convention domain/errors.go already uses
-// (there is no domain.ErrValidation). An unknown or foreign category id is
-// not checked here at all: that is BudgetRepository.Upsert's own
+// A duplicate category id, a negative cap, or a negative expected income is
+// refused before any repo call -- domain.ErrBudgetLineDuplicate,
+// domain.ErrBudgetCapNegative and domain.ErrBudgetIncomeNegative, following
+// the per-field sentinel convention domain/errors.go already uses (there is
+// no domain.ErrValidation). domain.NewMoney does not itself refuse a
+// negative amount -- a transaction's Money can legitimately be negative --
+// so nothing downstream of this check would otherwise catch a negative
+// income before it reached the repository. An unknown or foreign category id
+// is not checked here at all: that is BudgetRepository.Upsert's own
 // household-ownership check (validateLineCategories in the postgres
 // adapter), and its error passes through unchanged rather than being
 // duplicated or reinterpreted in this layer.
 func (s *BudgetService) Save(ctx context.Context, householdID string, month time.Time, expectedIncomeMinor *int64, lines []BudgetLineInput) (domain.Budget, error) {
+	if expectedIncomeMinor != nil && *expectedIncomeMinor < 0 {
+		return domain.Budget{}, domain.ErrBudgetIncomeNegative
+	}
+
 	seen := make(map[string]bool, len(lines))
 	for _, line := range lines {
 		if seen[line.CategoryID] {

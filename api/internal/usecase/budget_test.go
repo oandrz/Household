@@ -358,9 +358,9 @@ func TestBudgetMonthGroupsSpendByPerson(t *testing.T) {
 
 // TestBudgetSaveValidates covers Save's whole contract in one test, the same
 // shape TestBudgetHistoryMarksOnlyTheCurrentMonthOpen uses for its own
-// multi-assertion story: duplicate and negative-cap are refused before the
-// repository is ever called, an unknown category's error passes through
-// untouched, and a nil expected income round-trips as nil.
+// multi-assertion story: duplicate, negative-cap and negative-income are all
+// refused before the repository is ever called, an unknown category's error
+// passes through untouched, and a nil expected income round-trips as nil.
 func TestBudgetSaveValidates(t *testing.T) {
 	f := newBudgetFixture(t)
 	ctx := context.Background()
@@ -379,6 +379,14 @@ func TestBudgetSaveValidates(t *testing.T) {
 	})
 	if !errors.Is(err, domain.ErrBudgetCapNegative) {
 		t.Fatalf("negative cap err = %v, want domain.ErrBudgetCapNegative", err)
+	}
+
+	negativeIncome := int64(-500000)
+	_, err = f.svc.Save(ctx, "house-1", july, &negativeIncome, []usecase.BudgetLineInput{
+		{CategoryID: "cat-groceries", CapMinor: 1000},
+	})
+	if !errors.Is(err, domain.ErrBudgetIncomeNegative) {
+		t.Fatalf("negative income err = %v, want domain.ErrBudgetIncomeNegative", err)
 	}
 
 	// Arm the repository double's household-ownership check: only these two

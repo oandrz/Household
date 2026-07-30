@@ -14,10 +14,12 @@ export const BUDGET_COPY = {
   history: "History",
 
   budgeted: "Budgeted",
-  // "so far" is dropped for a month that isn't the current one -- daysLeft
-  // reaching 0 is the server's own signal for that (spec's formulas table:
-  // days left is 0 for a past month), and "Spent so far" for a month that
-  // finished weeks ago reads as if the screen doesn't know it's over.
+  // "so far" is dropped for a past month -- daysLeft reaching 0 is the
+  // server's own signal for that (spec's formulas table: days left is 0 for
+  // a past month), and "Spent so far" for a month that finished weeks ago
+  // reads as if the screen doesn't know it's over. A future month still has
+  // daysLeft > 0, so it keeps "so far" -- spec-consistent, since a month
+  // that hasn't started yet hasn't finished either.
   spentSoFar: "Spent so far",
   spent: "Spent",
   remaining: "Remaining",

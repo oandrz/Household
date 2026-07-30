@@ -36,10 +36,10 @@ func DaysLeftInMonth(month, today time.Time) int {
 	}
 }
 
-// PercentUsed rounds to the nearest whole percent, half away from zero — the
-// same rounding Money already uses. ok=false when nothing is budgeted; the
-// caller hides the figure rather than showing NaN or infinity. Handles negative
-// net spend (e.g., refunds exceeding the month's spend).
+// PercentUsed rounds to the nearest whole percent, half away from zero,
+// sign-aware on negative net spend (e.g., refunds exceeding the month's
+// spend). ok=false when nothing is budgeted; the caller hides the figure
+// rather than showing NaN or infinity.
 func PercentUsed(spentMinor, budgetedMinor int64) (int, bool) {
 	if budgetedMinor == 0 {
 		return 0, false
