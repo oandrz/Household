@@ -425,4 +425,18 @@ describe("AccountModal", () => {
 
     expect(await screen.findByLabelText("Starting balance as of")).toHaveValue("2025-12-31");
   });
+
+  it("says the starting balance is the start-of-day figure", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/household/members": NO_MEMBERS,
+    });
+    renderWithRouter(<AccountModal open onClose={() => {}} />);
+    expect(
+      await screen.findByText(
+        "The balance at the start of that day — transactions dated that day count.",
+      ),
+    ).toBeInTheDocument();
+  });
 });

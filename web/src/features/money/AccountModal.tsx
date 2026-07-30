@@ -376,6 +376,10 @@ export function AccountModal({
             onChange={(event) => setAsOf(event.target.value)}
             className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
           />
+          <p className="text-[11.5px] leading-snug text-muted">
+            The balance at the start of that day — transactions dated that day
+            count.
+          </p>
         </div>
 
         <div className="flex items-center justify-between rounded-[10px] border border-hairline px-3.5 py-2.5">
