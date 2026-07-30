@@ -27,6 +27,12 @@ const CURRENCIES = {
 // mapping override it via renderPage's extraRoutes.
 const CATEGORIES = { status: 200, body: { categories: [] } };
 
+// BudgetModal.tsx calls useBudget(month) and fetches the archived-inclusive
+// category list itself (see its own header comment on both) -- every test
+// below that opens the modal needs this stubbed too, even the ones that
+// never look at it, since stubFetchRoutes throws on anything unregistered.
+const NO_ARCHIVED_CATEGORIES = { status: 200, body: { categories: [] } };
+
 // The design's own set-state numbers (Household Dashboard.dc.html's Budget
 // screen), scaled into minor units: S$5,200 budgeted, S$3,420 spent, S$1,780
 // remaining, S$137/day, Christine S$1,610, Andreas S$1,240. Dining out is
@@ -87,6 +93,7 @@ function renderPage(
   stubFetchRoutes({
     "GET /api/v1/currencies": CURRENCIES,
     "GET /api/v1/categories": CATEGORIES,
+    "GET /api/v1/categories?includeArchived=true": NO_ARCHIVED_CATEGORIES,
     "GET /api/v1/budgets/2026-07": { status: 200, body: response },
     ...extraRoutes,
   });
@@ -289,9 +296,10 @@ describe("BudgetPage", () => {
     const importCard = await screen.findByTestId("budget-template-import-last-month");
     importCard.click();
 
-    const stub = await screen.findByTestId("budget-modal-stub");
-    expect(stub).toHaveAttribute("data-prefill-lines", "2");
-    expect(stub).toHaveAttribute("data-prefill-income", "520000");
+    // The real BudgetModal (Task 14): income and both lines land unchanged,
+    // proving the handoff carries the real prefill rather than a stub count.
+    expect(await screen.findByLabelText("Expected income")).toHaveValue("5200.00");
+    expect(screen.getAllByTestId(/^budget-modal-row-/)).toHaveLength(2);
   });
 
   it("hands off a template click as a prefilled TemplatePrefill, mapped by category name", async () => {
@@ -307,10 +315,11 @@ describe("BudgetPage", () => {
     familyCard.click();
 
     // Only one of the ten design categories has a live match here
-    // (Groceries) -- the modal stub's prefill-lines count pins that the
-    // handoff carries the real computed prefill, not a hard-coded number.
-    const stub = await screen.findByTestId("budget-modal-stub");
-    expect(stub).toHaveAttribute("data-prefill-lines", "1");
+    // (Groceries) -- one row, carrying the real computed prefill rather
+    // than a hard-coded number.
+    const rows = await screen.findAllByTestId(/^budget-modal-row-/);
+    expect(rows).toHaveLength(1);
+    expect(within(rows[0]).getByDisplayValue("Groceries")).toBeInTheDocument();
   });
 
   it("opens the 50/30/20 template with zero lines and the income prompt -- the waiting-for-income state", async () => {
@@ -321,9 +330,8 @@ describe("BudgetPage", () => {
     const fiftyThirtyTwentyCard = await screen.findByTestId("budget-template-fifty-thirty-twenty");
     fiftyThirtyTwentyCard.click();
 
-    const stub = await screen.findByTestId("budget-modal-stub");
-    expect(stub).toHaveAttribute("data-prefill-lines", "0");
-    expect(stub).toHaveTextContent("Enter your expected income and we'll split it 50/30/20");
+    expect(await screen.findByText("Enter your expected income and we'll split it 50/30/20")).toBeInTheDocument();
+    expect(screen.queryAllByTestId(/^budget-modal-row-/)).toHaveLength(0);
   });
 
   it("hands off `Create your first budget` as a blank (no prefill) modal", async () => {
@@ -334,8 +342,8 @@ describe("BudgetPage", () => {
     const createBlank = await screen.findByTestId("budget-create-blank");
     createBlank.click();
 
-    const stub = await screen.findByTestId("budget-modal-stub");
-    expect(stub).toHaveTextContent("Starting blank.");
+    expect(await screen.findByLabelText("Expected income")).toHaveValue("");
+    expect(screen.queryAllByTestId(/^budget-modal-row-/)).toHaveLength(0);
   });
 
   it("surfaces a fetch failure as an alert rather than a blank screen", async () => {

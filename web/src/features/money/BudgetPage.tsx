@@ -23,6 +23,7 @@
 // Task 14 replaces, not something this task tries to half-build.
 import { useState } from "react";
 import { useCurrencies } from "../auth/useAuth";
+import { BudgetModal } from "./BudgetModal";
 import { BUDGET_COPY } from "./budgetCopy";
 import { BudgetByPerson } from "./BudgetByPerson";
 import { BudgetCategoryGrid } from "./BudgetCategoryGrid";
@@ -298,23 +299,21 @@ export function BudgetPage() {
             )}
           </div>
 
-          {/* Task 14's real Edit-budget modal replaces this branch. Until
-              then, the seam is explicit: whatever was clicked above hands
-              off exactly one `TemplatePrefill | null` here, and this stub
-              only proves the handoff arrived with the right shape. */}
+          {/* BudgetModal.tsx's own header comment explains why `initial` is
+              always a `TemplatePrefill`, never `null`: "Create your first
+              budget" (modal.prefill === null) is normalised here into the
+              blank shape rather than the modal branching on a union
+              internally -- there is no behavioural difference between "no
+              prefill" and "a prefill with zero lines and nothing missing." */}
           {modal && (
-            <div
-              data-testid="budget-modal-stub"
-              data-prefill-lines={modal.prefill?.lines.length ?? 0}
-              data-prefill-income={modal.prefill?.expectedIncomeMinor ?? ""}
-              className="mt-6 rounded-lg border border-hairline bg-surface p-4 text-left text-xs text-muted"
-            >
-              <p>
-                Modal stub — Task 14 builds the real Edit-budget modal.{" "}
-                {modal.prefill ? `${modal.prefill.lines.length} categories prefilled.` : "Starting blank."}
-              </p>
-              {modal.awaitingIncome && <p className="mt-1">{BUDGET_COPY.fiftyThirtyTwentyPrompt}</p>}
-            </div>
+            <BudgetModal
+              month={data.month}
+              initial={modal.prefill ?? { expectedIncomeMinor: null, lines: [], missing: [] }}
+              categories={categoryList}
+              awaitingIncome={modal.awaitingIncome}
+              onClose={() => setModal(null)}
+              onSaved={() => setModal(null)}
+            />
           )}
         </div>
       ) : (

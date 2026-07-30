@@ -80,4 +80,36 @@ export const BUDGET_COPY = {
   fiftyThirtyTwentyPrompt: "Enter your expected income and we'll split it 50/30/20",
 
   loadError: "Couldn't load your budget.",
+
+  // BudgetModal.tsx (Task 14) copy below.
+  expectedIncome: "Expected income",
+  allocated: "Allocated",
+  leftToAllocate: "Left to allocate",
+  categoryName: "Category name",
+  cap: "Cap",
+  removeRow: "Remove",
+  archiveRow: "Archive",
+  addACategory: "+ Add a category",
+  chooseACategory: "Choose a category…",
+  newCategoryOption: "New category…",
+  newCategoryName: "New category name",
+  addCategory: "Add",
+  saveBudget: "Save budget",
+  cancel: "Cancel",
+  // The suggestion list built from a template's `missing` names (spec
+  // decision 6, budgetTemplates.ts's own comment) -- a name the template
+  // named but the household has no live category for yet.
+  suggestedByTemplate: "Suggested by this template",
+  // Shown on a row whose "Add" resolved to an ARCHIVED category rather than
+  // a brand-new one (the archived-name gotcha the Task 13 review flagged:
+  // creating a category with a name an archived row already holds 409s on
+  // categories_household_id_name_key). Saving restores it instead of
+  // creating a duplicate name the database would refuse anyway.
+  willRestore: "Archived -- saving will restore it instead of creating a duplicate.",
+  // 409 CATEGORY_NAME_TAKEN's server message is generic ("A category with
+  // that name already exists.", no name in `details`) -- named here from
+  // the name the modal itself just attempted, which it already knows
+  // client-side, rather than waiting on a server response that never
+  // carries it.
+  categoryNameTaken: (name: string) => `"${name}" is already a category name in this household.`,
 } as const;

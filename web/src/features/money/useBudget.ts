@@ -20,8 +20,10 @@ import { apiFetch } from "../../api/client";
 import { categoriesQueryKey } from "./useTransactions";
 import {
   budgetMonthResponseSchema,
+  categoryResponseSchema,
   putBudgetResponseSchema,
   type BudgetMonthResponse,
+  type Category,
 } from "./budgetSchemas";
 
 export type SaveBudgetBody = {
@@ -117,11 +119,20 @@ export function useBudget(month: string) {
   });
 
   const createCategoryMutation = useMutation({
-    mutationFn: async (name: string) => {
-      await apiFetch<unknown>("/api/v1/categories", {
+    // Parsed and returned (unlike rename/archive/restore below, which stay
+    // fire-and-refetch) because BudgetModal.tsx's queued creates need the
+    // real id the server assigned *before* it can build the PUT's line set
+    // -- a category that doesn't exist yet has no id to put a cap against,
+    // and the alternative (invalidate, then re-GET the list and match the
+    // new row back by name) would insert an extra request between every
+    // queued create and the final PUT, which is exactly the call sequence
+    // the save-order test pins.
+    mutationFn: async (name: string): Promise<Category> => {
+      const raw = await apiFetch<unknown>("/api/v1/categories", {
         method: "POST",
         body: JSON.stringify({ name }),
       });
+      return categoryResponseSchema.parse(raw).category;
     },
     onSuccess: () => invalidateAfterCategoryWrite(queryClient, month),
   });
@@ -186,8 +197,8 @@ export function useBudget(month: string) {
     save: async (body: SaveBudgetBody) => {
       await saveMutation.mutateAsync(body);
     },
-    createCategory: async (name: string) => {
-      await createCategoryMutation.mutateAsync(name);
+    createCategory: async (name: string): Promise<Category> => {
+      return createCategoryMutation.mutateAsync(name);
     },
     renameCategory: async (id: string, name: string) => {
       await renameCategoryMutation.mutateAsync({ id, name });

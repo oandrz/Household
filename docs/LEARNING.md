@@ -1216,6 +1216,40 @@ route with a missing guard has no second line of defence.
   depends on a component staying a stub is a landmine for whoever un-stubs
   it — worth writing that comment on every throwaway-stub test, not only
   this one.
+- `useBudget.ts`'s `createCategory` discarded the created category entirely
+  (`mutationFn` returned `void`) and relied on invalidate-then-refetch for
+  every caller to pick the new row up later — fine for every caller that
+  existed at the time, all of which just needed the list to eventually
+  refresh. `BudgetModal.tsx` (Task 14) is a caller that needs the server's
+  own id *immediately*: its save flow POSTs a queued create, then has to put
+  that exact id into the next request's line set, and the pinned
+  create-then-PUT ordering test would have forced an extra `GET
+  /api/v1/categories` between the two to look the id back up by name --
+  noise in a sequence the test asserts on exactly. The fix was additive, not
+  a rewrite: parse the create response and return it
+  (`categoryResponseSchema.parse(raw).category`), which every existing
+  caller still ignores and the new one now needs. General shape: a mutation
+  hook that only ever invalidates-and-refetches is quietly assuming no
+  future caller needs this write's own result before its *next* write --
+  worth returning the parsed response even when today's callers throw it
+  away, since the alternative (a second read wedged into an otherwise
+  sequential write chain) is both slower and changes what an ordering test
+  is actually asserting.
+- `BudgetModal.tsx` calls `useBudget(month)` itself rather than taking a
+  bound `save`/`createCategory` as props, which makes `budget.data` -- and
+  the currency it carries -- unavailable on the component's first render
+  whenever the query cache isn't already warm (any standalone test, or a
+  slow first load). Seeding the form's row/income state from `initial` and
+  `currency` in a plain `useState(() => ...)` initializer at the top level
+  would make that seeding depend on load order: correct in the app (the
+  parent always already resolved the same query) but wrong the moment a
+  test renders the modal on a cold cache. Split into an outer component that
+  render-branches on `!budget.data` and an inner `BudgetModalForm` that only
+  mounts once data exists -- its `useState` initializers then run exactly
+  once, at the one moment they have real data, and a later background
+  refetch (e.g. after `save` invalidates its own query) cannot silently
+  reseed a household's in-progress edits, since re-rendering the *outer*
+  component doesn't remount the *inner* one.
 
 ### Tooling and infrastructure
 

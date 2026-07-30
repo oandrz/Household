@@ -13,19 +13,21 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 48 of 93 features built or partly built. Money now has
-two features built — Accounts (a household records what it owns and owes by
-hand and sees a net worth built from it) and the Transactions ledger (logging,
-editing and deleting expenses, income and transfers, with filters and the five
-screen states the design and spec both call for) — plus the recent-transactions
-strip on Finances, deferred by the accounts spec for having no data and now
-built with the ledger to read from. Budget's set-state screen has started
-too: the four stat cards, per-category caps with the over state and pace, and
-spending by person all render live from `GET /budgets/{month}`, but nothing
-in the UI can create that budget row yet — the empty state and the Edit-budget
-modal are the next two tasks, so today it only shows once a budget exists via
-the API directly. Nothing else in Money is started yet, and nothing in
-Marriage, Family or Overview has been started.
+**Where things stand:** 51 of 94 features built or partly built (this update
+adds one row -- category rename/create/archive, folded into the Edit-budget
+modal -- and also fixes a pre-existing off-by-one: the previous "48 of 93"
+undercounted by one, since Built and Partial summed to 49, not 48). Money now has
+two features fully built — Accounts (a household records what it owns and
+owes by hand and sees a net worth built from it) and the Transactions ledger
+(logging, editing and deleting expenses, income and transfers, with filters
+and the five screen states the design and spec both call for) — plus the
+recent-transactions strip on Finances, deferred by the accounts spec for
+having no data and now built with the ledger to read from. Budget is most of
+the way there too: a household can now create a budget from scratch, from a
+template, or by importing last month's, and edit an existing one end to end
+(caps, renames, archives and all) — only the history modal and month-picker
+polish are still to come. Nothing else in Money is started yet, and nothing
+in Marriage, Family or Overview has been started.
 Five of the rows below have no mockup of their own — the provisioning
 transaction behind self-serve sign-up, the currency list endpoint, and
 `adminctl prune` — because the design's own "Create household" screen (the
@@ -36,10 +38,11 @@ reason each: archive and restore, which the design never draws anywhere in
 Money (see the Finances table below); and two ⬜ rows — custom account types
 and a warning before a primary-currency change strands every account — for
 work the accounts spec named and deliberately deferred rather than built.
-Transactions adds one more: **Categories**, whose list and seeding this
-feature needed even though the design draws category management only inside
-Budget's "Edit categories" screen — the one screen that will get its own row
-here, unbuilt, once Budget exists.
+Transactions adds two more under **Categories**: the list and its
+first-use seeding (needed before Budget existed, for the transaction modal's
+own dropdown), and — added by this Budget update — renaming, creating and
+archiving a category, which the design's spec folds into the Edit-budget
+modal rather than a dedicated screen the dc.html mockup never drew.
 
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
@@ -47,11 +50,11 @@ here, unbuilt, once Budget exists.
 | Navigation shell | 7 | 0 | 1 | 0 |
 | Household settings | 15 | 4 | 2 | 0 |
 | Overview (home) | 0 | 0 | 8 | 0 |
-| Money | 8 | 4 | 16 | 0 |
+| Money | 13 | 1 | 15 | 0 |
 | Marriage | 0 | 0 | 13 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **40** | **9** | **42** | **2** |
+| **Total** | **45** | **6** | **41** | **2** |
 
 ---
 
@@ -185,8 +188,9 @@ and Marriage retro — so it depends on Money, Family and Marriage existing firs
 
 ## 5 · Money
 
-Accounts and Transactions are built. Budget, Goals and Bills are still to
-come; this is still the largest area.
+Accounts and Transactions are built. Budget now has a real create-and-edit
+flow (only its history modal is left); Goals and Bills are still to come.
+This is still the largest area.
 
 **Finances**
 
@@ -293,40 +297,55 @@ right but isn't.
 | Feature | State |
 |---|---|
 | Category list, seeded on first use | ✅ |
+| Rename, create and archive a category | ✅ |
 
-**The list and the seeding are built; editing the list is not.** The starter
-set of thirteen categories (`domain.StarterCategories()`) is created the first
-time a household's own list is read — by `GET /api/v1/categories` or the
+**The list, the seeding, and editing are all built.** The starter set of
+thirteen categories (`domain.StarterCategories()`) is created the first time
+a household's own list is read — by `GET /api/v1/categories` or the
 transaction modal's dropdown — not at household creation, so provisioning a
-new household stays untouched by a feature it does not need. Renaming, adding
-and archiving a category is Budget's "Edit categories" screen, not this one;
-the design draws category management only there, which is why this feature
-adds a row the design itself has no mockup for.
+new household stays untouched by a feature it does not need. Renaming,
+creating and archiving a category happens inline in the Edit-budget modal
+(`BudgetModal.tsx`, Task 14) rather than a separate "Edit categories" screen —
+the design's own spec (not the original dc.html mockup) folds those controls
+into the same modal a household is already capping categories in, which is
+why this feature adds a row the design's mockup itself has no dedicated
+screen for.
 
 **Budget**
 
 | Feature | State |
 |---|---|
-| Envelope per category with pace | 🟡 |
-| Empty state with Family-of-four, 50/30/20 and import templates | 🟡 |
-| Spending by person | 🟡 |
-| Edit budget (modal) | ⬜ |
+| Envelope per category with pace | ✅ |
+| Empty state with Family-of-four, 50/30/20 and import templates | ✅ |
+| Spending by person | ✅ |
+| Edit budget (modal) | ✅ |
 | Budget history (modal) | ⬜ |
 
-**The set-state screen is built; nothing can create a budget yet.** The four
-stat cards (Budgeted, Spent, Remaining, Daily pace), the per-category caps
-grid with the over state, and Spending by person all render live from `GET
+**A household can create and edit a budget end to end now.** The four stat
+cards (Budgeted, Spent, Remaining, Daily pace), the per-category caps grid
+with the over state, and Spending by person all render live from `GET
 /budgets/{month}` — `BudgetPage.tsx` and its own card components, backed by
-`useBudget`. The empty state (`budget: null`) now renders the design's real
-"No budget set for &lt;Month&gt; yet" panel, both templates and the
-conditional "Import last month" card, and every template's caps are computed
-for real (`budgetTemplates.ts`: exact name mapping onto the household's live
-categories, `missing` for anything unmatched, the 50/30/20 proportional
-split with its 20%-headroom flooring). The 🟡 is the same gap on all three
-budget rows: a template click hands its computed prefill to a modal-stub
-(`data-testid="budget-modal-stub"`) rather than a real modal, so nothing can
-actually be saved yet — a household still cannot create a budget end to end
-until the Edit-budget modal (Task 14) replaces that stub.
+`useBudget`. The empty state (`budget: null`) renders the design's real "No
+budget set for &lt;Month&gt; yet" panel, both templates and the conditional
+"Import last month" card, with every template's caps computed for real
+(`budgetTemplates.ts`: exact name mapping onto the household's live
+categories, `missing` for anything unmatched, the 50/30/20 proportional split
+with its 20%-headroom flooring, computed live as income is typed). Clicking a
+template, or "Create your first budget", now opens the real Edit-budget modal
+(`BudgetModal.tsx`) rather than a stub: three cards (expected income,
+Allocated, Left to allocate — the last two hidden as a pair while income is
+blank), one editable row per capped category (rename, cap, ✕ to drop the cap,
+archive), and "+ Add a category" (an existing uncapped category, or a brand
+new one). Save runs every queued category create/rename/archive first, in
+order, through their own endpoints, then issues one `PUT` with the full line
+set; a failure anywhere in that sequence keeps the modal open with the error
+inline and never fires the remaining calls, including the `PUT`. A 409 name
+collision names the taken name (the server's own message doesn't carry it,
+so the modal composes it from the name it just attempted); a name that
+belongs to an *archived* category offers restore instead of silently 409ing
+on `categories_household_id_name_key` (the gotcha Task 13's review flagged).
+Only Budget history (the six-month summary modal and the page's own month
+picker beyond ‹ ›) is still unbuilt — Task 15.
 
 **Goals**
 

@@ -220,11 +220,17 @@ describe("useBudget", () => {
     const { result } = renderUseBudget("2026-07");
     await waitFor(() => expect(result.current.loading).toBe(false));
 
+    let created: unknown;
     await act(async () => {
-      await result.current.createCategory("Rent");
+      created = await result.current.createCategory("Rent");
     });
 
     expect(postBody).toEqual({ name: "Rent" });
+    // Pinned for BudgetModal.tsx: it has no other way to learn the new
+    // category's real id before building the PUT's line set, since the
+    // queued-create-then-PUT sequence must not interleave a second GET to
+    // look the id back up by name.
+    expect(created).toEqual({ id: "cat-2", name: "Rent", kind: "expense", archived: false });
     await waitFor(() => expect(result.current.data?.budgetedMinor).toBe(25000));
   });
 
