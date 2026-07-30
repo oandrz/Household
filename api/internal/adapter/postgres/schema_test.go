@@ -337,6 +337,180 @@ func TestCategoryNamesAreUniquePerHousehold(t *testing.T) {
 	}
 }
 
+// TestBudgetsSchema pins budgets' shape: the table exists, expected_income_minor
+// stays nullable (NULL means "chose not to say", never zero -- see the
+// migration's comment), and (household_id, month) is unique so Upsert can rely
+// on ON CONFLICT rather than a read-then-write race.
+func TestBudgetsSchema(t *testing.T) {
+	db := openTestDB(t)
+	pool := db.Pool()
+	ctx := context.Background()
+
+	t.Run("table exists", func(t *testing.T) {
+		var count int
+		if err := pool.QueryRow(ctx,
+			`SELECT count(*) FROM information_schema.tables WHERE table_name = 'budgets'`).Scan(&count); err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		if count != 1 {
+			t.Fatal("budgets table not found; migration did not run")
+		}
+	})
+
+	t.Run("expected_income_minor is nullable", func(t *testing.T) {
+		var isNullable string
+		if err := pool.QueryRow(ctx,
+			`SELECT is_nullable FROM information_schema.columns
+			 WHERE table_name = 'budgets' AND column_name = 'expected_income_minor'`).Scan(&isNullable); err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		if isNullable != "YES" {
+			t.Fatalf("expected_income_minor is_nullable = %q, want YES", isNullable)
+		}
+	})
+
+	t.Run("household_id and month are unique together", func(t *testing.T) {
+		householdID := insertTestHousehold(t, db)
+		insert := `INSERT INTO budgets (household_id, month) VALUES ($1, DATE '2026-07-01')`
+		if _, err := pool.Exec(ctx, insert, householdID); err != nil {
+			t.Fatalf("first insert: %v", err)
+		}
+		if _, err := pool.Exec(ctx, insert, householdID); err == nil {
+			t.Fatal("the database accepted a second budget for the same household and month")
+		}
+	})
+
+	t.Run("deleting the household cascades to its budgets", func(t *testing.T) {
+		householdID := insertTestHousehold(t, db)
+		var budgetID string
+		if err := pool.QueryRow(ctx,
+			`INSERT INTO budgets (household_id, month) VALUES ($1, DATE '2026-08-01') RETURNING id`,
+			householdID).Scan(&budgetID); err != nil {
+			t.Fatalf("insert budget: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM households WHERE id = $1`, householdID); err != nil {
+			t.Fatalf("delete household: %v", err)
+		}
+		var count int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM budgets WHERE id = $1`, budgetID).Scan(&count); err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		if count != 0 {
+			t.Fatal("budget survived its household's deletion; ON DELETE CASCADE is missing")
+		}
+	})
+}
+
+// TestBudgetLinesSchema pins budget_lines' shape: one cap per category per
+// budget, a non-negative cap, cascading with its parent budget, and a
+// category reference that refuses to cascade -- categories archive, they
+// don't delete, so a line pointing at one must block the delete instead of
+// silently disappearing.
+func TestBudgetLinesSchema(t *testing.T) {
+	db := openTestDB(t)
+	pool := db.Pool()
+	ctx := context.Background()
+
+	newBudget := func(householdID string, month string) string {
+		var id string
+		if err := pool.QueryRow(ctx,
+			`INSERT INTO budgets (household_id, month) VALUES ($1, $2) RETURNING id`,
+			householdID, month).Scan(&id); err != nil {
+			t.Fatalf("insert budget: %v", err)
+		}
+		return id
+	}
+	newCategory := func(householdID, name string) string {
+		var id string
+		if err := pool.QueryRow(ctx,
+			`INSERT INTO categories (household_id, name, kind, sort_order)
+			 VALUES ($1, $2, 'expense', 1) RETURNING id`, householdID, name).Scan(&id); err != nil {
+			t.Fatalf("insert category: %v", err)
+		}
+		return id
+	}
+
+	t.Run("table exists", func(t *testing.T) {
+		var count int
+		if err := pool.QueryRow(ctx,
+			`SELECT count(*) FROM information_schema.tables WHERE table_name = 'budget_lines'`).Scan(&count); err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		if count != 1 {
+			t.Fatal("budget_lines table not found; migration did not run")
+		}
+	})
+
+	t.Run("cap_minor must not be negative", func(t *testing.T) {
+		householdID := insertTestHousehold(t, db)
+		budgetID := newBudget(householdID, "2026-07-01")
+		categoryID := newCategory(householdID, "Groceries")
+
+		_, err := pool.Exec(ctx,
+			`INSERT INTO budget_lines (budget_id, category_id, cap_minor) VALUES ($1, $2, -100)`,
+			budgetID, categoryID)
+		if err == nil {
+			t.Fatal("the database accepted a negative cap_minor")
+		}
+		if !strings.Contains(err.Error(), "budget_lines_cap_minor_check") {
+			t.Fatalf("err = %v, want a budget_lines_cap_minor_check violation", err)
+		}
+	})
+
+	t.Run("budget_id and category_id are unique together", func(t *testing.T) {
+		householdID := insertTestHousehold(t, db)
+		budgetID := newBudget(householdID, "2026-09-01")
+		categoryID := newCategory(householdID, "Dining out")
+
+		insert := `INSERT INTO budget_lines (budget_id, category_id, cap_minor) VALUES ($1, $2, 50000)`
+		if _, err := pool.Exec(ctx, insert, budgetID, categoryID); err != nil {
+			t.Fatalf("first insert: %v", err)
+		}
+		if _, err := pool.Exec(ctx, insert, budgetID, categoryID); err == nil {
+			t.Fatal("the database accepted two lines for the same budget and category")
+		}
+	})
+
+	t.Run("deleting the budget cascades to its lines", func(t *testing.T) {
+		householdID := insertTestHousehold(t, db)
+		budgetID := newBudget(householdID, "2026-10-01")
+		categoryID := newCategory(householdID, "Transport")
+
+		var lineID string
+		if err := pool.QueryRow(ctx,
+			`INSERT INTO budget_lines (budget_id, category_id, cap_minor) VALUES ($1, $2, 20000) RETURNING id`,
+			budgetID, categoryID).Scan(&lineID); err != nil {
+			t.Fatalf("insert line: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM budgets WHERE id = $1`, budgetID); err != nil {
+			t.Fatalf("delete budget: %v", err)
+		}
+		var count int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM budget_lines WHERE id = $1`, lineID).Scan(&count); err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		if count != 0 {
+			t.Fatal("line survived its budget's deletion; ON DELETE CASCADE is missing")
+		}
+	})
+
+	t.Run("deleting a category referenced by a line is refused", func(t *testing.T) {
+		householdID := insertTestHousehold(t, db)
+		budgetID := newBudget(householdID, "2026-11-01")
+		categoryID := newCategory(householdID, "Utilities")
+
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO budget_lines (budget_id, category_id, cap_minor) VALUES ($1, $2, 30000)`,
+			budgetID, categoryID); err != nil {
+			t.Fatalf("insert line: %v", err)
+		}
+		_, err := pool.Exec(ctx, `DELETE FROM categories WHERE id = $1`, categoryID)
+		if err == nil {
+			t.Fatal("the database deleted a category still referenced by a budget line; NO ACTION is missing")
+		}
+	})
+}
+
 // insertTestHousehold inserts the minimum household row needed to satisfy a
 // foreign key, for tests that only care about a valid household_id and have
 // no other requirement on the household itself.
