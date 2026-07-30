@@ -296,7 +296,7 @@ to a real address and so are not on that path.
 | POST | `/categories/{id}/archive`, `/categories/{id}/restore` | session · money · owner · CSRF |
 | GET | `/healthz`, `/readyz` | none — outside `/api/v1` |
 
-Five test matrices walk the live router and assert this: every non-public
+Three test matrices walk the live router and assert this: every non-public
 route rejects an unauthenticated caller, every mutating route requires CSRF,
 and every owner-gated route rejects a limited member. A route added without
 its guard fails a test rather than shipping. All four sign-up-and-currency

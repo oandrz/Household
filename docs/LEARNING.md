@@ -480,15 +480,6 @@ Walked in order, the nine are not nine copies of the same mistake:
   pointer-semantics translation the task existed to get right).
 - **A shared guard** (Task 17) — a route refused for a reason that had
   nothing to do with the row the test was named after.
-
-None of the nine were caught by the test itself failing; every one needed a
-person to ask whether the test could ever have gone red in the first place.
-
-**Mutate to prove a test.** Break the code deliberately, watch the test go red,
-restore it. If it stays green, the test is decoration — and if it goes red for
-a different reason than the one you meant to prove, that is not yet proof
-either; sharpen the mutation until the failure names the claim.
-
 - Budget slice, Task 2 (the `budgets`/`budget_lines` migration): review found
   both `UNIQUE (household_id, month)` and `UNIQUE (budget_id, category_id)`
   tested with only one case each — insert the pair, insert it again, assert
@@ -506,6 +497,14 @@ either; sharpen the mutation until the failure names the claim.
   `*testing.T` rather than each subtest's own, so a `Fatalf` inside one
   subtest's setup would have failed whichever subtest happened to run last,
   not the one that actually broke.
+
+None of the nine were caught by the test itself failing; every one needed a
+person to ask whether the test could ever have gone red in the first place.
+
+**Mutate to prove a test.** Break the code deliberately, watch the test go red,
+restore it. If it stays green, the test is decoration — and if it goes red for
+a different reason than the one you meant to prove, that is not yet proof
+either; sharpen the mutation until the failure names the claim.
 
 ### 3. The simulated environment lied
 

@@ -22,16 +22,18 @@ crammed in after it — not the previous total adjusted in place: it corrects
 already marked in this file back to 🟡, since that row's own gap — Export
 CSV — was never actually closed; it adds one new row, "Roll unspent into
 savings" (⬜, deferred whole to Goals); and counting by that rule surfaced a
-third thing, present before this task touched anything: **Money row 258**,
-"Full ledger with filters | ✅ — a transaction dated…", reads ✅ same as
-every other built row, but a symbol-then-bare-pipe pattern (`grep`'s and a
-human eye's easiest read) skips it, because its cell holds a dash-note
-instead of a clean `| ✅ |`. The previous update's summary table had
-under-counted Money's Built by exactly that one row and over-counted its Not
-started by one to compensate, landing on the same row total by two errors
-that happened to cancel rather than one correct count — recounting by the
-rule above (first symbol in the cell, not "does the cell contain nothing but
-the symbol") is what this update fixes, alongside its own two changes. Money
+third thing, present before this task touched anything: the Transactions
+table's **"Full ledger with filters"** row, whose cell reads "✅ — a
+transaction dated…", counts as ✅ same as every other built row, but its
+cell holds a dash-note rather than a clean `| ✅ |`. Before this update the
+stated summary table had Money's Built at 13 and Not started at 15; a fresh
+count of the actual tables (every ✅/🟡/⬜/🚫 symbol, whether its cell is bare
+or has prose after it) gives Built 14 and Not started 14 for that same
+pre-edit state — the stated numbers were wrong in both directions by
+exactly one, landing on the same row total by two errors that happened to
+cancel rather than one correct count. Recounting by that rule — the first
+symbol in the cell, not "does the cell contain nothing but the symbol" — is
+what this update fixes, alongside its own two changes. Money
 now has three features fully built —
 Accounts (a household records what it owns and owes by hand and sees a net
 worth built from it), the Transactions ledger (logging, editing and deleting
