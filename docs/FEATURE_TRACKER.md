@@ -13,14 +13,19 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 46 of 93 features built or partly built. Money now has
+**Where things stand:** 48 of 93 features built or partly built. Money now has
 two features built — Accounts (a household records what it owns and owes by
 hand and sees a net worth built from it) and the Transactions ledger (logging,
 editing and deleting expenses, income and transfers, with filters and the five
 screen states the design and spec both call for) — plus the recent-transactions
 strip on Finances, deferred by the accounts spec for having no data and now
-built with the ledger to read from. Nothing else in Money is started yet, and
-nothing in Marriage, Family or Overview has been started.
+built with the ledger to read from. Budget's set-state screen has started
+too: the four stat cards, per-category caps with the over state and pace, and
+spending by person all render live from `GET /budgets/{month}`, but nothing
+in the UI can create that budget row yet — the empty state and the Edit-budget
+modal are the next two tasks, so today it only shows once a budget exists via
+the API directly. Nothing else in Money is started yet, and nothing in
+Marriage, Family or Overview has been started.
 Five of the rows below have no mockup of their own — the provisioning
 transaction behind self-serve sign-up, the currency list endpoint, and
 `adminctl prune` — because the design's own "Create household" screen (the
@@ -42,11 +47,11 @@ here, unbuilt, once Budget exists.
 | Navigation shell | 7 | 0 | 1 | 0 |
 | Household settings | 15 | 4 | 2 | 0 |
 | Overview (home) | 0 | 0 | 8 | 0 |
-| Money | 8 | 1 | 19 | 0 |
+| Money | 8 | 3 | 17 | 0 |
 | Marriage | 0 | 0 | 13 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **40** | **6** | **45** | **2** |
+| **Total** | **40** | **8** | **43** | **2** |
 
 ---
 
@@ -302,11 +307,21 @@ adds a row the design itself has no mockup for.
 
 | Feature | State |
 |---|---|
-| Envelope per category with pace | ⬜ |
+| Envelope per category with pace | 🟡 |
 | Empty state with Family-of-four, 50/30/20 and import templates | ⬜ |
-| Spending by person | ⬜ |
+| Spending by person | 🟡 |
 | Edit budget (modal) | ⬜ |
 | Budget history (modal) | ⬜ |
+
+**The set-state screen is built; nothing can create a budget yet.** The four
+stat cards (Budgeted, Spent, Remaining, Daily pace), the per-category caps
+grid with the over state, and Spending by person all render live from `GET
+/budgets/{month}` — `BudgetPage.tsx` and its own card components, backed by
+`useBudget`. The gap in both 🟡 rows is the same one: there is no UI path yet
+to create the budget row this screen reads, only the API directly, so a
+household cannot reach this screen on its own until the empty state (with its
+"Create your first budget" panel and templates) and the Edit-budget modal
+exist.
 
 **Goals**
 

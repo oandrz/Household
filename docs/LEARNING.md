@@ -536,6 +536,17 @@ either; sharpen the mutation until the failure names the claim.
   unselected one) before it was visible in both states — a reminder that a
   fix a screenshot diff would have caught in twenty seconds still went out
   the first time, because nobody diffed the screenshots.
+- The Budget screen's category and by-person progress bars used
+  `bg-hairline` (a 0.08-alpha border tint meant for 1px lines) as a bar
+  *track*, and the Categories card heading used `mb-4.5`, a spacing step
+  outside Tailwind's default scale. Both looked fine to `npx vitest run`:
+  jsdom renders no CSS at all, so nothing catches a class that resolves to a
+  colour too faint to see, or to a class that does not exist and generates
+  no rule whatsoever. Caught only by loading the real page and reading
+  `getComputedStyle` on the rendered elements — `bg-hairline` became the
+  app's own opaque `bg-canvas` (matched against a live `rgb(240, 238, 233)`
+  read-back) and `mb-4.5` became the explicit `mb-[18px]` the design's own
+  spacing called for.
 - Finance-fixes round, the grouped sidebar's Money links (pattern 13): the
   brief's own suggested mechanism, TanStack Router's `Link` `activeProps`,
   merges its `className` onto the base `className` rather than replacing
@@ -1177,6 +1188,18 @@ route with a missing guard has no second line of defence.
   specifics (child names; "Christine's Indonesian accounts") as if they
   were generic product copy, safe only while the seeded household was the
   only one that existed. See pattern 14.
+- `router.test.tsx`'s "mounts the Budget page" test stubbed only
+  `GET /api/v1/auth/me`, with its own comment explaining why: BudgetPage was
+  still Task 11's static stub, calling nothing else. Task 12 wired
+  `useBudget`/`useCurrencies` into that same component and the test broke on
+  the first run — `stubFetchRoutes` throws on any unregistered request, so a
+  router test that had been green was quietly asserting "the placeholder
+  never fetches," not "the real page mounts." The comment said exactly why
+  the gap existed and that it would need closing, which made the fix a
+  five-minute one instead of a debugging session, but a test whose pass
+  depends on a component staying a stub is a landmine for whoever un-stubs
+  it — worth writing that comment on every throwaway-stub test, not only
+  this one.
 
 ### Tooling and infrastructure
 
