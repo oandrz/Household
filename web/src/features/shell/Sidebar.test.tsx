@@ -115,9 +115,9 @@ describe("Sidebar", () => {
     );
 
     // Money now expands into a group label plus one row per built page
-    // (Finances, Transactions), so the flat "Family, Money, Marriage" this
-    // test used to assert no longer matches -- the grouped shape adds a
-    // label plus two link rows for Money alone. "sidebar-space" now tags
+    // (Finances, Transactions, Budget), so the flat "Family, Money, Marriage"
+    // this test used to assert no longer matches -- the grouped shape adds a
+    // label plus three link rows for Money alone. "sidebar-space" now tags
     // only links (and the unknown-key fallback span); the group label has
     // its own "sidebar-space-label" testid (finding 5) -- asserted here as
     // link order and label presence separately, so this test's actual
@@ -128,12 +128,13 @@ describe("Sidebar", () => {
       "Family",
       "Finances",
       "Transactions",
+      "Budget",
       "Marriage",
     ]);
     expect(screen.getByTestId("sidebar-space-label")).toHaveTextContent("Money");
   });
 
-  it("groups Money into a label with Finances and Transactions links", async () => {
+  it("groups Money into a label with Finances, Transactions and Budget links", async () => {
     stubFetchRoutes({});
     renderWithRouter(
       <Sidebar
@@ -149,6 +150,10 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: "Transactions" })).toHaveAttribute(
       "href",
       "/money/transactions",
+    );
+    expect(screen.getByRole("link", { name: "Budget" })).toHaveAttribute(
+      "href",
+      "/money/budget",
     );
   });
 
@@ -175,7 +180,7 @@ describe("Sidebar", () => {
     // before Family. Money's own name only ever shows as its group label
     // (finding 5), not a link, so it isn't part of this link-order list.
     const links = screen.getAllByTestId("sidebar-space").map((el) => el.textContent);
-    expect(links).toEqual(["Finances", "Transactions", "Marriage", "Family"]);
+    expect(links).toEqual(["Finances", "Transactions", "Budget", "Marriage", "Family"]);
     expect(screen.getByTestId("sidebar-space-label")).toHaveTextContent("Money");
   });
 
@@ -217,8 +222,39 @@ describe("Sidebar", () => {
 
     const finances = await screen.findByRole("link", { name: "Finances" });
     const transactions = screen.getByRole("link", { name: "Transactions" });
+    const budget = screen.getByRole("link", { name: "Budget" });
     expect(finances).toHaveClass("text-accent");
     expect(finances).not.toHaveClass("text-ink");
+    expect(transactions).toHaveClass("text-ink");
+    expect(transactions).not.toHaveClass("text-accent");
+    expect(budget).toHaveClass("text-ink");
+    expect(budget).not.toHaveClass("text-accent");
+  });
+
+  // Task 11's own regression test for the activeProps cascade defect
+  // (LEARNING pattern 3): Budget's active state has to come from the same
+  // route-driven `useMatchRoute` computation as its siblings, not from
+  // `Link`'s `activeProps` (which merges rather than replaces className and
+  // shipped the bug the comment above describes). Asserts both halves --
+  // Budget carries the accent and not the ink class while its siblings carry
+  // the reverse -- the same shape as "accents only the active Money link".
+  it("accents only the active Budget link, on /money/budget", async () => {
+    renderWithRouter(
+      <Sidebar
+        me={meFixture([
+          space({ id: "space-money", key: "money", name: "Money", position: 1 }),
+        ])}
+      />,
+      "/money/budget",
+    );
+
+    const finances = await screen.findByRole("link", { name: "Finances" });
+    const transactions = screen.getByRole("link", { name: "Transactions" });
+    const budget = screen.getByRole("link", { name: "Budget" });
+    expect(budget).toHaveClass("text-accent");
+    expect(budget).not.toHaveClass("text-ink");
+    expect(finances).toHaveClass("text-ink");
+    expect(finances).not.toHaveClass("text-accent");
     expect(transactions).toHaveClass("text-ink");
     expect(transactions).not.toHaveClass("text-accent");
   });

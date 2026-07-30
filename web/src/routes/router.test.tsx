@@ -227,6 +227,53 @@ describe("the real route tree", () => {
     expect(router.state.location.pathname).toBe("/money/transactions");
   });
 
+  // Task 11's analogue of the transactions redirect above: moneyBudgetRoute
+  // has to sit under moneyGuardRoute too, for the same reason -- a member
+  // without money must never reach the Budget screen.
+  it("redirects a member without the money capability away from /money/budget", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": {
+        status: 200,
+        body: meFixture({
+          membership: {
+            id: "membership-2",
+            householdId: "household-1",
+            userId: "user-2",
+            role: "limited",
+            capabilities: ["calendar", "chores"],
+          },
+          capabilities: ["calendar", "chores"],
+        }),
+      },
+    });
+
+    const { router } = renderApp("/money/budget");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    expect(await screen.findByText("Arriving in slice 5.")).toBeInTheDocument();
+  });
+
+  // The positive counterpart the redirect test above needs -- and the one
+  // that actually proves moneyBudgetRoute exists. Without it, the redirect
+  // test alone would still pass with no dedicated route at all: /money/budget
+  // falls through to moneySplatRoute, a sibling under the exact same
+  // RequireCapability parent, which redirects identically. This is the test
+  // that fails until moneyBudgetRoute is added to addChildren.
+  it("mounts the Budget page at /money/budget for a caller who has the money capability", async () => {
+    // No /api/v1/budgets stub: this task's BudgetPage is a static stub with
+    // no useBudget call yet (Task 12 wires the two together), and
+    // stubFetchRoutes throws on any *unregistered* request, so a route
+    // registered here but never called wouldn't be caught by that anyway.
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+    });
+
+    const { router } = renderApp("/money/budget");
+
+    expect(await screen.findByTestId("budget-page")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/money/budget");
+  });
+
   // Fix round 5, Finding 1 (critical): this is the exact reproduction the
   // coordinator's reviewer used -- /invite/tok with GET /api/v1/auth/me
   // returning 401 (a genuine, signed-out invitee -- Christine from `make
