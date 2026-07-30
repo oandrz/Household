@@ -124,10 +124,11 @@ func TestTransactionRoundTrips(t *testing.T) {
 			view.BeforeFromAccountOpening)
 	}
 
-	// A transaction dated exactly on the opening date moves the balance now
-	// (see the block below), so it is not "before" the opening -- the >=
-	// boundary, not a strict >, which is why before is false here and not on
-	// the 18th above.
+	// before_from_opening is a strict < against opening_balance_as_of
+	// (queries/transaction.sql), so a transaction dated exactly on the
+	// opening date is NOT before it -- false here, same as the 18th above.
+	// Only a transaction dated strictly earlier is before (see the block
+	// below).
 	onOpening, err := repo.Create(ctx, domain.Transaction{
 		HouseholdID:   householdID,
 		Kind:          domain.TransactionExpense,

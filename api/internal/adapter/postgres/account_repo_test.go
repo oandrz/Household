@@ -473,7 +473,7 @@ func TestASameCurrencyTransferLeavesTheTwoAccountsTotalUnchanged(t *testing.T) {
 // moves exactly one of the two balances.
 //
 // The "flag" the spec names is not a field anywhere: it is the
-// `t.occurred_on > a.opening_balance_as_of` comparison inside
+// `t.occurred_on >= a.opening_balance_as_of` comparison inside
 // queries/account.sql, which is evaluated once per *account*, not once per
 // transaction. A single transaction-level boolean -- "is this transfer before
 // the opening date" -- has no answer here, because the honest answer is
