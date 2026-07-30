@@ -10,8 +10,9 @@ import (
 // transactions routes with no CSRF token at all, and with one that does not
 // match the cookie.
 //
-// TestCSRFIsRequiredForMutatingRequests above proves requireCSRF works, using
-// sign-out. It does not prove this route group is behind it: deleting
+// TestCSRFIsRequiredForMutatingRequests (auth_api_test.go) already proves
+// requireCSRF works, using sign-out. It does not prove this route group is
+// behind it: deleting
 // `w.Use(requireCSRF)` from the transactions group in router.go left the
 // entire suite green, because every other test reaches these routes through
 // env.authed, which always supplies the token.

@@ -27,9 +27,13 @@ import (
 // .../invites/{token}/accept (mutating, but pre-auth by design -- there is no
 // caller identity yet to check a session, a CSRF token or ownership against).
 //
-// The three route-walk matrices below name these two routes explicitly
-// rather than skipping anything matching a "/api/v1/invites/" prefix, which
-// is what each used to do. A prefix skip silently exempts *any* future route
+// The three route-walk matrices that reference this map --
+// TestEveryProtectedRouteRejectsAnUnauthenticatedCaller and
+// TestEveryMutatingRouteRequiresCSRF in auth_api_test.go, and
+// TestOwnerOnlyRoutesRejectALimitedMember in household_api_test.go -- name
+// these two routes explicitly rather than skipping anything matching a
+// "/api/v1/invites/" prefix, which is what each used to do. A prefix skip
+// silently exempts *any* future route
 // added under that prefix from whichever guard the matrix checks -- a
 // mutating admin route added under /invites/ later would be auto-exempt from
 // the CSRF and owner checks with no test ever noticing. Naming the two

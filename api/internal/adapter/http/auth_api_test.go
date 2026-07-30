@@ -310,7 +310,7 @@ func TestEveryMutatingRouteRequiresCSRF(t *testing.T) {
 	t.Logf("checked %d mutating routes", checked)
 	// 11, not the pre-accounts 7: the same four accounts write routes are
 	// mutating and CSRF-gated too (see the identical reasoning on the 10
-	// floor above).
+	// floor in TestOwnerOnlyRoutesRejectALimitedMember, household_api_test.go).
 	if checked < 11 {
 		t.Fatalf("checked %d mutating routes, want at least 11 -- "+
 			"the walk may not be enumerating routes correctly", checked)
@@ -469,8 +469,8 @@ func TestSignUpPassesThroughThePerIPLimiter(t *testing.T) {
 // signUpMeBundle mirrors the shape of meResponseBody (auth_handlers.go) for
 // decoding the sign-up completion response. meResponseBody itself is
 // unexported outside package httpadapter -- this package is httpadapter_test
-// -- which is why householdResponse above exists as the identical kind of
-// local mirror for GET /household.
+// -- which is why householdResponse (household_api_test.go) exists as the
+// identical kind of local mirror for GET /household.
 type signUpMeBundle struct {
 	Household  householdResponse `json:"household"`
 	Membership struct {
