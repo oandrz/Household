@@ -42,11 +42,11 @@ here, unbuilt, once Budget exists.
 | Navigation shell | 6 | 0 | 1 | 0 |
 | Household settings | 15 | 4 | 2 | 0 |
 | Overview (home) | 0 | 0 | 8 | 0 |
-| Money | 8 | 1 | 19 | 0 |
+| Money | 7 | 2 | 19 | 0 |
 | Marriage | 0 | 0 | 13 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **39** | **6** | **45** | **2** |
+| **Total** | **38** | **7** | **45** | **2** |
 
 ---
 
@@ -243,7 +243,7 @@ a real aggregator could later fill.
 
 | Feature | State |
 |---|---|
-| Full ledger with filters | ✅ |
+| Full ledger with filters | 🟡 — a transaction dated on its account's opening date does not move the balance or net worth, so nothing a household logs on day one changes any figure; fix specced in `docs/superpowers/specs/2026-07-30-hearth-finance-fixes-design.md` |
 | Inline category editing | ⬜ |
 | Add transaction (modal) | ✅ |
 | Export CSV | ⬜ |
