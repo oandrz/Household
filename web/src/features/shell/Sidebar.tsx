@@ -21,6 +21,12 @@ import { useSignOut } from "../auth/useAuth";
 // per page (the 5a sidebar). A space key this map doesn't recognise --
 // reachable once "+ New space" lets a household create one -- renders as
 // plain text rather than a Link to a route that doesn't exist.
+// `label` is only ever read for a space with 2+ pages (the group-label form
+// below) -- a single-page space renders `space.name`, the household's own
+// name for that space, instead. Marriage and Family both carry a `label`
+// here purely to keep this map's shape uniform; setting it to anything else
+// would never show up. Don't "fix" a single-page space's label expecting it
+// to render -- see SpaceLink's single-link branch.
 const SPACE_PAGES: Record<string, { label: string; to: string }[]> = {
   money: [
     { label: "Finances", to: "/money" },
@@ -52,11 +58,20 @@ function SpaceLink({ space }: { space: Space }) {
     );
   }
   if (pages.length === 1) {
+    // Single-page spaces (Marriage, Family) get the same route-driven accent
+    // as a grouped page below -- `matchRoute` defaults to an exact match
+    // (fuzzy: false), which is deliberate here too: Family's only route
+    // today is /family/calendar, so exact and prefix behave identically for
+    // it right now, but exact is the correct choice going forward -- it is
+    // what stops a later sub-page under /family from also lighting up this
+    // link, the same reason the grouped Money links need it against
+    // /money/transactions.
+    const isActive = Boolean(matchRoute({ to: pages[0].to }));
     return (
       <Link
         data-testid="sidebar-space"
         to={pages[0].to}
-        className={`${NAV_ITEM_CLASS} text-ink`}
+        className={`${NAV_ITEM_CLASS} ${isActive ? "text-accent" : "text-ink"}`}
       >
         {space.name}
       </Link>
@@ -64,8 +79,11 @@ function SpaceLink({ space }: { space: Space }) {
   }
   return (
     <>
+      {/* The group label, not a link -- kept under its own testid so a test
+          asserting link order isn't also asserting where this label sits in
+          a flattened list of unrelated node kinds. */}
       <div
-        data-testid="sidebar-space"
+        data-testid="sidebar-space-label"
         className="px-2.5 pb-1 pt-3.5 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-muted"
       >
         {space.name}
@@ -99,6 +117,16 @@ function SpaceLink({ space }: { space: Space }) {
 export function Sidebar({ me }: { me: Me }) {
   const signOut = useSignOut();
   const navigate = useNavigate();
+  const matchRoute = useMatchRoute();
+  // Overview and Settings accent on their own route the same way each
+  // SpaceLink does -- before this, Overview was unconditionally text-accent
+  // and Settings unconditionally text-ink, so visiting /settings still left
+  // Overview looking active and Settings never lit up at all. Settings is a
+  // single route (SettingsPage renders Members/Spaces/Currency as tabs
+  // inside it, not separate routes -- see routes/router.tsx), so exact match
+  // is unambiguous here.
+  const overviewActive = Boolean(matchRoute({ to: "/" }));
+  const settingsActive = Boolean(matchRoute({ to: "/settings" }));
 
   function handleSignOut() {
     signOut.mutate(undefined, {
@@ -122,7 +150,7 @@ export function Sidebar({ me }: { me: Me }) {
         </div>
       </div>
 
-      <Link to="/" className={`${NAV_ITEM_CLASS} text-accent`}>
+      <Link to="/" className={`${NAV_ITEM_CLASS} ${overviewActive ? "text-accent" : "text-ink"}`}>
         Overview
       </Link>
 
@@ -132,7 +160,7 @@ export function Sidebar({ me }: { me: Me }) {
 
       <div className="flex-1" />
 
-      <Link to="/settings" className={`${NAV_ITEM_CLASS} text-ink`}>
+      <Link to="/settings" className={`${NAV_ITEM_CLASS} ${settingsActive ? "text-accent" : "text-ink"}`}>
         Settings
       </Link>
 
