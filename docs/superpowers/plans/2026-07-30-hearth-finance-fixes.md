@@ -418,6 +418,8 @@ function SpaceLink({ space }: { space: Space }) {
 }
 ```
 
+(Executed differently: activeProps shipped a cascade defect — text-ink vs text-accent — caught live-browser only; final code uses useMatchRoute. See LEARNING.md pattern 3's sidebar bullet.)
+
 `activeOptions.exact` on `/money` is load-bearing: without it, `/money/transactions` marks both links active (TanStack Router's default prefix matching). Update the component's header comment — the "sub-pages belong to slices 2–4, which haven't been built yet" paragraph is no longer true; say the grouped form arrived with Transactions and the map grows a row per shipped page.
 
 - [ ] **Step 4: Run the suite for the file, then the whole web suite**
