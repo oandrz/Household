@@ -33,9 +33,11 @@ screenshots, before and after, came back byte-identical), so the ring colour
 had to become conditional on which of the two pill backgrounds it sits
 against. Pinned by a new, mutation-checked test in
 `TransactionsPage.test.tsx`. Two criteria were met by an interpreted rather
-than fully literal path — the sidebar reaches Transactions via Money →
-Finances → "See all" rather than a direct sub-link (by the design's own
-documented scoping), and the limited-member capability was granted via
+than fully literal path — the sidebar reached Transactions via Money →
+Finances → "See all" rather than a direct sub-link at the time (the
+finance-fixes branch has since added the design's grouped sidebar, giving
+Money its own Finances and Transactions links directly), and the
+limited-member capability was granted via
 `adminctl create-invite --capabilities=money` before being additionally
 exercised through the Settings toggle Andreas would actually use — both
 recorded in the verification file rather than passed over quietly.
@@ -135,9 +137,11 @@ selected pill's dark background) — pattern 3 of `docs/LEARNING.md` records
 both. Two criteria were met by an interpreted path rather than a fully
 literal one and are recorded as such in the verification file, the same
 standard the Accounts walk set for its own criterion 12: the sidebar
-reaches Transactions through Money → Finances → "See all" rather than a
-direct sub-link, by the design's own documented single-nav-item scoping;
-and the limited member's Money capability was granted at invite time via
+reached Transactions through Money → Finances → "See all" rather than a
+direct sub-link at the time, by the design's own documented single-nav-item
+scoping — the finance-fixes branch has since built the grouped sidebar, so
+Money now expands directly to Finances and Transactions links; and the
+limited member's Money capability was granted at invite time via
 `adminctl` before also being exercised through the Settings toggle the
 criterion's wording names.
 
@@ -312,7 +316,10 @@ track" without a decision recorded first is building on sand.
   Accounts added a real page under the existing Money space (Finances,
   replacing its placeholder); Transactions added a second, real sibling route
   (`/money/transactions`) under the same guard rather than the placeholder's
-  catch-all; neither touched the sidebar itself.
+  catch-all. The finance-fixes branch then gave the sidebar itself the
+  design's grouped form: Money renders as an uppercase label plus a
+  Finances/Transactions link pair, with the accent following the active
+  route.
 - **`components/Modal`** is the shared primitive. Roughly fifteen modals across
   slices 2–4 build on it. It reaches genuine `:modal` state — do not
   reintroduce a declarative `open` attribute.
