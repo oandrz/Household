@@ -131,32 +131,6 @@ describe("the real route tree", () => {
     expect(await screen.findByText("Arriving in slice 5.")).toBeInTheDocument();
   });
 
-  it("redirects a member without the marriage capability away from /marriage", async () => {
-    // A limited member with calendar/chores/money but not marriage --
-    // domain.NewMembership never grants a limited member CapMarriage, so this
-    // is the real shape a "Kid" membership takes, not a contrived one.
-    stubFetchRoutes({
-      "GET /api/v1/auth/me": {
-        status: 200,
-        body: meFixture({
-          membership: {
-            id: "membership-2",
-            householdId: "household-1",
-            userId: "user-2",
-            role: "limited",
-            capabilities: ["calendar", "chores"],
-          },
-          capabilities: ["calendar", "chores"],
-        }),
-      },
-    });
-
-    const { router } = renderApp("/marriage");
-
-    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
-    expect(await screen.findByText("Arriving in slice 5.")).toBeInTheDocument();
-  });
-
   // Task 17: /money/transactions has to sit under moneyGuardRoute, not hung
   // off the shell beside it -- otherwise a member without the money
   // capability reaches a ledger because the guard that would have refused

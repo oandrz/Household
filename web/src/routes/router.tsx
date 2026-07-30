@@ -13,11 +13,14 @@
 //       /money/transactions RequireCapability("money") -> Transactions (Task 17; the real ledger)
 //       /money/budget RequireCapability("money") -> Budget (Task 11; BudgetPage stub -- Task 12 builds the real screen)
 //       /money/$     RequireCapability("money") -> Money    (slice 2 placeholder; Goals/Bills remain)
-//       /marriage, /marriage/$ RequireCapability("marriage") -> Marriage (slice 3 placeholder)
-//       /family/calendar                            -- Family (slice 4 placeholder); unconditional,
-//                                                       per domain.BuiltinSpaces Family carries no
-//                                                       required capability
-//       /settings                                   -- slice 1; the real Settings screen (Task 20)
+//       /settings                                   -- the real Settings screen (Task 20)
+//
+// Marriage and Family have no routes: both were placeholders reading
+// "Arriving in slice N", and the sidebar no longer offers them (see
+// Sidebar.tsx's SPACE_PAGES). Their URLs fall through to rootRoute's
+// notFoundComponent. Add the route back in the same change that builds the
+// page, alongside its SPACE_PAGES entry -- and re-add RequireCapability for
+// Marriage, which is capability-gated.
 import {
   Navigate,
   createRootRoute,
@@ -198,31 +201,6 @@ const moneySplatRoute = createRoute({
   component: () => <PlaceholderPage page="Money" slice={2} />,
 });
 
-const marriageGuardRoute = createRoute({
-  getParentRoute: () => shellRoute,
-  path: "marriage",
-  component: () => <RequireCapability cap="marriage" />,
-});
-const marriageIndexRoute = createRoute({
-  getParentRoute: () => marriageGuardRoute,
-  path: "/",
-  component: () => <PlaceholderPage page="Marriage" slice={3} />,
-});
-const marriageSplatRoute = createRoute({
-  getParentRoute: () => marriageGuardRoute,
-  path: "$",
-  component: () => <PlaceholderPage page="Marriage" slice={3} />,
-});
-
-// Family carries no required capability (domain.BuiltinSpaces: "Family is
-// unconditional ... it carries no required capability"), so this route sits
-// directly under the shell, with no RequireCapability guard.
-const familyCalendarRoute = createRoute({
-  getParentRoute: () => shellRoute,
-  path: "family/calendar",
-  component: () => <PlaceholderPage page="Family calendar" slice={4} />,
-});
-
 const settingsRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "settings",
@@ -250,8 +228,6 @@ export const routeTree = rootRoute.addChildren([
         moneyBudgetRoute,
         moneySplatRoute,
       ]),
-      marriageGuardRoute.addChildren([marriageIndexRoute, marriageSplatRoute]),
-      familyCalendarRoute,
       settingsRoute,
     ]),
   ]),

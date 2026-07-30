@@ -1,9 +1,11 @@
-// Behaviours from the task-19 brief:
-// 1. Given only Family in `me.spaces`, Family renders and Money/Marriage do
-//    not -- the sidebar must render from the payload, not a hard-coded list.
-// 2. Given all three spaces, all three render, in the order the payload
-//    gives them (VisibleSpaces on the server already sorted by position;
-//    the sidebar must not re-sort).
+// Behaviours from the task-19 brief, updated by task 2 (Marriage and Family
+// lost their SPACE_PAGES entries -- see Sidebar.tsx):
+// 1. A space present in `me.spaces` renders only if it has a SPACE_PAGES
+//    entry, or is a custom (non-builtin) space -- the sidebar must render
+//    from the payload, not a hard-coded list.
+// 2. Given several spaces, all with something to render, they render in the
+//    order the payload gives them (VisibleSpaces on the server already
+//    sorted by position; the sidebar must not re-sort).
 // 3. The footer shows the household name and a "Sign out" control.
 // 4. Clicking "Sign out" calls POST /api/v1/auth/sign-out.
 import { fireEvent, screen, waitFor } from "@testing-library/react";
@@ -30,6 +32,34 @@ const familySpace = space({
   key: "family",
   name: "Family",
   position: 3,
+});
+
+const moneySpace = space({
+  id: "space-money",
+  key: "money",
+  name: "Money",
+  position: 1,
+  requiredCapability: "money",
+});
+
+const marriageSpace = space({
+  id: "space-marriage",
+  key: "marriage",
+  name: "Marriage",
+  visibility: "parents_only",
+  position: 2,
+  requiredCapability: "marriage",
+});
+
+// A space a household made for itself with "+ New space". It has no
+// SPACE_PAGES entry either, which is exactly why it is here: the rule below
+// must key off isBuiltin, not off the absence of an entry.
+const travelSpace = space({
+  id: "space-travel",
+  key: "travel",
+  name: "Travel",
+  position: 4,
+  isBuiltin: false,
 });
 
 function meFixture(spaces: Space[]): Me {
@@ -62,15 +92,32 @@ function meFixture(spaces: Space[]): Me {
 }
 
 describe("Sidebar", () => {
-  it("renders only the spaces present in me.spaces", async () => {
-    renderWithRouter(<Sidebar me={meFixture([familySpace])} />);
+  it("renders no row for a builtin space whose pages are not built yet", async () => {
+    renderWithRouter(
+      <Sidebar me={meFixture([moneySpace, marriageSpace, familySpace])} />,
+    );
 
-    // TanStack Router resolves its initial match asynchronously even with a
-    // memory history and a single route, so the first render commit is
-    // empty; findBy* awaits that before asserting.
-    expect(await screen.findByText("Family")).toBeInTheDocument();
-    expect(screen.queryByText("Money")).not.toBeInTheDocument();
-    expect(screen.queryByText("Marriage")).not.toBeInTheDocument();
+    // Money's own group renders, so the sidebar did mount -- without this the
+    // assertions below would pass on an empty render.
+    expect(await screen.findByText("Finances")).toBeInTheDocument();
+    expect(screen.queryByText("Marriage")).toBeNull();
+    expect(screen.queryByText("Family")).toBeNull();
+  });
+
+  it("still renders a space the household created, which has no built pages either", async () => {
+    renderWithRouter(<Sidebar me={meFixture([moneySpace, travelSpace])} />);
+
+    expect(await screen.findByText("Travel")).toBeInTheDocument();
+  });
+
+  it("renders only the spaces present in me.spaces", async () => {
+    // travelSpace, not another builtin: `money` is the only builtin key left
+    // in SPACE_PAGES, so two builtin spaces cannot show that this renders
+    // from the payload rather than from a list in this file.
+    renderWithRouter(<Sidebar me={meFixture([travelSpace])} />);
+
+    expect(await screen.findByText("Travel")).toBeInTheDocument();
+    expect(screen.queryByText("Finances")).toBeNull();
   });
 
   it("renders spaces in the order given, not re-sorted by position", async () => {
@@ -78,19 +125,24 @@ describe("Sidebar", () => {
     // Money/Marriage/Family both in the array in that order AND with
     // ascending positions (1, 2, 3) -- a component that re-sorted by
     // `position` would have produced an identical rendered order, so the
-    // test could not have caught that regression. This supplies them in the
-    // array as Family, Money, Marriage while their `position` fields are 3,
-    // 1, 2 respectively (still distinct and still meaningful data, just not
-    // ascending in array order), and asserts the *array* order is what
-    // renders -- not the position-sorted order (which would be Money,
-    // Marriage, Family). Per domain.VisibleSpaces's own documented
-    // invariant, the server has already ordered by position and the sidebar
-    // must render exactly what it's given, never re-sort.
-    const outOfOrderFamily = space({
-      id: "space-family",
-      key: "family",
-      name: "Family",
+    // test could not have caught that regression. Task 2 removed Marriage
+    // and Family's SPACE_PAGES entries, so a builtin space can no longer
+    // stand in for "renders, but not as Money's group" -- only a custom
+    // space still does (see SPACE_PAGES's comment). This supplies two
+    // custom spaces and Money in the array as Travel, Money, Garden while
+    // their `position` fields are 3, 1, 2 respectively (still distinct and
+    // still meaningful data, just not ascending in array order), and
+    // asserts the *array* order is what renders -- not the position-sorted
+    // order (which would be Money, Garden, Travel). Per
+    // domain.VisibleSpaces's own documented invariant, the server has
+    // already ordered by position and the sidebar must render exactly what
+    // it's given, never re-sort.
+    const outOfOrderTravel = space({
+      id: "space-travel",
+      key: "travel",
+      name: "Travel",
       position: 3,
+      isBuiltin: false,
     });
     const outOfOrderMoney = space({
       id: "space-money",
@@ -99,37 +151,37 @@ describe("Sidebar", () => {
       position: 1,
       requiredCapability: "money",
     });
-    const outOfOrderMarriage = space({
-      id: "space-marriage",
-      key: "marriage",
-      name: "Marriage",
-      visibility: "parents_only",
+    const outOfOrderGarden = space({
+      id: "space-garden",
+      key: "garden",
+      name: "Garden",
       position: 2,
-      requiredCapability: "marriage",
+      isBuiltin: false,
     });
 
     renderWithRouter(
       <Sidebar
-        me={meFixture([outOfOrderFamily, outOfOrderMoney, outOfOrderMarriage])}
+        me={meFixture([outOfOrderTravel, outOfOrderMoney, outOfOrderGarden])}
       />,
     );
 
     // Money now expands into a group label plus one row per built page
-    // (Finances, Transactions, Budget), so the flat "Family, Money, Marriage"
-    // this test used to assert no longer matches -- the grouped shape adds a
-    // label plus three link rows for Money alone. "sidebar-space" now tags
-    // only links (and the unknown-key fallback span); the group label has
-    // its own "sidebar-space-label" testid (finding 5) -- asserted here as
-    // link order and label presence separately, so this test's actual
-    // purpose (payload order, not position-sorted) isn't entangled with
-    // where a non-link label happens to land in a flattened query.
+    // (Finances, Transactions, Budget), so the flat "Travel, Money, Garden"
+    // this test would otherwise assert no longer matches -- the grouped
+    // shape adds a label plus three link rows for Money alone.
+    // "sidebar-space" tags both links and the custom-space fallback span;
+    // the group label has its own "sidebar-space-label" testid (finding 5)
+    // -- asserted here as row order and label presence separately, so this
+    // test's actual purpose (payload order, not position-sorted) isn't
+    // entangled with where a non-link label happens to land in a flattened
+    // query.
     const links = await screen.findAllByTestId("sidebar-space");
     expect(links.map((el) => el.textContent)).toEqual([
-      "Family",
+      "Travel",
       "Finances",
       "Transactions",
       "Budget",
-      "Marriage",
+      "Garden",
     ]);
     expect(screen.getByTestId("sidebar-space-label")).toHaveTextContent("Money");
   });
@@ -157,33 +209,6 @@ describe("Sidebar", () => {
     );
   });
 
-  it("keeps single-page spaces as one link, in payload order", async () => {
-    stubFetchRoutes({});
-    renderWithRouter(
-      <Sidebar
-        me={meFixture([
-          space({ id: "space-money", key: "money", name: "Money", position: 1 }),
-          space({ id: "space-marriage", key: "marriage", name: "Marriage", position: 2 }),
-          space({ id: "space-family", key: "family", name: "Family", position: 3 }),
-        ])}
-      />,
-    );
-    expect(await screen.findByRole("link", { name: "Marriage" })).toHaveAttribute(
-      "href",
-      "/marriage",
-    );
-    expect(screen.getByRole("link", { name: "Family" })).toHaveAttribute(
-      "href",
-      "/family/calendar",
-    );
-    // Order: the payload's, not alphabetical -- Finances before Marriage
-    // before Family. Money's own name only ever shows as its group label
-    // (finding 5), not a link, so it isn't part of this link-order list.
-    const links = screen.getAllByTestId("sidebar-space").map((el) => el.textContent);
-    expect(links).toEqual(["Finances", "Transactions", "Budget", "Marriage", "Family"]);
-    expect(screen.getByTestId("sidebar-space-label")).toHaveTextContent("Money");
-  });
-
   it("renders an unrecognised space key as plain text, not a link", async () => {
     stubFetchRoutes({});
     renderWithRouter(
@@ -192,7 +217,16 @@ describe("Sidebar", () => {
           // "+ New space" (Task 20) can let a household create a space
           // whose key SPACE_PAGES doesn't recognise yet -- that must render
           // as inert text rather than a Link to a route that doesn't exist.
-          space({ id: "space-budget", key: "budget", name: "Budget", position: 1 }),
+          // isBuiltin: false, because the same absent-entry branch now
+          // renders nothing at all for a builtin space (see SPACE_PAGES's
+          // comment) -- only a custom space still falls through to text.
+          space({
+            id: "space-budget",
+            key: "budget",
+            name: "Budget",
+            position: 1,
+            isBuiltin: false,
+          }),
         ])}
       />,
     );
@@ -279,22 +313,15 @@ describe("Sidebar", () => {
     expect(settings).not.toHaveClass("text-ink");
   });
 
-  // Single-page spaces (Marriage, Family) used to be unconditionally
-  // text-ink, same defect class as Overview/Settings above.
-  it("accents a single-page space's link only on its own route", async () => {
-    renderWithRouter(
-      <Sidebar
-        me={meFixture([
-          space({ id: "space-marriage", key: "marriage", name: "Marriage", position: 1 }),
-        ])}
-      />,
-      "/marriage",
-    );
-
-    const marriage = await screen.findByRole("link", { name: "Marriage" });
-    expect(marriage).toHaveClass("text-accent");
-    expect(marriage).not.toHaveClass("text-ink");
-  });
+  // A single-page space's own accent test (Marriage was the only example)
+  // is gone with Marriage's SPACE_PAGES entry -- task 2. The defect class it
+  // guarded (an unconditionally-coloured nav item) stays pinned by "accents
+  // only the active Money link", "...active Budget link", "accents Overview
+  // only on /" and "accents Settings only on /settings" below, which cover
+  // the same `isActive` computation this test used, just via routes that
+  // still exist. The `pages.length === 1` branch itself is untouched code
+  // (SpaceLink), waiting for the first space that ships with exactly one
+  // page; it gets its own accent test again then.
 
   it("shows the household name and a Sign out control in the footer", async () => {
     renderWithRouter(<Sidebar me={meFixture([familySpace])} />);
