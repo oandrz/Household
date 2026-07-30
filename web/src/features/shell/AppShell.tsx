@@ -21,7 +21,16 @@ export function AppShell() {
     <div className="grid min-h-screen grid-cols-[236px_1fr] bg-surface">
       <Sidebar me={me.data} />
       <main className="overflow-y-auto">
-        <Outlet />
+        {/* 1204px is the design's own content width, not a taste: its canvas
+            is 1440px wide with a 236px sidebar (design/Household
+            Dashboard.dc.html, screen 5a). Without this, `1fr` gives every
+            page the whole monitor -- on a 2752px display the ledger's heading
+            and its "+ Add transaction" button ended up 2400px apart, and a
+            Settings toggle sat 1200px from the label naming it. Pages keep
+            their own padding; this element only bounds them. */}
+        <div className="mx-auto w-full max-w-[1204px]">
+          <Outlet />
+        </div>
       </main>
     </div>
   );
