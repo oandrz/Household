@@ -163,6 +163,53 @@ describe("BudgetModal", () => {
     expect(onSaved).not.toHaveBeenCalled();
   });
 
+  // The single-item 409 test above only proves the *first* queued write can
+  // stop the PUT. This proves the halt also stops every write *behind* the
+  // failing one: a queued rename on row 1 that 409s must never let row 2's
+  // queued archive fire, even though nothing about row 2 itself is invalid.
+  it("stops at the first failure in a multi-item queue -- a later row's queued archive never fires", async () => {
+    const { fetchMock, onClose, onSaved } = renderModal(
+      {
+        initial: {
+          expectedIncomeMinor: 500000,
+          lines: [
+            { categoryId: "cat-1", capMinor: 80000 },
+            { categoryId: "cat-2", capMinor: 45000 },
+          ],
+          missing: [],
+        },
+      },
+      {
+        "PATCH /api/v1/categories/cat-1": {
+          status: 409,
+          body: { error: { code: "CATEGORY_NAME_TAKEN", message: "A category with that name already exists." } },
+        },
+        // Registered (not left unregistered) so that if the halt regresses,
+        // the archive actually fires and shows up in `mutatingCalls` as a
+        // clean assertion failure rather than an unrelated stub-not-found
+        // rejection masking the real bug.
+        "POST /api/v1/categories/cat-2/archive": {
+          status: 200,
+          body: { category: { id: "cat-2", name: "Dining out", kind: "expense", archived: true } },
+        },
+        [`PUT /api/v1/budgets/${MONTH}`]: { status: 200, body: { budget: { expectedIncomeMinor: 500000, lines: [] } } },
+      },
+    );
+
+    await screen.findByLabelText("Expected income");
+    const firstRow = screen.getByTestId("budget-modal-row-cat-1");
+    fireEvent.change(within(firstRow).getByDisplayValue("Groceries"), { target: { value: "Food" } });
+    const secondRow = screen.getByTestId("budget-modal-row-cat-2");
+    fireEvent.click(within(secondRow).getByRole("button", { name: "Archive" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Save budget" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent('"Food" is already a category name in this household.');
+    expect(mutatingCalls(fetchMock)).toEqual(["PATCH /api/v1/categories/cat-1"]);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
   it("drops a row removed with the ✕ control from the PUT body", async () => {
     let putBody: unknown;
     renderModal(
@@ -313,6 +360,72 @@ describe("BudgetModal", () => {
     expect(leftToAllocate).toHaveTextContent("SGD 300.00");
   });
 
+  // One save combining all three ways a row can get into the PUT's line
+  // set: a survivor from `initial` left untouched, an existing category
+  // picked from the dropdown (no network write needed at all), and a
+  // brand-new category created on save -- all landing in the one PUT body
+  // together, each with its own real cap.
+  it("combines a survivor, a dropdown-picked category and a new create in one PUT body", async () => {
+    let postBody: unknown;
+    let putBody: unknown;
+    const { fetchMock, onSaved } = renderModal(
+      {
+        categories: [
+          { id: "cat-1", name: "Groceries", kind: "expense" },
+          { id: "cat-2", name: "Dining out", kind: "expense" },
+        ],
+      },
+      {
+        "POST /api/v1/categories": {
+          status: 201,
+          body: { category: { id: "cat-new", name: "Rent", kind: "expense", archived: false } },
+          capture: (body) => {
+            postBody = body;
+          },
+        },
+        [`PUT /api/v1/budgets/${MONTH}`]: {
+          status: 200,
+          body: { budget: { expectedIncomeMinor: 500000, lines: [] } },
+          capture: (body) => {
+            putBody = body;
+          },
+        },
+      },
+    );
+
+    await screen.findByLabelText("Expected income");
+    // cat-1 (Groceries) is the survivor from DEFAULT_INITIAL, cap 80000 --
+    // left untouched.
+
+    // Pick cat-2 (Dining out) straight off the dropdown -- an existing,
+    // active category with no cap yet this month, no network write required.
+    fireEvent.change(screen.getByLabelText("+ Add a category"), { target: { value: "cat-2" } });
+    fireEvent.change(within(screen.getByTestId("budget-modal-row-cat-2")).getByLabelText("Cap"), {
+      target: { value: "450" },
+    });
+
+    // Create a brand-new category.
+    fireEvent.change(screen.getByLabelText("+ Add a category"), { target: { value: "__new__" } });
+    fireEvent.change(screen.getByLabelText("New category name"), { target: { value: "Rent" } });
+    fireEvent.click(within(screen.getByTestId("budget-modal-new-category-form")).getByRole("button", { name: "Add" }));
+    const newRowByName = screen.getAllByTestId(/^budget-modal-row-new-/)[0];
+    fireEvent.change(within(newRowByName).getByLabelText("Cap"), { target: { value: "200" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save budget" }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(postBody).toEqual({ name: "Rent" });
+    expect(mutatingCalls(fetchMock)).toEqual(["POST /api/v1/categories", `PUT /api/v1/budgets/${MONTH}`]);
+    expect(putBody).toMatchObject({
+      lines: expect.arrayContaining([
+        { categoryId: "cat-1", capMinor: 80000 },
+        { categoryId: "cat-2", capMinor: 45000 },
+        { categoryId: "cat-new", capMinor: 20000 },
+      ]),
+    });
+    expect((putBody as { lines: unknown[] }).lines).toHaveLength(3);
+  });
+
   it("Cancel discards everything queued -- no write is ever fired", async () => {
     const { fetchMock, onClose } = renderModal();
 
@@ -333,6 +446,7 @@ describe("BudgetModal", () => {
   // pins that "Add" resolves to a restore, not a create, when that's true.
   it("offers restore instead of create when a typed name matches an archived category", async () => {
     let restoreCalled = false;
+    let putBody: unknown;
     const { fetchMock, onSaved } = renderModal(undefined, {
       "GET /api/v1/categories?includeArchived=true": {
         status: 200,
@@ -345,7 +459,13 @@ describe("BudgetModal", () => {
           restoreCalled = true;
         },
       },
-      [`PUT /api/v1/budgets/${MONTH}`]: { status: 200, body: { budget: { expectedIncomeMinor: 500000, lines: [] } } },
+      [`PUT /api/v1/budgets/${MONTH}`]: {
+        status: 200,
+        body: { budget: { expectedIncomeMinor: 500000, lines: [] } },
+        capture: (body) => {
+          putBody = body;
+        },
+      },
     });
 
     await screen.findByLabelText("Expected income");
@@ -363,6 +483,7 @@ describe("BudgetModal", () => {
 
     const row = await screen.findByTestId("budget-modal-row-cat-archived-1");
     expect(row).toHaveTextContent("Archived");
+    fireEvent.change(within(row).getByLabelText("Cap"), { target: { value: "500" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Save budget" }));
 
@@ -372,6 +493,12 @@ describe("BudgetModal", () => {
       "POST /api/v1/categories/cat-archived-1/restore",
       `PUT /api/v1/budgets/${MONTH}`,
     ]);
+    // The restored row's cap has to actually land in the PUT's line set --
+    // a restore that fires but never makes it into the budget would leave
+    // the household clicking "Add" for nothing.
+    expect(putBody).toMatchObject({
+      lines: expect.arrayContaining([{ categoryId: "cat-archived-1", capMinor: 50000 }]),
+    });
   });
 
   describe("the 50/30/20 waiting-for-income state", () => {
