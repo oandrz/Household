@@ -410,11 +410,15 @@ itself arrives with Goals.
 | Subscriptions summary | ⬜ |
 | Add bill (modal) | ⬜ |
 
-**Before building any of this**, the derived figures need defining. The design
-shows `66% used`, `S$137/day left`, `on pace to save S$1,780`, `4 of 4 on
-track`, net worth from assets minus liabilities, and unspent budget rolling into
-a nominated goal at month end. None of those formulas are specified anywhere
-yet.
+**Before building any more of this**, the two figures still open need
+defining. Four of the six the design shows are pinned already: net worth
+from assets minus liabilities (Accounts), and `66% used`, `S$137/day left`
+and `on pace to save S$1,780` — all Remaining-based rather than a run-rate
+projection — in the formula table of
+`docs/superpowers/specs/2026-07-30-hearth-budget-design.md` (decision 2).
+`4 of 4 on track` and unspent budget rolling into a nominated goal at month
+end are still undefined, and are Goals' own spec to pin — an implementer who
+invents either without a decision recorded first is building on sand.
 
 ## 6 · Marriage
 
