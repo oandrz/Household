@@ -489,6 +489,24 @@ restore it. If it stays green, the test is decoration — and if it goes red for
 a different reason than the one you meant to prove, that is not yet proof
 either; sharpen the mutation until the failure names the claim.
 
+- Budget slice, Task 2 (the `budgets`/`budget_lines` migration): review found
+  both `UNIQUE (household_id, month)` and `UNIQUE (budget_id, category_id)`
+  tested with only one case each — insert the pair, insert it again, assert
+  the second insert fails. A **single-column** `UNIQUE (household_id)` or
+  `UNIQUE (budget_id)` would have failed that exact test identically, since
+  the test's own two rows never varied the first column while holding the
+  second one fixed; the test proves "this pair collides," not "both columns
+  are in the key." Fixed by adding a same-`household_id`/different-`month`
+  case (and the `budget_lines` sibling), which only a real two-column key
+  passes. The same review also found `expected_income_minor`'s nullable
+  check asserting `is_nullable = 'YES'` from `information_schema` without
+  ever inserting a real `NULL` and reading it back — true of a column that
+  merely permits NULL and one that actually stores it identically — and the
+  schema tests' `newBudget`/`newCategory` helpers closing over the parent
+  `*testing.T` rather than each subtest's own, so a `Fatalf` inside one
+  subtest's setup would have failed whichever subtest happened to run last,
+  not the one that actually broke.
+
 ### 3. The simulated environment lied
 
 - `Modal` threw `InvalidStateError` on **every open in every real browser** —
@@ -584,8 +602,8 @@ different component, after it was already written down here once.
 
 ### 4. Guards scoped to the wrong interval
 
-Twice, a fix closed the reported sequence and left the class open. Both times a
-reviewer found it by building a probe rather than reading the diff.
+Three times, a fix closed the reported sequence and left the class open. Each
+time a reviewer found it by building a probe rather than reading the diff.
 
 - Clearing an error **on mode change** could not cancel an error that arrived
   *after* the change — an abandoned request settling later rendered on a screen
@@ -593,6 +611,20 @@ reviewer found it by building a probe rather than reading the diff.
 - Disabling a control **while the mutation is pending** stopped too early,
   because `onSuccess` fired `invalidateQueries` without awaiting it. The mutation
   settled when the response arrived, not when the cache refreshed.
+- Budget slice, Task 8 review found two instances of the same shape in
+  `BudgetService`, in the same review pass. `History`'s `Closed` flag
+  compared each row against the walk-back **anchor month** instead of
+  today's real calendar month, so a page whose month picker sat on a past
+  month while History was open would have mislabelled every row, including
+  the anchor itself, as "so far" or vice versa — the interval the flag
+  claims to cover ("is this month over yet") is anchored to the wrong clock.
+  Separately, `DailyPaceOK` didn't check whether the *viewed* month was the
+  *current* one at all: a budgeted future month with no spend yet has a
+  positive `Remaining` and a full `DaysLeftInMonth`, so the pace card would
+  have shown a false "on pace" for a month that hasn't started. Both fixed
+  by anchoring the relevant comparison to `today` explicitly rather than to
+  whatever month the caller happened to be walking, with a test for each
+  that only distinguishes the two months when they actually differ.
 
 **Ask what interval the guard actually covers, and what can arrive outside it.**
 
@@ -937,6 +969,28 @@ inventing itself as a person the moment it renders for someone else's family.
   referencing it, `domain.Account`'s `OpeningBalanceAsOf` doc comment,
   `accountDTO`'s doc comment, the `00004_accounts.sql` migration's table
   comment, and the frontend's mirrored comment in `schemas.ts`.
+- `domain.PercentUsed`'s rounding (add half the denominator before
+  truncating, for half-away-from-zero) only rounds correctly for a
+  non-negative numerator. A household with refunds exceeding the month's
+  spend has a negative net Spent, and adding a positive half-denominator to
+  a negative numerator rounds it *toward* zero instead of away from it —
+  `-338000` spent against a `520000` budget is exactly -65%, and the
+  unsigned formula returned -64. Fixed by making the rounding term
+  sign-aware (subtract half for a negative numerator, add for
+  non-negative), with a test for the exact -65% case and a second one at a
+  boundary the original formula's own test suite had never actually landed
+  on (127400/520000 = 24.5%, rounding up to 25 — "half rounds up" was
+  already asserted, but with a numerator that happened to give exactly
+  25.00%, never exercising the rounding term at all).
+- `web/src/features/money/budgetTemplates.ts`'s 50/30/20 split computed each
+  pool as `incomeMinor * 0.5` / `* 0.3` before flooring it into whole minor
+  units — `float64` arithmetic in a monetary path, the exact thing
+  `CLAUDE.md`'s money rule exists to keep out, and not hypothetical:
+  `333333 * 0.3 === 99999.90000000001` in JavaScript, so a pool that should
+  floor to exactly 99999 could floor one unit low depending which side of
+  the float error a given income landed on. Fixed to integer-first
+  division-then-multiplication, never a fractional float literal, with a
+  regression test pinned to the exact income that exposed the drift.
 
 ### Database and repositories
 
@@ -945,6 +999,41 @@ inventing itself as a person the moment it renders for someone else's family.
   the same file (`ConsumeMagicLink`).
 - A unique-violation surfaced as an opaque driver error because `translate` only
   special-cased `pgx.ErrNoRows`.
+- Budget slice, Task 5: four of `BudgetRepo.Upsert`'s own statements
+  (`DeleteBudgetLines`, `InsertBudgetLine`, `GetHouseholdPrimaryCurrency`,
+  `CountCategoriesInHousehold`) were wrapped with a plain `fmt.Errorf`
+  instead of `translate()`, the same "raw driver error crosses the adapter
+  boundary" shape as the bullet above, just at four new call sites instead
+  of the original one. Reachable for real: two lines in one `PUT` payload
+  naming the same category id both pass `validateLineCategories` (it
+  dedupes before counting), then the second `InsertBudgetLine` hits
+  `budget_lines`' own `UNIQUE (budget_id, category_id)` after
+  `DeleteBudgetLines` has already run inside the same transaction — a
+  `*pgconn.PgError` would have reached `usecase.BudgetService`, not
+  `domain.ErrAlreadyExists`. The existing test
+  (`TestBudgetUpsertIsOneTransaction`) couldn't have caught this: its own
+  failure happens before any write starts, so nothing in it ever pinned
+  `pgx.BeginFunc`'s rollback once writes were already underway. Fixed by
+  routing all four through `translate()` and adding
+  `TestBudgetUpsertDuplicateCategoryLineRollsBackAndStaysAtTheBoundary`,
+  which proves both the rollback undoes the `DELETE` and that the error
+  surfacing from it is `domain.ErrAlreadyExists` with no `*pgconn.PgError`
+  reachable via `errors.As`.
+- Budget slice, Task 6: `CategoryRepo.Create`'s own comment claimed its
+  single-statement `MAX(sort_order)+1` insert closed the concurrent-create
+  race entirely — a comment stating something the code does not actually
+  do, the same shape pattern 1's `buildRows` entry warns about. It closes
+  only the round-trip window (this process's own read then write); under
+  `READ COMMITTED`, two overlapping transactions can each read the same
+  pre-insert max and both commit the same `sort_order`, because
+  `sort_order` carries no unique constraint. Found by re-reading the claim
+  against the isolation level actually in use, not by a test — a tied
+  `sort_order` is cosmetic (display order, not correctness) and was judged
+  not worth an advisory lock or a unique constraint, so the fix corrected
+  the comment to name the residual race and the accepted trade-off rather
+  than closing it, and added `, name` as a tie-break to both `List` queries'
+  `ORDER BY` so a tie's *display* order stops depending on whichever row
+  order Postgres happens to scan on a given read.
 - `ListSpaces` ordered by `position` with no tiebreaker, so duplicates made
   sidebar order nondeterministic.
 - Deleting a membership leaves the `users` row alive. Three separate symptoms
@@ -1216,6 +1305,31 @@ route with a missing guard has no second line of defence.
   depends on a component staying a stub is a landmine for whoever un-stubs
   it — worth writing that comment on every throwaway-stub test, not only
   this one.
+- Task 12's first `useBudget.ts` was a hand-rolled `useState`/`useEffect`
+  fetch hook, with no precedent check against `useTransactions.ts`'s own
+  month-parameterised `useQuery`, already established for the identical
+  shape (a resource keyed by which month is being viewed). The deviation
+  was not free: it cost real behaviour, not just style. Category writes
+  had nothing invalidating `useTransactions`' own `categoriesQueryKey()`
+  cache entry, so a category created from the Budget modal would not have
+  shown up in the transaction modal's dropdown without a full reload; and
+  nothing kept `["budget", month]` as a structured query key, so switching
+  the page's month picker mid-fetch had no cache boundary stopping a
+  slower, stale response for the *old* month from landing after a faster
+  one for the *new* month already had. `useQuery`'s own key-based
+  cancellation is what `useTransactions.ts` got for free and this hook did
+  not. Found by review, not a failing test — both gaps are races or
+  cross-component effects a synchronous render-and-assert test does not
+  naturally reach. Fixed by rewriting onto `useQuery`/`useMutation`
+  matching the existing pattern exactly, with category writes now
+  invalidating both query keys and `save()` actually parsing `PUT`'s
+  response with `putBudgetResponseSchema` instead of leaving it uncalled.
+  Five of the rewritten hook's own mutation tests needed `waitFor` instead
+  of a synchronous post-act assertion, because TanStack Query's
+  `notifyManager` re-render notification lands one microtask after
+  `mutateAsync` resolves — the same timing `FinancesPage.test.tsx` had
+  already worked around, not a new discovery, just a new place the same
+  fact had to be applied again.
 - `useBudget.ts`'s `createCategory` discarded the created category entirely
   (`mutationFn` returned `void`) and relied on invalidate-then-refetch for
   every caller to pick the new row up later — fine for every caller that

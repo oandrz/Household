@@ -13,23 +13,36 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 51 of 93 features built or partly built (this update
-flips Budget history from ⬜ to ✅ -- no new row -- and, recounting from
-scratch rather than adjusting the previous line in place per this doc's own
-convention, also fixes a pre-existing off-by-one it carried forward from the
-last update: the count of ✅/🟡/⬜/🚫 rows in the tables below actually summed
-to 93, not the 94 stated, so Built+Partial was 51 of 93 even before this
-task's own change landed). Money now has three features fully built —
+**Where things stand:** 52 of 95 features built or partly built. This update
+does three things to the tables below, and every number here is a fresh count
+of the ✅/🟡/⬜/🚫 symbols in the tables — the first symbol in each row's own
+cell, counted whether that cell holds a bare symbol or a symbol with prose
+crammed in after it — not the previous total adjusted in place: it corrects
+"Budget history (modal)" from the ✅ the Task 15 commit that built it had
+already marked in this file back to 🟡, since that row's own gap — Export
+CSV — was never actually closed; it adds one new row, "Roll unspent into
+savings" (⬜, deferred whole to Goals); and counting by that rule surfaced a
+third thing, present before this task touched anything: **Money row 258**,
+"Full ledger with filters | ✅ — a transaction dated…", reads ✅ same as
+every other built row, but a symbol-then-bare-pipe pattern (`grep`'s and a
+human eye's easiest read) skips it, because its cell holds a dash-note
+instead of a clean `| ✅ |`. The previous update's summary table had
+under-counted Money's Built by exactly that one row and over-counted its Not
+started by one to compensate, landing on the same row total by two errors
+that happened to cancel rather than one correct count — recounting by the
+rule above (first symbol in the cell, not "does the cell contain nothing but
+the symbol") is what this update fixes, alongside its own two changes. Money
+now has three features fully built —
 Accounts (a household records what it owns and owes by hand and sees a net
 worth built from it), the Transactions ledger (logging, editing and deleting
 expenses, income and transfers, with filters and the five screen states the
 design and spec both call for), and Budget (create from scratch, from a
 template, or by importing last month's; edit an existing month end to end;
-and now review the last six months' spend-vs-budget in the History modal) —
-plus the recent-transactions strip on Finances, deferred by the accounts spec
-for having no data and now built with the ledger to read from. Nothing else
-in Money is started yet, and nothing in Marriage, Family or Overview has been
-started.
+and review the last six months' spend-vs-budget in the History modal, save
+for its own Export CSV) — plus the recent-transactions strip on Finances,
+deferred by the accounts spec for having no data and now built with the
+ledger to read from. Nothing else in Money is started yet, and nothing in
+Marriage, Family or Overview has been started.
 Five of the rows below have no mockup of their own — the provisioning
 transaction behind self-serve sign-up, the currency list endpoint, and
 `adminctl prune` — because the design's own "Create household" screen (the
@@ -42,7 +55,7 @@ and a warning before a primary-currency change strands every account — for
 work the accounts spec named and deliberately deferred rather than built.
 Transactions adds two more under **Categories**: the list and its
 first-use seeding (needed before Budget existed, for the transaction modal's
-own dropdown), and — added by this Budget update — renaming, creating and
+own dropdown), and — added by the Budget update — renaming, creating and
 archiving a category, which the design's spec folds into the Edit-budget
 modal rather than a dedicated screen the dc.html mockup never drew.
 
@@ -52,11 +65,11 @@ modal rather than a dedicated screen the dc.html mockup never drew.
 | Navigation shell | 7 | 0 | 1 | 0 |
 | Household settings | 15 | 4 | 2 | 0 |
 | Overview (home) | 0 | 0 | 8 | 0 |
-| Money | 13 | 1 | 15 | 0 |
+| Money | 13 | 2 | 15 | 0 |
 | Marriage | 0 | 0 | 13 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **45** | **6** | **41** | **2** |
+| **Total** | **45** | **7** | **41** | **2** |
 
 ---
 
@@ -190,9 +203,9 @@ and Marriage retro — so it depends on Money, Family and Marriage existing firs
 
 ## 5 · Money
 
-Accounts and Transactions are built. Budget now has a real create-and-edit
-flow (only its history modal is left); Goals and Bills are still to come.
-This is still the largest area.
+Accounts, Transactions and Budget are built — Budget's own history modal is
+whole except for Export CSV. Goals and Bills are still to come. This is still
+the largest area.
 
 **Finances**
 
@@ -321,7 +334,8 @@ screen for.
 | Empty state with Family-of-four, 50/30/20 and import templates | ✅ |
 | Spending by person | ✅ |
 | Edit budget (modal) | ✅ |
-| Budget history (modal) | ✅ |
+| Budget history (modal) | 🟡 *(Export CSV deferred — `apiFetch`'s JSON-only contract, transactions decision 7)* |
+| Roll unspent into savings | ⬜ *(deferred whole to Goals — spec decision 1)* |
 
 **A household can create, edit and review a budget end to end now.** The
 four stat cards (Budgeted, Spent, Remaining, Daily pace), the per-category
@@ -362,9 +376,20 @@ monthly spend, avg saved/month, months under budget) are computed over
 closed month with every cap removed are excluded from all three, not
 zero-filled into the average. Clicking a row switches the page's own month
 state and closes the modal — the design's "full breakdown" is the Budget
-screen itself, not a second view inside the modal. Export CSV, drawn in the
-design's mockup, is deferred (same class as the rollover sentence Task 12
-pinned absent) and never implemented, not merely hidden.
+screen itself, not a second view inside the modal. **Export CSV, drawn in the
+design's mockup, is deferred and never implemented, not merely hidden** —
+`apiFetch` is the only way the frontend talks to the server and throws on an
+ok response it cannot parse as JSON, so a CSV download needs its own
+non-JSON response path, its own guard and its own test (the transactions
+spec's decision 7, restated for Budget by decision 10 of the Budget spec) —
+which is why the row above is 🟡 rather than ✅ even though every other part
+of History works end to end. **"Roll unspent into savings" does not ship at
+all**, not stored-but-dormant, not stubbed: the design's toggle names a
+savings goal and moves money at month end, and Goals does not exist yet, so
+a control that looks real and does nothing would violate the same honesty
+rule the design's own "· not built" markers exist to protect (Budget spec
+decision 1). The insight card says what is unspent; the rollover sentence
+itself arrives with Goals.
 
 **Goals**
 

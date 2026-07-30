@@ -6,13 +6,16 @@ sitting.
 
 **Scope:** what exists today — slices 0 and 1, self-serve sign-up and
 household provisioning (which shipped ahead of slice 2 in the build order, see
-`docs/HANDOVER.md`), and the first two features of slice 2 (Money): Accounts —
-a household records what it owns and owes by hand and sees a net worth built
-from it — and Transactions — the ledger a household logs expenses, income and
-transfers into, categorised and filterable, which is also what turns an
-account's balance from a copy of its opening figure into a real sum. The rest
-of Money (Budget, Goals, Bills) and all of Marriage, Family and Overview are
-not built; see `docs/FEATURE_TRACKER.md`.
+`docs/HANDOVER.md`), and the first three features of slice 2 (Money):
+Accounts — a household records what it owns and owes by hand and sees a net
+worth built from it; Transactions — the ledger a household logs expenses,
+income and transfers into, categorised and filterable, which is also what
+turns an account's balance from a copy of its opening figure into a real
+sum; and Budget — an envelope per category with pace, built directly on
+Transactions' own month totals, plus the category management (rename,
+create, archive) the design folds into its Edit-budget modal rather than a
+dedicated screen. Goals and Bills, the rest of Money, and all of Marriage,
+Family and Overview are not built; see `docs/FEATURE_TRACKER.md`.
 
 ---
 
@@ -93,8 +96,9 @@ graph TD
         Member["MemberService"]
         House["HouseholdService"]
         Account["AccountService — net worth is<br/>composed here, not stored"]
-        Category["CategoryService — seeds the<br/>starter set on first read"]
+        Category["CategoryService — seeds the starter<br/>set on first read; create, rename, archive"]
         Transaction["TransactionService — MonthSummary<br/>converts then adds, like Account"]
+        Budget["BudgetService — Month, Save, History;<br/>Save always replaces the whole line set"]
         Seed["Seed"]
     end
 
@@ -146,8 +150,9 @@ points inward, which is why every service is testable against in-memory doubles.
 | `UserRepository` | `adapter/postgres` | Includes the transactional `CreateWithMembership` |
 | `HouseholdRepository`, `MembershipRepository`, `SessionRepository`, `MagicLinkRepository`, `LoginAttemptRepository`, `InviteRepository`, `SignupRepository`, `SpaceRepository`, `NotificationRepository` | `adapter/postgres` | Ten narrow repositories rather than one wide one |
 | `AccountRepository` | `adapter/postgres` | Eleventh. Accounts joined to the owner's display name (`AccountView`); its `MembershipBelongsToHousehold` is what stops an account being assigned to a member of a different household. `AccountView.Balance` is now a real sum — see §5 |
-| `CategoryRepository` | `adapter/postgres` | Twelfth. `List` respects `sort_order`, the order the design draws rather than alphabetical; `EnsureSeeded` is idempotent under two concurrent first requests through one `INSERT ... ON CONFLICT DO NOTHING` against `UNIQUE(household_id, name)`, never a read-then-write |
+| `CategoryRepository` | `adapter/postgres` | Twelfth. `List` respects `sort_order`, the order the design draws rather than alphabetical; `EnsureSeeded` is idempotent under two concurrent first requests through one `INSERT ... ON CONFLICT DO NOTHING` against `UNIQUE(household_id, name)`, never a read-then-write. Budget grows it with `Create`, `Rename` and `SetArchived` — a category is referenced by transactions and budget lines, so it archives rather than deletes, the same reasoning `accounts.archived_at` already uses for a different table; `sort_order`'s own concurrent-create window is a known, accepted, cosmetic tie (see `docs/LEARNING.md`) |
 | `TransactionRepository` | `adapter/postgres` | Thirteenth. Keyset-paged `List` (a cursor is the last row's date and id, not an offset); `Update` never merges a patch — `TransactionService` turns a partial `PATCH` into a complete `domain.Transaction` first; `MonthTotals` returns rows rather than a SQL `SUM`, because a sum is only correct within one currency and the FX conversion lives in the service, not the repository |
+| `BudgetRepository` | `adapter/postgres` | Fourteenth. `Get` returns `domain.ErrNotFound` for an unbudgeted month, which the service turns into the empty state, not an error; `Upsert` replaces one household-month wholesale in a single transaction — parent row upserted on `(household_id, month)`, every existing line deleted, every new line inserted, category ownership validated first — never a merge, so a category the caller left out of the payload is unambiguously gone after the call; `History` returns the closed months in range that actually have a budget row, never zero-filled |
 | `AccountLookup`, `CategoryLookup` | `adapter/postgres` (`*AccountRepo` and `*CategoryRepo` already satisfy them) | Narrower ports `TransactionService` depends on instead of the full repositories above — interface segregation: it needs an account's currency and household, and whether a category id belongs to this household and what kind it is, never `List` or `EnsureSeeded` |
 | `PasswordHasher`, `TokenGenerator` | `adapter/crypto` | argon2id with cost from config; tokens are random, stored hashed |
 | `Mailer` | `adapter/mail` | SMTP; TLS policy and credentials from config |
@@ -185,7 +190,7 @@ graph TD
 
     Session --> Cap{"Capability-gated<br/>route group?"}
     Cap -->|"accounts: money"| RequireCap["requireCapability(money)<br/>403 unless the caller's membership has it"]
-    Cap -->|"transactions, categories:<br/>money AND owner —<br/>reads included"| RequireCapTxn["requireCapability(money)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
+    Cap -->|"transactions, categories,<br/>budgets: money AND owner —<br/>reads included"| RequireCapTxn["requireCapability(money)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
     Cap -->|"no — most routes"| Safe{"GET or HEAD?"}
     RequireCap --> Safe
     RequireCapTxn --> Safe
@@ -225,19 +230,31 @@ the cheaper price. (This is unrelated to the frontend's own `RequireCapability`
 component, §7 — a presentation guard that already existed for the `/money` and
 `/marriage` placeholders; this is the first time the *server* enforces one.)
 
-**Transactions and categories are the first routes where `requireOwner` gates
-a `GET`.** Every other owner-gated route in this table only reaches
+**Transactions, categories and budgets are the routes where `requireOwner`
+gates a `GET`.** Every other owner-gated route in this table only reaches
 `requireOwner` after the `CSRF` check, which by construction means never on a
-read. The transactions group instead runs `requireCapability(money)` then
-`requireOwner` before the GET/HEAD branch even exists, so a limited member is
-refused the ledger itself, not merely its writes. This is deliberate, not
-copied from accounts by mistake: a limited member's accounts view already
-renders names with every amount blank (§5); applied to a ledger — a table
-whose every figure would be blank, next to a "Spent this month" that has to be
-absent rather than shown as zero — the page would read as broken rather than
-merely restricted. So for a limited member the `money` capability on
-Transactions means only "see which accounts this household has" (via
-`/accounts`), and nothing about the ledger at all.
+read. This group instead runs `requireCapability(money)` then `requireOwner`
+before the GET/HEAD branch even exists, so a limited member is refused the
+ledger — and the budget screen — itself, not merely their writes. This is
+deliberate, not copied from accounts by mistake: a limited member's accounts
+view already renders names with every amount blank (§5); applied to a
+ledger, or a budget screen, that is nothing but figures — a table whose every
+figure would be blank, next to a "Spent this month" that has to be absent
+rather than shown as zero, or a page of caps and pace with nothing left to
+show — the page would read as broken rather than merely restricted. So for a
+limited member the `money` capability on Transactions and Budget means only
+"see which accounts this household has" (via `/accounts`), and nothing about
+the ledger or the budget at all. Budget's spec named this explicitly as the
+Transactions shape reused for the same reason (decision 8), rather than
+inventing a new one.
+
+**`PUT /budgets/{month}` sits in its own `requireCSRF` sub-group**, separate
+from the one wrapping the category-write routes and the transaction writes,
+even though both sub-groups sit at the identical point in the chain (inside
+`requireCapability(money)` + `requireOwner`, ahead of the handler). The two
+groups can now each grow their own route list without editing the other's —
+a deliberate seam, not an accident of how the router file happened to be
+structured.
 
 `POST /auth/sign-up` is the one public route wrapped in an extra middleware,
 `rateLimitByIP` — a per-process, in-memory token bucket keyed on the request's
@@ -272,9 +289,14 @@ to a real address and so are not on that path.
 | GET | `/transactions`, `/categories` | session · money · owner — owner gates the read, unlike accounts |
 | POST | `/transactions` | session · money · owner · CSRF |
 | PATCH · DELETE | `/transactions/{id}` | session · money · owner · CSRF |
+| GET | `/budgets/{month}`, `/budgets/history` | session · money · owner — same reasoning as the transactions/categories reads above |
+| PUT | `/budgets/{month}` | session · money · owner · CSRF — its own CSRF sub-group, not the one below |
+| POST | `/categories` | session · money · owner · CSRF |
+| PATCH | `/categories/{id}` | session · money · owner · CSRF |
+| POST | `/categories/{id}/archive`, `/categories/{id}/restore` | session · money · owner · CSRF |
 | GET | `/healthz`, `/readyz` | none — outside `/api/v1` |
 
-Three test matrices walk the live router and assert this: every non-public
+Five test matrices walk the live router and assert this: every non-public
 route rejects an unauthenticated caller, every mutating route requires CSRF,
 and every owner-gated route rejects a limited member. A route added without
 its guard fails a test rather than shipping. All four sign-up-and-currency
@@ -304,6 +326,15 @@ per route rather than "not 401/403" — the looser form once let three routes
 panic on a nil dependency in the test harness and pass anyway, recovered into
 a `500` that the assertion could not tell apart from a correctly-enforced
 guard; see `docs/LEARNING.md`.
+
+**Budget adds two more matrices of its own, following the same shape rather
+than folding into Transactions' existing one**: `TestBudgetRoutesRequireMoneyAndOwner`
+plus `TestBudgetWriteRouteRequiresCSRF` for the three `/budgets` routes, and
+`TestCategoryWriteRoutesRequireMoneyAndOwner` plus
+`TestCategoryWriteRoutesRequireCSRF` for the four category-write routes —
+kept separate from `TestTransactionRoutesRequireMoneyAndOwner` rather than
+adding rows to it, so each feature's own route list can grow without editing
+a test file it does not own.
 
 ---
 
@@ -604,6 +635,68 @@ not the other's, so the mark is two independent fields
 (`beforeFromAccountOpeningBalance` / `beforeToAccountOpeningBalance`), each
 naming the account, not one flag that would be half true for a transfer.
 
+### Budget — one screen, one request; the PUT always replaces the whole month
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant H as Handler
+    participant Svc as BudgetService
+    participant Repo as BudgetRepository
+    participant TxnRepo as TransactionRepository
+    participant DB as Postgres
+
+    B->>H: GET /api/v1/budgets/{month}
+    H->>Svc: Month(householdID, month, today)
+    Svc->>Repo: Get(householdID, month)
+    Note over Svc,Repo: domain.ErrNotFound means unbudgeted —<br/>the service turns this into budget: null, not a 404
+    Svc->>TxnRepo: MonthTotals(householdID, month)
+    Svc->>Svc: per-category and per-person spend,<br/>convert then add, like Account/Transaction
+    Svc-->>H: BudgetMonthView{ budget, spent, totals,<br/>by-person, excludedNoRate }
+    H-->>B: 200 — same shape whether or not a budget exists
+
+    B->>H: PUT /api/v1/budgets/{month} { income, lines[] }
+    H->>Svc: Save(householdID, month, income, lines)
+    Svc->>Svc: reject a duplicate category id or negative<br/>cap before any repository call
+    Svc->>Repo: Upsert(budget)
+    Repo->>DB: BEGIN
+    Repo->>DB: validate every line's category<br/>belongs to this household
+    Repo->>DB: upsert budgets row on (household_id, month)
+    Repo->>DB: DELETE every existing budget_lines row
+    Repo->>DB: INSERT every line in the payload
+    Repo->>DB: COMMIT
+    Repo-->>H: the saved Budget
+    H-->>B: 200
+```
+
+**A third endpoint answers a whole screen in one request**, the same shape
+`GET /accounts` and `GET /transactions` already use: the figures and the raw
+data describe the same rows and must never be free to disagree, so there is
+one query to keep in sync, not two. `GET /budgets/{month}` returns `"budget":
+null` plus the spend figures even for a month with no caps at all — the
+empty state needs to know the month's spend to invite "Import last month",
+and a 404 would make the frontend special-case the one screen that is
+allowed to have nothing.
+
+**`PUT` is a full replace, never a merge, in one transaction.** The
+Edit-budget modal always holds the entire budget client-side — every capped
+category, not a diff — so replace is what makes "the caller removed a cap"
+unambiguous: a line simply absent from the payload is gone after the call,
+rather than needing a separate "delete this line" operation the frontend
+would have to track alongside "add" and "change". Category ownership is
+validated *inside* the same transaction as the delete-then-insert, before
+either runs, so a foreign-household category id in one line rolls the whole
+month back rather than leaving the parent row updated with its lines
+half-replaced — the same "any two writes that must both happen need a
+transaction" rule invite acceptance and self-serve sign-up already apply
+(§5 above), extended here to a delete-and-reinsert pair instead of a set of
+inserts. `BudgetService.Save` also re-derives every cap through
+`domain.NewMoney` before the repository ever sees it, so a caller cannot
+make a stored `Budget` carry a currency the household does not have — the
+repository still relabels to the household's own primary currency
+regardless, but that must never be the only thing standing between a bad
+currency and a stored row.
+
 ### What the frontend loads
 
 ```mermaid
@@ -624,7 +717,7 @@ sidebar never filters or re-sorts `me.spaces` client-side — duplicating that
 rule is how the two drift. It does expand each space into its built pages: a
 client-side map (`SPACE_PAGES` in `Sidebar.tsx`) turns a space with several
 shipped pages into the design's uppercase group label plus one link per page
-— Money renders as "MONEY" over Finances and Transactions — while a space
+— Money renders as "MONEY" over Finances, Transactions and Budget — while a space
 with only one page still renders as a single link. The map, not the server
 payload, decides how many links a space produces; the server payload still
 decides which spaces appear at all and in what order.
@@ -649,6 +742,9 @@ erDiagram
     memberships ||--o{ transactions : "paid by (nullable, SET NULL)"
     accounts ||--o{ transactions : "from (nullable, CASCADE)"
     accounts ||--o{ transactions : "to (nullable, CASCADE)"
+    households ||--o{ budgets : has
+    budgets ||--o{ budget_lines : has
+    categories ||--o{ budget_lines : caps
     users ||--o{ memberships : holds
     users ||--o{ sessions : owns
     users ||--o{ magic_links : owns
@@ -763,6 +859,20 @@ erDiagram
         bigint received_amount_minor "nullable — transfer only"
         char received_amount_currency "nullable, paired with the amount above"
     }
+    budgets {
+        uuid id PK
+        uuid household_id FK
+        date month "always the first of the month"
+        bigint expected_income_minor "nullable — not provided"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    budget_lines {
+        uuid id PK
+        uuid budget_id FK "ON DELETE CASCADE"
+        uuid category_id FK
+        bigint cap_minor "CHECK >= 0"
+    }
 ```
 
 Notes that are not obvious from the shapes:
@@ -837,6 +947,34 @@ Notes that are not obvious from the shapes:
   account, which transactions themselves reference. `DELETE
   /api/v1/transactions/{id}` really deletes the row and answers `204`, the one
   response in this product allowed to carry no body.
+- **`budgets` and `budget_lines` carry no `currency` column at all.** A cap
+  is a plan, not a transaction, and it lives in the household's primary
+  currency by construction (Budget spec decision 9). Changing the
+  household's primary currency in Settings changes what an existing cap
+  *means* — the same accepted trade-off the accounts currency-change screen
+  already documents, restated here rather than "fixed" by adding a column no
+  other monetary-plan table in this schema has either.
+- **`budgets.month` is the existence check for "is a budget set for this
+  month".** A household's caps could have lived directly on `categories`
+  instead, but a cap-on-category table has nowhere to hold expected income
+  and no way to tell "never budgeted" apart from "budgeted, then every cap
+  removed" — both would read as zero rows. The parent-and-lines shape keeps
+  those two states distinguishable: `budgets` row present, `budget_lines`
+  empty, is a real, closed-out zero; no `budgets` row at all is the empty
+  state.
+- **Archiving a category leaves its `budget_lines` rows exactly as they
+  were.** `category_id` on `budget_lines` has no `ON DELETE SET NULL` the
+  way `transactions.category_id` does, because there is no delete to guard
+  against — a category only ever archives. A month capped against a
+  category since archived still renders that cap, named and marked
+  archived, so history stays true to what the household actually budgeted;
+  only new caps and new transactions stop offering it.
+- **`budget_lines.budget_id` is `ON DELETE CASCADE`** — nothing deletes a
+  `budgets` row today, since Budget's own `PUT` upserts rather than
+  replacing the parent, but the cascade exists for the same reason
+  `accounts`'s cascade from `households` does: if a household is ever
+  deleted, its budgets should not survive it as orphaned rows with no parent
+  a query would ever reach.
 
 ---
 
@@ -857,9 +995,13 @@ web/src/
                        archive and restore; the Transactions page —
                        filterable ledger, the add/edit/delete transaction
                        modal (Task 15's component, this is its only
-                       caller), mounted at /money/transactions (Task 17)
-    placeholder/       named stand-ins for unbuilt areas — /money/$ (Budget,
-                       Goals and Bills, still to come) renders theirs
+                       caller), mounted at /money/transactions (Task 17);
+                       the Budget page — set state, empty state with
+                       templates, the Edit-budget modal (category create/
+                       rename/archive queued through it), the History
+                       modal and month picker, mounted at /money/budget
+    placeholder/       named stand-ins for unbuilt areas — /money/$ (Goals
+                       and Bills, still to come) renders theirs
   routes/router.tsx        the route tree
   routes/publicRoutes.ts   the one list of pre-auth routes and API prefixes;
                            a test walks the route tree and fails if a
@@ -870,18 +1012,19 @@ web/src/
 recent-transactions strip — five newest, reading through the same
 `useTransactions({})` query the Transactions page's own default (unfiltered)
 state resolves to, so the two share one cache entry rather than the strip
-standing up a second endpoint. `/money/transactions` is a real route, a
-sibling of `/money` nested under the same `moneyGuardRoute` (a literal path
-segment beats `/money/$`'s catch-all, so it is declared and added to that
-route's children ahead of the splat). `/money/$` still covers Budget, Goals
-and Bills. The sidebar still renders from the server's own filtered, ordered
-space list, but this feature is what expires the flat-links deferral: Money
-now has two built pages, so it takes the design's grouped form — an
-uppercase "MONEY" label over Finances (`/money`) and Transactions
-(`/money/transactions`) — via the `SPACE_PAGES` map in `Sidebar.tsx` (see
-"What the frontend loads" above). Marriage and Family still have exactly one
-built page each, so they still render as a single link; Budget, Goals and
-Bills join the map, and Money's label, only once their pages ship.
+standing up a second endpoint. `/money/transactions` and `/money/budget` are
+both real routes, siblings of `/money` nested under the same
+`moneyGuardRoute` (a literal path segment beats `/money/$`'s catch-all, so
+each is declared and added to that route's children ahead of the splat).
+`/money/$` now covers only Goals and Bills. The sidebar still renders from
+the server's own filtered, ordered space list, but Transactions is what
+expired the flat-links deferral and Budget is what grew it a third link:
+Money takes the design's grouped form — an uppercase "MONEY" label over
+Finances (`/money`), Transactions (`/money/transactions`) and Budget
+(`/money/budget`) — via the `SPACE_PAGES` map in `Sidebar.tsx` (see "What the
+frontend loads" above). Marriage and Family still have exactly one built
+page each, so they still render as a single link; Goals and Bills join the
+map, and add a fourth and fifth Money link, only once their own pages ship.
 
 **Route guards are presentation, not security.** The server enforces
 independently; `RequireAuth` and `RequireCapability` exist so the UI does not
