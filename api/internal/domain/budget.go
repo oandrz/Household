@@ -38,12 +38,18 @@ func DaysLeftInMonth(month, today time.Time) int {
 
 // PercentUsed rounds to the nearest whole percent, half away from zero — the
 // same rounding Money already uses. ok=false when nothing is budgeted; the
-// caller hides the figure rather than showing NaN or infinity.
+// caller hides the figure rather than showing NaN or infinity. Handles negative
+// net spend (e.g., refunds exceeding the month's spend).
 func PercentUsed(spentMinor, budgetedMinor int64) (int, bool) {
 	if budgetedMinor == 0 {
 		return 0, false
 	}
-	return int((spentMinor*100 + budgetedMinor/2) / budgetedMinor), true
+	half := budgetedMinor / 2
+	n := spentMinor * 100
+	if n < 0 {
+		return int((n - half) / budgetedMinor), true
+	}
+	return int((n + half) / budgetedMinor), true
 }
 
 // DailyPace floors: telling a household it can spend S$137/day when the true

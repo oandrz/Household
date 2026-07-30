@@ -45,6 +45,8 @@ func TestPercentUsed(t *testing.T) {
 		{"over 100 stays literal", 600000, 520000, 115, true},
 		{"rounds to nearest, not down", 335000, 520000, 64, true}, // 64.42 -> 64
 		{"half rounds up", 130000, 520000, 25, true},
+		{"negative net spend rounds correctly", -338000, 520000, -65, true},
+		{"half away from zero", 127400, 520000, 25, true}, // 24.5 -> 25
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
