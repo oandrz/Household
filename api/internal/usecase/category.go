@@ -30,6 +30,14 @@ func NewCategoryService(repo CategoryRepository) *CategoryService {
 //
 // EnsureSeeded is idempotent and concurrency-safe (see its port doc), so
 // calling it on every read costs one cheap count and nothing else.
+//
+// Create deliberately does not seed -- it is a pure write, not a second
+// seeding moment. The invariant that keeps that safe: every UI path reaches
+// Create only after populating a category list first (the "Log a
+// transaction" modal's dropdown, Budget's "Edit categories" screen), and
+// that list is always this method's return value. A household whose first-
+// ever category action was a direct Create, bypassing List entirely, would
+// get one category and never the starter set.
 func (s *CategoryService) List(ctx context.Context, householdID string) ([]domain.Category, error) {
 	if err := s.repo.EnsureSeeded(ctx, householdID, domain.StarterCategories()); err != nil {
 		return nil, err
