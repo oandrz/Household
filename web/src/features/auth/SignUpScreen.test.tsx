@@ -27,7 +27,7 @@ describe("SignUpScreen", () => {
     expect(await screen.findByText("Start your household.")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "One household, two owners. Set it up once and invite your partner in.",
+        "One household for the whole family. Set it up once, invite your partner, add the kids later.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create household" })).toBeInTheDocument();

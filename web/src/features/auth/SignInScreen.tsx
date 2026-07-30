@@ -311,7 +311,7 @@ export function SignInScreen() {
         </div>
 
         <p className="text-center text-xs leading-relaxed text-muted">
-          Your household data stays between the two of you.
+          Your household data stays inside your household.
         </p>
       </div>
     </main>
