@@ -176,7 +176,7 @@ export function SignUpScreen() {
               disabled={requestSignUp.isPending}
               className="mt-1 rounded-[9px] bg-accent py-3 text-center text-[13.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Create household
+              Send me a set-up link
             </button>
           </form>
 

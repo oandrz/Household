@@ -165,7 +165,7 @@ function CompleteSignUpForm({ token, email }: { token: string; email: string }) 
             className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
           />
           <p className="text-[11px] text-muted">
-            Shown at the top of the sidebar. Change it any time.
+            Shown at the bottom of the sidebar, beside your name. Change it any time.
           </p>
         </div>
 

@@ -43,7 +43,7 @@ describe("SignUpCompleteScreen", () => {
 
     expect(await screen.findByLabelText("Household name")).toBeInTheDocument();
     expect(
-      screen.getByText("Shown at the top of the sidebar. Change it any time."),
+      screen.getByText("Shown at the bottom of the sidebar, beside your name. Change it any time."),
     ).toBeInTheDocument();
     expect(screen.getByLabelText("Your name")).toBeInTheDocument();
     expect(screen.getByLabelText("Password")).toBeInTheDocument();

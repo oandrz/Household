@@ -30,7 +30,7 @@ describe("SignUpScreen", () => {
         "One household for the whole family. Set it up once, invite your partner, add the kids later.",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Create household" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send me a set-up link" })).toBeInTheDocument();
   });
 
   // The design's own footer link back into sign-in ("Already set up? Sign
@@ -76,7 +76,7 @@ describe("SignUpScreen", () => {
 
     const emailInput = await screen.findByLabelText("Email");
     fireEvent.change(emailInput, { target: { value: "founder@example.test" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create household" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send me a set-up link" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(await screen.findByText("Check your email.")).toBeInTheDocument();
@@ -117,7 +117,7 @@ describe("SignUpScreen", () => {
 
     const emailInput = await screen.findByLabelText("Email");
     fireEvent.change(emailInput, { target: { value: "founder@example.test" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create household" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send me a set-up link" }));
     await screen.findByText("Check your email.");
 
     fireEvent.click(screen.getByRole("button", { name: "Send another link" }));
@@ -146,7 +146,7 @@ describe("SignUpScreen", () => {
 
     const emailInput = await screen.findByLabelText("Email");
     fireEvent.change(emailInput, { target: { value: "founder@example.test" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create household" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send me a set-up link" }));
     await screen.findByText("Check your email.");
 
     fireEvent.click(screen.getByRole("button", { name: "Send another link" }));
@@ -207,7 +207,7 @@ describe("SignUpScreen", () => {
 
     const emailInput = await screen.findByLabelText("Email");
     fireEvent.change(emailInput, { target: { value: "founder@example.test" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create household" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send me a set-up link" }));
     await screen.findByText("Check your email.");
 
     // Start the resend -- it will not settle until rejectResend() is called.
@@ -276,7 +276,7 @@ describe("SignUpScreen", () => {
 
     const emailInput = await screen.findByLabelText("Email");
     fireEvent.change(emailInput, { target: { value: "founder@example.test" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create household" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send me a set-up link" }));
     await screen.findByText("Check your email.");
 
     // Start the resend -- it will not settle until resolveResend() is called.
@@ -323,5 +323,16 @@ describe("SignUpScreen", () => {
     expect(
       await screen.findByText("Enter your email address to create a household."),
     ).toBeInTheDocument();
+  });
+
+  it("does not promise to create a household from the address step", async () => {
+    // This button emails a set-up link. The household is created by the second
+    // screen's button, which is the one that may carry this name.
+    renderWithRouter(<SignUpScreen />);
+
+    expect(
+      await screen.findByRole("button", { name: "Send me a set-up link" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create household" })).toBeNull();
   });
 });
