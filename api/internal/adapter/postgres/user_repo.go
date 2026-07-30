@@ -164,6 +164,14 @@ func initialOf(displayName string) string {
 // https://www.postgresql.org/docs/current/errcodes-appendix.html.
 const pgUniqueViolation = "23505"
 
+// categoryNameUniqueConstraint is the name Postgres gave categories' own
+// UNIQUE (household_id, name) (migrations/00005_transactions.sql), Postgres's
+// default naming for an unnamed table constraint: "<table>_<columns>_key".
+// translate checks this by name, not only by SQLSTATE 23505, so a future
+// unique key on categories (or any other 23505 whose message happens to
+// mention the table) cannot masquerade as a name collision.
+const categoryNameUniqueConstraint = "categories_household_id_name_key"
+
 // translate converts driver errors into domain errors so nothing above the
 // adapter layer ever sees pgx types.
 func translate(err error, op string) error {
@@ -173,6 +181,13 @@ func translate(err error, op string) error {
 		return nil
 	case errors.Is(err, pgx.ErrNoRows):
 		return domain.ErrNotFound
+	case errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == categoryNameUniqueConstraint:
+		// CategoryRepository's own contract (usecase/ports.go) wants a
+		// sentinel specific to this one constraint, not the generic
+		// ErrAlreadyExists below -- Create and Rename both hit this on a
+		// name collision, archived rows included, since archived_at is not
+		// part of the unique key.
+		return fmt.Errorf("%s: constraint %q: %w", op, pgErr.ConstraintName, domain.ErrCategoryNameTaken)
 	case errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation:
 		// Mirrors ErrNotFound's translation: a caller-testable domain
 		// sentinel rather than a generic wrapped driver error, so

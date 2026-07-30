@@ -56,6 +56,46 @@ SELECT EXISTS (
 -- name: GetCategoryKind :one
 SELECT kind FROM categories WHERE id = $1 AND household_id = $2;
 
+-- CreateCategory appends the new row to the end of the household's sort
+-- order in the same statement as the insert -- not a separate
+-- read-max-then-write -- so two concurrent creates cannot both read the same
+-- max and collide on sort_order. A name collision (including against an
+-- archived row, which keeps its slot in UNIQUE (household_id, name)) surfaces
+-- as a 23505 that CategoryRepo.Create maps through translate to
+-- domain.ErrCategoryNameTaken.
+-- name: CreateCategory :one
+INSERT INTO categories (household_id, name, kind, sort_order)
+VALUES (
+    sqlc.arg(household_id),
+    sqlc.arg(name),
+    sqlc.arg(kind),
+    (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM categories WHERE household_id = sqlc.arg(household_id))
+)
+RETURNING id, household_id, name, kind, sort_order, archived_at, created_at;
+
+-- RenameCategory scopes the UPDATE to household_id as well as id, so a
+-- category id from another household returns no row -- CategoryRepo.Rename
+-- turns that into domain.ErrNotFound via translate's pgx.ErrNoRows case, the
+-- same as every other single-row lookup in this package -- rather than
+-- silently renaming (impossible, the WHERE excludes it) or leaking whether
+-- the id exists elsewhere.
+-- name: RenameCategory :one
+UPDATE categories
+SET name = sqlc.arg(name)
+WHERE id = sqlc.arg(id) AND household_id = sqlc.arg(household_id)
+RETURNING id, household_id, name, kind, sort_order, archived_at, created_at;
+
+-- SetCategoryArchived stamps or clears archived_at depending on the caller's
+-- boolean, scoped the same way RenameCategory is. The COALESCE is the whole
+-- of "archiving is idempotent": archiving an already-archived row keeps its
+-- first archived_at rather than moving it forward to now(), so two calls
+-- (or a retry) never disagree about when a category was actually archived.
+-- name: SetCategoryArchived :one
+UPDATE categories
+SET archived_at = CASE WHEN sqlc.arg(archived)::boolean THEN COALESCE(archived_at, now()) ELSE NULL END
+WHERE id = sqlc.arg(id) AND household_id = sqlc.arg(household_id)
+RETURNING id, household_id, name, kind, sort_order, archived_at, created_at;
+
 -- transactionColumns is repeated in full in each query below rather than
 -- factored into a view: sqlc generates a distinct row struct per query, and a
 -- view would hide which columns each one actually reads.

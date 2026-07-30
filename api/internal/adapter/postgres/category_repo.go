@@ -132,30 +132,55 @@ func (r *CategoryRepo) Kind(ctx context.Context, householdID, categoryID string)
 	return domain.CategoryKind(kind), nil
 }
 
-// errCategoryWritesNotImplemented is returned by the three stubs below.
-// usecase.CategoryRepository grew Create/Rename/SetArchived in Task 4 so the
-// port and its in-memory double could land ahead of the SQL; Task 6 replaces
-// these bodies with the real queries. They return an error rather than
-// panicking so a caller that reaches one before Task 6 lands fails loudly
-// instead of crashing the process, and rather than a silent no-op so a test
-// written against them cannot mistake "not implemented" for "did nothing".
-var errCategoryWritesNotImplemented = fmt.Errorf("postgres: category writes not implemented yet (Task 6)")
-
-// TODO(task-6): real SQL -- insert at the end of the household's sort order,
-// UNIQUE (household_id, name) violation -> domain.ErrCategoryNameTaken.
+// Create adds one category at the end of the household's sort order.
+// CreateCategory's own query computes that position in the same INSERT, so
+// two concurrent creates cannot both read the same max and collide. A name
+// collision -- including against an archived row, which still occupies its
+// slot in UNIQUE (household_id, name) -- surfaces as a 23505 that translate
+// maps to domain.ErrCategoryNameTaken by constraint name.
 func (r *CategoryRepo) Create(ctx context.Context, c domain.Category) (domain.Category, error) {
-	return domain.Category{}, errCategoryWritesNotImplemented
+	row, err := r.q.CreateCategory(ctx, sqlcgen.CreateCategoryParams{
+		HouseholdID: uuid(c.HouseholdID),
+		Name:        c.Name,
+		Kind:        string(c.Kind),
+	})
+	if err != nil {
+		return domain.Category{}, translate(err, "create category")
+	}
+	return toCategory(row), nil
 }
 
-// TODO(task-6): real SQL -- same collision contract as Create;
-// domain.ErrNotFound when categoryID is not householdID's.
+// Rename changes the name only; RenameCategory's WHERE clause scopes the
+// UPDATE to householdID as well as categoryID, so a category id from another
+// household matches no row and translate turns that pgx.ErrNoRows into
+// domain.ErrNotFound. Same collision contract as Create.
 func (r *CategoryRepo) Rename(ctx context.Context, householdID, categoryID, name string) (domain.Category, error) {
-	return domain.Category{}, errCategoryWritesNotImplemented
+	row, err := r.q.RenameCategory(ctx, sqlcgen.RenameCategoryParams{
+		ID:          uuid(categoryID),
+		HouseholdID: uuid(householdID),
+		Name:        name,
+	})
+	if err != nil {
+		return domain.Category{}, translate(err, "rename category")
+	}
+	return toCategory(row), nil
 }
 
-// TODO(task-6): real SQL -- stamp or clear archived_at, idempotently.
+// SetArchived stamps or clears archived_at. SetCategoryArchived's own
+// COALESCE is the "first stamp wins" rule: archiving an already-archived row
+// keeps its original archived_at instead of moving it forward to now(), so
+// two calls -- including a retry -- never disagree about when a category was
+// actually archived.
 func (r *CategoryRepo) SetArchived(ctx context.Context, householdID, categoryID string, archived bool) (domain.Category, error) {
-	return domain.Category{}, errCategoryWritesNotImplemented
+	row, err := r.q.SetCategoryArchived(ctx, sqlcgen.SetCategoryArchivedParams{
+		ID:          uuid(categoryID),
+		HouseholdID: uuid(householdID),
+		Archived:    archived,
+	})
+	if err != nil {
+		return domain.Category{}, translate(err, "set category archived")
+	}
+	return toCategory(row), nil
 }
 
 func toCategory(c sqlcgen.Category) domain.Category {

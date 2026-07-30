@@ -45,6 +45,45 @@ func (q *Queries) CountCategories(ctx context.Context, householdID pgtype.UUID) 
 	return count, err
 }
 
+const createCategory = `-- name: CreateCategory :one
+INSERT INTO categories (household_id, name, kind, sort_order)
+VALUES (
+    $1,
+    $2,
+    $3,
+    (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM categories WHERE household_id = $1)
+)
+RETURNING id, household_id, name, kind, sort_order, archived_at, created_at
+`
+
+type CreateCategoryParams struct {
+	HouseholdID pgtype.UUID
+	Name        string
+	Kind        string
+}
+
+// CreateCategory appends the new row to the end of the household's sort
+// order in the same statement as the insert -- not a separate
+// read-max-then-write -- so two concurrent creates cannot both read the same
+// max and collide on sort_order. A name collision (including against an
+// archived row, which keeps its slot in UNIQUE (household_id, name)) surfaces
+// as a 23505 that CategoryRepo.Create maps through translate to
+// domain.ErrCategoryNameTaken.
+func (q *Queries) CreateCategory(ctx context.Context, arg CreateCategoryParams) (Category, error) {
+	row := q.db.QueryRow(ctx, createCategory, arg.HouseholdID, arg.Name, arg.Kind)
+	var i Category
+	err := row.Scan(
+		&i.ID,
+		&i.HouseholdID,
+		&i.Name,
+		&i.Kind,
+		&i.SortOrder,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createTransaction = `-- name: CreateTransaction :one
 INSERT INTO transactions (
     household_id, kind, occurred_on, description, category_id,
@@ -537,6 +576,40 @@ func (q *Queries) MonthTotalsQuery(ctx context.Context, arg MonthTotalsQueryPara
 	return items, nil
 }
 
+const renameCategory = `-- name: RenameCategory :one
+UPDATE categories
+SET name = $1
+WHERE id = $2 AND household_id = $3
+RETURNING id, household_id, name, kind, sort_order, archived_at, created_at
+`
+
+type RenameCategoryParams struct {
+	Name        string
+	ID          pgtype.UUID
+	HouseholdID pgtype.UUID
+}
+
+// RenameCategory scopes the UPDATE to household_id as well as id, so a
+// category id from another household returns no row -- CategoryRepo.Rename
+// turns that into domain.ErrNotFound via translate's pgx.ErrNoRows case, the
+// same as every other single-row lookup in this package -- rather than
+// silently renaming (impossible, the WHERE excludes it) or leaking whether
+// the id exists elsewhere.
+func (q *Queries) RenameCategory(ctx context.Context, arg RenameCategoryParams) (Category, error) {
+	row := q.db.QueryRow(ctx, renameCategory, arg.Name, arg.ID, arg.HouseholdID)
+	var i Category
+	err := row.Scan(
+		&i.ID,
+		&i.HouseholdID,
+		&i.Name,
+		&i.Kind,
+		&i.SortOrder,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const seedCategories = `-- name: SeedCategories :exec
 INSERT INTO categories (household_id, name, kind, sort_order)
 VALUES
@@ -655,6 +728,39 @@ func (q *Queries) SeedCategories(ctx context.Context, arg SeedCategoriesParams) 
 		arg.SortOrder13,
 	)
 	return err
+}
+
+const setCategoryArchived = `-- name: SetCategoryArchived :one
+UPDATE categories
+SET archived_at = CASE WHEN $1::boolean THEN COALESCE(archived_at, now()) ELSE NULL END
+WHERE id = $2 AND household_id = $3
+RETURNING id, household_id, name, kind, sort_order, archived_at, created_at
+`
+
+type SetCategoryArchivedParams struct {
+	Archived    bool
+	ID          pgtype.UUID
+	HouseholdID pgtype.UUID
+}
+
+// SetCategoryArchived stamps or clears archived_at depending on the caller's
+// boolean, scoped the same way RenameCategory is. The COALESCE is the whole
+// of "archiving is idempotent": archiving an already-archived row keeps its
+// first archived_at rather than moving it forward to now(), so two calls
+// (or a retry) never disagree about when a category was actually archived.
+func (q *Queries) SetCategoryArchived(ctx context.Context, arg SetCategoryArchivedParams) (Category, error) {
+	row := q.db.QueryRow(ctx, setCategoryArchived, arg.Archived, arg.ID, arg.HouseholdID)
+	var i Category
+	err := row.Scan(
+		&i.ID,
+		&i.HouseholdID,
+		&i.Name,
+		&i.Kind,
+		&i.SortOrder,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const updateTransaction = `-- name: UpdateTransaction :one
