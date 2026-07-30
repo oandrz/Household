@@ -167,15 +167,8 @@ export function CurrencyPanel() {
               <div className="text-ink">
                 Show {household.data.secondaryCurrency} equivalents
               </div>
-              {/* Literal design copy, true of this specific seeded
-                  household (Christine's accounts are in Indonesia) -- not
-                  derived from any field, the same way Sidebar.tsx's "Andreas
-                  & Christine" footer isn't a coincidence either. A household
-                  with a different story would need this generalised or
-                  made configurable; flagged in the report, not solved
-                  here. */}
               <div className="mt-0.5 text-[11.5px] text-muted">
-                For Christine's Indonesian accounts
+                Shown alongside the primary currency
               </div>
             </div>
             <ToggleSwitch
