@@ -440,6 +440,11 @@ describe("AccountModal", () => {
     ).toBeInTheDocument();
   });
 
+  // Fixture names must never be the design household's own (Kayla, Ethan --
+  // see docs/LEARNING.md pattern 14): if they were, the expected string here
+  // would equal the old hardcoded literal in limitedMembersLine, and a
+  // revert of that fix back to the literal would still make this test pass.
+  // "Mira" and "Jun" belong to no household this product ships with.
   it("names the household's limited members under Visible to kids", async () => {
     stubFetchRoutes({
       "GET /api/v1/auth/me": { status: 200, body: meFixture() },
@@ -448,14 +453,14 @@ describe("AccountModal", () => {
         status: 200,
         body: [
           { id: "m1", role: "owner", capabilities: ["money"], user: { id: "u1", email: "", displayName: "Dre", avatarInitial: "D" } },
-          { id: "m2", role: "limited", capabilities: [], user: { id: "u2", email: "", displayName: "Kayla", avatarInitial: "K" } },
-          { id: "m3", role: "limited", capabilities: [], user: { id: "u3", email: "", displayName: "Ethan", avatarInitial: "E" } },
+          { id: "m2", role: "limited", capabilities: [], user: { id: "u2", email: "", displayName: "Mira", avatarInitial: "M" } },
+          { id: "m3", role: "limited", capabilities: [], user: { id: "u3", email: "", displayName: "Jun", avatarInitial: "J" } },
         ],
       },
     });
     renderWithRouter(<AccountModal open onClose={() => {}} />);
     expect(
-      await screen.findByText("Kayla & Ethan can see this account exists, not the balance"),
+      await screen.findByText("Mira & Jun can see this account exists, not the balance"),
     ).toBeInTheDocument();
   });
 
