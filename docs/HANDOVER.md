@@ -15,14 +15,54 @@ rounds — but **still** has not had its own browser walk. Say that plainly
 rather than letting "verified end to end" quietly absorb it: `make lint &&
 make test` passing is not the same claim as a human clicking through it.
 Accounts (slice 2's first feature) closed that gap for itself: its walk ran
-and passed, 15 of 15.
+and passed, 15 of 15. Transactions (slice 2's second feature) is code-complete
+and reviewed the same way, seventeen tasks deep with every task's own review
+clean including fix rounds — and its own browser walk (Task 19, fifteen
+criteria) has now run too. **Result: 15 of 15 pass**, recorded in
+`docs/superpowers/plans/2026-07-29-hearth-transactions-verification.md`. One
+real defect surfaced: the ledger's Kind filter (All/Expense/Income) hid its
+real, keyboard-focusable `<input type="radio">`s with `sr-only`, and the
+visible pill standing in for each one never reacted to the hidden input's
+own focus state — Tab and arrow-key navigation moved real focus with no
+visible indicator at all, catchable only in a real browser (`fireEvent.click`,
+what every existing test used, never presses a key). Fixed in
+`web/src/features/money/TransactionFilters.tsx`, and the fix's own first
+attempt was itself caught half-wrong by the same walk: a single ring colour
+was invisible against the selected pill's near-black background (two
+screenshots, before and after, came back byte-identical), so the ring colour
+had to become conditional on which of the two pill backgrounds it sits
+against. Pinned by a new, mutation-checked test in
+`TransactionsPage.test.tsx`. Two criteria were met by an interpreted rather
+than fully literal path — the sidebar reaches Transactions via Money →
+Finances → "See all" rather than a direct sub-link (by the design's own
+documented scoping), and the limited-member capability was granted via
+`adminctl create-invite --capabilities=money` before being additionally
+exercised through the Settings toggle Andreas would actually use — both
+recorded in the verification file rather than passed over quietly.
+
+A final whole-branch review then found five more, one of them Critical and
+now fixed: making `AccountView.Balance` a real sum changed what that value
+*means*, and `AccountModal` — a file no task on the branch owned — went on
+prefilling its Balance input from it and writing the result back as the
+*opening* balance, so editing an account's currency silently restated
+today's figure as the opening one and moved the household's net worth. The
+wire now carries `openingBalance` alongside `balance` (both redacted for a
+limited member), the form reads and is labelled "Starting balance", and it
+shows the current balance read-only beside it. The other four were a port
+doc comment describing the pre-Transactions world, two missing
+balance-invariant tests the spec had named (a transfer leaves the pair's
+total unchanged; a transfer straddling one account's opening date moves
+exactly one balance and reports the two flags independently), two comments
+asserting a Postgres row-comparison behaviour Postgres does not have, and no
+test driving the three transactions write routes without a CSRF token.
+`docs/LEARNING.md` pattern 1 carries the Critical one in full.
 
 | Slice | Contents | State |
 |---|---|---|
 | 0 — Skeleton | Clean-architecture layout, Docker, Compose, Make, migrations, health endpoints | **Done** |
 | 1 — Household & identity | Sign-in, magic link, invite acceptance, lockout, members, roles, capabilities, spaces, Settings | **Done** |
 | — Self-serve sign-up | Sign-up, household provisioning, an ISO 4217 currency allowlist and list endpoint, `adminctl prune`, a per-IP rate limiter | Code-complete; browser walk **still pending** |
-| 2 — Money | **Accounts**: manual entry, net worth, assets/liabilities breakdown, archive and restore — **done, browser walk 15/15**. Transactions, Budget, Goals, Bills: not started | In progress |
+| 2 — Money | **Accounts**: manual entry, net worth, assets/liabilities breakdown, archive and restore — **done, browser walk 15/15**. **Transactions**: ledger, categories, filters, keyset paging, month-to-date spend — **done, browser walk 15/15**. Budget, Goals, Bills: not started | In progress |
 | 3 — Marriage | Retros, Vision, Agreements | Not started |
 | 4 — Family | Calendar | Not started |
 | 5 — Overview | Read-only aggregation across 2–4 | Not started |
@@ -67,6 +107,39 @@ The walk itself lost most of its first hour to something unrelated to the
 feature: this machine runs two Docker engines, and a five-hour-old Docker
 Desktop stack was silently holding the host ports colima's stack needed. See
 `docs/LEARNING.md` for the lesson that cost the hour.
+
+Transactions' own definition of done is also a 15-criterion walk, written down
+in `docs/superpowers/plans/2026-07-29-hearth-transactions.md` (Task 19) — a
+fresh household's category dropdown populated before any transaction exists,
+the sign rule and the currency-mismatch rule both proven against a real
+database (a cross-currency transfer credits the destination in the figure
+actually typed, not a converted one), a transaction dated before its account's
+opening balance saved and marked but still counted in "Spent this month," the
+five filters each narrowing the ledger with the account filter matching a
+transfer on both sides, keyset paging surviving a row inserted mid-scroll, and
+a limited member holding Money refused the ledger itself (reads included, not
+only writes) among them. **Result: 15 of 15 pass**, recorded in
+`docs/superpowers/plans/2026-07-29-hearth-transactions-verification.md`. All
+seven money-movement criteria (expense, income, same-currency transfer,
+cross-currency transfer, a same-currency transfer's fee) reconciled to the
+cent against a real database, including the account-opening-date boundary
+that Task 9's designated mutation (`>` to `>=`) protects. One real defect
+came out of the walk rather than a false claim from a stub: the Kind
+filter's radios are `sr-only` and their visible label never reacted to the
+hidden input's own focus state, so keyboard navigation moved real focus
+with no visible sign of it at all — a defect no unit test using
+`fireEvent.click` could ever have pressed a key to find. Fixed, and the
+fix's own first version was itself caught half-wrong by the same walk
+before-and-after screenshots (a single ring colour disappeared against the
+selected pill's dark background) — pattern 3 of `docs/LEARNING.md` records
+both. Two criteria were met by an interpreted path rather than a fully
+literal one and are recorded as such in the verification file, the same
+standard the Accounts walk set for its own criterion 12: the sidebar
+reaches Transactions through Money → Finances → "See all" rather than a
+direct sub-link, by the design's own documented single-nav-item scoping;
+and the limited member's Money capability was granted at invite time via
+`adminctl` before also being exercised through the Settings toggle the
+criterion's wording names.
 
 Two screens the design marks "· not built" are deliberately absent: the **kids
 view** and **custom space pages**. That is the design's own scoping, not an
@@ -157,55 +230,63 @@ that will manage it (a deferred, separate spec) so it earns real usage first
 — and a household has to be able to exist before there is anything for that
 console to administer.
 
-**Slice 2 (Money) is under way.** Accounts, its first feature, is code-complete
-and reviewed; Transactions, Budget, Goals and Bills are not started. It is
-still the largest area and still the design's centre of gravity. Slice 5
-(Overview) must still be last — it only aggregates, so building it early means
-stubbing everything it reads.
+**Slice 2 (Money) is under way.** Accounts and Transactions, its first two
+features, are code-complete and reviewed; Budget, Goals and Bills are not
+started. It is still the largest area and still the design's centre of
+gravity. Slice 5 (Overview) must still be last — it only aggregates, so
+building it early means stubbing everything it reads.
 
 Each slice gets its own spec → plan → implementation cycle, the same way these
 did. The originating spec for slices 0–1 is
 `docs/superpowers/specs/2026-07-26-hearth-foundation-design.md`; self-serve
 sign-up's own is
 `docs/superpowers/specs/2026-07-27-hearth-self-serve-signup-design.md`;
-Accounts' own is `docs/superpowers/specs/2026-07-28-hearth-accounts-design.md`.
-The completed plans beside them are worth skimming for house style before
-writing a fifth.
+Accounts' own is `docs/superpowers/specs/2026-07-28-hearth-accounts-design.md`;
+Transactions' own is
+`docs/superpowers/specs/2026-07-29-hearth-transactions-design.md`. The
+completed plans beside them are worth skimming for house style before writing
+a fifth.
 
-### What Accounts closed, and what is next
+### What Accounts and Transactions closed, and what Budget must pin next
 
 Three things a prior review flagged as "must not be forgotten" before slice 2's
-first task. Accounts closes the first, upholds the second, and leaves the
-third for Transactions, Budget and Goals to pin:
+first task. Accounts closed the first, upheld the second, and pinned the start
+of the third; Transactions pinned two more figures of its own; Budget inherits
+what is left:
 
 1. **`requireCapability` middleware exists and no route uses it — closed.**
    The spec promised the server enforces capabilities independently of the
    UI; until Accounts, that promise was vacuous. `GET /api/v1/accounts` and
    its four write routes are now gated on the `money` capability (reads) and
-   `money` plus owner (writes), and the route-walk test matrices in
-   `api/internal/adapter/http/api_test.go` cover them. See
-   `docs/SYSTEM_DESIGN.md` §4.
+   `money` plus owner (writes); Transactions and Categories go further —
+   `money` **and** owner gate their reads too, not just their writes, because
+   a ledger with every figure blank reads as broken rather than merely
+   restricted (`docs/SYSTEM_DESIGN.md` §4). The route-walk test matrices in
+   `api/internal/adapter/http/api_test.go` cover both shapes.
 2. **Money is `int64` minor units plus an ISO 4217 code, everywhere — held.**
-   `domain.Money` refuses to mix currencies; `AccountService.Summary` converts
-   each account into the household's primary currency before summing, for
-   exactly that reason (`docs/LEARNING.md`, pattern 12). No `float64` entered
-   a monetary path on either side of the stack.
+   `domain.Money` refuses to mix currencies; `AccountService.Summary` and
+   `TransactionService.MonthSummary` both convert into the household's primary
+   currency before summing, for exactly that reason (`docs/LEARNING.md`,
+   pattern 12). No `float64` entered a monetary path on either side of the
+   stack.
 3. **The derived figures the design shows are still mostly undefined.** Net
-   worth (assets minus liabilities, converted per account) is now pinned and
-   built. `66% used`, `S$137/day left`, `on pace to save S$1,780`,
+   worth (Accounts) is pinned and built. Transactions pinned two more, and
+   only the two its own screen shows: `Count` ("247 in July") and `Spent`
+   ("Spent this month S$3,420.18" — expenses only, income and transfers
+   excluded). **`66% used`, `S$137/day left`, `on pace to save S$1,780`,
    `4 of 4 on track`, and unspent budget rolling into a nominated goal at
-   month end are Transactions/Budget/Goals territory and still need pinning
-   in their own specs before an implementer invents one.
+   month end are still undefined** and are Budget's and Goals' to pin, in
+   their own specs, before an implementer invents one.
 
-**Transactions is the next feature.** It attaches to the accounts this slice
-built, and it must **inherit their visibility rule rather than invent one** —
-a limited member sees a transaction only if it belongs to an account already
-shared with them, the same `visible_to_limited_members` gate `AccountService`
-already enforces. It is also what turns `AccountView.Balance` from an opening
-balance into a real sum: today `Balance` equals `OpeningBalance` because there
-is nothing to add to it; `AccountRepository.List`'s doc comment already shapes
-the query as a sum for this reason, so Transactions adds a join rather than
-changing the contract.
+**Budget is the next feature.** It builds directly on Transactions: an
+envelope per category is a sum over `transactions` filtered by `category_id`
+and month, which `TransactionRepository.MonthTotals`'s shape already supports.
+**"Edit categories" — rename, add, archive, the design's three seeding
+templates — is Budget's screen, not Transactions'**, and the table it edits
+(`categories`) already exists and is already seeded; Budget adds the controls,
+not the data. Before writing any of it, pin the five figures named above —
+an implementer who invents a formula for "on pace to save" or "4 of 4 on
+track" without a decision recorded first is building on sand.
 
 ### The seams slice 2 will use
 
@@ -218,9 +299,20 @@ changing the contract.
   for the same reason: a chooser between "connect a bank" (permanently dead)
   and "manual account" teaches nothing with only one live branch, so
   `+ Add account` opens the manual form directly.
+- **`AccountView.Balance` is a real sum, computed in the repository's SQL, not
+  in a service.** Transactions is what made it one: before, `Balance` copied
+  `opening_balance_minor` because there was nothing to add. See
+  `docs/SYSTEM_DESIGN.md` §5.
+- **A transaction is hard-deleted; an account never is.** Nothing references
+  a transaction, so archiving one would only be a screen nobody asked for.
+  Budget's category archiving follows the *account* pattern instead — a
+  category is referenced by transactions, so it archives rather than deletes,
+  the same reasoning, applied to a different table.
 - **The sidebar renders from `me.spaces`**, filtered and ordered by the server.
   Accounts added a real page under the existing Money space (Finances,
-  replacing its placeholder); it did not touch the sidebar.
+  replacing its placeholder); Transactions added a second, real sibling route
+  (`/money/transactions`) under the same guard rather than the placeholder's
+  catch-all; neither touched the sidebar itself.
 - **`components/Modal`** is the shared primitive. Roughly fifteen modals across
   slices 2–4 build on it. It reaches genuine `:modal` state — do not
   reintroduce a declarative `open` attribute.
@@ -284,6 +376,38 @@ gates the accounts routes, and the route-walk matrices exercise it.
   `docker compose up` do not. Found while grounding this slice's own docs
   update, not by a test — `make down && make up` (which forces recreation) or
   an explicit `make migrate` sidesteps it for now.
+
+Transactions' reviews flagged nine more, judged non-blocking at the time.
+Five are worth doing before they compound; four were judged noise and are
+left out of this list on purpose (a redundant `var _ AccountLookup`
+assertion that duplicates a check `main.go` already pins; the ordering of
+`requireCSRF` before or after `requireOwner` on transactions versus accounts,
+which has no observable effect either way; `seedSize = 13` coupling the
+adapter to the starter-set count, which fails loudly and is already commented
+where it would bite; and no dedicated index on `categories(household_id)`,
+which needs none — `UNIQUE (household_id, name)` already puts `household_id`
+as that index's leading column, so an equality lookup on it alone is served
+by the same index a name lookup uses):
+
+- **The goose `Down` migration for `00005_transactions.sql` is correct by
+  inspection but no test has ever run it.** Every other migration in this
+  project is in the same position; this is not a new gap, just a fresh
+  reminder of an old one.
+- `api/internal/adapter/http/api_test.go` is now 2036 lines. It wants
+  splitting by feature area (auth, household, accounts, transactions) before
+  the next feature adds a fifth block to one file.
+- `web/src/features/money/TransactionsPage.tsx` is over 500 lines doing
+  fetch orchestration, pagination, PATCH-body translation and row rendering
+  together. Budget will add a similar page; split this one first rather than
+  copying the shape.
+- `RecentTransactionsCard` has its own date formatter, duplicating one
+  `TransactionsPage` already has. Small today; this is exactly the "fixed in
+  one place, left in the sibling" shape pattern 1 warns about, so worth
+  merging before a date-formatting bug has two places to hide in.
+- Only two of the four `clearReceivedAmount` input combinations have a test
+  (see `docs/LEARNING.md`'s Task 16 entry for what the other two would need
+  to assert). Cheap to close while the PATCH-translation logic is still
+  fresh in mind.
 
 ### Before this is deployed anywhere real
 

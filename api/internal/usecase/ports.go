@@ -359,10 +359,18 @@ type FXRateProvider interface {
 // same reason as MemberView above.
 //
 // Balance is the account's current balance: its opening balance plus every
-// transaction dated after Account.OpeningBalanceAsOf. There is no transactions
-// table yet, so today Balance always equals Account.OpeningBalance. It is a
-// separate field from the start so the next slice adds a join rather than
-// changing this struct's shape under its consumers.
+// transaction dated strictly after Account.OpeningBalanceAsOf, summed by the
+// repository. It is denominated in the account's own currency, because every
+// transaction on an account is; nothing here converts.
+//
+// It is a separate field from Account.OpeningBalance, and the two are
+// different numbers as soon as an account has a transaction on it. Balance
+// answers "what does this hold now"; Account.OpeningBalance answers "what did
+// someone assert it held on Account.OpeningBalanceAsOf", and is the only one
+// of the two a caller may ever write back. Reading Balance and storing it as
+// an opening balance moves the household's net worth by every transaction
+// since -- a real defect this project shipped in the account edit form, see
+// docs/LEARNING.md.
 //
 // OwnerName is "" for a shared account, following the same "" <-> SQL NULL
 // convention as domain.Account.OwnerMembershipID.
@@ -398,4 +406,137 @@ type AccountRepository interface {
 	// one. It lives here rather than on MembershipRepository because that port
 	// is already consumed by sign-in and does not need widening for this.
 	MembershipBelongsToHousehold(ctx context.Context, householdID, membershipID string) (bool, error)
+}
+
+// AccountLookup is what TransactionService needs of accounts: the currency an
+// account is denominated in, whether it belongs to this household, and
+// whether a membership does too, for the paid-by check. Get returns
+// domain.ErrNotFound for an account in another household, the same as
+// AccountRepository.Get above -- "that account is not yours" must be
+// indistinguishable from "there is no such account" here as well.
+//
+// *postgres.AccountRepo already satisfies this: both methods exist on it
+// already, for AccountRepository above.
+type AccountLookup interface {
+	Get(ctx context.Context, householdID, accountID string) (AccountView, error)
+	MembershipBelongsToHousehold(ctx context.Context, householdID, membershipID string) (bool, error)
+}
+
+// TransactionView is a transaction joined to the names the ledger displays --
+// its category, who paid, and each account's nickname. Same shape and same
+// reason as MemberView and AccountView above: every consumer of the list wants
+// the names, and re-reading them per row is a query per row.
+//
+// The two Before...Opening fields answer whether this transaction predates the
+// opening-balance date of the account on that side, and so does not move that
+// account's balance. Each is nil when there is no account on that side.
+//
+// It is two fields rather than one because a transfer has two accounts with
+// two different opening dates: it can predate one and not the other, moving
+// one balance and leaving the other alone. A single flag would mark such a row
+// with a note that is half true. The server answers this rather than the
+// frontend recomputing it, so the rule lives in exactly one place.
+type TransactionView struct {
+	Transaction     domain.Transaction
+	CategoryName    string
+	PaidByName      string
+	FromAccountName string
+	ToAccountName   string
+
+	BeforeFromAccountOpening *bool
+	BeforeToAccountOpening   *bool
+}
+
+// TransactionFilter is the design's five filters plus paging. An empty field
+// means no filtering on it, following the same "" <-> unset convention the
+// rest of this file uses.
+//
+// AccountID matches a transaction on *either* side. A filter that only matched
+// from_account_id would hide money arriving in the account someone selected,
+// which is half of what they were looking for.
+//
+// Paging is keyset, not offset: CursorDate and CursorID are the last row of
+// the previous page, and the query asks for rows ordered after that pair.
+// Offset paging shifts every later row by one when a transaction is added
+// mid-scroll, so a page boundary silently repeats or skips a transaction.
+type TransactionFilter struct {
+	Kind               string
+	AccountID          string
+	CategoryID         string
+	PaidByMembershipID string
+	// Month is any instant inside the calendar month to list. Zero means every
+	// month.
+	Month time.Time
+
+	CursorDate time.Time
+	CursorID   string
+	Limit      int
+}
+
+type CategoryRepository interface {
+	// List returns one household's categories in sort_order. Archived
+	// categories are included only when includeArchived is true.
+	List(ctx context.Context, householdID string, includeArchived bool) ([]domain.Category, error)
+	// EnsureSeeded creates the starter set for a household that has none.
+	//
+	// It is idempotent and safe to run concurrently: one INSERT ... ON
+	// CONFLICT DO NOTHING against UNIQUE (household_id, name), never a
+	// read-then-write, which would race two simultaneous first requests into
+	// two starter sets.
+	//
+	// An archived category still occupies its unique key. An implementation
+	// must count it as already seeded -- never treat "no live categories" as
+	// "has none" -- so a household that cleared its whole list is not
+	// silently re-seeded over; the unique key is the backstop of last resort,
+	// for any path that reaches the insert without going through that count
+	// at all.
+	EnsureSeeded(ctx context.Context, householdID string, starter []domain.Category) error
+}
+
+// CategoryLookup is what TransactionService needs of categories: whether an
+// id is one of this household's, and what kind it is. Narrow on purpose -- it
+// does not need List or EnsureSeeded, and a port that hands it those is a
+// port that invites a service to seed as a side effect of validation.
+type CategoryLookup interface {
+	BelongsToHousehold(ctx context.Context, householdID, categoryID string) (bool, error)
+	Kind(ctx context.Context, householdID, categoryID string) (domain.CategoryKind, error)
+}
+
+type TransactionRepository interface {
+	// List returns one household's transactions, newest first, matching every
+	// filter that is set. It returns at most f.Limit+1 rows so the caller can
+	// tell whether another page exists without a second query.
+	//
+	// f.Limit <= 0 is treated as 50, and any f.Limit above 200 is clamped down
+	// to it -- both are the implementation's own constants, not configurable,
+	// so a caller (Task 12's handler) that passes through an unvalidated
+	// request-provided limit must know it can get back at most 201 rows, not
+	// limit+1, and that "no limit sent" does not mean "no cap applied."
+	List(ctx context.Context, householdID string, f TransactionFilter) ([]TransactionView, error)
+	// Get reports domain.ErrNotFound when no transaction with this id exists
+	// in this household -- including when one exists in a different household,
+	// which must be indistinguishable from not existing at all.
+	Get(ctx context.Context, householdID, transactionID string) (TransactionView, error)
+	// Create writes the "" <-> SQL NULL convention for every optional id:
+	// category, payer, and whichever account side the kind leaves empty.
+	// t.ID is ignored -- the database assigns it.
+	Create(ctx context.Context, t domain.Transaction) (domain.Transaction, error)
+	// Update replaces every mutable column. TransactionService is what turns a
+	// partial PATCH into a complete Transaction; this port never merges.
+	Update(ctx context.Context, t domain.Transaction) (domain.Transaction, error)
+	// Delete removes the row, and reports domain.ErrNotFound when there was
+	// none to remove. Nothing references a transaction, so nothing is
+	// orphaned -- which is why this differs from accounts, where SetArchived
+	// exists and no delete does.
+	Delete(ctx context.Context, householdID, transactionID string) error
+	// MonthTotals returns every transaction in one calendar month, which the
+	// service converts and sums.
+	//
+	// It returns rows rather than a SQL SUM deliberately, and the bound is one
+	// household's transactions in one month -- the design's own busiest
+	// example is 247. A SQL SUM would be correct only for a household whose
+	// transactions are all in its primary currency; having two code paths
+	// whose answers could disagree is the trade this refuses. The FX provider
+	// lives in this layer, so the conversion cannot move down here anyway.
+	MonthTotals(ctx context.Context, householdID string, month time.Time) ([]TransactionView, error)
 }

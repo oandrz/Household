@@ -20,10 +20,21 @@ type moneyDTO struct {
 	Currency    string `json:"currency"`
 }
 
-// accountDTO omits Balance and BalanceAsOf entirely for a limited member --
-// hence the pointers and omitempty rather than zero values. A zeroed amount
-// still reads as a real balance, which is the failure this shape exists to
-// make impossible.
+// accountDTO omits Balance, OpeningBalance and BalanceAsOf entirely for a
+// limited member -- hence the pointers and omitempty rather than zero values.
+// A zeroed amount still reads as a real balance, which is the failure this
+// shape exists to make impossible.
+//
+// Balance and OpeningBalance are two different figures. Balance is what the
+// account holds now: the opening balance plus every transaction dated after
+// BalanceAsOf, summed in SQL (queries/account.sql). OpeningBalance is the
+// figure someone asserted was true on BalanceAsOf, and BalanceAsOf is the day
+// that assertion is about -- the two of them are one fact and are the pair a
+// client edits and PATCHes back as openingBalanceMinor/openingBalanceAsOf.
+// They were the same number until Transactions shipped, which is exactly why
+// OpeningBalance has to be on the wire: a client that has only Balance to
+// prefill an edit form from will write today's balance back as the opening
+// one and move the household's net worth by every transaction since.
 type accountDTO struct {
 	ID                      string     `json:"id"`
 	Nickname                string     `json:"nickname"`
@@ -31,6 +42,7 @@ type accountDTO struct {
 	OwnerMembershipID       *string    `json:"ownerMembershipId"`
 	OwnerName               *string    `json:"ownerName"`
 	Balance                 *moneyDTO  `json:"balance,omitempty"`
+	OpeningBalance          *moneyDTO  `json:"openingBalance,omitempty"`
 	BalanceAsOf             *string    `json:"balanceAsOf,omitempty"`
 	CountTowardNetWorth     bool       `json:"countTowardNetWorth"`
 	VisibleToLimitedMembers bool       `json:"visibleToLimitedMembers"`
@@ -130,6 +142,10 @@ func redactedAccounts(views []usecase.AccountView) []accountDTO {
 		}
 		dto := toAccountDTO(v)
 		dto.Balance = nil
+		// The opening balance is an amount too, and one that is close enough
+		// to the current one to be just as revealing. A limited member who may
+		// not see what an account holds may not see what it started with.
+		dto.OpeningBalance = nil
 		dto.BalanceAsOf = nil
 		out = append(out, dto)
 	}
@@ -145,6 +161,10 @@ func toAccountDTO(v usecase.AccountView) accountDTO {
 		VisibleToLimitedMembers: v.Account.VisibleToLimitedMembers,
 		ArchivedAt:              v.Account.ArchivedAt,
 		Balance:                 &moneyDTO{AmountMinor: v.Balance.Amount, Currency: v.Balance.Currency},
+		OpeningBalance: &moneyDTO{
+			AmountMinor: v.Account.OpeningBalance.Amount,
+			Currency:    v.Account.OpeningBalance.Currency,
+		},
 	}
 	// "" means shared, and the wire form of shared is JSON null -- not an
 	// empty string, which would read as a member whose id happens to be blank.

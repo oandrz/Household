@@ -6,10 +6,13 @@ sitting.
 
 **Scope:** what exists today — slices 0 and 1, self-serve sign-up and
 household provisioning (which shipped ahead of slice 2 in the build order, see
-`docs/HANDOVER.md`), and Accounts — the first feature of slice 2 (Money): a
-household records what it owns and owes by hand and sees a net worth built
-from it. The rest of Money (Transactions, Budget, Goals, Bills) and all of
-Marriage, Family and Overview are not built; see `docs/FEATURE_TRACKER.md`.
+`docs/HANDOVER.md`), and the first two features of slice 2 (Money): Accounts —
+a household records what it owns and owes by hand and sees a net worth built
+from it — and Transactions — the ledger a household logs expenses, income and
+transfers into, categorised and filterable, which is also what turns an
+account's balance from a copy of its opening figure into a real sum. The rest
+of Money (Budget, Goals, Bills) and all of Marriage, Family and Overview are
+not built; see `docs/FEATURE_TRACKER.md`.
 
 ---
 
@@ -90,6 +93,8 @@ graph TD
         Member["MemberService"]
         House["HouseholdService"]
         Account["AccountService — net worth is<br/>composed here, not stored"]
+        Category["CategoryService — seeds the<br/>starter set on first read"]
+        Transaction["TransactionService — MonthSummary<br/>converts then adds, like Account"]
         Seed["Seed"]
     end
 
@@ -140,7 +145,10 @@ points inward, which is why every service is testable against in-memory doubles.
 |---|---|---|
 | `UserRepository` | `adapter/postgres` | Includes the transactional `CreateWithMembership` |
 | `HouseholdRepository`, `MembershipRepository`, `SessionRepository`, `MagicLinkRepository`, `LoginAttemptRepository`, `InviteRepository`, `SignupRepository`, `SpaceRepository`, `NotificationRepository` | `adapter/postgres` | Ten narrow repositories rather than one wide one |
-| `AccountRepository` | `adapter/postgres` | Eleventh. Accounts joined to the owner's display name (`AccountView`); its `MembershipBelongsToHousehold` is what stops an account being assigned to a member of a different household |
+| `AccountRepository` | `adapter/postgres` | Eleventh. Accounts joined to the owner's display name (`AccountView`); its `MembershipBelongsToHousehold` is what stops an account being assigned to a member of a different household. `AccountView.Balance` is now a real sum — see §5 |
+| `CategoryRepository` | `adapter/postgres` | Twelfth. `List` respects `sort_order`, the order the design draws rather than alphabetical; `EnsureSeeded` is idempotent under two concurrent first requests through one `INSERT ... ON CONFLICT DO NOTHING` against `UNIQUE(household_id, name)`, never a read-then-write |
+| `TransactionRepository` | `adapter/postgres` | Thirteenth. Keyset-paged `List` (a cursor is the last row's date and id, not an offset); `Update` never merges a patch — `TransactionService` turns a partial `PATCH` into a complete `domain.Transaction` first; `MonthTotals` returns rows rather than a SQL `SUM`, because a sum is only correct within one currency and the FX conversion lives in the service, not the repository |
+| `AccountLookup`, `CategoryLookup` | `adapter/postgres` (`*AccountRepo` and `*CategoryRepo` already satisfy them) | Narrower ports `TransactionService` depends on instead of the full repositories above — interface segregation: it needs an account's currency and household, and whether a category id belongs to this household and what kind it is, never `List` or `EnsureSeeded` |
 | `PasswordHasher`, `TokenGenerator` | `adapter/crypto` | argon2id with cost from config; tokens are random, stored hashed |
 | `Mailer` | `adapter/mail` | SMTP; TLS policy and credentials from config |
 | `Clock` | `adapter/clock` | So lockout windows and expiry are deterministic in tests |
@@ -176,9 +184,11 @@ graph TD
     Public -->|no| Session["requireSession<br/>reads hearth_session cookie,<br/>re-reads membership from the DB,<br/>extends when under a day remains"]
 
     Session --> Cap{"Capability-gated<br/>route group?"}
-    Cap -->|"accounts: money"| RequireCap["requireCapability(cap)<br/>403 unless the caller's membership has it"]
+    Cap -->|"accounts: money"| RequireCap["requireCapability(money)<br/>403 unless the caller's membership has it"]
+    Cap -->|"transactions, categories:<br/>money AND owner —<br/>reads included"| RequireCapTxn["requireCapability(money)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
     Cap -->|"no — most routes"| Safe{"GET or HEAD?"}
     RequireCap --> Safe
+    RequireCapTxn --> Safe
     Safe -->|yes| Handler
     Safe -->|no| CSRF["requireCSRF<br/>double-submit, constant-time compare"]
 
@@ -215,6 +225,20 @@ the cheaper price. (This is unrelated to the frontend's own `RequireCapability`
 component, §7 — a presentation guard that already existed for the `/money` and
 `/marriage` placeholders; this is the first time the *server* enforces one.)
 
+**Transactions and categories are the first routes where `requireOwner` gates
+a `GET`.** Every other owner-gated route in this table only reaches
+`requireOwner` after the `CSRF` check, which by construction means never on a
+read. The transactions group instead runs `requireCapability(money)` then
+`requireOwner` before the GET/HEAD branch even exists, so a limited member is
+refused the ledger itself, not merely its writes. This is deliberate, not
+copied from accounts by mistake: a limited member's accounts view already
+renders names with every amount blank (§5); applied to a ledger — a table
+whose every figure would be blank, next to a "Spent this month" that has to be
+absent rather than shown as zero — the page would read as broken rather than
+merely restricted. So for a limited member the `money` capability on
+Transactions means only "see which accounts this household has" (via
+`/accounts`), and nothing about the ledger at all.
+
 `POST /auth/sign-up` is the one public route wrapped in an extra middleware,
 `rateLimitByIP` — a per-process, in-memory token bucket keyed on the request's
 resolved IP (5/hour). It is the only sign-up route that can trigger outbound
@@ -245,6 +269,9 @@ to a real address and so are not on that path.
 | POST | `/accounts` | session · money · CSRF · owner |
 | PATCH | `/accounts/{id}` | session · money · CSRF · owner |
 | POST | `/accounts/{id}/archive`, `/accounts/{id}/restore` | session · money · CSRF · owner |
+| GET | `/transactions`, `/categories` | session · money · owner — owner gates the read, unlike accounts |
+| POST | `/transactions` | session · money · owner · CSRF |
+| PATCH · DELETE | `/transactions/{id}` | session · money · owner · CSRF |
 | GET | `/healthz`, `/readyz` | none — outside `/api/v1` |
 
 Three test matrices walk the live router and assert this: every non-public
@@ -267,6 +294,16 @@ exercising the guard it is named after; see `docs/LEARNING.md`. Two more tests
 pin the capability gate and the redaction rule directly:
 `TestAccountsListRequiresTheMoneyCapability` and
 `TestAccountsAreRedactedForALimitedMember`.
+
+**Transactions needed a fifth, dedicated matrix rather than reusing the
+generic owner-gated one**, because that one only ever walks mutating routes
+and the whole point of Transactions' guard order is that `GET /transactions`
+and `GET /categories` are owner-gated too.
+`TestTransactionRoutesRequireMoneyAndOwner` asserts an exact expected status
+per route rather than "not 401/403" — the looser form once let three routes
+panic on a nil dependency in the test harness and pass anyway, recovered into
+a `500` that the assertion could not tell apart from a correctly-enforced
+guard; see `docs/LEARNING.md`.
 
 ---
 
@@ -455,7 +492,7 @@ sequenceDiagram
     B->>H: GET /api/v1/accounts
     H->>Repo: List(householdID, includeArchived)
     alt caller's role is not owner
-        H-->>B: 200 { accounts: only visible-to-limited rows,<br/>balance/balanceAsOf/summary all absent }
+        H-->>B: 200 { accounts: only visible-to-limited rows,<br/>balance/openingBalance/balanceAsOf/summary all absent }
     else owner
         H->>Svc: Summary(householdID, views)
         loop each live account
@@ -482,8 +519,11 @@ never re-rounded, so the figure is deterministic. See `docs/LEARNING.md`.
 Showing the family total while hiding individual balances was rejected: with
 the list of which accounts exist and a running total, the individual balances
 become inferable as accounts are added and removed. So `summary` is omitted
-entirely, and each visible account's `balance`/`balanceAsOf` keys are absent —
-not zeroed, because a zeroed balance still reads as a real one.
+entirely, and each visible account's `balance`/`openingBalance`/`balanceAsOf`
+keys are absent — not zeroed, because a zeroed balance still reads as a real
+one. `openingBalance` is redacted for the same reason as `balance`: it is an
+amount, and on a young account it is close enough to the current one to be
+just as revealing.
 
 **An unconvertible account doesn't vanish from the total silently, and an
 entirely unconvertible household never shows a zero.**
@@ -495,6 +535,72 @@ is that it cannot be computed, so the screen says so instead of showing S$0.00.
 A household with no accounts at all is computable and genuinely zero — that
 distinction is why the guard counts non-archived accounts actually considered,
 not the raw row count (`docs/LEARNING.md`).
+
+**`AccountView.Balance` is now a real sum, computed in SQL, not in Go.**
+Before Transactions existed there was nothing to add, so `Balance` was a copy
+of `opening_balance_minor`; `AccountRepository`'s query has always shaped
+`Balance` as a sum for exactly this reason (see its doc comment). Now it is
+one: the query subtracts every transaction on the `from_account_id` side and
+adds every transaction — or its `received_amount_minor`, for the destination
+leg of a cross-currency transfer — on the `to_account_id` side, both filtered
+to `occurred_on > opening_balance_as_of`. That is the same exclusion
+Transactions' own ledger marks and explains on each affected row rather than
+hiding (§5's Transactions flow, below). The sum happens once, in the
+repository's SQL; `AccountService.Summary` still converts and adds each
+account's already-summed balance exactly as it did before this feature,
+unchanged.
+
+**Which is why `accountDTO` now carries `openingBalance` as well as
+`balance`.** The two were one number until this feature, and a client that
+has only `balance` to prefill the account edit form from will write today's
+figure back as `opening_balance_minor` — moving the household's net worth by
+every transaction since, on an edit that never meant to touch the balance.
+The wire therefore carries both figures, the form is labelled "Starting
+balance" so the field cannot be mistaken for the one on the account row, and
+`AccountView`'s own doc comment says which of the two may ever be written
+back. A value whose meaning changes has to change its consumers with it;
+`docs/LEARNING.md` records what this cost when it did not.
+
+### Transactions — the ledger and month-to-date spend, one request
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant H as Handler
+    participant Repo as TransactionRepository
+    participant Svc as TransactionService
+    participant FX as FXRateProvider
+
+    B->>H: GET /api/v1/transactions?filters&cursor
+    H->>Repo: List(householdID, filter) -- limit+1 rows,<br/>each marked if it predates its account's opening date
+    H->>Svc: MonthSummary(householdID, month)
+    Svc->>Repo: MonthTotals(householdID, month)
+    loop each expense
+        Svc->>FX: Rate(transaction currency, primary) unless already primary
+        Svc->>Svc: convert, then Add
+    end
+    Svc-->>H: MonthSummary{ Spent, ExcludedNoRate }
+    H-->>B: 200 { transactions, nextCursor, summary }
+```
+
+One endpoint answers the ledger and "Spent this month" together, for the same
+reason `GET /accounts` answers the list and net worth together: the two
+describe the same rows and a second endpoint risks them disagreeing.
+`nextCursor` is opaque — the date and id of the last row of the page, never
+something the frontend constructs — so a later change to sort order or paging
+predicate cannot become a breaking change to the client; `transactions_household_date_idx
+(household_id, occurred_on DESC, id DESC)` is what lets the keyset cursor walk
+an index instead of sorting a heap.
+
+**A transaction dated before its account's opening balance is kept, listed,
+and marked — not refused, and not silently absorbed into the balance.** It is
+still counted in `Spent`, because the money was actually spent; only the
+*balance* — the sum described above — ignores it, because a balance is
+anchored to a figure someone asserted was true on a date and this transaction
+predates that assertion. A transfer can predate one side's opening date and
+not the other's, so the mark is two independent fields
+(`beforeFromAccountOpeningBalance` / `beforeToAccountOpeningBalance`), each
+naming the account, not one flag that would be half true for a transfer.
 
 ### What the frontend loads
 
@@ -528,6 +634,12 @@ erDiagram
     households ||--|| notification_preferences : has
     households ||--o{ accounts : owns
     memberships ||--o{ accounts : "may own (nullable = shared)"
+    households ||--o{ categories : has
+    households ||--o{ transactions : has
+    categories ||--o{ transactions : "labels (nullable, SET NULL)"
+    memberships ||--o{ transactions : "paid by (nullable, SET NULL)"
+    accounts ||--o{ transactions : "from (nullable, CASCADE)"
+    accounts ||--o{ transactions : "to (nullable, CASCADE)"
     users ||--o{ memberships : holds
     users ||--o{ sessions : owns
     users ||--o{ magic_links : owns
@@ -619,6 +731,29 @@ erDiagram
         bool visible_to_limited_members "default false"
         timestamptz archived_at "nullable — never deleted"
     }
+    categories {
+        uuid id PK
+        uuid household_id FK
+        text name
+        text kind "expense | income"
+        int sort_order "the design's order, not alphabetical"
+        timestamptz archived_at "nullable — never deleted"
+    }
+    transactions {
+        uuid id PK
+        uuid household_id FK
+        text kind "expense | income | transfer"
+        date occurred_on "a date, not a timestamptz — a household has no timezone"
+        text description
+        uuid category_id FK "nullable — SET NULL, never on a transfer"
+        uuid paid_by_membership_id FK "nullable — SET NULL"
+        uuid from_account_id FK "nullable — CASCADE"
+        uuid to_account_id FK "nullable — CASCADE"
+        bigint amount_minor "CHECK > 0 — sign comes from kind, not the value"
+        char amount_currency
+        bigint received_amount_minor "nullable — transfer only"
+        char received_amount_currency "nullable, paired with the amount above"
+    }
 ```
 
 Notes that are not obvious from the shapes:
@@ -669,6 +804,30 @@ Notes that are not obvious from the shapes:
   column named "last updated" that nothing ever changes is a lie the next
   reader will believe. The question it would answer — when was this balance
   last true — is answered better by `opening_balance_as_of`.
+- **`transactions.household_id` and `categories.household_id` are `ON DELETE
+  CASCADE`**, the same as every other household-scoped table: a household's
+  own bookkeeping and its own spending taxonomy leave when the household does.
+  `category_id` and `paid_by_membership_id` are `ON DELETE SET NULL`, the same
+  reasoning `accounts.owner_membership_id` uses for a removed member — losing
+  a label is the least valuable thing a row can lose, and refusing the
+  deletion instead would mean an owner cannot remove a departed member without
+  first reassigning every transaction they ever paid for.
+- **`from_account_id` and `to_account_id` are `ON DELETE CASCADE`, and
+  `RESTRICT` was the first instinct.** The application never deletes an
+  account — accounts archive, never delete — so a restrict looked free: this
+  clause is unreachable in ordinary use. It is wrong anyway. It fires in
+  exactly one case — deleting a household cascades to its accounts — and a
+  `RESTRICT` from transactions would make that cascade fail partway through,
+  with no way to delete a household that has ever recorded a transaction.
+  `CASCADE` is the behaviour that is correct on the one path that ever reaches
+  it and irrelevant everywhere else. Found by reasoning about the cascade
+  before the schema shipped, not by a test; a test that deletes a household
+  with transactions in it now exists (`docs/LEARNING.md`).
+- **A transaction is hard-deleted; an account never is.** Nothing references a
+  transaction, so there is no history to orphan by removing one — unlike an
+  account, which transactions themselves reference. `DELETE
+  /api/v1/transactions/{id}` really deletes the row and answers `204`, the one
+  response in this product allowed to carry no body.
 
 ---
 
@@ -684,20 +843,30 @@ web/src/
     auth/              sign-in, invite, magic-link, sign-up screens and hooks
     shell/             AppShell, Sidebar, RequireAuth, RequireCapability
     settings/          members, spaces, currency, notifications
-    money/             Finances page — net worth, breakdown and accounts
-                       cards, the add/edit modal, archive and restore
-    placeholder/       named stand-ins for unbuilt areas — /money/* (the
-                       four Money siblings still to come) renders theirs
+    money/             Finances page — net worth, breakdown, accounts and
+                       recent-transactions cards, the add/edit modal,
+                       archive and restore; the Transactions page —
+                       filterable ledger, the add/edit/delete transaction
+                       modal (Task 15's component, this is its only
+                       caller), mounted at /money/transactions (Task 17)
+    placeholder/       named stand-ins for unbuilt areas — /money/$ (Budget,
+                       Goals and Bills, still to come) renders theirs
   routes/router.tsx        the route tree
   routes/publicRoutes.ts   the one list of pre-auth routes and API prefixes;
                            a test walks the route tree and fails if a
                            pre-auth screen escapes it
 ```
 
-**Finances replaces the placeholder at `/money`**; `/money/$` (Transactions,
-Budget, Goals, Bills) keeps its own. The sidebar is untouched — it renders from
-the server's own filtered, ordered space list, and this feature adds nothing
-to it.
+**Finances replaces the placeholder at `/money`**, and now carries a
+recent-transactions strip — five newest, reading through the same
+`useTransactions({})` query the Transactions page's own default (unfiltered)
+state resolves to, so the two share one cache entry rather than the strip
+standing up a second endpoint. `/money/transactions` is a real route, a
+sibling of `/money` nested under the same `moneyGuardRoute` (a literal path
+segment beats `/money/$`'s catch-all, so it is declared and added to that
+route's children ahead of the splat). `/money/$` still covers Budget, Goals
+and Bills. The sidebar is untouched — it renders from the server's own
+filtered, ordered space list, and this feature adds nothing to it.
 
 **Route guards are presentation, not security.** The server enforces
 independently; `RequireAuth` and `RequireCapability` exist so the UI does not

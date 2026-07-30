@@ -31,6 +31,27 @@ var (
 	ErrOpeningBalanceInFuture     = errors.New("an opening balance cannot be dated in the future")
 	ErrAccountOwnerNotInHousehold = errors.New("that member is not in this household")
 
+	// ErrUnknownCategoryKind is returned for a category kind this code did not
+	// construct -- a database column holding something other than expense or
+	// income.
+	ErrUnknownCategoryKind = errors.New("unknown category kind")
+
+	// The transaction sentinels. Each maps to a 422 with a field-specific code in
+	// the HTTP layer (see errors.go there); none of them is an internal failure.
+	ErrUnknownTransactionKind         = errors.New("unknown transaction kind")
+	ErrTransactionDescriptionRequired = errors.New("transaction description is required")
+	ErrTransactionAmountNotPositive   = errors.New("transaction amount must be positive")
+	// ErrTransactionAccountsInvalid covers every wrong combination of the two
+	// account fields: an expense with a destination, a transfer with one leg,
+	// a transfer from an account to itself, or an account in another
+	// household. They are one sentinel because the screen shows one message
+	// next to the account pickers, and splitting them would tell an attacker
+	// which ids exist elsewhere.
+	ErrTransactionAccountsInvalid = errors.New("transaction accounts are not valid for its kind")
+	ErrReceivedAmountRequired     = errors.New("a cross-currency transfer needs the amount received")
+	ErrReceivedAmountNotAllowed   = errors.New("only a transfer can record an amount received")
+	ErrCategoryKindMismatch       = errors.New("category does not match the transaction kind")
+
 	// ErrAlreadyExists mirrors ErrNotFound: a row that must be unique
 	// already exists. It exists so an adapter can translate a Postgres
 	// unique-violation (SQLSTATE 23505) into something usecase code can

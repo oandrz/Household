@@ -19,7 +19,12 @@ import { apiErrorMessage } from "../auth/copy";
 import { useCurrencies, useMe } from "../auth/useAuth";
 import { membersListSchema, type MemberView } from "../settings/schemas";
 import { ACCOUNT_TYPES, ACCOUNT_TYPE_LABELS, LIABILITY_TYPES } from "./accountTypes";
-import { NO_DECIMAL_CURRENCIES, toMinorUnits } from "./formatMoney";
+import {
+  describeAmountError,
+  formatMoney,
+  minorUnitsToInputValue,
+  toMinorUnits,
+} from "./formatMoney";
 import { useCreateAccount, useUpdateAccount } from "./useAccounts";
 import type { Account, AccountType } from "./schemas";
 
@@ -38,15 +43,15 @@ export type AccountFormValues = {
 
 // The PATCH route's own body. openingBalanceMinor/openingBalanceCurrency are
 // optional here -- and genuinely omitted from the request, not just
-// undefined -- unless the person actually touched Balance or Currency. See
-// handleSubmit: an edit that only changes the nickname must never resend a
-// balance derived from what the field displays, because the display can
-// truncate a value the create path itself could never produce (an IDR/VND
-// account whose stored minor units aren't a multiple of 100 -- unreachable
-// from this form, but not prevented anywhere else: a direct API call, a CSV
-// import or a future bank-sync adapter all could). Resending it regardless
-// would move the stored figure by up to 99 minor units as a side effect of
-// an edit that never touched it.
+// undefined -- unless the person actually touched Starting balance or
+// Currency. See handleSubmit: an edit that only changes the nickname must
+// never resend a balance derived from what the field displays, because the
+// display can truncate a value the create path itself could never produce
+// (an IDR/VND account whose stored minor units aren't a multiple of 100 --
+// unreachable from this form, but not prevented anywhere else: a direct API
+// call, a CSV import or a future bank-sync adapter all could). Resending it
+// regardless would move the stored figure by up to 99 minor units as a side
+// effect of an edit that never touched it.
 export type AccountEditValues = Omit<
   AccountFormValues,
   "openingBalanceMinor" | "openingBalanceCurrency"
@@ -85,27 +90,6 @@ function today(): string {
   return `${year}-${month}-${day}`;
 }
 
-// The inverse of toMinorUnits, needed only to prefill the balance field when
-// editing an existing account. Not the same function as toMinorUnits (which
-// parses what someone typed) or formatMoney (which adds thousands separators,
-// a currency symbol and a typographic minus sign, none of which belong in an
-// editable input) -- but it agrees with both on the one fact that matters:
-// minor units are always hundredths, and NO_DECIMAL_CURRENCIES is a display
-// convention, never a change to that scale.
-function minorUnitsToInputValue(amountMinor: number, currency: string): string {
-  const negative = amountMinor < 0;
-  const magnitude = Math.abs(amountMinor);
-  const cents = magnitude % 100;
-  // Subtracting the exact remainder before dividing keeps this an exact
-  // integer division -- (magnitude - cents) is always a multiple of 100 -- so
-  // no floating-point rounding enters a figure the person is about to see and
-  // edit.
-  const whole = (magnitude - cents) / 100;
-  const decimals = NO_DECIMAL_CURRENCIES.has(currency) ? 0 : 2;
-  const value = decimals === 0 ? String(whole) : `${whole}.${String(cents).padStart(2, "0")}`;
-  return negative ? `-${value}` : value;
-}
-
 export function AccountModal({
   open,
   onClose,
@@ -129,21 +113,26 @@ export function AccountModal({
   const [ownerMembershipId, setOwnerMembershipId] = useState<string | null>(
     account?.ownerMembershipId ?? null,
   );
-  // account.balance is the account's *current* balance (opening balance plus
-  // every transaction since -- usecase/ports.go's own doc comment on
-  // AccountView.Balance), and this prefill sends whatever the person leaves
-  // here straight back as openingBalanceMinor. The two are the same number
-  // today only because there is no transactions table yet: once Transactions
-  // ships, prefilling from the current balance and writing it back as the
-  // *opening* balance would rewrite history on every edit that touches this
-  // field. The real-patch handling in handleSubmit below (only send the
-  // balance when it was actually touched) protects the untouched case; a
-  // touched edit will need this prefill to read from opening balance instead.
+  // This field is written back as openingBalanceMinor, so it is prefilled
+  // from account.openingBalance -- the figure someone asserted was true on
+  // balanceAsOf -- and never from account.balance, which is the *current*
+  // balance: the opening balance plus every transaction since. The two were
+  // the same number until Transactions shipped, and prefilling from the
+  // current one restates today's figure as the opening one, moving the
+  // household's net worth by every transaction since on every save that
+  // sends this field.
+  //
+  // The fallback is "" rather than account.balance on purpose. openingBalance
+  // is absent exactly when balance is (a limited member's response omits both
+  // -- accountDTO in account_handlers.go), so a "defensive" fallback would
+  // only ever fire in the one case that reintroduces the defect.
   const [balanceInput, setBalanceInput] = useState(() =>
-    account?.balance ? minorUnitsToInputValue(account.balance.amountMinor, account.balance.currency) : "",
+    account?.openingBalance
+      ? minorUnitsToInputValue(account.openingBalance.amountMinor, account.openingBalance.currency)
+      : "",
   );
   const [balanceTouched, setBalanceTouched] = useState(false);
-  const [currency, setCurrency] = useState(() => account?.balance?.currency ?? "");
+  const [currency, setCurrency] = useState(() => account?.openingBalance?.currency ?? "");
   const [currencyTouched, setCurrencyTouched] = useState(false);
   const [asOf, setAsOf] = useState(account?.balanceAsOf ?? today());
   const [countTowardNetWorth, setCountTowardNetWorth] = useState(account?.countTowardNetWorth ?? true);
@@ -178,18 +167,10 @@ export function AccountModal({
       // without touching Balance -- an SGD account showing "8240.55" stays
       // exactly that after switching to IDR, so restating it back as "enter
       // an amount, like 8240.55" describes the very thing already in the
-      // field rather than what actually went wrong. hasADecimalPoint is
-      // deliberately its own small check, not a reason toMinorUnits itself
-      // returned null: it only ever changes which of two messages is shown,
-      // never whether the value is accepted, so it staying in sync with
-      // toMinorUnits's own number format is a copy concern, not a
-      // correctness one.
-      const hasADecimalPoint = /^-?\d+\.\d+$/.test(balanceInput.trim().replace(/,/g, ""));
-      if (NO_DECIMAL_CURRENCIES.has(currency) && hasADecimalPoint) {
-        setBalanceError(`${currency} doesn't use cents. Remove the decimal point.`);
-        return null;
-      }
-      setBalanceError("Enter an amount, like 8240.55.");
+      // field rather than what actually went wrong. describeAmountError is
+      // shared with TransactionModal's Amount/Amount received fields so the
+      // two forms can't answer "what's wrong with 8240.55 in IDR" differently.
+      setBalanceError(describeAmountError(balanceInput, currency, "8240.55"));
       return null;
     }
     // The same rule domain.AccountType.SignedNetWorthAmount enforces, said
@@ -310,8 +291,18 @@ export function AccountModal({
 
         <div className="grid grid-cols-2 gap-4">
           <div className="flex flex-col gap-1.5">
+            {/* "Starting balance" rather than "Balance": this input writes
+                opening_balance_minor, and once an account has transactions on
+                it that is a different number from the one the Finances list
+                shows against the same account. A bare "Balance" next to a row
+                reading S$1,300 invites someone to "correct" this field to
+                1300, which is precisely the edit that rewrites history. The
+                wording is the design's own -- "Starting balance" is the only
+                label it gives a balance input anywhere (the bank-connect
+                panel this modal is drawn from has no balance field at all,
+                because a synced account would not need one). */}
             <label htmlFor="account-balance" className="text-xs font-semibold text-label">
-              Balance
+              Starting balance
             </label>
             <input
               id="account-balance"
@@ -356,9 +347,26 @@ export function AccountModal({
           </p>
         )}
 
+        {/* Read-only, edit path only. The two figures differ the moment an
+            account has a transaction on it, and the owner needs to be able to
+            see which of them the field above is asking for -- otherwise the
+            only cue is a label. Deliberately not a form control: there is
+            nothing to edit here, because the way to change the current
+            balance is to record the transaction that changed it. */}
+        {isEditing && account.balance && (
+          <p className="text-[11.5px] leading-snug text-muted">
+            Balance today, after transactions since:{" "}
+            {formatMoney(
+              account.balance.amountMinor,
+              account.balance.currency,
+              currencies.data?.currencies.find((c) => c.code === account.balance?.currency)?.symbol,
+            )}
+          </p>
+        )}
+
         <div className="flex flex-col gap-1.5">
           <label htmlFor="account-as-of" className="text-xs font-semibold text-label">
-            Balance as of
+            Starting balance as of
           </label>
           <input
             id="account-as-of"

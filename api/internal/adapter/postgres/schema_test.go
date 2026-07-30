@@ -188,6 +188,155 @@ func TestAccountsRefusesANegativeLiability(t *testing.T) {
 	}
 }
 
+// TestTransactionSchemaRefusesNonsenseRows pins the constraints that make a
+// wrong balance unrepresentable. Each insert below is a row the service also
+// refuses; the database is the second line of defence, and a second line
+// nobody tests is decoration.
+func TestTransactionSchemaRefusesNonsenseRows(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	householdID := insertTestHousehold(t, db)
+
+	newAccount := func(nickname string) string {
+		var id string
+		if err := db.Pool().QueryRow(ctx,
+			`INSERT INTO accounts (household_id, nickname, type, opening_balance_minor,
+			                       opening_balance_currency, opening_balance_as_of)
+			 VALUES ($1, $2, 'cash', 0, 'SGD', DATE '2026-07-01') RETURNING id`,
+			householdID, nickname).Scan(&id); err != nil {
+			t.Fatalf("insert account %s: %v", nickname, err)
+		}
+		return id
+	}
+	from, to := newAccount("DBS"), newAccount("OCBC")
+
+	// A real category, because the "a transfer carrying a category" case below
+	// needs a non-NULL category_id to exercise transfer_has_no_category at
+	// all. A subselect over an empty table yields NULL, the constraint is
+	// satisfied, the insert succeeds -- and the subtest fails claiming the
+	// database accepted something it never saw.
+	var categoryID string
+	if err := db.Pool().QueryRow(ctx,
+		`INSERT INTO categories (household_id, name, kind, sort_order)
+		 VALUES ($1, 'Groceries', 'expense', 1) RETURNING id`, householdID).
+		Scan(&categoryID); err != nil {
+		t.Fatalf("insert category: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		sql  string
+		args []any
+		// constraint is the name the violation must carry, not just the fact
+		// that some insert failed. Later tasks map this exact name to a
+		// domain error (see the brief's Interfaces section); a rename here
+		// would leave every subtest green while breaking that mapping.
+		constraint string
+	}{
+		{
+			name: "an expense with a destination account",
+			sql: `INSERT INTO transactions (household_id, kind, occurred_on, description,
+			          from_account_id, to_account_id, amount_minor, amount_currency)
+			      VALUES ($1, 'expense', DATE '2026-07-18', 'Cold Storage', $2, $3, 5230, 'SGD')`,
+			args:       []any{householdID, from, to},
+			constraint: "accounts_match_kind",
+		},
+		{
+			name: "a transfer with only one leg",
+			sql: `INSERT INTO transactions (household_id, kind, occurred_on, description,
+			          from_account_id, amount_minor, amount_currency)
+			      VALUES ($1, 'transfer', DATE '2026-07-18', 'To BCA', $2, 50000, 'SGD')`,
+			args:       []any{householdID, from},
+			constraint: "accounts_match_kind",
+		},
+		{
+			name: "a transfer from an account to itself",
+			sql: `INSERT INTO transactions (household_id, kind, occurred_on, description,
+			          from_account_id, to_account_id, amount_minor, amount_currency)
+			      VALUES ($1, 'transfer', DATE '2026-07-18', 'Round trip', $2, $2, 50000, 'SGD')`,
+			args:       []any{householdID, from},
+			constraint: "accounts_match_kind",
+		},
+		{
+			name: "a received amount with no currency",
+			sql: `INSERT INTO transactions (household_id, kind, occurred_on, description,
+			          from_account_id, to_account_id, amount_minor, amount_currency,
+			          received_amount_minor)
+			      VALUES ($1, 'transfer', DATE '2026-07-18', 'To BCA', $2, $3, 50000, 'SGD', 49800)`,
+			args:       []any{householdID, from, to},
+			constraint: "received_amount_pairs",
+		},
+		{
+			name: "a received amount on an expense",
+			sql: `INSERT INTO transactions (household_id, kind, occurred_on, description,
+			          from_account_id, amount_minor, amount_currency,
+			          received_amount_minor, received_amount_currency)
+			      VALUES ($1, 'expense', DATE '2026-07-18', 'Cold Storage', $2, 5230, 'SGD', 5230, 'SGD')`,
+			args:       []any{householdID, from},
+			constraint: "received_amount_is_a_transfer_thing",
+		},
+		{
+			name: "a negative received amount",
+			sql: `INSERT INTO transactions (household_id, kind, occurred_on, description,
+			          from_account_id, to_account_id, amount_minor, amount_currency,
+			          received_amount_minor, received_amount_currency)
+			      VALUES ($1, 'transfer', DATE '2026-07-18', 'To BCA', $2, $3, 50000, 'SGD', -100, 'SGD')`,
+			args:       []any{householdID, from, to},
+			constraint: "received_amount_is_positive",
+		},
+		{
+			name: "a transfer carrying a category",
+			sql: `INSERT INTO transactions (household_id, kind, occurred_on, description,
+			          from_account_id, to_account_id, amount_minor, amount_currency, category_id)
+			      VALUES ($1, 'transfer', DATE '2026-07-18', 'To BCA', $2, $3, 50000, 'SGD', $4)`,
+			args:       []any{householdID, from, to, categoryID},
+			constraint: "transfer_has_no_category",
+		},
+		{
+			name: "a zero amount",
+			sql: `INSERT INTO transactions (household_id, kind, occurred_on, description,
+			          from_account_id, amount_minor, amount_currency)
+			      VALUES ($1, 'expense', DATE '2026-07-18', 'Free', $2, 0, 'SGD')`,
+			args: []any{householdID, from},
+			// Not one of the named constraints in the brief's Interfaces
+			// section: this is the plain inline CHECK on amount_minor, and
+			// Postgres names an unlabelled column check <table>_<column>_check.
+			constraint: "transactions_amount_minor_check",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := db.Pool().Exec(ctx, tc.sql, tc.args...)
+			if err == nil {
+				t.Fatal("the database accepted it")
+			}
+			if !strings.Contains(err.Error(), tc.constraint) {
+				t.Fatalf("err = %v, want a %s violation", err, tc.constraint)
+			}
+		})
+	}
+}
+
+// TestCategoryNamesAreUniquePerHousehold pins the constraint EnsureSeeded's
+// ON CONFLICT depends on. Without it the seed is not idempotent and two
+// simultaneous first requests produce two starter sets.
+func TestCategoryNamesAreUniquePerHousehold(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	householdID := insertTestHousehold(t, db)
+	insert := `INSERT INTO categories (household_id, name, kind, sort_order)
+	           VALUES ($1, 'Groceries', 'expense', 1)`
+	if _, err := db.Pool().Exec(ctx, insert, householdID); err != nil {
+		t.Fatalf("first insert: %v", err)
+	}
+	if _, err := db.Pool().Exec(ctx, insert, householdID); err == nil {
+		t.Fatal("the database accepted a duplicate category name")
+	}
+}
+
 // insertTestHousehold inserts the minimum household row needed to satisfy a
 // foreign key, for tests that only care about a valid household_id and have
 // no other requirement on the household itself.

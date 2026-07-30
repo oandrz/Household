@@ -7,7 +7,31 @@
 -- come back as a row with a NULL owner name rather than vanishing.
 
 -- name: ListAccounts :many
-SELECT a.id, a.household_id, a.nickname, a.type, a.owner_membership_id, a.opening_balance_minor, a.opening_balance_currency, a.opening_balance_as_of, a.count_toward_net_worth, a.visible_to_limited_members, a.archived_at, a.created_at, u.display_name AS owner_name
+SELECT a.id, a.household_id, a.nickname, a.type, a.owner_membership_id, a.opening_balance_minor, a.opening_balance_currency, a.opening_balance_as_of, a.count_toward_net_worth, a.visible_to_limited_members, a.archived_at, a.created_at, u.display_name AS owner_name,
+       -- balance_minor is the opening balance plus every transaction dated
+       -- AFTER opening_balance_as_of. The strict > is load-bearing: a
+       -- transaction dated ON the opening date is already reflected in the
+       -- figure someone asserted was true that day, and counting it again
+       -- would make the account wrong by that transaction with nothing on
+       -- screen to explain it.
+       --
+       -- Two filtered sums rather than one, because an account can be the
+       -- source of one transfer and the destination of another. The incoming
+       -- side takes received_amount_minor when there is one: that is what
+       -- actually landed, in this account's own currency. Using amount_minor
+       -- there would add the sending account's currency to this one's.
+       --
+       -- No conversion happens here and none can: every figure in this
+       -- expression is already in this account's own currency.
+       (a.opening_balance_minor
+        - COALESCE((SELECT SUM(t.amount_minor) FROM transactions t
+                    WHERE t.from_account_id = a.id
+                      AND t.occurred_on > a.opening_balance_as_of), 0)
+        + COALESCE((SELECT SUM(COALESCE(t.received_amount_minor, t.amount_minor))
+                    FROM transactions t
+                    WHERE t.to_account_id = a.id
+                      AND t.occurred_on > a.opening_balance_as_of), 0)
+       )::bigint AS balance_minor
 FROM accounts a
 LEFT JOIN memberships m ON m.id = a.owner_membership_id
 LEFT JOIN users u ON u.id = m.user_id
@@ -15,7 +39,18 @@ WHERE a.household_id = $1 AND a.archived_at IS NULL
 ORDER BY a.created_at;
 
 -- name: ListAccountsIncludingArchived :many
-SELECT a.id, a.household_id, a.nickname, a.type, a.owner_membership_id, a.opening_balance_minor, a.opening_balance_currency, a.opening_balance_as_of, a.count_toward_net_worth, a.visible_to_limited_members, a.archived_at, a.created_at, u.display_name AS owner_name
+SELECT a.id, a.household_id, a.nickname, a.type, a.owner_membership_id, a.opening_balance_minor, a.opening_balance_currency, a.opening_balance_as_of, a.count_toward_net_worth, a.visible_to_limited_members, a.archived_at, a.created_at, u.display_name AS owner_name,
+       -- See ListAccounts above for why this is two filtered sums with a
+       -- strict > and why the incoming side prefers received_amount_minor.
+       (a.opening_balance_minor
+        - COALESCE((SELECT SUM(t.amount_minor) FROM transactions t
+                    WHERE t.from_account_id = a.id
+                      AND t.occurred_on > a.opening_balance_as_of), 0)
+        + COALESCE((SELECT SUM(COALESCE(t.received_amount_minor, t.amount_minor))
+                    FROM transactions t
+                    WHERE t.to_account_id = a.id
+                      AND t.occurred_on > a.opening_balance_as_of), 0)
+       )::bigint AS balance_minor
 FROM accounts a
 LEFT JOIN memberships m ON m.id = a.owner_membership_id
 LEFT JOIN users u ON u.id = m.user_id
@@ -27,7 +62,20 @@ ORDER BY a.archived_at NULLS FIRST, a.created_at;
 -- another by guessing a uuid, and the HTTP layer's session gives us the
 -- household for free.
 -- name: GetAccount :one
-SELECT a.id, a.household_id, a.nickname, a.type, a.owner_membership_id, a.opening_balance_minor, a.opening_balance_currency, a.opening_balance_as_of, a.count_toward_net_worth, a.visible_to_limited_members, a.archived_at, a.created_at, u.display_name AS owner_name
+SELECT a.id, a.household_id, a.nickname, a.type, a.owner_membership_id, a.opening_balance_minor, a.opening_balance_currency, a.opening_balance_as_of, a.count_toward_net_worth, a.visible_to_limited_members, a.archived_at, a.created_at, u.display_name AS owner_name,
+       -- See ListAccounts above for why this is two filtered sums with a
+       -- strict > and why the incoming side prefers received_amount_minor.
+       -- Get and List must compute this the same way, or the two disagree
+       -- on the same account's balance.
+       (a.opening_balance_minor
+        - COALESCE((SELECT SUM(t.amount_minor) FROM transactions t
+                    WHERE t.from_account_id = a.id
+                      AND t.occurred_on > a.opening_balance_as_of), 0)
+        + COALESCE((SELECT SUM(COALESCE(t.received_amount_minor, t.amount_minor))
+                    FROM transactions t
+                    WHERE t.to_account_id = a.id
+                      AND t.occurred_on > a.opening_balance_as_of), 0)
+       )::bigint AS balance_minor
 FROM accounts a
 LEFT JOIN memberships m ON m.id = a.owner_membership_id
 LEFT JOIN users u ON u.id = m.user_id

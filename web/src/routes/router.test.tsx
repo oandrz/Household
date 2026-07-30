@@ -153,6 +153,80 @@ describe("the real route tree", () => {
     expect(await screen.findByText("Arriving in slice 5.")).toBeInTheDocument();
   });
 
+  // Task 17: /money/transactions has to sit under moneyGuardRoute, not hung
+  // off the shell beside it -- otherwise a member without the money
+  // capability reaches a ledger because the guard that would have refused
+  // them never ran. If the route were hung directly off shellRoute instead
+  // (a literal path always wins over moneySplatRoute's "$" catch-all, so
+  // that wrong wiring would still be the one TanStack Router picks),
+  // RequireCapability would never run at all: TransactionsPage would mount
+  // unconditionally, hit this test's deliberately-thin stub set (no
+  // /api/v1/transactions, /accounts, etc.), its queries would error, and
+  // router.state.location.pathname would still read "/money/transactions"
+  // when the waitFor below times out -- a real failure, not a passthrough.
+  //
+  // On its own, though, this test is not proof the dedicated route exists at
+  // all: today, before Step 3 adds it, "/money/transactions" already falls
+  // through to moneySplatRoute (also a child of moneyGuardRoute), which is
+  // gated by the exact same RequireCapability parent and therefore redirects
+  // identically. That is what the next test, the one asserting a caller *with*
+  // money capability actually reaches TransactionsPage rather than the Money
+  // placeholder, is for -- it is the one that genuinely fails until Step 3.
+  it("redirects a member without the money capability away from /money/transactions", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": {
+        status: 200,
+        body: meFixture({
+          membership: {
+            id: "membership-2",
+            householdId: "household-1",
+            userId: "user-2",
+            role: "limited",
+            capabilities: ["calendar", "chores"],
+          },
+          capabilities: ["calendar", "chores"],
+        }),
+      },
+    });
+
+    const { router } = renderApp("/money/transactions");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    expect(await screen.findByText("Arriving in slice 5.")).toBeInTheDocument();
+  });
+
+  // The positive counterpart the test above needs: a caller who *does* carry
+  // the money capability must actually land on TransactionsPage at
+  // /money/transactions, not the Money slice's own placeholder -- today (and
+  // until Step 3 adds moneyTransactionsRoute) that path falls through to
+  // moneySplatRoute's "Arriving in slice 2" placeholder instead, so this is
+  // the one of the pair that genuinely fails before the route exists.
+  it("mounts the Transactions page at /money/transactions for a caller who has the money capability", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      "GET /api/v1/currencies": {
+        status: 200,
+        body: { currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }] },
+      },
+      "GET /api/v1/categories": { status: 200, body: { categories: [] } },
+      "GET /api/v1/household/members": { status: 200, body: [] },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [] } },
+      "GET /api/v1/transactions": {
+        status: 200,
+        body: {
+          transactions: [],
+          nextCursor: null,
+          summary: { currency: "SGD", month: "2026-07", count: 0, spentMinor: 0, excludedNoRate: [] },
+        },
+      },
+    });
+
+    const { router } = renderApp("/money/transactions");
+
+    expect(await screen.findByText("All transactions")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/money/transactions");
+  });
+
   // Fix round 5, Finding 1 (critical): this is the exact reproduction the
   // coordinator's reviewer used -- /invite/tok with GET /api/v1/auth/me
   // returning 401 (a genuine, signed-out invitee -- Christine from `make

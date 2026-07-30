@@ -19,9 +19,19 @@ const moneySchema = z.object({
   currency: z.string(),
 });
 
-// balance and balanceAsOf are optional because a limited member's response
-// omits them entirely. Modelling them as `number | null` instead would let a
-// component render a zero balance for someone who is not allowed to see one.
+// balance, openingBalance and balanceAsOf are optional because a limited
+// member's response omits them entirely. Modelling them as `number | null`
+// instead would let a component render a zero balance for someone who is not
+// allowed to see one.
+//
+// balance and openingBalance are two different figures and stopped being the
+// same number the day Transactions shipped. balance is what the account holds
+// now -- the opening balance plus every transaction dated after balanceAsOf,
+// summed in SQL (queries/account.sql). openingBalance is the figure someone
+// asserted was true on balanceAsOf, and it is the only one of the two that
+// may ever be written back as openingBalanceMinor. Anything editing the
+// stored opening balance reads openingBalance; anything displaying what the
+// account is worth today reads balance.
 export const accountSchema = z.object({
   id: z.string(),
   nickname: z.string(),
@@ -29,6 +39,7 @@ export const accountSchema = z.object({
   ownerMembershipId: z.string().nullable(),
   ownerName: z.string().nullable(),
   balance: moneySchema.optional(),
+  openingBalance: moneySchema.optional(),
   balanceAsOf: z.string().optional(),
   countTowardNetWorth: z.boolean(),
   visibleToLimitedMembers: z.boolean(),

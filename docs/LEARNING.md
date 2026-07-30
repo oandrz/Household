@@ -1,9 +1,10 @@
 # Hearth — learning log
 
-Every defect found while building slices 0, 1, self-serve sign-up and Accounts
-(slice 2's first feature), and what each one teaches. Written because almost
-none of them were caught by a failing test — they were caught by someone
-asking the right question about code that looked fine and had a green suite.
+Every defect found while building slices 0, 1, self-serve sign-up, Accounts and
+Transactions (slice 2's first two features), and what each one teaches.
+Written because almost none of them were caught by a failing test — they were
+caught by someone asking the right question about code that looked fine and
+had a green suite.
 
 **Read the patterns first.** They are where the value is. The catalogue below
 them is evidence, and a place to check when you touch that area.
@@ -17,8 +18,10 @@ gets rebuilt.
 
 ### 1. Fixing an instance rarely fixes the class
 
-This happened **six times**. Every time, the fix was correct and the sibling
-kept the bug.
+This happened **eight times** — one bullet each below. Almost every time, the
+fix was correct and the sibling kept the bug; the last one is the variant
+where nothing was broken at all until a field's meaning moved under a reader
+nobody thought to look at.
 
 - `PATCH` implemented as `PUT` — fixed in `/household` and
   `/notification-preferences`, missed in `/household/members/:id`. Found two
@@ -46,10 +49,61 @@ kept the bug.
   (`process.env.TZ` already works in the test runner) and the test was added
   in the same task.
 
+- Same slice, Task 15: `AccountModal`'s Balance field distinguishes "not a
+  number" from "this currency doesn't use cents" (a switch to IDR/VND without
+  touching the figure), with a comment explaining why restating the number
+  back is the wrong message for the second case. `TransactionModal`'s first
+  draft of Amount/Amount received had only the generic message, reachable the
+  same way — logging an expense against the seeded household's own IDR
+  account (BCA) with a figure that still has cents. Not caught by a failing
+  test (none existed yet for this path in the new component); caught by a
+  reviewer reading the sibling code before declaring the task done. Fixed by
+  moving the distinction out of `AccountModal` into a shared
+  `describeAmountError` helper in `formatMoney.ts`, used by both fields in
+  both components, and adding a test plus a mutation check to each.
+
+- Transactions slice, Task 9, found in the final whole-branch review.
+  `usecase.AccountView.Balance` changed from a copy of the opening balance
+  into a real SQL sum of the account's transactions. That is a change of
+  *meaning*, not of shape: nothing failed to compile, no test went red, and
+  every consumer kept reading the field it had always read. One of those
+  consumers was `AccountModal.tsx` — a file no task on the branch owned — which
+  prefilled its Balance input from `account.balance` and sent whatever was
+  left there back as `openingBalanceMinor`. Because the gate on that resend is
+  `balanceTouched || currencyTouched`, changing **only the Currency select**
+  was enough: an account with a S$1,000 opening balance and S$300 of
+  transactions since had its opening balance rewritten to S$1,300, Finances
+  then read S$1,600, nothing on screen said anything had happened, and each
+  such edit compounded the last. The modal's own comment had predicted this in
+  full — it named the failure, named its precondition ("the same number today
+  only because there is no transactions table yet"), and named the fix ("a
+  touched edit will need this prefill to read from opening balance instead").
+  The branch falsified the precondition and left the comment and the code
+  exactly as they were. Nor could the fix have been local: `accountDTO`
+  carried no opening-balance field at all, so there was nothing correct to
+  prefill *from* until the read side was built. Fixed by putting
+  `openingBalance` on the wire (redacted for a limited member alongside
+  `balance`, since it is just as revealing), prefilling from it with no
+  fallback to `balance`, relabelling the input "Starting balance" so it cannot
+  be mistaken for the figure on the account row, and showing the current
+  balance read-only beside it. `usecase/ports.go`'s doc comment still
+  described the old world too, while `account_repo.go`'s comment — for the
+  implementation of that same port — had been updated.
+
 **When you fix something, grep for its shape before you close it.** The question
 that finds these is not "is this fixed?" but "where else does this pattern
 appear?" `Truncate` is now that grep for date-and-location bugs specifically —
 run it before adding a fourth site.
+
+**And when you change what a value *means*, its readers are the class.** The
+compiler will not find them, because nothing about the type changed; only a
+grep for every reader will. Two habits fall out of this one. Sweep the
+consumers in the same change that moves the meaning, including the ones in
+files your task does not own — the producer and its readers are one change,
+not two. And treat a comment that says "this is only safe until X" as a debt
+that comes due: whoever ships X owns it. Here the comment was right, specific,
+and load-bearing, and it still did not stop the defect, because nothing made
+shipping Transactions go and read it.
 
 ### 2. A test that cannot fail protects nothing
 
@@ -120,6 +174,313 @@ run it before adding a fourth site.
   `SignInScreen.test.tsx`'s existing pattern — can tell the two apart.
   Corrected to describe only what it proves, with a second test added
   alongside it that asserts the disabled state directly.
+- `TestEnsureSeededSurvivesConcurrentFirstRequests` (category seeding, Task 5)
+  fired eight bare `go func(i) { ... }(i)` goroutines against `EnsureSeeded`
+  and stayed green, five runs straight, with the `ON CONFLICT DO NOTHING`
+  deliberately removed from `SeedCategories`. The pool in `postgres.Open`
+  dials only one connection up front (`Ping`); each goroutine's first query
+  pays its own connection-dial latency, which was enough to serialise the
+  count-then-insert window the test exists to race. Warming the pool with
+  sixteen concurrent `List` calls first, then releasing every seeding
+  goroutine through the same closed channel, reproduced the race reliably —
+  the same code, unmutated, now fails 15/16 with
+  `constraint "categories_household_id_name_key": already exists` the moment
+  `ON CONFLICT` is removed, and is stably green five runs in a row restored.
+  A concurrency test that starts its goroutines with a bare loop is only
+  proven to race if the work per goroutine already dwarfs connection setup;
+  otherwise warm the pool and use a start barrier before trusting it.
+- Same task, a second instance, found by review after the first was already
+  fixed: `TestEnsureSeededDoesNotRebuildOverArchivedCategories`'s comment
+  credited the archived-row protection to `SeedCategories`' unique key and
+  `ON CONFLICT`. It does not reach either. `CountCategories` has no
+  `archived_at` filter, so a household with all thirteen categories archived
+  still counts as thirteen; `EnsureSeeded`'s `if count > 0 { return nil }`
+  fires before the second `EnsureSeeded` call in that test ever calls
+  `SeedCategories`. The test still pins something real — a cleared list stays
+  cleared — but the *reason* in the comment was wrong, and it would have
+  passed identically with `ON CONFLICT` deleted outright, same as the
+  concurrency test above. Fixed by correcting the comment to name the count
+  check, and by adding
+  `TestSeedCategoriesRespectsTheUniqueKeyEvenWhenEveryRowIsArchived`, which
+  calls the generated query directly — bypassing `EnsureSeeded`'s count check
+  — against an already-archived household, and does fail with a duplicate-key
+  error the moment `ON CONFLICT` is removed. Two short-circuit-shadowed tests
+  in one task, one caught only by review after the first was already
+  believed fixed, is the point of this section: a passing mutation check on
+  a *different* test in the same file is not evidence for this one.
+- Same slice, Task 7: `TestDeletingAMemberKeepsTheirTransactionsAndDeletingAHouseholdTakesThemAway`'s
+  final assertion — `DELETE FROM households` must succeed — carried the
+  comment "The cascade RESTRICT would have blocked," claiming to prove
+  `transactions.from_account_id`/`to_account_id` are `ON DELETE CASCADE` and
+  not `RESTRICT`. Mutating both columns to `RESTRICT` and rerunning left the
+  test green. The confound is one level less obvious than the other entries
+  here, because the test *did* delete something and the delete *did*
+  succeed — it looked exactly like the proof it claimed to be.
+  `transactions.household_id` is itself `ON DELETE CASCADE` from
+  `households`, so deleting the household fires two independent RI cascades
+  at once: one deletes the household's accounts, the other deletes the
+  household's transactions directly via `household_id`. In this environment
+  the `household_id` cascade ran first, removing the transaction row before
+  the accounts cascade ever reached the account it referenced — so the
+  (mutated) `RESTRICT` on `from_account_id`/`to_account_id` had nothing left
+  to restrict against by the time it was checked, and passed trivially. A
+  household-level delete can prove `households` cascades to `transactions`
+  end-to-end; it cannot, by itself, prove anything about which FK action a
+  *different*, indirectly-cascaded column carries, whenever another path to
+  the same row's deletion exists. What would have caught it sooner: asking
+  "does this test exercise the column under test directly, or only as a
+  side effect of a bigger deletion with its own path to the same result?"
+  before trusting a comment that names a specific constraint. Fixed by
+  adding `TestDeletingAnAccountTakesItsTransactionsWithIt`, which deletes an
+  account directly — the household and the referencing transaction both
+  still otherwise present — for both `from_account_id` and `to_account_id`;
+  that is exactly the shape `RESTRICT` would block, with no second cascade
+  path to confound it. The original test's comment was corrected to say
+  what it actually proves rather than deleted, since the household-cascade
+  property it does prove is still real coverage.
+
+- Same slice, Task 8: the brief's own
+  `TestPagingIsStableWhenARowIsInsertedMidScroll` created ten transactions on
+  ten *different* days, then paged with a keyset cursor. A cursor comparing
+  only the date and one comparing the `(date, id)` pair return identical
+  results whenever no two rows share a date — there is never a tie for them to
+  disagree over — so the brief's own mutation instruction (weaken the
+  predicate to date-only, confirm red) would have reported a false pass
+  against its own fixture. Caught before ever running the mutation, by tracing
+  the parent task's explicit question rather than trusting the brief's test as
+  given. Fixed two things together, because the assertions had the same gap
+  as the fixture: added a second transaction dated onto the page boundary
+  (deterministic given the loop bounds and page size, not random — with days
+  11–20 and a page of 4, the boundary row is always the 17th), and added an
+  explicit "the boundary's sibling row must appear on page two" assertion.
+  That second part mattered on its own: the existing assertions (no id on
+  both pages, nothing newer than the cursor) do not notice a row that simply
+  vanishes, and a date-only predicate's actual failure mode here is silently
+  dropping the whole boundary date, not duplicating a row — a duplicate-only
+  check would have stayed green even with the fixture fixed. Confirmed the
+  mutation red (`page two is missing ..., the cursor's own sibling on 17
+  July`) before restoring.
+
+- Same slice, Task 11: `TestSpendCountsATransactionDatedBeforeTheAccountsOpeningBalance`
+  (`internal/usecase/monthsummary_test.go`) asserts that a transaction dated
+  before its account's opening balance still counts toward the month's spend
+  — the split decision 6 pins: excluded from the balance, still counted as
+  spend, because the money was actually spent. `MonthSummary` decides that by
+  reading `TransactionView.BeforeFromAccountOpening`, but neither test double
+  the brief supplied (`fakeAccountLookup`, `fakeTransactionRepo`) ever set
+  that field anywhere — it is populated only by the real Postgres join in
+  `adapter/postgres/transaction_repo.go`. The flag was permanently `nil` in
+  every run of this test, so a `MonthSummary` that actively filtered out
+  `BeforeFromAccountOpening` rows — the exact opposite of the rule being
+  tested — would have seen nothing to filter and passed identically;
+  confirmed by injecting exactly that filter and watching the test stay
+  green. Fixed by giving `fakeTransactionRepo` a
+  `markBeforeFromAccountOpening` setter, called on the transaction under test
+  before `MonthSummary` runs — the double now actually simulates the
+  condition its own name claims to test, and the same injected filter now
+  fails for the right reason (`spent = 0, want 840`).
+
+- Same slice, Task 13: `TestTransactionRoutesRequireMoneyAndOwner`
+  (`internal/adapter/http/api_test.go`) walks the new transactions and
+  categories routes to prove each requires `money` and owner. The test
+  harness builds its own `httpadapter.Deps` in `newTestEnvWithClock`, entirely
+  separate from `main.go`'s wiring, and the brief's own instructions covered
+  wiring `Transactions`/`Categories` into `main.go` only — never into the
+  harness's copy. With those fields left nil, every owner request panicked on
+  a nil pointer inside the handler and was recovered by `recoverer` into a
+  bare `500`. The test's own assertion was `rec.Code != 401 && rec.Code !=
+  403` — true of *any* status that isn't one of those two, 500 included — so
+  three of five routes 500'd on a dependency that was never wired, and the
+  test passed as if it had proven the guard. Found by reading debug logging,
+  not by the assertion going red. Fixed by wiring the harness's `Deps` the
+  same way `main.go` is, and replacing the two-way exclusion with an exact
+  expected status per route, so a route whose handler never ran fails loudly
+  instead of sliding through a check built to reject only two specific
+  numbers.
+
+- Same slice, Task 15 (the Log-a-transaction modal): the brief's given test
+  file imported `userEvent` from `@testing-library/user-event`, which is not a
+  dependency of this project at all — only `@testing-library/react` and
+  `jest-dom` are installed, and every other modal test here (`AccountModal`,
+  `AccountsPanel`) already uses `fireEvent`. Run as given, the whole file would
+  have failed to import, not failed one assertion — caught before ever running
+  it, by trying to resolve the same failing-for-the-right-reason RED step this
+  checklist requires and getting a module-resolution error instead of a test
+  failure. Rewritten to use `fireEvent`, matching the rest of the codebase.
+  Separately, the same brief's account fixtures were the flattened
+  `{ id, nickname, currency }` guess `AccountsPanel.test.tsx`'s own comment
+  above the brief's code already warned about ("follow whatever shape ... this
+  project already builds its account fixtures with") — `schemas.ts`'s real
+  `Account` nests currency under `balance` — and its received-amount test
+  selected `"ocbc"` as the same-currency destination without that account
+  existing anywhere in the fixture list. Selecting a nonexistent `<option>` is
+  a silent no-op in both jsdom and a real browser, so the "optional within one
+  currency" half of that test would have run against whatever the destination
+  select's default already was, never actually exercising a same-currency
+  selection distinct from the later cross-currency one. Fixed by building full
+  `Account` fixtures (a small `account()` helper supplying every required
+  field) and adding `ocbc` as a real, second SGD account. A third gap had no
+  test at all in the brief: nothing checked that the Category dropdown
+  actually filters by kind, and the brief's own fixture only ever names one
+  category, which would make that filter untestable even if a test existed —
+  "no income categories shown for an expense" is true whether or not the
+  component filters, when income categories were never in the list to begin
+  with. Added a category fixture with both kinds and a dedicated test,
+  confirmed red by temporarily returning every category regardless of kind.
+
+- Same slice, Task 16 (the Transactions page): the brief's given test file
+  imported `userEvent` from `@testing-library/user-event` again — the exact
+  same wrong dependency Task 15's brief sketch used, in a different task's
+  brief, despite Task 15's own report already naming the gap and every real
+  modal test in this codebase already using `fireEvent`. Rewritten the same
+  way. The brief's `renderPage`, `expenseFixture` and `patched`/`deleted`
+  spies were also, as its own task instructions warned, guesses at shapes
+  that did not exist yet: `patched`/`deleted` needed building against
+  `stubFetchRoutes`'s real `capture` hook (parsed request body in, an
+  arbitrary call signature out), not assumed into existence. The mutation
+  check named in the brief (drop the "are filters set" condition, confirm
+  "distinguishes an empty ledger from filters that match nothing" goes red)
+  passed on the first try here — evidence that a brief's own suggested
+  mutation is not automatically suspect, only that it has to be checked
+  every time rather than assumed correct from the fact that it was written
+  down. Two further gaps survived every mutation check run before an advisor
+  pass caught them, both hiding behind an assertion that fired without
+  constraining enough to matter. First: the delete test's DELETE stub was
+  `{status: 204, body: null}` — `JSON.stringify(null)` is the four-character
+  string `"null"`, and `stubFetchRoutes` builds `new Response(...)` from
+  exactly that, which the Fetch spec's own `Response` constructor refuses to
+  do for a 204 (confirmed directly: `new Response(JSON.stringify(null),
+  {status: 204})` throws `TypeError: Invalid response status code 204`;
+  swapping in `body: undefined` — `JSON.stringify(undefined)` is
+  `undefined`, a legal null body — does not). Because `stubFetchRoutes`'s
+  `capture` hook records the request *before* constructing that `Response`,
+  the test's only assertion (the `deleted` spy) was satisfied even though
+  the fetch then threw, the mutation rejected, and `TransactionModal`'s own
+  `.catch` left the dialog open on a submit error the test never looked for.
+  No other test in this codebase had stubbed a 204 before, so this exact
+  interaction — `stubFetchRoutes` plus a null-body status — was untried
+  territory. Fixed the stub (`body: undefined`) and added a permanent
+  `expect(screen.queryByRole("dialog")).not.toBeInTheDocument()` assertion,
+  since a spy recorded before a throw cannot tell a completed action from a
+  merely-attempted one. Second: the edit test's PATCH-body assertion used
+  `expect.objectContaining({ description: ... })` — true of a request that
+  also happened to carry a wrong `categoryId` or a hardcoded
+  `clearReceivedAmount: false`, which is exactly the pointer-semantics
+  translation this task's own headline requirement exists to get right (see
+  the Frontend catalogue entry below). Extended the assertion to also pin
+  `categoryId: ""` and `clearReceivedAmount: false`, and added a dedicated
+  new test for the case those two fields don't cover between them — a
+  transfer edited into a different kind, which must send
+  `clearReceivedAmount: true`. All three fixes mutation-confirmed: each
+  breaks exactly the test built to catch it and no other.
+
+- Same slice, Task 16 review round: a human reviewer found two more gaps the
+  advisor pass above had not, both the same shape — a row in
+  `FEATURE_TRACKER.md` said ✅ ("built and verified") for a path nothing
+  verified. First, **`POST /api/v1/transactions` had no registered route in
+  the test file at all, and no test clicked "Add transaction"** — `handleCreate`
+  existed and was wired correctly, but was provably untouched by the suite;
+  "Add transaction (modal)" was marked ✅ regardless. Second, and worse
+  because it was a real bug, not just an absent test: rows loaded via "Load
+  older transactions" are held in local state (`olderRows`) outside the query
+  cache the update/delete mutations invalidate — so a transaction edited or
+  deleted while it happened to be showing on an appended page kept displaying
+  its stale, pre-edit value (or kept existing at all, for a delete) with no
+  staleness indicator, until a full reload. This was disclosed honestly in
+  the task's own report, but landed in the wrong place: `CLAUDE.md`'s own
+  rule is that a feature shipped with a known gap is 🟡 **with the gap
+  named**, not ✅ with the gap described only in a report nobody reads
+  before trusting the tracker. Both fixed rather than left as a documented
+  gap: `handleUpdate`/`handleDelete` now patch or remove the matching row in
+  `olderRows` directly from the mutation's own response, and a dedicated test
+  for each (create; edit-on-an-older-page; delete-on-an-older-page) was added
+  and red-before-green'd by reverting each fix in turn and confirming the
+  exact test built for it — and only that one — went red. The general
+  lesson: an honestly-disclosed known gap is not the same thing as a correctly
+  marked one, and "the report names it" does not substitute for the row
+  itself saying 🟡 and why.
+- Same review round, a design decision rather than a defect: `TransactionFilters.tsx`'s
+  Kind control was first built as a native `<select>`, on the reasoning that
+  a single settable value was the only way to keep it both keyboard-reachable
+  and queryable by label — a real constraint, but one that traded away the
+  design's own segmented control without asking first. Escalated rather than
+  assumed; the product owner ruled for rebuilding the real control (a
+  `<fieldset>`/`<legend>` grouping three real `<input type="radio">`s, one
+  per option, each independently queryable via
+  `getByRole("radio", { name: "Income" })`) — proof that the "native `<select>`
+  for testability" pattern this codebase leans on elsewhere (`AccountModal`'s
+  Owner/Type) is a default, not a rule that overrides the design outright
+  when a fully keyboard-reachable alternative exists.
+
+- Task 17's own plan quoted a router test — a caller lacking the `money`
+  capability visiting `/money/transactions` must be refused — as the proof
+  that the new route sits under `moneyGuardRoute` rather than hung off the
+  shell beside it. Run before Step 3 added the route at all, it passed
+  outright: `/money/transactions` already fell through to `moneySplatRoute`,
+  the Money placeholder's own catch-all, which is *also* a child of
+  `moneyGuardRoute` and is gated by the identical `RequireCapability`
+  component. Rejection for a capability-less caller was never in question;
+  it was true before this task touched anything, for a reason unrelated to
+  the row it was meant to pin. The test still does the job the brief
+  actually wanted — mutating the route to hang off `shellRoute` directly
+  (confirmed by editing `router.tsx` and rerunning) leaves it red, because
+  an ungated `TransactionsPage` then tries to mount and hits stub routes
+  that were never registered — but by itself it gave no red/green signal
+  for "does the dedicated route exist," only for "is whatever handles this
+  path gated." Fixed by adding a second, positive test alongside it: a
+  caller who *does* hold `money` must actually see `TransactionsPage`'s own
+  content at that path, not the Money placeholder's. That one genuinely
+  failed before Step 3 and passed after — the pair together is what proves
+  both "the route exists" and "it's gated," where either test alone proves
+  only one.
+
+**One feature — Transactions, Tasks 5 through 17 — accounts for nine of the
+entries above this line, more than any other piece of work in this log.**
+Counted, not estimated: nine dash-bullets above are Transactions' own — the
+two Task 5 entries, Task 7, Task 8, Task 11, Task 13, Task 15, one from
+Task 16, and Task 17. A tenth Transactions bullet sits among them (the Task 16 review
+round entry naming a `POST /api/v1/transactions` route with no test behind
+it at all, and a stale-display bug on an appended page) and is deliberately
+not one of the nine: it is a route nobody wrote a test for, and a shipped
+bug, not a test that ran and passed without discriminating — a different
+failure than the one this section is about, not a repetition of it. An
+eleventh, the segmented-control rebuild, is a design decision rather than a
+defect and was never a candidate.
+
+Walked in order, the nine are not nine copies of the same mistake:
+
+- **A serialised race** (Task 5's first entry) — concurrent goroutines that
+  all paid the same one-time connection-dial cost before any of them raced
+  anything.
+- **A short-circuit** (Task 5's second entry) — a count check reached, and
+  returned, before the clause under test.
+- **A confound** (Task 7) — a household-level delete proved the wrong
+  foreign key, because a second, indirect cascade reached the same row
+  first and left nothing for the direct one to restrict against.
+- **A fixture with no case to discriminate** (Task 8) — ten transactions on
+  ten distinct dates left a date-only cursor and a row-value cursor nothing
+  to disagree over.
+- **A value never set** (Task 11) — a fake double never told to simulate the
+  condition its own test claims to exercise.
+- **An unwired fixture** (Task 13) — a test harness's own dependencies left
+  nil, caught only because a loose assertion happened not to distinguish
+  `500` from success.
+- **A value never set, again** (Task 15) — a `<select>` option chosen that
+  did not exist in the fixture list, a silent no-op in both jsdom and a real
+  browser.
+- **Task 16's one bullet bundles two, not one** — counted once here, by
+  bullet, since the count above is of bullets rather than of individual
+  defects: **an assertion satisfied before the failure it should have
+  caught** (a spy recording the request before the response it stubbed
+  threw), and, separately, **an assertion too loose to pin the one claim it
+  named** (`objectContaining` true of a request that also carried a wrong
+  `categoryId` and a hardcoded `clearReceivedAmount`, missing the exact
+  pointer-semantics translation the task existed to get right).
+- **A shared guard** (Task 17) — a route refused for a reason that had
+  nothing to do with the row the test was named after.
+
+None of the nine were caught by the test itself failing; every one needed a
+person to ask whether the test could ever have gone red in the first place.
 
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
@@ -153,13 +514,37 @@ either; sharpen the mutation until the failure names the claim.
   restarted — and went unread because nobody checked which process was
   actually answering.
 
+- The Transactions ledger's Kind filter (All / Expense / Income) is a real
+  `<fieldset>` of `<input type="radio">`s, built keyboard-reachable on
+  purpose — but each radio is `sr-only` (visually hidden), so the `<label>`
+  pill wrapping it is the only thing a sighted user sees, and that label's
+  className never reacted to the radio's own `:focus-visible` state. Tabbing
+  or arrow-keying through the group moved real focus with **zero visible
+  sign of it** — `element.matches(':focus-visible')` was `true` throughout,
+  while the label's computed `outline` and `box-shadow` stayed `none`.
+  `fireEvent.click` in every existing test fires a click directly at the
+  element, the same shortcut jsdom's `<dialog>` stub takes, so nothing here
+  ever pressed Tab or an arrow key for real. The first fix (a single
+  `has-[:focus-visible]:ring-accent`) was itself caught half-wrong by the
+  same walk: two screenshots of the selected-and-focused pill, taken before
+  and after that fix, came back **pixel-identical**, because a dark-green
+  ring inset against the pill's own near-black selected background has no
+  contrast. The ring colour had to become conditional on the pill's own
+  background (white ring on the dark selected pill, accent ring on the light
+  unselected one) before it was visible in both states — a reminder that a
+  fix a screenshot diff would have caught in twenty seconds still went out
+  the first time, because nobody diffed the screenshots.
+
 **If a behaviour depends on the platform, verify it in the platform.** A real
-browser found three defects that jsdom structurally could not observe. And
+browser found four defects that jsdom structurally could not observe. And
 when a service returns an error it did not log, stop debugging the code and
 confirm you are talking to the process you think you are — an assumed
 environment that is not the one running is the same trap as a simulated one
 that cannot tell the truth, and every hypothesis about the code will be wrong
-for as long as the premise is.
+for as long as the premise is. A fix for one of those defects is also worth
+a second look with your own eyes, not just a passing assertion: a green test
+that only checks a class string is present says nothing about whether the
+color that class names actually shows up against its own background.
 
 ### 4. Guards scoped to the wrong interval
 
@@ -411,6 +796,38 @@ anything to prove itself against.
   struct, not just sqlc's, which is why a later task re-checked all 17 call
   sites of the higher-level `HouseholdRepository.Create` by hand for the
   identical reason.
+- The instinct on `transactions.from_account_id`/`to_account_id` was `ON
+  DELETE RESTRICT` — the application never deletes an account, only archives
+  it, so a restrict looked free. It would have broken deleting a *household*:
+  the household cascade reaches its own accounts, and a restrict from
+  transactions would block that cascade partway through, with no way to
+  remove a household that had ever recorded a transaction. `ON DELETE
+  CASCADE` is correct precisely because the clause is unreachable in ordinary
+  use and must not stand in the way the one time it fires. Found by reasoning
+  about the cascade before the schema shipped, not by a test — a test that
+  deletes a household with transactions still in it now exists
+  (`TestDeletingAMemberKeepsTheirTransactionsAndDeletingAHouseholdTakesThemAway`;
+  see pattern 2 above for what that same test's own comment got wrong about
+  what it proves).
+- `TransactionRepo.List` builds its optional filters as the standard "`IS
+  NULL OR column = $n`" form — no filter means match everything. But
+  `uuid()`'s own doc comment promises that a malformed id "matches no row,"
+  and parsing a garbage string produces `pgtype.UUID{Valid: false}`, which
+  reads as SQL `NULL` — indistinguishable, in that `IS NULL OR ...` form, from
+  an *absent* filter. A garbage `accountId` therefore silently became "no
+  account filter" and returned the whole household's ledger: the opposite of
+  what the same helper's own comment promises, and the opposite of `Kind`, a
+  plain string that fails closed on the same kind of bad input (an
+  unrecognised value can never equal any row's `kind` column, so it correctly
+  returns nothing). Fixed by checking `id.Valid` explicitly for every
+  optional uuid filter (`AccountID`, `CategoryID`, `PaidByMembershipID`) and
+  returning an empty result when it is false, rather than falling through to
+  a query that cannot tell "invalid" from "unset." The repository guard is
+  not the only line of defence: the handler itself already refuses a
+  malformed `account_id`/`category_id`/`paid_by` at `422` before the
+  repository is ever called, and the paging cursor's id half is checked
+  separately again in `decodeCursor`, deliberately, since `TransactionRepository.List`
+  has no `Valid` guard on `CursorID` the way it does on the other three.
 
 ### HTTP layer
 
@@ -551,6 +968,51 @@ route with a missing guard has no second line of defence.
   precisely the figure it's being told to enter. Failing closed was already
   right; the copy just needed to name the actual cause instead of restating
   the input back at the person looking at it.
+- Editing a transaction through `TransactionModal` (Task 15) resends every
+  field's *current* value on submit, including the ones that are legitimately
+  empty — `categoryId: null` for "no category" chosen, `receivedAmountMinor:
+  null` for a non-transfer or an optional field left blank. The PATCH route's
+  own fields are all pointers (`*string`/`*int64`, `transaction_handlers.go`)
+  where a `null` in the JSON body and the key being absent entirely decode to
+  the identical Go `nil` — "leave this alone." Forwarding the modal's `null`
+  straight into the request body would make clearing a category (or a
+  transfer's stored received amount back out) silently do nothing: the old
+  value survives the exact request that was supposed to remove it, invisible
+  behind a form now showing the field blank. `categoryId`, `paidByMembershipId`,
+  `fromAccountId` and `toAccountId` need `?? ""` before the request is built —
+  the same empty-string sentinel the create route's own zero-value default
+  already uses for "no category." `receivedAmountMinor` has no honest empty
+  sentinel of its own (`0` is a real, if invalid, amount), which is exactly why
+  the API gives it a separate `clearReceivedAmount` boolean instead
+  (`TransactionUpdate.ClearReceivedAmount`, `usecase/transaction.go`) — derived
+  in `TransactionsPage.tsx` from whether the transaction had a received amount
+  *before* the edit and does not *after*, not from the new value in isolation,
+  because "the new value is null" alone is true both when a transfer's fee was
+  genuinely just cleared and every time a non-transfer's form submits at all.
+- `TransactionModal`'s Amount-received field used one flag
+  (`receivedAmountTouched`) to gate two independent rules: whether to clear
+  the field on a genuine currency-pair change, and whether to mirror it to
+  Amount sent for a same-currency transfer. Typing a same-currency transfer
+  fee (dbs → ocbc, both SGD) set the flag; changing the destination
+  afterwards to a different-currency account (bca, IDR) left the old figure
+  sitting in the field, because the touched flag now suppressed the clear it
+  was never meant to gate — the amount would have submitted under the *new*
+  currency's minor units, silently misvalued. One flag answering two
+  questions is what let a rule written for the second question block the
+  first. Fixed by splitting it into two independent states: a
+  `currencyPairKey`/`lastCurrencyPairKey` comparison that unconditionally
+  clears Amount received the moment the actual currency pair changes, leaving
+  `receivedAmountTouched` to govern only the same-currency mirroring it was
+  named for.
+- The Transactions ledger's Kind filter hid its real `<input type="radio">`s
+  with `sr-only` and never gave the visible `<label>` pill a rule reacting to
+  the hidden input's `:focus-visible` state, so Tab and arrow-key navigation
+  moved real, `:focus-visible`-true focus with no visible indicator at all —
+  caught only by the Task 19 browser walk, since `fireEvent.click` (every
+  existing test) never presses a key. See pattern 3 for the fix's own
+  near-miss: a single ring colour was invisible on the selected pill's dark
+  background until the colour itself was made conditional on which
+  background it sits against.
 
 ### Tooling and infrastructure
 

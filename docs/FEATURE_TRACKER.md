@@ -13,10 +13,14 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 41 of 91 features built or partly built. Money now has
-its first feature — Accounts — built: a household records what it owns and
-owes by hand and sees a net worth built from it. Nothing else in Money is
-started yet, and nothing in Marriage, Family or Overview has been started.
+**Where things stand:** 45 of 92 features built or partly built. Money now has
+two features built — Accounts (a household records what it owns and owes by
+hand and sees a net worth built from it) and the Transactions ledger (logging,
+editing and deleting expenses, income and transfers, with filters and the five
+screen states the design and spec both call for) — plus the recent-transactions
+strip on Finances, deferred by the accounts spec for having no data and now
+built with the ledger to read from. Nothing else in Money is started yet, and
+nothing in Marriage, Family or Overview has been started.
 Five of the rows below have no mockup of their own — the provisioning
 transaction behind self-serve sign-up, the currency list endpoint, and
 `adminctl prune` — because the design's own "Create household" screen (the
@@ -27,6 +31,10 @@ reason each: archive and restore, which the design never draws anywhere in
 Money (see the Finances table below); and two ⬜ rows — custom account types
 and a warning before a primary-currency change strands every account — for
 work the accounts spec named and deliberately deferred rather than built.
+Transactions adds one more: **Categories**, whose list and seeding this
+feature needed even though the design draws category management only inside
+Budget's "Edit categories" screen — the one screen that will get its own row
+here, unbuilt, once Budget exists.
 
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
@@ -34,11 +42,11 @@ work the accounts spec named and deliberately deferred rather than built.
 | Navigation shell | 6 | 0 | 1 | 0 |
 | Household settings | 15 | 4 | 2 | 0 |
 | Overview (home) | 0 | 0 | 8 | 0 |
-| Money | 4 | 1 | 22 | 0 |
+| Money | 8 | 1 | 19 | 0 |
 | Marriage | 0 | 0 | 13 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **35** | **6** | **48** | **2** |
+| **Total** | **39** | **6** | **45** | **2** |
 
 ---
 
@@ -171,8 +179,8 @@ and Marriage retro — so it depends on Money, Family and Marriage existing firs
 
 ## 5 · Money
 
-Its first feature, Accounts, is built. Everything else here — Transactions,
-Budget, Goals, Bills — is still to come; this is still the largest area.
+Accounts and Transactions are built. Budget, Goals and Bills are still to
+come; this is still the largest area.
 
 **Finances**
 
@@ -181,7 +189,7 @@ Budget, Goals, Bills — is still to come; this is still the largest area.
 | Net worth with 12-month trend | 🟡 |
 | Assets and liabilities breakdown | ✅ |
 | Accounts by owner, with SGD/IDR split | ✅ |
-| Recent transactions strip | ⬜ |
+| Recent transactions strip | ✅ |
 | Link account — step 1, choose source | ⬜ |
 | Link account — step 2, authorise | ⬜ |
 | Link account — step 3, details and ownership | ⬜ |
@@ -235,10 +243,59 @@ a real aggregator could later fill.
 
 | Feature | State |
 |---|---|
-| Full ledger with filters | ⬜ |
+| Full ledger with filters | ✅ |
 | Inline category editing | ⬜ |
-| Add transaction (modal) | ⬜ |
+| Add transaction (modal) | ✅ |
 | Export CSV | ⬜ |
+
+**Full ledger with filters and Add transaction share one modal, add and edit
+alike** — the same `TransactionModal` Task 15 built, opened blank for a new
+row (its own test: blank fields, POSTs on save) and opened populated for an
+existing one clicked from the ledger. That click-to-edit path is also the
+only caller `PATCH /transactions/{id}` has, and its own Delete control
+(behind an in-page confirmation, never `window.confirm`) is the only caller
+`DELETE /transactions/{id}` has. The ledger itself covers all five screen
+states the spec's section 7.1 names: first run, filters matching nothing
+(deliberately different copy from first run, so a household that filtered to
+nothing doesn't think its ledger was wiped), transactions excluded from the
+month's spend for want of an exchange rate, a row dated before its account's
+opening balance (naming the account, since a transfer can predate one side
+and not the other), and a disabled Add button when the household has no
+accounts yet to attach a transaction to. "Load older transactions" appends a
+second page held in local state, separate from the reactive first page —
+editing or deleting a row that lives on an appended page patches or removes
+it there directly, so a correction made on an older page is not left showing
+its stale, pre-edit value.
+
+**Inline category editing and Export CSV are the two pieces of the design's
+Transactions screen still unbuilt, for different reasons.** Changing a
+transaction's category today means opening the same edit modal used for
+everything else, not clicking the category text directly in the ledger row —
+a second control for the one field the modal already edits is more surface
+for the same outcome, so it is deferred rather than missing by accident.
+Export CSV is deferred for a structural reason (the transactions spec's
+decision 7): `apiFetch` is the only way the frontend talks to the server and
+throws on an ok response it cannot parse as JSON, so a CSV download needs its
+own non-JSON response path out of the frontend, with its own guard and its
+own test. Building the file client-side from what the ledger has already
+fetched was rejected for the same decision: with keyset pagination, that would
+silently omit every row past the first page and produce a file that looks
+right but isn't.
+
+**Categories**
+
+| Feature | State |
+|---|---|
+| Category list, seeded on first use | ✅ |
+
+**The list and the seeding are built; editing the list is not.** The starter
+set of thirteen categories (`domain.StarterCategories()`) is created the first
+time a household's own list is read — by `GET /api/v1/categories` or the
+transaction modal's dropdown — not at household creation, so provisioning a
+new household stays untouched by a feature it does not need. Renaming, adding
+and archiving a category is Budget's "Edit categories" screen, not this one;
+the design draws category management only there, which is why this feature
+adds a row the design itself has no mockup for.
 
 **Budget**
 

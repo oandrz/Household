@@ -1791,6 +1791,42 @@ func (r *fakeAccountRepo) MembershipBelongsToHousehold(_ context.Context, househ
 	return r.memberships[membershipID] == householdID, nil
 }
 
+// fakeCategoryRepo records how many times EnsureSeeded actually inserted, so a
+// test can tell "seeded once" from "seeded on every call".
+type fakeCategoryRepo struct {
+	categories []domain.Category
+	seeds      int
+}
+
+func (f *fakeCategoryRepo) List(_ context.Context, householdID string, includeArchived bool) ([]domain.Category, error) {
+	out := []domain.Category{}
+	for _, c := range f.categories {
+		if c.HouseholdID != householdID {
+			continue
+		}
+		if c.IsArchived() && !includeArchived {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+func (f *fakeCategoryRepo) EnsureSeeded(_ context.Context, householdID string, starter []domain.Category) error {
+	for _, c := range f.categories {
+		if c.HouseholdID == householdID {
+			return nil
+		}
+	}
+	f.seeds++
+	for i, c := range starter {
+		c.ID = fmt.Sprintf("cat-%d", i+1)
+		c.HouseholdID = householdID
+		f.categories = append(f.categories, c)
+	}
+	return nil
+}
+
 // staticTestRates knows the one pair fx.StaticProvider knows, and errors on
 // everything else -- so a test for the no-rate branch does not have to invent
 // a second, differently-behaved double.
@@ -1807,4 +1843,150 @@ func (staticTestRates) Rate(_ context.Context, from, to string) (usecase.Rate, e
 	default:
 		return usecase.Rate{}, fmt.Errorf("no rate available for %s to %s", from, to)
 	}
+}
+
+// --- Transactions ------------------------------------------------------
+
+type fakeTransactionRepo struct {
+	transactions []domain.Transaction
+	nextID       int
+
+	// beforeFromOpening is the set of transaction ids MonthTotals reports as
+	// dated before their from-account's opening balance -- the same
+	// BeforeFromAccountOpening flag the real repository computes via a join
+	// to Account.OpeningBalanceAsOf (see transaction_repo.go). This fake has
+	// no accounts to join against, so a test that needs the flag set marks it
+	// directly with markBeforeFromAccountOpening rather than the fake
+	// inferring it from a date comparison it cannot actually make.
+	beforeFromOpening map[string]bool
+}
+
+// markBeforeFromAccountOpening flags transactionID so MonthTotals reports its
+// BeforeFromAccountOpening as true, for a test proving that a transaction the
+// balance ignores still counts toward spend (decision 6).
+func (f *fakeTransactionRepo) markBeforeFromAccountOpening(transactionID string) {
+	if f.beforeFromOpening == nil {
+		f.beforeFromOpening = map[string]bool{}
+	}
+	f.beforeFromOpening[transactionID] = true
+}
+
+func (f *fakeTransactionRepo) Create(_ context.Context, t domain.Transaction) (domain.Transaction, error) {
+	f.nextID++
+	t.ID = fmt.Sprintf("txn-%d", f.nextID)
+	f.transactions = append(f.transactions, t)
+	return t, nil
+}
+
+func (f *fakeTransactionRepo) Get(_ context.Context, householdID, id string) (usecase.TransactionView, error) {
+	for _, t := range f.transactions {
+		if t.ID == id && t.HouseholdID == householdID {
+			return usecase.TransactionView{Transaction: t}, nil
+		}
+	}
+	return usecase.TransactionView{}, domain.ErrNotFound
+}
+
+func (f *fakeTransactionRepo) Update(_ context.Context, t domain.Transaction) (domain.Transaction, error) {
+	for i, existing := range f.transactions {
+		if existing.ID == t.ID {
+			f.transactions[i] = t
+			return t, nil
+		}
+	}
+	return domain.Transaction{}, domain.ErrNotFound
+}
+
+func (f *fakeTransactionRepo) Delete(_ context.Context, householdID, id string) error {
+	for i, t := range f.transactions {
+		if t.ID == id && t.HouseholdID == householdID {
+			f.transactions = append(f.transactions[:i], f.transactions[i+1:]...)
+			return nil
+		}
+	}
+	return domain.ErrNotFound
+}
+
+func (f *fakeTransactionRepo) List(_ context.Context, householdID string, _ usecase.TransactionFilter) ([]usecase.TransactionView, error) {
+	out := []usecase.TransactionView{}
+	for _, t := range f.transactions {
+		if t.HouseholdID == householdID {
+			out = append(out, usecase.TransactionView{Transaction: t})
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeTransactionRepo) MonthTotals(_ context.Context, householdID string, month time.Time) ([]usecase.TransactionView, error) {
+	out := []usecase.TransactionView{}
+	for _, t := range f.transactions {
+		if t.HouseholdID != householdID {
+			continue
+		}
+		if t.OccurredOn.Year() == month.Year() && t.OccurredOn.Month() == month.Month() {
+			view := usecase.TransactionView{Transaction: t}
+			if f.beforeFromOpening[t.ID] {
+				before := true
+				view.BeforeFromAccountOpening = &before
+			}
+			out = append(out, view)
+		}
+	}
+	return out, nil
+}
+
+// fakeCategoryLookup answers the two questions validation asks, and nothing
+// else -- the narrow port it stands in for.
+type fakeCategoryLookup struct {
+	kinds map[string]domain.CategoryKind // category id -> kind, for one household
+}
+
+func (f *fakeCategoryLookup) BelongsToHousehold(_ context.Context, _, categoryID string) (bool, error) {
+	_, ok := f.kinds[categoryID]
+	return ok, nil
+}
+
+func (f *fakeCategoryLookup) Kind(_ context.Context, _, categoryID string) (domain.CategoryKind, error) {
+	kind, ok := f.kinds[categoryID]
+	if !ok {
+		return "", domain.ErrNotFound
+	}
+	return kind, nil
+}
+
+// fakeAccountRecord is one account's currency and the household it actually
+// belongs to.
+type fakeAccountRecord struct {
+	householdID string
+	currency    string
+}
+
+// fakeAccountLookup holds accounts keyed by id, each carrying its own
+// household. Get refuses both an id it has never heard of and one that
+// belongs to a household other than the one asked about -- the same collapse
+// AccountLookup.Get's contract requires, so a test can plant an account that
+// genuinely exists, just not here, rather than relying on an unknown id to
+// stand in for that case.
+type fakeAccountLookup struct {
+	accounts    map[string]fakeAccountRecord
+	memberships map[string]string // membership id -> owning household
+}
+
+func (f *fakeAccountLookup) Get(_ context.Context, householdID, accountID string) (usecase.AccountView, error) {
+	a, ok := f.accounts[accountID]
+	if !ok || a.householdID != householdID {
+		return usecase.AccountView{}, domain.ErrNotFound
+	}
+	return usecase.AccountView{
+		Account: domain.Account{
+			ID:             accountID,
+			HouseholdID:    a.householdID,
+			OpeningBalance: domain.Money{Currency: a.currency},
+		},
+		Balance: domain.Money{Currency: a.currency},
+	}, nil
+}
+
+func (f *fakeAccountLookup) MembershipBelongsToHousehold(_ context.Context, householdID, membershipID string) (bool, error) {
+	return f.memberships[membershipID] == householdID, nil
 }
