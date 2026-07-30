@@ -13,7 +13,12 @@ import { type FormEvent, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { ApiError } from "../../api/client";
 import { apiErrorMessage } from "./copy";
+import { type Currency } from "./schemas";
 import { useCompleteSignUp, useCurrencies, useSignUpPreview } from "./useAuth";
+
+function currencyLabel(c: Currency) {
+  return c.symbol ? `${c.code} (${c.symbol}) — ${c.name}` : `${c.code} — ${c.name}`;
+}
 
 // Branches on the ApiError code, never on the server's message. InviteScreen
 // does the same, for the reason its own comment gives: the message is copy the
@@ -138,6 +143,14 @@ function CompleteSignUpForm({ token, email }: { token: string; email: string }) 
     );
   }
 
+  const allCurrencies = currencies.data?.currencies ?? [];
+  // The split is the wire's own `symbol`, not a list kept here: currencySymbols
+  // on the server is already the judgement about which currencies are worth
+  // surfacing, and duplicating it would let the two drift. Order inside each
+  // group is the server's.
+  const common = allCurrencies.filter((c) => c.symbol);
+  const rest = allCurrencies.filter((c) => !c.symbol);
+
   const inlineErrorMessage =
     validationError ??
     (error ? apiErrorMessage(error, "Something went wrong. Please try again.") : null);
@@ -184,11 +197,24 @@ function CompleteSignUpForm({ token, email }: { token: string; email: string }) 
                 wrong-currency first impression to everyone who did not
                 notice the field, which is the reason the field exists. */}
             <option value="">Choose a currency</option>
-            {(currencies.data?.currencies ?? []).map((c) => (
-              <option key={c.code} value={c.code}>
-                {c.symbol ? `${c.code} (${c.symbol}) — ${c.name}` : `${c.code} — ${c.name}`}
-              </option>
-            ))}
+            {common.length > 0 && (
+              <optgroup label="Common">
+                {common.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {currencyLabel(c)}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {rest.length > 0 && (
+              <optgroup label="All currencies">
+                {rest.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {currencyLabel(c)}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
         </div>
 
