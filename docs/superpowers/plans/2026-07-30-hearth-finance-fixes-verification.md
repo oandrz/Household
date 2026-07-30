@@ -125,14 +125,20 @@ went wrong in a way worth recording precisely: the composite date control's
 `2026-07-01`, but the transaction actually **saved** with today's date —
 caught by reopening the row's edit modal and seeing `2026-07-30` still
 there. That is a tooling quirk of driving a native composite
-`<input type="date">` through this tool, not a product defect, but it meant
-the fix (setting the underlying input's value with the DOM's native
-property setter, dispatching real `input`/`change` events, then saving
-again) only proved the criterion through an **edit**, not the "log an
-expense" the criterion actually names — a create handler that skips the
-pre-opening check while an update handler applies it would have been
-invisible to that walk. So the criterion was re-walked with a second,
-independent expense built the right way from the start: "Pre-opening
+`<input type="date">` through this tool, not a product defect. The fix
+(setting the underlying input's value with the DOM's native property
+setter, dispatching real `input`/`change` events, then saving again)
+corrected the row: it moved to sort under a `JUL 1` date header and read
+**"Before Everyday Checking's opening balance — it doesn't change that
+balance."** — naming the account
+(`criterion-3-pre-opening-expense-marked.png`), and net worth/the account
+balance stayed at S$1,184.50 afterward
+(`criterion-3-balance-unchanged.png`). But that only proved the criterion
+through an **edit**, not the "log an expense" the criterion actually
+names — a create handler that skips the pre-opening check while an update
+handler applies it would have been invisible to that walk. So the
+criterion was re-walked with a second, independent expense built the right
+way from the start: "Pre-opening
 streaming charge", S$22.00, with the date set via the native setter
 **before the first save**, confirmed at `2026-06-15` in the form, then
 saved exactly once. It landed correctly on that single save — sorted under
