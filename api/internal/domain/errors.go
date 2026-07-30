@@ -58,4 +58,10 @@ var (
 	// test with errors.Is, instead of a generic wrapped driver error. Added
 	// in the Task 15 fix round (see task-15-report.md, "Fix round 2").
 	ErrAlreadyExists = errors.New("already exists")
+
+	// ErrCategoryNameTaken is UNIQUE (household_id, name) on categories,
+	// translated the same way ErrAlreadyExists is for other tables. It
+	// covers a collision with an archived row too -- an archived category
+	// still occupies its unique key, so its name is not free to reuse.
+	ErrCategoryNameTaken = errors.New("category name taken")
 )

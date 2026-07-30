@@ -132,6 +132,32 @@ func (r *CategoryRepo) Kind(ctx context.Context, householdID, categoryID string)
 	return domain.CategoryKind(kind), nil
 }
 
+// errCategoryWritesNotImplemented is returned by the three stubs below.
+// usecase.CategoryRepository grew Create/Rename/SetArchived in Task 4 so the
+// port and its in-memory double could land ahead of the SQL; Task 6 replaces
+// these bodies with the real queries. They return an error rather than
+// panicking so a caller that reaches one before Task 6 lands fails loudly
+// instead of crashing the process, and rather than a silent no-op so a test
+// written against them cannot mistake "not implemented" for "did nothing".
+var errCategoryWritesNotImplemented = fmt.Errorf("postgres: category writes not implemented yet (Task 6)")
+
+// TODO(task-6): real SQL -- insert at the end of the household's sort order,
+// UNIQUE (household_id, name) violation -> domain.ErrCategoryNameTaken.
+func (r *CategoryRepo) Create(ctx context.Context, c domain.Category) (domain.Category, error) {
+	return domain.Category{}, errCategoryWritesNotImplemented
+}
+
+// TODO(task-6): real SQL -- same collision contract as Create;
+// domain.ErrNotFound when categoryID is not householdID's.
+func (r *CategoryRepo) Rename(ctx context.Context, householdID, categoryID, name string) (domain.Category, error) {
+	return domain.Category{}, errCategoryWritesNotImplemented
+}
+
+// TODO(task-6): real SQL -- stamp or clear archived_at, idempotently.
+func (r *CategoryRepo) SetArchived(ctx context.Context, householdID, categoryID string, archived bool) (domain.Category, error) {
+	return domain.Category{}, errCategoryWritesNotImplemented
+}
+
 func toCategory(c sqlcgen.Category) domain.Category {
 	return domain.Category{
 		ID:          uuidToString(c.ID),

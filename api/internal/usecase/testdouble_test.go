@@ -1796,6 +1796,7 @@ func (r *fakeAccountRepo) MembershipBelongsToHousehold(_ context.Context, househ
 type fakeCategoryRepo struct {
 	categories []domain.Category
 	seeds      int
+	nextID     int
 }
 
 func (f *fakeCategoryRepo) List(_ context.Context, householdID string, includeArchived bool) ([]domain.Category, error) {
@@ -1819,12 +1820,157 @@ func (f *fakeCategoryRepo) EnsureSeeded(_ context.Context, householdID string, s
 		}
 	}
 	f.seeds++
-	for i, c := range starter {
-		c.ID = fmt.Sprintf("cat-%d", i+1)
+	for _, c := range starter {
+		f.nextID++
+		c.ID = fmt.Sprintf("cat-%d", f.nextID)
 		c.HouseholdID = householdID
 		f.categories = append(f.categories, c)
 	}
 	return nil
+}
+
+// nameTaken reports whether name is already used by another category in this
+// household, archived rows included -- the same collision the database's
+// UNIQUE (household_id, name) enforces regardless of archived_at. excludeID
+// lets Rename check against every row but its own.
+func (f *fakeCategoryRepo) nameTaken(householdID, name, excludeID string) bool {
+	for _, c := range f.categories {
+		if c.HouseholdID == householdID && c.Name == name && c.ID != excludeID {
+			return true
+		}
+	}
+	return false
+}
+
+func (f *fakeCategoryRepo) Create(_ context.Context, c domain.Category) (domain.Category, error) {
+	if f.nameTaken(c.HouseholdID, c.Name, "") {
+		return domain.Category{}, domain.ErrCategoryNameTaken
+	}
+	f.nextID++
+	c.ID = fmt.Sprintf("cat-%d", f.nextID)
+	c.ArchivedAt = nil
+	maxOrder := 0
+	for _, existing := range f.categories {
+		if existing.HouseholdID == c.HouseholdID && existing.SortOrder > maxOrder {
+			maxOrder = existing.SortOrder
+		}
+	}
+	c.SortOrder = maxOrder + 1
+	f.categories = append(f.categories, c)
+	return c, nil
+}
+
+func (f *fakeCategoryRepo) Rename(_ context.Context, householdID, categoryID, name string) (domain.Category, error) {
+	for i, c := range f.categories {
+		if c.ID != categoryID {
+			continue
+		}
+		if c.HouseholdID != householdID {
+			return domain.Category{}, domain.ErrNotFound
+		}
+		if f.nameTaken(householdID, name, categoryID) {
+			return domain.Category{}, domain.ErrCategoryNameTaken
+		}
+		c.Name = name
+		f.categories[i] = c
+		return c, nil
+	}
+	return domain.Category{}, domain.ErrNotFound
+}
+
+// SetArchived only stamps ArchivedAt the first time a category is archived,
+// so calling it again with archived=true is a true no-op rather than moving
+// the timestamp forward -- the idempotence the port's doc comment promises.
+func (f *fakeCategoryRepo) SetArchived(_ context.Context, householdID, categoryID string, archived bool) (domain.Category, error) {
+	for i, c := range f.categories {
+		if c.ID != categoryID {
+			continue
+		}
+		if c.HouseholdID != householdID {
+			return domain.Category{}, domain.ErrNotFound
+		}
+		if archived {
+			if c.ArchivedAt == nil {
+				now := time.Now().UTC()
+				c.ArchivedAt = &now
+			}
+		} else {
+			c.ArchivedAt = nil
+		}
+		f.categories[i] = c
+		return c, nil
+	}
+	return domain.Category{}, domain.ErrNotFound
+}
+
+// budgetKey collapses a household and month into the map key fakeBudgetRepo
+// uses. Budget.Month is documented as "any instant in the month", so the key
+// normalizes to the first of the month the same way the database's UNIQUE
+// (household_id, month) constraint would, rather than trusting every caller
+// to have already truncated it.
+func budgetKey(householdID string, month time.Time) string {
+	return householdID + "|" + time.Date(month.Year(), month.Month(), 1, 0, 0, 0, 0, time.UTC).Format("2006-01")
+}
+
+// fakeBudgetRepo is the in-memory BudgetRepository every BudgetService test
+// runs against, one row per household-month -- the map-backed shape the
+// port's Get/Upsert/History contract calls for.
+type fakeBudgetRepo struct {
+	budgets map[string]domain.Budget
+	nextID  int
+}
+
+func newFakeBudgetRepo() *fakeBudgetRepo {
+	return &fakeBudgetRepo{budgets: map[string]domain.Budget{}}
+}
+
+func (r *fakeBudgetRepo) Get(_ context.Context, householdID string, month time.Time) (domain.Budget, error) {
+	b, ok := r.budgets[budgetKey(householdID, month)]
+	if !ok {
+		return domain.Budget{}, domain.ErrNotFound
+	}
+	return b, nil
+}
+
+// Upsert always replaces every line wholesale, never merges -- the same
+// full-replace contract Upsert's port doc comment requires of the real
+// repository. b.ID and any line IDs the caller passed are ignored; an
+// existing row keeps its own ID, a new one is assigned here.
+func (r *fakeBudgetRepo) Upsert(_ context.Context, b domain.Budget) (domain.Budget, error) {
+	month := time.Date(b.Month.Year(), b.Month.Month(), 1, 0, 0, 0, 0, time.UTC)
+	key := budgetKey(b.HouseholdID, month)
+	if existing, ok := r.budgets[key]; ok {
+		b.ID = existing.ID
+	} else {
+		r.nextID++
+		b.ID = fmt.Sprintf("budget-%d", r.nextID)
+	}
+	b.Month = month
+	lines := make([]domain.BudgetLine, len(b.Lines))
+	copy(lines, b.Lines)
+	b.Lines = lines
+	r.budgets[key] = b
+	return b, nil
+}
+
+// History walks backward from the viewed month, including it only if
+// budgeted, then the `months` closed months before it -- skipping any month
+// with no row rather than zero-filling it, exactly as the port's doc
+// comment describes. Order is newest first because the walk itself runs
+// newest to oldest.
+func (r *fakeBudgetRepo) History(_ context.Context, householdID string, month time.Time, months int) ([]domain.Budget, error) {
+	viewed := time.Date(month.Year(), month.Month(), 1, 0, 0, 0, 0, time.UTC)
+	var out []domain.Budget
+	if b, ok := r.budgets[budgetKey(householdID, viewed)]; ok {
+		out = append(out, b)
+	}
+	for i := 1; i <= months; i++ {
+		m := viewed.AddDate(0, -i, 0)
+		if b, ok := r.budgets[budgetKey(householdID, m)]; ok {
+			out = append(out, b)
+		}
+	}
+	return out, nil
 }
 
 // staticTestRates knows the one pair fx.StaticProvider knows, and errors on
