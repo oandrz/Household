@@ -1918,10 +1918,29 @@ func budgetKey(householdID string, month time.Time) string {
 type fakeBudgetRepo struct {
 	budgets map[string]domain.Budget
 	nextID  int
+
+	// knownCategoryIDs, when non-nil, is the set Upsert checks every line's
+	// CategoryID against before writing anything -- mirroring the real
+	// repository's own validateLineCategories (budget_repo.go), which
+	// refuses a line whose category is not this household's inside the same
+	// transaction as the write. It exists so a usecase-level test can prove
+	// BudgetService.Save lets that error pass through untouched rather than
+	// pre-validating category ownership itself (a check that belongs to the
+	// repository, which is the thing that actually knows what a household
+	// owns). nil means "accept anything", the default every other test gets.
+	knownCategoryIDs map[string]bool
 }
 
 func newFakeBudgetRepo() *fakeBudgetRepo {
 	return &fakeBudgetRepo{budgets: map[string]domain.Budget{}}
+}
+
+// knownCategories arms the unknown-category check Upsert enforces below.
+func (r *fakeBudgetRepo) knownCategories(ids ...string) {
+	r.knownCategoryIDs = make(map[string]bool, len(ids))
+	for _, id := range ids {
+		r.knownCategoryIDs[id] = true
+	}
 }
 
 func (r *fakeBudgetRepo) Get(_ context.Context, householdID string, month time.Time) (domain.Budget, error) {
@@ -1937,6 +1956,14 @@ func (r *fakeBudgetRepo) Get(_ context.Context, householdID string, month time.T
 // repository. b.ID and any line IDs the caller passed are ignored; an
 // existing row keeps its own ID, a new one is assigned here.
 func (r *fakeBudgetRepo) Upsert(_ context.Context, b domain.Budget) (domain.Budget, error) {
+	if r.knownCategoryIDs != nil {
+		for _, line := range b.Lines {
+			if !r.knownCategoryIDs[line.CategoryID] {
+				return domain.Budget{}, fmt.Errorf("fakeBudgetRepo: category %q does not belong to household %s",
+					line.CategoryID, b.HouseholdID)
+			}
+		}
+	}
 	month := time.Date(b.Month.Year(), b.Month.Month(), 1, 0, 0, 0, 0, time.UTC)
 	key := budgetKey(b.HouseholdID, month)
 	if existing, ok := r.budgets[key]; ok {
