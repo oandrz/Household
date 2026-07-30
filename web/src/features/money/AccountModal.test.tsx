@@ -439,4 +439,35 @@ describe("AccountModal", () => {
       ),
     ).toBeInTheDocument();
   });
+
+  it("names the household's limited members under Visible to kids", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/household/members": {
+        status: 200,
+        body: [
+          { id: "m1", role: "owner", capabilities: ["money"], user: { id: "u1", email: "", displayName: "Dre", avatarInitial: "D" } },
+          { id: "m2", role: "limited", capabilities: [], user: { id: "u2", email: "", displayName: "Kayla", avatarInitial: "K" } },
+          { id: "m3", role: "limited", capabilities: [], user: { id: "u3", email: "", displayName: "Ethan", avatarInitial: "E" } },
+        ],
+      },
+    });
+    renderWithRouter(<AccountModal open onClose={() => {}} />);
+    expect(
+      await screen.findByText("Kayla & Ethan can see this account exists, not the balance"),
+    ).toBeInTheDocument();
+  });
+
+  it("falls back to generic copy when no member is limited", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/household/members": NO_MEMBERS,
+    });
+    renderWithRouter(<AccountModal open onClose={() => {}} />);
+    expect(
+      await screen.findByText("Limited members can see this account exists, not the balance"),
+    ).toBeInTheDocument();
+  });
 });
