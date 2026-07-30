@@ -824,6 +824,21 @@ closing checklist states it in operational terms.
 criterion no spec item implies: do the thing a first-time user would
 actually do, not the thing the spec remembered to ask about.
 
+The walk *scripts* themselves keep proving the adjacent, smaller point: every
+walk so far has shipped with at least one criterion that could not be executed
+as written. Accounts' criterion 12 said "sign in as Kayla," who is
+credential-less by design. Sign-up's (run 2026-07-30) had two: criterion 11
+asserts the per-IP limit's five-then-429 arithmetic, but the walk's own
+criteria 3 and 10 had already spent two of the five requests — the limiter is
+a fixed window per process, so the script's arithmetic only works from a fresh
+API process, which the script never says; and criterion 13 counts "four
+members" in Andreas's household where the seed deliberately creates three plus
+Christine's *pending* invite, which the members list does not show. Each was
+met by an interpreted path and fixed in the verification record, not the
+product. When writing a walk script, dry-run its arithmetic against the state
+the walk itself will have created by that step — a criterion that asserts a
+counter must say what the counter has already counted.
+
 ### 14. Literal example data belongs to the seed, not the product
 
 The design mockup was built around one imagined household — Andreas &

@@ -1,7 +1,8 @@
 # Hearth — handover
 
-Written 2026-07-27, after slices 0 and 1 shipped, and updated the same day once
-self-serve sign-up's code (not yet its browser walk — §1) was done too. This
+Written 2026-07-27, after slices 0 and 1 shipped, updated the same day once
+self-serve sign-up's code was done too, and again on 2026-07-30 when that
+slice's browser walk finally ran (§1). This
 is the document to read before picking the work back up, whether that is you
 in three months or someone new.
 
@@ -9,11 +10,17 @@ in three months or someone new.
 
 ## 1. Where things stand
 
-Three of six slices are now walked end to end in a browser. Self-serve sign-up
-is complete and reviewed — every task's code was reviewed clean, including fix
-rounds — but **still** has not had its own browser walk. Say that plainly
-rather than letting "verified end to end" quietly absorb it: `make lint &&
-make test` passing is not the same claim as a human clicking through it.
+Everything shipped so far is now walked end to end in a browser. Self-serve
+sign-up's own 15-criterion walk ran on 2026-07-30 — three days after its code
+was finished and reviewed — and **passed 15 of 15**, recorded in
+`docs/superpowers/plans/2026-07-27-hearth-signup-verification.md`. No product
+defect came out of it. Three criteria carry notes rather than silent passes:
+the rate-limit criterion needed the API restarted first (the per-IP limiter is
+in-memory and the walk's own earlier submissions had spent two of the five
+requests), the private-window invite acceptance was met by signing out in the
+same browser instead, and "four members" in Andreas's household reads as the
+seeded state — three accepted members plus Christine's deliberately pending
+invite.
 Accounts (slice 2's first feature) closed that gap for itself: its walk ran
 and passed, 15 of 15. Transactions (slice 2's second feature) is code-complete
 and reviewed the same way, seventeen tasks deep with every task's own review
@@ -63,7 +70,7 @@ test driving the three transactions write routes without a CSRF token.
 |---|---|---|
 | 0 — Skeleton | Clean-architecture layout, Docker, Compose, Make, migrations, health endpoints | **Done** |
 | 1 — Household & identity | Sign-in, magic link, invite acceptance, lockout, members, roles, capabilities, spaces, Settings | **Done** |
-| — Self-serve sign-up | Sign-up, household provisioning, an ISO 4217 currency allowlist and list endpoint, `adminctl prune`, a per-IP rate limiter | Code-complete; browser walk **still pending** |
+| — Self-serve sign-up | Sign-up, household provisioning, an ISO 4217 currency allowlist and list endpoint, `adminctl prune`, a per-IP rate limiter | **Done, browser walk 15/15** (2026-07-30) |
 | 2 — Money | **Accounts**: manual entry, net worth, assets/liabilities breakdown, archive and restore — **done, browser walk 15/15**. **Transactions**: ledger, categories, filters, keyset paging, month-to-date spend — **done, browser walk 15/15**. Budget, Goals, Bills: not started | In progress |
 | 3 — Marriage | Retros, Vision, Agreements | Not started |
 | 4 — Family | Calendar | Not started |
@@ -85,9 +92,12 @@ down in `docs/superpowers/plans/2026-07-27-hearth-self-serve-signup.md`
 across the first five rapid sign-ups and the per-IP limit correctly answering
 `429` on the sixth, `adminctl
 unlock-household --email` resolving the right household, and `adminctl prune`
-refusing a window under seven days among them. It has not been run. Start it
-from `make down && make up` (or an explicit `make migrate`), not a bare
-`make up` — see §5's Makefile item.
+refusing a window under seven days among them. **Result: 15 of 15 pass**, run
+2026-07-30 from a wiped database and recorded in
+`docs/superpowers/plans/2026-07-27-hearth-signup-verification.md` — including
+the notes on the three criteria that needed interpreting (the in-memory
+limiter restart, the sign-out-instead-of-private-window invite acceptance,
+and "four members" meaning the seeded three plus Christine's pending invite).
 
 Accounts' own definition of done is a 15-criterion walk, written down in
 `docs/superpowers/plans/2026-07-28-hearth-accounts.md` (Task 41). **Result: 15
