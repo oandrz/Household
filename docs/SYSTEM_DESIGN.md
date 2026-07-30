@@ -610,7 +610,7 @@ graph TD
     Me --> Guard{"Authenticated?"}
     Guard -->|no| SignIn["/sign-in"]
     Guard -->|yes| Shell["AppShell"]
-    Shell --> Sidebar["Sidebar renders me.spaces —<br/>already filtered and ordered by the server"]
+    Shell --> Sidebar["Sidebar renders me.spaces —<br/>already filtered and ordered by the server —<br/>expanding each into its built pages client-side"]
     Shell --> Page["Route content"]
     Page --> Settings["Settings panels — their own queries"]
     Settings -->|"on mutation"| Invalidate["invalidate ['me'] and the panel's query,<br/>awaited so the guard spans the refetch"]
@@ -618,7 +618,14 @@ graph TD
 
 `/auth/me` returns the user, household, membership, capabilities and visible
 spaces in one response, so the shell renders without a request waterfall. The
-sidebar never filters client-side — duplicating that rule is how the two drift.
+sidebar never filters or re-sorts `me.spaces` client-side — duplicating that
+rule is how the two drift. It does expand each space into its built pages: a
+client-side map (`SPACE_PAGES` in `Sidebar.tsx`) turns a space with several
+shipped pages into the design's uppercase group label plus one link per page
+— Money renders as "MONEY" over Finances and Transactions — while a space
+with only one page still renders as a single link. The map, not the server
+payload, decides how many links a space produces; the server payload still
+decides which spaces appear at all and in what order.
 
 ---
 
@@ -865,8 +872,14 @@ standing up a second endpoint. `/money/transactions` is a real route, a
 sibling of `/money` nested under the same `moneyGuardRoute` (a literal path
 segment beats `/money/$`'s catch-all, so it is declared and added to that
 route's children ahead of the splat). `/money/$` still covers Budget, Goals
-and Bills. The sidebar is untouched — it renders from the server's own
-filtered, ordered space list, and this feature adds nothing to it.
+and Bills. The sidebar still renders from the server's own filtered, ordered
+space list, but this feature is what expires the flat-links deferral: Money
+now has two built pages, so it takes the design's grouped form — an
+uppercase "MONEY" label over Finances (`/money`) and Transactions
+(`/money/transactions`) — via the `SPACE_PAGES` map in `Sidebar.tsx` (see
+"What the frontend loads" above). Marriage and Family still have exactly one
+built page each, so they still render as a single link; Budget, Goals and
+Bills join the map, and Money's label, only once their pages ship.
 
 **Route guards are presentation, not security.** The server enforces
 independently; `RequireAuth` and `RequireCapability` exist so the UI does not

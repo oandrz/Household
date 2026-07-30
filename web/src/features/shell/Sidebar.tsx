@@ -7,44 +7,69 @@
 //
 // The design's 5a sidebar groups each space into an uppercase label plus
 // several sub-page links (Finances/Transactions/Budget/... under Money, and
-// so on) -- those sub-pages belong to slices 2-4, which haven't been built
-// yet. Until they exist, one space has exactly one destination, so each
-// space renders as a single clickable nav item in the same style as
-// Overview/Settings, not as an inert group label.
+// so on). That grouped form arrived with Transactions: Money now has two
+// built pages, so it renders as a label plus two links. SPACE_PAGES grows a
+// row per shipped page -- Budget, Goals and Bills join it once their pages
+// exist, not before, because a permanent grey "soon" row reads as broken.
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { Me, Space } from "../auth/schemas";
 import { useSignOut } from "../auth/useAuth";
 
-// The only spaces with a route built this task (docs/superpowers/specs/
-// 2026-07-26-hearth-foundation-design.md puts custom space pages out of
-// scope). A space key this map doesn't recognise -- reachable once "+ New
-// space" lets a household create one -- renders as plain text rather than a
-// Link to a route that doesn't exist.
-const SPACE_PATHS: Record<
-  string,
-  "/money" | "/marriage" | "/family/calendar"
-> = {
-  money: "/money",
-  marriage: "/marriage",
-  family: "/family/calendar",
+// One entry per built page of each space, in the design's order. A space
+// with one entry renders as a single link named after the space; a space
+// with several renders as the design's uppercase group label plus a link
+// per page (the 5a sidebar). A space key this map doesn't recognise --
+// reachable once "+ New space" lets a household create one -- renders as
+// plain text rather than a Link to a route that doesn't exist.
+const SPACE_PAGES: Record<string, { label: string; to: string }[]> = {
+  money: [
+    { label: "Finances", to: "/money" },
+    { label: "Transactions", to: "/money/transactions" },
+  ],
+  marriage: [{ label: "Marriage", to: "/marriage" }],
+  family: [{ label: "Family", to: "/family/calendar" }],
 };
 
 const NAV_ITEM_CLASS =
   "rounded-lg px-2.5 py-2 text-[13.5px] font-semibold text-ink";
 
 function SpaceLink({ space }: { space: Space }) {
-  const to = SPACE_PATHS[space.key];
-  if (!to) {
+  const pages = SPACE_PAGES[space.key];
+  if (!pages) {
     return (
       <span data-testid="sidebar-space" className={`${NAV_ITEM_CLASS} text-muted`}>
         {space.name}
       </span>
     );
   }
+  if (pages.length === 1) {
+    return (
+      <Link data-testid="sidebar-space" to={pages[0].to} className={NAV_ITEM_CLASS}>
+        {space.name}
+      </Link>
+    );
+  }
   return (
-    <Link data-testid="sidebar-space" to={to} className={NAV_ITEM_CLASS}>
-      {space.name}
-    </Link>
+    <>
+      <div
+        data-testid="sidebar-space"
+        className="px-2.5 pb-1 pt-3.5 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-muted"
+      >
+        {space.name}
+      </div>
+      {pages.map((page) => (
+        <Link
+          key={page.to}
+          data-testid="sidebar-space"
+          to={page.to}
+          className={NAV_ITEM_CLASS}
+          activeProps={{ className: `${NAV_ITEM_CLASS} text-accent` }}
+          activeOptions={{ exact: page.to === "/money" }}
+        >
+          {page.label}
+        </Link>
+      ))}
+    </>
   );
 }
 

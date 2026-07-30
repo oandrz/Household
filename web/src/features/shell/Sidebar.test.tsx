@@ -114,12 +114,62 @@ describe("Sidebar", () => {
       />,
     );
 
+    // Money now expands into a group label plus one row per built page
+    // (Finances, Transactions), so the flat "Family, Money, Marriage" this
+    // test used to assert no longer matches -- the grouped shape adds two
+    // rows for Money alone.
     const elements = await screen.findAllByTestId("sidebar-space");
     expect(elements.map((el) => el.textContent)).toEqual([
       "Family",
       "Money",
+      "Finances",
+      "Transactions",
       "Marriage",
     ]);
+  });
+
+  it("groups Money into a label with Finances and Transactions links", async () => {
+    stubFetchRoutes({});
+    renderWithRouter(
+      <Sidebar
+        me={meFixture([
+          space({ id: "space-money", key: "money", name: "Money", position: 1 }),
+        ])}
+      />,
+    );
+    // The group label is not a link.
+    expect(await screen.findByText("Money")).toBeInTheDocument();
+    expect(screen.getByText("Money").closest("a")).toBeNull();
+    expect(screen.getByRole("link", { name: "Finances" })).toHaveAttribute("href", "/money");
+    expect(screen.getByRole("link", { name: "Transactions" })).toHaveAttribute(
+      "href",
+      "/money/transactions",
+    );
+  });
+
+  it("keeps single-page spaces as one link, in payload order", async () => {
+    stubFetchRoutes({});
+    renderWithRouter(
+      <Sidebar
+        me={meFixture([
+          space({ id: "space-money", key: "money", name: "Money", position: 1 }),
+          space({ id: "space-marriage", key: "marriage", name: "Marriage", position: 2 }),
+          space({ id: "space-family", key: "family", name: "Family", position: 3 }),
+        ])}
+      />,
+    );
+    expect(await screen.findByRole("link", { name: "Marriage" })).toHaveAttribute(
+      "href",
+      "/marriage",
+    );
+    expect(screen.getByRole("link", { name: "Family" })).toHaveAttribute(
+      "href",
+      "/family/calendar",
+    );
+    // Order: the payload's, not alphabetical -- Finances before Marriage
+    // before Family.
+    const labels = screen.getAllByTestId("sidebar-space").map((el) => el.textContent);
+    expect(labels).toEqual(["Money", "Finances", "Transactions", "Marriage", "Family"]);
   });
 
   it("shows the household name and a Sign out control in the footer", async () => {
