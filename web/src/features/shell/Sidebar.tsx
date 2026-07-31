@@ -16,25 +16,27 @@ import type { Me, Space } from "../auth/schemas";
 import { useSignOut } from "../auth/useAuth";
 
 // One entry per built page of each space, in the design's order. A space
-// with one entry renders as a single link named after the space; a space
-// with several renders as the design's uppercase group label plus a link
-// per page (the 5a sidebar). A space key this map doesn't recognise --
-// reachable once "+ New space" lets a household create one -- renders as
-// plain text rather than a Link to a route that doesn't exist.
-// `label` is only ever read for a space with 2+ pages (the group-label form
-// below) -- a single-page space renders `space.name`, the household's own
-// name for that space, instead. Marriage and Family both carry a `label`
-// here purely to keep this map's shape uniform; setting it to anything else
-// would never show up. Don't "fix" a single-page space's label expecting it
-// to render -- see SpaceLink's single-link branch.
+// present here renders as the design's uppercase group label plus a link
+// per page (the 5a sidebar) -- including a space with only one page. No
+// entry has exactly one page today (money has three), so the bare-link
+// branch that used to render that case was deleted as unreachable rather
+// than kept waiting for a space that would use it. Marriage and Family were
+// the last spaces in that state; they lost their entries in task 2.
+//
+// A *builtin* space missing from this map has no built pages at all and
+// renders nothing -- the same rule this map already applies one level down
+// ("Goals and Bills join it once their pages exist, not before, because a
+// permanent grey 'soon' row reads as broken"). Marriage and Family were both
+// rows whose only content was the sentence "Arriving in slice N"; they come
+// back here when their pages do. A *custom* space -- one a household made
+// with "+ New space" -- is missing from this map permanently and by design,
+// so it still renders, as plain text.
 const SPACE_PAGES: Record<string, { label: string; to: string }[]> = {
   money: [
     { label: "Finances", to: "/money" },
     { label: "Transactions", to: "/money/transactions" },
     { label: "Budget", to: "/money/budget" },
   ],
-  marriage: [{ label: "Marriage", to: "/marriage" }],
-  family: [{ label: "Family", to: "/family/calendar" }],
 };
 
 // Layout only -- no color here. `text-ink`/`text-accent`/`text-muted` are
@@ -52,30 +54,13 @@ function SpaceLink({ space }: { space: Space }) {
   const matchRoute = useMatchRoute();
   const pages = SPACE_PAGES[space.key];
   if (!pages) {
+    // Builtin and unbuilt: no row. Custom: a row the household named, with
+    // no route yet -- see SPACE_PAGES's comment for why the two differ.
+    if (space.isBuiltin) return null;
     return (
       <span data-testid="sidebar-space" className={`${NAV_ITEM_CLASS} text-muted`}>
         {space.name}
       </span>
-    );
-  }
-  if (pages.length === 1) {
-    // Single-page spaces (Marriage, Family) get the same route-driven accent
-    // as a grouped page below -- `matchRoute` defaults to an exact match
-    // (fuzzy: false), which is deliberate here too: Family's only route
-    // today is /family/calendar, so exact and prefix behave identically for
-    // it right now, but exact is the correct choice going forward -- it is
-    // what stops a later sub-page under /family from also lighting up this
-    // link, the same reason the grouped Money links need it against
-    // /money/transactions.
-    const isActive = Boolean(matchRoute({ to: pages[0].to }));
-    return (
-      <Link
-        data-testid="sidebar-space"
-        to={pages[0].to}
-        className={`${NAV_ITEM_CLASS} ${isActive ? "text-accent" : "text-ink"}`}
-      >
-        {space.name}
-      </Link>
     );
   }
   return (

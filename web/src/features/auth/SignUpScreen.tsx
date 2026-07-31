@@ -139,7 +139,7 @@ export function SignUpScreen() {
             Start your household.
           </h1>
           <p className="mb-5 text-[13px] leading-relaxed text-muted">
-            One household, two owners. Set it up once and invite your partner in.
+            One household for the whole family. Set it up once, invite your partner, add the kids later.
           </p>
 
           <form className="flex flex-col gap-3.5" onSubmit={handleSubmit}>
@@ -176,7 +176,7 @@ export function SignUpScreen() {
               disabled={requestSignUp.isPending}
               className="mt-1 rounded-[9px] bg-accent py-3 text-center text-[13.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Create household
+              Send me a set-up link
             </button>
           </form>
 
@@ -192,7 +192,7 @@ export function SignUpScreen() {
           You can invite your partner right after — nothing is shared until they accept.
           <br />
           <span className="text-[11px]">
-            Your household data stays between the two of you.
+            Your household data stays inside your household.
           </span>
         </p>
       </div>

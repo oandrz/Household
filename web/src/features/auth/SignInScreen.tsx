@@ -206,7 +206,7 @@ export function SignInScreen() {
             Welcome back.
           </h1>
           <p className="mb-5 text-[13px] leading-relaxed text-muted">
-            Sign in to pick up where you both left off.
+            Sign in to pick up where you left off.
           </p>
 
           <form className="flex flex-col gap-3.5" onSubmit={handleSubmit}>
@@ -311,7 +311,7 @@ export function SignInScreen() {
         </div>
 
         <p className="text-center text-xs leading-relaxed text-muted">
-          Your household data stays between the two of you.
+          Your household data stays inside your household.
         </p>
       </div>
     </main>

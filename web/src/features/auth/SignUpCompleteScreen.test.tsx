@@ -2,7 +2,7 @@
 // anywhere in this codebase (see SignUpScreen.test.tsx's own comment on the
 // same choice), so this matches that convention rather than introducing a new
 // one for a single file.
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes } from "../../test/fetchStub";
@@ -43,7 +43,7 @@ describe("SignUpCompleteScreen", () => {
 
     expect(await screen.findByLabelText("Household name")).toBeInTheDocument();
     expect(
-      screen.getByText("Shown at the top of the sidebar. Change it any time."),
+      screen.getByText("Shown at the bottom of the sidebar, beside your name. Change it any time."),
     ).toBeInTheDocument();
     expect(screen.getByLabelText("Your name")).toBeInTheDocument();
     expect(screen.getByLabelText("Password")).toBeInTheDocument();
@@ -57,6 +57,32 @@ describe("SignUpCompleteScreen", () => {
     // Defaulting to SGD would ship a wrong-currency first impression to
     // everyone who does not notice the field.
     expect(await screen.findByLabelText("Primary currency")).toHaveValue("");
+  });
+
+  it("puts the currencies with a symbol in their own group", async () => {
+    // Split on the wire's own `symbol`, so adding one server-side promotes a
+    // currency here with no frontend change. ALL has none, which is the whole
+    // point of the fixture -- `preview`'s two both do.
+    stubFetchRoutes({
+      ...preview,
+      "GET /api/v1/currencies": {
+        status: 200,
+        body: {
+          currencies: [
+            { code: "SGD", symbol: "S$", name: "Singapore dollar" },
+            { code: "ALL", name: "Albanian lek" },
+          ],
+        },
+      },
+    });
+    renderWithRouter(<SignUpCompleteScreen token="tok" />);
+
+    const common = await screen.findByRole("group", { name: "Common" });
+    expect(within(common).getByRole("option", { name: /SGD/ })).toBeInTheDocument();
+    expect(within(common).queryByRole("option", { name: /ALL/ })).toBeNull();
+
+    const all = screen.getByRole("group", { name: "All currencies" });
+    expect(within(all).getByRole("option", { name: /ALL/ })).toBeInTheDocument();
   });
 
   it("submits every field and enters the app", async () => {

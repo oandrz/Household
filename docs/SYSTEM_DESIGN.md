@@ -15,7 +15,11 @@ sum; and Budget — an envelope per category with pace, built directly on
 Transactions' own month totals, plus the category management (rename,
 create, archive) the design folds into its Edit-budget modal rather than a
 dedicated screen. Goals and Bills, the rest of Money, and all of Marriage,
-Family and Overview are not built; see `docs/FEATURE_TRACKER.md`.
+Family and Overview are not built; see `docs/FEATURE_TRACKER.md`. The
+UX-repair round of 2026-07-31 shipped no feature at all — it bounded the page
+container, removed the two unbuilt spaces from the navigation along with their
+four routes, and rewrote copy; where it changed the shape of something drawn
+here, the change is recorded at that diagram (§7 in particular).
 
 ---
 
@@ -227,8 +231,11 @@ the alternative is for these routes to lean on an invariant enforced in a
 different layer for a different reason, and if that invariant is ever relaxed
 every route depending on it would open silently. One extra middleware call is
 the cheaper price. (This is unrelated to the frontend's own `RequireCapability`
-component, §7 — a presentation guard that already existed for the `/money` and
-`/marriage` placeholders; this is the first time the *server* enforces one.)
+component, §7 — a presentation guard that, at the time accounts shipped,
+already existed for the `/money` and `/marriage` placeholders; this is the
+first time the *server* enforces one. `/marriage` has had no route since
+`110ab0a`, so today `RequireCapability` guards only `/money`'s subtree, and
+the server-side gate below is the enforcement either way.)
 
 **Transactions, categories and budgets are the routes where `requireOwner`
 gates a `GET`.** Every other owner-gated route in this table only reaches
@@ -705,7 +712,7 @@ graph TD
     Me --> Guard{"Authenticated?"}
     Guard -->|no| SignIn["/sign-in"]
     Guard -->|yes| Shell["AppShell"]
-    Shell --> Sidebar["Sidebar renders me.spaces —<br/>already filtered and ordered by the server —<br/>expanding each into its built pages client-side"]
+    Shell --> Sidebar["Sidebar renders me.spaces —<br/>already filtered and ordered by the server —<br/>expanding each into its built pages client-side,<br/>and dropping a builtin space that has none"]
     Shell --> Page["Route content"]
     Page --> Settings["Settings panels — their own queries"]
     Settings -->|"on mutation"| Invalidate["invalidate ['me'] and the panel's query,<br/>awaited so the guard spans the refetch"]
@@ -717,10 +724,26 @@ sidebar never filters or re-sorts `me.spaces` client-side — duplicating that
 rule is how the two drift. It does expand each space into its built pages: a
 client-side map (`SPACE_PAGES` in `Sidebar.tsx`) turns a space with several
 shipped pages into the design's uppercase group label plus one link per page
-— Money renders as "MONEY" over Finances, Transactions and Budget — while a space
-with only one page still renders as a single link. The map, not the server
-payload, decides how many links a space produces; the server payload still
-decides which spaces appear at all and in what order.
+— Money renders as "MONEY" over Finances, Transactions and Budget.
+
+**A builtin space the map does not name renders nothing at all.** Since
+`110ab0a`, Marriage and Family are exactly that: both had a single
+"destination" whose whole content was the sentence "Arriving in slice N", the
+team's own planning vocabulary shown to a customer, so the pages and their
+four routes were deleted and their `SPACE_PAGES` entries with them. The rule
+keys off `isBuiltin`, **not** off the absence of a pages entry — a *custom*
+space created through "+ New space" has no map entry either and must keep
+appearing, because a household that just made a space needs to see that it
+exists. So there are three cases, not two: a space with built pages → the
+group label plus one link per page, whether it has one shipped page or
+several (no space is in that state today — Marriage and Family were, until
+`110ab0a` — so there is no separate single-link rendering to special-case); a
+custom space → its name as plain text, since it has no route to link to; a
+*builtin* space with no built page → nothing rendered. The map, not the
+server payload, decides how many links a space produces; the server payload
+still decides which spaces are *visible to this member* at all and in what
+order, and Settings' own Spaces panel still lists Marriage and Family,
+because the spaces themselves are untouched — only their navigation is gone.
 
 ---
 
@@ -988,7 +1011,9 @@ web/src/
   components/          generic primitives only (Modal, on native <dialog>)
   features/
     auth/              sign-in, invite, magic-link, sign-up screens and hooks
-    shell/             AppShell, Sidebar, RequireAuth, RequireCapability
+    shell/             AppShell (sidebar + the 1204px content column every
+                       page renders inside), Sidebar, RequireAuth,
+                       RequireCapability
     settings/          members, spaces, currency, notifications
     money/             Finances page — net worth, breakdown, accounts and
                        recent-transactions cards, the add/edit modal,
@@ -1000,9 +1025,12 @@ web/src/
                        templates, the Edit-budget modal (category create/
                        rename/archive queued through it), the History
                        modal and month picker, mounted at /money/budget
-    placeholder/       named stand-ins for unbuilt areas — /money/$ (Goals
-                       and Bills, still to come) renders theirs
-  routes/router.tsx        the route tree
+    placeholder/       named stand-ins for unbuilt areas, and only for areas
+                       a household can already reach — / (Overview, until
+                       the interim Overview ships) and /money/$ (Goals and
+                       Bills, still to come)
+  routes/router.tsx        the route tree; its header comment is the route
+                           list, kept beside the code it describes
   routes/publicRoutes.ts   the one list of pre-auth routes and API prefixes;
                            a test walks the route tree and fails if a
                            pre-auth screen escapes it
@@ -1022,13 +1050,40 @@ expired the flat-links deferral and Budget is what grew it a third link:
 Money takes the design's grouped form — an uppercase "MONEY" label over
 Finances (`/money`), Transactions (`/money/transactions`) and Budget
 (`/money/budget`) — via the `SPACE_PAGES` map in `Sidebar.tsx` (see "What the
-frontend loads" above). Marriage and Family still have exactly one built
-page each, so they still render as a single link; Goals and Bills join the
-map, and add a fourth and fifth Money link, only once their own pages ship.
+frontend loads" above). Goals and Bills join the map, and add a fourth and
+fifth Money link, only once their own pages ship.
+
+**`/marriage`, `/marriage/$` and `/family/calendar` are gone** (`110ab0a`),
+with the placeholders they rendered. Those URLs now fall through to
+`rootRoute`'s `notFoundComponent`. Two consequences follow from *where* that
+component sits, and `router.tsx`'s header comment records both because
+neither is visible from the route list alone. `rootRoute` sits **above** the
+pathless `RequireAuth`/`AppShell` pair rather than below it, so the 404
+renders shell-less — no sidebar, and today no link home, which makes
+`/marriage` a dead end rather than a route that offers a way out. And
+`RequireAuth` never runs for it, so a signed-out visitor following an old
+`/marriage` bookmark gets bare "Page not found." text instead of the sign-in
+screen every real route bounces them to. Both are accepted for now: these are
+links to a feature that does not exist, not routes anything should point at.
+Both stop being acceptable the moment `notFoundComponent` grows real content
+or a route moves relative to `authenticatedRoute`, so `router.test.tsx` pins
+the fall-through rather than leaving it to be rediscovered.
+
+**Every page renders inside a 1204px column**, centred by `AppShell` — the
+design's own content width (a 1440px canvas less the 236px sidebar), not a
+taste. Before it, the grid's `1fr` handed each page the whole monitor: on a
+2752px display the ledger's heading and its "+ Add transaction" button
+measured 2407px apart, and a Settings toggle sat far from the label naming
+it. Pages keep their own padding; the column only bounds them, which is why
+adding it changed no page's internal layout. Nothing in the unit suite could
+see the defect — jsdom lays nothing out — so the numbers come from a real
+browser (`docs/superpowers/plans/2026-07-31-hearth-ux-repair-verification.md`).
 
 **Route guards are presentation, not security.** The server enforces
 independently; `RequireAuth` and `RequireCapability` exist so the UI does not
-render something the user will be refused.
+render something the user will be refused. The `/marriage` fall-through above
+is the same rule read from the other side: a URL with no route gets no guard
+either, and it is the server that would refuse the data regardless.
 
 `publicRoutes.ts` replaces two hand-maintained lists that used to live in
 `api/client.ts` and `api/unauthorizedRedirect.ts`, with nothing tying either to

@@ -13,7 +13,12 @@ import { type FormEvent, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { ApiError } from "../../api/client";
 import { apiErrorMessage } from "./copy";
+import { type Currency } from "./schemas";
 import { useCompleteSignUp, useCurrencies, useSignUpPreview } from "./useAuth";
+
+function currencyLabel(c: Currency) {
+  return c.symbol ? `${c.code} (${c.symbol}) — ${c.name}` : `${c.code} — ${c.name}`;
+}
 
 // Branches on the ApiError code, never on the server's message. InviteScreen
 // does the same, for the reason its own comment gives: the message is copy the
@@ -138,6 +143,14 @@ function CompleteSignUpForm({ token, email }: { token: string; email: string }) 
     );
   }
 
+  const allCurrencies = currencies.data?.currencies ?? [];
+  // The split is the wire's own `symbol`, not a list kept here: currencySymbols
+  // on the server is already the judgement about which currencies are worth
+  // surfacing, and duplicating it would let the two drift. Order inside each
+  // group is the server's.
+  const common = allCurrencies.filter((c) => c.symbol);
+  const rest = allCurrencies.filter((c) => !c.symbol);
+
   const inlineErrorMessage =
     validationError ??
     (error ? apiErrorMessage(error, "Something went wrong. Please try again.") : null);
@@ -148,7 +161,7 @@ function CompleteSignUpForm({ token, email }: { token: string; email: string }) 
         Start your household.
       </h1>
       <p className="mb-5 text-[13px] leading-relaxed text-muted">
-        One household, two owners. Set it up once and invite your partner in.
+        One household for the whole family. Set it up once, invite your partner, add the kids later.
       </p>
 
       <form className="flex flex-col gap-3.5" onSubmit={handleSubmit}>
@@ -165,7 +178,7 @@ function CompleteSignUpForm({ token, email }: { token: string; email: string }) 
             className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
           />
           <p className="text-[11px] text-muted">
-            Shown at the top of the sidebar. Change it any time.
+            Shown at the bottom of the sidebar, beside your name. Change it any time.
           </p>
         </div>
 
@@ -184,11 +197,24 @@ function CompleteSignUpForm({ token, email }: { token: string; email: string }) 
                 wrong-currency first impression to everyone who did not
                 notice the field, which is the reason the field exists. */}
             <option value="">Choose a currency</option>
-            {(currencies.data?.currencies ?? []).map((c) => (
-              <option key={c.code} value={c.code}>
-                {c.symbol ? `${c.code} (${c.symbol}) — ${c.name}` : `${c.code} — ${c.name}`}
-              </option>
-            ))}
+            {common.length > 0 && (
+              <optgroup label="Common">
+                {common.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {currencyLabel(c)}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {rest.length > 0 && (
+              <optgroup label="All currencies">
+                {rest.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {currencyLabel(c)}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
         </div>
 
@@ -307,7 +333,7 @@ export function SignUpCompleteScreen({ token }: { token: string }) {
           You can invite your partner right after — nothing is shared until they accept.
           <br />
           <span className="text-[11px]">
-            Your household data stays between the two of you.
+            Your household data stays inside your household.
           </span>
         </p>
       </div>

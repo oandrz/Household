@@ -1,9 +1,12 @@
 # Hearth — learning log
 
 Every defect found while building slices 0, 1, self-serve sign-up, Accounts,
-Transactions (slice 2's first two features) and the finance-fixes round that
-followed the owner's first real day-one use of Transactions, and what each
-one teaches.
+Transactions and Budget (slice 2's first three features), the finance-fixes
+round that followed the owner's first real day-one use of Transactions, and
+the UX-repair round (M1) that followed his first look at the app as a whole —
+and what each one teaches. That last round is worth noticing for what it
+contains: not one of its defects was a broken function. Every one was
+something correct in isolation that nobody had looked at as a product.
 Written because almost none of them were caught by a failing test — they were
 caught by someone asking the right question about code that looked fine and
 had a green suite.
@@ -20,10 +23,12 @@ gets rebuilt.
 
 ### 1. Fixing an instance rarely fixes the class
 
-This happened **eight times** — one bullet each below. Almost every time, the
-fix was correct and the sibling kept the bug; the last one is the variant
-where nothing was broken at all until a field's meaning moved under a reader
-nobody thought to look at.
+This happened **eleven times** — one bullet each below, and the count is the
+number of bullets, so recount it when you add one (it had already drifted by
+one before the UX-repair round noticed). Almost every time, the fix was
+correct and the sibling kept the bug; two of them are the variant where
+nothing was broken at all until a field's or a product's meaning moved under
+a reader nobody thought to look at.
 
 - `PATCH` implemented as `PUT` — fixed in `/household` and
   `/notification-preferences`, missed in `/household/members/:id`. Found two
@@ -110,10 +115,49 @@ nobody thought to look at.
   duplicate-name guard that refused with zero feedback) found by the same
   walk.
 
+- UX-repair round (M1), the audience copy. Every auth screen — sign-in,
+  sign-up, the magic-link panel — described a product for **two people**:
+  "where you both left off", "two owners", copy written when the imagined
+  household was a couple. The domain had long since stopped modelling that:
+  `domain.BuiltinSpaces` has a Family space for everyone, memberships carry
+  limited members and children, Settings invites a family member with a role.
+  Nothing broke; no test could go red, because the copy was exactly what its
+  own tests asserted. This is the meaning-moved variant again, applied to the
+  product's own description rather than to a struct field: the domain's
+  readers include every rendered sentence about who the product is for, and
+  none of them was swept when the domain grew past a couple. What would have
+  caught it years earlier is embarrassingly cheap — read the front door and
+  Settings **in the same sitting**, and ask whether they describe the same
+  product.
+- Same round, the sweep for that copy missed one and the browser walk caught
+  it. Task 4 grepped for `two owners`, `two of you` and `both of you`, fixed
+  every hit, and shipped. The sign-in screen still read "Sign in to pick up
+  where **you both** left off." — a fourth phrasing of the same idea, matching
+  none of the three patterns. The lesson is about the grep, not the decision:
+  when the thing you are sweeping for is a *concept* rather than a token, it
+  has no single shape, and a grep is only as complete as the list of phrasings
+  you thought of. Either enumerate the phrasings deliberately (write them
+  down, then ask what a writer would say that is not on the list), or grep for
+  something structural instead — here, every copy constant in the auth
+  feature, read end to end, would have been a shorter list than the phrasings.
+  Found by opening the sign-in screen in a real browser, which is the backstop
+  when the grep is the thing that is wrong (fixed in `8fe1f1a`; see
+  `docs/superpowers/plans/2026-07-31-hearth-ux-repair-verification.md`
+  criterion 15).
+
 **When you fix something, grep for its shape before you close it.** The question
 that finds these is not "is this fixed?" but "where else does this pattern
 appear?" `Truncate` is now that grep for date-and-location bugs specifically —
 run it before adding a fourth site.
+
+**And a concept has no single shape, so a grep for one is a guess at a list.**
+Code has tokens you can search exactly; an *idea* — "copy that assumes two
+people", "places we format a currency" — is spelled several ways by several
+authors, and the one nobody listed is the one that survives. Write the
+phrasings down before you sweep, add the ones you would not have written
+yourself, and treat the sweep as unproven until something that does not read
+your grep — a browser walk, a reviewer, a rendered-bundle search — has looked
+at the result.
 
 **And when you change what a value *means*, its readers are the class.** The
 compiler will not find them, because nothing about the type changed; only a
@@ -616,8 +660,32 @@ either; sharpen the mutation until the failure names the claim.
   itself via `useMatchRoute` instead of `activeProps` — one color class per
   link leaves nothing for the cascade to arbitrate.
 
+- UX-repair round (M1): **the app had no maximum content width at all.**
+  `AppShell`'s grid gave the sidebar 236px and the page `1fr`, so every page
+  stretched to whatever monitor it was opened on. Measured in a real browser
+  at 2752 CSS px, the Transactions ledger's "All transactions" heading sat at
+  x=170 and its "+ Add transaction" button at x=2577 — **2407px apart**, a
+  heading and the button that acts on it at opposite ends of the desk — and
+  the Settings notification toggles sat at x=2653, far from the labels naming
+  them. The entire frontend suite was green throughout and could not have been
+  anything else: jsdom performs no layout, so `getBoundingClientRect()` returns
+  zeroes and there is no width for an assertion to be wrong about. Fixed by
+  bounding the outlet to the design's own 1204px column (a 1440px canvas less
+  the 236px sidebar), which moved the same two elements to x=928 and x=1921 —
+  993px apart. Two things generalise. First, *nothing on the layout axis is
+  testable in jsdom*, so "the tests pass" carries no information at all about
+  it, and the only witness is a measurement taken in a browser at a realistic
+  viewport — including a wide one, since the defect is invisible at 1280px
+  where most people develop. Second, a design's own numbers are a
+  specification: 1204px was in the mockup from the beginning, and the defect
+  is simply that nobody transcribed it.
+
 **If a behaviour depends on the platform, verify it in the platform.** A real
-browser found five defects that jsdom structurally could not observe. And
+browser is what found every frontend defect above, and nothing else could
+have: jsdom has no working `<dialog>`, no CSS cascade and no layout at all, so
+the assertion that would catch one of these has nothing to read. Count the
+bullets rather than trusting a number in this sentence — the list keeps
+growing. And
 when a service returns an error it did not log, stop debugging the code and
 confirm you are talking to the process you think you are — an assumed
 environment that is not the one running is the same trap as a simulated one
@@ -891,6 +959,42 @@ product in a real browser before calling it done," added the day this
 round's spec was written; the sharper form of the rule — walk it as the
 user, not as the spec — is this pattern, and item 4 of this file's own
 closing checklist states it in operational terms.
+
+The UX-repair round (M1) was that walk done properly — the product owner
+opened the app as a stranger would — and it found two more of the same class,
+neither of which any feature spec had a criterion for:
+
+- **A placeholder page shipped as a live navigation destination, in the
+  team's own planning vocabulary.** Marriage, Family and Overview each
+  rendered nothing but the sentence "Arriving in slice N" — "slice" is a word
+  from this project's plan documents, and it reached a customer's screen.
+  Every one of those pages was *deliberately* built and *correctly* built:
+  each slice's spec said "placeholder page for the unbuilt areas", and each
+  task delivered exactly that. What no spec ever asked was what a household
+  sees when it clicks one, which is a navigation row promising a page that
+  does not exist, in a word only the people who built it understand. Two of
+  the three — the unbuilt spaces — were deleted with their four routes
+  (`110ab0a`); Overview keeps its placeholder because it is the landing page
+  and cannot simply be dropped from the sidebar, and its replacement is its
+  own plan. The rule that falls out: a placeholder is honest as the *inside*
+  of something a household already has, and dishonest as a destination it is
+  invited to visit. And the vocabulary check is free — grep rendered strings
+  for the words that only exist in your planning documents (`slice`, `task`,
+  `TODO`, `Phase`) before shipping.
+- **A disabled control explained itself where nobody was looking.** With no
+  accounts yet, the Transactions page disabled "+ Add transaction" — right,
+  and documented: you cannot attach a transaction to an account that does not
+  exist. But the explanation lived in the button's own area at the top right,
+  while the eye was in the middle of the page reading the ledger's empty
+  state, which said "Nothing logged yet." — an answer to a different question,
+  and a dead end for a household whose actual next step was to create an
+  account. The decision was reviewed; the *placement* was never checked
+  against the empty state it belongs to, because a spec criterion asks "is the
+  button disabled?" and a person asks "what do I do now?". Fixed by making the
+  empty state itself read "Add an account first" with a link to Finances. When
+  you disable a control, find where the user's eye actually is at that moment
+  and put the reason and the way out there — the disabled control is where the
+  answer is *filed*, not where it is *read*.
 
 **A spec-derived verification walk is only as good as the spec.** Add one
 criterion no spec item implies: do the thing a first-time user would

@@ -24,6 +24,15 @@ export const TRANSACTIONS_COPY = {
   noMatchesTitle: "Nothing matches those filters.",
   noMatchesAction: "Clear filters",
 
+  // The first-run state above assumes there is somewhere to log *to*. With no
+  // accounts there is not, and the header's "+ Add transaction" is disabled --
+  // so the middle of the screen has to carry the way out, not just the header's
+  // hint, which sits at the far right of a wide row.
+  noAccountsTitle: "Add an account first",
+  noAccountsBody:
+    "Transactions attach to an account, so Hearth needs one before you can log anything.",
+  noAccountsAction: "Add an account",
+
   // The button is disabled rather than opening a modal whose account dropdown
   // is empty -- a dead end reached after four clicks.
   noAccountsYet: "Add an account first, and transactions can attach to it.",

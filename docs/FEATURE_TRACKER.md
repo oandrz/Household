@@ -151,11 +151,11 @@ The full checklist is at the end of `docs/LEARNING.md`.
 | Feature | State | Notes |
 |---|---|---|
 | Sidebar grouped into spaces | ✅ | Which spaces appear, and in what order — rendered from the server's own filtered, ordered list, never re-sorted or re-filtered client-side. Grouping a space's own pages under its label is the row below |
-| Sidebar's design 5a form — a space with several built pages renders as an uppercase group label plus one link per page | ✅ | `SPACE_PAGES` map in `Sidebar.tsx`; a space with one built page still renders as a single link. Money took this form once Transactions shipped a second page (Finances, Transactions); Marriage and Family still render as single links, having one page each. Active state is computed per link via `useMatchRoute`, not `Link`'s `activeProps` — `activeProps` merges its class onto the base class rather than replacing it, which shipped an active link with both an ink and an accent color class present at once and the accent never winning the cascade (`docs/LEARNING.md` pattern 3) |
+| Sidebar's design 5a form — a space with several built pages renders as an uppercase group label plus one link per page | ✅ | `SPACE_PAGES` map in `Sidebar.tsx`; a space with one built page still renders as a single link. Money took this form once Transactions shipped a second page (Finances, Transactions). Marriage and Family render nothing at all since `110ab0a`: the sidebar shows a builtin space only when `SPACE_PAGES` names at least one built page for it, and both spaces lost their entry along with their four routes (see sections 6 and 7 below). A *custom* space from "+ New space" still renders as a single link — the rule keys off `isBuiltin`, not off the absence of a pages entry. Active state is computed per link via `useMatchRoute`, not `Link`'s `activeProps` — `activeProps` merges its class onto the base class rather than replacing it, which shipped an active link with both an ink and an accent color class present at once and the accent never winning the cascade (`docs/LEARNING.md` pattern 3) |
 | Space visibility per member | ✅ | Money is capability-gated, Marriage is parents-only, Family is for everyone |
 | Household footer with members and plan | ✅ | "Free plan" is static text, as specified |
 | Modal primitive | ✅ | Native `<dialog>`; backdrop dismissal, Escape, focus trap. Slices 2–4 build on it |
-| Placeholder pages for unbuilt areas | ✅ | Each names the slice that will ship it |
+| Placeholder pages for unbuilt areas | ✅ | Two are left, and each names the slice that will ship it: `/` (Overview) and `/money/$` (Goals and Bills). Marriage's and Family's were deleted with their routes in `110ab0a` — a placeholder is honest as the *inside* of a space a household already has, and dishonest as a whole navigation destination offering a page that does not exist |
 | `⌘K` command palette | ⬜ | Shown in the sidebar header; no behaviour behind it |
 | "+ New space" | ✅ | See Household settings below |
 
@@ -424,6 +424,21 @@ invents either without a decision recorded first is building on sand.
 
 Nothing started. Parents-only throughout.
 
+**Marriage has no routes any more, and no sidebar entry.** `110ab0a` deleted
+`/marriage` and `/marriage/$` along with the placeholder page they rendered,
+because a navigation row whose only content was the sentence "Arriving in
+slice 3" reads as a broken product rather than an honest one. Nothing about
+the *feature* changed — every row below is still ⬜, and removing a
+placeholder from the navigation does not make an unbuilt space less unbuilt.
+What it changes is the shape of the first task that builds it: add the route
+back in `router.tsx`, add the `SPACE_PAGES` entry in `Sidebar.tsx` in the
+same change, and re-add `RequireCapability cap="marriage"` on the route —
+Marriage is capability-gated and its guard went with its route. Settings
+still lists Marriage as a space, because the space itself still exists in
+`domain.BuiltinSpaces` and in the database; it simply has nowhere to link to
+yet. Debugging a "missing sidebar link" without this note is the failure mode
+it exists to prevent.
+
 | Feature | State |
 |---|---|
 | Retro history with mood | ⬜ |
@@ -451,6 +466,15 @@ restored. That is append-only and versioned, not ordinary CRUD.
 | Shared month calendar with per-person filters | ⬜ | Needs Bills, since bill dates appear on the grid |
 | New event (modal) | ⬜ | |
 | Kids view | 🚫 | The design marks it "· not built" |
+
+**Family has no routes any more, and no sidebar entry**, for the same reason
+Marriage does not (`110ab0a`): `/family/calendar` and its "Arriving in slice
+4" placeholder were deleted together. Whoever builds the calendar adds the
+route back and the `SPACE_PAGES` entry in the same change. One difference
+from Marriage: Family carries **no** required capability — `domain.BuiltinSpaces`
+makes it unconditional — so its route sits directly under the shell with no
+`RequireCapability` wrapper, exactly as it did before. Settings still lists
+Family as a space for everyone.
 
 ## 8 · Household extras
 

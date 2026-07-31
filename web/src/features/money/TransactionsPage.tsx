@@ -454,6 +454,23 @@ export function TransactionsPage() {
                 {TRANSACTIONS_COPY.noMatchesAction}
               </button>
             </div>
+          ) : accounts.length === 0 ? (
+            <div className="flex flex-col items-center gap-3 py-14 text-center">
+              <p className="text-sm font-semibold text-ink">
+                {TRANSACTIONS_COPY.noAccountsTitle}
+              </p>
+              <p className="max-w-sm text-[13px] text-muted">
+                {TRANSACTIONS_COPY.noAccountsBody}
+              </p>
+              {/* The way out lives here, in the middle of the screen, not only
+                  in the header's hint beside the disabled button. */}
+              <Link
+                to="/money"
+                className="rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white"
+              >
+                {TRANSACTIONS_COPY.noAccountsAction}
+              </Link>
+            </div>
           ) : (
             <div className="flex flex-col items-center gap-3 py-14 text-center">
               <p className="text-sm font-semibold text-ink">{TRANSACTIONS_COPY.emptyTitle}</p>
