@@ -14,7 +14,7 @@
 // satisfied by omission -- there is no field here that could be mistaken
 // for "this member has no address."
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../../api/client";
 import { apiErrorMessage } from "../auth/copy";
 import { useMe } from "../auth/useAuth";
@@ -22,22 +22,8 @@ import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { ALL_CAPABILITIES } from "./capabilities";
 import { InviteMemberModal } from "./InviteMemberModal";
 import { memberBadgeLabel, memberDescriptionLine } from "./copy";
-import {
-  membersListSchema,
-  updateMemberResponseSchema,
-  type MemberView,
-} from "./schemas";
-
-const membersQueryKey = ["household", "members"] as const;
-
-async function fetchMembers(): Promise<MemberView[]> {
-  const body = await apiFetch<unknown>("/api/v1/household/members");
-  return membersListSchema.parse(body);
-}
-
-function useMembers() {
-  return useQuery({ queryKey: membersQueryKey, queryFn: fetchMembers });
-}
+import { updateMemberResponseSchema, type MemberView } from "./schemas";
+import { householdMembersQueryKey, useHouseholdMembers } from "./useHouseholdMembers";
 
 // api/internal/adapter/http/member_handlers.go's updateMemberRequest fields
 // are now pointers (fixed alongside this task, matching /household and
@@ -82,7 +68,7 @@ function useUpdateMember() {
     // of "click" and "PATCH resolved".
     onSuccess: () => {
       return Promise.all([
-        queryClient.invalidateQueries({ queryKey: membersQueryKey }),
+        queryClient.invalidateQueries({ queryKey: householdMembersQueryKey }),
         // The sidebar and every RequireCapability guard read from ['me'];
         // a capability or role change that doesn't refresh it leaves the
         // caller (if they just edited their own membership) looking at
@@ -242,7 +228,7 @@ function MemberRow({
 
 export function MembersPanel() {
   const me = useMe();
-  const members = useMembers();
+  const members = useHouseholdMembers();
   const updateMember = useUpdateMember();
   const [inviteOpen, setInviteOpen] = useState(false);
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});

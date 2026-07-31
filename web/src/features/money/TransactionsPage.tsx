@@ -10,10 +10,9 @@
 // product cannot do is a promise it cannot keep.
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../../api/client";
 import { useCurrencies } from "../auth/useAuth";
-import { membersListSchema, type MemberView } from "../settings/schemas";
+import { useHouseholdMembers } from "../settings/useHouseholdMembers";
 import { formatMoney } from "./formatMoney";
 import { TransactionFilters, type TransactionFilterValues } from "./TransactionFilters";
 import { TransactionModal, type TransactionFormValues } from "./TransactionModal";
@@ -42,21 +41,6 @@ const EMPTY_TRANSACTION_FILTERS: TransactionFilterValues = {
   paidBy: "",
   month: "",
 };
-
-// Shares MembersPanel's / AccountModal's own ["household", "members"] query
-// key (re-declared here, not imported -- matching those two files' own
-// convention of a small per-file copy) so all three read one cache entry
-// instead of three that can independently go stale.
-const householdMembersQueryKey = ["household", "members"] as const;
-
-async function fetchHouseholdMembers(): Promise<MemberView[]> {
-  const body = await apiFetch<unknown>("/api/v1/household/members");
-  return membersListSchema.parse(body);
-}
-
-function useHouseholdMembers() {
-  return useQuery({ queryKey: householdMembersQueryKey, queryFn: fetchHouseholdMembers });
-}
 
 // A one-off fetch for "Load older transactions", deliberately not routed
 // through useTransactions/useQuery. That hook's query key includes `cursor`,
