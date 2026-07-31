@@ -74,7 +74,7 @@ test driving the three transactions write routes without a CSRF token.
 | 2 — Money | **Accounts**: manual entry, net worth, assets/liabilities breakdown, archive and restore — **done, browser walk 15/15**. **Transactions**: ledger, categories, filters, keyset paging, month-to-date spend — **done, browser walk 15/15**. **Budget**: envelope per category with pace, empty state and templates, Edit-budget modal with category create/rename/archive, History modal and month picker — **done, browser walk 15/15** (2026-07-31, two defects found at criterion 9 and fixed mid-walk; see `docs/superpowers/plans/2026-07-30-hearth-budget-verification.md`). Accounts, Transactions, Budget built; Goals, Bills not started | In progress |
 | 3 — Marriage | Retros, Vision, Agreements | Not started |
 | 4 — Family | Calendar | Not started |
-| 5 — Overview | Read-only aggregation across 2–4 | Not started |
+| 5 — Overview | Read-only aggregation across 2–4 | **Interim page built** (2026-08-01) — `/` carries the two of the eight cards Money can supply, a setup checklist and a two-entry "+ Add". Browser walk **14 of 14**, one real defect found and fixed mid-walk. The other six cards need Bills, Goals, Marriage and Family; the page grows into the designed one rather than being replaced |
 
 Self-serve sign-up carries no slice number on purpose: it was specified and
 built between slices 1 and 2, ahead of Money (see "What to do next" below for
@@ -155,6 +155,22 @@ limited member's Money capability was granted at invite time via
 `adminctl` before also being exercised through the Settings toggle the
 criterion's wording names.
 
+**The interim Overview (M2) shipped 2026-08-01**, after the UX-repair round
+(M1) that preceded it. It added no endpoint, no table and no port — it is
+composition over what Accounts, Transactions and Budget already expose — and
+two extractions that stopped it being a fourth copy of one query and a second
+copy of another. Its walk covered three member states because the seeded owner
+exercises only one of them, and that is what caught the milestone's one real
+defect: **a limited member holding `money` saw a page containing the word
+"Overview" and nothing else.** Every unit test passed against it, before and
+after, because each test covering that member asserted the *absence* of
+something, and absence holds perfectly over a blank page. Recorded in
+`docs/superpowers/plans/2026-07-31-hearth-interim-overview-verification.md`
+and in `docs/LEARNING.md` pattern 2, which also carries the second finding
+from the same milestone: the plan's own designated mutation could never go
+red, because two guards defend that behaviour and removing either alone
+changes nothing observable.
+
 Two screens the design marks "· not built" are deliberately absent: the **kids
 view** and **custom space pages**. That is the design's own scoping, not an
 omission.
@@ -199,8 +215,57 @@ silently wins host ports 5173/8080/8025 out from under colima's stack, so
 browser and every `curl` still talk to whatever Docker Desktop published —
 check `docker ps` on both engines before concluding the code is broken.
 
-Mailpit catches all outbound mail at `http://localhost:8025`. Magic links and
-invites land there in development.
+Mailpit catches all outbound mail at `http://localhost:8025`. Its API is
+easier to drive than its UI:
+
+```bash
+curl -s "http://localhost:8025/api/v1/messages?limit=1"
+curl -s "http://localhost:8025/api/v1/message/<ID>"
+```
+
+Magic links, invites and sign-up links all land there in development.
+
+### Driving the app in a browser
+
+Every "done" claim here needs a browser walk (see §1 and `CLAUDE.md`). Four
+things cost previous walks real time, so they are written down rather than
+rediscovered:
+
+- **Clicking by element reference goes stale.** A reference captured in the
+  same batch as a navigation often points at a tree React has since
+  re-rendered. Sign-out in particular has never fired reliably that way; it
+  works immediately via page script:
+  `document.querySelector('button[aria-label="Sign out"]').click()`.
+- **React controlled inputs ignore synthetic typing.** Set them through the
+  native setter and dispatch the event, or the component's state never
+  updates:
+
+  ```js
+  const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+  set.call(el, 'value'); el.dispatchEvent(new Event('input', { bubbles: true }));
+  ```
+
+  Use `'change'` and `HTMLSelectElement` for a `<select>`.
+- **Screenshots are scaled and easy to misread.** A walk twice concluded an
+  element was missing when it was rendered far to the right at a tiny scale.
+  Assert on numbers — `getBoundingClientRect()`, or read `innerText` in page
+  script — and keep screenshots as the record, not as the evidence.
+- **Two byte-identical before/after screenshots mean the change did not
+  land.** That exact failure is in `docs/LEARNING.md` from the finance-fixes
+  branch. Compare hashes rather than eyeballing; the interim Overview's walk
+  did (`shasum -a 256`, five files, five distinct hashes).
+
+Creating the non-owner states a walk needs, since the seeded owner exercises
+only one of them:
+
+```bash
+docker compose exec api go run ./cmd/adminctl create-invite \
+  --email=someone@example.test --name=Someone --role=limited \
+  --capabilities=money --inviter-email=<an existing member's address>
+```
+
+`adminctl` with no arguments prints its real subcommands; `--help` is not one
+of them.
 
 ---
 
@@ -245,12 +310,20 @@ that will manage it (a deferred, separate spec) so it earns real usage first
 console to administer.
 
 **Slice 2 (Money) is under way.** Accounts, Transactions and Budget, its
-first three features, are code-complete and reviewed — Budget's own browser
-walk (Task 17) has not run yet, so it is not counted as done the way Accounts
-and Transactions are (§1). Goals and Bills are not started. It is still the
-largest area and still the design's centre of gravity. Slice 5 (Overview)
-must still be last — it only aggregates, so building it early means stubbing
-everything it reads.
+first three features, are all code-complete, reviewed and walked in a browser
+— Budget's own walk ran on 2026-07-31 and passed 15 of 15 (§1). Goals and
+Bills are not started. It is still the largest area and still the design's
+centre of gravity.
+
+**Slice 5 (Overview) is the exception to its own rule, deliberately.** The
+original order put it last because it only aggregates, so building it early
+means stubbing everything it reads. That still holds for the *designed*
+Overview. What shipped on 2026-08-01 is an interim page built strictly on what
+already exists — two of the eight cards, no stubs, no invented figures — taken
+early because `/` was showing every household "Arriving in slice 5" on every
+visit, established households included. The remaining six cards still wait on
+Bills, Goals, Marriage and Family, and the same route and the same component
+grow into them.
 
 Each slice gets its own spec → plan → implementation cycle, the same way these
 did. The originating spec for slices 0–1 is
@@ -394,6 +467,56 @@ checks membership in a real ISO 4217 allowlist (`domain.ParseCurrency`) rather
 than format only, so `ZZZ` is refused. Accounts closed the fourth:
 `requireCapability` was unused and carried a deadline (§4 above) — it now
 gates the accounts routes, and the route-walk matrices exercise it.
+
+**Inherited from the interim Overview (M2), none of it blocking:**
+
+- **Pending invites are exposed nowhere, and one checklist step is missing
+  because of it.** `InviteService.Create` writes an emailed invite to the
+  `invites` table only; `GET /household/members` reads `memberships` joined to
+  `users`, so a pending invite is not a row there, and no endpoint lists one.
+  Overview's setup checklist therefore has three steps rather than four — an
+  "invite your partner" step could only tick once the partner *accepted*,
+  leaving an owner who had just invited someone looking at an unticked step
+  whose link goes to a Settings page showing no trace of the invite. The
+  product owner chose to drop the step rather than ship that (2026-08-01), on
+  the precedent of Budget spec decision 1. **A `GET` for pending invites is
+  the follow-up**: it closes the checklist step *and* gives Settings something
+  to show, which is the larger gap of the two.
+- **The not-found page is a dead end, and that is a product decision, not a
+  bug.** M1 deleted the Marriage and Family routes, so their URLs reach
+  `notFoundComponent` — which sits *above* the authenticated shell, so the 404
+  renders with no sidebar and no link home, and a signed-out visitor with an
+  old bookmark gets bare "Page not found." text instead of the sign-in screen.
+  Both are documented in `router.tsx`'s header comment and pinned by
+  `router.test.tsx`. Only URLs that never shipped to a customer are affected.
+  The smallest fix is a `<Link to="/">` inside `notFoundComponent`; making the
+  signed-out case redirect needs the route moved under the shell, which is
+  structural. **Ask before doing either — it is the owner's call.**
+- **`.claude/worktrees/transactions/` is a registered git worktree holding
+  pre-M1 copy.** It affects neither lint nor tests, but it is a live decoy for
+  exactly the repo-root grep sweeps `docs/LEARNING.md` now warns about — a
+  re-sweep of the audience copy gets eight false positives from it. Removing
+  it deletes a directory, so it needs the owner's consent:
+  `git worktree remove .claude/worktrees/transactions`.
+- Three cosmetic items parked at M1's final review, any of which is fair game
+  if you are already in the file: in `docs/SYSTEM_DESIGN.md` §7, the
+  three-cases-not-two paragraph about `SPACE_PAGES` contains the parenthetical
+  "no space is in that state today" — "that state" has no unambiguous
+  antecedent (loose, not wrong). Quoted rather than given a line number
+  deliberately: the number it used to carry was already stale by the time this
+  entry moved here;
+  `SignUpCompleteScreen.tsx:43,47`, two action labels still reading "Create a
+  household" for a click that navigates to the email form — defensible as a
+  call-to-action, and a fourth phrasing that escaped the same sweep that
+  missed "you both".
+- **The interim Overview's limited-member panel is gated on
+  `accounts.isSuccess`, and that gate has no test.** It exists so the panel
+  does not flash at an owner while `/accounts` is still in flight (`summary`
+  is equally undefined then). Mutating it to the looser condition leaves every
+  test green. A test would have to assert a transient loading state, which is
+  the shape `docs/LEARNING.md` records as having produced a worthless guard
+  test before — so it was left uncovered deliberately rather than covered
+  badly.
 
 - `apiFetch` has no timeout or abort, so a request that never settles leaves its
   control disabled indefinitely.

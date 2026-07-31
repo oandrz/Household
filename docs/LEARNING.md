@@ -54,7 +54,23 @@ a reader nobody thought to look at.
   with no test, on the stated belief that pinning it needed a
   `vitest.config.ts` timezone change — a reviewer disproved that belief
   (`process.env.TZ` already works in the test runner) and the test was added
-  in the same task.
+  in the same task. **A fourth instance, seen live during the interim
+  Overview's browser walk, on the server side and still open.** With the host
+  at 1 August 06:24 (+08) and the API container in UTC — where it was still 31
+  July — `/money/transactions` headed itself "0 in July 2026" while holding an
+  August-dated transaction. That count comes from the server's own clock, so a
+  household east of UTC sees last month's name over this month's ledger for
+  the first eight hours of every month. The frontend side of the same walk was
+  fine, and for a recorded reason: `currentMonth()` reads local calendar
+  components, and `GET /budgets/{month}` takes its month from the URL rather
+  than from a server "now", so Overview and Budget agreed on August with no
+  clock involved. **The lesson is where the boundary sits.** Every one of these
+  four is the same mistake, but the frontend ones were fixed by choosing local
+  components and the server one cannot be — the server does not know the
+  household's calendar. A derived "this month" computed server-side is a
+  product decision (whose timezone?) wearing a bug's clothes, and it needs
+  answering before it is coded, not after. Recorded against Transactions; not
+  M2's to fix.
 
 - Same slice, Task 15: `AccountModal`'s Balance field distinguishes "not a
   number" from "this currency doesn't use cents" (a switch to IDR/VND without
@@ -158,6 +174,20 @@ phrasings down before you sweep, add the ones you would not have written
 yourself, and treat the sweep as unproven until something that does not read
 your grep — a browser walk, a reviewer, a rendered-bundle search — has looked
 at the result.
+
+**And three copies of a thing share nothing but a coincidence.** Before the
+interim Overview, `AccountModal`, `TransactionsPage` and `MembersPanel` each
+declared a byte-identical `fetchHouseholdMembers` + `useHouseholdMembers` pair
+against the same `["household", "members"]` key. Nothing was broken — they
+shared one cache entry, which is what each of their comments said they wanted.
+But they shared it *by coincidence*, and the coincidence was one keystroke
+deep: any of the three could have changed its key, kept passing its own tests,
+and silently split the cache while `MembersPanel`'s mutations went on
+invalidating a literal only two of them still used. It surfaced only when a
+fourth caller needed the same data. **A comment saying "this is deliberately a
+copy of that" is a design decision that expires** — at two it is a judgement
+call, at three it is a shared thing nobody owns. Grep for the endpoint before
+writing a hook for it.
 
 **And when you change what a value *means*, its readers are the class.** The
 compiler will not find them, because nothing about the type changed; only a
@@ -563,10 +593,57 @@ Walked in order, the nine are not nine copies of the same mistake:
 None of the nine were caught by the test itself failing; every one needed a
 person to ask whether the test could ever have gone red in the first place.
 
+- **The interim Overview (M2), and the plan's own mutation was a no-op.** The
+  plan named the mutation for its limited-member budget-card test: remove the
+  `isOwner &&` guard on the render and watch it fail. It did not fail. Two
+  guards defend that behaviour — `enabled: isOwner` on the `useBudget` call
+  and `isOwner &&` on the render — so deleting either one alone changes
+  nothing observable, and no single-guard mutation can ever kill the test. The
+  deeper cause is what the test asserted: **absence**. `queryByText("This
+  month")` is null when the guard works, when the other guard works, and when
+  the query simply has not resolved — three reasons, one assertion, no way to
+  tell them apart. Retargeted at what actually does the work, through the
+  fetch stub's own `capture` hook: the budget endpoint must never be
+  *requested* for a limited member. That version dies the moment `enabled`
+  stops gating the query. **An absence assertion is satisfied by every reason
+  the thing could be missing, including "the page is broken."** When a test
+  asserts something is not there, ask what else would produce the same green.
+- **Same milestone, the same weakness with a visible cost.** Three tests
+  covered a limited member holding `money`: no budget card, no checklist, no
+  "+ Add". All three passed. All three would have passed against the page that
+  actually shipped to the browser, which rendered the word "Overview" and
+  nothing else — no summary (the server omits it for that caller), no budget
+  card, no checklist, so every absence held perfectly over a blank page. A
+  browser walk found it in one look. The fix was a test that asserts
+  **presence**, and a panel that says what is true. Three absence tests over
+  one member state is a blind spot, not coverage.
+- **And the fix's own sibling, one JSX block away, found by review rather than
+  by either.** Gating the new panel on `accounts.isSuccess` was deliberate —
+  `summary` is equally undefined while the request is in flight, so the looser
+  condition would flash it at an owner. The setup checklist directly beneath
+  it had no such gate: `hasAccount` and `hasBudget` are both `false` while
+  their queries are in flight, which is indistinguishable from "this household
+  has neither", so an **established** household was told to create the account
+  and budget it already owned, on every cold load, until the figures landed.
+  Same root cause, same file, same session, and the fix for the first did not
+  prompt a sweep for the second — the exact failure this document's pattern 1
+  is about. Two further things worth keeping: the flash is invisible to a walk
+  that navigates and waits (every step of ours waited ~1.5s, well past
+  resolution — it took injecting a delay into `fetch` to see it), and the
+  obvious test for it is a trap. Asserting on the *first* render passes
+  vacuously, because `me` has not resolved then either and nothing owner-only
+  is on screen at all; the window that matters is the render after `me` lands
+  and before the money queries do, and a test has to hold that window open
+  deliberately. **"Loading" is not one state.** A page with three independent
+  queries has a lattice of them, and the harmful one is rarely the first.
+
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
 a different reason than the one you meant to prove, that is not yet proof
-either; sharpen the mutation until the failure names the claim.
+either; sharpen the mutation until the failure names the claim. **And if the
+mutation cannot go red because a second guard covers for the first, the test
+is pinned to neither** — mutate the guard that does the work, or assert
+something only that guard can produce.
 
 ### 3. The simulated environment lied
 
@@ -1308,6 +1385,30 @@ route with a missing guard has no second line of defence.
 
 ### Frontend
 
+- **The only page every member reaches is where "who can see what" stops being
+  the router's problem.** Every other screen in this app sits behind
+  `RequireAuth` plus `RequireCapability`, so "what does a limited member see
+  here?" is answered before the component mounts — it doesn't. Overview is the
+  first page with no such guard, and its three access shapes (owner, limited
+  with `money`, limited without) are therefore *normal renders*, not edge
+  cases. That inversion is easy to miss because the seeded owner account
+  exercises exactly one of the three, so a walk that only signs in as the
+  owner sees a third of the page's behaviour and calls it done. Two guards
+  differing by one word made it worse: `/accounts` is
+  `requireCapability(money)`, `/budgets/{month}` is `requireCapability(money)`
+  **and** `requireOwner`, so a card built on the assumption that the two match
+  403s for every limited member. **When a page has no guard above it, write
+  down its access shapes before writing the page, and walk every one of them.**
+- **A component that mounts a modal unconditionally pays that modal's fetches
+  on every visit.** `TransactionModal` calls `useCategories()` itself, so
+  `{open && <TransactionModal open .../>}` and
+  `<TransactionModal open={open} .../>` differ by one request per page load —
+  and `TransactionsPage` already carried a comment saying exactly that. The
+  interim Overview's plan reintroduced the eager form on the app's front door,
+  the single most-visited route. Caught by copying the house pattern rather
+  than the plan, and pinned by a test that fails if either modal is mounted
+  eagerly. **`open` as a prop is not the same as mounting conditionally**;
+  when a child owns queries, the difference is the whole cost.
 - A failed magic-link request rendered **nothing at all** — and because the
   backend send is fire-and-forget by design, the frontend is the only place a
   failure can ever surface. It is also the only way back into a locked household.

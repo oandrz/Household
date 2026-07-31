@@ -76,12 +76,20 @@ function invalidateAfterCategoryWrite(queryClient: QueryClient, month: string) {
 // remaining, percent used, over count...) is computed together, so
 // re-deriving them from a create/rename/archive response here would
 // duplicate BudgetService.Month's own math on the client.
-export function useBudget(month: string) {
+// `enabled` exists for Overview, which renders for every member but may only
+// read a budget for an owner (GET /budgets/{month} is requireCapability(money)
+// AND requireOwner). A caller cannot skip the hook -- that breaks the rules of
+// hooks -- and passing a fake month would both fire a doomed request and cache
+// a failure under a key nobody meant to write. Defaults to true, so BudgetPage
+// is unaffected.
+export function useBudget(month: string, options: { enabled?: boolean } = {}) {
   const queryClient = useQueryClient();
+  const enabled = options.enabled ?? true;
 
   const query = useQuery({
     queryKey: budgetQueryKey(month),
     queryFn: () => fetchBudgetMonth(month),
+    enabled,
   });
 
   // Backs the empty state's "Import last month" card (Task 13), which only
@@ -100,7 +108,7 @@ export function useBudget(month: string) {
   const prevMonthQuery = useQuery({
     queryKey: budgetQueryKey(prevMonth),
     queryFn: () => fetchBudgetMonth(prevMonth),
-    enabled: query.data?.budget === null,
+    enabled: enabled && query.data?.budget === null,
   });
 
   const saveMutation = useMutation({

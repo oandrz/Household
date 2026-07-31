@@ -11,13 +11,12 @@
 // explicitly, and a native select is what lets a test (and a keyboard user)
 // change either field with one event instead of simulating a row of buttons.
 import { type FormEvent, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { Modal } from "../../components/Modal";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
-import { apiFetch } from "../../api/client";
 import { apiErrorMessage } from "../auth/copy";
 import { useCurrencies, useMe } from "../auth/useAuth";
-import { membersListSchema, type MemberView } from "../settings/schemas";
+import type { MemberView } from "../settings/schemas";
+import { useHouseholdMembers } from "../settings/useHouseholdMembers";
 import { ACCOUNT_TYPES, ACCOUNT_TYPE_LABELS, LIABILITY_TYPES } from "./accountTypes";
 import {
   describeAmountError,
@@ -58,14 +57,6 @@ export type AccountEditValues = Omit<
 > &
   Partial<Pick<AccountFormValues, "openingBalanceMinor" | "openingBalanceCurrency">>;
 
-// The household member list this modal's Owner select needs. Shares
-// MembersPanel's own ["household", "members"] query key (not exported from
-// there, so re-declared here) rather than a differently-keyed fetch of the
-// same endpoint, so an owner who has Settings' Members panel open in another
-// tab and this modal open in this one are reading one cache entry, not two
-// that can drift.
-const householdMembersQueryKey = ["household", "members"] as const;
-
 // The design wrote "Kayla & Ethan can see this account exists, not the
 // balance" — true only of the seeded household. Real households get their
 // own limited members' names, and a household with none gets the generic
@@ -91,15 +82,6 @@ function limitedMembersLine(members: MemberView[] | undefined, isPending: boolea
       ? names[0]
       : `${names.slice(0, -1).join(", ")} & ${names[names.length - 1]}`;
   return `${list} can see this account exists, not the balance`;
-}
-
-async function fetchHouseholdMembers(): Promise<MemberView[]> {
-  const body = await apiFetch<unknown>("/api/v1/household/members");
-  return membersListSchema.parse(body);
-}
-
-function useHouseholdMembers() {
-  return useQuery({ queryKey: householdMembersQueryKey, queryFn: fetchHouseholdMembers });
 }
 
 // today() reads the *local* calendar date via getFullYear/getMonth/getDate,

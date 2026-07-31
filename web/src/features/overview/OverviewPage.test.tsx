@@ -1,0 +1,369 @@
+import { fireEvent, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { renderWithRouter } from "../../test/renderWithRouter";
+import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
+import { currentMonth } from "../money/month";
+import { OverviewPage } from "./OverviewPage";
+
+const MONTH = currentMonth();
+
+function meBody(overrides: { role?: string; capabilities?: string[] } = {}) {
+  return {
+    user: { id: "u1", email: "sam@newhouse.test", displayName: "Sam", avatarInitial: "S" },
+    household: {
+      id: "h1",
+      name: "Rivera household",
+      familyName: "Rivera",
+      primaryCurrency: "SGD",
+      showSecondaryCurrency: false,
+      secondaryCurrency: "",
+      fxRateMode: "static",
+    },
+    membership: {
+      id: "m1",
+      householdId: "h1",
+      userId: "u1",
+      role: overrides.role ?? "owner",
+      capabilities: overrides.capabilities ?? ["calendar", "chores", "money", "marriage"],
+    },
+    capabilities: overrides.capabilities ?? ["calendar", "chores", "money", "marriage"],
+    spaces: [],
+  };
+}
+
+// A computable summary: the shape features/money/schemas.ts's discriminated
+// union takes when the server could convert every account.
+function summaryBody(netWorthMinor: number) {
+  return {
+    computable: true,
+    currency: "SGD",
+    netWorthMinor,
+    assetsMinor: netWorthMinor,
+    liabilitiesMinor: 0,
+    breakdown: [],
+    excludedNoRate: [],
+    excludedByChoice: 0,
+  };
+}
+
+// Spelled out here rather than imported from TransactionsPage.test.tsx -- a
+// test file that reaches into another feature's fixtures breaks when that
+// feature's own tests change for reasons of their own.
+const ACCOUNT = {
+  id: "a1",
+  nickname: "DBS Everyday",
+  type: "cash",
+  ownerMembershipId: null,
+  ownerName: null,
+  balance: { amountMinor: 500000, currency: "SGD" },
+  openingBalance: { amountMinor: 400000, currency: "SGD" },
+  balanceAsOf: "2026-07-01",
+  countTowardNetWorth: true,
+  visibleToLimitedMembers: false,
+  archivedAt: null,
+};
+
+function budgetBody(overrides: Record<string, unknown> = {}) {
+  return {
+    currency: "SGD",
+    month: MONTH,
+    budget: { expectedIncomeMinor: null, lines: [] },
+    categories: [],
+    budgetedMinor: 200000,
+    spentMinor: 124000,
+    remainingMinor: 76000,
+    percentUsed: 62,
+    percentOk: true,
+    daysLeft: 2,
+    dailyPaceMinor: 0,
+    dailyPaceOk: true,
+    byPerson: [],
+    excludedNoRate: 0,
+    overCount: 0,
+    ...overrides,
+  };
+}
+
+function renderOverview(routes: Record<string, RouteResponse>) {
+  stubFetchRoutes({
+    "GET /api/v1/currencies": {
+      status: 200,
+      body: { currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }] },
+    },
+    "GET /api/v1/household/members": { status: 200, body: [] },
+    ...routes,
+  });
+  return renderWithRouter(<OverviewPage />);
+}
+
+describe("OverviewPage", () => {
+  it("shows net worth and this month's budget to an owner", async () => {
+    renderOverview({
+      "GET /api/v1/auth/me": { status: 200, body: meBody() },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [], summary: summaryBody(1248000) } },
+      [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
+    });
+
+    expect(await screen.findByText("S$12,480.00")).toBeInTheDocument();
+    expect(await screen.findByText("62% used")).toBeInTheDocument();
+  });
+
+  it("tells a member without money that Money is not shared with them", async () => {
+    renderOverview({
+      "GET /api/v1/auth/me": {
+        status: 200,
+        body: meBody({ role: "limited", capabilities: ["calendar", "chores"] }),
+      },
+      "GET /api/v1/accounts": {
+        status: 403,
+        body: { error: { code: "FORBIDDEN", message: "Not allowed." } },
+      },
+    });
+
+    expect(await screen.findByText(/don't have access to money/i)).toBeInTheDocument();
+    // Not an error state, and not a zero -- zero would be a claim about this
+    // household's money.
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("never asks for a budget on behalf of a limited member, who cannot read one", async () => {
+    // GET /budgets/{month} is requireCapability(money) AND requireOwner
+    // (router.go). A limited member with money can see account names and
+    // nothing else -- rendering a budget card that can only 403 would be a
+    // card that is always broken.
+    //
+    // The assertion is that the request is never *made*, not merely that no
+    // card appears. Absence of the card is the weaker claim: it holds for
+    // several reasons at once (the render guard, the `enabled` gate, or
+    // simply no data having arrived), so a test asserting only that stays
+    // green when either guard is deleted. This one goes red the moment
+    // `enabled: isOwner` stops gating the query -- which is the guard that
+    // keeps a doomed 403 out of the cache.
+    let budgetRequested = false;
+    renderOverview({
+      "GET /api/v1/auth/me": {
+        status: 200,
+        body: meBody({ role: "limited", capabilities: ["calendar", "chores", "money"] }),
+      },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [] } },
+      [`GET /api/v1/budgets/${MONTH}`]: {
+        status: 200,
+        body: budgetBody(),
+        capture: () => {
+          budgetRequested = true;
+        },
+      },
+    });
+
+    await screen.findByText("Overview");
+    expect(budgetRequested).toBe(false);
+    expect(screen.queryByText("This month")).toBeNull();
+  });
+
+  // Found in a browser, not here: every assertion below passed against a page
+  // that rendered the word "Overview" and nothing else. A limited member with
+  // money gets no summary (the server omits it), no budget card and no
+  // checklist, so all three earlier tests' absence-assertions held while the
+  // page itself was blank. A page with nothing on it reads as broken rather
+  // than as restricted -- the same rule SYSTEM_DESIGN §4 states for the
+  // ledger and the budget screen.
+  it("explains the missing figures to a limited member rather than showing them an empty page", async () => {
+    renderOverview({
+      "GET /api/v1/auth/me": {
+        status: 200,
+        body: meBody({ role: "limited", capabilities: ["money"] }),
+      },
+      // No `summary` key at all -- the shape the server actually returns to a
+      // caller who may not see amounts.
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [] } },
+    });
+
+    expect(await screen.findByText(/amounts are hidden/i)).toBeInTheDocument();
+  });
+
+  it("offers a way to set one when the household has never budgeted", async () => {
+    renderOverview({
+      "GET /api/v1/auth/me": { status: 200, body: meBody() },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [], summary: summaryBody(0) } },
+      [`GET /api/v1/budgets/${MONTH}`]: {
+        status: 200,
+        body: budgetBody({ budget: null, budgetedMinor: 0, spentMinor: 0, percentUsed: 0 }),
+      },
+    });
+
+    const link = await screen.findByRole("link", { name: /set a budget/i });
+    expect(link).toHaveAttribute("href", "/money/budget");
+  });
+
+  it("shows a fresh household what is left to set up", async () => {
+    renderOverview({
+      "GET /api/v1/auth/me": { status: 200, body: meBody() },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [], summary: summaryBody(0) } },
+      [`GET /api/v1/budgets/${MONTH}`]: {
+        status: 200,
+        body: budgetBody({ budget: null, budgetedMinor: 0, spentMinor: 0, percentUsed: 0 }),
+      },
+    });
+
+    expect(await screen.findByText("Finish setting up")).toBeInTheDocument();
+    expect(screen.getByText("1 of 3 done")).toBeInTheDocument();
+
+    // Each unfinished step's own link, not just the count: a checklist that
+    // shows the right number of steps and sends you to the wrong screen is
+    // worse than no checklist. The account step is the one the walk reached
+    // through "+ Add" instead, so nothing else covers it.
+    const [accountStep, budgetStep] = screen.getAllByRole("link", { name: "Set up" });
+    expect(accountStep).toHaveAttribute("href", "/money");
+    expect(budgetStep).toHaveAttribute("href", "/money/budget");
+  });
+
+  it("drops the checklist once the household has finished setting up", async () => {
+    renderOverview({
+      "GET /api/v1/auth/me": { status: 200, body: meBody() },
+      "GET /api/v1/accounts": {
+        status: 200,
+        body: {
+          accounts: [ACCOUNT],
+          summary: summaryBody(500000),
+        },
+      },
+      [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
+    });
+
+    // Waiting on the budget card, not merely on the heading: the checklist's
+    // last step reads the budget, so asserting its absence before that query
+    // resolves would pass against a page that simply had not finished
+    // loading yet.
+    await screen.findByText("62% used");
+    expect(screen.queryByText("Finish setting up")).toBeNull();
+  });
+
+  // The sibling of the blank-page defect above, and the same root cause:
+  // deriving a claim from data that has not arrived. `hasAccount` and
+  // `hasBudget` are both false while their queries are in flight, which is
+  // indistinguishable from "this household has neither" -- so an established
+  // household was told to go and set up the account and budget it already has,
+  // on every cold load of the app's front door, until the figures landed.
+  //
+  // Asserted on the synchronous first render rather than through a timer: at
+  // that moment no query has resolved, which is exactly the state the flash
+  // happens in, and it needs no fake clock to observe.
+  it("shows no checklist before the data it reads has arrived", async () => {
+    // The window that matters is not the first render -- `me` has not resolved
+    // then either, so nothing owner-only is on screen at all. It is the render
+    // *after* `me` lands and before the money queries do. Held open here by
+    // delaying only those two responses, so the assertion lands inside it
+    // deterministically rather than by racing a timer.
+    const routed = stubFetchRoutes({
+      "GET /api/v1/currencies": {
+        status: 200,
+        body: { currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }] },
+      },
+      "GET /api/v1/household/members": { status: 200, body: [] },
+      "GET /api/v1/auth/me": { status: 200, body: meBody() },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [ACCOUNT], summary: summaryBody(500000) } },
+      [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
+    });
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/accounts") || url.includes("/budgets")) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return routed(input, init);
+    });
+
+    renderWithRouter(<OverviewPage />);
+
+    // "+ Add" appears as soon as `me` resolves, so this is the moment the
+    // household is known to be an owner and its figures are still in flight.
+    await screen.findByRole("button", { name: "+ Add" });
+    expect(screen.queryByText("Finish setting up")).toBeNull();
+
+    // And it stays absent once the data confirms this household is set up.
+    expect(await screen.findByText("62% used")).toBeInTheDocument();
+    expect(screen.queryByText("Finish setting up")).toBeNull();
+  });
+
+  it("keeps the checklist away from a limited member, who cannot do any of it", async () => {
+    // Writing a budget is requireOwner, and so is adding an account.
+    // Offering the steps would be offering work they cannot do.
+    renderOverview({
+      "GET /api/v1/auth/me": {
+        status: 200,
+        body: meBody({ role: "limited", capabilities: ["calendar", "chores", "money"] }),
+      },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [] } },
+    });
+
+    await screen.findByText("Overview");
+    expect(screen.queryByText("Finish setting up")).toBeNull();
+  });
+
+  it("offers only the two things it can actually create", async () => {
+    renderOverview({
+      "GET /api/v1/auth/me": { status: 200, body: meBody() },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [], summary: summaryBody(0) } },
+      [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "+ Add" }));
+
+    expect(screen.getByRole("button", { name: "Account" })).toBeInTheDocument();
+    // Bill, Savings goal, Calendar event and Marriage retro are in the design
+    // and do not exist. A row that does nothing reads as broken.
+    expect(screen.queryByRole("button", { name: /bill/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /savings goal/i })).toBeNull();
+  });
+
+  it("does not offer Transaction before there is an account to attach it to", async () => {
+    renderOverview({
+      "GET /api/v1/auth/me": { status: 200, body: meBody() },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [], summary: summaryBody(0) } },
+      [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "+ Add" }));
+
+    expect(screen.getByRole("button", { name: "Transaction" })).toBeDisabled();
+    expect(screen.getByText("Add an account first")).toBeInTheDocument();
+  });
+
+  it("gives a limited member no quick-add at all", async () => {
+    renderOverview({
+      "GET /api/v1/auth/me": {
+        status: 200,
+        body: meBody({ role: "limited", capabilities: ["calendar", "chores", "money"] }),
+      },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [] } },
+    });
+
+    await screen.findByText("Overview");
+    expect(screen.queryByRole("button", { name: "+ Add" })).toBeNull();
+  });
+
+  // The modals the menu opens carry their own queries -- TransactionModal's
+  // useCategories in particular. Mounting them alongside the menu would fire
+  // those on every visit to the app's most-visited page, which is the exact
+  // regression TransactionsPage.tsx's own conditional mount is commented to
+  // prevent. stubFetchRoutes throws on an unregistered request, so a request
+  // fired before anyone opens a modal fails this test rather than passing
+  // quietly.
+  it("does not fetch a modal's data until that modal is opened", async () => {
+    let categoriesRequested = false;
+    renderOverview({
+      "GET /api/v1/auth/me": { status: 200, body: meBody() },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [ACCOUNT], summary: summaryBody(500000) } },
+      [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
+      "GET /api/v1/categories": {
+        status: 200,
+        body: { categories: [] },
+        capture: () => {
+          categoriesRequested = true;
+        },
+      },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "+ Add" }));
+    expect(categoriesRequested).toBe(false);
+  });
+});
