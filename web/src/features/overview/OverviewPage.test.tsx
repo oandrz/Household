@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
@@ -222,5 +222,73 @@ describe("OverviewPage", () => {
 
     await screen.findByText("Overview");
     expect(screen.queryByText("Finish setting up")).toBeNull();
+  });
+
+  it("offers only the two things it can actually create", async () => {
+    renderOverview({
+      "GET /api/v1/auth/me": { status: 200, body: meBody() },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [], summary: summaryBody(0) } },
+      [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "+ Add" }));
+
+    expect(screen.getByRole("button", { name: "Account" })).toBeInTheDocument();
+    // Bill, Savings goal, Calendar event and Marriage retro are in the design
+    // and do not exist. A row that does nothing reads as broken.
+    expect(screen.queryByRole("button", { name: /bill/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /savings goal/i })).toBeNull();
+  });
+
+  it("does not offer Transaction before there is an account to attach it to", async () => {
+    renderOverview({
+      "GET /api/v1/auth/me": { status: 200, body: meBody() },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [], summary: summaryBody(0) } },
+      [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "+ Add" }));
+
+    expect(screen.getByRole("button", { name: "Transaction" })).toBeDisabled();
+    expect(screen.getByText("Add an account first")).toBeInTheDocument();
+  });
+
+  it("gives a limited member no quick-add at all", async () => {
+    renderOverview({
+      "GET /api/v1/auth/me": {
+        status: 200,
+        body: meBody({ role: "limited", capabilities: ["calendar", "chores", "money"] }),
+      },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [] } },
+    });
+
+    await screen.findByText("Overview");
+    expect(screen.queryByRole("button", { name: "+ Add" })).toBeNull();
+  });
+
+  // The modals the menu opens carry their own queries -- TransactionModal's
+  // useCategories in particular. Mounting them alongside the menu would fire
+  // those on every visit to the app's most-visited page, which is the exact
+  // regression TransactionsPage.tsx's own conditional mount is commented to
+  // prevent. stubFetchRoutes throws on an unregistered request, so a request
+  // fired before anyone opens a modal fails this test rather than passing
+  // quietly.
+  it("does not fetch a modal's data until that modal is opened", async () => {
+    let categoriesRequested = false;
+    renderOverview({
+      "GET /api/v1/auth/me": { status: 200, body: meBody() },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [ACCOUNT], summary: summaryBody(500000) } },
+      [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
+      "GET /api/v1/categories": {
+        status: 200,
+        body: { categories: [] },
+        capture: () => {
+          categoriesRequested = true;
+        },
+      },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "+ Add" }));
+    expect(categoriesRequested).toBe(false);
   });
 });

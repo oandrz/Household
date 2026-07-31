@@ -26,5 +26,13 @@ export const OVERVIEW_COPY = {
   // literal "July" is wrong for eleven months of the year.
   setupBudget: (monthName: string) => `Set a budget for ${monthName}`,
   setupGo: "Set up",
+
+  quickAdd: "+ Add",
+  quickAddTransaction: "Transaction",
+  quickAddAccount: "Account",
+  // Transactions attach to an account. With none, the entry would open a
+  // modal whose account dropdown is empty -- the dead end TransactionsPage's
+  // own comment refuses.
+  quickAddNeedsAccount: "Add an account first",
 } as const;
 

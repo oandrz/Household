@@ -15,6 +15,7 @@ import { useAccounts } from "../money/useAccounts";
 import { useBudget } from "../money/useBudget";
 import { BudgetCard } from "./BudgetCard";
 import { OVERVIEW_COPY } from "./copy";
+import { QuickAddMenu } from "./QuickAddMenu";
 import { SetupChecklist } from "./SetupChecklist";
 
 export function OverviewPage() {
@@ -31,7 +32,10 @@ export function OverviewPage() {
 
   return (
     <div className="flex flex-col gap-5 p-10">
-      <h1 className="font-serif text-2xl">{OVERVIEW_COPY.title}</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="font-serif text-2xl">{OVERVIEW_COPY.title}</h1>
+        {isOwner && hasMoney && <QuickAddMenu accounts={accounts.data?.accounts ?? []} />}
+      </div>
 
       {!hasMoney ? (
         <section className="rounded-xl border border-hairline bg-card p-[22px]">
