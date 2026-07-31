@@ -14,12 +14,18 @@ turns an account's balance from a copy of its opening figure into a real
 sum; and Budget — an envelope per category with pace, built directly on
 Transactions' own month totals, plus the category management (rename,
 create, archive) the design folds into its Edit-budget modal rather than a
-dedicated screen. Goals and Bills, the rest of Money, and all of Marriage,
-Family and Overview are not built; see `docs/FEATURE_TRACKER.md`. The
-UX-repair round of 2026-07-31 shipped no feature at all — it bounded the page
-container, removed the two unbuilt spaces from the navigation along with their
-four routes, and rewrote copy; where it changed the shape of something drawn
-here, the change is recorded at that diagram (§7 in particular).
+dedicated screen. Goals and Bills, the rest of Money, and all of Marriage and
+Family are not built; see `docs/FEATURE_TRACKER.md`. Overview is **partly**
+built: `/` carries an interim page composed of the two of the design's eight
+cards Money can already supply, plus a setup checklist and a quick-create
+menu, and it grows into the designed Overview as Bills, Goals, Marriage and
+Family arrive rather than being replaced (§7). It adds no endpoint, no table
+and no port — it is composition over what Accounts, Transactions and Budget
+already expose. The UX-repair round of 2026-07-31 that preceded it shipped no
+feature at all — it bounded the page container, removed the two unbuilt spaces
+from the navigation along with their four routes, and rewrote copy; where
+either round changed the shape of something drawn here, the change is recorded
+at that diagram (§7 in particular).
 
 ---
 
@@ -714,6 +720,7 @@ graph TD
     Guard -->|yes| Shell["AppShell"]
     Shell --> Sidebar["Sidebar renders me.spaces —<br/>already filtered and ordered by the server —<br/>expanding each into its built pages client-side,<br/>and dropping a builtin space that has none"]
     Shell --> Page["Route content"]
+    Page --> Overview["/ Overview — GET /accounts,<br/>GET /budgets/{month} for an owner only,<br/>GET /household/members via the shared hook"]
     Page --> Settings["Settings panels — their own queries"]
     Settings -->|"on mutation"| Invalidate["invalidate ['me'] and the panel's query,<br/>awaited so the guard spans the refetch"]
 ```
@@ -725,6 +732,20 @@ rule is how the two drift. It does expand each space into its built pages: a
 client-side map (`SPACE_PAGES` in `Sidebar.tsx`) turns a space with several
 shipped pages into the design's uppercase group label plus one link per page
 — Money renders as "MONEY" over Finances, Transactions and Budget.
+
+**Overview fetches nothing of its own.** Its three requests are the ones
+Accounts, Budget and Settings already make, through the same hooks and the
+same cache keys, so a figure on the front door cannot disagree with the same
+figure on the screen it links to — the browser walk checks exactly that
+(net worth on `/` against net worth on `/money`). One of those hooks is new
+only in the sense that it stopped being three: `useHouseholdMembers` was
+declared privately and identically in `AccountModal`, `TransactionsPage` and
+`MembersPanel`, all against `["household", "members"]`, sharing one cache
+entry by coincidence rather than by construction; Overview would have been
+the fourth copy, so it is now one module in `features/settings/`. `Budget`
+and Overview likewise share `currentMonth()` (`features/money/month.ts`),
+which reads the *local* calendar — the two screens must agree on which month
+"this month" is, and the API container's own clock is UTC.
 
 **A builtin space the map does not name renders nothing at all.** Since
 `110ab0a`, Marriage and Family are exactly that: both had a single
@@ -1025,10 +1046,14 @@ web/src/
                        templates, the Edit-budget modal (category create/
                        rename/archive queued through it), the History
                        modal and month picker, mounted at /money/budget
+    overview/          the interim Overview at / — the two of the design's
+                       eight cards Money can supply (net worth, reusing
+                       money/NetWorthCard; this month's budget), a setup
+                       checklist, and the "+ Add" quick-create menu
     placeholder/       named stand-ins for unbuilt areas, and only for areas
-                       a household can already reach — / (Overview, until
-                       the interim Overview ships) and /money/$ (Goals and
-                       Bills, still to come)
+                       a household can already reach — now /money/$ alone
+                       (Goals and Bills, still to come); / stopped using it
+                       when the interim Overview shipped
   routes/router.tsx        the route tree; its header comment is the route
                            list, kept beside the code it describes
   routes/publicRoutes.ts   the one list of pre-auth routes and API prefixes;
@@ -1052,6 +1077,41 @@ Finances (`/money`), Transactions (`/money/transactions`) and Budget
 (`/money/budget`) — via the `SPACE_PAGES` map in `Sidebar.tsx` (see "What the
 frontend loads" above). Goals and Bills join the map, and add a fourth and
 fifth Money link, only once their own pages ship.
+
+**`/` is a real page, and it is the only one with no capability guard above
+it.** Every other screen sits behind `RequireAuth` *and* `RequireCapability`,
+so "what does a limited member see here?" is answered by the router before the
+component mounts. Overview has no such guard — it is the one page every member
+of a household reaches — so its access shapes are decided *inside* the
+component, and they are three normal renders rather than one render plus edge
+cases:
+
+| Caller | What renders | Why |
+|---|---|---|
+| owner | net worth card, budget card, setup checklist, "+ Add" | the only caller `GET /budgets/{month}` admits, and the only one who may write an account, a transaction or a budget |
+| limited, holds `money` | a panel saying amounts are hidden, linking to Finances | `GET /accounts` answers 200 but **omits `summary` entirely** rather than zeroing it (§5); with no budget card and no checklist either, this panel is the only thing on the page |
+| limited, no `money` | a single "You don't have access to Money" panel | `GET /accounts` answers 403 |
+
+Two details here are load-bearing and neither is visible from the route table
+alone. First, **`/accounts` and `/budgets/{month}` do not carry the same
+guards** — accounts is `requireCapability(money)`, budgets is that *and*
+`requireOwner` — so the budget card is owner-only, and `useBudget` takes an
+`enabled` flag rather than being called with a placeholder month: a limited
+member must not fire a request that can only 403 and cache the failure. Second,
+**the absent `summary` is the only signal the frontend has** that a caller may
+not see amounts, so the page must never synthesise one; a zero there would be a
+claim about the household's money. The middle row of that table is the one that
+shipped broken — it rendered nothing at all until a browser walk found it, and
+every unit test passed both before and after, because each asserted only that
+something was *absent* (see `docs/LEARNING.md` pattern 2).
+
+The checklist is derived entirely from data the page already holds — no
+endpoint of its own — and disappears once its three steps are done, so an
+established household is not shown a permanent chore list. It has three steps,
+not the four an onboarding flow suggests: an emailed invite writes only to the
+`invites` table (§6) while `GET /household/members` reads memberships joined to
+users, so a pending invite is not a row there and an "invite your partner" step
+could only tick once the partner accepted.
 
 **`/marriage`, `/marriage/$` and `/family/calendar` are gone** (`110ab0a`),
 with the placeholders they rendered. Those URLs now fall through to

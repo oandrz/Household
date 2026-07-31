@@ -13,8 +13,19 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 52 of 95 features built or partly built. This update
-does three things to the tables below, and every number here is a fresh count
+**Where things stand:** 57 of 97 features built or partly built.
+
+**The interim Overview (M2) update.** `/` stopped being a placeholder. Section
+4 gains two rows the design does not draw — a setup checklist and the
+limited-member "amounts are hidden" panel, both ✅ — and three of its existing
+rows move ⬜ → 🟡 with their gaps named: the net worth card, the budget card
+and the "+ Add" menu. The remaining five Overview cards stay ⬜; they need
+Bills, Goals, Marriage and Family. Recounting by this file's own rule takes
+the totals from 45/7/41/2 = 95 to 47/10/38/2 = 97 — two rows added, three
+moved from Not started to Partial.
+
+**The Budget update, recorded before it.** That earlier update
+did three things to the tables below, and every number here is a fresh count
 of the ✅/🟡/⬜/🚫 symbols in the tables — the first symbol in each row's own
 cell, counted whether that cell holds a bare symbol or a symbol with prose
 crammed in after it — not the previous total adjusted in place: it corrects
@@ -44,7 +55,8 @@ and review the last six months' spend-vs-budget in the History modal, save
 for its own Export CSV) — plus the recent-transactions strip on Finances,
 deferred by the accounts spec for having no data and now built with the
 ledger to read from. Nothing else in Money is started yet, and nothing in
-Marriage, Family or Overview has been started.
+Marriage or Family has been started. Overview is no longer among them: see
+the M2 note above.
 Five of the rows below have no mockup of their own — the provisioning
 transaction behind self-serve sign-up, the currency list endpoint, and
 `adminctl prune` — because the design's own "Create household" screen (the
@@ -66,12 +78,12 @@ modal rather than a dedicated screen the dc.html mockup never drew.
 | Entry & authentication | 10 | 1 | 0 | 0 |
 | Navigation shell | 7 | 0 | 1 | 0 |
 | Household settings | 15 | 4 | 2 | 0 |
-| Overview (home) | 0 | 0 | 8 | 0 |
+| Overview (home) | 2 | 3 | 5 | 0 |
 | Money | 13 | 2 | 15 | 0 |
 | Marriage | 0 | 0 | 13 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **45** | **7** | **41** | **2** |
+| **Total** | **47** | **10** | **38** | **2** |
 
 ---
 
@@ -187,21 +199,42 @@ The full checklist is at the end of `docs/LEARNING.md`.
 
 ## 4 · Overview (home)
 
-Nothing here is started. The page exists as a placeholder.
+`/` is a real page as of the interim Overview (M2). It carries the two of the
+design's eight cards that Money can supply today, plus a setup checklist the
+design does not draw. The remaining six cards need Bills, Goals, Marriage and
+Family, none of which exist — so this section stays mostly ⬜, and the page
+grows into the designed Overview rather than being replaced.
 
 | Feature | State |
 |---|---|
-| Net worth card | ⬜ |
-| July budget card — percentage used | ⬜ |
+| Net worth card | 🟡 — the figure and the not-computable case only, by reusing Finances' own card. The design's card also carries an assets/liabilities split and a trend |
+| July budget card — percentage used | 🟡 — percentage used plus the two figures behind it, and a "Set a budget" link when the household has never budgeted. No sparkline. Owner-only: `GET /budgets/{month}` is `requireCapability(money)` **and** `requireOwner` |
 | Next bill card | ⬜ |
 | Goals on track card | ⬜ |
 | Next retro card with carried-over actions | ⬜ |
 | Vision check-in strip | ⬜ |
 | "This week" agenda | ⬜ |
-| "+ Add" quick-create menu | ⬜ |
+| "+ Add" quick-create menu | 🟡 — Transaction and Account only, the two that exist. Transaction is disabled with its reason until an account exists. Bill, Savings goal, Calendar event and Marriage retro join it in the change that builds each |
+| Setup checklist (no mockup — see below) | ✅ |
+| Limited-member "amounts are hidden" panel (no mockup — see below) | ✅ |
 
 The "+ Add" menu offers Transaction, Account, Bill, Savings goal, Calendar event
-and Marriage retro — so it depends on Money, Family and Marriage existing first.
+and Marriage retro — so its remaining four entries depend on Money, Family and
+Marriage existing first.
+
+Two rows above have no mockup of their own. The **setup checklist** is three
+steps derived from data the page already fetched (create your household, add an
+account, set a budget for the current month); it disappears at three of three,
+so an established household is not shown a permanent chore list, and it never
+renders for a limited member, who can do none of it. It has three steps rather
+than the four an onboarding flow would suggest: an emailed invite writes only
+to the `invites` table while `GET /household/members` reads memberships, so an
+"invite your partner" step could only tick once the partner *accepted* — the
+step joins the list in the change that exposes pending invites. The
+**limited-member panel** exists because Overview is the only page every member
+reaches: a limited member holding `money` gets no summary, no budget card and
+no checklist, and without it saw a page with nothing on it at all (found in the
+browser walk, `2026-07-31-hearth-interim-overview-verification.md` criterion 9).
 
 ## 5 · Money
 
