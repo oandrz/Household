@@ -8,7 +8,10 @@
 //   /sign-up, /sign-up/$token                       -- public, pre-auth (see routes/publicRoutes.ts)
 //   RequireAuth (pathless)                          -- redirects to /sign-in on a 401
 //     AppShell (pathless)                           -- sidebar + outlet
-//       /            Overview      (slice 5 placeholder)
+//       /            Overview      (the interim Overview: the two of slice 5's
+//                                   eight cards Money can supply today, plus a
+//                                   setup checklist. It grows into the designed
+//                                   page rather than being replaced.)
 //       /money       RequireCapability("money") -> Finances (Task 39; slice 2's first real page)
 //       /money/transactions RequireCapability("money") -> Transactions (Task 17; the real ledger)
 //       /money/budget RequireCapability("money") -> Budget (Task 11; BudgetPage stub -- Task 12 builds the real screen)
@@ -51,7 +54,11 @@ import { useMe } from "../features/auth/useAuth";
 import { BudgetPage } from "../features/money/BudgetPage";
 import { FinancesPage } from "../features/money/FinancesPage";
 import { TransactionsPage } from "../features/money/TransactionsPage";
+// Still live for /money/$ -- Goals and Bills have no page yet. Overview
+// stopped using it when the interim Overview shipped, but it was not that
+// component's last user.
 import { PlaceholderPage } from "../features/placeholder/PlaceholderPage";
+import { OverviewPage } from "../features/overview/OverviewPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { AppShell } from "../features/shell/AppShell";
 import { RequireAuth } from "../features/shell/RequireAuth";
@@ -162,7 +169,7 @@ const shellRoute = createRoute({
 const indexRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "/",
-  component: () => <PlaceholderPage page="Overview" slice={5} />,
+  component: OverviewPage,
 });
 
 const moneyGuardRoute = createRoute({

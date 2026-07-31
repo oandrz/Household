@@ -128,7 +128,13 @@ describe("the real route tree", () => {
     const { router } = renderApp("/sign-in");
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/"));
-    expect(await screen.findByText("Arriving in slice 5.")).toBeInTheDocument();
+    // The <h1>, not a bare text match: the sidebar carries its own
+    // "Overview" link, so an unscoped query for that word matches two
+    // elements and throws. What this pins is unchanged -- that the
+    // redirect landed on / and / rendered its own page.
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Overview" }),
+    ).toBeInTheDocument();
   });
 
   // Pins router.tsx's header comment: rootRoute's notFoundComponent sits
@@ -190,7 +196,13 @@ describe("the real route tree", () => {
     const { router } = renderApp("/money/transactions");
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/"));
-    expect(await screen.findByText("Arriving in slice 5.")).toBeInTheDocument();
+    // The <h1>, not a bare text match: the sidebar carries its own
+    // "Overview" link, so an unscoped query for that word matches two
+    // elements and throws. What this pins is unchanged -- that the
+    // redirect landed on / and / rendered its own page.
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Overview" }),
+    ).toBeInTheDocument();
   });
 
   // The positive counterpart the test above needs: a caller who *does* carry
@@ -248,7 +260,13 @@ describe("the real route tree", () => {
     const { router } = renderApp("/money/budget");
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/"));
-    expect(await screen.findByText("Arriving in slice 5.")).toBeInTheDocument();
+    // The <h1>, not a bare text match: the sidebar carries its own
+    // "Overview" link, so an unscoped query for that word matches two
+    // elements and throws. What this pins is unchanged -- that the
+    // redirect landed on / and / rendered its own page.
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Overview" }),
+    ).toBeInTheDocument();
   });
 
   // The positive counterpart the redirect test above needs -- and the one
