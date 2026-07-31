@@ -32,6 +32,7 @@ import { BudgetCategoryGrid } from "./BudgetCategoryGrid";
 import { BudgetStatCards } from "./BudgetStatCards";
 import { familyOfFourTemplate, fiftyThirtyTwentyTemplate, type TemplatePrefill } from "./budgetTemplates";
 import { formatMoney } from "./formatMoney";
+import { currentMonth } from "./month";
 import { useBudget } from "./useBudget";
 import { useBudgetHistory } from "./useBudgetHistory";
 import { useCategories } from "./useTransactions";
@@ -48,14 +49,6 @@ type ModalState = {
   prefill: TemplatePrefill | null;
   awaitingIncome: boolean;
 };
-
-// Local calendar date, never toISOString() -- the same reasoning as
-// AccountModal.tsx's own today(): a UTC conversion can read back yesterday's
-// (or tomorrow's) month for a household west/east of UTC.
-function currentMonth(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-}
 
 // Shifts a "YYYY-MM" string by whole months, for the ‹ › picker below. Built
 // through Date's own (year, monthIndex, 1) constructor -- the day is fixed
