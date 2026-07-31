@@ -86,21 +86,42 @@ landed. Two identical files mean the change did not reach the browser.
 
 ## Gate
 
+**`make lint && make test` are green. The milestone meets the project's stated
+bar.**
+
 ```
-make test-web   — 28 files, 278 tests, all pass (at 151ae4d; 8fe1f1a kept the count)
-make typecheck  — clean
 make lint       — arch lint, tsc, eslint, go vet: clean
+make typecheck  — clean
+make test-web   — 28 files, 278 tests, all pass (at 151ae4d; 8fe1f1a kept the count)
+make test       — exit 0. Frontend leg: the same 28 files / 278 tests.
+                  Go leg: ten packages ok, none failed —
+                    cmd/adminctl                 0.498s
+                    cmd/api                      2.282s
+                    internal/adapter/crypto      1.541s
+                    internal/adapter/fx          1.517s
+                    internal/adapter/http       49.409s
+                    internal/adapter/mail        2.865s
+                    internal/adapter/postgres   78.658s
+                    internal/config              3.217s
+                    internal/domain              3.522s
+                    internal/usecase             4.912s
+                  Three packages report [no test files] and are not part of
+                  that ten: internal/adapter/clock,
+                  internal/adapter/postgres/sqlcgen, internal/testsupport.
 ```
 
-**`make test` was not part of this walk's evidence, and is recorded
-separately.** The Go suite runs through testcontainers and needs a Docker
-socket, which the walk did not have. Every one of M1's seven commits is under
-`web/src`, so there is no Go change for it to cover — but "`make lint && make
-test` green" is this project's stated bar, and this walk did not meet the
-letter of it. The controller started the Go suite after the walk and records
-its result on its own; nothing in this file claims a result nobody watched.
-If you are reading this to decide whether M1 is safe to merge, the Go run is
-the other half and it is not here.
+**Read the Go leg for what it is: a regression check on code this milestone
+never touched.** It ran *after* the browser walk, not as part of it — the Go
+suite drives real Postgres containers through testcontainers and needs a
+Docker socket the walk did not have, so it was run separately from the repo
+root with the colima socket exported (`DOCKER_HOST` and
+`TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE`, as `CLAUDE.md` records for this
+machine). Every one of M1's seven commits is under `web/src`; nothing in
+`api/` changed. So the ten green Go packages say "this milestone broke
+nothing on the server", which is worth knowing and is *not* evidence about
+the work itself. The evidence about the work is the walk above and the
+frontend suite — and, for the layout defect the milestone exists to fix,
+only the walk, since jsdom performs no layout at all.
 
 ## Notes rather than silent passes
 
