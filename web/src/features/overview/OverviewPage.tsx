@@ -8,6 +8,7 @@
 // normal renders. See the guards in api/internal/adapter/http/router.go:
 // /accounts needs the money capability; /budgets/{month} needs money AND
 // owner.
+import { Link } from "@tanstack/react-router";
 import { useMe } from "../auth/useAuth";
 import { NetWorthCard } from "../money/NetWorthCard";
 import { currentMonth } from "../money/month";
@@ -48,6 +49,26 @@ export function OverviewPage() {
                 amounts (features/money/schemas.ts). Its absence is the only
                 signal there is -- never synthesise one to fill the gap. */}
             {accounts.data?.summary && <NetWorthCard summary={accounts.data.summary} />}
+
+            {/* Gated on isSuccess, not on `!accounts.data?.summary` alone:
+                summary is equally undefined while the request is still in
+                flight, so the looser condition would flash this panel at an
+                owner on every visit before their figures arrived. */}
+            {accounts.isSuccess && !accounts.data.summary && (
+              <section
+                aria-labelledby="overview-limited-heading"
+                className="flex flex-col rounded-xl border border-hairline bg-card p-[22px]"
+              >
+                <h2 id="overview-limited-heading" className="text-xs text-muted">
+                  {OVERVIEW_COPY.limitedHeading}
+                </h2>
+                <p className="mt-1.5 text-[13px] text-ink">{OVERVIEW_COPY.limitedNoAmounts}</p>
+                <Link to="/money" className="mt-3 text-[13px] font-semibold text-accent">
+                  {OVERVIEW_COPY.limitedGo}
+                </Link>
+              </section>
+            )}
+
             {isOwner && budget.data && <BudgetCard month={budget.data} />}
           </div>
 

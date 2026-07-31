@@ -10,6 +10,17 @@ export const OVERVIEW_COPY = {
   // shared its money with them.
   noMoneyAccess: "You don't have access to Money in this household.",
 
+  // The third render shape, and the one no test caught until a browser walk
+  // did. A limited member *with* money reaches this page, gets no summary
+  // (the server omits it rather than zeroing it), no budget card and no
+  // checklist -- so without this they saw a heading and nothing else. Says
+  // what is true and where they can still go, rather than leaving a blank
+  // page that reads as broken.
+  limitedHeading: "Money",
+  limitedNoAmounts:
+    "Amounts are hidden for your account. The accounts shared with you are in Finances.",
+  limitedGo: "Go to Finances",
+
   budgetHeading: "This month",
   // The never-budgeted state. The wording matches BudgetPage's own empty
   // state, which is the screen this card links to.

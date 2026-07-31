@@ -160,6 +160,27 @@ describe("OverviewPage", () => {
     expect(screen.queryByText("This month")).toBeNull();
   });
 
+  // Found in a browser, not here: every assertion below passed against a page
+  // that rendered the word "Overview" and nothing else. A limited member with
+  // money gets no summary (the server omits it), no budget card and no
+  // checklist, so all three earlier tests' absence-assertions held while the
+  // page itself was blank. A page with nothing on it reads as broken rather
+  // than as restricted -- the same rule SYSTEM_DESIGN §4 states for the
+  // ledger and the budget screen.
+  it("explains the missing figures to a limited member rather than showing them an empty page", async () => {
+    renderOverview({
+      "GET /api/v1/auth/me": {
+        status: 200,
+        body: meBody({ role: "limited", capabilities: ["money"] }),
+      },
+      // No `summary` key at all -- the shape the server actually returns to a
+      // caller who may not see amounts.
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [] } },
+    });
+
+    expect(await screen.findByText(/amounts are hidden/i)).toBeInTheDocument();
+  });
+
   it("offers a way to set one when the household has never budgeted", async () => {
     renderOverview({
       "GET /api/v1/auth/me": { status: 200, body: meBody() },
