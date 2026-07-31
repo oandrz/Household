@@ -76,10 +76,18 @@ export function OverviewPage() {
               grid: the cards are the figures someone opens this page to
               glance at, and a chore list sitting beside them at the same
               size competes with that. */}
-          {isOwner && (
+          {/* Both queries must have *answered* before this renders, not just
+              the member be an owner. `hasAccount` and `hasBudget` are false
+              while their requests are in flight, which is indistinguishable
+              from "this household has neither" -- so without these two gates
+              an established household is told to go and create the account
+              and budget it already has, on every cold load, until the figures
+              land. Same root cause as the limited-member panel above:
+              a claim derived from data that has not arrived. */}
+          {isOwner && accounts.isSuccess && budget.data && (
             <SetupChecklist
-              hasAccount={(accounts.data?.accounts.length ?? 0) > 0}
-              hasBudget={budget.data?.budget != null}
+              hasAccount={accounts.data.accounts.length > 0}
+              hasBudget={budget.data.budget != null}
             />
           )}
         </>

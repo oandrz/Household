@@ -8,7 +8,10 @@ automation, against http://localhost:5173. Criteria derive from Task 6 of
 recorded below.
 
 **Result: 14 of 14 pass — after one real defect the walk itself found at
-criterion 9 was fixed, mutation-checked and re-verified live mid-walk.**
+criterion 9 was fixed, mutation-checked and re-verified live mid-walk. A
+second defect, the sibling of that one, was found by review afterwards and is
+recorded below rather than folded into a criterion, because no criterion here
+would have caught it.**
 
 The defect is the reason this walk exists. A limited member holding the money
 capability saw a page containing the word "Overview" and nothing else. All
@@ -53,6 +56,58 @@ page was blank. Nothing asserted that anything was present. Screenshots
 | 12 | Overview and Budget agree about which month "this month" is | PASS, and this is the criterion the environment made interesting. Host local time was 1 August; the API container runs UTC, where it was still 31 July. `currentMonth()` reads the local calendar, so Overview asked `GET /budgets/2026-08` and `/money/budget` rendered "August 2026" — the two screens agreed because Task 2 made them share one function. `GET /budgets/{month}` takes its month from the URL, so no server-side "now" is involved and there is no mismatch to reconcile |
 | 13 | No console errors across the walk | PASS — no errors or exceptions captured |
 | 14 | Screenshots record distinct states | PASS — five screenshots, five distinct SHA-256 hashes. Two byte-identical before/after images are the failure `docs/LEARNING.md` already records from the finance-fixes branch; hashes were compared rather than eyeballed |
+
+## Found after the walk, by review
+
+**The fixed defect had a sibling one JSX block away, and the walk could not
+have caught it.** Gating the new limited-member panel on `accounts.isSuccess`
+was deliberate. The setup checklist directly beneath it had no equivalent
+gate, so while `/accounts` and `/budgets/{month}` were in flight both
+`hasAccount` and `hasBudget` read `false` — indistinguishable from a household
+that has neither — and an **established** household saw "Finish setting up ·
+1 of 3 done" on every cold load of `/` until its figures arrived, telling it
+to create the account and budget it already owned.
+
+Every step of the walk above navigated and then waited, so it never observed
+the window. Reproduced by injecting a 1.5s delay into `fetch` for those two
+URLs and re-mounting the page: before the fix the checklist appeared and then
+vanished; after it, a `MutationObserver` watching the whole body across the
+delay recorded **zero** appearances, with the final render showing both cards
+and no checklist.
+
+The obvious test for it is also a trap, and is recorded in `docs/LEARNING.md`
+for that reason: asserting on the *first* render passes vacuously, because
+`me` has not resolved then either and nothing owner-only renders at all. The
+test that pins it holds open the window after `me` lands and before the money
+queries do. Both new gates are pinned — `budget.data` by that test,
+`accounts.isSuccess` by the type checker, which reports
+`TS18048: 'accounts.data' is possibly 'undefined'` the moment it is removed.
+
+**One untested link closed at the same time.** The checklist's "Add an
+account" step points at `/money`, and nothing covered it: the suite's href
+assertion checked the budget *card's* link, and the walk reached the account
+form through "+ Add" rather than through the step. Both steps' hrefs are now
+asserted, mutation-checked by pointing the account step at `/money/budget`.
+
+## One flaky gate run, unexplained
+
+`make test` failed once on `internal/adapter/postgres` after the sibling fix
+above — a fix that touched only frontend files, so it cannot be causal. The
+package did not fail again in four subsequent runs (three forced
+`go test -count=1` on the package, one more full `make test`), and the final
+gate is green: 10 Go packages, 293 frontend tests, lint clean.
+
+Two things are worth knowing rather than pretending it did not happen. The
+failing run took 104s against a ~90s baseline, and the dev stack was up on
+Docker Desktop throughout the walk while the Go suite runs against colima —
+two engines competing for the same machine, which is the environment
+`docs/LEARNING.md` already has an entry about, in a new form. This package
+also contains the concurrency test that same document records as only being
+meaningful with a warmed pool and a start barrier, which is the shape most
+likely to flake under load. **Not diagnosed, and not claimed as diagnosed** —
+the detail was lost because the run's output was filtered too narrowly to
+capture the `--- FAIL` line. If it recurs, capture the whole package output
+before rerunning; a rerun that passes destroys the only evidence.
 
 ## Observations outside M2's scope
 

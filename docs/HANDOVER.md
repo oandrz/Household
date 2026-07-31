@@ -499,8 +499,12 @@ gates the accounts routes, and the route-walk matrices exercise it.
   it deletes a directory, so it needs the owner's consent:
   `git worktree remove .claude/worktrees/transactions`.
 - Three cosmetic items parked at M1's final review, any of which is fair game
-  if you are already in the file: `docs/SYSTEM_DESIGN.md:739`, a parenthetical
-  whose antecedent is ambiguous (loose, not wrong);
+  if you are already in the file: in `docs/SYSTEM_DESIGN.md` §7, the
+  three-cases-not-two paragraph about `SPACE_PAGES` contains the parenthetical
+  "no space is in that state today" — "that state" has no unambiguous
+  antecedent (loose, not wrong). Quoted rather than given a line number
+  deliberately: the number it used to carry was already stale by the time this
+  entry moved here;
   `SignUpCompleteScreen.tsx:43,47`, two action labels still reading "Create a
   household" for a click that navigates to the email form — defensible as a
   call-to-action, and a fourth phrasing that escaped the same sweep that

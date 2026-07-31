@@ -1,5 +1,5 @@
 import { fireEvent, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
 import { currentMonth } from "../money/month";
@@ -207,6 +207,14 @@ describe("OverviewPage", () => {
 
     expect(await screen.findByText("Finish setting up")).toBeInTheDocument();
     expect(screen.getByText("1 of 3 done")).toBeInTheDocument();
+
+    // Each unfinished step's own link, not just the count: a checklist that
+    // shows the right number of steps and sends you to the wrong screen is
+    // worse than no checklist. The account step is the one the walk reached
+    // through "+ Add" instead, so nothing else covers it.
+    const [accountStep, budgetStep] = screen.getAllByRole("link", { name: "Set up" });
+    expect(accountStep).toHaveAttribute("href", "/money");
+    expect(budgetStep).toHaveAttribute("href", "/money/budget");
   });
 
   it("drops the checklist once the household has finished setting up", async () => {
@@ -227,6 +235,52 @@ describe("OverviewPage", () => {
     // resolves would pass against a page that simply had not finished
     // loading yet.
     await screen.findByText("62% used");
+    expect(screen.queryByText("Finish setting up")).toBeNull();
+  });
+
+  // The sibling of the blank-page defect above, and the same root cause:
+  // deriving a claim from data that has not arrived. `hasAccount` and
+  // `hasBudget` are both false while their queries are in flight, which is
+  // indistinguishable from "this household has neither" -- so an established
+  // household was told to go and set up the account and budget it already has,
+  // on every cold load of the app's front door, until the figures landed.
+  //
+  // Asserted on the synchronous first render rather than through a timer: at
+  // that moment no query has resolved, which is exactly the state the flash
+  // happens in, and it needs no fake clock to observe.
+  it("shows no checklist before the data it reads has arrived", async () => {
+    // The window that matters is not the first render -- `me` has not resolved
+    // then either, so nothing owner-only is on screen at all. It is the render
+    // *after* `me` lands and before the money queries do. Held open here by
+    // delaying only those two responses, so the assertion lands inside it
+    // deterministically rather than by racing a timer.
+    const routed = stubFetchRoutes({
+      "GET /api/v1/currencies": {
+        status: 200,
+        body: { currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }] },
+      },
+      "GET /api/v1/household/members": { status: 200, body: [] },
+      "GET /api/v1/auth/me": { status: 200, body: meBody() },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [ACCOUNT], summary: summaryBody(500000) } },
+      [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
+    });
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/accounts") || url.includes("/budgets")) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return routed(input, init);
+    });
+
+    renderWithRouter(<OverviewPage />);
+
+    // "+ Add" appears as soon as `me` resolves, so this is the moment the
+    // household is known to be an owner and its figures are still in flight.
+    await screen.findByRole("button", { name: "+ Add" });
+    expect(screen.queryByText("Finish setting up")).toBeNull();
+
+    // And it stays absent once the data confirms this household is set up.
+    expect(await screen.findByText("62% used")).toBeInTheDocument();
     expect(screen.queryByText("Finish setting up")).toBeNull();
   });
 

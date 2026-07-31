@@ -617,6 +617,25 @@ person to ask whether the test could ever have gone red in the first place.
   browser walk found it in one look. The fix was a test that asserts
   **presence**, and a panel that says what is true. Three absence tests over
   one member state is a blind spot, not coverage.
+- **And the fix's own sibling, one JSX block away, found by review rather than
+  by either.** Gating the new panel on `accounts.isSuccess` was deliberate —
+  `summary` is equally undefined while the request is in flight, so the looser
+  condition would flash it at an owner. The setup checklist directly beneath
+  it had no such gate: `hasAccount` and `hasBudget` are both `false` while
+  their queries are in flight, which is indistinguishable from "this household
+  has neither", so an **established** household was told to create the account
+  and budget it already owned, on every cold load, until the figures landed.
+  Same root cause, same file, same session, and the fix for the first did not
+  prompt a sweep for the second — the exact failure this document's pattern 1
+  is about. Two further things worth keeping: the flash is invisible to a walk
+  that navigates and waits (every step of ours waited ~1.5s, well past
+  resolution — it took injecting a delay into `fetch` to see it), and the
+  obvious test for it is a trap. Asserting on the *first* render passes
+  vacuously, because `me` has not resolved then either and nothing owner-only
+  is on screen at all; the window that matters is the render after `me` lands
+  and before the money queries do, and a test has to hold that window open
+  deliberately. **"Loading" is not one state.** A page with three independent
+  queries has a lattice of them, and the harmful one is rarely the first.
 
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
