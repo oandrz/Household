@@ -12,10 +12,15 @@ a measurement you did not take on the tree you are shipping is not evidence.
 
 **Result: 19 of 20 criteria pass. Criterion 15 passes only after a fix the
 walk itself found. Criterion 8 is deliberately unmet and is not M1's to
-meet.** Read the notes at the end before quoting the headline: three of these
-passes were reached by an interpreted rather than a literal path, and a
-silent pass over an interpreted path is how a "15 of 15" walk still surprises
-the product owner on day one (`docs/LEARNING.md` pattern 13).
+meet.** Read the notes at the end before quoting the headline: **two** of
+these passes were reached by an interpreted rather than a literal path —
+criterion 15, which passes only because the walk found the defect and the
+branch fixed it mid-walk (note 1), and criteria 14 and 20, whose Settings
+before/after is a pair of x-readings rather than the pair of screenshots the
+task asked for (note 3). A silent pass over an interpreted path is how a
+"15 of 15" walk still surprises the product owner on day one
+(`docs/LEARNING.md` pattern 13), so each one is named here and again at its
+note rather than counted and left for the reader to find.
 
 ## Fresh household
 
@@ -59,8 +64,9 @@ bounded container measured against real data rather than an empty screen.
 ## The measurement that motivated the milestone
 
 Same viewport, before and after Task 1's 1204px container. This is the defect
-in numbers: a heading and the button that acts on it, two thirds of a screen
-apart, with a green unit suite the whole time.
+in numbers: a heading and the button that acts on it ended up 2407px apart on
+a 2752px-wide window — 87% of the screen between them — with a green unit
+suite the whole time.
 
 | element | before | after |
 |---|---|---|
@@ -116,8 +122,9 @@ suite drives real Postgres containers through testcontainers and needs a
 Docker socket the walk did not have, so it was run separately from the repo
 root with the colima socket exported (`DOCKER_HOST` and
 `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE`, as `CLAUDE.md` records for this
-machine). Every one of M1's seven commits is under `web/src`; nothing in
-`api/` changed. So the ten green Go packages say "this milestone broke
+machine). All eight of M1's commits — `0fe4d17` through `8fe1f1a`, the last of
+them the sign-in copy fix this walk itself prompted — are under `web/src`;
+nothing in `api/` changed. So the ten green Go packages say "this milestone broke
 nothing on the server", which is worth knowing and is *not* evidence about
 the work itself. The evidence about the work is the walk above and the
 frontend suite — and, for the layout defect the milestone exists to fix,
