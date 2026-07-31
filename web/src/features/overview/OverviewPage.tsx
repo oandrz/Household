@@ -15,6 +15,7 @@ import { useAccounts } from "../money/useAccounts";
 import { useBudget } from "../money/useBudget";
 import { BudgetCard } from "./BudgetCard";
 import { OVERVIEW_COPY } from "./copy";
+import { SetupChecklist } from "./SetupChecklist";
 
 export function OverviewPage() {
   const me = useMe();
@@ -37,13 +38,26 @@ export function OverviewPage() {
           <p className="text-[13px] text-muted">{OVERVIEW_COPY.noMoneyAccess}</p>
         </section>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {/* `summary` is omitted, not zeroed, for a member who may not see
-              amounts (features/money/schemas.ts). Its absence is the only
-              signal there is -- never synthesise one to fill the gap. */}
-          {accounts.data?.summary && <NetWorthCard summary={accounts.data.summary} />}
-          {isOwner && budget.data && <BudgetCard month={budget.data} />}
-        </div>
+        <>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {/* `summary` is omitted, not zeroed, for a member who may not see
+                amounts (features/money/schemas.ts). Its absence is the only
+                signal there is -- never synthesise one to fill the gap. */}
+            {accounts.data?.summary && <NetWorthCard summary={accounts.data.summary} />}
+            {isOwner && budget.data && <BudgetCard month={budget.data} />}
+          </div>
+
+          {/* Full width beneath the cards rather than a third cell in the
+              grid: the cards are the figures someone opens this page to
+              glance at, and a chore list sitting beside them at the same
+              size competes with that. */}
+          {isOwner && (
+            <SetupChecklist
+              hasAccount={(accounts.data?.accounts.length ?? 0) > 0}
+              hasBudget={budget.data?.budget != null}
+            />
+          )}
+        </>
       )}
     </div>
   );

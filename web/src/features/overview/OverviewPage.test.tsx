@@ -46,6 +46,23 @@ function summaryBody(netWorthMinor: number) {
   };
 }
 
+// Spelled out here rather than imported from TransactionsPage.test.tsx -- a
+// test file that reaches into another feature's fixtures breaks when that
+// feature's own tests change for reasons of their own.
+const ACCOUNT = {
+  id: "a1",
+  nickname: "DBS Everyday",
+  type: "cash",
+  ownerMembershipId: null,
+  ownerName: null,
+  balance: { amountMinor: 500000, currency: "SGD" },
+  openingBalance: { amountMinor: 400000, currency: "SGD" },
+  balanceAsOf: "2026-07-01",
+  countTowardNetWorth: true,
+  visibleToLimitedMembers: false,
+  archivedAt: null,
+};
+
 function budgetBody(overrides: Record<string, unknown> = {}) {
   return {
     currency: "SGD",
@@ -155,5 +172,55 @@ describe("OverviewPage", () => {
 
     const link = await screen.findByRole("link", { name: /set a budget/i });
     expect(link).toHaveAttribute("href", "/money/budget");
+  });
+
+  it("shows a fresh household what is left to set up", async () => {
+    renderOverview({
+      "GET /api/v1/auth/me": { status: 200, body: meBody() },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [], summary: summaryBody(0) } },
+      [`GET /api/v1/budgets/${MONTH}`]: {
+        status: 200,
+        body: budgetBody({ budget: null, budgetedMinor: 0, spentMinor: 0, percentUsed: 0 }),
+      },
+    });
+
+    expect(await screen.findByText("Finish setting up")).toBeInTheDocument();
+    expect(screen.getByText("1 of 3 done")).toBeInTheDocument();
+  });
+
+  it("drops the checklist once the household has finished setting up", async () => {
+    renderOverview({
+      "GET /api/v1/auth/me": { status: 200, body: meBody() },
+      "GET /api/v1/accounts": {
+        status: 200,
+        body: {
+          accounts: [ACCOUNT],
+          summary: summaryBody(500000),
+        },
+      },
+      [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
+    });
+
+    // Waiting on the budget card, not merely on the heading: the checklist's
+    // last step reads the budget, so asserting its absence before that query
+    // resolves would pass against a page that simply had not finished
+    // loading yet.
+    await screen.findByText("62% used");
+    expect(screen.queryByText("Finish setting up")).toBeNull();
+  });
+
+  it("keeps the checklist away from a limited member, who cannot do any of it", async () => {
+    // Writing a budget is requireOwner, and so is adding an account.
+    // Offering the steps would be offering work they cannot do.
+    renderOverview({
+      "GET /api/v1/auth/me": {
+        status: 200,
+        body: meBody({ role: "limited", capabilities: ["calendar", "chores", "money"] }),
+      },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [] } },
+    });
+
+    await screen.findByText("Overview");
+    expect(screen.queryByText("Finish setting up")).toBeNull();
   });
 });

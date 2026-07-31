@@ -17,4 +17,14 @@ export const OVERVIEW_COPY = {
   budgetSetUp: "Set a budget",
   budgetUsed: (percent: number) => `${percent}% used`,
   budgetOf: (spent: string, budgeted: string) => `${spent} of ${budgeted}`,
+
+  setupHeading: "Finish setting up",
+  setupProgress: (done: number, total: number) => `${done} of ${total} done`,
+  setupHousehold: "Create your household",
+  setupAccount: "Add an account",
+  // The month is read at render time, never written into this string -- a
+  // literal "July" is wrong for eleven months of the year.
+  setupBudget: (monthName: string) => `Set a budget for ${monthName}`,
+  setupGo: "Set up",
 } as const;
+
