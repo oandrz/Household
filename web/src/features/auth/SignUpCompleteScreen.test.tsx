@@ -70,7 +70,7 @@ describe("SignUpCompleteScreen", () => {
         body: {
           currencies: [
             { code: "SGD", symbol: "S$", name: "Singapore dollar" },
-            { code: "ALL", symbol: "", name: "Albanian lek" },
+            { code: "ALL", name: "Albanian lek" },
           ],
         },
       },

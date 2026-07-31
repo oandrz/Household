@@ -296,7 +296,7 @@ describe("Sidebar", () => {
   // Overview used to be unconditionally text-accent (finding 3): it stayed
   // green even on /settings, where nothing about it was actually active.
   it("accents Overview only on /, not on another route", async () => {
-    renderWithRouter(<Sidebar me={meFixture([familySpace])} />, "/settings");
+    renderWithRouter(<Sidebar me={meFixture([])} />, "/settings");
 
     const overview = await screen.findByRole("link", { name: "Overview" });
     expect(overview).toHaveClass("text-ink");
@@ -306,25 +306,15 @@ describe("Sidebar", () => {
   // Settings used to be unconditionally text-ink (finding 3): it never
   // accented even while on /settings itself.
   it("accents Settings only on /settings", async () => {
-    renderWithRouter(<Sidebar me={meFixture([familySpace])} />, "/settings");
+    renderWithRouter(<Sidebar me={meFixture([])} />, "/settings");
 
     const settings = await screen.findByRole("link", { name: "Settings" });
     expect(settings).toHaveClass("text-accent");
     expect(settings).not.toHaveClass("text-ink");
   });
 
-  // A single-page space's own accent test (Marriage was the only example)
-  // is gone with Marriage's SPACE_PAGES entry -- task 2. The defect class it
-  // guarded (an unconditionally-coloured nav item) stays pinned by "accents
-  // only the active Money link", "...active Budget link", "accents Overview
-  // only on /" and "accents Settings only on /settings" below, which cover
-  // the same `isActive` computation this test used, just via routes that
-  // still exist. The `pages.length === 1` branch itself is untouched code
-  // (SpaceLink), waiting for the first space that ships with exactly one
-  // page; it gets its own accent test again then.
-
   it("shows the household name and a Sign out control in the footer", async () => {
-    renderWithRouter(<Sidebar me={meFixture([familySpace])} />);
+    renderWithRouter(<Sidebar me={meFixture([])} />);
 
     expect(await screen.findByText("Andreas & Christine")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /sign out/i })).toBeInTheDocument();
@@ -339,7 +329,7 @@ describe("Sidebar", () => {
       },
     });
 
-    renderWithRouter(<Sidebar me={meFixture([familySpace])} />);
+    renderWithRouter(<Sidebar me={meFixture([])} />);
     fireEvent.click(await screen.findByRole("button", { name: /sign out/i }));
 
     await waitFor(() => {

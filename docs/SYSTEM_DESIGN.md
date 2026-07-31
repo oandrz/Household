@@ -734,15 +734,16 @@ four routes were deleted and their `SPACE_PAGES` entries with them. The rule
 keys off `isBuiltin`, **not** off the absence of a pages entry — a *custom*
 space created through "+ New space" has no map entry either and must keep
 appearing, because a household that just made a space needs to see that it
-exists. So there are four cases, not two: several built pages → the group
-label plus one link per page; exactly one built page → a single link named
-after the space (no space is in this state today, and the branch is kept for
-the first one that ships that way); a custom space → its name as plain text,
-since it has no route to link to; a *builtin* space with no built page →
-nothing rendered. The map, not the server payload, decides how many links a space produces; the server payload still
-decides which spaces are *visible to this member* at all and in what order,
-and Settings' own Spaces panel still lists Marriage and Family, because the
-spaces themselves are untouched — only their navigation is gone.
+exists. So there are three cases, not two: a space with built pages → the
+group label plus one link per page, whether it has one shipped page or
+several (no space is in that state today — Marriage and Family were, until
+`110ab0a` — so there is no separate single-link rendering to special-case); a
+custom space → its name as plain text, since it has no route to link to; a
+*builtin* space with no built page → nothing rendered. The map, not the
+server payload, decides how many links a space produces; the server payload
+still decides which spaces are *visible to this member* at all and in what
+order, and Settings' own Spaces panel still lists Marriage and Family,
+because the spaces themselves are untouched — only their navigation is gone.
 
 ---
 

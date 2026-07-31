@@ -16,9 +16,12 @@ import type { Me, Space } from "../auth/schemas";
 import { useSignOut } from "../auth/useAuth";
 
 // One entry per built page of each space, in the design's order. A space
-// with one entry renders as a single link named after the space; a space
-// with several renders as the design's uppercase group label plus a link
-// per page (the 5a sidebar).
+// present here renders as the design's uppercase group label plus a link
+// per page (the 5a sidebar) -- including a space with only one page. No
+// entry has exactly one page today (money has three), so the bare-link
+// branch that used to render that case was deleted as unreachable rather
+// than kept waiting for a space that would use it. Marriage and Family were
+// the last spaces in that state; they lost their entries in task 2.
 //
 // A *builtin* space missing from this map has no built pages at all and
 // renders nothing -- the same rule this map already applies one level down
@@ -58,27 +61,6 @@ function SpaceLink({ space }: { space: Space }) {
       <span data-testid="sidebar-space" className={`${NAV_ITEM_CLASS} text-muted`}>
         {space.name}
       </span>
-    );
-  }
-  if (pages.length === 1) {
-    // No space currently has exactly one page -- Money has three, and
-    // Marriage and Family, the previous single-page examples, lost their
-    // SPACE_PAGES entries in task 2. This branch stays for the first space
-    // that ships with exactly one page; it gets the same route-driven
-    // accent as a grouped page below. `matchRoute` defaults to an exact
-    // match (fuzzy: false), deliberately: exact is what stops a later
-    // sub-page under a single-page space's own path from also lighting up
-    // this link, the same reason the grouped Money links need it against
-    // /money/transactions.
-    const isActive = Boolean(matchRoute({ to: pages[0].to }));
-    return (
-      <Link
-        data-testid="sidebar-space"
-        to={pages[0].to}
-        className={`${NAV_ITEM_CLASS} ${isActive ? "text-accent" : "text-ink"}`}
-      >
-        {space.name}
-      </Link>
     );
   }
   return (
