@@ -84,7 +84,7 @@ describe("SignInScreen", () => {
 
     expect(screen.getByText("Welcome back.")).toBeInTheDocument();
     expect(
-      screen.getByText("Sign in to pick up where you both left off."),
+      screen.getByText("Sign in to pick up where you left off."),
     ).toBeInTheDocument();
   });
 
