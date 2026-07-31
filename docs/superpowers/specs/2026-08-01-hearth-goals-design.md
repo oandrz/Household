@@ -200,8 +200,18 @@ ALTER TABLE budgets
 ## The formulas, pinned
 
 Let `contributed = SUM(goal_contributions.amount_minor)` for the goal, in the
-goal's own currency, and `remaining = max(0, target − contributed)`. "This
-month" is the calendar month containing today, in the household's own clock.
+goal's own currency, and `remaining = max(0, target − contributed)`.
+
+**"Today" is `deps.Clock.Now()`, resolved in the handler and passed down as a
+parameter — the Budget convention, inherited by name rather than restated.**
+`internal/usecase/budget.go` says why in its own comment: no service here reads
+`time.Now()` itself, because a service that does cannot be tested at a
+boundary. Month arithmetic truncates in **UTC**, exactly as
+`domain.budget.go` and `startOfMonth` already do. No new timezone concept is
+introduced; `docs/HANDOVER.md` §6 records a `time.Truncate`-and-location
+mistake that shipped at two call sites here, and inventing a household clock
+would be a third.
+
 These formulas are the contract; an implementer who needs a different one
 changes this spec first.
 
@@ -217,7 +227,7 @@ changes this spec first.
 | "X of Y on track" | Y counts unarchived, dated, unachieved goals; X counts those on track. Copy names what was excluded: "3 of 4 on track · 1 with no date". Y = 0 hides the figure rather than rendering "0 of 0" |
 | Next goal (Overview) | Of the dated, unarchived, unachieved goals, the earliest `target_month`; ties broken by name. None → the line is omitted |
 | Planned monthly total | `SUM(planned_monthly_minor)` over unarchived goals, each converted to primary currency. Goals with no available rate are excluded and the card states how many, the ledger's own copy pattern |
-| Actual this month | `SUM(amount_minor)` over contributions with `occurred_on` in the current month, unarchived goals only, converted the same way and excluded the same way |
+| Actual this month | `SUM(amount_minor)` over contributions with `occurred_on` in the current month, unarchived goals only, **excluding `source = 'starting_balance'`**, converted the same way and excluded-for-no-rate the same way. The exclusion is load-bearing: a household creating four goals with existing balances on day one would otherwise read "S$41,200 added in August" for money that never moved, destroying the planned-versus-actual divergence decision 7 exists to show |
 | Suggested monthly (modal) | `remaining ÷ monthsLeft` at the values currently typed, recomputed live; blank while target or date is blank. A suggestion only — the household may type anything, including 0 |
 | Unspent available to roll (Budget) | The closed month's `Remaining` (Budgeted − Spent) when positive. `≤ 0` → no rollover offered |
 
@@ -234,14 +244,14 @@ body; a household with no goals is `200 {"goals": [], "summary": {…}}`, never
 | `POST /goals` | `{name, targetAmountMinor, currency, targetMonth?, plannedMonthlyMinor, startingBalanceMinor?}`. One transaction: the goal row, then the `starting_balance` contribution when the figure is non-zero (decision 8). Duplicate name against `UNIQUE (household_id, name)` → 409 naming the taken name; unknown currency → 422 via `domain.ParseCurrency`; target ≤ 0 → 422 |
 | `PATCH /goals/{id}` | Any of name, target, target month (including clearing it to null), planned monthly. **Currency is not patchable** — it would restate every contribution behind it; the household archives the goal and creates a new one. `archivedAt` set or cleared archives or restores |
 | `POST /goals/{id}/contributions` | `{amountMinor, occurredOn, note?}`, `source = 'manual'`. A contribution against an archived goal → 422 |
-| `DELETE /goals/{id}/contributions/{cid}` | Hard delete. A mistyped figure needs a way back, and nothing references a contribution. `starting_balance` and `budget_rollover` rows are deletable too — refusing would leave a household stuck with a wrong number it can see |
-| `POST /budgets/{month}/rollover` | `{goalId}`. Writes one contribution with `source = 'budget_rollover'` and a note naming the month, and stamps `rolled_over_at`/`rollover_goal_id`, in one transaction. Refuses: an open (current or future) month → 422; an already-stamped month → 409; a goal whose currency is not the household's primary → 422 (decision 11); an archived goal → 422; `Remaining ≤ 0` → 422 |
+| `DELETE /goals/{id}/contributions/{cid}` | Hard delete. A mistyped figure needs a way back, and nothing references a contribution. `starting_balance` and `budget_rollover` rows are deletable too — refusing would leave a household stuck with a wrong number it can see. **Deleting a `budget_rollover` row clears that month's `rolled_over_at` and `rollover_goal_id` in the same transaction**, so the month becomes rollable again; leaving the stamp would produce money gone from the goal, a month claiming it rolled over, and a 409 on every retry — unrecoverable partial state, the shape `guarding-partial-writes` exists to catch |
+| `POST /budgets/{month}/rollover` | `{goalId}`. Writes one contribution with `source = 'budget_rollover'` and a note naming the month, and stamps `rolled_over_at`/`rollover_goal_id`, in one transaction. Refuses: a month with **no `budgets` row at all** → 404, stated explicitly rather than left to `Budgeted = 0` catching it by arithmetic (Budget decision 4 allows a closed month with spend and no caps, so this state is reachable); an open (current or future) month → 422; an already-stamped month → 409; a goal whose currency is not the household's primary → 422 (decision 11); an archived goal → 422; `Remaining ≤ 0` → 422 |
 
 Ports: `GoalRepository` is new and narrow — `List`, `Get`, `Create`,
 `Update`, `AddContribution`, `DeleteContribution`, `ListContributions`,
-`MonthContributionTotals`. `BudgetRepository` grows `MarkRolledOver`, which
-takes the month, the goal and the stamp in one call so the stamp and the
-contribution cannot half-happen. Status, `monthsLeft` and the required-monthly
+`MonthContributionTotals`. `BudgetRepository` grows `MarkRolledOver` and
+`ClearRolledOver`, each taking the month so the stamp and the contribution move
+together and cannot half-happen in either direction. Status, `monthsLeft` and the required-monthly
 arithmetic live in `internal/domain/goal.go` and are pure functions over
 values — no repository, no clock beyond a `today` parameter.
 
@@ -357,7 +367,10 @@ precondition — the account dependency disappeared with decision 6.
   Task 1 established.
 - **Postgres**: the unique name constraint, the household scoping of both
   tables, the two transactional writes rolling back whole on a forced failure,
-  and the rollover stamp preventing a second write.
+  the rollover stamp preventing a second write, and the round trip that matters
+  most — roll over, delete the rollover contribution, roll over again and
+  succeed. A test that only asserts the 409 would pass against the
+  stamp-left-behind bug.
 - **Frontend**: the five page states, the modal's create and edit shapes, the
   live suggested-monthly recomputation, the contribution add/delete flow, the
   Budget rollover button's appear/disappear conditions. New guard tests
