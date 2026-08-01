@@ -606,8 +606,12 @@ type GoalMonthTotal struct {
 
 type GoalRepository interface {
     // List returns one household's goals with their contributed totals, newest
-    // target first then by name. Archived goals are included only when
-    // includeArchived is true.
+    // target first then by name. includeArchived is a UNION, not a filter
+    // swap: false returns the live goals, true returns the live ones AND the
+    // archived ones together, each carrying its own ArchivedAt. That is the
+    // AccountRepository.List / CategoryRepository.List contract, and the
+    // accounts screen's own "(archived)" row is what it renders as. Do not
+    // implement it as "archived instead".
     List(ctx context.Context, householdID string, includeArchived bool) ([]GoalRecord, error)
     // Get reports domain.ErrNotFound when no goal with this id exists in this
     // household — including when one exists in a different household, which
@@ -915,6 +919,11 @@ git commit -m "feat: transactional budget rollover and stamp-clearing contributi
 // shows. RequiredMonthly is present only for a dated, unachieved goal —
 // RequiredMonthlyOK false means the card shows no "needs S$X/mo" line rather
 // than a zero.
+//
+// Contributed and RequiredMonthly are in the GOAL's own currency, not the
+// household's primary: the card renders an IDR goal in IDR. Only the two
+// summary totals below convert. Converting here as well would leave the card
+// saying "S$2,600 of Rp 40,000,000", which is not a sentence.
 type GoalView struct {
     Goal              domain.Goal
     Contributed       domain.Money
@@ -1145,7 +1154,7 @@ git commit -m "feat: BudgetService.RollOver — manual, closed-month, once"
 - Produces: the wire contract the frontend (Task 10) parses.
 
 ```
-GET    /api/v1/goals[?archived=true]          -> 200 goalsResponse
+GET    /api/v1/goals[?include_archived=true]  -> 200 goalsResponse
 POST   /api/v1/goals                          -> 201 {"goal": goalDTO}          (CSRF)
 PATCH  /api/v1/goals/{id}                     -> 200 {"goal": goalDTO}          (CSRF)
 POST   /api/v1/goals/{id}/archive             -> 200 {"goal": goalDTO}          (CSRF)
@@ -1216,7 +1225,7 @@ Then behaviour:
 - A duplicate name → 409 `GOAL_NAME_TAKEN`; a name held by an **archived** goal → the same 409 with a body that names the archived goal's id, so the modal can offer restore instead of a dead end (the categories gotcha Budget's Task 13 review caught, applied here).
 - `targetMonth: "2026-13"` → 400 `INVALID_MONTH`; `targetMonth: null` on create is accepted (a dateless goal).
 - `PATCH` with `clearTargetMonth: true` clears it; a later `GET` shows `"targetMonth": null` and `"status": "none"`.
-- `POST /goals/{id}/archive` then `GET /goals` omits it, `GET /goals?archived=true` includes it, `/restore` brings it back.
+- `POST /goals/{id}/archive` then `GET /goals` omits it, `GET /goals?include_archived=true` returns it **alongside** the live goals (the union, `include_archived` spelled the way `account_handlers.go` already spells it), `/restore` brings it back. In both responses `summary` counts live goals only — an archived goal is in no count, whether or not it is in the list.
 - `POST .../contributions` with `amountMinor: 0` → 422 `CONTRIBUTION_AMOUNT_ZERO`; against an archived goal → 422 `GOAL_ARCHIVED`; with `"currency": "IDR"` against an SGD goal → 422 `GOAL_CURRENCY_IMMUTABLE`, while a matching `currency` and an absent one both succeed.
 - `DELETE .../contributions/{cid}` → 204 with no body; deleting it twice → the not-found shape.
 - A contribution belonging to a different goal of the same household → the not-found shape (the id pair is checked, not just the contribution id).
@@ -1380,7 +1389,7 @@ The card renders: a progress ring at `percent`, the name, the status pill, "S$2,
 - an `achieved` goal renders the achieved pill and a full ring
 - a `behind` goal names its required monthly figure
 - `goals: []` renders the empty state with one "Create your first goal" action and **no templates** (a goal has no category set to prefill; a fake starter goal is a number nobody chose)
-- "Show archived" refetches with `?archived=true` and renders Restore per row
+- "Show archived" refetches with `?include_archived=true` and renders the archived goals **alongside** the live ones, each marked "(archived)" with a Restore action — the `AccountsPanel.tsx` shape. The test asserts the live goals are still on screen, which is what pins the union against a filter-swap reading, and that the header counts did not change
 - `excludedNoRate > 0` renders the exclusion note with its count, the ledger's copy shape
 - a 403 from `GET /goals` (an owner-gated read reached by a limited member holding `money`) renders the owner-only explanation, not the generic load error — branch on `ApiError.status` from `web/src/api/client.ts`. The interim Overview's one real defect was a page that rendered nothing for exactly that member; this is the assertion that would have caught it.
 - **no automation copy anywhere**: assert the strings "auto-saved", "next transfer" and "Auto-save" are absent, pinned so a future copy-paste from the design cannot smuggle them back in (the same guard Budget's page test uses for "rolls into")
@@ -1585,10 +1594,12 @@ Start from nothing (`make down && docker volume rm hearth_hearth-pgdata && make 
 9. Move it into Bali: the goal's contributed figure rises by exactly X, the contributions panel shows the row labelled "From <month>'s unspent budget", and the Budget card now names the destination with no button left. Click through again in a second tab: refused, with the message, and **no second contribution**.
 10. Delete that rollover contribution from the goal, return to Budget's same month: the button is back. Move it again: it succeeds, and there is exactly one rollover row. (The round trip, in the browser this time.)
 11. Overview shows "Goals on track — N of M" with the next dated goal named, and "+ Add → Savings goal" opens the modal and saves.
-12. Archive "Emergency fund": it leaves the list and the counts; "Show archived" lists it with Restore; its contributions survive; Restore returns it whole.
+12. Archive "Emergency fund": it leaves the default list and every count; "Show archived" brings it back into view **beside** the live goals, marked archived and offering Restore, with the counts unchanged; its contributions survive; Restore returns it whole.
 13. Create a goal in **IDR** while the household's primary is SGD: its own card renders in IDR; the planned and actual totals convert it at the live rate; then reach the no-rate state the accounts walk used and confirm the exclusion note appears with a count rather than a silently short total.
-14. With the IDR goal present, open the rollover picker: the IDR goal is listed as unavailable with its reason, and only primary-currency goals can be chosen.
-15. A limited member granted `money` through Settings: `/money/goals` shows the owner-only explanation, not a blank page and not a generic error; Overview still renders content for them. Then, by `curl` with a session cookie only: `POST /api/v1/goals` without CSRF → 403; `GET /api/v1/goals` as that member → 403; `POST /api/v1/budgets/2026-13/rollover` → 400 `INVALID_MONTH`.
+14. **Delete criterion 10's rollover contribution again first** — criterion 10 left that month stamped, so the button is gone and there would be no picker to open (this is the walk-arithmetic rule the note above states, applied to the walk's own steps). With the month rollable again and the IDR goal present, open the picker: the IDR goal is listed as unavailable with its reason, only primary-currency goals can be chosen, and **Cancel** — leave the month unrolled, so the walk ends in a state whose figures the record can state exactly.
+15. A limited member granted `money` through Settings: `/money/goals` shows the owner-only explanation, not a blank page and not a generic error; Overview still renders content for them. Then two `curl` groups, deliberately on **different sessions**, because `router.go`'s middleware order is `requireSession` → `requireCapability` → `requireOwner` → `requireCSRF` and a non-owner fails out before CSRF or month parsing is ever reached — a 403 from that session would prove nothing about either:
+    - **as that limited member:** `GET /api/v1/goals` → 403, `POST /api/v1/goals` → 403.
+    - **as Andreas (owner), session cookie only, no CSRF header:** `POST /api/v1/goals` → 403 (this one really is the CSRF guard); and with CSRF present, `POST /api/v1/budgets/2026-13/rollover` → 400 `INVALID_MONTH`.
 
 - [ ] **Step 1: Run the walk, recording PASS/FAIL per criterion as you go, with the arithmetic written out where a criterion asserts a figure. Step 2: `make lint && make test`, paste the summary lines. Step 3: Fix anything found — each in its own commit, with a test that would have caught it, and re-walk that criterion. Step 4: Commit the record**
 
