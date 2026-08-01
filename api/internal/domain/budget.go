@@ -16,6 +16,17 @@ type Budget struct {
 	Month          time.Time // first of month
 	ExpectedIncome *Money    // nil = not provided, hides the income cards
 	Lines          []BudgetLine
+
+	// RolledOverAt and RolloverGoalID are the stamp 00007_goals.sql adds to
+	// budgets: nil/"" until BudgetService.RollOver moves this month's
+	// unspent money into a goal, and set exactly once thereafter. The two
+	// always move together -- both nil, or both populated -- which
+	// migrations/00007_goals.sql's rollover_stamp_is_whole CHECK constraint
+	// enforces at the schema level, so nothing in this layer needs to guard
+	// against seeing one without the other. RolloverGoalID follows the same
+	// "" <-> SQL NULL convention Account.OwnerMembershipID documents.
+	RolledOverAt   *time.Time
+	RolloverGoalID string
 }
 
 // DaysLeftInMonth is the spec's pinned rule: today counts, because the

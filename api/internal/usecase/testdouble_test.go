@@ -1931,13 +1931,13 @@ type fakeBudgetRepo struct {
 	knownCategoryIDs map[string]bool
 
 	// rolledOver holds, per household-month key (the same key r.budgets
-	// uses), the goal id a month's unspent money was rolled into. It exists
-	// only in the double: domain.Budget carries no rolled_over_at /
-	// rollover_goal_id field of its own -- nothing yet reads either back out
-	// of a domain.Budget -- so the double tracks the stamp
-	// 00007_goals.sql adds to the real budgets table here instead, as a
-	// parallel map rather than widening domain.Budget for a feature it does
-	// not otherwise touch.
+	// uses), the goal id a month's unspent money was rolled into. Task 9
+	// widened domain.Budget itself to carry RolledOverAt/RolloverGoalID, so
+	// this map is no longer the only place that state lives -- RollOverToGoal
+	// and clearRolloverStamp below keep both in sync -- but it stays as the
+	// quick "is this month currently rolled over" read
+	// rolledOverGoalID gives tests, rather than every caller re-deriving that
+	// from a stored domain.Budget's own fields.
 	rolledOver map[string]string
 
 	// goals is the GoalRepository double RollOverToGoal writes its
@@ -1978,7 +1978,13 @@ func (r *fakeBudgetRepo) rolledOverGoalID(householdID string, month time.Time) (
 // household is left claiming a rollover that no longer has a contribution
 // behind it.
 func (r *fakeBudgetRepo) clearRolloverStamp(householdID string, month time.Time) {
-	delete(r.rolledOver, budgetKey(householdID, month))
+	key := budgetKey(householdID, month)
+	delete(r.rolledOver, key)
+	if b, ok := r.budgets[key]; ok {
+		b.RolledOverAt = nil
+		b.RolloverGoalID = ""
+		r.budgets[key] = b
+	}
 }
 
 // knownCategories arms the unknown-category check Upsert enforces below.
@@ -2059,7 +2065,8 @@ func (r *fakeBudgetRepo) History(_ context.Context, householdID string, month ti
 func (r *fakeBudgetRepo) RollOverToGoal(ctx context.Context, in usecase.RollOverToGoalInput) (domain.GoalContribution, error) {
 	month := time.Date(in.Month.Year(), in.Month.Month(), 1, 0, 0, 0, 0, time.UTC)
 	key := budgetKey(in.HouseholdID, month)
-	if _, ok := r.budgets[key]; !ok {
+	b, ok := r.budgets[key]
+	if !ok {
 		return domain.GoalContribution{}, domain.ErrNotFound
 	}
 	if _, done := r.rolledOver[key]; done {
@@ -2079,6 +2086,15 @@ func (r *fakeBudgetRepo) RollOverToGoal(ctx context.Context, in usecase.RollOver
 		delete(r.rolledOver, key)
 		return domain.GoalContribution{}, err
 	}
+
+	// Stamp the stored row itself, not just the parallel rolledOver map, so
+	// a caller reading it back through Get (BudgetService.Month does exactly
+	// that) sees the same domain.Budget fields the real Postgres repository
+	// would return after RollOverToGoal.
+	stampedAt := in.OccurredOn
+	b.RolledOverAt = &stampedAt
+	b.RolloverGoalID = in.GoalID
+	r.budgets[key] = b
 	return c, nil
 }
 

@@ -43,7 +43,8 @@ func (q *Queries) DeleteBudgetLines(ctx context.Context, budgetID pgtype.UUID) e
 }
 
 const getBudget = `-- name: GetBudget :one
-SELECT b.id, b.household_id, b.month, b.expected_income_minor, h.primary_currency
+SELECT b.id, b.household_id, b.month, b.expected_income_minor, h.primary_currency,
+       b.rolled_over_at, b.rollover_goal_id
 FROM budgets b
 JOIN households h ON h.id = b.household_id
 WHERE b.household_id = $1 AND b.month = $2
@@ -60,6 +61,8 @@ type GetBudgetRow struct {
 	Month               pgtype.Date
 	ExpectedIncomeMinor *int64
 	PrimaryCurrency     string
+	RolledOverAt        pgtype.Timestamptz
+	RolloverGoalID      pgtype.UUID
 }
 
 func (q *Queries) GetBudget(ctx context.Context, arg GetBudgetParams) (GetBudgetRow, error) {
@@ -71,6 +74,8 @@ func (q *Queries) GetBudget(ctx context.Context, arg GetBudgetParams) (GetBudget
 		&i.Month,
 		&i.ExpectedIncomeMinor,
 		&i.PrimaryCurrency,
+		&i.RolledOverAt,
+		&i.RolloverGoalID,
 	)
 	return i, err
 }
@@ -188,7 +193,8 @@ func (q *Queries) ListBudgetLinesForBudgets(ctx context.Context, budgetIds []pgt
 }
 
 const listBudgetsInRange = `-- name: ListBudgetsInRange :many
-SELECT b.id, b.household_id, b.month, b.expected_income_minor, h.primary_currency
+SELECT b.id, b.household_id, b.month, b.expected_income_minor, h.primary_currency,
+       b.rolled_over_at, b.rollover_goal_id
 FROM budgets b
 JOIN households h ON h.id = b.household_id
 WHERE b.household_id = $1 AND b.month BETWEEN $2 AND $3
@@ -207,6 +213,8 @@ type ListBudgetsInRangeRow struct {
 	Month               pgtype.Date
 	ExpectedIncomeMinor *int64
 	PrimaryCurrency     string
+	RolledOverAt        pgtype.Timestamptz
+	RolloverGoalID      pgtype.UUID
 }
 
 // ListBudgetsInRange returns the household's budgeted months between
@@ -232,6 +240,8 @@ func (q *Queries) ListBudgetsInRange(ctx context.Context, arg ListBudgetsInRange
 			&i.Month,
 			&i.ExpectedIncomeMinor,
 			&i.PrimaryCurrency,
+			&i.RolledOverAt,
+			&i.RolloverGoalID,
 		); err != nil {
 			return nil, err
 		}
@@ -279,7 +289,7 @@ INSERT INTO budgets (household_id, month, expected_income_minor)
 VALUES ($1, $2, $3)
 ON CONFLICT (household_id, month) DO UPDATE
 SET expected_income_minor = EXCLUDED.expected_income_minor, updated_at = now()
-RETURNING id, household_id, month, expected_income_minor
+RETURNING id, household_id, month, expected_income_minor, rolled_over_at, rollover_goal_id
 `
 
 type UpsertBudgetParams struct {
@@ -293,6 +303,8 @@ type UpsertBudgetRow struct {
 	HouseholdID         pgtype.UUID
 	Month               pgtype.Date
 	ExpectedIncomeMinor *int64
+	RolledOverAt        pgtype.Timestamptz
+	RolloverGoalID      pgtype.UUID
 }
 
 // UpsertBudget upserts the parent row on (household_id, month) -- the
@@ -302,6 +314,11 @@ type UpsertBudgetRow struct {
 // rewrites them as separate statements in the same transaction, so a
 // category-ownership failure caught before this point leaves neither the
 // parent nor the lines touched at all.
+// UpsertBudget's RETURNING includes rolled_over_at and rollover_goal_id even
+// though this statement never writes either column (only StampBudgetRollover
+// does): ON CONFLICT DO UPDATE leaves them untouched, so RETURNING here
+// faithfully echoes whatever stamp the row already carried rather than
+// forcing every caller to re-read it separately.
 func (q *Queries) UpsertBudget(ctx context.Context, arg UpsertBudgetParams) (UpsertBudgetRow, error) {
 	row := q.db.QueryRow(ctx, upsertBudget, arg.HouseholdID, arg.Month, arg.ExpectedIncomeMinor)
 	var i UpsertBudgetRow
@@ -310,6 +327,8 @@ func (q *Queries) UpsertBudget(ctx context.Context, arg UpsertBudgetParams) (Ups
 		&i.HouseholdID,
 		&i.Month,
 		&i.ExpectedIncomeMinor,
+		&i.RolledOverAt,
+		&i.RolloverGoalID,
 	)
 	return i, err
 }

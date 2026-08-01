@@ -43,7 +43,8 @@ func (r *BudgetRepo) Get(ctx context.Context, householdID string, month time.Tim
 	}
 
 	return toBudget(row.ID, row.HouseholdID, row.Month, row.ExpectedIncomeMinor, row.PrimaryCurrency,
-		toBudgetLines(lineRows, row.PrimaryCurrency)), nil
+		toBudgetLines(lineRows, row.PrimaryCurrency),
+		budgetRolloverStamp{row.RolledOverAt, row.RolloverGoalID}), nil
 }
 
 // Upsert replaces one household-month's budget wholesale, inside one
@@ -108,7 +109,8 @@ func (r *BudgetRepo) Upsert(ctx context.Context, b domain.Budget) (domain.Budget
 		}
 
 		result = toBudget(budgetRow.ID, budgetRow.HouseholdID, budgetRow.Month, budgetRow.ExpectedIncomeMinor,
-			currency, reCurrency(b.Lines, currency))
+			currency, reCurrency(b.Lines, currency),
+			budgetRolloverStamp{budgetRow.RolledOverAt, budgetRow.RolloverGoalID})
 		return nil
 	})
 	if err != nil {
@@ -159,7 +161,7 @@ func (r *BudgetRepo) History(ctx context.Context, householdID string, month time
 	out := make([]domain.Budget, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, toBudget(row.ID, row.HouseholdID, row.Month, row.ExpectedIncomeMinor, row.PrimaryCurrency,
-			linesByBudget[row.ID]))
+			linesByBudget[row.ID], budgetRolloverStamp{row.RolledOverAt, row.RolloverGoalID}))
 	}
 	return out, nil
 }
@@ -365,13 +367,26 @@ func toBudgetLines(rows []sqlcgen.ListBudgetLinesRow, currency string) []domain.
 	return out
 }
 
+// budgetRolloverStamp bundles rolled_over_at and rollover_goal_id, the two
+// columns 00007_goals.sql added to budgets and its rollover_stamp_is_whole
+// CHECK constraint keeps in lockstep at the schema level -- both NULL or
+// both set, never one without the other. Passing them into toBudget as one
+// value, rather than as two more positional params, is what keeps a caller
+// from ever being able to wire one half to a different row's other half.
+type budgetRolloverStamp struct {
+	RolledOverAt   pgtype.Timestamptz
+	RolloverGoalID pgtype.UUID
+}
+
 func toBudget(id, householdID pgtype.UUID, month pgtype.Date, expectedIncomeMinor *int64, currency string,
-	lines []domain.BudgetLine) domain.Budget {
+	lines []domain.BudgetLine, stamp budgetRolloverStamp) domain.Budget {
 	b := domain.Budget{
-		ID:          uuidToString(id),
-		HouseholdID: uuidToString(householdID),
-		Month:       dateToTime(month),
-		Lines:       lines,
+		ID:             uuidToString(id),
+		HouseholdID:    uuidToString(householdID),
+		Month:          dateToTime(month),
+		Lines:          lines,
+		RolledOverAt:   timePtrOf(stamp.RolledOverAt),
+		RolloverGoalID: optionalIDToString(stamp.RolloverGoalID),
 	}
 	if expectedIncomeMinor != nil {
 		b.ExpectedIncome = &domain.Money{Amount: *expectedIncomeMinor, Currency: currency}

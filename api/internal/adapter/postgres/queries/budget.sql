@@ -15,7 +15,8 @@ WHERE id = ANY(sqlc.arg(category_ids)::uuid[]) AND household_id = $1;
 SELECT primary_currency FROM households WHERE id = $1;
 
 -- name: GetBudget :one
-SELECT b.id, b.household_id, b.month, b.expected_income_minor, h.primary_currency
+SELECT b.id, b.household_id, b.month, b.expected_income_minor, h.primary_currency,
+       b.rolled_over_at, b.rollover_goal_id
 FROM budgets b
 JOIN households h ON h.id = b.household_id
 WHERE b.household_id = $1 AND b.month = $2;
@@ -30,12 +31,17 @@ SELECT category_id, cap_minor FROM budget_lines WHERE budget_id = $1 ORDER BY ca
 -- rewrites them as separate statements in the same transaction, so a
 -- category-ownership failure caught before this point leaves neither the
 -- parent nor the lines touched at all.
+-- UpsertBudget's RETURNING includes rolled_over_at and rollover_goal_id even
+-- though this statement never writes either column (only StampBudgetRollover
+-- does): ON CONFLICT DO UPDATE leaves them untouched, so RETURNING here
+-- faithfully echoes whatever stamp the row already carried rather than
+-- forcing every caller to re-read it separately.
 -- name: UpsertBudget :one
 INSERT INTO budgets (household_id, month, expected_income_minor)
 VALUES ($1, $2, $3)
 ON CONFLICT (household_id, month) DO UPDATE
 SET expected_income_minor = EXCLUDED.expected_income_minor, updated_at = now()
-RETURNING id, household_id, month, expected_income_minor;
+RETURNING id, household_id, month, expected_income_minor, rolled_over_at, rollover_goal_id;
 
 -- name: DeleteBudgetLines :exec
 DELETE FROM budget_lines WHERE budget_id = $1;
@@ -52,7 +58,8 @@ INSERT INTO budget_lines (budget_id, category_id, cap_minor) VALUES ($1, $2, $3)
 -- comes back exactly when there is one, and the closed months before it come
 -- back the same way with no special-casing.
 -- name: ListBudgetsInRange :many
-SELECT b.id, b.household_id, b.month, b.expected_income_minor, h.primary_currency
+SELECT b.id, b.household_id, b.month, b.expected_income_minor, h.primary_currency,
+       b.rolled_over_at, b.rollover_goal_id
 FROM budgets b
 JOIN households h ON h.id = b.household_id
 WHERE b.household_id = $1 AND b.month BETWEEN sqlc.arg(from_month) AND sqlc.arg(to_month)

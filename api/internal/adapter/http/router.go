@@ -223,10 +223,15 @@ func NewRouter(deps Deps) http.Handler {
 				// joining the one above -- the task brief that introduced
 				// this route pinned this exact shape, and keeping it
 				// distinct means budgets and transactions guards can each
-				// change without touching the other's route list.
+				// change without touching the other's route list. POST
+				// .../rollover joins it: both are budget-month writes behind
+				// the same money+owner+CSRF stack, and there is no reason
+				// for the two to diverge the way budgets and transactions
+				// were kept apart above.
 				txn.Group(func(w chi.Router) {
 					w.Use(requireCSRF)
 					w.Put("/budgets/{month}", handlePutBudgetMonth(deps))
+					w.Post("/budgets/{month}/rollover", handleRolloverBudgetMonth(deps))
 				})
 
 				// Goals sit in the same money+owner group as transactions,

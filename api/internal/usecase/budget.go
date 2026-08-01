@@ -56,6 +56,15 @@ type BudgetMonthView struct {
 	ByPerson       []BudgetPersonView
 	ExcludedNoRate []ExcludedTransaction
 	OverCount      int
+
+	// RolledOverAt and RolloverGoalID mirror domain.Budget's own rollover
+	// stamp (see its doc comment for why the two always move together), read
+	// out to the top level here rather than making every caller reach
+	// through the nilable Budget pointer above: a never-budgeted month has
+	// no rollover to speak of either, and nil/"" says that as directly as
+	// Budget == nil does for the empty state.
+	RolledOverAt   *time.Time
+	RolloverGoalID string
 }
 
 // BudgetHistoryMonth is one row of the History modal. Closed is false only
@@ -273,6 +282,15 @@ func (s *BudgetService) Month(ctx context.Context, householdID string, month, to
 		dailyPace, dailyPaceOK = 0, false
 	}
 
+	// A never-budgeted month has no stamp to report either -- nil/"" is
+	// budget == nil's own answer, not a separate case to handle.
+	var rolledOverAt *time.Time
+	var rolloverGoalID string
+	if budget != nil {
+		rolledOverAt = budget.RolledOverAt
+		rolloverGoalID = budget.RolloverGoalID
+	}
+
 	return BudgetMonthView{
 		Currency:       primary,
 		Month:          month,
@@ -289,6 +307,8 @@ func (s *BudgetService) Month(ctx context.Context, householdID string, month, to
 		ByPerson:       byPerson,
 		ExcludedNoRate: excluded,
 		OverCount:      overCount,
+		RolledOverAt:   rolledOverAt,
+		RolloverGoalID: rolloverGoalID,
 	}, nil
 }
 

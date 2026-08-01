@@ -92,6 +92,18 @@ type budgetMonthResponse struct {
 	// transactions excluded" note the design calls for.
 	ExcludedNoRate int `json:"excludedNoRate"`
 	OverCount      int `json:"overCount"`
+
+	// RolledOverAt and RolloverGoalID are how the Budget screen knows a
+	// month was already rolled over, without a second request: both nil
+	// until POST .../rollover succeeds for this month, and both populated
+	// together afterward -- never one without the other, the same
+	// constraint domain.Budget's own doc comment describes. RolloverGoalID
+	// is *string, not string, so an empty wire value is distinguishable JSON
+	// null rather than an empty-string id (account_handlers.go's
+	// ownerMembershipId follows the identical convention for the same
+	// nullable-id reason).
+	RolledOverAt   *time.Time `json:"rolledOverAt"`
+	RolloverGoalID *string    `json:"rolloverGoalId"`
 }
 
 type putBudgetResponse struct {
@@ -115,6 +127,15 @@ type budgetHistoryResponse struct {
 type saveBudgetRequest struct {
 	ExpectedIncomeMinor *int64          `json:"expectedIncomeMinor"`
 	Lines               []budgetLineDTO `json:"lines"`
+}
+
+// rolloverBudgetRequest is POST .../rollover's whole body: which goal
+// receives the month's unspent money. Every refusal -- the month being open,
+// nothing unspent, an archived or wrong-currency goal, an already-rolled-over
+// month -- is BudgetService.RollOver's own job (its doc comment lists the
+// exact order); this handler only decodes and maps.
+type rolloverBudgetRequest struct {
+	GoalID string `json:"goalId"`
 }
 
 // parseBudgetMonth reads the {month} path segment. monthLayout ("2006-01")
@@ -178,6 +199,43 @@ func handlePutBudgetMonth(deps Deps) http.HandlerFunc {
 			return
 		}
 		WriteJSON(w, http.StatusOK, putBudgetResponse{Budget: toBudgetDTO(budget)})
+	}
+}
+
+// handleRolloverBudgetMonth moves a closed month's unspent budget into a
+// goal, as one contribution. It answers 200, not 201: this route does not
+// create a resource a client asked for by name (contrast POST
+// /goals/{id}/contributions, which does and answers 201) -- BudgetService.
+// RollOver's own contribution is a side effect of an action on the budget
+// month, the same reason PUT /budgets/{month} above answers 200 rather than
+// 201 for the lines it writes.
+//
+// The response reuses goal_handlers.go's contributionResponse/contributionDTO
+// rather than declaring a second copy of the same shape: the written
+// contribution is identical whether it came from a manual add or a rollover,
+// and the frontend needs to render both the same way.
+//
+// Every refusal is BudgetService.RollOver's own job, mapped by
+// MapDomainError -- this handler decodes and calls, nothing more.
+func handleRolloverBudgetMonth(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope, _ := RequestScope(r)
+		month, ok := parseBudgetMonth(w, r)
+		if !ok {
+			return
+		}
+
+		var req rolloverBudgetRequest
+		if !decodeJSONBody(w, r, &req) {
+			return
+		}
+
+		contribution, err := deps.Budgets.RollOver(r.Context(), scope.HouseholdID, month, req.GoalID, deps.Clock.Now())
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		WriteJSON(w, http.StatusOK, contributionResponse{Contribution: toContributionDTO(contribution)})
 	}
 }
 
@@ -245,10 +303,15 @@ func toBudgetMonthResponse(view usecase.BudgetMonthView) budgetMonthResponse {
 		ByPerson:       make([]budgetPersonDTO, 0, len(view.ByPerson)),
 		ExcludedNoRate: len(view.ExcludedNoRate),
 		OverCount:      view.OverCount,
+		RolledOverAt:   view.RolledOverAt,
 	}
 	if view.Budget != nil {
 		dto := toBudgetDTO(*view.Budget)
 		out.Budget = &dto
+	}
+	if view.RolloverGoalID != "" {
+		id := view.RolloverGoalID
+		out.RolloverGoalID = &id
 	}
 	for _, c := range view.Categories {
 		out.Categories = append(out.Categories, budgetCategoryDTO{

@@ -117,6 +117,12 @@ func TestBudgetRoutesRequireMoneyAndOwner(t *testing.T) {
 		{http.MethodGet, month, http.StatusOK},
 		{http.MethodGet, "/api/v1/budgets/history", http.StatusOK},
 		{http.MethodPut, month, http.StatusBadRequest},
+		// A bare POST with no body reaches the handler exactly the way the
+		// bare PUT above does, and fails at the same decodeJSONBody step --
+		// proving the guards passed and the route is wired without needing
+		// a real goalId or a closed month here (those are what the
+		// dedicated rollover tests below exist to cover).
+		{http.MethodPost, month + "/rollover", http.StatusBadRequest},
 	}
 
 	for _, route := range routes {
@@ -148,36 +154,50 @@ func TestBudgetRoutesRequireMoneyAndOwner(t *testing.T) {
 }
 
 // TestBudgetWriteRouteRequiresCSRF mirrors
-// TestTransactionWriteRoutesRequireCSRF for the one mutating budget route:
-// no token at all, and a token that does not match the cookie, both refused
-// by the CSRF_INVALID code specifically (not merely a 403 status, which
-// requireOwner above it in the guard stack would also produce).
+// TestTransactionWriteRoutesRequireCSRF for both mutating budget routes --
+// PUT (save) and POST .../rollover, which joins PUT's own CSRF group
+// (router.go's own comment on why): no token at all, and a token that does
+// not match the cookie, both refused by the CSRF_INVALID code specifically
+// (not merely a 403 status, which requireOwner above it in the guard stack
+// would also produce).
 func TestBudgetWriteRouteRequiresCSRF(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
 	path := monthPath(time.Now().UTC())
 
-	req := httptest.NewRequest(http.MethodPut, path, nil)
-	req.AddCookie(session)
-	req.AddCookie(csrf)
-	rec := httptest.NewRecorder()
-	env.router.ServeHTTP(rec, req)
-	assertErrorResponse(t, rec, http.StatusForbidden, "CSRF_INVALID")
+	routes := []struct{ method, path string }{
+		{http.MethodPut, path},
+		{http.MethodPost, path + "/rollover"},
+	}
 
-	req2 := httptest.NewRequest(http.MethodPut, path, nil)
-	req2.AddCookie(session)
-	req2.AddCookie(csrf)
-	req2.Header.Set("X-CSRF-Token", "definitely-the-wrong-value")
-	rec2 := httptest.NewRecorder()
-	env.router.ServeHTTP(rec2, req2)
-	assertErrorResponse(t, rec2, http.StatusForbidden, "CSRF_INVALID")
+	for _, route := range routes {
+		t.Run(route.method+" "+route.path, func(t *testing.T) {
+			req := httptest.NewRequest(route.method, route.path, nil)
+			req.AddCookie(session)
+			req.AddCookie(csrf)
+			rec := httptest.NewRecorder()
+			env.router.ServeHTTP(rec, req)
+			assertErrorResponse(t, rec, http.StatusForbidden, "CSRF_INVALID")
+
+			req2 := httptest.NewRequest(route.method, route.path, nil)
+			req2.AddCookie(session)
+			req2.AddCookie(csrf)
+			req2.Header.Set("X-CSRF-Token", "definitely-the-wrong-value")
+			rec2 := httptest.NewRecorder()
+			env.router.ServeHTTP(rec2, req2)
+			assertErrorResponse(t, rec2, http.StatusForbidden, "CSRF_INVALID")
+		})
+	}
 }
 
 // TestBudgetMalformedMonthIs400 pins the brief's INVALID_MONTH/400 shape --
 // deliberately different from the 422 the transactions month filter answers
 // for the same malformed-month case (transaction_handlers.go's
-// parseTransactionFilter). Both GET and PUT parse {month} through the same
-// parseBudgetMonth helper, so both must answer identically.
+// parseTransactionFilter). GET, PUT and POST .../rollover all parse {month}
+// through the same parseBudgetMonth helper, so all three must answer
+// identically -- and parseBudgetMonth runs before decodeJSONBody in every
+// handler that has a body, so the rollover case below needs no valid goalId
+// to prove this: a malformed month never reaches the body at all.
 func TestBudgetMalformedMonthIs400(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -186,6 +206,10 @@ func TestBudgetMalformedMonthIs400(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusBadRequest, "INVALID_MONTH")
 
 	rec = env.authed(t, http.MethodPut, "/api/v1/budgets/2026-7", map[string]any{"lines": []any{}}, session, csrf)
+	assertErrorResponse(t, rec, http.StatusBadRequest, "INVALID_MONTH")
+
+	rec = env.authed(t, http.MethodPost, "/api/v1/budgets/2026-7/rollover",
+		map[string]any{"goalId": "00000000-0000-0000-0000-000000000000"}, session, csrf)
 	assertErrorResponse(t, rec, http.StatusBadRequest, "INVALID_MONTH")
 }
 
@@ -528,6 +552,240 @@ func decodeBudgetHistoryMonths(t *testing.T, rec *httptest.ResponseRecorder) []s
 		out = append(out, m.Month)
 	}
 	return out
+}
+
+// --- Task 9: budget rollover route ------------------------------------------
+
+// mustBudgetClosedMonth PUTs a single-category budget for the calendar month
+// immediately before the real one -- always closed, regardless of which day
+// this suite happens to run on -- and returns its wire path plus the amount
+// RollOver should move: the cap in full, since nothing is ever spent against
+// it. It is the shared fixture for every rollover test below that needs a
+// real closed, budgeted, unspent month (the 200 case, the already-done case,
+// the currency-mismatch case and the unknown-goal case all need the exact
+// same state), so a fixture mismatch between those tests can never look like
+// a mismatch in RollOver's own behaviour.
+func (env *testEnv) mustBudgetClosedMonth(t *testing.T, session, csrf *http.Cookie, capMinor int64) (path string, remainingMinor int64) {
+	t.Helper()
+	categoryID, _ := env.firstExpenseCategory(t, session)
+	now := time.Now().UTC()
+	lastMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 0)
+	path = monthPath(lastMonth)
+	env.mustPutBudget(t, session, csrf, path, map[string]any{
+		"lines": []map[string]any{{"categoryId": categoryID, "capMinor": capMinor}},
+	})
+	return path, capMinor
+}
+
+// assertRolloverFieldsNull confirms budgetMonthResponse's two new fields read
+// as literal JSON null, not merely absent from the body. A Go struct field
+// left at its zero value cannot tell "the server sent null" apart from "the
+// server sent nothing at all" -- decoding `{}` and `{"rolledOverAt":null}`
+// into the same *time.Time field gives nil either way -- so this reads the
+// raw message the same way TestGoalListEmptyState's own raw-JSON check does
+// for "goals": [].
+func assertRolloverFieldsNull(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw: %v (body = %s)", err, rec.Body.String())
+	}
+	rolledOverAt, ok := raw["rolledOverAt"]
+	if !ok {
+		t.Fatalf(`response has no "rolledOverAt" key at all: %s`, rec.Body.String())
+	}
+	if string(rolledOverAt) != "null" {
+		t.Fatalf(`"rolledOverAt" = %s, want literal null`, rolledOverAt)
+	}
+	rolloverGoalID, ok := raw["rolloverGoalId"]
+	if !ok {
+		t.Fatalf(`response has no "rolloverGoalId" key at all: %s`, rec.Body.String())
+	}
+	if string(rolloverGoalID) != "null" {
+		t.Fatalf(`"rolloverGoalId" = %s, want literal null`, rolloverGoalID)
+	}
+}
+
+// assertRolloverFieldsSet is assertRolloverFieldsNull's after-the-fact
+// counterpart: both fields populated, and rolloverGoalId names the exact
+// goal the rollover under test named -- the two are documented to move
+// together (budgetMonthResponse's own brief), and this is what proves it on
+// the wire rather than merely in domain.Budget.
+func assertRolloverFieldsSet(t *testing.T, rec *httptest.ResponseRecorder, wantGoalID string) {
+	t.Helper()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		RolledOverAt   *time.Time `json:"rolledOverAt"`
+		RolloverGoalID *string    `json:"rolloverGoalId"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v (body = %s)", err, rec.Body.String())
+	}
+	if body.RolledOverAt == nil {
+		t.Fatal("rolledOverAt = nil, want set after a rollover")
+	}
+	if body.RolloverGoalID == nil || *body.RolloverGoalID != wantGoalID {
+		t.Fatalf("rolloverGoalId = %v, want %q", body.RolloverGoalID, wantGoalID)
+	}
+}
+
+// TestBudgetRolloverMovesUnspentIntoGoalAndStampsTheMonth is the brief's
+// central round trip: a closed, budgeted month with unspent money answers
+// 200 with the written contribution; GET /budgets/{month} reads
+// rolledOverAt: null before and both fields populated (naming this goal)
+// after; and GET /goals afterwards shows the goal's contributedMinor risen
+// by exactly the month's remainingMinor -- three separate assertions in the
+// brief's own list, combined here because they are one state change seen
+// from three different reads, not three independent behaviours.
+func TestBudgetRolloverMovesUnspentIntoGoalAndStampsTheMonth(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	path, remaining := env.mustBudgetClosedMonth(t, session, csrf, 200_000)
+	goal := env.mustCreateGoal(t, session, csrf, map[string]any{
+		"name": "Rollover target", "targetMinor": 1_000_000, "plannedMonthlyMinor": 50_000,
+	})
+
+	assertRolloverFieldsNull(t, env.authedGet(t, path, session))
+
+	rec := env.authed(t, http.MethodPost, path+"/rollover", map[string]any{"goalId": goal.Goal.ID}, session, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rollover: status = %d, want 200 (body = %s)", rec.Code, rec.Body.String())
+	}
+	var body contributionResponseBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode rollover response: %v (body = %s)", err, rec.Body.String())
+	}
+	if body.Contribution.AmountMinor != remaining {
+		t.Fatalf("contribution amountMinor = %d, want %d (the month's full remaining -- nothing was ever spent)",
+			body.Contribution.AmountMinor, remaining)
+	}
+	if body.Contribution.Source != "budget_rollover" {
+		t.Fatalf("contribution source = %q, want budget_rollover", body.Contribution.Source)
+	}
+
+	assertRolloverFieldsSet(t, env.authedGet(t, path, session), goal.Goal.ID)
+
+	goalsRec := env.authedGet(t, "/api/v1/goals", session)
+	list := decodeGoalsList(t, goalsRec)
+	var got *goalDTOBody
+	for i := range list.Goals {
+		if list.Goals[i].ID == goal.Goal.ID {
+			got = &list.Goals[i]
+		}
+	}
+	if got == nil {
+		t.Fatalf("goal %s missing from the list after rollover", goal.Goal.ID)
+	}
+	if got.ContributedMinor != remaining {
+		t.Fatalf("goal contributedMinor = %d, want exactly %d (the rolled-over month's remaining)",
+			got.ContributedMinor, remaining)
+	}
+}
+
+// TestBudgetRolloverCurrentMonthIsOpen is the brief's "current month -> 422
+// ROLLOVER_MONTH_OPEN" case: RollOver refuses before ever looking at whether
+// the month is budgeted or has anything unspent (usecase/budget.go's own
+// ordering comment), so this needs no budget at all to prove.
+func TestBudgetRolloverCurrentMonthIsOpen(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	goal := env.mustCreateGoal(t, session, csrf, map[string]any{
+		"name": "Too soon", "targetMinor": 500_000, "plannedMonthlyMinor": 20_000,
+	})
+
+	rec := env.authed(t, http.MethodPost, monthPath(time.Now().UTC())+"/rollover",
+		map[string]any{"goalId": goal.Goal.ID}, session, csrf)
+	assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "ROLLOVER_MONTH_OPEN")
+}
+
+// TestBudgetRolloverTwiceIsAlreadyDone is the brief's "a second call -> 409
+// ROLLOVER_ALREADY_DONE" case: the conditional stamp update
+// (StampBudgetRollover) finds nothing left to update the second time, and
+// GetBudgetRolloverStamp's follow-up read tells "already stamped" apart from
+// "never budgeted" -- see budget_repo.go's diagnoseUnstampedRollover.
+func TestBudgetRolloverTwiceIsAlreadyDone(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	path, _ := env.mustBudgetClosedMonth(t, session, csrf, 100_000)
+	goal := env.mustCreateGoal(t, session, csrf, map[string]any{
+		"name": "First come first served", "targetMinor": 500_000, "plannedMonthlyMinor": 20_000,
+	})
+
+	first := env.authed(t, http.MethodPost, path+"/rollover", map[string]any{"goalId": goal.Goal.ID}, session, csrf)
+	if first.Code != http.StatusOK {
+		t.Fatalf("first rollover: status = %d, body = %s", first.Code, first.Body.String())
+	}
+
+	second := env.authed(t, http.MethodPost, path+"/rollover", map[string]any{"goalId": goal.Goal.ID}, session, csrf)
+	assertErrorResponse(t, second, http.StatusConflict, "ROLLOVER_ALREADY_DONE")
+}
+
+// TestBudgetRolloverNoBudgetRowIsNotFound is the brief's "a month with no
+// budget row -> 404" case: a real, closed month that nothing ever PUT a
+// budget for. BudgetService.Month's own empty state (Budget == nil) is what
+// RollOver reads as domain.ErrNotFound, before it ever looks at Remaining or
+// reaches for the goal -- so a real goal is enough here; the goal's own id
+// is never consulted.
+func TestBudgetRolloverNoBudgetRowIsNotFound(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	goal := env.mustCreateGoal(t, session, csrf, map[string]any{
+		"name": "Never budgeted", "targetMinor": 500_000, "plannedMonthlyMinor": 20_000,
+	})
+
+	now := time.Now().UTC()
+	unbudgeted := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -2, 0)
+	rec := env.authed(t, http.MethodPost, monthPath(unbudgeted)+"/rollover",
+		map[string]any{"goalId": goal.Goal.ID}, session, csrf)
+	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
+}
+
+// TestBudgetRolloverCurrencyMismatchIs422 is the brief's "an IDR goal in an
+// SGD household -> 422 ROLLOVER_CURRENCY_MISMATCH" case. The seeded
+// household's primary is SGD (api_test.go's newTestEnv), so a goal created
+// with currency: "IDR" is exactly the mismatch spec decision 11 refuses --
+// budgets carry no currency column of their own and are implicitly the
+// household's primary, so a rollover into any other currency would store a
+// rate nobody can audit.
+func TestBudgetRolloverCurrencyMismatchIs422(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	path, _ := env.mustBudgetClosedMonth(t, session, csrf, 100_000)
+	idrGoal := env.mustCreateGoal(t, session, csrf, map[string]any{
+		"name": "IDR goal", "currency": "IDR", "targetMinor": 5_000_000, "plannedMonthlyMinor": 200_000,
+	})
+
+	rec := env.authed(t, http.MethodPost, path+"/rollover", map[string]any{"goalId": idrGoal.Goal.ID}, session, csrf)
+	assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "ROLLOVER_CURRENCY_MISMATCH")
+}
+
+// The malformed-month case for this route lives in TestBudgetMalformedMonthIs400
+// above, alongside GET and PUT's own, since all three share parseBudgetMonth
+// and that test's own reasoning for covering them together applies here too.
+
+// TestBudgetRolloverUnknownGoalIsNotFound is this route's "another
+// household's member" matrix row, realised the way goals_api_test.go's own
+// comment documents for this whole suite: zeroUUID stands in for a goal
+// belonging to another household, since GoalRepository.Get scopes by
+// household id and cannot tell "made up" and "someone else's" apart -- both
+// simply match no row. The fixture is a real closed, budgeted, unspent
+// month (not merely "no budget row", which TestBudgetRolloverNoBudgetRowIsNotFound
+// already covers) specifically so this 404 can only come from Goals.Get's
+// own household scoping.
+func TestBudgetRolloverUnknownGoalIsNotFound(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	path, _ := env.mustBudgetClosedMonth(t, session, csrf, 100_000)
+	zeroUUID := "00000000-0000-0000-0000-000000000000"
+
+	rec := env.authed(t, http.MethodPost, path+"/rollover", map[string]any{"goalId": zeroUUID}, session, csrf)
+	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
 }
 
 // --- Task 10: category create, rename, archive and restore routes ----------
