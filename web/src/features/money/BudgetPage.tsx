@@ -159,8 +159,12 @@ export function BudgetPage() {
   // Whether BudgetRolloverCard.tsx could show anything at all -- purely to
   // decide the surrounding `budget-insight` box's own visibility (a closed
   // month with dailyPaceOk false and no over-category otherwise has nothing
-  // to put in that box).
-  const rolloverMayShow = monthClosed && (data.remainingMinor > 0 || data.rolloverGoalId !== null);
+  // to put in that box). Checked against `rolloverAmountMinor`, not
+  // `rolloverGoalId` -- the two move together, but BudgetRolloverCard.tsx's
+  // own "done" branch is gated on the amount now (Finding 1's fix), so this
+  // visibility check uses the same field rather than a second one that
+  // happens to agree with it.
+  const rolloverMayShow = monthClosed && (data.remainingMinor > 0 || data.rolloverAmountMinor !== null);
 
   function openBlank() {
     setModal({ prefill: null, awaitingIncome: false });
@@ -403,6 +407,7 @@ export function BudgetPage() {
                         month={data.month}
                         closed={monthClosed}
                         remainingMinor={data.remainingMinor}
+                        rolloverAmountMinor={data.rolloverAmountMinor}
                         currency={data.currency}
                         rolledOverTo={data.rolloverGoalId}
                         symbol={symbol}

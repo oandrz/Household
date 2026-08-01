@@ -27,6 +27,27 @@ type Budget struct {
 	// "" <-> SQL NULL convention Account.OwnerMembershipID documents.
 	RolledOverAt   *time.Time
 	RolloverGoalID string
+
+	// RolloverAmountMinor is the amount RollOver actually moved -- read off
+	// the goal_contributions row it wrote (source = 'budget_rollover'), never
+	// recomputed from Budgeted minus Spent. That recomputation is exactly the
+	// bug this field exists to close: Remaining moves with every later
+	// transaction in the month (a backdated entry, an edit, a delete), so a
+	// caller that rendered Remaining next to a past-tense "moved into X"
+	// sentence was quietly restating a completed action with a live number
+	// (see BudgetService.Month's own comment on RolloverAmountMinor for the
+	// concrete failure).
+	//
+	// Unlike RolledOverAt/RolloverGoalID, this is NOT DB-CHECK-enforced to
+	// move with the other two -- it comes from a different table
+	// (goal_contributions), read via a join, not a column on budgets itself.
+	// It is populated with a real value ONLY by BudgetRepository.Get. Upsert
+	// and History both return a domain.Budget too, but neither one's result
+	// ever reaches BudgetMonthView -- BudgetService.Month builds its Budget
+	// exclusively through Get -- so both leave this nil regardless of
+	// whether the month was actually rolled over, and that nil is never
+	// observed by anything that renders it.
+	RolloverAmountMinor *int64
 }
 
 // DaysLeftInMonth is the spec's pinned rule: today counts, because the

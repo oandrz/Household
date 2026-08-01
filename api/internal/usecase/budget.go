@@ -65,6 +65,21 @@ type BudgetMonthView struct {
 	// Budget == nil does for the empty state.
 	RolledOverAt   *time.Time
 	RolloverGoalID string
+
+	// RolloverAmountMinor is domain.Budget's own field of the same name,
+	// carried up here the same way -- the amount RollOver actually wrote,
+	// nil until a rollover happens and fixed from then on. It is
+	// deliberately NOT `Remaining` at read time: Remaining a few lines above
+	// is Budgeted minus Spent, recomputed on every call to Month from
+	// whatever transactions exist in the ledger right now, so a caller that
+	// showed Remaining next to a past-tense "moved into X" sentence was
+	// showing a live number, not the record of what actually moved. A
+	// backdated transaction, or an edit or delete inside an
+	// already-rolled-over month -- none of them blocked anywhere in this
+	// codebase -- would silently change that sentence's own figure after the
+	// fact. RolloverAmountMinor is the fix: read off the goal_contributions
+	// row RollOver wrote, not recomputed from today's ledger.
+	RolloverAmountMinor *int64
 }
 
 // BudgetHistoryMonth is one row of the History modal. Closed is false only
@@ -286,29 +301,32 @@ func (s *BudgetService) Month(ctx context.Context, householdID string, month, to
 	// budget == nil's own answer, not a separate case to handle.
 	var rolledOverAt *time.Time
 	var rolloverGoalID string
+	var rolloverAmountMinor *int64
 	if budget != nil {
 		rolledOverAt = budget.RolledOverAt
 		rolloverGoalID = budget.RolloverGoalID
+		rolloverAmountMinor = budget.RolloverAmountMinor
 	}
 
 	return BudgetMonthView{
-		Currency:       primary,
-		Month:          month,
-		Budget:         budget,
-		Categories:     categoryViews,
-		Budgeted:       budgeted,
-		Spent:          spent,
-		Remaining:      remaining,
-		PercentUsed:    percentUsed,
-		PercentOK:      percentOK,
-		DaysLeft:       daysLeft,
-		DailyPace:      dailyPace,
-		DailyPaceOK:    dailyPaceOK,
-		ByPerson:       byPerson,
-		ExcludedNoRate: excluded,
-		OverCount:      overCount,
-		RolledOverAt:   rolledOverAt,
-		RolloverGoalID: rolloverGoalID,
+		Currency:            primary,
+		Month:               month,
+		Budget:              budget,
+		Categories:          categoryViews,
+		Budgeted:            budgeted,
+		Spent:               spent,
+		Remaining:           remaining,
+		PercentUsed:         percentUsed,
+		PercentOK:           percentOK,
+		DaysLeft:            daysLeft,
+		DailyPace:           dailyPace,
+		DailyPaceOK:         dailyPaceOK,
+		ByPerson:            byPerson,
+		ExcludedNoRate:      excluded,
+		OverCount:           overCount,
+		RolledOverAt:        rolledOverAt,
+		RolloverGoalID:      rolloverGoalID,
+		RolloverAmountMinor: rolloverAmountMinor,
 	}, nil
 }
 
@@ -469,13 +487,22 @@ func (s *BudgetService) Save(ctx context.Context, householdID string, month time
 // decision 4 explains why a stored toggle that acts only when clicked would
 // be worse than this button.
 //
-// Every refusal happens before anything is written, in this order:
+// Every refusal THIS METHOD can detect happens before anything is written,
+// in this order:
 //   - a current or future month            -> domain.ErrRolloverMonthOpen
 //   - a month with no budget row           -> domain.ErrNotFound
 //   - Remaining <= 0                       -> domain.ErrRolloverNothingUnspent
 //   - an archived goal                     -> domain.ErrGoalArchived
 //   - a goal not in the primary currency   -> domain.ErrRolloverCurrencyMismatch
-//   - a month already rolled over          -> domain.ErrRolloverAlreadyDone
+//
+// domain.ErrRolloverAlreadyDone is not in that list because this method
+// cannot see it coming: it surfaces from INSIDE BudgetRepository.RollOverToGoal's
+// own transaction, after its conditional UPDATE (StampBudgetRollover, ...
+// AND rolled_over_at IS NULL) has already been attempted and matched zero
+// rows -- diagnoseUnstampedRollover (budget_repo.go) is what tells that apart
+// from "never budgeted" and returns the sentinel. The transaction still rolls
+// back on it, so nothing is left half-written, but a reader looking for this
+// refusal should not expect to find a pre-write check for it in this file.
 //
 // The closed-month check compares month-starts, not instants, using the
 // same UTC truncation domain/budget.go's own DaysLeftInMonth applies (via

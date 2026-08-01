@@ -103,6 +103,15 @@ export const budgetMonthResponseSchema = z.object({
   // other (the database's own rollover_stamp_is_whole CHECK constraint).
   rolledOverAt: z.string().nullable(),
   rolloverGoalId: z.string().nullable(),
+  // rolloverAmountMinor is the fix for the finding this closes: the amount a
+  // rollover actually moved, read off the goal_contributions row it wrote --
+  // never `remainingMinor` above, which is recomputed on every GET from
+  // whatever transactions exist in this month right now. It moves in
+  // lockstep with `rolledOverAt`/`rolloverGoalId` (null until a rollover
+  // happens, populated and then fixed from then on), but is not covered by
+  // the database's rollover_stamp_is_whole CHECK -- it comes from a
+  // different table, joined in only by BudgetRepository.Get.
+  rolloverAmountMinor: z.number().nullable(),
 });
 export type BudgetMonthResponse = z.infer<typeof budgetMonthResponseSchema>;
 

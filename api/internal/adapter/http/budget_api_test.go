@@ -688,6 +688,78 @@ func TestBudgetRolloverMovesUnspentIntoGoalAndStampsTheMonth(t *testing.T) {
 	}
 }
 
+// TestBudgetRolloverAmountSurvivesALaterTransactionInThatMonth is Finding 1's
+// own regression test, run against the real HTTP route and a real database:
+// remainingMinor is Budgeted minus Spent, recomputed on every GET from
+// whatever transactions exist in the month right now, so a late expense
+// entered in an already-rolled-over month used to change what the "done"
+// sentence would read -- rolloverAmountMinor did not exist on the wire at
+// all before this fix, so this decoded as a permanent nil regardless of what
+// the server actually stamped. Run against the pre-fix tree, this test fails
+// on the first assertion (rolloverAmountMinor decodes nil, not 200000);
+// after the fix it passes and additionally proves remainingMinor DID move
+// while rolloverAmountMinor did not, so the fixture is provably exercising
+// the defect rather than missing it by accident.
+func TestBudgetRolloverAmountSurvivesALaterTransactionInThatMonth(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	path, remaining := env.mustBudgetClosedMonth(t, session, csrf, 200_000)
+	goal := env.mustCreateGoal(t, session, csrf, map[string]any{
+		"name": "Late receipt", "targetMinor": 1_000_000, "plannedMonthlyMinor": 50_000,
+	})
+
+	rec := env.authed(t, http.MethodPost, path+"/rollover", map[string]any{"goalId": goal.Goal.ID}, session, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rollover: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	before := decodeBudgetMonthRollover(t, env.authedGet(t, path, session))
+	if before.RolloverAmountMinor == nil || *before.RolloverAmountMinor != remaining {
+		t.Fatalf("rolloverAmountMinor right after rollover = %v, want %d", before.RolloverAmountMinor, remaining)
+	}
+
+	// A late receipt landing in the rolled-over month -- mustBudgetClosedMonth's
+	// own "always the calendar month before this one" fixture, duplicated
+	// here (not imported) the same way budget_repo_test.go's firstOfMonth
+	// deliberately duplicates the repository's own normalisation: this date
+	// must land inside that same closed month regardless of which day this
+	// suite happens to run on.
+	now := time.Now().UTC()
+	lastMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 0)
+	categoryID, _ := env.firstExpenseCategory(t, session)
+	accountID := env.mustCreateAccountID(t, session, csrf)
+	env.mustCreateExpense(t, session, csrf, lastMonth.AddDate(0, 0, 5).Format("2006-01-02"), categoryID, accountID, 15_000)
+
+	after := decodeBudgetMonthRollover(t, env.authedGet(t, path, session))
+	if after.RemainingMinor == remaining {
+		t.Fatal("remainingMinor did not move after the late expense -- fixture is not exercising the defect")
+	}
+	if after.RolloverAmountMinor == nil || *after.RolloverAmountMinor != remaining {
+		t.Fatalf("rolloverAmountMinor after the late expense = %v, want unchanged %d -- "+
+			"a live remainingMinor must never leak into the record of what a past rollover moved",
+			after.RolloverAmountMinor, remaining)
+	}
+}
+
+func decodeBudgetMonthRollover(t *testing.T, rec *httptest.ResponseRecorder) struct {
+	RemainingMinor      int64  `json:"remainingMinor"`
+	RolloverAmountMinor *int64 `json:"rolloverAmountMinor"`
+} {
+	t.Helper()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		RemainingMinor      int64  `json:"remainingMinor"`
+		RolloverAmountMinor *int64 `json:"rolloverAmountMinor"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v (body = %s)", err, rec.Body.String())
+	}
+	return body
+}
+
 // TestBudgetRolloverCurrentMonthIsOpen is the brief's "current month -> 422
 // ROLLOVER_MONTH_OPEN" case: RollOver refuses before ever looking at whether
 // the month is budgeted or has anything unspent (usecase/budget.go's own

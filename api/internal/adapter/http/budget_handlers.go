@@ -104,6 +104,15 @@ type budgetMonthResponse struct {
 	// nullable-id reason).
 	RolledOverAt   *time.Time `json:"rolledOverAt"`
 	RolloverGoalID *string    `json:"rolloverGoalId"`
+
+	// RolloverAmountMinor is the amount RollOver actually wrote, for the
+	// frontend's "moved into X" sentence to render -- never RemainingMinor
+	// above, which is recomputed on every GET from whatever transactions
+	// exist in this month right now and can disagree with what was actually
+	// moved (usecase.BudgetMonthView's own comment names the concrete
+	// failure this closes). nil until a rollover happens, alongside
+	// RolledOverAt/RolloverGoalID, and fixed from then on.
+	RolloverAmountMinor *int64 `json:"rolloverAmountMinor"`
 }
 
 type putBudgetResponse struct {
@@ -289,21 +298,22 @@ func handleBudgetHistory(deps Deps) http.HandlerFunc {
 
 func toBudgetMonthResponse(view usecase.BudgetMonthView) budgetMonthResponse {
 	out := budgetMonthResponse{
-		Currency:       view.Currency,
-		Month:          view.Month.Format(monthLayout),
-		Categories:     make([]budgetCategoryDTO, 0, len(view.Categories)),
-		BudgetedMinor:  view.Budgeted.Amount,
-		SpentMinor:     view.Spent.Amount,
-		RemainingMinor: view.Remaining,
-		PercentUsed:    view.PercentUsed,
-		PercentOK:      view.PercentOK,
-		DaysLeft:       view.DaysLeft,
-		DailyPaceMinor: view.DailyPace,
-		DailyPaceOK:    view.DailyPaceOK,
-		ByPerson:       make([]budgetPersonDTO, 0, len(view.ByPerson)),
-		ExcludedNoRate: len(view.ExcludedNoRate),
-		OverCount:      view.OverCount,
-		RolledOverAt:   view.RolledOverAt,
+		Currency:            view.Currency,
+		Month:               view.Month.Format(monthLayout),
+		Categories:          make([]budgetCategoryDTO, 0, len(view.Categories)),
+		BudgetedMinor:       view.Budgeted.Amount,
+		SpentMinor:          view.Spent.Amount,
+		RemainingMinor:      view.Remaining,
+		PercentUsed:         view.PercentUsed,
+		PercentOK:           view.PercentOK,
+		DaysLeft:            view.DaysLeft,
+		DailyPaceMinor:      view.DailyPace,
+		DailyPaceOK:         view.DailyPaceOK,
+		ByPerson:            make([]budgetPersonDTO, 0, len(view.ByPerson)),
+		ExcludedNoRate:      len(view.ExcludedNoRate),
+		OverCount:           view.OverCount,
+		RolledOverAt:        view.RolledOverAt,
+		RolloverAmountMinor: view.RolloverAmountMinor,
 	}
 	if view.Budget != nil {
 		dto := toBudgetDTO(*view.Budget)

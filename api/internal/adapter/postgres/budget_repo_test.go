@@ -443,6 +443,47 @@ func TestRollOverToGoalWritesContributionAndStampTogether(t *testing.T) {
 	}
 }
 
+// TestBudgetGetSurfacesRolloverAmountFromTheContributionRow pins GetBudget's
+// own LEFT JOIN (Finding 1 of the goals-branch review): nil before any
+// rollover, in lockstep with rolled_over_at/rollover_goal_id, and the exact
+// amount written to goal_contributions afterward -- read off that row, not
+// off anything this test could confuse with a live Spent/Remaining
+// recomputation, because Get never touches transactions at all.
+func TestBudgetGetSurfacesRolloverAmountFromTheContributionRow(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	budgetRepo := postgres.NewBudgetRepo(db)
+	goalRepo := postgres.NewGoalRepo(db)
+	householdID := insertTestHousehold(t, db)
+	_, goalID := rolloverFixture(t, db, budgetRepo, goalRepo, householdID, july(17), "Emergency fund")
+
+	before, err := budgetRepo.Get(ctx, householdID, july(1))
+	if err != nil {
+		t.Fatalf("Get before rollover: %v", err)
+	}
+	if before.RolloverAmountMinor != nil {
+		t.Fatalf("RolloverAmountMinor before rollover = %v, want nil", before.RolloverAmountMinor)
+	}
+
+	if _, err := budgetRepo.RollOverToGoal(ctx, usecase.RollOverToGoalInput{
+		HouseholdID: householdID,
+		Month:       july(17),
+		GoalID:      goalID,
+		Amount:      moneyOf(20000),
+		OccurredOn:  august(3),
+	}); err != nil {
+		t.Fatalf("RollOverToGoal: %v", err)
+	}
+
+	after, err := budgetRepo.Get(ctx, householdID, july(1))
+	if err != nil {
+		t.Fatalf("Get after rollover: %v", err)
+	}
+	if after.RolloverAmountMinor == nil || *after.RolloverAmountMinor != 20000 {
+		t.Fatalf("RolloverAmountMinor after rollover = %v, want 20000", after.RolloverAmountMinor)
+	}
+}
+
 // TestRollOverToGoalTwiceIsErrRolloverAlreadyDone pins the conditional
 // UPDATE's own guard: a second rollover for the same household-month must
 // fail, and must not write a second contribution.

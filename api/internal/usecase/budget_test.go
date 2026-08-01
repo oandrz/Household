@@ -588,6 +588,70 @@ func TestBudgetRollOverWritesTheMonthsRemainingIntoTheGoal(t *testing.T) {
 	}
 }
 
+// TestBudgetMonthRolloverAmountSurvivesALaterTransaction is the regression
+// test for the finding this closes: BudgetMonthView.Remaining is Budgeted
+// minus Spent, recomputed fresh on every call to Month from whatever
+// transactions exist in the ledger right now -- it is NOT a record of what a
+// past rollover actually moved. Three ordinary actions can change Remaining
+// after a rollover has already happened (a backdated transaction, an edit,
+// or a delete in that month), and none of them is blocked anywhere in this
+// codebase. This test exercises the first: a late expense lands in July
+// AFTER July has already been rolled over, which moves Remaining down from
+// what it was at rollover time -- and RolloverAmountMinor must still report
+// the original 178000 rolled over, not the new, lower Remaining.
+func TestBudgetMonthRolloverAmountSurvivesALaterTransaction(t *testing.T) {
+	f := newBudgetFixture(t)
+	ctx := context.Background()
+	july := julyMonth()
+	today := time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC)
+
+	if _, err := f.svc.Save(ctx, "house-1", july, nil, []usecase.BudgetLineInput{
+		{CategoryID: "cat-groceries", CapMinor: 520000}, // S$5,200.00
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	f.addExpense("tx-groceries", "cat-groceries", "", july.AddDate(0, 0, 5), 342000, "SGD") // S$3,420.00
+
+	goal := f.seedGoal(t, "house-1", "Bali trip", "SGD", 1000000, false)
+
+	if _, err := f.svc.RollOver(ctx, "house-1", july, goal.ID, today); err != nil {
+		t.Fatalf("rollover: %v", err)
+	}
+
+	before, err := f.svc.Month(ctx, "house-1", july, today)
+	if err != nil {
+		t.Fatalf("Month before the late expense: %v", err)
+	}
+	if before.RolloverAmountMinor == nil || *before.RolloverAmountMinor != 178000 {
+		t.Fatalf("RolloverAmountMinor right after rollover = %v, want 178000 (S$1,780.00)", before.RolloverAmountMinor)
+	}
+
+	// A late July receipt, entered in August -- TransactionService.Create has
+	// no closed-month guard to stop this, and neither does anything else in
+	// this codebase. It lands in the same category, the same month, after
+	// the rollover already happened.
+	f.addExpense("tx-late-receipt", "cat-groceries", "", july.AddDate(0, 0, 28), 15000, "SGD") // S$150.00
+
+	after, err := f.svc.Month(ctx, "house-1", july, today)
+	if err != nil {
+		t.Fatalf("Month after the late expense: %v", err)
+	}
+
+	// Remaining DID move -- proving this test actually exercises the defect,
+	// not a fixture that happens not to trigger it.
+	if after.Remaining != 163000 {
+		t.Fatalf("Remaining after the late expense = %d, want 163000 (178000 - 15000) -- "+
+			"fixture is not exercising the defect if this does not hold", after.Remaining)
+	}
+	// RolloverAmountMinor must NOT have moved with it: it is the record of
+	// what RollOver actually wrote, not Remaining recomputed a second time.
+	if after.RolloverAmountMinor == nil || *after.RolloverAmountMinor != 178000 {
+		t.Fatalf("RolloverAmountMinor after the late expense = %v, want unchanged 178000 -- "+
+			"a live Remaining must never leak into the record of what a past rollover moved",
+			after.RolloverAmountMinor)
+	}
+}
+
 // TestBudgetRollOverRefusesAnOpenMonth is the rule worth stating twice: only
 // a CLOSED month can be rolled over. Mid-month "unspent" is still moving,
 // and money moved out of a figure that later shrinks is a wrong number the

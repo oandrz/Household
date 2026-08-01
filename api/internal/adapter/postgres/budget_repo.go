@@ -44,7 +44,7 @@ func (r *BudgetRepo) Get(ctx context.Context, householdID string, month time.Tim
 
 	return toBudget(row.ID, row.HouseholdID, row.Month, row.ExpectedIncomeMinor, row.PrimaryCurrency,
 		toBudgetLines(lineRows, row.PrimaryCurrency),
-		budgetRolloverStamp{row.RolledOverAt, row.RolloverGoalID}), nil
+		budgetRolloverStamp{row.RolledOverAt, row.RolloverGoalID, row.RolloverAmountMinor}), nil
 }
 
 // Upsert replaces one household-month's budget wholesale, inside one
@@ -108,9 +108,15 @@ func (r *BudgetRepo) Upsert(ctx context.Context, b domain.Budget) (domain.Budget
 			return translate(err, "get household primary currency")
 		}
 
+		// RolloverAmountMinor is deliberately nil here, not read off a second
+		// query: UpsertBudget's RETURNING has no join to goal_contributions
+		// (see budgetRolloverStamp's own comment), and the domain.Budget PUT
+		// hands back is never read for it -- putBudgetResponse's budgetDTO
+		// carries no rollover fields at all, unlike the GET response's
+		// top-level ones.
 		result = toBudget(budgetRow.ID, budgetRow.HouseholdID, budgetRow.Month, budgetRow.ExpectedIncomeMinor,
 			currency, reCurrency(b.Lines, currency),
-			budgetRolloverStamp{budgetRow.RolledOverAt, budgetRow.RolloverGoalID})
+			budgetRolloverStamp{budgetRow.RolledOverAt, budgetRow.RolloverGoalID, nil})
 		return nil
 	})
 	if err != nil {
@@ -160,8 +166,12 @@ func (r *BudgetRepo) History(ctx context.Context, householdID string, month time
 
 	out := make([]domain.Budget, 0, len(rows))
 	for _, row := range rows {
+		// RolloverAmountMinor is nil here for the same reason Upsert's own
+		// call site is: ListBudgetsInRange has no join to goal_contributions,
+		// and budgetHistoryMonthDTO carries no rollover fields at all for
+		// History's caller to read it from.
 		out = append(out, toBudget(row.ID, row.HouseholdID, row.Month, row.ExpectedIncomeMinor, row.PrimaryCurrency,
-			linesByBudget[row.ID], budgetRolloverStamp{row.RolledOverAt, row.RolloverGoalID}))
+			linesByBudget[row.ID], budgetRolloverStamp{row.RolledOverAt, row.RolloverGoalID, nil}))
 	}
 	return out, nil
 }
@@ -373,20 +383,29 @@ func toBudgetLines(rows []sqlcgen.ListBudgetLinesRow, currency string) []domain.
 // both set, never one without the other. Passing them into toBudget as one
 // value, rather than as two more positional params, is what keeps a caller
 // from ever being able to wire one half to a different row's other half.
+//
+// RolloverAmountMinor rides along in the same struct for convenience, but it
+// is NOT the same guarantee: it comes from goal_contributions, a different
+// table, reached only by GetBudget's own LEFT JOIN -- there is no CHECK
+// constraint tying it to the two columns above, and Upsert/History's own
+// call sites below pass it as nil on purpose (see their comments). Only
+// Get's call site ever has a real value to pass.
 type budgetRolloverStamp struct {
-	RolledOverAt   pgtype.Timestamptz
-	RolloverGoalID pgtype.UUID
+	RolledOverAt        pgtype.Timestamptz
+	RolloverGoalID      pgtype.UUID
+	RolloverAmountMinor *int64
 }
 
 func toBudget(id, householdID pgtype.UUID, month pgtype.Date, expectedIncomeMinor *int64, currency string,
 	lines []domain.BudgetLine, stamp budgetRolloverStamp) domain.Budget {
 	b := domain.Budget{
-		ID:             uuidToString(id),
-		HouseholdID:    uuidToString(householdID),
-		Month:          dateToTime(month),
-		Lines:          lines,
-		RolledOverAt:   timePtrOf(stamp.RolledOverAt),
-		RolloverGoalID: optionalIDToString(stamp.RolloverGoalID),
+		ID:                  uuidToString(id),
+		HouseholdID:         uuidToString(householdID),
+		Month:               dateToTime(month),
+		Lines:               lines,
+		RolledOverAt:        timePtrOf(stamp.RolledOverAt),
+		RolloverGoalID:      optionalIDToString(stamp.RolloverGoalID),
+		RolloverAmountMinor: stamp.RolloverAmountMinor,
 	}
 	if expectedIncomeMinor != nil {
 		b.ExpectedIncome = &domain.Money{Amount: *expectedIncomeMinor, Currency: currency}

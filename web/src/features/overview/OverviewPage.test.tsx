@@ -83,6 +83,7 @@ function budgetBody(overrides: Record<string, unknown> = {}) {
     overCount: 0,
     rolledOverAt: null,
     rolloverGoalId: null,
+    rolloverAmountMinor: null,
     ...overrides,
   };
 }

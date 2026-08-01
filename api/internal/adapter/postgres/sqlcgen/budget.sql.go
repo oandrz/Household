@@ -44,9 +44,13 @@ func (q *Queries) DeleteBudgetLines(ctx context.Context, budgetID pgtype.UUID) e
 
 const getBudget = `-- name: GetBudget :one
 SELECT b.id, b.household_id, b.month, b.expected_income_minor, h.primary_currency,
-       b.rolled_over_at, b.rollover_goal_id
+       b.rolled_over_at, b.rollover_goal_id, c.amount_minor AS rollover_amount_minor
 FROM budgets b
 JOIN households h ON h.id = b.household_id
+LEFT JOIN goal_contributions c
+       ON c.household_id = b.household_id
+      AND c.source_budget_month = b.month
+      AND c.source = 'budget_rollover'
 WHERE b.household_id = $1 AND b.month = $2
 `
 
@@ -63,8 +67,23 @@ type GetBudgetRow struct {
 	PrimaryCurrency     string
 	RolledOverAt        pgtype.Timestamptz
 	RolloverGoalID      pgtype.UUID
+	RolloverAmountMinor *int64
 }
 
+// GetBudget's LEFT JOIN reads back the amount a rollover actually moved --
+// goal_contributions.amount_minor for the one row this household-month's
+// stamp names (source = 'budget_rollover'), never Remaining recomputed from
+// today's transactions. The finding this closes: Remaining is Budgeted minus
+// Spent, live over every transaction in the month, so a backdated entry, an
+// edit, or a delete in an already-rolled-over month silently changed the
+// "done" sentence's own number after the fact -- a past-tense claim reading a
+// present-tense recomputation. rollover_amount_minor comes back NULL exactly
+// when rolled_over_at is NULL (a month that was never rolled over has no
+// contribution row to join to), so the two stay in lockstep without a second
+// query. The join is safe from duplicating b's row because
+// goal_contributions_one_rollover_per_month (00007_goals.sql) guarantees at
+// most one row can ever match (household_id, source_budget_month) with
+// source = 'budget_rollover'.
 func (q *Queries) GetBudget(ctx context.Context, arg GetBudgetParams) (GetBudgetRow, error) {
 	row := q.db.QueryRow(ctx, getBudget, arg.HouseholdID, arg.Month)
 	var i GetBudgetRow
@@ -76,6 +95,7 @@ func (q *Queries) GetBudget(ctx context.Context, arg GetBudgetParams) (GetBudget
 		&i.PrimaryCurrency,
 		&i.RolledOverAt,
 		&i.RolloverGoalID,
+		&i.RolloverAmountMinor,
 	)
 	return i, err
 }

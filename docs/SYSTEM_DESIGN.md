@@ -690,9 +690,10 @@ sequenceDiagram
     H->>Svc: Month(householdID, month, today)
     Svc->>Repo: Get(householdID, month)
     Note over Svc,Repo: domain.ErrNotFound means unbudgeted —<br/>the service turns this into budget: null, not a 404
+    Note over Repo: Get's own query LEFT JOINs goal_contributions<br/>(household_id + source_budget_month + source=budget_rollover)<br/>for RolloverAmountMinor — the amount a rollover actually<br/>moved, never Remaining recomputed below
     Svc->>TxnRepo: MonthTotals(householdID, month)
     Svc->>Svc: per-category and per-person spend,<br/>convert then add, like Account/Transaction
-    Svc-->>H: BudgetMonthView{ budget, spent, totals,<br/>by-person, excludedNoRate }
+    Svc-->>H: BudgetMonthView{ budget, spent, totals,<br/>by-person, excludedNoRate, rolloverAmountMinor }
     H-->>B: 200 — same shape whether or not a budget exists
 
     B->>H: PUT /api/v1/budgets/{month} { income, lines[] }
@@ -717,6 +718,24 @@ null` plus the spend figures even for a month with no caps at all — the
 empty state needs to know the month's spend to invite "Import last month",
 and a 404 would make the frontend special-case the one screen that is
 allowed to have nothing.
+
+`GET /budgets/{month}` also carries `rolloverAmountMinor` (nullable, moving
+in lockstep with `rolledOverAt`/`rolloverGoalId`) — the fix for a defect the
+final whole-branch review found: `remainingMinor` on this same response is
+`Budgeted − Spent`, **recomputed on every call** from whatever transactions
+exist in the month right now, so it is not a safe thing to render next to a
+past-tense "moved into X" sentence once a rollover has happened. A backdated
+transaction, or an edit or delete in an already-rolled-over month — none of
+them blocked anywhere in this codebase — used to change that sentence's own
+number after the fact. `rolloverAmountMinor` is read off the
+`goal_contributions` row the rollover actually wrote (`household_id` +
+`source_budget_month` + `source = 'budget_rollover'`, a lookup the partial
+unique index `goal_contributions_one_rollover_per_month` guarantees returns
+at most one row), via a `LEFT JOIN` added to `BudgetRepository.Get`'s own
+query — not a new column on `budgets`. `Upsert` and `History` still build a
+`domain.Budget` too, but neither result ever reaches the month response
+(`BudgetService.Month` builds its `Budget` through `Get` alone), so their
+own `RolloverAmountMinor` is always `nil` and nothing ever observes that.
 
 **`PUT` is a full replace, never a merge, in one transaction.** The
 Edit-budget modal always holds the entire budget client-side — every capped

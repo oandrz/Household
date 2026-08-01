@@ -50,6 +50,7 @@ function budgetFixture(overrides: Partial<BudgetMonthResponse> = {}): BudgetMont
     overCount: 0,
     rolledOverAt: null,
     rolloverGoalId: null,
+    rolloverAmountMinor: null,
     ...overrides,
   };
 }

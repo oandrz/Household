@@ -1315,6 +1315,40 @@ reason, and its comment is where this was learned the first time.
   "can this be negative" question) got asymmetric treatment, and nothing
   short of asking "what's the sibling field's guard, and does this one
   have the same shape" would have caught it — see pattern 1.
+- Goals slice, final whole-branch review: `BudgetRolloverCard.tsx`'s "done"
+  sentence ("S$650.00 moved into Bali trip.") rendered `remainingMinor` —
+  `BudgetMonthView.Remaining`, `Budgeted − Spent`, **recomputed on every
+  `GET /budgets/{month}`** — as if it were a record of the amount a past
+  rollover had actually moved. Nothing in this codebase blocks a backdated
+  transaction, an edit, or a delete inside an already-rolled-over month
+  (`TransactionService.Create` has no closed-month guard; neither does
+  `BudgetService.Save`), so any of the three silently changed a past-tense
+  sentence's own number after the fact — a late July receipt entered in
+  August could turn "S$650.00 moved into Bali trip" into "S$500.00 moved
+  into Bali trip" on the very next page load, while the goal's own
+  contributions panel still showed S$650.00 for that same row. The general
+  shape: **a live recomputation rendered as though it were a frozen record
+  of a completed action.** `remainingMinor` was never wrong — it was
+  answering a different question ("what is unspent right now") than the
+  sentence asked ("what did this rollover move"), and nothing before this
+  review had asked whether those two questions could drift apart once time
+  (and more transactions) passed between them. Fixed by adding
+  `rolloverAmountMinor` end to end — `BudgetRepository.Get`'s own query
+  `LEFT JOIN`s `goal_contributions` (`household_id` + `source_budget_month`
+  + `source = 'budget_rollover'`, at most one row by the partial unique
+  index `goal_contributions_one_rollover_per_month`) rather than a second
+  column on `budgets`, through `domain.Budget` → `BudgetMonthView` → the
+  DTO → the zod schema → the component, which now gates its "done" branch
+  on that field instead of `rolledOverTo`. The regression test
+  (`TestBudgetMonthRolloverAmountSurvivesALaterTransaction`, plus an HTTP
+  round-trip covering the same scenario against a real database) rolls a
+  month over, adds a transaction to it afterward, and asserts the reported
+  amount is unchanged while `remainingMinor` demonstrably moved — a test
+  that only checked the amount right after the rollover would have passed
+  against the original bug just as easily. Ask, for any figure rendered
+  next to a past-tense sentence about a completed write: is this value
+  actually read back from what was written, or is it recomputed fresh on
+  every read of the surrounding screen?
 
 ### Database and repositories
 

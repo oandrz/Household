@@ -90,6 +90,13 @@ export const GOAL_COPY = {
   // empty line in the list, which reads as a rendering bug rather than "no
   // note."
   manualContributionFallback: "Manual contribution",
+  // unknownContributionLabel is contributionSourceLabel's own default-case
+  // fallback -- deliberately NOT manualContributionFallback, which asserts
+  // "manual" about a row whose source this function does not recognise.
+  // Reviewed and promoted to fix-before-merge: a screen whose whole job is
+  // to be believed should never label an unknown thing with a specific,
+  // wrong claim.
+  unknownContributionLabel: "Contribution",
   startingBalanceLabel: "Starting balance",
   rolloverLabel: (monthName: string) => `From ${monthName}'s unspent budget`,
   // rolloverUnknownMonth is the fallback for a budget_rollover row whose
@@ -192,7 +199,7 @@ export function contributionSourceLabel(
     default: {
       const refused: never = source;
       void refused;
-      return GOAL_COPY.manualContributionFallback;
+      return GOAL_COPY.unknownContributionLabel;
     }
   }
 }

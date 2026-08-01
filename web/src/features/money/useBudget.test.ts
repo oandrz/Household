@@ -34,6 +34,7 @@ const julyResponse = {
   overCount: 0,
   rolledOverAt: null,
   rolloverGoalId: null,
+  rolloverAmountMinor: null,
 };
 
 // A second, distinguishable body -- proving `reload`/`save` actually re-GET
@@ -340,6 +341,7 @@ describe("useBudget", () => {
       ...julyResponse,
       rolledOverAt: "2026-07-31T00:00:00Z",
       rolloverGoalId: "goal-1",
+      rolloverAmountMinor: 5000,
     };
     const emptySummary = {
       plannedMonthlyTotalMinor: 0,

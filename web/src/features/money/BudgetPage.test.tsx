@@ -84,6 +84,7 @@ function budgetFixture(overrides: Partial<BudgetMonthResponse> = {}): BudgetMont
     overCount: 1,
     rolledOverAt: null,
     rolloverGoalId: null,
+    rolloverAmountMinor: null,
     ...overrides,
   };
 }
@@ -583,6 +584,7 @@ describe("BudgetPage rollover card", () => {
         dailyPaceOk: false,
         rolledOverAt: "2026-07-31T00:00:00Z",
         rolloverGoalId: "goal-1",
+        rolloverAmountMinor: 178000,
       }),
       { "GET /api/v1/goals": GOALS_WITH_BALI },
     );
@@ -601,6 +603,7 @@ describe("BudgetPage rollover card", () => {
       dailyPaceOk: false,
       rolledOverAt: "2026-07-31T00:00:00Z",
       rolloverGoalId: "goal-1",
+      rolloverAmountMinor: 178000,
     });
     renderPage(openFixture, {
       "GET /api/v1/budgets/2026-07": [
@@ -650,6 +653,7 @@ describe("BudgetPage rollover card", () => {
       dailyPaceOk: false,
       rolledOverAt: "2026-07-31T00:00:00Z",
       rolloverGoalId: "goal-1",
+      rolloverAmountMinor: 178000,
     });
     renderPage(openFixture, {
       "GET /api/v1/budgets/2026-07": [

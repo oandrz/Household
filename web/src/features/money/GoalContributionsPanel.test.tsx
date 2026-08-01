@@ -103,7 +103,9 @@ function renderPanel(
 ) {
   const onClose = vi.fn();
   const fetchMock = stubFetchRoutes(extraRoutes);
-  renderWithRouter(<GoalContributionsPanel goal={goalFixture()} onClose={onClose} {...props} />);
+  renderWithRouter(
+    <GoalContributionsPanel goal={goalFixture()} symbol="S$" onClose={onClose} {...props} />,
+  );
   return { fetchMock, onClose };
 }
 
@@ -225,6 +227,27 @@ describe("GoalContributionsPanel", () => {
     expect(screen.getByText("Manual contribution")).toBeInTheDocument();
     expect(screen.getByText("Starting balance")).toBeInTheDocument();
     expect(screen.getByText("From July's unspent budget")).toBeInTheDocument();
+  });
+
+  // Finding 2 of the goals-branch review: this row used to call formatMoney
+  // without its third `symbol` argument, so the amount read "SGD 400.00"
+  // directly above a GoalCard reading "S$400.00" -- the same figure, two
+  // different renderings on the same screen. GoalsPage.tsx now threads the
+  // goal's own symbol (symbolFor(goal.currency)) through as a prop, the same
+  // way it already does for GoalCard.
+  it("renders the contribution amount with the goal's currency symbol, not the bare code", async () => {
+    renderPanel(
+      { symbol: "S$" },
+      {
+        "GET /api/v1/goals/goal-1/contributions": {
+          status: 200,
+          body: { contributions: [contributionFixture({ amountMinor: 40000 })] },
+        },
+      },
+    );
+
+    expect(await screen.findByText("S$400.00")).toBeInTheDocument();
+    expect(screen.queryByText("SGD 400.00")).not.toBeInTheDocument();
   });
 
   // goalContributionSchema's z.enum refuses an unrecognised `source` one

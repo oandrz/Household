@@ -309,6 +309,7 @@ describe("the real route tree", () => {
           overCount: 0,
           rolledOverAt: null,
           rolloverGoalId: null,
+          rolloverAmountMinor: null,
         },
       },
     });

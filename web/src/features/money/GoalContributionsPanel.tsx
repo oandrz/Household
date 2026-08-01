@@ -49,6 +49,7 @@ function today(): string {
 function ContributionRow({
   contribution,
   currency,
+  symbol,
   confirming,
   deleting,
   error,
@@ -58,6 +59,13 @@ function ContributionRow({
 }: {
   contribution: GoalContribution;
   currency: string;
+  // The goal's own symbol (GoalsPage.tsx's `symbolFor(goal.currency)`), not
+  // the household's primary-currency one -- a contribution is its goal's
+  // currency by construction (00007_goals.sql's own comment), and every
+  // other money figure on this screen (GoalCard's own progress amounts)
+  // already renders with the symbol, not the bare ISO code. undefined falls
+  // back to the code, formatMoney's own contract.
+  symbol: string | undefined;
   confirming: boolean;
   deleting: boolean;
   // Scoped to this one row, not a single panel-level slot -- a 404 on row 1
@@ -83,7 +91,7 @@ function ContributionRow({
         </div>
         <div className="flex items-center gap-3">
           <span className="text-[13px] font-semibold text-ink">
-            {formatMoney(contribution.amountMinor, currency)}
+            {formatMoney(contribution.amountMinor, currency, symbol)}
           </span>
           {!confirming && (
             <button
@@ -127,7 +135,18 @@ function ContributionRow({
   );
 }
 
-export function GoalContributionsPanel({ goal, onClose }: { goal: Goal; onClose: () => void }) {
+export function GoalContributionsPanel({
+  goal,
+  symbol,
+  onClose,
+}: {
+  goal: Goal;
+  // GoalsPage.tsx's own `symbolFor(goal.currency)` -- see ContributionRow's
+  // own `symbol` prop comment for why this must be the goal's currency, not
+  // the household's primary one.
+  symbol: string | undefined;
+  onClose: () => void;
+}) {
   const { addContribution, deleteContribution } = useGoals({ enabled: false });
   const contributions = useGoalContributions(goal.id, true);
 
@@ -291,6 +310,7 @@ export function GoalContributionsPanel({ goal, onClose }: { goal: Goal; onClose:
             key={contribution.id}
             contribution={contribution}
             currency={goal.currency}
+            symbol={symbol}
             confirming={confirmingId === contribution.id}
             deleting={deletingId === contribution.id}
             error={deleteErrors[contribution.id] ?? null}

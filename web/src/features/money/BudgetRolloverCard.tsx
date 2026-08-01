@@ -52,6 +52,7 @@ export function BudgetRolloverCard({
   month,
   closed,
   remainingMinor,
+  rolloverAmountMinor,
   currency,
   rolledOverTo,
   onRolledOver,
@@ -67,11 +68,25 @@ export function BudgetRolloverCard({
   // to honour.
   closed: boolean;
   remainingMinor: number;
+  // budgetMonthResponseSchema's own `rolloverAmountMinor` -- the amount a
+  // rollover actually moved, read off the goal_contributions row it wrote.
+  // null until a rollover happens, alongside `rolledOverTo` below, and fixed
+  // from then on. This is what the "done" sentence renders, deliberately
+  // never `remainingMinor` above: that figure is recomputed on every GET
+  // from whatever transactions exist in this month right now, and a
+  // backdated entry, an edit or a delete after the rollover would otherwise
+  // silently change a past-tense "moved into X" sentence's own number (the
+  // finding this closes). Gating the "done" branch on this field rather than
+  // on `rolledOverTo` means that branch can never be reached with a live
+  // figure standing in for it.
+  rolloverAmountMinor: number | null;
   currency: string;
   // The stamped destination goal's id (budgetMonthResponseSchema's own
   // `rolloverGoalId`), or null before any move has happened. Named after
   // the wire fact it mirrors, not "goalId" -- this describes the month,
-  // not a selection this component is making.
+  // not a selection this component is making. Used only to look up the
+  // goal's name below; `rolloverAmountMinor` above is what decides whether
+  // the "done" branch renders at all.
   rolledOverTo: string | null;
   // Fired once a move succeeds, after the mutation's own onSuccess has
   // already invalidated both the month and /goals (useBudget.ts's own
@@ -122,17 +137,24 @@ export function BudgetRolloverCard({
   }
 
   if (!closed) return null;
-  if (remainingMinor <= 0 && rolledOverTo === null) return null;
+  if (remainingMinor <= 0 && rolloverAmountMinor === null) return null;
 
   // `error` is rendered in both branches below (this one and the offer
   // further down), not only where the click that set it happened -- see the
   // offer branch's own comment on `error` for why: a 409 here can cause
-  // `rolledOverTo` to flip non-null out from under an in-flight error
+  // `rolloverAmountMinor` to flip non-null out from under an in-flight error
   // message, and the message needs to survive landing in this branch
   // instead, not just the one it started in.
-  if (rolledOverTo !== null) {
+  //
+  // Gated on `rolloverAmountMinor !== null`, not `rolledOverTo !== null`:
+  // the two move together (both null, or both set, the same invariant the
+  // wire's own comment describes), but keying the branch on the amount is
+  // what makes it impossible to reach this "done" sentence with anything
+  // other than the frozen figure it exists to show -- there is no fallback
+  // to `remainingMinor` anywhere below for a bad state to fall back into.
+  if (rolloverAmountMinor !== null) {
     const destination = goals.data?.goals.find((g) => g.id === rolledOverTo);
-    const amount = formatMoney(remainingMinor, currency, symbol);
+    const amount = formatMoney(rolloverAmountMinor, currency, symbol);
     return (
       <div data-testid="budget-rollover" className="flex flex-col gap-1.5">
         <p data-testid="budget-rollover-done" className="text-[12px] leading-relaxed text-accent-dark">
@@ -171,19 +193,25 @@ export function BudgetRolloverCard({
 
   return (
     <div data-testid="budget-rollover-offer" className="flex flex-col gap-1.5">
-      <p className="text-[12px] leading-relaxed text-accent-dark">
+      <p data-testid="budget-rollover-offer-text" className="text-[12px] leading-relaxed text-accent-dark">
         {BUDGET_COPY.rolloverOffer(formatMoney(remainingMinor, currency, symbol), monthNameOnly(month))}
-        {" · "}
+        {/* The separator lives inside the same guard as the button it
+            introduces -- opening the picker unmounts the button below but
+            used to leave this literal " · " rendered on its own, so the
+            sentence read "... left in July · " with nothing after it. */}
         {!pickerOpen && (
-          <button
-            type="button"
-            data-testid="budget-rollover-cta"
-            disabled={!canOffer}
-            onClick={() => setPickerOpen(true)}
-            className="font-semibold text-accent underline disabled:cursor-not-allowed disabled:text-muted disabled:no-underline"
-          >
-            {BUDGET_COPY.moveIntoGoal}
-          </button>
+          <>
+            {" · "}
+            <button
+              type="button"
+              data-testid="budget-rollover-cta"
+              disabled={!canOffer}
+              onClick={() => setPickerOpen(true)}
+              className="font-semibold text-accent underline disabled:cursor-not-allowed disabled:text-muted disabled:no-underline"
+            >
+              {BUDGET_COPY.moveIntoGoal}
+            </button>
+          </>
         )}
       </p>
 

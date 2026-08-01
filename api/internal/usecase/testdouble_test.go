@@ -1983,6 +1983,7 @@ func (r *fakeBudgetRepo) clearRolloverStamp(householdID string, month time.Time)
 	if b, ok := r.budgets[key]; ok {
 		b.RolledOverAt = nil
 		b.RolloverGoalID = ""
+		b.RolloverAmountMinor = nil
 		r.budgets[key] = b
 	}
 }
@@ -2094,6 +2095,15 @@ func (r *fakeBudgetRepo) RollOverToGoal(ctx context.Context, in usecase.RollOver
 	stampedAt := in.OccurredOn
 	b.RolledOverAt = &stampedAt
 	b.RolloverGoalID = in.GoalID
+	// Amount is frozen here, at write time -- the real Postgres repository's
+	// Get reads it back off the goal_contributions row this same call wrote
+	// (RollOverToGoal's own comment), never off a later recomputation. A
+	// test that changes what this household-month's Remaining would compute
+	// to AFTER this call (a late addExpense, most concretely) must still see
+	// this exact figure back from Get -- that is the whole of what
+	// TestBudgetMonthRolloverAmountSurvivesALaterTransaction pins.
+	amount := in.Amount.Amount
+	b.RolloverAmountMinor = &amount
 	r.budgets[key] = b
 	return c, nil
 }

@@ -260,13 +260,20 @@ export function GoalsPage() {
           conditional-mount gate modalGoal above uses, and the gate
           GoalContributionsPanel.tsx's own header comment relies on for its
           `useGoalContributions(goal.id, true)` call to mean "while open,"
-          not "always." No currencies.data guard needed here (unlike
-          GoalModal above): this panel takes no currencies prop at all --
-          formatMoney falls back to the bare currency code when no symbol is
-          available, so there is nothing here that must wait on a second
-          query to settle. */}
+          not "always." symbol is `symbolFor(contributingGoal.currency)`, the
+          same expression GoalCard above already uses -- still no
+          currencies.data GUARD needed (unlike GoalModal above): symbolFor
+          returns undefined before that query settles, and formatMoney falls
+          back to the bare currency code for undefined, so there is nothing
+          here that must block on a second query. Finding 2 of the review:
+          this panel used to take no symbol at all, rendering "SGD 400.00"
+          directly above a card reading "S$400.00". */}
       {contributingGoal && (
-        <GoalContributionsPanel goal={contributingGoal} onClose={() => setContributingGoal(null)} />
+        <GoalContributionsPanel
+          goal={contributingGoal}
+          symbol={symbolFor(contributingGoal.currency)}
+          onClose={() => setContributingGoal(null)}
+        />
       )}
     </div>
   );

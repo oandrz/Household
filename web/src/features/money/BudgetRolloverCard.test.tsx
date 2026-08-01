@@ -65,6 +65,7 @@ function renderCard(
     month: string;
     closed: boolean;
     remainingMinor: number;
+    rolloverAmountMinor: number | null;
     currency: string;
     rolledOverTo: string | null;
     onRolledOver: () => void;
@@ -78,6 +79,14 @@ function renderCard(
     ...extraRoutes,
   });
   const onRolledOver = props.onRolledOver ?? vi.fn();
+  // Defaults to the "done" branch's own figure whenever a test names a
+  // destination goal (rolledOverTo set) and leaves the amount unspecified --
+  // most existing fixtures below only ever set rolledOverTo, and the two are
+  // meant to move together. Tests that need to prove the amount and
+  // remainingMinor can legitimately disagree (Finding 1's own regression)
+  // pass rolloverAmountMinor explicitly instead.
+  const stamped = props.rolledOverTo !== undefined && props.rolledOverTo !== null;
+  const rolloverAmountMinor = props.rolloverAmountMinor ?? (stamped ? (props.remainingMinor ?? 178000) : null);
   return {
     fetchMock,
     onRolledOver,
@@ -86,6 +95,7 @@ function renderCard(
         month={props.month ?? "2026-07"}
         closed={props.closed ?? true}
         remainingMinor={props.remainingMinor ?? 178000}
+        rolloverAmountMinor={rolloverAmountMinor}
         currency={props.currency ?? "SGD"}
         rolledOverTo={props.rolledOverTo ?? null}
         onRolledOver={onRolledOver}
@@ -132,6 +142,27 @@ describe("BudgetRolloverCard", () => {
     const offer = await screen.findByTestId("budget-rollover-offer");
     expect(offer).toHaveTextContent("S$1,780.00 unspent in July");
     expect(screen.getByTestId("budget-rollover-cta")).toHaveTextContent("Move it into a goal");
+  });
+
+  // Finding 4 of the goals-branch review: the " · " separator used to render
+  // unconditionally while only the button after it was gated on
+  // `!pickerOpen`, so opening the picker left the sentence ending in
+  // "... unspent in July · " with nothing after it -- a dangling separator
+  // pointing at nothing. The fix moved the separator inside the same guard
+  // as the button, so opening the picker must remove both together.
+  it("removes the trailing separator along with the button once the picker opens", async () => {
+    renderCard({ closed: true, month: "2026-07", remainingMinor: 178000 });
+
+    await screen.findByTestId("budget-rollover-cta");
+    await waitFor(() => expect(screen.getByTestId("budget-rollover-cta")).not.toBeDisabled());
+
+    const offerText = screen.getByTestId("budget-rollover-offer-text");
+    expect(offerText.textContent).toBe("S$1,780.00 unspent in July · Move it into a goal");
+
+    screen.getByTestId("budget-rollover-cta").click();
+
+    await waitFor(() => expect(screen.queryByTestId("budget-rollover-cta")).not.toBeInTheDocument());
+    expect(screen.getByTestId("budget-rollover-offer-text").textContent).toBe("S$1,780.00 unspent in July");
   });
 
   // Owner ruling, 2026-08-01: remainingMinor excludes any expense with no
@@ -200,6 +231,22 @@ describe("BudgetRolloverCard", () => {
     );
     expect(screen.queryByTestId("budget-rollover-offer")).not.toBeInTheDocument();
     expect(screen.queryByTestId("budget-rollover-cta")).not.toBeInTheDocument();
+  });
+
+  // Finding 1's own regression test at the component level: remainingMinor
+  // is recomputed on every GET from whatever transactions exist in the
+  // month right now, so a late transaction landing in an already-rolled-over
+  // month can leave it disagreeing with what actually moved. The "done"
+  // sentence must render rolloverAmountMinor -- the frozen figure -- even
+  // when remainingMinor has since drifted to a different, and here even
+  // negative, value.
+  it("renders the frozen rolloverAmountMinor in the done sentence, never the live remainingMinor", async () => {
+    renderCard({ closed: true, remainingMinor: -5000, rolloverAmountMinor: 178000, rolledOverTo: "goal-1" });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("budget-rollover-done")).toHaveTextContent("S$1,780.00 moved into Bali trip."),
+    );
+    expect(screen.getByTestId("budget-rollover-done")).not.toHaveTextContent("S$50.00");
   });
 
   it("falls back to a nameless destination sentence when the stamped goal isn't in the fetched list", async () => {
