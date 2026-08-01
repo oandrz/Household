@@ -318,20 +318,15 @@ describe("the real route tree", () => {
     // Real timers restored in this file's shared afterEach below.
   });
 
-  // Task 10's own analogue of the transactions/budget redirect tests above:
+  // Task 11's own analogue of the transactions/budget redirect tests above:
   // moneyGoalsRoute has to sit under moneyGuardRoute too, for the same
-  // reason -- a member without money must never reach the Goals screen.
-  // Unlike the budget test's pair, there is no positive "mounts the Goals
-  // page" counterpart here: Task 10 wires the route to a placeholder (Task
-  // 11 builds GoalsPage), and today, before moneyGoalsRoute exists at all,
-  // "/money/goals" already falls through to moneySplatRoute -- a sibling
-  // gated by the exact same RequireCapability parent, which redirects
-  // identically. That is exactly why this test alone cannot prove the
-  // dedicated route exists (only that *something* under moneyGuardRoute
-  // caught it) -- the mutation check that pins this re-parents
-  // moneyGoalsRoute onto shellRoute (bypassing the guard entirely) rather
-  // than deleting it, since deleting it would leave the splat's identical
-  // guard in place and this test would stay green for the wrong reason.
+  // reason -- a member without money must never reach the Goals screen. On
+  // its own this test cannot prove the dedicated route exists (before
+  // moneyGoalsRoute existed at all, "/money/goals" already fell through to
+  // moneySplatRoute -- a sibling gated by the exact same RequireCapability
+  // parent, which redirects identically) -- the positive counterpart right
+  // below is what actually proves it, the same pairing moneyBudgetRoute's
+  // two tests use.
   it("redirects a member without the money capability away from /money/goals", async () => {
     stubFetchRoutes({
       "GET /api/v1/auth/me": {
@@ -359,6 +354,42 @@ describe("the real route tree", () => {
     expect(
       await screen.findByRole("heading", { level: 1, name: "Overview" }),
     ).toBeInTheDocument();
+  });
+
+  // The positive counterpart the redirect test above needs -- and the one
+  // that actually proves moneyGoalsRoute exists and mounts the real
+  // GoalsPage, not moneySplatRoute's placeholder. This is the test Task 10's
+  // own comment named as the one nothing would catch the placeholder swap
+  // being forgotten without (task-11-brief.md's carry-forward).
+  it("mounts the Goals page at /money/goals for a caller who has the money capability", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      "GET /api/v1/currencies": {
+        status: 200,
+        body: { currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }] },
+      },
+      "GET /api/v1/goals": {
+        status: 200,
+        body: {
+          currency: "SGD",
+          goals: [],
+          summary: {
+            plannedMonthlyTotalMinor: 0,
+            actualThisMonthMinor: 0,
+            onTrackCount: 0,
+            datedCount: 0,
+            noDateCount: 0,
+            excludedNoRate: 0,
+            nextGoal: null,
+          },
+        },
+      },
+    });
+
+    const { router } = renderApp("/money/goals");
+
+    expect(await screen.findByTestId("goals-page")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/money/goals");
   });
 
   // Fix round 5, Finding 1 (critical): this is the exact reproduction the

@@ -15,7 +15,7 @@
 //       /money       RequireCapability("money") -> Finances (Task 39; slice 2's first real page)
 //       /money/transactions RequireCapability("money") -> Transactions (Task 17; the real ledger)
 //       /money/budget RequireCapability("money") -> Budget (Task 11; BudgetPage stub -- Task 12 builds the real screen)
-//       /money/goals RequireCapability("money") -> Goals (Task 10; placeholder heading -- Task 11 builds the real screen)
+//       /money/goals RequireCapability("money") -> Goals (Task 11; the real GoalsPage)
 //       /money/$     RequireCapability("money") -> Money    (slice 2 placeholder; Bills remains)
 //       /settings                                   -- the real Settings screen (Task 20)
 //
@@ -54,7 +54,7 @@ import { SignUpCompleteScreen } from "../features/auth/SignUpCompleteScreen";
 import { useMe } from "../features/auth/useAuth";
 import { BudgetPage } from "../features/money/BudgetPage";
 import { FinancesPage } from "../features/money/FinancesPage";
-import { GOAL_COPY } from "../features/money/goalCopy";
+import { GoalsPage } from "../features/money/GoalsPage";
 import { TransactionsPage } from "../features/money/TransactionsPage";
 // Still live for /money/$ -- Bills has no page yet. Overview
 // stopped using it when the interim Overview shipped, but it was not that
@@ -219,23 +219,18 @@ const moneyBudgetRoute = createRoute({
 });
 // A sibling of moneyBudgetRoute, same reasoning: nested under
 // moneyGuardRoute (not the shell) so RequireCapability still runs. Task 10
-// wires the route only -- there is no GoalsPage yet (Task 11 builds it), so
-// the component is this file's own tiny placeholder rather than a stub file
-// like BudgetPage.tsx once was; nothing outside this route needs it by name,
-// and Task 11 replaces the whole `component` value in one change rather than
-// editing a file this route no longer needs. router.test.tsx's "redirects a
-// member without the money capability away from /money/goals" pins the
-// guard; unlike moneyBudgetRoute's pair, there is deliberately no positive
-// "mounts the Goals page" counterpart here, since there is no distinctive
-// page yet for one to assert against.
+// wired the route to a tiny inline placeholder heading (there was no
+// GoalsPage yet); Task 11 replaces it with the real screen, the same swap
+// moneyBudgetRoute's own BudgetPage went through. router.test.tsx's
+// "redirects a member without the money capability away from /money/goals"
+// pins the guard, and "mounts the Goals page at /money/goals" (added
+// alongside this change) is moneyBudgetRoute's positive-counterpart pattern,
+// restated here -- Task 10's own comment named this test as the one nothing
+// would have caught the placeholder swap being forgotten without.
 const moneyGoalsRoute = createRoute({
   getParentRoute: () => moneyGuardRoute,
   path: "goals",
-  component: () => (
-    <div className="flex flex-col gap-2 p-10">
-      <h1 className="font-serif text-2xl">{GOAL_COPY.title}</h1>
-    </div>
-  ),
+  component: GoalsPage,
 });
 const moneySplatRoute = createRoute({
   getParentRoute: () => moneyGuardRoute,
