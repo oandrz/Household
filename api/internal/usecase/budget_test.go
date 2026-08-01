@@ -609,8 +609,15 @@ func TestBudgetRollOverRefusesAnOpenMonth(t *testing.T) {
 		t.Fatalf("future month err = %v, want domain.ErrRolloverMonthOpen", err)
 	}
 
-	if contribs, _ := f.goals.ListContributions(ctx, "house-1", "goal-nonexistent", 0); len(contribs) != 0 {
-		t.Fatalf("contributions = %+v, want none written", contribs)
+	// A ListContributions check against "goal-nonexistent" would be
+	// tautological -- a goal that was never seeded has no contributions no
+	// matter what RollOver does. rolledOverGoalID is the one piece of state
+	// a wrongly-permissive month check could actually have touched.
+	if _, done := f.budgets.rolledOverGoalID("house-1", current); done {
+		t.Fatal("current month stamped as rolled over -- the month check must refuse before any write")
+	}
+	if _, done := f.budgets.rolledOverGoalID("house-1", future); done {
+		t.Fatal("future month stamped as rolled over -- the month check must refuse before any write")
 	}
 }
 
