@@ -179,4 +179,23 @@ describe("MonthlyContributionsCard", () => {
 
     expect(screen.getByTestId("monthly-contributions-planned")).toHaveTextContent("S$500.00");
   });
+
+  // Self-review's own question: the bar's width divides by the local sum of
+  // every live goal's plannedMonthlyMinor (localPlannedTotal in the
+  // component) -- a household whose live goals are all zero-planned, or
+  // that has none live at all, must never let that division reach the DOM
+  // as `NaN%`, the same guard BudgetByPerson.tsx's own width already takes.
+  it("renders a flat, non-NaN bar when every live goal's planned monthly is zero", () => {
+    renderCard(
+      [goalFixture({ plannedMonthlyMinor: 0 })],
+      summaryFixture({ plannedMonthlyTotalMinor: 0, actualThisMonthMinor: 0 }),
+    );
+
+    const segment = screen.getByTestId("monthly-contributions-segment");
+    expect(segment.style.width).toBe("0%");
+    expect(screen.getByTestId("monthly-contributions-planned")).toHaveTextContent("S$0.00");
+    // Nothing planned and nothing logged is not a divergence to report --
+    // actualNone only fires when something was planned to compare against.
+    expect(screen.queryByTestId("monthly-contributions-diff")).not.toBeInTheDocument();
+  });
 });
