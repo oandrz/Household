@@ -8,6 +8,7 @@ import (
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres"
 	"github.com/andreasoentoro/hearth/api/internal/domain"
+	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
 // newTestGoal is the shared fixture every test below builds on: a goal with
@@ -541,5 +542,107 @@ func TestGoalListContributionsRespectsALowLimit(t *testing.T) {
 	// Newest first: the two most recent of the three (July 4 and July 3).
 	if limited[0].Amount.Amount != 4000 || limited[1].Amount.Amount != 3000 {
 		t.Fatalf("limited = %+v, want [4000, 3000] newest first", limited)
+	}
+}
+
+// TestDeleteManualContributionLeavesEveryStampAlone pins
+// GoalRepository.DeleteContribution's own doc comment from the other
+// direction: deleting a MANUAL contribution on a goal that also holds a
+// budget_rollover contribution must leave that rollover's stamp completely
+// untouched -- ClearBudgetRollover only ever runs for a deleted row whose OWN
+// source is budget_rollover, never merely because the same goal has one
+// somewhere.
+func TestDeleteManualContributionLeavesEveryStampAlone(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	budgetRepo := postgres.NewBudgetRepo(db)
+	goalRepo := postgres.NewGoalRepo(db)
+	householdID := insertTestHousehold(t, db)
+	_, goalID := rolloverFixture(t, db, budgetRepo, goalRepo, householdID, july(17), "Goal A")
+
+	if _, err := budgetRepo.RollOverToGoal(ctx, usecase.RollOverToGoalInput{
+		HouseholdID: householdID,
+		Month:       july(17),
+		GoalID:      goalID,
+		Amount:      moneyOf(20000),
+		OccurredOn:  august(3),
+	}); err != nil {
+		t.Fatalf("RollOverToGoal: %v", err)
+	}
+
+	manual, err := goalRepo.AddContribution(ctx, domain.GoalContribution{
+		GoalID: goalID, HouseholdID: householdID,
+		Amount: moneyOf(5000), OccurredOn: august(4), Source: domain.ContributionManual,
+	})
+	if err != nil {
+		t.Fatalf("AddContribution manual: %v", err)
+	}
+
+	if err := goalRepo.DeleteContribution(ctx, householdID, goalID, manual.ID); err != nil {
+		t.Fatalf("DeleteContribution: %v", err)
+	}
+
+	if rolledOverAt, rolloverGoalID := budgetRolloverStamp(t, db, householdID, july(1)); rolledOverAt == nil || rolloverGoalID == nil {
+		t.Fatalf("stamp after deleting the MANUAL contribution = (rolled_over_at=%v, rollover_goal_id=%v), want both still set",
+			rolledOverAt, rolloverGoalID)
+	}
+
+	remaining, err := goalRepo.ListContributions(ctx, householdID, goalID, 0)
+	if err != nil {
+		t.Fatalf("ListContributions: %v", err)
+	}
+	if len(remaining) != 1 || remaining[0].Source != domain.ContributionBudgetRollover {
+		t.Fatalf("remaining = %+v, want exactly the surviving rollover contribution", remaining)
+	}
+}
+
+// TestDeleteRolloverClearsOnlyItsOwnMonth pins why the contribution carries
+// source_budget_month at all rather than ClearBudgetRollover keying off
+// rollover_goal_id alone: two different months rolled into the SAME goal must
+// carry independent stamps, and deleting one month's rollover must never
+// touch the other's -- clearing by goal id alone would unstamp both (the
+// task brief's own reasoning for this test).
+func TestDeleteRolloverClearsOnlyItsOwnMonth(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	budgetRepo := postgres.NewBudgetRepo(db)
+	goalRepo := postgres.NewGoalRepo(db)
+	householdID := insertTestHousehold(t, db)
+	june := time.Date(2026, time.June, 17, 0, 0, 0, 0, time.UTC)
+
+	_, goalID := rolloverFixture(t, db, budgetRepo, goalRepo, householdID, june, "Shared goal")
+	if _, err := budgetRepo.Upsert(ctx, domain.Budget{
+		HouseholdID: householdID,
+		Month:       july(17),
+		Lines:       []domain.BudgetLine{{CategoryID: insertTestCategory(t, db, householdID, "Dining out"), Cap: moneyOf(50000)}},
+	}); err != nil {
+		t.Fatalf("Upsert July budget: %v", err)
+	}
+
+	juneRollover, err := budgetRepo.RollOverToGoal(ctx, usecase.RollOverToGoalInput{
+		HouseholdID: householdID, Month: june, GoalID: goalID,
+		Amount: moneyOf(10000), OccurredOn: july(2),
+	})
+	if err != nil {
+		t.Fatalf("RollOverToGoal June: %v", err)
+	}
+	if _, err := budgetRepo.RollOverToGoal(ctx, usecase.RollOverToGoalInput{
+		HouseholdID: householdID, Month: july(17), GoalID: goalID,
+		Amount: moneyOf(15000), OccurredOn: august(2),
+	}); err != nil {
+		t.Fatalf("RollOverToGoal July: %v", err)
+	}
+
+	if err := goalRepo.DeleteContribution(ctx, householdID, goalID, juneRollover.ID); err != nil {
+		t.Fatalf("DeleteContribution June's rollover: %v", err)
+	}
+
+	if rolledOverAt, rolloverGoalID := budgetRolloverStamp(t, db, householdID, june); rolledOverAt != nil || rolloverGoalID != nil {
+		t.Fatalf("June's stamp = (rolled_over_at=%v, rollover_goal_id=%v), want BOTH nil after deleting its rollover",
+			rolledOverAt, rolloverGoalID)
+	}
+	if rolledOverAt, rolloverGoalID := budgetRolloverStamp(t, db, householdID, july(1)); rolledOverAt == nil || rolloverGoalID == nil || *rolloverGoalID != goalID {
+		t.Fatalf("July's stamp = (rolled_over_at=%v, rollover_goal_id=%v), want BOTH still set -- "+
+			"deleting June's rollover must not touch July's", rolledOverAt, rolloverGoalID)
 	}
 }

@@ -62,3 +62,28 @@ ORDER BY b.month DESC;
 SELECT budget_id, category_id, cap_minor FROM budget_lines
 WHERE budget_id = ANY(sqlc.arg(budget_ids)::uuid[])
 ORDER BY budget_id, category_id;
+
+-- StampBudgetRollover sets a budget month's rollover stamp, but only if it is
+-- not already stamped -- the "AND rolled_over_at IS NULL" is what makes two
+-- concurrent rollovers for the same month unable to both succeed: whichever
+-- transaction's UPDATE commits first wins the row, and the second finds
+-- nothing left to update once it re-checks the WHERE clause against the
+-- committed row.
+--
+-- Zero rows updated is ambiguous on its own -- the month may never have been
+-- budgeted, or it may already be stamped -- so BudgetRepo.RollOverToGoal
+-- follows a zero-row result with GetBudgetRolloverStamp inside the same
+-- transaction to tell the two apart, rather than guessing here.
+-- name: StampBudgetRollover :one
+UPDATE budgets
+   SET rolled_over_at = now(), rollover_goal_id = $3, updated_at = now()
+ WHERE household_id = $1 AND month = $2 AND rolled_over_at IS NULL
+RETURNING id;
+
+-- GetBudgetRolloverStamp is StampBudgetRollover's own follow-up read, run
+-- only when that UPDATE matches zero rows: no row at all means the month was
+-- never budgeted (BudgetRepo.RollOverToGoal maps that to domain.ErrNotFound);
+-- a row whose rolled_over_at is already set means a rollover beat this one to
+-- it (domain.ErrRolloverAlreadyDone).
+-- name: GetBudgetRolloverStamp :one
+SELECT rolled_over_at FROM budgets WHERE household_id = $1 AND month = $2;

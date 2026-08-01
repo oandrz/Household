@@ -75,6 +75,27 @@ func (q *Queries) GetBudget(ctx context.Context, arg GetBudgetParams) (GetBudget
 	return i, err
 }
 
+const getBudgetRolloverStamp = `-- name: GetBudgetRolloverStamp :one
+SELECT rolled_over_at FROM budgets WHERE household_id = $1 AND month = $2
+`
+
+type GetBudgetRolloverStampParams struct {
+	HouseholdID pgtype.UUID
+	Month       pgtype.Date
+}
+
+// GetBudgetRolloverStamp is StampBudgetRollover's own follow-up read, run
+// only when that UPDATE matches zero rows: no row at all means the month was
+// never budgeted (BudgetRepo.RollOverToGoal maps that to domain.ErrNotFound);
+// a row whose rolled_over_at is already set means a rollover beat this one to
+// it (domain.ErrRolloverAlreadyDone).
+func (q *Queries) GetBudgetRolloverStamp(ctx context.Context, arg GetBudgetRolloverStampParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getBudgetRolloverStamp, arg.HouseholdID, arg.Month)
+	var rolled_over_at pgtype.Timestamptz
+	err := row.Scan(&rolled_over_at)
+	return rolled_over_at, err
+}
+
 const getHouseholdPrimaryCurrency = `-- name: GetHouseholdPrimaryCurrency :one
 SELECT primary_currency FROM households WHERE id = $1
 `
@@ -220,6 +241,37 @@ func (q *Queries) ListBudgetsInRange(ctx context.Context, arg ListBudgetsInRange
 		return nil, err
 	}
 	return items, nil
+}
+
+const stampBudgetRollover = `-- name: StampBudgetRollover :one
+UPDATE budgets
+   SET rolled_over_at = now(), rollover_goal_id = $3, updated_at = now()
+ WHERE household_id = $1 AND month = $2 AND rolled_over_at IS NULL
+RETURNING id
+`
+
+type StampBudgetRolloverParams struct {
+	HouseholdID    pgtype.UUID
+	Month          pgtype.Date
+	RolloverGoalID pgtype.UUID
+}
+
+// StampBudgetRollover sets a budget month's rollover stamp, but only if it is
+// not already stamped -- the "AND rolled_over_at IS NULL" is what makes two
+// concurrent rollovers for the same month unable to both succeed: whichever
+// transaction's UPDATE commits first wins the row, and the second finds
+// nothing left to update once it re-checks the WHERE clause against the
+// committed row.
+//
+// Zero rows updated is ambiguous on its own -- the month may never have been
+// budgeted, or it may already be stamped -- so BudgetRepo.RollOverToGoal
+// follows a zero-row result with GetBudgetRolloverStamp inside the same
+// transaction to tell the two apart, rather than guessing here.
+func (q *Queries) StampBudgetRollover(ctx context.Context, arg StampBudgetRolloverParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, stampBudgetRollover, arg.HouseholdID, arg.Month, arg.RolloverGoalID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const upsertBudget = `-- name: UpsertBudget :one

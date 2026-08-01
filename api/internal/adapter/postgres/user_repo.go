@@ -180,6 +180,16 @@ const categoryNameUniqueConstraint = "categories_household_id_name_key"
 // GoalRepo.Create and GoalRepo.Update.
 const goalNameUniqueConstraint = "goals_household_id_name_key"
 
+// goalContributionRolloverUniqueConstraint is the name
+// 00007_goals.sql gave goal_contributions' own partial unique index on
+// (household_id, source_budget_month) WHERE source = 'budget_rollover' --
+// the belt-and-braces beside BudgetRepo.RollOverToGoal's conditional UPDATE
+// that index's own migration comment describes. translate checks this by
+// name, the same categoryNameUniqueConstraint/goalNameUniqueConstraint
+// pattern, so a concurrent pair of rollovers that both somehow reach the
+// INSERT cannot surface as an unmapped 500.
+const goalContributionRolloverUniqueConstraint = "goal_contributions_one_rollover_per_month"
+
 // translate converts driver errors into domain errors so nothing above the
 // adapter layer ever sees pgx types.
 func translate(err error, op string) error {
@@ -202,6 +212,14 @@ func translate(err error, op string) error {
 		// occupies-its-key rule categories follow (00007_goals.sql's own
 		// comment).
 		return fmt.Errorf("%s: constraint %q: %w", op, pgErr.ConstraintName, domain.ErrGoalNameTaken)
+	case errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == goalContributionRolloverUniqueConstraint:
+		// BudgetRepo.RollOverToGoal's own doc comment: a concurrent pair
+		// that both reach the INSERT must not surface as a raw 23505.
+		// StampBudgetRollover's conditional UPDATE is the first line of
+		// defence and normally catches this before the INSERT is ever
+		// attempted; this index is what makes a future code path that
+		// forgets the conditional UPDATE fail safely instead of silently.
+		return fmt.Errorf("%s: constraint %q: %w", op, pgErr.ConstraintName, domain.ErrRolloverAlreadyDone)
 	case errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation:
 		// Mirrors ErrNotFound's translation: a caller-testable domain
 		// sentinel rather than a generic wrapped driver error, so

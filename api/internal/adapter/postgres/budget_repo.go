@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -163,28 +164,108 @@ func (r *BudgetRepo) History(ctx context.Context, householdID string, month time
 	return out, nil
 }
 
-// errBudgetRolloverNotImplemented is returned by RollOverToGoal below.
-// usecase.BudgetRepository grew this method in Task 3 so the port and
-// GoalRepository could land together, ahead of the SQL; Task 5 ("Postgres
-// rollover write and stamp round trip") replaces this body with the real
-// one-transaction write and conditional-UPDATE stamp. It returns an error
-// rather than panicking so a caller that reaches this before Task 5 lands
-// fails loudly instead of crashing the process, and rather than a silent
-// no-op so a test written against it cannot mistake "not implemented" for
-// "nothing to roll over" -- the same reasoning
-// errCategoryWritesNotImplemented documents for CategoryRepo's own stubs
-// (see category_repo.go).
-var errBudgetRolloverNotImplemented = fmt.Errorf("postgres: budget rollover not implemented yet (Task 5)")
-
-// TODO(task-5): real SQL, one transaction -- a conditional UPDATE budgets SET
-// rolled_over_at = now(), rollover_goal_id = $goal WHERE household_id = $1
-// AND month = $2 AND rolled_over_at IS NULL, zero rows updated because the
-// month has no budget row at all -> domain.ErrNotFound, zero rows updated
-// because it is already stamped -> domain.ErrRolloverAlreadyDone (the port's
-// own doc comment), then INSERT the goal_contributions row with source
-// 'budget_rollover' and source_budget_month = in.Month.
+// RollOverToGoal writes a budget month's unspent money into a goal as one
+// contribution and stamps the month, in ONE transaction -- both statements or
+// neither (usecase.BudgetRepository's own doc comment).
+//
+// in.Month is normalised with startOfMonth/dateOnly, the same pair Get and
+// Upsert already use for budgets.month, before it is used anywhere in this
+// method -- including as the value written into source_budget_month. That
+// normalisation is load-bearing beyond this method: GoalRepo.DeleteContribution's
+// ClearBudgetRollover matches budgets on the exact source_budget_month value
+// read back off the deleted contribution row, so writing anything other than
+// the first-of-month here would make that later clear match zero rows and
+// silently strand the stamp.
+//
+// The stamp itself is a conditional UPDATE (StampBudgetRollover, WHERE
+// rolled_over_at IS NULL). Zero rows updated is ambiguous by itself -- the
+// month may never have been budgeted, or it may already be stamped -- so
+// diagnoseUnstampedRollover below issues one follow-up SELECT inside this
+// same transaction to tell the two apart, rather than guessing.
+//
+// A 23505 on goal_contributions' partial unique index
+// (goal_contributions_one_rollover_per_month) also maps to
+// domain.ErrRolloverAlreadyDone via translate's constraint-name check -- the
+// belt-and-braces the index's own migration comment describes, so a
+// concurrent pair that somehow both reach the INSERT cannot surface as an
+// unmapped 500.
 func (r *BudgetRepo) RollOverToGoal(ctx context.Context, in usecase.RollOverToGoalInput) (domain.GoalContribution, error) {
-	return domain.GoalContribution{}, errBudgetRolloverNotImplemented
+	month := dateOnly(startOfMonth(in.Month))
+	var result domain.GoalContribution
+
+	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		q := r.q.WithTx(tx)
+
+		_, err := q.StampBudgetRollover(ctx, sqlcgen.StampBudgetRolloverParams{
+			HouseholdID:    uuid(in.HouseholdID),
+			Month:          month,
+			RolloverGoalID: uuid(in.GoalID),
+		})
+		if err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return translate(err, "stamp budget rollover")
+			}
+			return diagnoseUnstampedRollover(ctx, q, in.HouseholdID, month)
+		}
+
+		row, err := q.InsertGoalContribution(ctx, sqlcgen.InsertGoalContributionParams{
+			GoalID:      uuid(in.GoalID),
+			HouseholdID: uuid(in.HouseholdID),
+			AmountMinor: in.Amount.Amount,
+			OccurredOn:  dateOnly(in.OccurredOn),
+			// note stays empty: the design's "From July's unspent budget" copy
+			// is composed in the frontend from source + sourceBudgetMonth, not
+			// written here (RollOverToGoalInput's own doc comment).
+			Note:              "",
+			Source:            string(domain.ContributionBudgetRollover),
+			SourceBudgetMonth: month,
+		})
+		if err != nil {
+			return translate(err, "insert budget rollover contribution")
+		}
+
+		contribution, cerr := toGoalContribution(row.ID, row.GoalID, row.HouseholdID, row.AmountMinor,
+			in.Amount.Currency, row.OccurredOn, row.Note, row.Source, row.SourceBudgetMonth)
+		if cerr != nil {
+			return cerr
+		}
+		result = contribution
+		return nil
+	})
+	if err != nil {
+		return domain.GoalContribution{}, err
+	}
+	return result, nil
+}
+
+// diagnoseUnstampedRollover runs when StampBudgetRollover's conditional
+// UPDATE matches zero rows, which is ambiguous by itself: the month may never
+// have been budgeted at all, or it may already be stamped by an earlier
+// rollover. It reads the row back inside the SAME transaction to tell the two
+// apart, per usecase.BudgetRepository.RollOverToGoal's own doc comment --
+// a second, separate transaction here could race a concurrent Upsert or
+// rollover and read a different answer than the UPDATE above just saw.
+func diagnoseUnstampedRollover(ctx context.Context, q *sqlcgen.Queries, householdID string, month pgtype.Date) error {
+	stamp, err := q.GetBudgetRolloverStamp(ctx, sqlcgen.GetBudgetRolloverStampParams{
+		HouseholdID: uuid(householdID),
+		Month:       month,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ErrNotFound
+		}
+		return translate(err, "get budget rollover stamp")
+	}
+	if !stamp.Valid {
+		// StampBudgetRollover's own WHERE clause requires rolled_over_at IS
+		// NULL for it to have updated a row, so matching zero rows against an
+		// existing budget row should mean rolled_over_at is NOT NULL. Reading
+		// NULL back here anyway is a state this code did not construct --
+		// fail loud rather than carry an ambiguous result upward as either
+		// sentinel.
+		return fmt.Errorf("postgres: budget for household %s matched no rows on stamp but rolled_over_at reads NULL", householdID)
+	}
+	return domain.ErrRolloverAlreadyDone
 }
 
 // currencyOf is ListBudgetLinesForBudgets' rows losing their household's
