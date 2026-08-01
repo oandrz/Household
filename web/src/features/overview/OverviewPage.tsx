@@ -6,16 +6,18 @@
 // RequireCapability, so a member without money never sees them. Which means
 // the no-access shapes below are not an edge case, they are one of the three
 // normal renders. See the guards in api/internal/adapter/http/router.go:
-// /accounts needs the money capability; /budgets/{month} needs money AND
-// owner.
+// /accounts needs the money capability; /budgets/{month} and /goals both
+// need money AND owner.
 import { Link } from "@tanstack/react-router";
 import { useMe } from "../auth/useAuth";
 import { NetWorthCard } from "../money/NetWorthCard";
 import { currentMonth } from "../money/month";
 import { useAccounts } from "../money/useAccounts";
 import { useBudget } from "../money/useBudget";
+import { useGoals } from "../money/useGoals";
 import { BudgetCard } from "./BudgetCard";
 import { OVERVIEW_COPY } from "./copy";
+import { GoalsCard } from "./GoalsCard";
 import { QuickAddMenu } from "./QuickAddMenu";
 import { SetupChecklist } from "./SetupChecklist";
 
@@ -30,6 +32,10 @@ export function OverviewPage() {
   // cache for nobody to read. `enabled`, not a fake month and not a
   // conditional call.
   const budget = useBudget(currentMonth(), { enabled: isOwner });
+  // GET /goals carries the identical guard as GET /budgets/{month}
+  // (requireCapability(money) AND requireOwner), so this is gated the same
+  // way and for the same reason.
+  const goals = useGoals({ enabled: isOwner });
 
   return (
     <div className="flex flex-col gap-5 p-10">
@@ -70,6 +76,8 @@ export function OverviewPage() {
             )}
 
             {isOwner && budget.data && <BudgetCard month={budget.data} />}
+
+            {isOwner && goals.data && <GoalsCard goals={goals.data} />}
           </div>
 
           {/* Full width beneath the cards rather than a third cell in the

@@ -29,6 +29,29 @@ export const OVERVIEW_COPY = {
   budgetUsed: (percent: number) => `${percent}% used`,
   budgetOf: (spent: string, budgeted: string) => `${spent} of ${budgeted}`,
 
+  // GoalsCard.tsx. Mirrors GOAL_COPY's own onTrack/withNoDate pair
+  // (features/money/goalCopy.ts) rather than importing them -- a small
+  // duplicated pair of one-liners is the established trade-off here
+  // (goalCopy.ts's own monthNameOnly comment makes the identical call), not
+  // coupling Overview's copy module to Money's for four lines. datedCount
+  // === 0 hides goalsOnTrack's figure entirely (the design spec's own "X of
+  // Y" rule) rather than this function ever being asked to render "0 of 0".
+  goalsHeading: "Goals on track",
+  goalsOnTrack: (onTrackCount: number, datedCount: number) => `${onTrackCount} of ${datedCount}`,
+  // monthLabel is null exactly when the next goal (which the design's own
+  // spec table guarantees is always dated when it exists at all) somehow
+  // isn't -- an invariant this function stays fail-closed against rather
+  // than trusting, the same reason goalSchemas.ts's own nextGoalSchema
+  // leaves targetMonth nullable instead of narrowing it.
+  goalsNext: (name: string, monthLabel: string | null) =>
+    monthLabel ? `next: ${name} · ${monthLabel}` : `next: ${name}`,
+  goalsWithNoDate: (count: number) => `${count} with no date`,
+  // The household has no live goals at all yet -- not the same state as
+  // datedCount: 0, which still has goals, just none with a date. Mirrors
+  // budgetNone/budgetSetUp above: a way in, not a blank card.
+  goalsNone: "No goals yet",
+  goalsCreate: "Create a goal",
+
   setupHeading: "Finish setting up",
   setupProgress: (done: number, total: number) => `${done} of ${total} done`,
   setupHousehold: "Create your household",
@@ -45,5 +68,9 @@ export const OVERVIEW_COPY = {
   // modal whose account dropdown is empty -- the dead end TransactionsPage's
   // own comment refuses.
   quickAddNeedsAccount: "Add an account first",
+  // No precondition, unlike Transaction above -- the account dependency
+  // that shape follows disappeared for goals with decision 6 (contributions
+  // move no real money), so this entry is never disabled.
+  quickAddGoal: "Savings goal",
 } as const;
 

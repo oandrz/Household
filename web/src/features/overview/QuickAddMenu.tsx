@@ -1,13 +1,16 @@
 // The design's "+ Add" offers Transaction, Account, Bill, Savings goal,
-// Calendar event and Marriage retro. Four of those features do not exist, and
-// a permanently greyed row reads as broken rather than as a roadmap -- the
-// same rule Sidebar.tsx's SPACE_PAGES states. Each entry joins this list in
-// the change that builds the thing it creates.
+// Calendar event and Marriage retro. Three of those features do not exist,
+// and a permanently greyed row reads as broken rather than as a roadmap --
+// the same rule Sidebar.tsx's SPACE_PAGES states. Each entry joins this list
+// in the change that builds the thing it creates -- Savings goal is this
+// change's own.
 //
-// Rendered only for an owner: POST /transactions and POST /accounts are both
-// requireOwner.
+// Rendered only for an owner: POST /transactions, POST /accounts and
+// POST /goals are all requireOwner.
 import { useState } from "react";
+import { useCurrencies, useMe } from "../auth/useAuth";
 import { AccountModal } from "../money/AccountModal";
+import { GoalModal } from "../money/GoalModal";
 import { TransactionModal, type TransactionFormValues } from "../money/TransactionModal";
 import { useCreateTransaction } from "../money/useTransactions";
 import { useHouseholdMembers } from "../settings/useHouseholdMembers";
@@ -18,8 +21,24 @@ export function QuickAddMenu({ accounts }: { accounts: Account[] }) {
   const [open, setOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [transactionOpen, setTransactionOpen] = useState(false);
+  const [goalOpen, setGoalOpen] = useState(false);
   const members = useHouseholdMembers();
   const createTransaction = useCreateTransaction();
+  // GoalModal.tsx takes `currencies`/`primaryCurrency` as explicit props
+  // rather than fetching them itself (unlike AccountModal, whose own
+  // internal useCurrencies/useMe calls are deferred to when it mounts) --
+  // its own header comment on why: the currency select is disabled in edit
+  // mode and needs the household's own currency to prefill create mode.
+  // Called unconditionally here rather than gated behind `goalOpen`, the
+  // same choice GoalsPage.tsx's own top-level useCurrencies() call already
+  // makes for this exact modal: both keys are already warm on this page
+  // regardless (['me'] from OverviewPage's own useMe() above this
+  // component, ['currencies'] from BudgetCard's, and useCurrencies' own
+  // staleTime: Infinity means neither ever re-fetches once cached), so this
+  // costs no request TransactionModal's useCategories/AccountModal's own
+  // fetches would have to avoid by staying deferred.
+  const me = useMe();
+  const currencies = useCurrencies();
 
   const canAddTransaction = accounts.length > 0;
 
@@ -64,15 +83,34 @@ export function QuickAddMenu({ accounts }: { accounts: Account[] }) {
           >
             {OVERVIEW_COPY.quickAddAccount}
           </button>
+
+          {/* No `disabled` guard, unlike Transaction above -- decision 6
+              (goal contributions move no real money) means this has no
+              account precondition to wait on. */}
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              setGoalOpen(true);
+            }}
+            className="rounded-lg px-2.5 py-2 text-left text-[13px] text-ink"
+          >
+            {OVERVIEW_COPY.quickAddGoal}
+          </button>
         </div>
       )}
 
-      {/* Both mounted only while actually open, matching TransactionsPage's
-          own AccountModal/TransactionModal. Each modal carries queries of its
-          own -- TransactionModal's useCategories, AccountModal's currencies
-          and members -- and mounting them alongside the menu would fire those
-          on every visit to the app's front door, whether or not anyone ever
-          opens one. */}
+      {/* All three mounted only while actually open, matching
+          TransactionsPage's own AccountModal/TransactionModal. Each modal
+          carries queries of its own -- TransactionModal's useCategories,
+          AccountModal's currencies and members -- and mounting them
+          alongside the menu would fire those on every visit to the app's
+          front door, whether or not anyone ever opens one. GoalModal takes
+          no query of its own to defer this way (its currencies/primaryCurrency
+          are the props sourced above, already warm by construction), but
+          stays gated on `goalOpen` regardless, for the same reason
+          AccountModal/TransactionModal do: no reason to keep an unused form
+          mounted in the tree. */}
       {accountOpen && <AccountModal open onClose={() => setAccountOpen(false)} />}
       {transactionOpen && (
         <TransactionModal
@@ -83,6 +121,24 @@ export function QuickAddMenu({ accounts }: { accounts: Account[] }) {
           // The same mapping TransactionsPage uses, not a second one -- the
           // two screens must not disagree about what a member is called.
           members={(members.data ?? []).map((m) => ({ id: m.id, name: m.user.displayName }))}
+        />
+      )}
+      {/* Gated on both me.data and currencies.data, the same guard
+          GoalsPage.tsx's own modal mount uses: GoalModal's props are
+          required, not optional, and this only matters for an implausibly
+          fast click between opening the menu and choosing Savings goal
+          before either has resolved. createGoal (useGoals.ts) invalidates
+          the goals query on success, so OverviewPage's own
+          `useGoals({ enabled: isOwner })` -- mounted and active the whole
+          time this menu exists -- refetches on its own; nothing here needs
+          to ask again. */}
+      {goalOpen && me.data && currencies.data && (
+        <GoalModal
+          mode="create"
+          currencies={currencies.data.currencies}
+          primaryCurrency={me.data.household.primaryCurrency}
+          onClose={() => setGoalOpen(false)}
+          onSaved={() => setGoalOpen(false)}
         />
       )}
     </div>
