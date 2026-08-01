@@ -172,6 +172,14 @@ const pgUniqueViolation = "23505"
 // mention the table) cannot masquerade as a name collision.
 const categoryNameUniqueConstraint = "categories_household_id_name_key"
 
+// goalNameUniqueConstraint is the name Postgres gave goals' own UNIQUE
+// (household_id, name) (migrations/00007_goals.sql), the same default naming
+// categoryNameUniqueConstraint's own comment explains. translate checks this
+// by name, not only by SQLSTATE 23505, so a future unique key on goals cannot
+// masquerade as a name collision -- the brief's own instruction for
+// GoalRepo.Create and GoalRepo.Update.
+const goalNameUniqueConstraint = "goals_household_id_name_key"
+
 // translate converts driver errors into domain errors so nothing above the
 // adapter layer ever sees pgx types.
 func translate(err error, op string) error {
@@ -188,6 +196,12 @@ func translate(err error, op string) error {
 		// name collision, archived rows included, since archived_at is not
 		// part of the unique key.
 		return fmt.Errorf("%s: constraint %q: %w", op, pgErr.ConstraintName, domain.ErrCategoryNameTaken)
+	case errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == goalNameUniqueConstraint:
+		// GoalRepository's own contract: Create and Update both hit this on a
+		// name collision, archived rows included -- the same archived-still-
+		// occupies-its-key rule categories follow (00007_goals.sql's own
+		// comment).
+		return fmt.Errorf("%s: constraint %q: %w", op, pgErr.ConstraintName, domain.ErrGoalNameTaken)
 	case errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation:
 		// Mirrors ErrNotFound's translation: a caller-testable domain
 		// sentinel rather than a generic wrapped driver error, so

@@ -1,0 +1,545 @@
+package postgres_test
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres"
+	"github.com/andreasoentoro/hearth/api/internal/domain"
+)
+
+// newTestGoal is the shared fixture every test below builds on: a goal with
+// no target month and a zero starting balance, which every test overrides
+// only the fields it actually cares about.
+func newTestGoal(householdID, name string) domain.Goal {
+	return domain.Goal{
+		HouseholdID:    householdID,
+		Name:           name,
+		Target:         moneyOf(1000000),
+		PlannedMonthly: moneyOf(50000),
+	}
+}
+
+func TestGoalCreateWritesTheOpeningContribution(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewGoalRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	createdOn := july(5)
+	g, err := repo.Create(ctx, newTestGoal(householdID, "Emergency fund"), 250000, createdOn)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	record, err := repo.Get(ctx, householdID, g.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if record.ContributedMinor != 250000 {
+		t.Fatalf("ContributedMinor = %d, want 250000", record.ContributedMinor)
+	}
+
+	contributions, err := repo.ListContributions(ctx, householdID, g.ID, 0)
+	if err != nil {
+		t.Fatalf("ListContributions: %v", err)
+	}
+	if len(contributions) != 1 {
+		t.Fatalf("len(contributions) = %d, want exactly 1", len(contributions))
+	}
+	c := contributions[0]
+	if c.Source != domain.ContributionStartingBalance {
+		t.Fatalf("Source = %q, want starting_balance", c.Source)
+	}
+	if !c.OccurredOn.Equal(createdOn) {
+		t.Fatalf("OccurredOn = %v, want %v (createdOn)", c.OccurredOn, createdOn)
+	}
+	if c.Amount.Amount != 250000 {
+		t.Fatalf("Amount = %d, want 250000", c.Amount.Amount)
+	}
+}
+
+// TestGoalCreateThatFailsWritesNothingAtAll is the reachable half of the
+// atomicity claim (see this file's own package doc and the brief's own
+// comment on this test): a goal insert that fails on a name collision must
+// leave no orphaned contribution row anywhere for the household, even though
+// the failed Create asked for a non-zero starting balance.
+func TestGoalCreateThatFailsWritesNothingAtAll(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewGoalRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	if _, err := repo.Create(ctx, newTestGoal(householdID, "New Car"), 0, july(1)); err != nil {
+		t.Fatalf("first Create: %v", err)
+	}
+
+	_, err := repo.Create(ctx, newTestGoal(householdID, "New Car"), 500000, july(2))
+	if !errors.Is(err, domain.ErrGoalNameTaken) {
+		t.Fatalf("err = %v, want domain.ErrGoalNameTaken", err)
+	}
+
+	// No orphan: the household has zero contribution rows at all, not just
+	// zero on the goal that failed to write -- the first, successful Create
+	// above asked for a zero starting balance, which writes nothing either.
+	var count int
+	if err := db.Pool().QueryRow(ctx, `SELECT count(*) FROM goal_contributions WHERE household_id = $1`, householdID).
+		Scan(&count); err != nil {
+		t.Fatalf("count goal_contributions: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("goal_contributions count = %d, want 0 -- no orphan for the goal that never got written", count)
+	}
+}
+
+func TestGoalCreateWithZeroStartingBalanceWritesNoContribution(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewGoalRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	g, err := repo.Create(ctx, newTestGoal(householdID, "Holiday"), 0, july(1))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	record, err := repo.Get(ctx, householdID, g.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if record.ContributedMinor != 0 {
+		t.Fatalf("ContributedMinor = %d, want 0", record.ContributedMinor)
+	}
+
+	contributions, err := repo.ListContributions(ctx, householdID, g.ID, 0)
+	if err != nil {
+		t.Fatalf("ListContributions: %v", err)
+	}
+	if len(contributions) != 0 {
+		t.Fatalf("len(contributions) = %d, want 0 -- zero is not a contribution", len(contributions))
+	}
+}
+
+func TestGoalCreateDuplicateNameIsErrGoalNameTaken(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewGoalRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	first, err := repo.Create(ctx, newTestGoal(householdID, "Wedding"), 0, july(1))
+	if err != nil {
+		t.Fatalf("first Create: %v", err)
+	}
+
+	if _, err := repo.Create(ctx, newTestGoal(householdID, "Wedding"), 0, july(1)); !errors.Is(err, domain.ErrGoalNameTaken) {
+		t.Fatalf("err = %v, want domain.ErrGoalNameTaken", err)
+	}
+
+	if _, err := repo.SetArchived(ctx, householdID, first.ID, true, july(2)); err != nil {
+		t.Fatalf("SetArchived: %v", err)
+	}
+
+	// An archived goal still occupies its unique key -- the categories
+	// gotcha, restated for goals.
+	if _, err := repo.Create(ctx, newTestGoal(householdID, "Wedding"), 0, july(1)); !errors.Is(err, domain.ErrGoalNameTaken) {
+		t.Fatalf("err after archiving the first = %v, want still domain.ErrGoalNameTaken", err)
+	}
+}
+
+func TestGoalGetFromAnotherHouseholdIsErrNotFound(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewGoalRepo(db)
+	householdID := insertTestHousehold(t, db)
+	otherHouseholdID := insertTestHousehold(t, db)
+
+	g, err := repo.Create(ctx, newTestGoal(householdID, "Down payment"), 0, july(1))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if _, err := repo.Get(ctx, otherHouseholdID, g.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("err = %v, want domain.ErrNotFound", err)
+	}
+}
+
+func TestGoalUpdateClearsTargetMonth(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewGoalRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	target := july(1)
+	goal := newTestGoal(householdID, "Laptop")
+	goal.TargetMonth = &target
+	g, err := repo.Create(ctx, goal, 0, july(1))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if g.TargetMonth == nil {
+		t.Fatal("TargetMonth is nil right after Create, want the month just set")
+	}
+
+	g.TargetMonth = nil
+	updated, err := repo.Update(ctx, g)
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.TargetMonth != nil {
+		t.Fatalf("TargetMonth = %v, want nil after clearing, not the zero time", updated.TargetMonth)
+	}
+
+	fetched, err := repo.Get(ctx, householdID, g.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if fetched.Goal.TargetMonth != nil {
+		t.Fatalf("Get after Update: TargetMonth = %v, want nil", fetched.Goal.TargetMonth)
+	}
+}
+
+func TestGoalArchiveAndRestoreKeepContributions(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewGoalRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	g, err := repo.Create(ctx, newTestGoal(householdID, "Sabbatical"), 300000, july(1))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	firstStamp := july(10)
+	archived, err := repo.SetArchived(ctx, householdID, g.ID, true, firstStamp)
+	if err != nil {
+		t.Fatalf("SetArchived(true): %v", err)
+	}
+	if archived.ArchivedAt == nil || !archived.ArchivedAt.Equal(firstStamp) {
+		t.Fatalf("ArchivedAt = %v, want %v", archived.ArchivedAt, firstStamp)
+	}
+
+	live, err := repo.List(ctx, householdID, false)
+	if err != nil {
+		t.Fatalf("List(false): %v", err)
+	}
+	for _, r := range live {
+		if r.Goal.ID == g.ID {
+			t.Fatal("List(false) includes the archived goal, want it omitted")
+		}
+	}
+
+	all, err := repo.List(ctx, householdID, true)
+	if err != nil {
+		t.Fatalf("List(true): %v", err)
+	}
+	var found bool
+	for _, r := range all {
+		if r.Goal.ID == g.ID {
+			found = true
+			if r.ContributedMinor != 300000 {
+				t.Fatalf("ContributedMinor = %d, want 300000 -- archiving must not touch contributions", r.ContributedMinor)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("List(true) does not include the archived goal")
+	}
+
+	// Archiving twice does not move the original stamp forward.
+	secondStamp := july(20)
+	archivedAgain, err := repo.SetArchived(ctx, householdID, g.ID, true, secondStamp)
+	if err != nil {
+		t.Fatalf("second SetArchived(true): %v", err)
+	}
+	if archivedAgain.ArchivedAt == nil || !archivedAgain.ArchivedAt.Equal(firstStamp) {
+		t.Fatalf("ArchivedAt after second archive = %v, want it to keep the FIRST stamp %v", archivedAgain.ArchivedAt, firstStamp)
+	}
+
+	restored, err := repo.SetArchived(ctx, householdID, g.ID, false, july(25))
+	if err != nil {
+		t.Fatalf("SetArchived(false): %v", err)
+	}
+	if restored.ArchivedAt != nil {
+		t.Fatalf("ArchivedAt after restore = %v, want nil", restored.ArchivedAt)
+	}
+}
+
+func TestGoalMonthContributionTotalsExcludesStartingBalance(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewGoalRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	g, err := repo.Create(ctx, newTestGoal(householdID, "Rainy day"), 400000, july(5))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := repo.AddContribution(ctx, domain.GoalContribution{
+		GoalID: g.ID, HouseholdID: householdID,
+		Amount: moneyOf(20000), OccurredOn: july(10), Source: domain.ContributionManual,
+	}); err != nil {
+		t.Fatalf("AddContribution this month: %v", err)
+	}
+	lastMonth := time.Date(2026, time.June, 15, 0, 0, 0, 0, time.UTC)
+	if _, err := repo.AddContribution(ctx, domain.GoalContribution{
+		GoalID: g.ID, HouseholdID: householdID,
+		Amount: moneyOf(15000), OccurredOn: lastMonth, Source: domain.ContributionManual,
+	}); err != nil {
+		t.Fatalf("AddContribution last month: %v", err)
+	}
+
+	totals, err := repo.MonthContributionTotals(ctx, householdID, july(1))
+	if err != nil {
+		t.Fatalf("MonthContributionTotals: %v", err)
+	}
+	if len(totals) != 1 {
+		t.Fatalf("totals = %+v, want exactly one goal", totals)
+	}
+	if totals[0].GoalID != g.ID || totals[0].AmountMinor != 20000 {
+		t.Fatalf("totals[0] = %+v, want goal %s at 20000 (the manual contribution alone, "+
+			"never the 400000 starting balance or last month's 15000)", totals[0], g.ID)
+	}
+}
+
+func TestGoalMonthContributionTotalsExcludesArchivedGoals(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewGoalRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	g, err := repo.Create(ctx, newTestGoal(householdID, "Archived goal"), 0, july(1))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := repo.AddContribution(ctx, domain.GoalContribution{
+		GoalID: g.ID, HouseholdID: householdID,
+		Amount: moneyOf(10000), OccurredOn: july(5), Source: domain.ContributionManual,
+	}); err != nil {
+		t.Fatalf("AddContribution: %v", err)
+	}
+	if _, err := repo.SetArchived(ctx, householdID, g.ID, true, july(6)); err != nil {
+		t.Fatalf("SetArchived: %v", err)
+	}
+
+	totals, err := repo.MonthContributionTotals(ctx, householdID, july(1))
+	if err != nil {
+		t.Fatalf("MonthContributionTotals: %v", err)
+	}
+	if len(totals) != 0 {
+		t.Fatalf("totals = %+v, want none -- the only goal with a contribution this month is archived", totals)
+	}
+}
+
+func TestGoalDeleteContributionRemovesExactlyThatRow(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewGoalRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	g, err := repo.Create(ctx, newTestGoal(householdID, "Two contributions"), 0, july(1))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	first, err := repo.AddContribution(ctx, domain.GoalContribution{
+		GoalID: g.ID, HouseholdID: householdID,
+		Amount: moneyOf(30000), OccurredOn: july(2), Source: domain.ContributionManual,
+	})
+	if err != nil {
+		t.Fatalf("AddContribution first: %v", err)
+	}
+	if _, err := repo.AddContribution(ctx, domain.GoalContribution{
+		GoalID: g.ID, HouseholdID: householdID,
+		Amount: moneyOf(45000), OccurredOn: july(3), Source: domain.ContributionManual,
+	}); err != nil {
+		t.Fatalf("AddContribution second: %v", err)
+	}
+
+	before, err := repo.Get(ctx, householdID, g.ID)
+	if err != nil {
+		t.Fatalf("Get before delete: %v", err)
+	}
+
+	if err := repo.DeleteContribution(ctx, householdID, g.ID, first.ID); err != nil {
+		t.Fatalf("DeleteContribution: %v", err)
+	}
+
+	after, err := repo.Get(ctx, householdID, g.ID)
+	if err != nil {
+		t.Fatalf("Get after delete: %v", err)
+	}
+	if after.ContributedMinor != before.ContributedMinor-30000 {
+		t.Fatalf("ContributedMinor = %d, want %d (dropped by exactly the deleted amount)",
+			after.ContributedMinor, before.ContributedMinor-30000)
+	}
+
+	remaining, err := repo.ListContributions(ctx, householdID, g.ID, 0)
+	if err != nil {
+		t.Fatalf("ListContributions: %v", err)
+	}
+	if len(remaining) != 1 || remaining[0].Amount.Amount != 45000 {
+		t.Fatalf("remaining = %+v, want exactly the surviving 45000 contribution", remaining)
+	}
+
+	if err := repo.DeleteContribution(ctx, householdID, g.ID, first.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("second delete of the same id: err = %v, want domain.ErrNotFound", err)
+	}
+}
+
+func TestGoalDeleteContributionOfAnotherGoalIsErrNotFound(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewGoalRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	goalA, err := repo.Create(ctx, newTestGoal(householdID, "Goal A"), 0, july(1))
+	if err != nil {
+		t.Fatalf("Create goal A: %v", err)
+	}
+	goalB, err := repo.Create(ctx, newTestGoal(householdID, "Goal B"), 0, july(1))
+	if err != nil {
+		t.Fatalf("Create goal B: %v", err)
+	}
+	contribution, err := repo.AddContribution(ctx, domain.GoalContribution{
+		GoalID: goalA.ID, HouseholdID: householdID,
+		Amount: moneyOf(10000), OccurredOn: july(2), Source: domain.ContributionManual,
+	})
+	if err != nil {
+		t.Fatalf("AddContribution: %v", err)
+	}
+
+	// The pair is checked, not just the contribution id: goalB is real and in
+	// this household, but the contribution belongs to goalA.
+	if err := repo.DeleteContribution(ctx, householdID, goalB.ID, contribution.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("err = %v, want domain.ErrNotFound", err)
+	}
+
+	remaining, err := repo.ListContributions(ctx, householdID, goalA.ID, 0)
+	if err != nil {
+		t.Fatalf("ListContributions: %v", err)
+	}
+	if len(remaining) != 1 {
+		t.Fatalf("len(remaining) = %d, want 1 -- the row must still be there", len(remaining))
+	}
+}
+
+func TestGoalDeleteContributionFromAnotherHouseholdIsErrNotFound(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewGoalRepo(db)
+	householdID := insertTestHousehold(t, db)
+	otherHouseholdID := insertTestHousehold(t, db)
+
+	g, err := repo.Create(ctx, newTestGoal(householdID, "Mine"), 0, july(1))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	contribution, err := repo.AddContribution(ctx, domain.GoalContribution{
+		GoalID: g.ID, HouseholdID: householdID,
+		Amount: moneyOf(10000), OccurredOn: july(2), Source: domain.ContributionManual,
+	})
+	if err != nil {
+		t.Fatalf("AddContribution: %v", err)
+	}
+
+	if err := repo.DeleteContribution(ctx, otherHouseholdID, g.ID, contribution.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("err = %v, want domain.ErrNotFound", err)
+	}
+
+	remaining, err := repo.ListContributions(ctx, householdID, g.ID, 0)
+	if err != nil {
+		t.Fatalf("ListContributions: %v", err)
+	}
+	if len(remaining) != 1 {
+		t.Fatalf("len(remaining) = %d, want 1 -- the row must still be there", len(remaining))
+	}
+}
+
+// TestGoalListOrdersDatedGoalsFirstThenDateless is not in the brief's own
+// enumerated test list, but GoalRepository.List's doc comment pins this
+// ordering by name specifically so an ORDER BY cannot silently choose the
+// wrong NULL placement -- "DESC NULLS LAST" is two words away from "DESC",
+// Postgres's own default null-ordering for DESC being NULLS FIRST (the
+// opposite of what the port requires). Left unprotected, that mutation would
+// pass every other test in this file, since none of them lists more than one
+// goal at a time.
+func TestGoalListOrdersDatedGoalsFirstThenDateless(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewGoalRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	sept := time.Date(2026, time.September, 1, 0, 0, 0, 0, time.UTC)
+	dec := time.Date(2026, time.December, 1, 0, 0, 0, 0, time.UTC)
+
+	makeGoal := func(name string, targetMonth *time.Time) {
+		t.Helper()
+		g := newTestGoal(householdID, name)
+		g.TargetMonth = targetMonth
+		if _, err := repo.Create(ctx, g, 0, july(1)); err != nil {
+			t.Fatalf("Create %s: %v", name, err)
+		}
+	}
+	// Deliberately not created in the order List should return them, so a
+	// query with no ORDER BY at all could not accidentally pass.
+	makeGoal("Zebra dateless", nil)
+	makeGoal("December goal", &dec)
+	makeGoal("Ant dateless", nil)
+	makeGoal("September goal", &sept)
+
+	goals, err := repo.List(ctx, householdID, false)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(goals) != 4 {
+		t.Fatalf("len(goals) = %d, want 4", len(goals))
+	}
+	var names []string
+	for _, g := range goals {
+		names = append(names, g.Goal.Name)
+	}
+	want := []string{"December goal", "September goal", "Ant dateless", "Zebra dateless"}
+	for i, name := range want {
+		if names[i] != name {
+			t.Fatalf("List order = %v, want %v (dated newest-first, then dateless by name)", names, want)
+		}
+	}
+}
+
+// TestGoalListContributionsRespectsALowLimit proves the limit parameter is
+// actually threaded into the query, not merely defaulted -- the other tests
+// in this file all call ListContributions with limit 0 (which the port
+// treats as "50", see the doc comment) and would not notice a limit that was
+// silently ignored.
+func TestGoalListContributionsRespectsALowLimit(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewGoalRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	g, err := repo.Create(ctx, newTestGoal(householdID, "Limit test"), 0, july(1))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	for _, day := range []int{2, 3, 4} {
+		if _, err := repo.AddContribution(ctx, domain.GoalContribution{
+			GoalID: g.ID, HouseholdID: householdID,
+			Amount: moneyOf(int64(day) * 1000), OccurredOn: july(day), Source: domain.ContributionManual,
+		}); err != nil {
+			t.Fatalf("AddContribution day %d: %v", day, err)
+		}
+	}
+
+	limited, err := repo.ListContributions(ctx, householdID, g.ID, 2)
+	if err != nil {
+		t.Fatalf("ListContributions with limit 2: %v", err)
+	}
+	if len(limited) != 2 {
+		t.Fatalf("len(limited) = %d, want exactly 2", len(limited))
+	}
+	// Newest first: the two most recent of the three (July 4 and July 3).
+	if limited[0].Amount.Amount != 4000 || limited[1].Amount.Amount != 3000 {
+		t.Fatalf("limited = %+v, want [4000, 3000] newest first", limited)
+	}
+}

@@ -30,6 +30,8 @@ type Budget struct {
 	ExpectedIncomeMinor *int64
 	CreatedAt           pgtype.Timestamptz
 	UpdatedAt           pgtype.Timestamptz
+	RolledOverAt        pgtype.Timestamptz
+	RolloverGoalID      pgtype.UUID
 }
 
 type BudgetLine struct {
@@ -47,6 +49,31 @@ type Category struct {
 	SortOrder   int32
 	ArchivedAt  pgtype.Timestamptz
 	CreatedAt   pgtype.Timestamptz
+}
+
+type Goal struct {
+	ID                  pgtype.UUID
+	HouseholdID         pgtype.UUID
+	Name                string
+	TargetAmountMinor   int64
+	Currency            string
+	TargetMonth         pgtype.Date
+	PlannedMonthlyMinor int64
+	ArchivedAt          pgtype.Timestamptz
+	CreatedAt           pgtype.Timestamptz
+	UpdatedAt           pgtype.Timestamptz
+}
+
+type GoalContribution struct {
+	ID                pgtype.UUID
+	GoalID            pgtype.UUID
+	HouseholdID       pgtype.UUID
+	AmountMinor       int64
+	OccurredOn        pgtype.Date
+	Note              string
+	Source            string
+	SourceBudgetMonth pgtype.Date
+	CreatedAt         pgtype.Timestamptz
 }
 
 type Household struct {

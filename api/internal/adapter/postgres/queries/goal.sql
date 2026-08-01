@@ -1,0 +1,163 @@
+-- CreateGoal inserts the goal row only -- GoalRepo.Create wraps this with the
+-- opening contribution insert in one pgx.BeginFunc transaction (see its own
+-- comment), so a name collision here rolls back before any contribution is
+-- ever attempted. A name collision -- archived rows included, since
+-- archived_at is not part of goals' own UNIQUE (household_id, name) --
+-- surfaces as a 23505 that translate maps to domain.ErrGoalNameTaken by
+-- constraint name, the same pattern CreateCategory's own comment describes.
+-- name: CreateGoal :one
+INSERT INTO goals (household_id, name, target_amount_minor, currency, target_month, planned_monthly_minor)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, household_id, name, target_amount_minor, currency, target_month, planned_monthly_minor, archived_at, created_at, updated_at;
+
+-- InsertGoalContribution writes one contribution row. Both GoalRepo.Create's
+-- opening contribution (source starting_balance) and GoalRepo.AddContribution's
+-- manual one (source manual, or budget_rollover once Task 5 exists) share this
+-- one query -- a contribution row's shape does not depend on why it was
+-- written. It carries no currency column: a contribution is its goal's
+-- currency by construction (00007_goals.sql's own comment), so the caller
+-- supplies the goal's currency separately when it needs a domain.Money back.
+-- name: InsertGoalContribution :one
+INSERT INTO goal_contributions (goal_id, household_id, amount_minor, occurred_on, note, source, source_budget_month)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, goal_id, household_id, amount_minor, occurred_on, note, source, source_budget_month, created_at;
+
+-- ListGoalsWithTotals returns one household's goals joined to the sum of
+-- their own contributions, COALESCEd to 0 for a goal with none at all (a
+-- plain SUM over an empty LEFT JOIN group is NULL, not 0). include_archived
+-- is a UNION, not a filter swap -- GoalRepository.List's own doc comment:
+-- false returns only the live goals, true returns the live ones AND the
+-- archived ones together, each carrying its own archived_at.
+--
+-- Ordering is the port's own pinned contract: dated goals first, newest
+-- target_month first, ties (and every dateless goal, which all compare equal
+-- on target_month) broken by name. "DESC NULLS LAST" is doing the real work
+-- here -- Postgres's own default null-ordering for DESC is NULLS FIRST, so
+-- without the explicit NULLS LAST a dateless goal would sort ahead of every
+-- dated one, exactly the placement the port's doc comment forbids.
+-- name: ListGoalsWithTotals :many
+SELECT g.id, g.household_id, g.name, g.target_amount_minor, g.currency, g.target_month, g.planned_monthly_minor, g.archived_at, g.created_at, g.updated_at,
+       COALESCE(SUM(c.amount_minor), 0)::bigint AS contributed_minor
+FROM goals g
+LEFT JOIN goal_contributions c ON c.goal_id = g.id
+WHERE g.household_id = $1 AND (g.archived_at IS NULL OR sqlc.arg(include_archived)::boolean)
+GROUP BY g.id, g.household_id, g.name, g.target_amount_minor, g.currency, g.target_month, g.planned_monthly_minor, g.archived_at, g.created_at, g.updated_at
+ORDER BY g.target_month DESC NULLS LAST, g.name;
+
+-- GetGoalWithTotal is ListGoalsWithTotals scoped to one goal, so the two can
+-- never disagree about what ContributedMinor means. household_id AND id are
+-- both required in the WHERE -- a goal id from another household must match
+-- no row, so it is indistinguishable from an id that never existed
+-- (GoalRepository.Get's own doc comment).
+-- name: GetGoalWithTotal :one
+SELECT g.id, g.household_id, g.name, g.target_amount_minor, g.currency, g.target_month, g.planned_monthly_minor, g.archived_at, g.created_at, g.updated_at,
+       COALESCE(SUM(c.amount_minor), 0)::bigint AS contributed_minor
+FROM goals g
+LEFT JOIN goal_contributions c ON c.goal_id = g.id
+WHERE g.household_id = $1 AND g.id = $2
+GROUP BY g.id, g.household_id, g.name, g.target_amount_minor, g.currency, g.target_month, g.planned_monthly_minor, g.archived_at, g.created_at, g.updated_at;
+
+-- UpdateGoal replaces every mutable column -- name, target amount, target
+-- month (NULL clears it) and planned monthly -- and deliberately has no SET
+-- clause for currency or archived_at: currency is not mutable
+-- (GoalRepository.Update's own doc comment; see GoalService.Update for why),
+-- and archiving has its own dedicated method. Because the SET list omits
+-- them, RETURNING hands back whatever the row already had for both --
+-- exactly the "read back off the existing row regardless of what the caller
+-- passed" behaviour the in-memory double implements by hand. Same collision
+-- contract as CreateGoal. Scoped by household_id AND id, so an id from
+-- another household matches no row and translate turns that pgx.ErrNoRows
+-- into domain.ErrNotFound.
+-- name: UpdateGoal :one
+UPDATE goals
+SET name = $3, target_amount_minor = $4, target_month = $5, planned_monthly_minor = $6, updated_at = now()
+WHERE household_id = $1 AND id = $2
+RETURNING id, household_id, name, target_amount_minor, currency, target_month, planned_monthly_minor, archived_at, created_at, updated_at;
+
+-- SetGoalArchived stamps or clears archived_at depending on the caller's
+-- boolean, scoped the same way UpdateGoal is. The COALESCE is the whole of
+-- "archiving is idempotent, keeping the first stamp": archiving an
+-- already-archived goal keeps its original archived_at rather than moving it
+-- forward to the caller's `at`, mirroring SetCategoryArchived's own
+-- COALESCE(archived_at, now()) with a caller-supplied timestamp standing in
+-- for that query's now() -- GoalRepository.SetArchived's own doc comment
+-- requires exactly this shape.
+-- name: SetGoalArchived :one
+UPDATE goals
+SET archived_at = CASE WHEN sqlc.arg(archived)::boolean THEN COALESCE(archived_at, sqlc.arg(at)::timestamptz) ELSE NULL END,
+    updated_at = now()
+WHERE household_id = sqlc.arg(household_id) AND id = sqlc.arg(id)
+RETURNING id, household_id, name, target_amount_minor, currency, target_month, planned_monthly_minor, archived_at, created_at, updated_at;
+
+-- ListGoalContributions returns one goal's contributions, newest first by
+-- occurred_on, tie-broken by created_at DESC ("most recently added first") --
+-- the same tiebreak the in-memory double gives, since AddContribution only
+-- ever appends and two contributions can share a calendar date. It joins to
+-- goals for currency: a contribution row carries none of its own
+-- (00007_goals.sql's own comment), so this is the one read path that must
+-- fetch it to build a domain.Money at all.
+--
+-- Scoped by household_id AND goal_id together, never by either alone --
+-- GoalRepository's own package doc comment: goal_contributions carries no
+-- database-level guarantee that its household_id agrees with its own
+-- goal_id's household, so both must be checked or a contribution could leak
+-- across households.
+-- name: ListGoalContributions :many
+SELECT c.id, c.goal_id, c.household_id, c.amount_minor, c.occurred_on, c.note, c.source, c.source_budget_month, c.created_at,
+       g.currency
+FROM goal_contributions c
+JOIN goals g ON g.id = c.goal_id
+WHERE c.household_id = $1 AND c.goal_id = $2
+ORDER BY c.occurred_on DESC, c.created_at DESC
+LIMIT sqlc.arg(row_limit);
+
+-- MonthContributionTotals sums each unarchived goal's contributions inside
+-- one calendar month, excluding source = 'starting_balance' -- the exclusion
+-- GoalRepository.MonthContributionTotals' own doc comment calls load-bearing:
+-- without it, a household that created goals with existing balances would
+-- read its opening balances as money added this month. Joined to goals so an
+-- archived goal's contributions never appear, matching "sums each unarchived
+-- goal's contributions" exactly.
+--
+-- Both g.household_id and c.household_id are checked against $1, matching
+-- goalDouble.MonthContributionTotals -- the tie-breaker where the port is
+-- silent (usecase/testdouble_test.go): 00007_goals.sql gives
+-- goal_contributions.household_id no database-level guarantee of agreeing
+-- with its own goal_id's household, so a mismatched row must not be summed
+-- under either household's total.
+-- name: MonthContributionTotals :many
+SELECT c.goal_id, SUM(c.amount_minor)::bigint AS amount_minor
+FROM goal_contributions c
+JOIN goals g ON g.id = c.goal_id
+WHERE c.household_id = $1
+  AND g.household_id = $1
+  AND g.archived_at IS NULL
+  AND c.occurred_on >= $2::date
+  AND c.occurred_on < ($2::date + INTERVAL '1 month')
+  AND c.source <> 'starting_balance'
+GROUP BY c.goal_id;
+
+-- DeleteGoalContribution removes one contribution row, scoped by id, goal_id
+-- AND household_id together for the same reason ListGoalContributions' own
+-- comment gives. It returns source and source_budget_month so
+-- GoalRepo.DeleteContribution can decide, inside the same transaction,
+-- whether a budget's rollover stamp needs clearing -- the invariant is
+-- proven end to end only once Task 5 exists, since no budget_rollover row can
+-- be written before then.
+-- name: DeleteGoalContribution :one
+DELETE FROM goal_contributions
+WHERE id = $1 AND goal_id = $2 AND household_id = $3
+RETURNING source, source_budget_month;
+
+-- ClearBudgetRollover undoes RollOverToGoal's stamp when the contribution it
+-- wrote is deleted -- see GoalRepository.DeleteContribution's own doc comment
+-- for why leaving the stamp behind would strand the household: money gone
+-- from the goal, a month still claiming it was rolled over, and a 409 on
+-- every retry. It is unconditional on rolled_over_at's existing value:
+-- GoalRepo.DeleteContribution only ever runs this after confirming the
+-- deleted row's source was budget_rollover, so there is exactly one budget
+-- row -- this household-month -- that stamp could belong to.
+-- name: ClearBudgetRollover :exec
+UPDATE budgets
+SET rolled_over_at = NULL, rollover_goal_id = NULL, updated_at = now()
+WHERE household_id = $1 AND month = $2;

@@ -182,6 +182,29 @@ func dateOnly(t time.Time) pgtype.Date {
 
 func dateToTime(d pgtype.Date) time.Time { return d.Time }
 
+// nullableDate is dateOnly's counterpart for the columns that are genuinely
+// optional -- goals.target_month and goal_contributions.source_budget_month
+// -- where the port passes *time.Time and a nil pointer must reach Postgres
+// as NULL, the same "" <-> SQL NULL shape nullableUUID gives ids.
+func nullableDate(t *time.Time) pgtype.Date {
+	if t == nil {
+		return pgtype.Date{}
+	}
+	return dateOnly(*t)
+}
+
+// dateToTimePtr is nullableDate's read-side counterpart: a NULL date column
+// comes back as nil, never the zero time, so a caller (GoalRepository.Get's
+// own doc comment: "not the zero time") cannot mistake "never set" for
+// "set to January 1, year 1."
+func dateToTimePtr(d pgtype.Date) *time.Time {
+	if !d.Valid {
+		return nil
+	}
+	t := dateToTime(d)
+	return &t
+}
+
 // Compile-time confirmation that every repository satisfies its port.
 // Nothing in internal/usecase constructs these yet -- that is Task 12's job
 // -- so without this, a signature drift from ports.go would not surface
@@ -201,4 +224,5 @@ var (
 	_ usecase.CategoryRepository     = (*CategoryRepo)(nil)
 	_ usecase.TransactionRepository  = (*TransactionRepo)(nil)
 	_ usecase.BudgetRepository       = (*BudgetRepo)(nil)
+	_ usecase.GoalRepository         = (*GoalRepo)(nil)
 )
