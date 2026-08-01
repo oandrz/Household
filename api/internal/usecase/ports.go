@@ -616,8 +616,13 @@ type GoalMonthTotal struct {
 // alone, or a contribution could leak across households. Later tasks
 // implement this port; this is the contract they must honour.
 type GoalRepository interface {
-	// List returns one household's goals with their contributed totals, newest
-	// target first then by name. includeArchived is a UNION, not a filter
+	// List returns one household's goals with their contributed totals,
+	// ordered: dated goals first, newest TargetMonth first, ties by name;
+	// dateless goals (TargetMonth == nil) last, by name among themselves.
+	// A dateless goal never sorts ahead of a dated one, and never carries a
+	// "newest" of its own to compare by -- pinned here so an implementation's
+	// ORDER BY (e.g. target_month DESC NULLS LAST, name) cannot silently pick
+	// the opposite NULL placement. includeArchived is a UNION, not a filter
 	// swap: false returns the live goals, true returns the live ones AND the
 	// archived ones together, each carrying its own ArchivedAt. That is the
 	// AccountRepository.List / CategoryRepository.List contract, and the
@@ -638,10 +643,17 @@ type GoalRepository interface {
 	// (nil clears it), planned monthly. Currency is NOT mutable — see
 	// GoalService.Update's own comment. Same collision contract as Create.
 	Update(ctx context.Context, g domain.Goal) (domain.Goal, error)
-	// SetArchived stamps or clears archived_at. Archiving is idempotent and
-	// keeps every contribution and rollover reference intact; there is no
-	// delete, the accounts precedent.
-	SetArchived(ctx context.Context, householdID, goalID string, archived bool) (domain.Goal, error)
+	// SetArchived stamps archived_at with at, or clears it when archived is
+	// false -- the same signature AccountRepository.SetArchived uses, at
+	// supplied by the caller rather than read with time.Now() inside the
+	// port implementation, so today is always a parameter, never a clock
+	// reached for down here. Archiving is idempotent: a second archive call
+	// keeps the FIRST stamp rather than moving it forward to at
+	// (COALESCE(archived_at, $at) — the rule CategoryRepository.SetArchived's
+	// own SQL already applies, here with a caller-supplied timestamp in place
+	// of that query's now()), and keeps every contribution and rollover
+	// reference intact; there is no delete, the accounts precedent.
+	SetArchived(ctx context.Context, householdID, goalID string, archived bool, at time.Time) (domain.Goal, error)
 	// AddContribution writes one row. c.ID is ignored; the database assigns
 	// it. c.Amount's currency must equal the goal's — the service checks, and
 	// the column does not exist to hold a second answer.
@@ -654,7 +666,11 @@ type GoalRepository interface {
 	// remove.
 	DeleteContribution(ctx context.Context, householdID, goalID, contributionID string) error
 	// ListContributions returns one goal's contributions, newest first, at
-	// most limit rows.
+	// most limit rows. limit follows TransactionRepository.List's own
+	// convention rather than inventing a second one: limit <= 0 is treated
+	// as 50, and anything above 200 is clamped down to it. A real LIMIT 0
+	// returns zero rows, the opposite of "no cap", which is exactly why this
+	// port pins a default instead of passing limit through unclamped.
 	ListContributions(ctx context.Context, householdID, goalID string, limit int) ([]domain.GoalContribution, error)
 	// MonthContributionTotals sums each unarchived goal's contributions inside
 	// one calendar month, EXCLUDING source 'starting_balance'. The exclusion is

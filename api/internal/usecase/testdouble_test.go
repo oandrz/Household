@@ -2149,10 +2149,12 @@ func (d *goalDouble) List(_ context.Context, householdID string, includeArchived
 		}
 		out = append(out, usecase.GoalRecord{Goal: g, ContributedMinor: d.contributedMinor(g.ID)})
 	}
-	// Newest target first (the port's own doc comment), a nil TargetMonth
-	// sorting last -- there is no "newest" for a goal with no target date --
-	// then by name, including as the tiebreak within an equal TargetMonth,
-	// so the order is deterministic and no test can flake on map iteration.
+	// Dated goals first (newest TargetMonth first), then dateless goals last
+	// -- the port's own doc comment pins this NULL placement explicitly, so
+	// Task 4's ORDER BY cannot silently choose the other one. Name is the
+	// tiebreak throughout: among dateless goals, and within an equal
+	// TargetMonth, so the order is fully deterministic and no test can flake
+	// on map iteration.
 	sort.Slice(out, func(i, j int) bool {
 		ti, tj := out[i].Goal.TargetMonth, out[j].Goal.TargetMonth
 		switch {
@@ -2231,19 +2233,25 @@ func (d *goalDouble) Update(_ context.Context, g domain.Goal) (domain.Goal, erro
 	return g, nil
 }
 
-// SetArchived only stamps ArchivedAt the first time a goal is archived, so
-// calling it again with archived=true is a true no-op rather than moving the
-// timestamp forward -- the same idempotence fakeCategoryRepo.SetArchived
-// gives categories, and the port's own doc comment promises for goals.
-func (d *goalDouble) SetArchived(_ context.Context, householdID, goalID string, archived bool) (domain.Goal, error) {
+// SetArchived takes at as a parameter rather than reaching for time.Now()
+// itself -- the port's own doc comment requires this, following
+// AccountRepository.SetArchived's signature, so that today is always
+// supplied by the caller (GoalService, reading its injected Clock) and never
+// read from the wall clock inside a port implementation. It only stamps
+// ArchivedAt the first time a goal is archived, so calling it again with
+// archived=true is a true no-op that keeps the FIRST at rather than moving
+// the timestamp forward -- the same idempotence CategoryRepository.SetArchived's
+// own COALESCE(archived_at, now()) gives categories, adapted here for a
+// caller-supplied timestamp instead of the database's now().
+func (d *goalDouble) SetArchived(_ context.Context, householdID, goalID string, archived bool, at time.Time) (domain.Goal, error) {
 	g, ok := d.goals[goalID]
 	if !ok || g.HouseholdID != householdID {
 		return domain.Goal{}, domain.ErrNotFound
 	}
 	if archived {
 		if g.ArchivedAt == nil {
-			now := time.Now().UTC()
-			g.ArchivedAt = &now
+			stamp := at
+			g.ArchivedAt = &stamp
 		}
 	} else {
 		g.ArchivedAt = nil
@@ -2283,20 +2291,30 @@ func (d *goalDouble) DeleteContribution(_ context.Context, householdID, goalID, 
 	return domain.ErrNotFound
 }
 
+// defaultContributionLimit and maxContributionLimit are ListContributions'
+// own copy of TransactionRepository.List's clamp -- limit <= 0 becomes 50,
+// anything above 200 is pulled down to it -- rather than a second, competing
+// convention: a real SQL LIMIT 0 returns zero rows, the opposite of "no
+// cap", so "no cap" was never a safe reading for this double to give limit
+// <= 0 in the first place.
+const (
+	defaultContributionLimit = 50
+	maxContributionLimit     = 200
+)
+
 // ListContributions reports newest first by OccurredOn, tie-broken by
 // creation order (most recently added first): domain.GoalContribution
 // carries no created_at the way the goal_contributions table does, so the
 // double stands in for "created_at DESC" with the only ordering information
 // it actually has -- AddContribution only ever appends, so the slice's own
 // order already is chronological.
-//
-// limit <= 0 is read as "no cap" here -- the plain reading of "at most limit
-// rows" ("at most 0 rows" would be vacuous), and unlike
-// TransactionRepository.List's own doc comment, this port's does not give
-// <= 0 its own rule. Task 4's real implementation is free to pick
-// differently, provided it documents its choice as plainly as this comment
-// does; nothing yet depends on which one wins.
 func (d *goalDouble) ListContributions(_ context.Context, householdID, goalID string, limit int) ([]domain.GoalContribution, error) {
+	if limit <= 0 {
+		limit = defaultContributionLimit
+	} else if limit > maxContributionLimit {
+		limit = maxContributionLimit
+	}
+
 	rows := d.contributions[goalID]
 	ordered := make([]domain.GoalContribution, 0, len(rows))
 	for i := len(rows) - 1; i >= 0; i-- { // most recently added first, for the tiebreak below
@@ -2307,7 +2325,7 @@ func (d *goalDouble) ListContributions(_ context.Context, householdID, goalID st
 	sort.SliceStable(ordered, func(i, j int) bool {
 		return ordered[i].OccurredOn.After(ordered[j].OccurredOn)
 	})
-	if limit > 0 && len(ordered) > limit {
+	if len(ordered) > limit {
 		ordered = ordered[:limit]
 	}
 	return ordered, nil
