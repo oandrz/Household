@@ -11,6 +11,7 @@ import (
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres/sqlcgen"
 	"github.com/andreasoentoro/hearth/api/internal/domain"
+	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
 // BudgetRepo keeps the pool alongside the pool-backed *sqlcgen.Queries, like
@@ -160,6 +161,30 @@ func (r *BudgetRepo) History(ctx context.Context, householdID string, month time
 			linesByBudget[row.ID]))
 	}
 	return out, nil
+}
+
+// errBudgetRolloverNotImplemented is returned by RollOverToGoal below.
+// usecase.BudgetRepository grew this method in Task 3 so the port and
+// GoalRepository could land together, ahead of the SQL; Task 5 ("Postgres
+// rollover write and stamp round trip") replaces this body with the real
+// one-transaction write and conditional-UPDATE stamp. It returns an error
+// rather than panicking so a caller that reaches this before Task 5 lands
+// fails loudly instead of crashing the process, and rather than a silent
+// no-op so a test written against it cannot mistake "not implemented" for
+// "nothing to roll over" -- the same reasoning
+// errCategoryWritesNotImplemented documents for CategoryRepo's own stubs
+// (see category_repo.go).
+var errBudgetRolloverNotImplemented = fmt.Errorf("postgres: budget rollover not implemented yet (Task 5)")
+
+// TODO(task-5): real SQL, one transaction -- a conditional UPDATE budgets SET
+// rolled_over_at = now(), rollover_goal_id = $goal WHERE household_id = $1
+// AND month = $2 AND rolled_over_at IS NULL, zero rows updated because the
+// month has no budget row at all -> domain.ErrNotFound, zero rows updated
+// because it is already stamped -> domain.ErrRolloverAlreadyDone (the port's
+// own doc comment), then INSERT the goal_contributions row with source
+// 'budget_rollover' and source_budget_month = in.Month.
+func (r *BudgetRepo) RollOverToGoal(ctx context.Context, in usecase.RollOverToGoalInput) (domain.GoalContribution, error) {
+	return domain.GoalContribution{}, errBudgetRolloverNotImplemented
 }
 
 // currencyOf is ListBudgetLinesForBudgets' rows losing their household's

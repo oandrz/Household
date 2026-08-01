@@ -1929,10 +1929,56 @@ type fakeBudgetRepo struct {
 	// repository, which is the thing that actually knows what a household
 	// owns). nil means "accept anything", the default every other test gets.
 	knownCategoryIDs map[string]bool
+
+	// rolledOver holds, per household-month key (the same key r.budgets
+	// uses), the goal id a month's unspent money was rolled into. It exists
+	// only in the double: domain.Budget carries no rolled_over_at /
+	// rollover_goal_id field of its own -- nothing yet reads either back out
+	// of a domain.Budget -- so the double tracks the stamp
+	// 00007_goals.sql adds to the real budgets table here instead, as a
+	// parallel map rather than widening domain.Budget for a feature it does
+	// not otherwise touch.
+	rolledOver map[string]string
+
+	// goals is the GoalRepository double RollOverToGoal writes its
+	// contribution into, and that DeleteContribution reaches back through to
+	// clear rolledOver -- the same mutual-reference pattern userDouble and
+	// membershipDouble use for CreateWithMembership. nil until setGoals is
+	// called; a fixture that never exercises rollover (every fixture as of
+	// Task 3, since nothing consumes RollOverToGoal yet) has no reason to
+	// wire it up.
+	goals *goalDouble
 }
 
 func newFakeBudgetRepo() *fakeBudgetRepo {
-	return &fakeBudgetRepo{budgets: map[string]domain.Budget{}}
+	return &fakeBudgetRepo{budgets: map[string]domain.Budget{}, rolledOver: map[string]string{}}
+}
+
+// setGoals completes the mutual reference RollOverToGoal and
+// goalDouble.DeleteContribution both need: this double writes into goals on
+// a rollover, and goalDouble reaches back through its own budgets field to
+// clear rolledOver when a rollover contribution is deleted. Call it once,
+// after both doubles are constructed, exactly as userDouble.setMembers is
+// called for its pair.
+func (r *fakeBudgetRepo) setGoals(g *goalDouble) { r.goals = g }
+
+// rolledOverGoalID is a read of rolledOver, for a test proving
+// RollOverToGoal stamped a month or DeleteContribution cleared it back off
+// again -- the double's only way to answer "is this month currently
+// rolled over" without a domain.Budget field to hold the question.
+func (r *fakeBudgetRepo) rolledOverGoalID(householdID string, month time.Time) (string, bool) {
+	goalID, ok := r.rolledOver[budgetKey(householdID, month)]
+	return goalID, ok
+}
+
+// clearRolloverStamp removes household+month's rollover stamp, if any. It is
+// unexported and called only from goalDouble.DeleteContribution, mirroring
+// RollOverToGoal's own port doc comment: deleting a budget_rollover
+// contribution must clear the month's stamp in the same operation, or the
+// household is left claiming a rollover that no longer has a contribution
+// behind it.
+func (r *fakeBudgetRepo) clearRolloverStamp(householdID string, month time.Time) {
+	delete(r.rolledOver, budgetKey(householdID, month))
 }
 
 // knownCategories arms the unknown-category check Upsert enforces below.
@@ -1999,6 +2045,315 @@ func (r *fakeBudgetRepo) History(_ context.Context, householdID string, month ti
 	}
 	return out, nil
 }
+
+// RollOverToGoal mirrors the real one-transaction write the port's doc
+// comment describes: stamp the month first, then write the contribution
+// through r.goals, undoing the stamp if that write somehow fails -- so a
+// test can never observe a stamped month with no contribution behind it, the
+// exact strand DeleteContribution's own doc comment exists to prevent from
+// the other direction. The stamp is checked and set before the write, not
+// after, mirroring the real conditional UPDATE (... AND rolled_over_at IS
+// NULL): a second call for the same month finds it already stamped and never
+// reaches the contribution write at all, the same way a second concurrent
+// UPDATE finds zero rows to touch.
+func (r *fakeBudgetRepo) RollOverToGoal(ctx context.Context, in usecase.RollOverToGoalInput) (domain.GoalContribution, error) {
+	month := time.Date(in.Month.Year(), in.Month.Month(), 1, 0, 0, 0, 0, time.UTC)
+	key := budgetKey(in.HouseholdID, month)
+	if _, ok := r.budgets[key]; !ok {
+		return domain.GoalContribution{}, domain.ErrNotFound
+	}
+	if _, done := r.rolledOver[key]; done {
+		return domain.GoalContribution{}, domain.ErrRolloverAlreadyDone
+	}
+	r.rolledOver[key] = in.GoalID
+
+	c, err := r.goals.AddContribution(ctx, domain.GoalContribution{
+		GoalID:            in.GoalID,
+		HouseholdID:       in.HouseholdID,
+		Amount:            in.Amount,
+		OccurredOn:        in.OccurredOn,
+		Source:            domain.ContributionBudgetRollover,
+		SourceBudgetMonth: &month,
+	})
+	if err != nil {
+		delete(r.rolledOver, key)
+		return domain.GoalContribution{}, err
+	}
+	return c, nil
+}
+
+// --- GoalRepository --------------------------------------------------
+
+// goalDouble is the in-memory GoalRepository every GoalService test (Task 6)
+// and every BudgetService.RollOver test (Task 7) runs against -- the same
+// map-backed shape the rest of this file uses. contributions is keyed by
+// goal id; AddContribution only ever appends to its slice, so that slice's
+// own order is a faithful creation-time record even though
+// domain.GoalContribution itself carries no created_at column to sort by.
+type goalDouble struct {
+	goals         map[string]domain.Goal
+	contributions map[string][]domain.GoalContribution // goal id -> contributions, in creation order
+	n             int
+	contribN      int
+
+	// budgets, when set, is the fakeBudgetRepo whose rolledOver stamp
+	// DeleteContribution clears when the removed row is a budget_rollover --
+	// the reverse half of fakeBudgetRepo.setGoals's mutual reference. nil is
+	// fine for a GoalService test that never touches a rollover
+	// contribution; DeleteContribution then simply has nothing to clear.
+	budgets *fakeBudgetRepo
+}
+
+func newGoalDouble() *goalDouble {
+	return &goalDouble{goals: map[string]domain.Goal{}, contributions: map[string][]domain.GoalContribution{}}
+}
+
+// setBudgets completes fakeBudgetRepo.setGoals's mutual reference.
+func (d *goalDouble) setBudgets(b *fakeBudgetRepo) { d.budgets = b }
+
+// nameTaken reports whether name is already used by another goal in this
+// household, archived rows included -- the same collision UNIQUE
+// (household_id, name) enforces regardless of archived_at, and the same
+// contract fakeCategoryRepo.nameTaken reproduces for categories. excludeID
+// lets Update check every row but its own.
+func (d *goalDouble) nameTaken(householdID, name, excludeID string) bool {
+	for _, g := range d.goals {
+		if g.HouseholdID == householdID && g.Name == name && g.ID != excludeID {
+			return true
+		}
+	}
+	return false
+}
+
+// contributedMinor sums every contribution a goal has -- starting balance
+// and rollovers included -- which is GoalRecord.ContributedMinor, the "how
+// much has actually accumulated" figure. MonthContributionTotals below
+// answers a narrower question, "how much arrived this month," and excludes
+// starting_balance for its own, separately load-bearing reason.
+func (d *goalDouble) contributedMinor(goalID string) int64 {
+	var total int64
+	for _, c := range d.contributions[goalID] {
+		total += c.Amount.Amount
+	}
+	return total
+}
+
+func (d *goalDouble) List(_ context.Context, householdID string, includeArchived bool) ([]usecase.GoalRecord, error) {
+	var out []usecase.GoalRecord
+	for _, g := range d.goals {
+		if g.HouseholdID != householdID {
+			continue
+		}
+		if g.IsArchived() && !includeArchived {
+			continue
+		}
+		out = append(out, usecase.GoalRecord{Goal: g, ContributedMinor: d.contributedMinor(g.ID)})
+	}
+	// Newest target first (the port's own doc comment), a nil TargetMonth
+	// sorting last -- there is no "newest" for a goal with no target date --
+	// then by name, including as the tiebreak within an equal TargetMonth,
+	// so the order is deterministic and no test can flake on map iteration.
+	sort.Slice(out, func(i, j int) bool {
+		ti, tj := out[i].Goal.TargetMonth, out[j].Goal.TargetMonth
+		switch {
+		case ti == nil && tj == nil:
+			return out[i].Goal.Name < out[j].Goal.Name
+		case ti == nil:
+			return false
+		case tj == nil:
+			return true
+		case !ti.Equal(*tj):
+			return ti.After(*tj)
+		default:
+			return out[i].Goal.Name < out[j].Goal.Name
+		}
+	})
+	return out, nil
+}
+
+func (d *goalDouble) Get(_ context.Context, householdID, goalID string) (usecase.GoalRecord, error) {
+	g, ok := d.goals[goalID]
+	if !ok || g.HouseholdID != householdID {
+		return usecase.GoalRecord{}, domain.ErrNotFound
+	}
+	return usecase.GoalRecord{Goal: g, ContributedMinor: d.contributedMinor(goalID)}, nil
+}
+
+// Create mirrors the real Create's own transaction: the goal row, then --
+// only when startingBalanceMinor is non-zero -- its opening contribution,
+// dated createdOn and sourced starting_balance. A zero startingBalanceMinor
+// writes no contribution row at all, never a zero-amount one:
+// goal_contributions' own CHECK (amount_minor <> 0) refuses a zero row on
+// the real table, and this double must never attempt to write one either.
+func (d *goalDouble) Create(_ context.Context, g domain.Goal, startingBalanceMinor int64, createdOn time.Time) (domain.Goal, error) {
+	if d.nameTaken(g.HouseholdID, g.Name, "") {
+		return domain.Goal{}, domain.ErrGoalNameTaken
+	}
+	d.n++
+	g.ID = fmt.Sprintf("goal-%d", d.n)
+	g.ArchivedAt = nil
+	d.goals[g.ID] = g
+
+	if startingBalanceMinor != 0 {
+		d.contribN++
+		d.contributions[g.ID] = append(d.contributions[g.ID], domain.GoalContribution{
+			ID:          fmt.Sprintf("contribution-%d", d.contribN),
+			GoalID:      g.ID,
+			HouseholdID: g.HouseholdID,
+			Amount:      domain.Money{Amount: startingBalanceMinor, Currency: g.Target.Currency},
+			OccurredOn:  createdOn,
+			Source:      domain.ContributionStartingBalance,
+		})
+	}
+	return g, nil
+}
+
+// Update replaces name, target amount, target month and planned monthly --
+// the port's own "every mutable column" list -- but never currency or
+// ArchivedAt: a real UPDATE's SET list would simply omit both columns, so
+// g.Target.Currency and g.ArchivedAt are read back off the existing row
+// regardless of what the caller passed, rather than trusted from g.
+// GoalService.Update is what refuses a currency change outright
+// (domain.ErrGoalCurrencyImmutable) before this is ever reached; this double
+// honours the immutability contract even if a future caller forgets to
+// check, the same way a real SET list without a currency column would.
+func (d *goalDouble) Update(_ context.Context, g domain.Goal) (domain.Goal, error) {
+	existing, ok := d.goals[g.ID]
+	if !ok || existing.HouseholdID != g.HouseholdID {
+		return domain.Goal{}, domain.ErrNotFound
+	}
+	if d.nameTaken(g.HouseholdID, g.Name, g.ID) {
+		return domain.Goal{}, domain.ErrGoalNameTaken
+	}
+	g.Target.Currency = existing.Target.Currency
+	g.ArchivedAt = existing.ArchivedAt
+	d.goals[g.ID] = g
+	return g, nil
+}
+
+// SetArchived only stamps ArchivedAt the first time a goal is archived, so
+// calling it again with archived=true is a true no-op rather than moving the
+// timestamp forward -- the same idempotence fakeCategoryRepo.SetArchived
+// gives categories, and the port's own doc comment promises for goals.
+func (d *goalDouble) SetArchived(_ context.Context, householdID, goalID string, archived bool) (domain.Goal, error) {
+	g, ok := d.goals[goalID]
+	if !ok || g.HouseholdID != householdID {
+		return domain.Goal{}, domain.ErrNotFound
+	}
+	if archived {
+		if g.ArchivedAt == nil {
+			now := time.Now().UTC()
+			g.ArchivedAt = &now
+		}
+	} else {
+		g.ArchivedAt = nil
+	}
+	d.goals[goalID] = g
+	return g, nil
+}
+
+func (d *goalDouble) AddContribution(_ context.Context, c domain.GoalContribution) (domain.GoalContribution, error) {
+	d.contribN++
+	c.ID = fmt.Sprintf("contribution-%d", d.contribN)
+	d.contributions[c.GoalID] = append(d.contributions[c.GoalID], c)
+	return c, nil
+}
+
+// DeleteContribution scopes by household AND by goal, not by contribution id
+// alone -- GoalRepository's own interface doc comment requires this, because
+// 00007_goals.sql gives goal_contributions.household_id no database-level
+// guarantee of agreeing with its own goal_id's household. When the removed
+// row is a budget_rollover, it also clears that month's stamp on the paired
+// fakeBudgetRepo (through d.budgets, wired by setBudgets) in the same call --
+// the in-memory equivalent of the real one-transaction guarantee the port's
+// doc comment describes; leaving the stamp would strand the household
+// exactly as that comment warns.
+func (d *goalDouble) DeleteContribution(_ context.Context, householdID, goalID, contributionID string) error {
+	rows := d.contributions[goalID]
+	for i, c := range rows {
+		if c.ID != contributionID || c.HouseholdID != householdID {
+			continue
+		}
+		d.contributions[goalID] = append(rows[:i:i], rows[i+1:]...)
+		if c.Source == domain.ContributionBudgetRollover && d.budgets != nil && c.SourceBudgetMonth != nil {
+			d.budgets.clearRolloverStamp(householdID, *c.SourceBudgetMonth)
+		}
+		return nil
+	}
+	return domain.ErrNotFound
+}
+
+// ListContributions reports newest first by OccurredOn, tie-broken by
+// creation order (most recently added first): domain.GoalContribution
+// carries no created_at the way the goal_contributions table does, so the
+// double stands in for "created_at DESC" with the only ordering information
+// it actually has -- AddContribution only ever appends, so the slice's own
+// order already is chronological.
+//
+// limit <= 0 is read as "no cap" here -- the plain reading of "at most limit
+// rows" ("at most 0 rows" would be vacuous), and unlike
+// TransactionRepository.List's own doc comment, this port's does not give
+// <= 0 its own rule. Task 4's real implementation is free to pick
+// differently, provided it documents its choice as plainly as this comment
+// does; nothing yet depends on which one wins.
+func (d *goalDouble) ListContributions(_ context.Context, householdID, goalID string, limit int) ([]domain.GoalContribution, error) {
+	rows := d.contributions[goalID]
+	ordered := make([]domain.GoalContribution, 0, len(rows))
+	for i := len(rows) - 1; i >= 0; i-- { // most recently added first, for the tiebreak below
+		if rows[i].HouseholdID == householdID {
+			ordered = append(ordered, rows[i])
+		}
+	}
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return ordered[i].OccurredOn.After(ordered[j].OccurredOn)
+	})
+	if limit > 0 && len(ordered) > limit {
+		ordered = ordered[:limit]
+	}
+	return ordered, nil
+}
+
+// MonthContributionTotals sums each unarchived goal's contributions inside
+// one calendar month, excluding source starting_balance -- the exclusion the
+// port's own doc comment calls load-bearing. An archived goal is left out of
+// the result entirely, matching "sums each unarchived goal's contributions."
+// The result is sorted by goal id purely for test determinism; nothing in
+// the port promises an order.
+func (d *goalDouble) MonthContributionTotals(_ context.Context, householdID string, month time.Time) ([]usecase.GoalMonthTotal, error) {
+	totals := map[string]int64{}
+	for goalID, rows := range d.contributions {
+		g, ok := d.goals[goalID]
+		if !ok || g.HouseholdID != householdID || g.IsArchived() {
+			continue
+		}
+		for _, c := range rows {
+			if c.HouseholdID != householdID {
+				continue
+			}
+			if c.Source == domain.ContributionStartingBalance {
+				continue // load-bearing exclusion -- see the port's own doc comment
+			}
+			if c.OccurredOn.Year() != month.Year() || c.OccurredOn.Month() != month.Month() {
+				continue
+			}
+			totals[goalID] += c.Amount.Amount
+		}
+	}
+	out := make([]usecase.GoalMonthTotal, 0, len(totals))
+	for goalID, amount := range totals {
+		out = append(out, usecase.GoalMonthTotal{GoalID: goalID, AmountMinor: amount})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].GoalID < out[j].GoalID })
+	return out, nil
+}
+
+// var _ usecase.GoalRepository = (*goalDouble)(nil) below is load-bearing,
+// not decoration: nothing in internal/usecase constructs a GoalService yet
+// (that is Task 6's job), so without this assertion a signature drift
+// between this double and ports.go's GoalRepository would not surface until
+// then -- the same reasoning convert.go's own compile-time repository
+// assertions give for the postgres adapters.
+var _ usecase.GoalRepository = (*goalDouble)(nil)
 
 // staticTestRates knows the one pair fx.StaticProvider knows, and errors on
 // everything else -- so a test for the no-rate branch does not have to invent

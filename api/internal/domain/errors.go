@@ -93,4 +93,23 @@ var (
 	// this sentinel is what lets the HTTP layer turn that failure into a 422
 	// instead of an unmapped 500.
 	ErrBudgetCategoryUnknown = errors.New("a budget line's category does not belong to this household")
+
+	// The goal sentinels. GoalService checks each before its repository call,
+	// following the per-field convention above rather than a generic
+	// validation error, so every 422 carries a field-specific code.
+	ErrGoalNameRequired           = errors.New("a goal name is required")
+	ErrGoalNameTaken              = errors.New("goal name taken")
+	ErrGoalTargetNotPositive      = errors.New("a goal's target must be positive")
+	ErrGoalPlannedMonthlyNegative = errors.New("a goal's planned monthly amount cannot be negative")
+	ErrGoalCurrencyImmutable      = errors.New("a goal's currency cannot be changed")
+	ErrGoalArchived               = errors.New("that goal is archived")
+	ErrContributionAmountZero     = errors.New("a contribution cannot be zero")
+
+	// The rollover sentinels. Each is a refusal BudgetService.RollOver makes
+	// before anything is written; ErrRolloverAlreadyDone can also arrive from
+	// the repository's own conditional UPDATE losing a race.
+	ErrRolloverMonthOpen        = errors.New("only a closed month can be rolled over")
+	ErrRolloverAlreadyDone      = errors.New("that month has already been rolled over")
+	ErrRolloverNothingUnspent   = errors.New("that month has nothing unspent to roll over")
+	ErrRolloverCurrencyMismatch = errors.New("only a goal in the household's primary currency can receive a rollover")
 )

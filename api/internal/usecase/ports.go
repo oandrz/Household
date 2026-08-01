@@ -552,6 +552,18 @@ type TransactionRepository interface {
 	MonthTotals(ctx context.Context, householdID string, month time.Time) ([]TransactionView, error)
 }
 
+// RollOverToGoalInput is what one rollover needs. Note is deliberately absent:
+// the row's note stays empty and the frontend renders "From July's unspent
+// budget" from source + sourceBudgetMonth, because user-facing copy does not
+// belong in a Go handler.
+type RollOverToGoalInput struct {
+	HouseholdID string
+	Month       time.Time // the budget month being rolled over
+	GoalID      string
+	Amount      domain.Money
+	OccurredOn  time.Time
+}
+
 type BudgetRepository interface {
 	// Get returns one household-month's budget. domain.ErrNotFound means the
 	// month has never been budgeted — callers translate that to the empty
@@ -567,4 +579,87 @@ type BudgetRepository interface {
 	// plus the viewed month if budgeted — newest first, months without a
 	// budget row simply absent, never zero-filled.
 	History(ctx context.Context, householdID string, month time.Time, months int) ([]domain.Budget, error)
+	// RollOverToGoal writes a budget month's unspent money into a goal as one
+	// contribution and stamps the month, in ONE transaction. The stamp is set
+	// by a conditional UPDATE (... AND rolled_over_at IS NULL), so a second
+	// concurrent call finds no row to update and gets
+	// domain.ErrRolloverAlreadyDone rather than writing a second contribution.
+	// domain.ErrNotFound when the month has no budget row at all — a state
+	// Budget decision 4 makes reachable, since a closed month can have spend
+	// and no caps.
+	RollOverToGoal(ctx context.Context, in RollOverToGoalInput) (domain.GoalContribution, error)
+}
+
+// GoalRecord is one goal with the only derived figure the repository can
+// supply: the sum of its contributions. Every other figure on the screen
+// (percent, status, required monthly) is domain arithmetic the service does,
+// not something SQL should be asked to know.
+type GoalRecord struct {
+	Goal             domain.Goal
+	ContributedMinor int64
+}
+
+// GoalMonthTotal is one goal's contributions inside one calendar month.
+type GoalMonthTotal struct {
+	GoalID      string
+	AmountMinor int64
+}
+
+// GoalRepository's implementation must not trust a contribution's household
+// scoping to be self-evident: 00007_goals.sql's goal_contributions table has
+// no database-level constraint tying goal_contributions.household_id to its
+// own goal_id's household_id, so a row could in principle carry a
+// household_id that disagrees with the goal it names. Every method below
+// that reads or writes a contribution -- AddContribution, DeleteContribution,
+// ListContributions, MonthContributionTotals -- must therefore filter its SQL
+// by household_id AND goal_id together, never by contribution id or goal id
+// alone, or a contribution could leak across households. Later tasks
+// implement this port; this is the contract they must honour.
+type GoalRepository interface {
+	// List returns one household's goals with their contributed totals, newest
+	// target first then by name. includeArchived is a UNION, not a filter
+	// swap: false returns the live goals, true returns the live ones AND the
+	// archived ones together, each carrying its own ArchivedAt. That is the
+	// AccountRepository.List / CategoryRepository.List contract, and the
+	// accounts screen's own "(archived)" row is what it renders as. Do not
+	// implement it as "archived instead".
+	List(ctx context.Context, householdID string, includeArchived bool) ([]GoalRecord, error)
+	// Get reports domain.ErrNotFound when no goal with this id exists in this
+	// household — including when one exists in a different household, which
+	// must be indistinguishable from not existing at all.
+	Get(ctx context.Context, householdID, goalID string) (GoalRecord, error)
+	// Create writes the goal and, when startingBalanceMinor is non-zero, its
+	// opening contribution (source starting_balance, dated createdOn) in ONE
+	// transaction. A goal whose opening contribution is missing is not a state
+	// this port can produce. A name colliding with UNIQUE (household_id, name)
+	// — archived rows included — surfaces as domain.ErrGoalNameTaken.
+	Create(ctx context.Context, g domain.Goal, startingBalanceMinor int64, createdOn time.Time) (domain.Goal, error)
+	// Update replaces every mutable column: name, target, target month
+	// (nil clears it), planned monthly. Currency is NOT mutable — see
+	// GoalService.Update's own comment. Same collision contract as Create.
+	Update(ctx context.Context, g domain.Goal) (domain.Goal, error)
+	// SetArchived stamps or clears archived_at. Archiving is idempotent and
+	// keeps every contribution and rollover reference intact; there is no
+	// delete, the accounts precedent.
+	SetArchived(ctx context.Context, householdID, goalID string, archived bool) (domain.Goal, error)
+	// AddContribution writes one row. c.ID is ignored; the database assigns
+	// it. c.Amount's currency must equal the goal's — the service checks, and
+	// the column does not exist to hold a second answer.
+	AddContribution(ctx context.Context, c domain.GoalContribution) (domain.GoalContribution, error)
+	// DeleteContribution removes one row and, when that row is a
+	// budget_rollover, clears its month's rolled_over_at and rollover_goal_id
+	// on budgets IN THE SAME TRANSACTION. Leaving the stamp would strand the
+	// household: money gone from the goal, a month claiming it rolled over,
+	// and 409 on every retry. domain.ErrNotFound when there was nothing to
+	// remove.
+	DeleteContribution(ctx context.Context, householdID, goalID, contributionID string) error
+	// ListContributions returns one goal's contributions, newest first, at
+	// most limit rows.
+	ListContributions(ctx context.Context, householdID, goalID string, limit int) ([]domain.GoalContribution, error)
+	// MonthContributionTotals sums each unarchived goal's contributions inside
+	// one calendar month, EXCLUDING source 'starting_balance'. The exclusion is
+	// load-bearing and lives here so no caller can forget it: a household
+	// creating four goals with existing balances would otherwise read
+	// "S$41,200 added in August" for money that never moved.
+	MonthContributionTotals(ctx context.Context, householdID string, month time.Time) ([]GoalMonthTotal, error)
 }
