@@ -14,6 +14,7 @@ import { ApiError } from "../../api/client";
 import { useCurrencies } from "../auth/useAuth";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { GoalCard } from "./GoalCard";
+import { GoalModal } from "./GoalModal";
 import { GOAL_COPY } from "./goalCopy";
 import { useGoals } from "./useGoals";
 import type { Goal } from "./goalSchemas";
@@ -24,11 +25,8 @@ export function GoalsPage() {
   const currencies = useCurrencies();
   // Task 12's New/Edit modal and Task 13's contribution panel both open
   // through state owned here (the task brief's own "Produces" line). "new"
-  // opens Create; a Goal opens Edit for that card. Neither modal exists yet,
-  // so the branch at the bottom of this file is a minimal stub -- the same
-  // seam Task 10's router placeholder was, named in a testid so Task 12 has
-  // somewhere concrete to replace rather than adding its own state to this
-  // file.
+  // opens Create; a Goal opens Edit for that card. Task 13's panel does not
+  // exist yet, so only the New/Edit modal renders below today.
   const [modalGoal, setModalGoal] = useState<Goal | "new" | null>(null);
   // Restore is scoped per card, not one page-wide flag -- AccountsPanel.tsx's
   // own pendingIds reasoning: useGoals exposes one restoreGoal function
@@ -190,16 +188,30 @@ export function GoalsPage() {
         </p>
       )}
 
-      {/* Task 12's real modal replaces this branch outright, the same way
-          Task 11 replaced router.tsx's own placeholder -- not something to
-          edit around. modalGoal is "new" for Create, a Goal for Edit. */}
-      {modalGoal && (
-        <div data-testid="goal-modal-stub" role="dialog" aria-modal="true">
-          {modalGoal === "new" ? "New goal" : `Edit ${modalGoal.name}`}
-          <button type="button" onClick={() => setModalGoal(null)}>
-            Close
-          </button>
-        </div>
+      {/* modalGoal is "new" for Create, a Goal for Edit -- GoalCard.tsx's
+          own `clickable = !archived && Boolean(onEdit)` already refuses a
+          click on an archived card, so onEdit={setModalGoal} above never
+          opens this in edit mode for one. Gated on currencies.data because
+          GoalModal's `currencies` prop is required, not optional -- this
+          page already fetches it (symbolFor above needs it too), and it is
+          small and independent of `goals.data`, so in practice it has
+          settled by the time a person has clicked anything on this page;
+          this guard only matters for an implausibly fast double-click.
+          onSaved and onClose both just close the modal -- the same
+          BudgetPage.tsx/BudgetModal convention, since createGoal/updateGoal
+          (useGoals.ts) already invalidate the goals query on success, so
+          this page's own `useGoals({ includeArchived })` call -- mounted
+          and active the whole time the modal is open -- refetches on its
+          own with no extra call needed here. */}
+      {modalGoal && currencies.data && (
+        <GoalModal
+          mode={modalGoal === "new" ? "create" : "edit"}
+          goal={modalGoal === "new" ? undefined : modalGoal}
+          currencies={currencies.data.currencies}
+          primaryCurrency={data.currency}
+          onClose={() => setModalGoal(null)}
+          onSaved={() => setModalGoal(null)}
+        />
       )}
     </div>
   );

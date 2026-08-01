@@ -371,26 +371,120 @@ describe("GoalsPage", () => {
     expect(document.body.textContent).not.toContain("Auto-save");
   });
 
-  // Task 12 (the New/Edit modal) and Task 13 (the contributions panel) both
-  // open through state this page owns (the task brief's own "Produces"
-  // line). Neither modal exists yet, so this pins only that the seam is
-  // wired -- Task 12 replaces the stub branch outright, the same way this
-  // task replaced router.tsx's own placeholder.
-  it("clicking Create your first goal opens the create-goal seam", async () => {
+  // Task 12's New/Edit modal (GoalModal.tsx) opens through state this page
+  // owns (the task brief's own "Produces" line) -- three entry points, all
+  // sharing the one `modalGoal` state and the one <GoalModal> render at the
+  // bottom of the file. Task 12's own report flagged that no task in the
+  // plan wired the modal in; these three tests (plus the mutation check
+  // below) are that wiring's own coverage, replacing the two tests that used
+  // to pin only the stub seam.
+  it("clicking + New goal opens the create-goal modal, blank", async () => {
+    renderPage(
+      goalsFixture([goalFixture({ name: "Bali family trip" })], { onTrackCount: 1, datedCount: 1 }),
+    );
+
+    fireEvent.click(await screen.findByTestId("goals-new"));
+
+    expect(await screen.findByLabelText("Goal name")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Create goal" })).toBeInTheDocument();
+    // Create mode only -- Starting balance exists exclusively at creation
+    // (spec decision 8; GoalModal.tsx's own header comment on why).
+    expect(screen.getByLabelText("Starting balance")).toBeInTheDocument();
+  });
+
+  it("clicking Create your first goal opens the create-goal modal, blank", async () => {
     renderPage(goalsFixture([]));
 
     fireEvent.click(await screen.findByTestId("goals-create-first"));
 
-    expect(await screen.findByTestId("goal-modal-stub")).toHaveTextContent("New goal");
+    expect(await screen.findByLabelText("Goal name")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Create goal" })).toBeInTheDocument();
   });
 
-  it("clicking a live card opens the edit seam for that goal", async () => {
+  it("clicking a live card opens the edit modal, prefilled from that goal", async () => {
     renderPage(
       goalsFixture([goalFixture({ name: "Bali family trip" })], { onTrackCount: 1, datedCount: 1 }),
     );
 
     fireEvent.click(await screen.findByTestId("goal-card"));
 
-    expect(await screen.findByTestId("goal-modal-stub")).toHaveTextContent("Edit Bali family trip");
+    expect(await screen.findByLabelText("Goal name")).toHaveValue("Bali family trip");
+    // Edit mode only -- Currency is locked once a goal exists (GoalModal.tsx
+    // disables the control with its reason shown), and there is no
+    // Starting balance field to prefill at all past creation.
+    expect(screen.getByLabelText("Currency")).toBeDisabled();
+    expect(screen.queryByLabelText("Starting balance")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+  });
+
+  // An archived card opens nothing -- GoalCard.tsx's own
+  // `clickable = !archived && Boolean(onEdit)` already refuses the click;
+  // this pins that the page's wiring doesn't accidentally reopen the seam
+  // for the archived case (e.g. by handing every card the same onEdit
+  // regardless of archived state).
+  it("clicking an archived card opens no modal", async () => {
+    const archived = goalFixture({
+      id: "g1",
+      name: "Old family car",
+      archivedAt: "2026-06-01T00:00:00Z",
+      status: "none",
+      targetMonth: null,
+      requiredMonthlyOk: false,
+      requiredMonthlyMinor: 0,
+    });
+    renderPage(goalsFixture([]), {
+      "GET /api/v1/goals?include_archived=true": { status: 200, body: goalsFixture([archived]) },
+    });
+
+    await screen.findByTestId("goals-empty-state");
+    fireEvent.click(screen.getByRole("switch", { name: "Show archived" }));
+    fireEvent.click(await screen.findByText("Old family car"));
+
+    expect(screen.queryByLabelText("Goal name")).not.toBeInTheDocument();
+  });
+
+  // The coordinator's own instruction: "verify rather than assume" that a
+  // successful save closes the modal *and* the list reflects the change,
+  // since useGoals.ts's createGoal/updateGoal invalidate on success rather
+  // than patching local state -- this end-to-end loop is the only place
+  // that invalidate-then-refetch behaviour is actually exercised through a
+  // real page mount rather than asserted about in isolation.
+  it("saving an edit closes the modal and the card shows the new figure, with no extra call this page had to make", async () => {
+    const goal = goalFixture({ id: "goal-1", name: "Bali family trip", plannedMonthlyMinor: 35000 });
+    const renamed = goalFixture({ id: "goal-1", name: "Bali family trip 2027", plannedMonthlyMinor: 40000 });
+    let patchBody: unknown;
+
+    renderPage(goalsFixture([goal], { onTrackCount: 1, datedCount: 1 }), {
+      // Two responses, consumed in order: the page's own initial GET, then
+      // the refetch createGoal/updateGoal's onSuccess invalidation triggers
+      // -- this second entry is what proves the invalidation actually
+      // reaches this page's mounted query, not just that useGoals.ts calls
+      // invalidateQueries in isolation.
+      "GET /api/v1/goals": [
+        { status: 200, body: goalsFixture([goal], { onTrackCount: 1, datedCount: 1 }) },
+        { status: 200, body: goalsFixture([renamed], { onTrackCount: 1, datedCount: 1 }) },
+      ],
+      [`PATCH /api/v1/goals/${goal.id}`]: {
+        status: 200,
+        body: { goal: renamed },
+        capture: (body) => {
+          patchBody = body;
+        },
+      },
+    });
+
+    fireEvent.click(await screen.findByTestId("goal-card"));
+    fireEvent.change(await screen.findByLabelText("Goal name"), {
+      target: { value: "Bali family trip 2027" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(patchBody).toBeDefined());
+    // The modal is gone -- onSaved/onClose both fired.
+    expect(screen.queryByLabelText("Goal name")).not.toBeInTheDocument();
+    // And the card now shows what the refetch (not the PATCH response,
+    // which this page never reads directly) came back with.
+    expect(await screen.findByText("Bali family trip 2027")).toBeInTheDocument();
+    expect(screen.getByText("S$400.00/mo")).toBeInTheDocument();
   });
 });
