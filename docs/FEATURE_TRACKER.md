@@ -13,7 +13,27 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 57 of 97 features built or partly built.
+**Where things stand:** 64 of 99 features built or partly built.
+
+**The Goals update, recorded before the ones below it.** Slice 2's fourth
+feature shipped: savings targets whose progress is a contributions ledger,
+not an account balance; the New/Edit goal modal; the contributions panel;
+the Monthly contributions card; and the Budget page's own manual rollover
+into a goal. As with every update recorded here, every number is a fresh
+count of the ✅/🟡/⬜/🚫 symbols in the tables below — the first symbol in
+each row's own cell — never the previous totals adjusted in place. Four
+rows move and two are added in Money: "Savings goals with progress and
+funding source" moves ⬜ → 🟡, its one named gap being the design's
+funding-source account (dropped deliberately, spec decision 6); "Monthly
+contributions summary" and "New goal (modal)" both move ⬜ → ✅; two new
+rows the design's own mockup never draws — "Goal contributions — add,
+delete, list by source" and "Archive and restore a goal" — are added at ✅;
+and Budget's "Roll unspent into savings" moves ⬜ → 🟡, since the manual
+move now ships even though the design's automatic month-end toggle does
+not. One more row moves in Overview: "Goals on track card" reaches ✅,
+reading the real `X of Y on track` figure. Recounting by this file's own
+rule takes the totals from 47/10/38/2 = 97 to 52/12/33/2 = 99 — two rows
+added (both Money), five moved from Not started to Partial or Built.
 
 **The interim Overview (M2) update.** `/` stopped being a placeholder. Section
 4 gains two rows the design does not draw — a setup checklist and the
@@ -71,19 +91,22 @@ Transactions adds two more under **Categories**: the list and its
 first-use seeding (needed before Budget existed, for the transaction modal's
 own dropdown), and — added by the Budget update — renaming, creating and
 archiving a category, which the design's spec folds into the Edit-budget
-modal rather than a dedicated screen the dc.html mockup never drew.
+modal rather than a dedicated screen the dc.html mockup never drew. Goals
+adds two more of its own, under **Goals** below: contributions — add,
+delete, list by source — and archive/restore, neither of which the design's
+mockup draws beyond the cards and the contributions summary themselves.
 
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
 | Entry & authentication | 10 | 1 | 0 | 0 |
 | Navigation shell | 7 | 0 | 1 | 0 |
 | Household settings | 15 | 4 | 2 | 0 |
-| Overview (home) | 2 | 3 | 5 | 0 |
-| Money | 13 | 2 | 15 | 0 |
+| Overview (home) | 3 | 3 | 4 | 0 |
+| Money | 17 | 4 | 11 | 0 |
 | Marriage | 0 | 0 | 13 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **47** | **10** | **38** | **2** |
+| **Total** | **52** | **12** | **33** | **2** |
 
 ---
 
@@ -167,7 +190,7 @@ The full checklist is at the end of `docs/LEARNING.md`.
 | Space visibility per member | ✅ | Money is capability-gated, Marriage is parents-only, Family is for everyone |
 | Household footer with members and plan | ✅ | "Free plan" is static text, as specified |
 | Modal primitive | ✅ | Native `<dialog>`; backdrop dismissal, Escape, focus trap. Slices 2–4 build on it |
-| Placeholder pages for unbuilt areas | ✅ | Two are left, and each names the slice that will ship it: `/` (Overview) and `/money/$` (Goals and Bills). Marriage's and Family's were deleted with their routes in `110ab0a` — a placeholder is honest as the *inside* of a space a household already has, and dishonest as a whole navigation destination offering a page that does not exist |
+| Placeholder pages for unbuilt areas | ✅ | Two are left, and each names the slice that will ship it: `/` (Overview) and `/money/$` (Bills). Marriage's and Family's were deleted with their routes in `110ab0a` — a placeholder is honest as the *inside* of a space a household already has, and dishonest as a whole navigation destination offering a page that does not exist |
 | `⌘K` command palette | ⬜ | Shown in the sidebar header; no behaviour behind it |
 | "+ New space" | ✅ | See Household settings below |
 
@@ -199,9 +222,9 @@ The full checklist is at the end of `docs/LEARNING.md`.
 
 ## 4 · Overview (home)
 
-`/` is a real page as of the interim Overview (M2). It carries the two of the
-design's eight cards that Money can supply today, plus a setup checklist the
-design does not draw. The remaining six cards need Bills, Goals, Marriage and
+`/` is a real page as of the interim Overview (M2), and now carries three of
+the design's eight cards that Money can supply, plus a setup checklist the
+design does not draw. The remaining five cards need Bills, Marriage and
 Family, none of which exist — so this section stays mostly ⬜, and the page
 grows into the designed Overview rather than being replaced.
 
@@ -210,17 +233,17 @@ grows into the designed Overview rather than being replaced.
 | Net worth card | 🟡 — the figure and the not-computable case only, by reusing Finances' own card. The design's card also carries an assets/liabilities split and a trend |
 | July budget card — percentage used | 🟡 — percentage used plus the two figures behind it, and a "Set a budget" link when the household has never budgeted. No sparkline. Owner-only: `GET /budgets/{month}` is `requireCapability(money)` **and** `requireOwner` |
 | Next bill card | ⬜ |
-| Goals on track card | ⬜ |
+| Goals on track card | ✅ — the real `X of Y on track` figure and the next dated goal beneath it, reading `useGoals`, the same hook and cache entry `/money/goals` itself uses |
 | Next retro card with carried-over actions | ⬜ |
 | Vision check-in strip | ⬜ |
 | "This week" agenda | ⬜ |
-| "+ Add" quick-create menu | 🟡 — Transaction and Account only, the two that exist. Transaction is disabled with its reason until an account exists. Bill, Savings goal, Calendar event and Marriage retro join it in the change that builds each |
+| "+ Add" quick-create menu | 🟡 — Transaction, Account and Savings goal now live. Transaction is disabled with its reason until an account exists; Savings goal has no such precondition (Goals decision 6 — there is no funding-source account to require). Bill, Calendar event and Marriage retro still join it in the change that builds each |
 | Setup checklist (no mockup — see below) | ✅ |
 | Limited-member "amounts are hidden" panel (no mockup — see below) | ✅ |
 
 The "+ Add" menu offers Transaction, Account, Bill, Savings goal, Calendar event
-and Marriage retro — so its remaining four entries depend on Money, Family and
-Marriage existing first.
+and Marriage retro — so its remaining three entries (Bill, Calendar event,
+Marriage retro) depend on Bills, Family and Marriage existing first.
 
 Two rows above have no mockup of their own. The **setup checklist** is three
 steps derived from data the page already fetched (create your household, add an
@@ -238,9 +261,10 @@ browser walk, `2026-07-31-hearth-interim-overview-verification.md` criterion 9).
 
 ## 5 · Money
 
-Accounts, Transactions and Budget are built — Budget's own history modal is
-whole except for Export CSV. Goals and Bills are still to come. This is still
-the largest area.
+Accounts, Transactions, Budget and Goals are built — Budget's own history
+modal is whole except for Export CSV, and Goals is whole except for the
+funding-source account the design draws and decision 6 deliberately drops.
+Bills is still to come. This is still the largest area.
 
 **Finances**
 
@@ -370,7 +394,7 @@ screen for.
 | Spending by person | ✅ |
 | Edit budget (modal) | ✅ |
 | Budget history (modal) | 🟡 *(Export CSV deferred — `apiFetch`'s JSON-only contract, transactions decision 7)* |
-| Roll unspent into savings | ⬜ *(deferred whole to Goals — spec decision 1)* |
+| Roll unspent into savings | 🟡 *(the manual move ships; the design's automatic month-end toggle does not)* |
 
 **A household can create, edit and review a budget end to end now.** The
 four stat cards (Budgeted, Spent, Remaining, Daily pace), the per-category
@@ -418,21 +442,66 @@ ok response it cannot parse as JSON, so a CSV download needs its own
 non-JSON response path, its own guard and its own test (the transactions
 spec's decision 7, restated for Budget by decision 10 of the Budget spec) —
 which is why the row above is 🟡 rather than ✅ even though every other part
-of History works end to end. **"Roll unspent into savings" does not ship at
-all**, not stored-but-dormant, not stubbed: the design's toggle names a
-savings goal and moves money at month end, and Goals does not exist yet, so
-a control that looks real and does nothing would violate the same honesty
-rule the design's own "· not built" markers exist to protect (Budget spec
-decision 1). The insight card says what is unspent; the rollover sentence
-itself arrives with Goals.
+of History works end to end. **"Roll unspent into savings" ships as a manual button, not the design's
+automatic toggle.** A closed month with `Remaining > 0` and no stamp shows
+`BudgetRolloverCard.tsx`'s own offer — "S$1,780 unspent in July · Move it
+into a goal" — opening a picker of the household's primary-currency,
+unarchived goals; after the move the card names where the money went and the
+button is gone (Goals spec decision 4). This is deliberately not the
+design's toggle: a setting labelled "Roll unspent into savings" that acts
+only when clicked would read as automatic, the exact dishonesty Budget spec
+decision 1 already refused for this same feature — nothing here runs on a
+clock. **The gap this row's 🟡 names is that automatic month-end rollover
+specifically does not exist**, not the manual move, which is complete
+end-to-end including its own owner-ruled edge case: `Remaining` excludes any
+expense with no available exchange rate, so on a month with exclusions the
+true unspent figure can be lower than what the button moves. The card names
+the excluded count next to the button whenever it is non-zero (commit
+`8a1114b`) rather than blocking the move — see `docs/SYSTEM_DESIGN.md` §5's
+Goals flow for the ruling in full.
 
 **Goals**
 
 | Feature | State |
 |---|---|
-| Savings goals with progress and funding source | ⬜ |
-| Monthly contributions summary | ⬜ |
-| New goal (modal) | ⬜ |
+| Savings goals with progress and funding source | 🟡 *(no funding-source account — dropped deliberately, spec decision 6)* |
+| Monthly contributions summary | ✅ |
+| New goal (modal) | ✅ |
+| Goal contributions — add, delete, list by source | ✅ |
+| Archive and restore a goal | ✅ |
+
+**A household can set a goal, track it and move money into it end to end
+now.** A goal carries a name, a target amount and currency, an optional
+target date, and a planned-monthly figure; progress is a `goal_contributions`
+ledger, not an account balance — a contribution moves no real money, and
+nothing reconciles a goal's progress against any account
+(`docs/SYSTEM_DESIGN.md` §5). The New/Edit goal modal (`GoalModal.tsx`,
+Task 12) creates and edits a goal, with a live suggested-monthly figure
+recomputed from whatever is currently typed; currency is settable only at
+creation; the modal is wired into the Goals page at three entry points
+(empty state, a card, "+ New goal"), closing a plan gap the Task 12 review
+found where no task had actually mounted it. The contributions panel
+(`GoalContributionsPanel.tsx`, Task 13) adds a manual contribution and lists
+a goal's history by source (manual, starting balance, budget rollover), with
+delete behind an in-page confirmation, never `window.confirm`. Archive hides
+a goal behind a "Show archived" view with restore, the Accounts pattern; a
+goal is never deleted, because contributions reference it and a rolled-over
+budget month may name it.
+
+**"Savings goals with progress and funding source" is 🟡 for one named
+reason: the design's "Fund from" account select does not ship.** Under the
+decision that a contribution moves no real money, an account link would
+drive no figure and decorate a screen whose whole job is to be believed
+(spec decision 6). A household with several goals across two accounts loses
+the record of which pot funds which goal — the accepted cost, returned for
+free only if contributions ever become real transfers. Everything else the
+row promises — progress, target, status — is built.
+
+**Two rows here have no mockup of their own**, the same shape Accounts' own
+archive/restore and Transactions' own category rows take: the design's
+Goals screen draws cards and a contributions summary, never the add/delete
+controls or the archive view that make either one real, so both are counted
+as their own rows rather than folded silently into the cards above them.
 
 **Bills**
 
@@ -443,15 +512,16 @@ itself arrives with Goals.
 | Subscriptions summary | ⬜ |
 | Add bill (modal) | ⬜ |
 
-**Before building any more of this**, the two figures still open need
-defining. Four of the six the design shows are pinned already: net worth
-from assets minus liabilities (Accounts), and `66% used`, `S$137/day left`
-and `on pace to save S$1,780` — all Remaining-based rather than a run-rate
-projection — in the formula table of
-`docs/superpowers/specs/2026-07-30-hearth-budget-design.md` (decision 2).
-`4 of 4 on track` and unspent budget rolling into a nominated goal at month
-end are still undefined, and are Goals' own spec to pin — an implementer who
-invents either without a decision recorded first is building on sand.
+**Every derived figure the design shows across Accounts, Budget and Goals is
+now pinned and built.** Net worth from assets minus liabilities (Accounts);
+`66% used`, `S$137/day left` and `on pace to save S$1,780` — all
+Remaining-based rather than a run-rate projection — in the formula table of
+`docs/superpowers/specs/2026-07-30-hearth-budget-design.md` (decision 2);
+and `X of Y on track` plus the manual move of unspent budget into a
+nominated goal, in the formula table of
+`docs/superpowers/specs/2026-08-01-hearth-goals-design.md`. Bills is the one
+area left where an implementer would be inventing a figure with no decision
+recorded first.
 
 ## 6 · Marriage
 

@@ -223,13 +223,28 @@ changes this spec first.
 | Required monthly | `remaining ÷ monthsLeft`, rounded **up** to the whole minor unit. Rounding up is deliberate: rounding down states a figure that does not actually reach the target |
 | On track | `target_month` present, not archived, not achieved, and `required monthly ≤ planned_monthly` |
 | Behind | Same inputs, `required monthly > planned_monthly`. A `target_month` before the current month and not achieved is **Behind** by definition, with no division performed |
-| No status | `target_month IS NULL`, or the goal is archived |
+| No status | Not achieved, and either `target_month IS NULL` or the goal is archived |
 | "X of Y on track" | Y counts unarchived, dated, unachieved goals; X counts those on track. Copy names what was excluded: "3 of 4 on track · 1 with no date". Y = 0 hides the figure rather than rendering "0 of 0" |
 | Next goal (Overview) | Of the dated, unarchived, unachieved goals, the earliest `target_month`; ties broken by name. None → the line is omitted |
 | Planned monthly total | `SUM(planned_monthly_minor)` over unarchived goals, each converted to primary currency. Goals with no available rate are excluded and the card states how many, the ledger's own copy pattern |
 | Actual this month | `SUM(amount_minor)` over contributions with `occurred_on` in the current month, unarchived goals only, **excluding `source = 'starting_balance'`**, converted the same way and excluded-for-no-rate the same way. The exclusion is load-bearing: a household creating four goals with existing balances on day one would otherwise read "S$41,200 added in August" for money that never moved, destroying the planned-versus-actual divergence decision 7 exists to show |
 | Suggested monthly (modal) | `remaining ÷ monthsLeft` at the values currently typed, recomputed live; blank while target or date is blank. A suggestion only — the household may type anything, including 0 |
 | Unspent available to roll (Budget) | The closed month's `Remaining` (Budgeted − Spent) when positive. `≤ 0` → no rollover offered |
+
+**Amendment (owner ruling, 2026-08-01, recorded by Task 17 rather than
+silently rewriting the row above):** the "No status" row originally read
+`target_month IS NULL`, **or archived** — implying an archived goal never
+shows a status at all, achieved included. That was wrong against the
+shipped behaviour and is now corrected above. `GoalStatusFor` checks
+`Achieved` (`contributed ≥ target`) *before* it checks `IsArchived()`, so an
+archived goal that was finished still reads **Achieved**. The ruling: keep
+it that way. Achieved is derived from real data, never a stored flag
+(decision 9); archiving only hides a goal from the default list, it does
+not un-finish it, and a goal a household completed and tucked away should
+still say so when viewed. Task 2's own review raised this exact
+ordering as a ⚠️ when `GoalStatusFor` was first written, and it went
+unresolved until it was visible on screen (Task 11's review) and the owner
+ruled on it directly.
 
 ## API
 

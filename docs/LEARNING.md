@@ -637,6 +637,53 @@ person to ask whether the test could ever have gone red in the first place.
   deliberately. **"Loading" is not one state.** A page with three independent
   queries has a lattice of them, and the harmful one is rarely the first.
 
+- **Goals, four separate tasks, one shape each time: an assertion that would
+  have passed against broken code.** None of the four was caught by the test
+  itself going red — every one needed a person, usually a reviewer, to ask
+  whether the test could ever have failed in the first place.
+  - Task 2's plan-mandated case for `GoalProgressPercent` was named "net
+    negative floors at 0, never a reversed ring" (`goal_test.go:72`) but
+    supplied `contributed = -500000` against `target = 400000` — division
+    produces a negative percentage on its own before any flooring runs, so
+    the expected value of `0` matched whether or not the floor existed. The
+    owner's ruling: fix the test, not the plan — a case named for a guard
+    that passes with the guard deleted protects nothing. Fixed by adding a
+    case where the unfloored arithmetic would land somewhere other than
+    zero, confirmed red with the floor removed and green with it restored.
+  - Task 6's sharpest finding: a test asserted
+    `GoalView.Goal.PlannedMonthly.Currency` to pin "the card stays in its own
+    currency, never the household's primary." The field is real and
+    populated, but `GoalService.List` never *writes* it — `GoalView.Goal` is
+    the stored record's own `domain.Goal` carried straight through
+    unconverted, so the currency the test read back was whatever its own
+    fixture had put there, regardless of what `List`'s conversion logic did
+    or didn't do. The assertion could not fail no matter how `List` was
+    written, because that field sits entirely outside the path the service
+    under test actually computes. Fixed by asserting the fields `List`
+    genuinely constructs itself from `g.Target.Currency`
+    (`Contributed.Currency`, `RequiredMonthly.Currency`, including the real
+    `ok=false` branch), each mutation-checked by swapping in the household's
+    primary currency and watching the corrected assertions go red.
+  - Task 7's implementer caught its own instance before review did:
+    contributions were asserted on a goal id the test had never seeded, so
+    the list was structurally empty regardless of what
+    `GoalService.Contributions` did with it — the same "value never set"
+    shape pattern 1's Transactions catalogue already carries twice. Fixed in
+    the same commit (`f8c1cd6`) by seeding the goal the assertions actually
+    named.
+  - Task 9's two rollover 404 tests asserted only `status == 404` and the
+    error `code`, never the message — indistinguishable between
+    `BudgetService.RollOver` refusing with its own `"That could not be
+    found."` and chi's route catch-all answering `"That endpoint does not
+    exist."` for a route that was never registered at all. Deleting the
+    route registration left both tests green. Fixed by asserting the
+    service's own message text, with a route-deletion mutation as the proof
+    it now discriminates (commits `f1dbd00..8839c46`).
+
+  All four are filed here rather than as new patterns, because the shape is
+  the one this section already tracks — an assertion satisfied by more than
+  the one thing it claims to pin — not four new discoveries.
+
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
 a different reason than the one you meant to prove, that is not yet proof
@@ -1721,6 +1768,31 @@ route with a missing guard has no second line of defence.
   (reverting `buildRows`'s argument back to `categories` turns it red on
   the display-name assertion, not just the incidental no-rename one, which
   would have passed either way). See pattern 1.
+
+- Goals slice, Task 16 (Overview's "Goals on track" card): the implementer's
+  own beyond-brief empty state computed `hasAnyGoals` as
+  `datedCount + noDateCount` — the two counts `GoalsSummary` builds for a
+  different question ("how many goals need an on-track pill"), which by
+  design exclude an achieved goal (`GoalService.List`'s own switch checks
+  `status == GoalAchieved` first and puts it in neither count). A household
+  that fully funded its only goal without archiving it saw "No goals yet" on
+  Overview while `/money/goals` still showed the goal, achieved pill and
+  all — a derived boolean reconstructed from summary figures that were never
+  built to answer the question actually being asked. This is the same shape
+  as `NetWorthSummary.Computable`'s guard counting archived accounts
+  (Domain and money catalogue, above) — a count built for one purpose reused
+  for a different one it silently gets wrong at the boundary — and the same
+  class as Task 11's own self-caught defect one task earlier in this same
+  feature, where "Show archived" was gated on `goals.length > 0` and so
+  vanished exactly when a household most needed it (archiving its last live
+  goal). Three instances across two features is what makes this a class
+  rather than a one-off: **a value built to answer "how many of X have
+  property Y" is not safe to reuse for "does X exist at all" — count the
+  thing you actually need to know, not the nearest count that happens to be
+  in scope.** Fixed by reading `goals.goals.length` instead — the same
+  question `GoalsPage` itself answers the same way — with a new test that
+  builds the exact achieved-and-unarchived, both-counts-zero state and goes
+  red on the old formula (commits `f04ce11..acbf52d`).
 
 ### Tooling and infrastructure
 

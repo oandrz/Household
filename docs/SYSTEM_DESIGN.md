@@ -6,26 +6,29 @@ sitting.
 
 **Scope:** what exists today — slices 0 and 1, self-serve sign-up and
 household provisioning (which shipped ahead of slice 2 in the build order, see
-`docs/HANDOVER.md`), and the first three features of slice 2 (Money):
+`docs/HANDOVER.md`), and the first four features of slice 2 (Money):
 Accounts — a household records what it owns and owes by hand and sees a net
 worth built from it; Transactions — the ledger a household logs expenses,
 income and transfers into, categorised and filterable, which is also what
 turns an account's balance from a copy of its opening figure into a real
-sum; and Budget — an envelope per category with pace, built directly on
+sum; Budget — an envelope per category with pace, built directly on
 Transactions' own month totals, plus the category management (rename,
 create, archive) the design folds into its Edit-budget modal rather than a
-dedicated screen. Goals and Bills, the rest of Money, and all of Marriage and
-Family are not built; see `docs/FEATURE_TRACKER.md`. Overview is **partly**
-built: `/` carries an interim page composed of the two of the design's eight
-cards Money can already supply, plus a setup checklist and a quick-create
-menu, and it grows into the designed Overview as Bills, Goals, Marriage and
-Family arrive rather than being replaced (§7). It adds no endpoint, no table
-and no port — it is composition over what Accounts, Transactions and Budget
-already expose. The UX-repair round of 2026-07-31 that preceded it shipped no
-feature at all — it bounded the page container, removed the two unbuilt spaces
-from the navigation along with their four routes, and rewrote copy; where
-either round changed the shape of something drawn here, the change is recorded
-at that diagram (§7 in particular).
+dedicated screen; and Goals — a savings target with an optional date, its
+progress kept as a contributions ledger rather than an account balance, and
+the manual move that finally gives Budget's unspent money somewhere to go.
+Bills, the rest of Money, and all of Marriage and Family are not built; see
+`docs/FEATURE_TRACKER.md`. Overview is **partly** built: `/` carries an
+interim page composed of three of the design's eight cards Money can already
+supply, plus a setup checklist and a quick-create menu, and it grows into the
+designed Overview as Bills, Marriage and Family arrive rather than being
+replaced (§7). It adds no endpoint, no table and no port — it is composition
+over what Accounts, Transactions, Budget and Goals already expose. The
+UX-repair round of 2026-07-31 that preceded it shipped no feature at all — it
+bounded the page container, removed the two unbuilt spaces from the
+navigation along with their four routes, and rewrote copy; where either round
+changed the shape of something drawn here, the change is recorded at that
+diagram (§7 in particular).
 
 ---
 
@@ -108,7 +111,8 @@ graph TD
         Account["AccountService — net worth is<br/>composed here, not stored"]
         Category["CategoryService — seeds the starter<br/>set on first read; create, rename, archive"]
         Transaction["TransactionService — MonthSummary<br/>converts then adds, like Account"]
-        Budget["BudgetService — Month, Save, History;<br/>Save always replaces the whole line set"]
+        Budget["BudgetService — Month, Save, History,<br/>RollOver; RollOver moves a closed<br/>month's Remaining into a goal, once"]
+        Goal["GoalService — composes the whole<br/>Goals screen in one List call;<br/>a contribution moves no real money"]
         Seed["Seed"]
     end
 
@@ -162,7 +166,8 @@ points inward, which is why every service is testable against in-memory doubles.
 | `AccountRepository` | `adapter/postgres` | Eleventh. Accounts joined to the owner's display name (`AccountView`); its `MembershipBelongsToHousehold` is what stops an account being assigned to a member of a different household. `AccountView.Balance` is now a real sum — see §5 |
 | `CategoryRepository` | `adapter/postgres` | Twelfth. `List` respects `sort_order`, the order the design draws rather than alphabetical; `EnsureSeeded` is idempotent under two concurrent first requests through one `INSERT ... ON CONFLICT DO NOTHING` against `UNIQUE(household_id, name)`, never a read-then-write. Budget grows it with `Create`, `Rename` and `SetArchived` — a category is referenced by transactions and budget lines, so it archives rather than deletes, the same reasoning `accounts.archived_at` already uses for a different table; `sort_order`'s own concurrent-create window is a known, accepted, cosmetic tie (see `docs/LEARNING.md`) |
 | `TransactionRepository` | `adapter/postgres` | Thirteenth. Keyset-paged `List` (a cursor is the last row's date and id, not an offset); `Update` never merges a patch — `TransactionService` turns a partial `PATCH` into a complete `domain.Transaction` first; `MonthTotals` returns rows rather than a SQL `SUM`, because a sum is only correct within one currency and the FX conversion lives in the service, not the repository |
-| `BudgetRepository` | `adapter/postgres` | Fourteenth. `Get` returns `domain.ErrNotFound` for an unbudgeted month, which the service turns into the empty state, not an error; `Upsert` replaces one household-month wholesale in a single transaction — parent row upserted on `(household_id, month)`, every existing line deleted, every new line inserted, category ownership validated first — never a merge, so a category the caller left out of the payload is unambiguously gone after the call; `History` returns the closed months in range that actually have a budget row, never zero-filled |
+| `BudgetRepository` | `adapter/postgres` | Fourteenth. `Get` returns `domain.ErrNotFound` for an unbudgeted month, which the service turns into the empty state, not an error; `Upsert` replaces one household-month wholesale in a single transaction — parent row upserted on `(household_id, month)`, every existing line deleted, every new line inserted, category ownership validated first — never a merge, so a category the caller left out of the payload is unambiguously gone after the call; `History` returns the closed months in range that actually have a budget row, never zero-filled; `RollOverToGoal` writes a `goal_contributions` row **and** stamps `budgets.rolled_over_at`/`rollover_goal_id` in one transaction — the stamp is a conditional `UPDATE ... WHERE rolled_over_at IS NULL`, so a second concurrent call finds no row to update and answers `ErrRolloverAlreadyDone` rather than writing a second contribution (§5) |
+| `GoalRepository` | `adapter/postgres` | Fifteenth. `List`/`Get` return each goal's stored fields plus the one figure only SQL can cheaply supply — the summed `contributed` — leaving percent, status and required-monthly to `domain.` arithmetic in the service; `Create` writes the goal and, when a starting balance is given, its opening contribution in one transaction, so a goal with a missing opening contribution cannot exist; `DeleteContribution` clears a rolled-over month's stamp in the same transaction as the delete when the row being removed is that month's rollover (§5). The port's own doc comment carries a warning no other repository needs: `goal_contributions.household_id` has no database-level constraint tying it to its own `goal_id`'s household, so every method that reads or writes a contribution filters by `household_id` **and** `goal_id` together, never by contribution id alone |
 | `AccountLookup`, `CategoryLookup` | `adapter/postgres` (`*AccountRepo` and `*CategoryRepo` already satisfy them) | Narrower ports `TransactionService` depends on instead of the full repositories above — interface segregation: it needs an account's currency and household, and whether a category id belongs to this household and what kind it is, never `List` or `EnsureSeeded` |
 | `PasswordHasher`, `TokenGenerator` | `adapter/crypto` | argon2id with cost from config; tokens are random, stored hashed |
 | `Mailer` | `adapter/mail` | SMTP; TLS policy and credentials from config |
@@ -200,7 +205,7 @@ graph TD
 
     Session --> Cap{"Capability-gated<br/>route group?"}
     Cap -->|"accounts: money"| RequireCap["requireCapability(money)<br/>403 unless the caller's membership has it"]
-    Cap -->|"transactions, categories,<br/>budgets: money AND owner —<br/>reads included"| RequireCapTxn["requireCapability(money)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
+    Cap -->|"transactions, categories,<br/>budgets, goals: money AND owner —<br/>reads included"| RequireCapTxn["requireCapability(money)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
     Cap -->|"no — most routes"| Safe{"GET or HEAD?"}
     RequireCap --> Safe
     RequireCapTxn --> Safe
@@ -243,23 +248,25 @@ first time the *server* enforces one. `/marriage` has had no route since
 `110ab0a`, so today `RequireCapability` guards only `/money`'s subtree, and
 the server-side gate below is the enforcement either way.)
 
-**Transactions, categories and budgets are the routes where `requireOwner`
-gates a `GET`.** Every other owner-gated route in this table only reaches
-`requireOwner` after the `CSRF` check, which by construction means never on a
-read. This group instead runs `requireCapability(money)` then `requireOwner`
-before the GET/HEAD branch even exists, so a limited member is refused the
-ledger — and the budget screen — itself, not merely their writes. This is
-deliberate, not copied from accounts by mistake: a limited member's accounts
-view already renders names with every amount blank (§5); applied to a
-ledger, or a budget screen, that is nothing but figures — a table whose every
-figure would be blank, next to a "Spent this month" that has to be absent
-rather than shown as zero, or a page of caps and pace with nothing left to
-show — the page would read as broken rather than merely restricted. So for a
-limited member the `money` capability on Transactions and Budget means only
-"see which accounts this household has" (via `/accounts`), and nothing about
-the ledger or the budget at all. Budget's spec named this explicitly as the
-Transactions shape reused for the same reason (decision 8), rather than
-inventing a new one.
+**Transactions, categories, budgets and goals are the routes where
+`requireOwner` gates a `GET`.** Every other owner-gated route in this table
+only reaches `requireOwner` after the `CSRF` check, which by construction
+means never on a read. This group instead runs `requireCapability(money)`
+then `requireOwner` before the GET/HEAD branch even exists, so a limited
+member is refused the ledger — and the budget and goals screens — themselves,
+not merely their writes. This is deliberate, not copied from accounts by
+mistake: a limited member's accounts view already renders names with every
+amount blank (§5); applied to a ledger, a budget screen or a goal card, that
+is nothing but figures — a table whose every figure would be blank, next to a
+"Spent this month" that has to be absent rather than shown as zero, a page of
+caps and pace with nothing left to show, or a card whose whole point is a
+progress ring and a dollar figure — the page would read as broken rather than
+merely restricted. So for a limited member the `money` capability on
+Transactions, Budget and Goals means only "see which accounts this household
+has" (via `/accounts`), and nothing about the ledger, the budget or a goal at
+all. Budget's spec named this explicitly as the Transactions shape reused for
+the same reason (decision 8); Goals' own spec (decision 10) reuses it a third
+time rather than inventing a new one.
 
 **`PUT /budgets/{month}` sits in its own `requireCSRF` sub-group**, separate
 from the one wrapping the category-write routes and the transaction writes,
@@ -267,7 +274,14 @@ even though both sub-groups sit at the identical point in the chain (inside
 `requireCapability(money)` + `requireOwner`, ahead of the handler). The two
 groups can now each grow their own route list without editing the other's —
 a deliberate seam, not an accident of how the router file happened to be
-structured.
+structured. `POST /budgets/{month}/rollover` joins `PUT`'s group rather than
+starting a third: both are budget-month writes behind the identical
+money+owner+CSRF stack, and there is no reason for the two to diverge the way
+budgets and transactions were kept apart above. The six Goals write routes
+(create, update, archive, restore, add contribution, delete contribution)
+form their own third `requireCSRF` sub-group, for the same reason as the
+first two — Goals can grow its own route list without touching budgets',
+transactions', or categories'.
 
 `POST /auth/sign-up` is the one public route wrapped in an extra middleware,
 `rateLimitByIP` — a per-process, in-memory token bucket keyed on the request's
@@ -304,9 +318,16 @@ to a real address and so are not on that path.
 | PATCH · DELETE | `/transactions/{id}` | session · money · owner · CSRF |
 | GET | `/budgets/{month}`, `/budgets/history` | session · money · owner — same reasoning as the transactions/categories reads above |
 | PUT | `/budgets/{month}` | session · money · owner · CSRF — its own CSRF sub-group, not the one below |
+| POST | `/budgets/{month}/rollover` | session · money · owner · CSRF — joins `PUT`'s CSRF sub-group, not a new one |
 | POST | `/categories` | session · money · owner · CSRF |
 | PATCH | `/categories/{id}` | session · money · owner · CSRF |
 | POST | `/categories/{id}/archive`, `/categories/{id}/restore` | session · money · owner · CSRF |
+| GET | `/goals`, `/goals/{id}/contributions` | session · money · owner — same reasoning as the transactions/categories/budgets reads above |
+| POST | `/goals` | session · money · owner · CSRF |
+| PATCH | `/goals/{id}` | session · money · owner · CSRF |
+| POST | `/goals/{id}/archive`, `/goals/{id}/restore` | session · money · owner · CSRF |
+| POST | `/goals/{id}/contributions` | session · money · owner · CSRF |
+| DELETE | `/goals/{id}/contributions/{contributionId}` | session · money · owner · CSRF |
 | GET | `/healthz`, `/readyz` | none — outside `/api/v1` |
 
 Three test matrices walk the live router and assert this: every non-public
@@ -348,6 +369,12 @@ plus `TestBudgetWriteRouteRequiresCSRF` for the three `/budgets` routes, and
 kept separate from `TestTransactionRoutesRequireMoneyAndOwner` rather than
 adding rows to it, so each feature's own route list can grow without editing
 a test file it does not own.
+
+**`POST /budgets/{month}/rollover` is a row in Budget's own two matrices, not
+a third**, since it shares that group's exact guard stack (§4 above). Goals
+gets its own pair in `goals_api_test.go` —
+`TestGoalRoutesRequireMoneyAndOwner` and `TestGoalWriteRoutesRequireCSRF` —
+covering all eight `/goals` routes, the same one-file-per-feature split.
 
 ---
 
@@ -710,6 +737,108 @@ repository still relabels to the household's own primary currency
 regardless, but that must never be the only thing standing between a bad
 currency and a stored row.
 
+### Goals — a contribution moves no real money; a rollover is one transaction each way
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant H as Handler
+    participant GSvc as GoalService
+    participant BSvc as BudgetService
+    participant GRepo as GoalRepository
+    participant BRepo as BudgetRepository
+    participant DB as Postgres
+
+    B->>H: POST /api/v1/goals { ..., startingBalanceMinor }
+    H->>GSvc: Create(...)
+    GSvc->>GRepo: Create(goal, startingBalanceMinor, createdOn)
+    GRepo->>DB: BEGIN
+    GRepo->>DB: INSERT goals row
+    alt startingBalanceMinor != 0
+        GRepo->>DB: INSERT goal_contributions (source=starting_balance)
+    end
+    GRepo->>DB: COMMIT
+
+    B->>H: POST /api/v1/budgets/{month}/rollover { goalId }
+    H->>BSvc: RollOver(month, goalId, today)
+    BSvc->>BSvc: Month(month, today) -- reuses Remaining, never recomputes spend
+    BSvc->>GRepo: Goals.Get(goalId) -- BEFORE any write, so an unknown or<br/>foreign-household id fails ErrNotFound, not a raw FK 500
+    BSvc->>BRepo: RollOverToGoal({month, goalId, amount: Remaining})
+    BRepo->>DB: BEGIN
+    BRepo->>DB: UPDATE budgets SET rolled_over_at, rollover_goal_id<br/>WHERE rolled_over_at IS NULL -- 0 rows = already done
+    BRepo->>DB: INSERT goal_contributions (source=budget_rollover,<br/>source_budget_month=month)
+    BRepo->>DB: COMMIT
+
+    B->>H: DELETE /api/v1/goals/{id}/contributions/{cid}
+    H->>GSvc: DeleteContribution(...)
+    GSvc->>GRepo: DeleteContribution(...)
+    alt the row being deleted has source=budget_rollover
+        GRepo->>DB: BEGIN
+        GRepo->>DB: DELETE the contribution row
+        GRepo->>DB: UPDATE budgets CLEAR rolled_over_at, rollover_goal_id<br/>WHERE month = the row's own source_budget_month
+        GRepo->>DB: COMMIT
+    else any other source
+        GRepo->>DB: DELETE the contribution row -- no second write, no transaction needed
+    end
+```
+
+**A contribution moves no real money.** `goal_contributions` is a ledger a
+household writes to by hand — starting balance, a manual top-up, a rollover —
+never a join against `transactions` or a debit against an `accounts` row. A
+goal earmarks; it does not hold. Goal progress and account balances are
+therefore independent figures, and nothing in this system reconciles them:
+an account can be overdrawn while every goal reads fully funded, and that is
+not a bug to fix by wiring the two together — Goals spec decision 1 rejected
+that as the larger, later feature (it would drag in the transactions schema,
+the ledger UI and the cross-currency transfer rules for a screen whose whole
+point today is to exist without any of that).
+
+**The rollover writes a contribution and stamps the month in one
+transaction, and deleting that contribution clears the stamp in the same
+transaction — the invariant runs both ways.** `RollOverToGoal` cannot leave a
+stamped month with no contribution, or a contribution with no stamp; deleting
+a `budget_rollover` contribution cannot leave the stamp behind either, because
+`GoalRepository.DeleteContribution` reads the deleted row's own
+`source_budget_month` and clears `budgets.rolled_over_at`/`rollover_goal_id`
+for that exact month inside the same transaction as the delete. Leaving either
+half undone would strand the household in an unrecoverable state: a month
+claiming it rolled over with no money in any goal to show for it, or the
+reverse, and a retry refused by `ErrRolloverAlreadyDone` either way — the
+shape `guarding-partial-writes` exists to catch. `Goals.Get(goalID)` runs
+*before* `RollOverToGoal` for a related, narrower reason: `RollOverToGoalInput.GoalID`
+reaches the repository's SQL in a value position, so an id that does not
+exist — or belongs to a different household — would otherwise reach a
+foreign-key violation and surface as an unmapped `500` instead of this
+method's own `domain.ErrNotFound` (a gap Task 5's review found and Task 7's
+dispatch carried forward as a hard requirement).
+
+**A goal carries an explicit currency; a budget does not.** `budgets` and
+`budget_lines` have no `currency` column at all (§6) — a budget is one
+month's plan, denominated in the household's primary currency by
+construction, and a primary-currency change silently restating one month was
+an accepted cost. A goal accumulates for years, so the same silence would
+restate a multi-year total and every contribution behind it; `accounts`
+already carries currency per row for the identical reason. `goals.currency`
+defaults to the household's primary at creation but is **not** patchable —
+changing it would restate every contribution already summed under the old
+one, so a currency change means archiving the goal and creating a new one,
+not editing the field.
+
+**`Remaining` can read higher than the household's true unspent figure, and
+`RollOver` moves `Remaining` anyway — a known, deliberate limitation, not a
+bug to close by blocking the button.** `BudgetService.Month`'s `Remaining` is
+`Budgeted − Spent`, and `Spent` excludes any expense with no available
+exchange rate (§5's Budget flow, `excludedNoRate`). On a month with such
+exclusions, the true unspent figure is *lower* than `Remaining`, and a
+rollover moves the (possibly inflated) `Remaining` into the goal regardless.
+The owner's ruling (2026-08-01): move it, but say what was excluded — the
+rollover offer names the excluded count right next to the button whenever
+`excludedNoRate > 0` (`BudgetRolloverCard.tsx`, commit `8a1114b`, reusing
+Budget's own exclusion copy), and the button stays enabled. This is
+information, not a refusal, and it is deliberate: do not "fix" this by
+blocking the button on a positive exclusion count without a further product
+conversation.
+
 ### What the frontend loads
 
 ```mermaid
@@ -720,7 +849,7 @@ graph TD
     Guard -->|yes| Shell["AppShell"]
     Shell --> Sidebar["Sidebar renders me.spaces —<br/>already filtered and ordered by the server —<br/>expanding each into its built pages client-side,<br/>and dropping a builtin space that has none"]
     Shell --> Page["Route content"]
-    Page --> Overview["/ Overview — GET /accounts,<br/>GET /budgets/{month} for an owner only,<br/>GET /household/members via the shared hook"]
+    Page --> Overview["/ Overview — GET /accounts,<br/>GET /budgets/{month} and GET /goals for<br/>an owner only, GET /household/members<br/>via the shared hook"]
     Page --> Settings["Settings panels — their own queries"]
     Settings -->|"on mutation"| Invalidate["invalidate ['me'] and the panel's query,<br/>awaited so the guard spans the refetch"]
 ```
@@ -733,11 +862,14 @@ client-side map (`SPACE_PAGES` in `Sidebar.tsx`) turns a space with several
 shipped pages into the design's uppercase group label plus one link per page
 — Money renders as "MONEY" over Finances, Transactions and Budget.
 
-**Overview fetches nothing of its own.** Its three requests are the ones
-Accounts, Budget and Settings already make, through the same hooks and the
-same cache keys, so a figure on the front door cannot disagree with the same
-figure on the screen it links to — the browser walk checks exactly that
-(net worth on `/` against net worth on `/money`). One of those hooks is new
+**Overview fetches nothing of its own.** Its four requests are the ones
+Accounts, Budget, Goals and Settings already make, through the same hooks and
+the same cache keys, so a figure on the front door cannot disagree with the
+same figure on the screen it links to — the browser walk checks exactly that
+(net worth on `/` against net worth on `/money`). `useGoals` is the same
+hook `GoalsPage` itself calls, so the "X of Y on track" figure on Overview's
+Goals card and the same count on `/money/goals` share one cache entry rather
+than risking two independent reads of `GET /goals` disagreeing. One of those hooks is new
 only in the sense that it stopped being three: `useHouseholdMembers` was
 declared privately and identically in `AccountModal`, `TransactionsPage` and
 `MembersPanel`, all against `["household", "members"]`, sharing one cache
@@ -789,6 +921,10 @@ erDiagram
     households ||--o{ budgets : has
     budgets ||--o{ budget_lines : has
     categories ||--o{ budget_lines : caps
+    households ||--o{ goals : has
+    goals ||--o{ goal_contributions : has
+    households ||--o{ goal_contributions : scopes
+    goals ||--o{ budgets : "may receive a rollover (nullable)"
     users ||--o{ memberships : holds
     users ||--o{ sessions : owns
     users ||--o{ magic_links : owns
@@ -908,6 +1044,8 @@ erDiagram
         uuid household_id FK
         date month "always the first of the month"
         bigint expected_income_minor "nullable — not provided"
+        timestamptz rolled_over_at "nullable — whole with rollover_goal_id, CHECK"
+        uuid rollover_goal_id FK "nullable — no ON DELETE, goals are never deleted"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -916,6 +1054,29 @@ erDiagram
         uuid budget_id FK "ON DELETE CASCADE"
         uuid category_id FK
         bigint cap_minor "CHECK >= 0"
+    }
+    goals {
+        uuid id PK
+        uuid household_id FK
+        text name
+        bigint target_amount_minor "CHECK > 0"
+        char currency "explicit — unlike budgets, see the notes below"
+        date target_month "nullable — no date means no on-track status"
+        bigint planned_monthly_minor "CHECK >= 0"
+        timestamptz archived_at "nullable — never deleted"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    goal_contributions {
+        uuid id PK
+        uuid goal_id FK
+        uuid household_id FK "redundant with the goal's own — every read scopes by both"
+        bigint amount_minor "CHECK non-zero — a downward correction is a negative row"
+        date occurred_on
+        text note
+        text source "manual | starting_balance | budget_rollover"
+        date source_budget_month "nullable — set only for source=budget_rollover"
+        timestamptz created_at
     }
 ```
 
@@ -1019,6 +1180,51 @@ Notes that are not obvious from the shapes:
   `accounts`'s cascade from `households` does: if a household is ever
   deleted, its budgets should not survive it as orphaned rows with no parent
   a query would ever reach.
+- **`goals` carries an explicit `currency`; `budgets` and `budget_lines`
+  carry none at all.** A budget is one month's plan, implicitly in the
+  household's primary currency, and a primary-currency change silently
+  restating one month was an accepted cost (above). A goal accumulates for
+  years, so the same silence would restate a multi-year total and every
+  contribution behind it — `accounts` stores currency per row for the
+  identical reason. `goals.currency` is set once, at creation, and is not
+  patchable: `usecase.GoalUpdate` carries no field for it at all, so a
+  currency change is type-refused one layer up, not merely policy-refused
+  here.
+- **A contribution moves no real money.** `goal_contributions` is a ledger a
+  household writes to by hand; it is never derived from `transactions` or
+  `accounts`, and nothing in this schema reconciles the two. See §5's Goals
+  flow for what that costs and why it was chosen anyway.
+- **`goal_contributions.household_id` has no database-level constraint tying
+  it to its own `goal_id`'s household.** A row could in principle carry a
+  `household_id` that disagrees with the goal it names. Every
+  `GoalRepository` method that reads or writes a contribution filters by
+  `household_id` **and** `goal_id` together for exactly this reason — never
+  by contribution id or goal id alone — which is why `List`/`Get`'s
+  `contributed` sum is the one place in this schema still trusted to join on
+  `goal_id` alone (the real query and its in-memory test double are
+  deliberately consistent on this one point). `GoalRepository`'s own doc
+  comment in `usecase/ports.go` states the underlying warning in full.
+- **`goal_contributions_one_rollover_per_month` is belt-and-braces beside the
+  conditional `UPDATE` in `RollOverToGoal`.** The application-level guard
+  (`WHERE rolled_over_at IS NULL`) is what actually stops a second rollover
+  in ordinary use; the unique index on `(household_id, source_budget_month)
+  WHERE source = 'budget_rollover'` means even a future code path that
+  forgets that guard cannot write two rollover contributions for one
+  household-month.
+- **`budgets.rollover_stamp_is_whole` refuses a half-set stamp at the
+  database level**, not only in the repository's own transaction:
+  `rolled_over_at` and `rollover_goal_id` must be both null or both set.
+  `rollover_goal_id` carries no `ON DELETE` clause, because goals are never
+  deleted (the same reasoning `accounts` and `categories` already apply) —
+  an archived goal keeps a past rollover's reference readable.
+- **A goal is archived, never deleted; a contribution is hard-deleted.**
+  Contributions reference a goal, and a rolled-over month names one, so
+  deleting a goal would strand rows and blank a past month's record — the
+  `accounts` precedent, for the `accounts` reason. A contribution has the
+  opposite shape: nothing references one, so deleting it — including a
+  `starting_balance` or `budget_rollover` row — is the same reasoning
+  Transactions applies to a transaction (§5), and it is how a household
+  undoes a mistyped figure or a rollover it wants to redo.
 
 ---
 
@@ -1045,15 +1251,21 @@ web/src/
                        the Budget page — set state, empty state with
                        templates, the Edit-budget modal (category create/
                        rename/archive queued through it), the History
-                       modal and month picker, mounted at /money/budget
-    overview/          the interim Overview at / — the two of the design's
+                       modal and month picker, mounted at /money/budget;
+                       the Goals page — cards in a 2-up grid, the New/Edit
+                       goal modal, the contributions panel (add/delete,
+                       listed by source), the Monthly contributions card,
+                       and the Budget page's own rollover card, mounted at
+                       /money/goals
+    overview/          the interim Overview at / — three of the design's
                        eight cards Money can supply (net worth, reusing
-                       money/NetWorthCard; this month's budget), a setup
-                       checklist, and the "+ Add" quick-create menu
+                       money/NetWorthCard; this month's budget; goals on
+                       track), a setup checklist, and the "+ Add"
+                       quick-create menu
     placeholder/       named stand-ins for unbuilt areas, and only for areas
                        a household can already reach — now /money/$ alone
-                       (Goals and Bills, still to come); / stopped using it
-                       when the interim Overview shipped
+                       (Bills, still to come); / stopped using it when the
+                       interim Overview shipped
   routes/router.tsx        the route tree; its header comment is the route
                            list, kept beside the code it describes
   routes/publicRoutes.ts   the one list of pre-auth routes and API prefixes;
@@ -1065,18 +1277,18 @@ web/src/
 recent-transactions strip — five newest, reading through the same
 `useTransactions({})` query the Transactions page's own default (unfiltered)
 state resolves to, so the two share one cache entry rather than the strip
-standing up a second endpoint. `/money/transactions` and `/money/budget` are
-both real routes, siblings of `/money` nested under the same
-`moneyGuardRoute` (a literal path segment beats `/money/$`'s catch-all, so
-each is declared and added to that route's children ahead of the splat).
-`/money/$` now covers only Goals and Bills. The sidebar still renders from
-the server's own filtered, ordered space list, but Transactions is what
-expired the flat-links deferral and Budget is what grew it a third link:
-Money takes the design's grouped form — an uppercase "MONEY" label over
-Finances (`/money`), Transactions (`/money/transactions`) and Budget
-(`/money/budget`) — via the `SPACE_PAGES` map in `Sidebar.tsx` (see "What the
-frontend loads" above). Goals and Bills join the map, and add a fourth and
-fifth Money link, only once their own pages ship.
+standing up a second endpoint. `/money/transactions`, `/money/budget` and
+`/money/goals` are all real routes, siblings of `/money` nested under the
+same `moneyGuardRoute` (a literal path segment beats `/money/$`'s catch-all,
+so each is declared and added to that route's children ahead of the splat).
+`/money/$` now covers only Bills. The sidebar still renders from the
+server's own filtered, ordered space list, but Transactions is what expired
+the flat-links deferral and Budget and Goals are what grew it a third and
+fourth link: Money takes the design's grouped form — an uppercase "MONEY"
+label over Finances (`/money`), Transactions (`/money/transactions`), Budget
+(`/money/budget`) and Goals (`/money/goals`) — via the `SPACE_PAGES` map in
+`Sidebar.tsx` (see "What the frontend loads" above). Bills joins the map, and
+adds a fifth Money link, only once its own page ships.
 
 **`/` is a real page, and it is the only one with no capability guard above
 it.** Every other screen sits behind `RequireAuth` *and* `RequireCapability`,
@@ -1088,16 +1300,17 @@ cases:
 
 | Caller | What renders | Why |
 |---|---|---|
-| owner | net worth card, budget card, setup checklist, "+ Add" | the only caller `GET /budgets/{month}` admits, and the only one who may write an account, a transaction or a budget |
-| limited, holds `money` | a panel saying amounts are hidden, linking to Finances | `GET /accounts` answers 200 but **omits `summary` entirely** rather than zeroing it (§5); with no budget card and no checklist either, this panel is the only thing on the page |
+| owner | net worth card, budget card, goals card, setup checklist, "+ Add" | the only caller `GET /budgets/{month}` and `GET /goals` admit, and the only one who may write an account, a transaction, a budget or a goal |
+| limited, holds `money` | a panel saying amounts are hidden, linking to Finances | `GET /accounts` answers 200 but **omits `summary` entirely** rather than zeroing it (§5); with no budget card, no goals card and no checklist either, this panel is the only thing on the page |
 | limited, no `money` | a single "You don't have access to Money" panel | `GET /accounts` answers 403 |
 
 Two details here are load-bearing and neither is visible from the route table
-alone. First, **`/accounts` and `/budgets/{month}` do not carry the same
-guards** — accounts is `requireCapability(money)`, budgets is that *and*
-`requireOwner` — so the budget card is owner-only, and `useBudget` takes an
-`enabled` flag rather than being called with a placeholder month: a limited
-member must not fire a request that can only 403 and cache the failure. Second,
+alone. First, **`/accounts` and `/budgets/{month}`/`/goals` do not carry the
+same guards** — accounts is `requireCapability(money)`, budgets and goals are
+that *and* `requireOwner` — so the budget card and the goals card are both
+owner-only, and `useBudget`/`useGoals` each take an `enabled` flag rather than
+being called unconditionally: a limited member must not fire a request that
+can only 403 and cache the failure. Second,
 **the absent `summary` is the only signal the frontend has** that a caller may
 not see amounts, so the page must never synthesise one; a zero there would be a
 claim about the household's money. The middle row of that table is the one that

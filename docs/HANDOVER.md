@@ -71,10 +71,10 @@ test driving the three transactions write routes without a CSRF token.
 | 0 — Skeleton | Clean-architecture layout, Docker, Compose, Make, migrations, health endpoints | **Done** |
 | 1 — Household & identity | Sign-in, magic link, invite acceptance, lockout, members, roles, capabilities, spaces, Settings | **Done** |
 | — Self-serve sign-up | Sign-up, household provisioning, an ISO 4217 currency allowlist and list endpoint, `adminctl prune`, a per-IP rate limiter | **Done, browser walk 15/15** (2026-07-30) |
-| 2 — Money | **Accounts**: manual entry, net worth, assets/liabilities breakdown, archive and restore — **done, browser walk 15/15**. **Transactions**: ledger, categories, filters, keyset paging, month-to-date spend — **done, browser walk 15/15**. **Budget**: envelope per category with pace, empty state and templates, Edit-budget modal with category create/rename/archive, History modal and month picker — **done, browser walk 15/15** (2026-07-31, two defects found at criterion 9 and fixed mid-walk; see `docs/superpowers/plans/2026-07-30-hearth-budget-verification.md`). Accounts, Transactions, Budget built; Goals, Bills not started | In progress |
+| 2 — Money | **Accounts**: manual entry, net worth, assets/liabilities breakdown, archive and restore — **done, browser walk 15/15**. **Transactions**: ledger, categories, filters, keyset paging, month-to-date spend — **done, browser walk 15/15**. **Budget**: envelope per category with pace, empty state and templates, Edit-budget modal with category create/rename/archive, History modal and month picker — **done, browser walk 15/15** (2026-07-31, two defects found at criterion 9 and fixed mid-walk; see `docs/superpowers/plans/2026-07-30-hearth-budget-verification.md`). **Goals**: savings targets whose progress is a contributions ledger (not an account balance), the New/Edit goal modal, contributions add/delete/list by source, the Monthly contributions card, and Budget's own manual rollover into a goal — **all 16 tasks implemented and reviewed clean; its own browser walk has not run yet** (next up, see "What to do next" below). Accounts, Transactions, Budget, Goals built; Bills not started | In progress |
 | 3 — Marriage | Retros, Vision, Agreements | Not started |
 | 4 — Family | Calendar | Not started |
-| 5 — Overview | Read-only aggregation across 2–4 | **Interim page built** (2026-08-01) — `/` carries the two of the eight cards Money can supply, a setup checklist and a two-entry "+ Add". Browser walk **14 of 14**, one real defect found and fixed mid-walk. The other six cards need Bills, Goals, Marriage and Family; the page grows into the designed one rather than being replaced |
+| 5 — Overview | Read-only aggregation across 2–4 | **Interim page built** (2026-08-01) — `/` carries three of the eight cards Money can supply (net worth, this month's budget, and — added the same day by Goals — goals on track), a setup checklist and a three-entry "+ Add" (Transaction, Account, Savings goal). The M2 walk on the first two cards and the two-entry menu ran **14 of 14**, one real defect found and fixed mid-walk; the goals card and its menu entry are new since and are covered by Goals' own pending browser walk (row 2 above), not yet re-walked here. The other five cards need Bills, Marriage and Family; the page grows into the designed one rather than being replaced |
 
 Self-serve sign-up carries no slice number on purpose: it was specified and
 built between slices 1 and 2, ahead of Money (see "What to do next" below for
@@ -309,21 +309,24 @@ that will manage it (a deferred, separate spec) so it earns real usage first
 — and a household has to be able to exist before there is anything for that
 console to administer.
 
-**Slice 2 (Money) is under way.** Accounts, Transactions and Budget, its
-first three features, are all code-complete, reviewed and walked in a browser
-— Budget's own walk ran on 2026-07-31 and passed 15 of 15 (§1). Goals and
-Bills are not started. It is still the largest area and still the design's
+**Slice 2 (Money) is under way.** Accounts, Transactions, Budget and Goals —
+its first four features — are all code-complete and reviewed. Accounts,
+Transactions and Budget are also walked in a browser; Budget's own walk ran
+on 2026-07-31 and passed 15 of 15 (§1). **Goals' own browser walk has not run
+yet** — it is next (§1, and `docs/superpowers/sdd/2026-08-01-hearth-goals/`).
+Bills is not started. Money is still the largest area and still the design's
 centre of gravity.
 
 **Slice 5 (Overview) is the exception to its own rule, deliberately.** The
 original order put it last because it only aggregates, so building it early
 means stubbing everything it reads. That still holds for the *designed*
-Overview. What shipped on 2026-08-01 is an interim page built strictly on what
-already exists — two of the eight cards, no stubs, no invented figures — taken
-early because `/` was showing every household "Arriving in slice 5" on every
-visit, established households included. The remaining six cards still wait on
-Bills, Goals, Marriage and Family, and the same route and the same component
-grow into them.
+Overview. What shipped on 2026-08-01 is an interim page built strictly on
+what already exists — two of the eight cards at first, a third (goals on
+track) added the same day once Goals itself shipped — no stubs, no invented
+figures, taken early because `/` was showing every household "Arriving in
+slice 5" on every visit, established households included. The remaining five
+cards still wait on Bills, Marriage and Family, and the same route and the
+same component grow into them.
 
 Each slice gets its own spec → plan → implementation cycle, the same way these
 did. The originating spec for slices 0–1 is
@@ -333,62 +336,62 @@ sign-up's own is
 Accounts' own is `docs/superpowers/specs/2026-07-28-hearth-accounts-design.md`;
 Transactions' own is
 `docs/superpowers/specs/2026-07-29-hearth-transactions-design.md`; Budget's
-own is `docs/superpowers/specs/2026-07-30-hearth-budget-design.md`. The
+own is `docs/superpowers/specs/2026-07-30-hearth-budget-design.md`; Goals'
+own is `docs/superpowers/specs/2026-08-01-hearth-goals-design.md`. The
 completed plans beside them are worth skimming for house style before writing
 a sixth.
 
-### What Accounts, Transactions and Budget closed, and what Goals must pin next
+### What Accounts, Transactions, Budget and Goals closed, and what Bills inherits
 
 Three things a prior review flagged as "must not be forgotten" before slice 2's
 first task. Accounts closed the first, upheld the second, and pinned the start
 of the third; Transactions pinned two more figures of its own, Budget pinned
-three more; Goals inherits what is left:
+three more, and Goals pinned the last two the design shows anywhere in Money.
+Bills inherits a clean slate on all three:
 
 1. **`requireCapability` middleware exists and no route uses it — closed.**
    The spec promised the server enforces capabilities independently of the
    UI; until Accounts, that promise was vacuous. `GET /api/v1/accounts` and
    its four write routes are now gated on the `money` capability (reads) and
-   `money` plus owner (writes); Transactions, Categories and Budget go
+   `money` plus owner (writes); Transactions, Categories, Budget and Goals go
    further — `money` **and** owner gate their reads too, not just their
-   writes, because a ledger, or a budget screen, with every figure blank
-   reads as broken rather than merely restricted (`docs/SYSTEM_DESIGN.md`
-   §4). The route-walk test matrices under `api/internal/adapter/http/`
-   cover all three shapes.
+   writes, because a ledger, a budget screen or a goal card with every figure
+   blank reads as broken rather than merely restricted
+   (`docs/SYSTEM_DESIGN.md` §4). The route-walk test matrices under
+   `api/internal/adapter/http/` cover all four shapes.
 2. **Money is `int64` minor units plus an ISO 4217 code, everywhere — held.**
-   `domain.Money` refuses to mix currencies; `AccountService.Summary` and
-   `TransactionService.MonthSummary` both convert into the household's primary
-   currency before summing, for exactly that reason (`docs/LEARNING.md`,
-   pattern 12). Budget held the line too, once under real pressure: the
-   frontend's first 50/30/20 template split multiplied expected income by a
-   float literal (`incomeMinor * 0.3`) before flooring, which drifted by a
-   minor unit on at least one real income figure — caught in review, fixed
-   to integer-first arithmetic (`docs/LEARNING.md`, Domain and money
-   catalogue). No `float64` survived in a monetary path on either side of
-   the stack.
-3. **The derived figures the design shows are still mostly undefined.** Net
-   worth (Accounts) is pinned and built. Transactions pinned two more —
-   `Count` ("247 in July") and `Spent` ("Spent this month S$3,420.18" —
-   expenses only, income and transfers excluded). Budget pinned three more of
-   its own: `66% used`, `S$137/day left` and `on pace to save S$1,780`, all
+   `domain.Money` refuses to mix currencies; `AccountService.Summary`,
+   `TransactionService.MonthSummary` and `GoalService.List` all convert into
+   the household's primary currency before summing, for exactly that reason
+   (`docs/LEARNING.md`, pattern 12). Budget held the line too, once under
+   real pressure: the frontend's first 50/30/20 template split multiplied
+   expected income by a float literal (`incomeMinor * 0.3`) before flooring,
+   which drifted by a minor unit on at least one real income figure — caught
+   in review, fixed to integer-first arithmetic (`docs/LEARNING.md`, Domain
+   and money catalogue). No `float64` survived in a monetary path anywhere
+   in the stack, on any of the four features.
+3. **The derived figures the design shows are now all pinned and built.** Net
+   worth (Accounts). `Count` and `Spent`, expenses only (Transactions).
+   `66% used`, `S$137/day left` and `on pace to save S$1,780`, all
    Remaining-based rather than a run-rate projection (Budget spec decision
    2 — a projection can contradict the mockup's own numbers with the
-   mockup's own data). **`4 of 4 on track` and unspent budget rolling into a
-   nominated goal at month end are still undefined** and are Goals' to pin,
-   in its own spec, before an implementer invents one. Budget's own spec
-   named the rollover figure explicitly rather than inventing a stub for
-   it: the design's "Roll unspent into savings" toggle does not ship at
-   all — not stored-but-dormant — because a control that looks real and
-   does nothing is worse than a missing one (Budget spec decision 1,
-   `docs/FEATURE_TRACKER.md`'s Budget row).
+   mockup's own data). And the last two anywhere in Money: `X of Y on
+   track` and the manual move of unspent budget into a nominated goal, both
+   pinned in Goals' own formula table
+   (`docs/superpowers/specs/2026-08-01-hearth-goals-design.md`). The
+   rollover is deliberately not the design's automatic toggle — a stored
+   setting that acts only when clicked would read as automatic, the same
+   dishonesty Budget's own spec had already refused for this row (Budget
+   decision 1, Goals decision 4); the manual button ships instead
+   (`docs/FEATURE_TRACKER.md`'s Budget row).
 
-**Goals is the next feature.** Budget's own screen already shows what is
-unspent each month; Goals is what gives a household somewhere to point it.
-Before writing any of it, pin the two figures still open above — an
-implementer who invents "4 of 4 on track" or the rollover mechanics (which
-goal receives the money, on what schedule, what happens to a goal that is
-deleted mid-rollover) without a decision recorded first is building on sand,
-the same warning Budget's own spec inherited from this section before it was
-written.
+**Bills is the next feature, and it starts with nothing already pinned.**
+Money's fourth build task, Goals, closed out every derived figure the
+design's Money mockups show; Bills' own timeline, autopay status and
+subscriptions summary are figures nobody has defined yet. An implementer who
+invents any of them without a decision recorded first in Bills' own spec is
+building on sand — the same warning this section has carried since before
+Budget was written, now discharged three times over rather than once.
 
 ### The seams slice 2 will use
 
@@ -452,8 +455,20 @@ the reasoning for each. The headlines:
   never approaches. Do not change either number without re-reading
   `docs/LEARNING.md`'s pattern 11 and re-checking
   `TestSignUpRateLimitsCompose`, the test that asserts the two stay composed.
+- **`RollOver` moves `Remaining` even on a month with excluded
+  transactions, and that can read higher than the household's true unspent
+  figure.** `BudgetService.Month`'s `Remaining` is `Budgeted − Spent`, and
+  `Spent` excludes any expense with no available exchange rate — a
+  pre-existing property of `Month`, not something Goals introduced. The
+  owner's ruling (2026-08-01): move it, but say what was excluded. The
+  rollover offer names the excluded count next to the button whenever it is
+  positive (`BudgetRolloverCard.tsx`, commit `8a1114b`), and the button
+  stays enabled — this is information, not a refusal. Do not "fix" this by
+  blocking the button on a positive exclusion count without a further
+  product conversation; see `docs/SYSTEM_DESIGN.md` §5's Goals flow for the
+  full reasoning.
 
-All three are documented in the code at the point a future editor would change them.
+All four are documented in the code at the point a future editor would change them.
 
 ### Worth doing when convenient
 
@@ -517,6 +532,30 @@ gates the accounts routes, and the route-walk matrices exercise it.
   the shape `docs/LEARNING.md` records as having produced a worthless guard
   test before — so it was left uncovered deliberately rather than covered
   badly.
+
+**Deferred whole out of Goals, by its own spec's decision, none of it
+blocking:**
+
+- **Automatic monthly contributions, and any scheduler, do not exist.**
+  Contributions are entered by a person; nothing in this codebase runs on a
+  clock yet. The design shows "S$2,050 auto-saved on the 1st of each month"
+  and "next transfer Aug 1" — neither ships. Inventing this codebase's first
+  scheduler inside a feature that arrived with four undefined figures was
+  judged the wrong trade (Goals spec, "This is the M-sized Goals,
+  deliberately"). **The follow-up is its own later spec**, written once real
+  households have goals to point contributions at — there is no scheduling
+  infrastructure anywhere else in the product to build it on top of yet.
+- **Automatic month-end rollover does not exist; only the manual button
+  does.** The design's "Roll unspent into savings" toggle implies money
+  moves by itself at midnight on the 1st; Goals decision 4 refused that
+  shape for the same reason Budget's own spec already refused it once
+  (Budget decision 1) — a setting that acts only when clicked reads as
+  automatic, and that is a dishonesty this product's own "· not built"
+  convention exists to prevent. The accepted cost: a household that never
+  revisits last month's Budget page never rolls anything, and nothing
+  happens silently. **The follow-up is the same later spec as automatic
+  contributions** — the two are the same missing piece (a scheduler this
+  product does not have yet), not two independent gaps.
 
 - `apiFetch` has no timeout or abort, so a request that never settles leaves its
   control disabled indefinitely.
