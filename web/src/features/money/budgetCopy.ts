@@ -2,6 +2,17 @@
 // transactionCopy.ts/copy.ts are: eslint's react-refresh/only-export-components
 // rule never has to think about a file that mixes components with other
 // exports.
+
+// The "N transactions are/is not counted: no exchange rate." fact, shared by
+// BUDGET_COPY.excludedNoRate (the page's own footer note) and
+// BUDGET_COPY.rolloverExcludedNoRateNote (Task 15's follow-up, the rollover
+// card's own note) below -- one wording for one fact, not two sentences that
+// could drift apart. Kept private to this module: nothing outside
+// BUDGET_COPY's own two call sites needs it by name.
+function excludedNoRateFragment(count: number): string {
+  return `${count} ${count === 1 ? "transaction is" : "transactions are"} not counted: no exchange rate.`;
+}
+
 export const BUDGET_COPY = {
   title: "Budget",
 
@@ -53,8 +64,7 @@ export const BUDGET_COPY = {
   // without a currency list -- budgetSchemas.ts's own comment on
   // `excludedNoRate` says why: this screen has no ledger rows to name the
   // currencies against, only the count.
-  excludedNoRate: (count: number) =>
-    `${count} ${count === 1 ? "transaction is" : "transactions are"} not counted: no exchange rate.`,
+  excludedNoRate: excludedNoRateFragment,
 
   // The empty state (Household Dashboard.dc.html's Budget screen, "Set
   // state" -> "never budgeted"). Task 12 shipped a holding placeholder here;
@@ -172,4 +182,19 @@ export const BUDGET_COPY = {
   // own header comment on why that is the cheaper, still-honest answer
   // rather than a second archived-inclusive fetch just to resolve a name).
   rolledOverDoneUnknown: (amount: string) => `${amount} moved into a goal.`,
+  // Owner ruling, 2026-08-01: `remainingMinor` (the figure the offer above
+  // names) is Budgeted minus Spent, and Spent excludes any expense with no
+  // available exchange rate -- the same `excludedNoRate` count this page's
+  // own footer already names. On a month with exclusions, "unspent" can
+  // therefore read higher than what the household truly had left, and a
+  // rollover would earmark money that was, in fact, already spent. The
+  // ruling is to say so at the moment of the decision, not to block the
+  // move -- the button stays enabled; this is information, not a refusal.
+  // Reuses excludedNoRateFragment for the fact itself (the same wording this
+  // page's footer and transactionCopy.ts's TRANSACTIONS_COPY.excludedNoRate
+  // already use for "N transactions couldn't be converted"), and adds only
+  // the one clause specific to a rollover: what that fact means for this
+  // figure.
+  rolloverExcludedNoRateNote: (count: number) =>
+    `${excludedNoRateFragment(count)} The unspent amount above may be higher than what was actually left.`,
 } as const;

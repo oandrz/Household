@@ -56,6 +56,7 @@ export function BudgetRolloverCard({
   rolledOverTo,
   onRolledOver,
   symbol,
+  excludedNoRate,
 }: {
   month: string;
   // Whether this month is closed -- BudgetPage.tsx's own `data.daysLeft ===
@@ -79,6 +80,13 @@ export function BudgetRolloverCard({
   // fires.
   onRolledOver: () => void;
   symbol?: string;
+  // budgetMonthResponse's own count of expenses excluded from Spent for
+  // want of an exchange rate -- the same figure the page's own footer note
+  // names. remainingMinor is Budgeted minus that same (possibly
+  // undercounted) Spent, so a positive count here means the "unspent"
+  // figure the offer below names can read higher than what the household
+  // truly had left. Owner ruling, 2026-08-01: name it, don't block on it.
+  excludedNoRate: number;
 }) {
   const { rollOver } = useBudget(month, { enabled: false });
   const goals = useGoals();
@@ -178,6 +186,18 @@ export function BudgetRolloverCard({
           </button>
         )}
       </p>
+
+      {/* Owner ruling, 2026-08-01: information, not a refusal -- rendered
+          next to the offer and its button (where the decision is actually
+          made), not folded into BudgetPage.tsx's own footer note at the
+          bottom of the page, and visible whether or not the picker is
+          open, since either is a moment the household could still commit
+          to the move. The button above stays enabled regardless. */}
+      {excludedNoRate > 0 && (
+        <p data-testid="budget-rollover-excluded-note" className="text-[11.5px] text-muted">
+          {BUDGET_COPY.rolloverExcludedNoRateNote(excludedNoRate)}
+        </p>
+      )}
 
       {!pickerOpen && disabledReason && (
         <p data-testid="budget-rollover-disabled-reason" className="text-[11.5px] text-muted">

@@ -69,6 +69,7 @@ function renderCard(
     rolledOverTo: string | null;
     onRolledOver: () => void;
     symbol: string;
+    excludedNoRate: number;
   }> = {},
   extraRoutes: Record<string, RouteResponse | RouteResponse[]> = {},
 ) {
@@ -89,6 +90,7 @@ function renderCard(
         rolledOverTo={props.rolledOverTo ?? null}
         onRolledOver={onRolledOver}
         symbol={props.symbol ?? "S$"}
+        excludedNoRate={props.excludedNoRate ?? 0}
       />,
     ),
   };
@@ -130,6 +132,58 @@ describe("BudgetRolloverCard", () => {
     const offer = await screen.findByTestId("budget-rollover-offer");
     expect(offer).toHaveTextContent("S$1,780.00 unspent in July");
     expect(screen.getByTestId("budget-rollover-cta")).toHaveTextContent("Move it into a goal");
+  });
+
+  // Owner ruling, 2026-08-01: remainingMinor excludes any expense with no
+  // available exchange rate the same way Spent does, so on a month with
+  // exclusions the "unspent" figure can read higher than what was truly
+  // left. The ruling is to name the count and what it means, right next to
+  // the offer -- not to block the move.
+  it("renders no exclusion note when excludedNoRate is 0", async () => {
+    renderCard({ closed: true, excludedNoRate: 0 });
+
+    await screen.findByTestId("budget-rollover-offer");
+    expect(screen.queryByTestId("budget-rollover-excluded-note")).not.toBeInTheDocument();
+  });
+
+  it("names the excluded count and what it means for the unspent figure when excludedNoRate is positive, and the move still works", async () => {
+    let postBody: unknown;
+    renderCard(
+      { closed: true, excludedNoRate: 3 },
+      {
+        "GET /api/v1/goals": { status: 200, body: goalsBody([goalFixture()]) },
+        "POST /api/v1/budgets/2026-07/rollover": {
+          status: 200,
+          body: {
+            contribution: {
+              id: "contribution-1",
+              amountMinor: 178000,
+              occurredOn: "2026-07-31",
+              note: "",
+              source: "budget_rollover",
+              sourceBudgetMonth: "2026-07",
+            },
+          },
+          capture: (body) => {
+            postBody = body;
+          },
+        },
+      },
+    );
+
+    const note = await screen.findByTestId("budget-rollover-excluded-note");
+    expect(note).toHaveTextContent("3 transactions are not counted: no exchange rate.");
+    expect(note).toHaveTextContent("The unspent amount above may be higher than what was actually left.");
+
+    // The note is information, not a refusal -- the button stays enabled
+    // and the move still works.
+    await waitFor(() => expect(screen.getByTestId("budget-rollover-cta")).not.toBeDisabled());
+    screen.getByTestId("budget-rollover-cta").click();
+    const select = await screen.findByTestId("budget-rollover-select");
+    fireEvent.change(select, { target: { value: "goal-1" } });
+    screen.getByTestId("budget-rollover-confirm").click();
+
+    await waitFor(() => expect(postBody).toEqual({ goalId: "goal-1" }));
   });
 
   it("shows the destination sentence, not the offer, once the month already carries a stamp", async () => {

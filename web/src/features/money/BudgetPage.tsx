@@ -406,6 +406,7 @@ export function BudgetPage() {
                         currency={data.currency}
                         rolledOverTo={data.rolloverGoalId}
                         symbol={symbol}
+                        excludedNoRate={data.excludedNoRate}
                         // No-op: useBudget.ts's own rollOver mutation
                         // already invalidates this month and /goals on
                         // success (its own comment) -- `data` above already
