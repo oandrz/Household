@@ -94,12 +94,19 @@ func findGoalView(t *testing.T, views []usecase.GoalView, goalID string) usecase
 //	Car:        12% (360000*100+1500000)/3000000 = 37500000/3000000 = 12.
 //	            monthsLeft Aug 2026->Dec 2029 inclusive = 41. remaining = 2640000.
 //	            required = ceil(2640000/41) = 64391 > planned 40000 -> Behind.
+//
+// A fifth goal, Overdue, exercises the branch none of the four above reach:
+// a dated, unachieved goal whose target month has already passed `today`
+// (monthsLeft == 0). RequiredMonthlyMinor's own "no honest number" rule
+// means RequiredMonthlyOK must be false here, never a zero standing in for
+// one.
 func TestGoalListComposesTheDesignsCards(t *testing.T) {
 	f := newGoalFixture(t)
 	today := time.Date(2026, 8, 15, 0, 0, 0, 0, time.UTC)
 	dec2026 := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
 	dec2032 := time.Date(2032, 12, 1, 0, 0, 0, 0, time.UTC)
 	dec2029 := time.Date(2029, 12, 1, 0, 0, 0, 0, time.UTC)
+	jun2026 := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 
 	bali := f.seedGoal(domain.Goal{
 		Name:           "Bali family trip",
@@ -132,6 +139,14 @@ func TestGoalListComposesTheDesignsCards(t *testing.T) {
 	})
 	f.seedContribution(car.ID, 360000, "SGD", today, domain.ContributionManual) // S$3,600.00
 
+	overdue := f.seedGoal(domain.Goal{
+		Name:           "Overdue goal",
+		Target:         domain.Money{Amount: 1000000, Currency: "SGD"}, // S$10,000.00
+		TargetMonth:    &jun2026,                                       // already past `today` (Aug 15 2026)
+		PlannedMonthly: domain.Money{Amount: 50000, Currency: "SGD"},
+	})
+	f.seedContribution(overdue.ID, 200000, "SGD", today, domain.ContributionManual) // unachieved
+
 	got, err := f.svc.List(context.Background(), "house-1", false, today)
 	if err != nil {
 		t.Fatalf("List: %v", err)
@@ -144,6 +159,12 @@ func TestGoalListComposesTheDesignsCards(t *testing.T) {
 	if baliView.Status != domain.GoalOnTrack {
 		t.Errorf("Bali Status = %v, want OnTrack", baliView.Status)
 	}
+	if !baliView.RequiredMonthlyOK || baliView.RequiredMonthly.Amount != 28000 {
+		t.Errorf("Bali RequiredMonthly = %+v (ok=%v), want 28000 (ok)", baliView.RequiredMonthly, baliView.RequiredMonthlyOK)
+	}
+	if baliView.RequiredMonthly.Currency != "SGD" {
+		t.Errorf("Bali RequiredMonthly.Currency = %q, want SGD", baliView.RequiredMonthly.Currency)
+	}
 
 	emergencyView := findGoalView(t, got.Goals, emergency.ID)
 	if emergencyView.Percent != 62 {
@@ -151,6 +172,9 @@ func TestGoalListComposesTheDesignsCards(t *testing.T) {
 	}
 	if emergencyView.Status != domain.GoalStatusNone {
 		t.Errorf("Emergency Status = %v, want None -- a dateless goal has nothing to be on track against", emergencyView.Status)
+	}
+	if emergencyView.RequiredMonthlyOK {
+		t.Errorf("Emergency RequiredMonthlyOK = true, want false -- a dateless goal has no required-monthly figure")
 	}
 
 	educationView := findGoalView(t, got.Goals, education.ID)
@@ -160,6 +184,12 @@ func TestGoalListComposesTheDesignsCards(t *testing.T) {
 	if educationView.Status != domain.GoalBehind {
 		t.Errorf("Education Status = %v, want Behind", educationView.Status)
 	}
+	if !educationView.RequiredMonthlyOK || educationView.RequiredMonthly.Amount != 102338 {
+		t.Errorf("Education RequiredMonthly = %+v (ok=%v), want 102338 (ok)", educationView.RequiredMonthly, educationView.RequiredMonthlyOK)
+	}
+	if educationView.RequiredMonthly.Currency != "SGD" {
+		t.Errorf("Education RequiredMonthly.Currency = %q, want SGD", educationView.RequiredMonthly.Currency)
+	}
 
 	carView := findGoalView(t, got.Goals, car.ID)
 	if carView.Percent != 12 {
@@ -167,6 +197,23 @@ func TestGoalListComposesTheDesignsCards(t *testing.T) {
 	}
 	if carView.Status != domain.GoalBehind {
 		t.Errorf("Car Status = %v, want Behind", carView.Status)
+	}
+	if !carView.RequiredMonthlyOK || carView.RequiredMonthly.Amount != 64391 {
+		t.Errorf("Car RequiredMonthly = %+v (ok=%v), want 64391 (ok)", carView.RequiredMonthly, carView.RequiredMonthlyOK)
+	}
+	if carView.RequiredMonthly.Currency != "SGD" {
+		t.Errorf("Car RequiredMonthly.Currency = %q, want SGD", carView.RequiredMonthly.Currency)
+	}
+
+	overdueView := findGoalView(t, got.Goals, overdue.ID)
+	if overdueView.Status != domain.GoalBehind {
+		t.Errorf("Overdue Status = %v, want Behind (target month already passed, unachieved)", overdueView.Status)
+	}
+	if overdueView.RequiredMonthlyOK {
+		t.Errorf("Overdue RequiredMonthlyOK = true, want false -- the target month has already passed, so no honest required-monthly figure exists")
+	}
+	if overdueView.RequiredMonthly.Amount != 0 {
+		t.Errorf("Overdue RequiredMonthly.Amount = %d, want 0 (the zero value; unused since RequiredMonthlyOK is false)", overdueView.RequiredMonthly.Amount)
 	}
 }
 
@@ -227,6 +274,7 @@ func TestGoalListCountsOnlyDatedUnachievedGoals(t *testing.T) {
 func TestGoalListPlannedTotalConvertsThenAdds(t *testing.T) {
 	f := newGoalFixture(t)
 	today := time.Date(2026, 8, 15, 0, 0, 0, 0, time.UTC)
+	dec2026 := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
 
 	f.seedGoal(domain.Goal{
 		Name: "SGD goal", Target: domain.Money{Amount: 10000000, Currency: "SGD"},
@@ -234,11 +282,17 @@ func TestGoalListPlannedTotalConvertsThenAdds(t *testing.T) {
 	})
 	// Rp124,100.00/mo converts to exactly S$10.00/mo: staticTestRates' IDR->SGD
 	// is {1, 12410}, so Apply(12,410,000) = (12,410,000 + 6,205) / 12,410 = 1,000
-	// with no remainder ambiguity.
-	f.seedGoal(domain.Goal{
+	// with no remainder ambiguity. Dated and contributed-to, so its card also
+	// carries a RequiredMonthly figure -- both this and Contributed must stay
+	// in IDR, the goal's own currency, never the household's primary SGD:
+	// remaining = 500000000-100000000 = 400000000, monthsLeft Aug->Dec 2026
+	// inclusive = 5, required = 400000000/5 = 80000000 exactly.
+	idrGoal := f.seedGoal(domain.Goal{
 		Name: "IDR goal", Target: domain.Money{Amount: 500000000, Currency: "IDR"},
+		TargetMonth:    &dec2026,
 		PlannedMonthly: domain.Money{Amount: 12410000, Currency: "IDR"},
 	})
+	f.seedContribution(idrGoal.ID, 100000000, "IDR", today, domain.ContributionManual) // Rp1,000,000.00
 	noRateGoal := f.seedGoal(domain.Goal{
 		Name: "No rate goal", Target: domain.Money{Amount: 1000000, Currency: "EUR"},
 		PlannedMonthly: domain.Money{Amount: 20000, Currency: "EUR"},
@@ -259,9 +313,27 @@ func TestGoalListPlannedTotalConvertsThenAdds(t *testing.T) {
 		t.Errorf("ExcludedNoRate = %d, want 1 (the EUR goal)", got.Summary.ExcludedNoRate)
 	}
 
+	// The two fields the service actually constructs for a card --
+	// Contributed and RequiredMonthly -- must stay in the goal's own
+	// currency. Asserting Goal.PlannedMonthly here instead would just echo
+	// back the seed data unchanged by the service, proving nothing.
+	idrView := findGoalView(t, got.Goals, idrGoal.ID)
+	if idrView.Contributed.Currency != "IDR" {
+		t.Errorf("IDR goal Contributed.Currency = %q, want IDR (the goal's own currency, not the household's primary SGD)", idrView.Contributed.Currency)
+	}
+	if idrView.Contributed.Amount != 100000000 {
+		t.Errorf("IDR goal Contributed.Amount = %d, want 100000000", idrView.Contributed.Amount)
+	}
+	if idrView.RequiredMonthly.Currency != "IDR" {
+		t.Errorf("IDR goal RequiredMonthly.Currency = %q, want IDR (the goal's own currency, not the household's primary SGD)", idrView.RequiredMonthly.Currency)
+	}
+	if !idrView.RequiredMonthlyOK || idrView.RequiredMonthly.Amount != 80000000 {
+		t.Errorf("IDR goal RequiredMonthly = %+v (ok=%v), want 80000000 (ok)", idrView.RequiredMonthly, idrView.RequiredMonthlyOK)
+	}
+
 	noRateView := findGoalView(t, got.Goals, noRateGoal.ID)
-	if noRateView.Goal.PlannedMonthly.Currency != "EUR" {
-		t.Errorf("excluded goal's own card currency = %q, want EUR -- only the summary totals exclude it", noRateView.Goal.PlannedMonthly.Currency)
+	if noRateView.Contributed.Currency != "EUR" {
+		t.Errorf("excluded goal's own Contributed.Currency = %q, want EUR -- only the summary totals exclude it, its own card still renders in its own currency", noRateView.Contributed.Currency)
 	}
 }
 
@@ -536,6 +608,50 @@ func TestGoalUpdateRefusesACurrencyChangeAndClearsADate(t *testing.T) {
 	if untouched.TargetMonth == nil || !untouched.TargetMonth.Equal(newDate) {
 		t.Fatalf("TargetMonth = %v, want unchanged %v after an all-nil patch", untouched.TargetMonth, newDate)
 	}
+}
+
+// TestGoalUpdateCollisionAndNotFoundErrorsPassThrough pins the brief's Step
+// 3 requirement directly: "collision and not-found errors from the
+// repository pass through untranslated -- assert errors.Is still holds
+// through the service." Task 8 is about to map ErrGoalNameTaken to 409 and
+// ErrNotFound to 404; if a future edit wraps either on the way out of
+// Update, the HTTP layer would silently 500 instead of returning the right
+// status.
+func TestGoalUpdateCollisionAndNotFoundErrorsPassThrough(t *testing.T) {
+	f := newGoalFixture(t)
+	ctx := context.Background()
+	createdOn := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+
+	taken, err := f.svc.Create(ctx, usecase.NewGoal{
+		HouseholdID: "house-1", Name: "Already taken", TargetMinor: 100000, Currency: "SGD",
+		PlannedMonthlyMinor: 10000,
+	}, createdOn)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	other, err := f.svc.Create(ctx, usecase.NewGoal{
+		HouseholdID: "house-1", Name: "Renaming this one", TargetMinor: 100000, Currency: "SGD",
+		PlannedMonthlyMinor: 10000,
+	}, createdOn)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	t.Run("name collision passes through unwrapped", func(t *testing.T) {
+		collidingName := taken.Name
+		_, err := f.svc.Update(ctx, "house-1", other.ID, usecase.GoalUpdate{Name: &collidingName})
+		if !errors.Is(err, domain.ErrGoalNameTaken) {
+			t.Fatalf("err = %v, want domain.ErrGoalNameTaken to pass through unwrapped", err)
+		}
+	})
+
+	t.Run("not found from another household passes through unwrapped", func(t *testing.T) {
+		newName := "Attempted rename"
+		_, err := f.svc.Update(ctx, "house-2", taken.ID, usecase.GoalUpdate{Name: &newName})
+		if !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("err = %v, want domain.ErrNotFound to pass through unwrapped", err)
+		}
+	})
 }
 
 // TestGoalAddContributionRefusesZeroAndArchivedGoals pins the two guards
