@@ -8,3 +8,6 @@ web/dist/
 
 # JetBrains project files — per-developer, not per-project
 .idea/
+
+# Serena's project config, language-server index and agent memories — per-developer
+.serena/
