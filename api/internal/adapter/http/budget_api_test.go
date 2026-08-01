@@ -732,6 +732,14 @@ func TestBudgetRolloverTwiceIsAlreadyDone(t *testing.T) {
 // RollOver reads as domain.ErrNotFound, before it ever looks at Remaining or
 // reaches for the goal -- so a real goal is enough here; the goal's own id
 // is never consulted.
+//
+// The message is asserted, not just the status and code: chi's own
+// catch-all 404 (router.go's r.NotFound) answers the identical
+// {404, "NOT_FOUND"} shape for a route that plain does not exist, so a
+// deleted or mistyped route registration would leave this test green for
+// the wrong reason if it stopped at the code. "That could not be found."
+// (errors.go's domain.ErrNotFound case) is the one signal that distinguishes
+// a real service refusal from the router never having matched anything.
 func TestBudgetRolloverNoBudgetRowIsNotFound(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -743,7 +751,12 @@ func TestBudgetRolloverNoBudgetRowIsNotFound(t *testing.T) {
 	unbudgeted := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -2, 0)
 	rec := env.authed(t, http.MethodPost, monthPath(unbudgeted)+"/rollover",
 		map[string]any{"goalId": goal.Goal.ID}, session, csrf)
-	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
+	body := assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
+	if body.Error.Message != "That could not be found." {
+		t.Fatalf("message = %q, want %q -- a mismatch here means the 404 came from chi's own "+
+			"route-not-found catch-all (router.go), not a real BudgetService.RollOver refusal",
+			body.Error.Message, "That could not be found.")
+	}
 }
 
 // TestBudgetRolloverCurrencyMismatchIs422 is the brief's "an IDR goal in an
@@ -778,6 +791,12 @@ func TestBudgetRolloverCurrencyMismatchIs422(t *testing.T) {
 // month (not merely "no budget row", which TestBudgetRolloverNoBudgetRowIsNotFound
 // already covers) specifically so this 404 can only come from Goals.Get's
 // own household scoping.
+//
+// The message is asserted for the same reason
+// TestBudgetRolloverNoBudgetRowIsNotFound's own comment gives: {404,
+// "NOT_FOUND"} alone does not distinguish a real Goals.Get refusal from
+// chi's route-not-found catch-all, which would answer the identical status
+// and code if the route itself were ever deleted or mistyped.
 func TestBudgetRolloverUnknownGoalIsNotFound(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -785,7 +804,12 @@ func TestBudgetRolloverUnknownGoalIsNotFound(t *testing.T) {
 	zeroUUID := "00000000-0000-0000-0000-000000000000"
 
 	rec := env.authed(t, http.MethodPost, path+"/rollover", map[string]any{"goalId": zeroUUID}, session, csrf)
-	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
+	body := assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
+	if body.Error.Message != "That could not be found." {
+		t.Fatalf("message = %q, want %q -- a mismatch here means the 404 came from chi's own "+
+			"route-not-found catch-all (router.go), not a real GoalRepository.Get refusal",
+			body.Error.Message, "That could not be found.")
+	}
 }
 
 // --- Task 10: category create, rename, archive and restore routes ----------
