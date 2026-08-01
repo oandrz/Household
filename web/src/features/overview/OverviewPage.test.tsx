@@ -87,15 +87,44 @@ function budgetBody(overrides: Record<string, unknown> = {}) {
   };
 }
 
+// A minimal, valid live goal -- goalsResponseSchema.parse (useGoals.ts's own
+// fetchGoals) runs on whatever `goalsBody` answers here, unlike
+// GoalsCard.test.tsx's own fixture, which hands GoalsCard already-typed props
+// directly and skips the wire round trip. Every field below is required by
+// goalSchema even though this suite never reads most of them.
+function goalStub(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "goal-1",
+    name: "Bali",
+    targetMinor: 400000,
+    currency: "SGD",
+    targetMonth: "2026-12",
+    plannedMonthlyMinor: 35000,
+    contributedMinor: 260000,
+    percent: 65,
+    status: "on_track",
+    requiredMonthlyMinor: 28000,
+    requiredMonthlyOk: true,
+    archivedAt: null,
+    ...overrides,
+  };
+}
+
 // A goals response with no live goals at all -- the default for every test
 // below that doesn't care about GoalsCard's own figures (GoalsCard.test.tsx
 // covers those in isolation). `summaryOverrides` nests rather than
-// spreading flat like budgetBody's own overrides, because everything this
-// card actually reads lives inside `summary`.
-function goalsBody(summaryOverrides: Record<string, unknown> = {}) {
+// spreading flat like budgetBody's own overrides, because everything the
+// card's "X of Y"/"next"/"with no date" clauses read lives inside `summary`.
+// `goals` defaults to empty too -- but GoalsCard.tsx's own empty-state check
+// (`goals.goals.length > 0`, not a sum of summary counts, after the fix an
+// achieved-goal review round found: an achieved goal is in neither
+// `datedCount` nor `noDateCount`) means any test wanting the card to show
+// real content must pass a non-empty `goals` array here, not just non-zero
+// summary counts.
+function goalsBody(summaryOverrides: Record<string, unknown> = {}, goals: Record<string, unknown>[] = []) {
   return {
     currency: "SGD",
-    goals: [],
+    goals,
     summary: {
       plannedMonthlyTotalMinor: 0,
       actualThisMonthMinor: 0,
@@ -135,11 +164,14 @@ describe("OverviewPage", () => {
       [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
       "GET /api/v1/goals": {
         status: 200,
-        body: goalsBody({
-          onTrackCount: 3,
-          datedCount: 4,
-          nextGoal: { id: "goal-1", name: "Bali", targetMonth: "2026-12" },
-        }),
+        body: goalsBody(
+          {
+            onTrackCount: 3,
+            datedCount: 4,
+            nextGoal: { id: "goal-1", name: "Bali", targetMonth: "2026-12" },
+          },
+          [goalStub()],
+        ),
       },
     });
 
@@ -467,11 +499,14 @@ describe("OverviewPage", () => {
         { status: 200, body: goalsBody() },
         {
           status: 200,
-          body: goalsBody({
-            onTrackCount: 1,
-            datedCount: 1,
-            nextGoal: { id: "goal-1", name: "Japan 2027", targetMonth: "2026-12" },
-          }),
+          body: goalsBody(
+            {
+              onTrackCount: 1,
+              datedCount: 1,
+              nextGoal: { id: "goal-1", name: "Japan 2027", targetMonth: "2026-12" },
+            },
+            [goalStub({ id: "goal-1", name: "Japan 2027" })],
+          ),
         },
       ],
       "POST /api/v1/goals": {

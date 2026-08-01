@@ -1,9 +1,13 @@
 // The "Goals on track" card (design/Household Dashboard.dc.html's
 // go_goals-linked summary tile): a heading, the "X of Y" figure, and the
-// next dated goal beneath it. Pure presentation over `summary`, the same
-// contract GoalCard.tsx and GoalsPage.tsx's own subtitle already hold --
-// every figure here arrives already computed from GET /goals, so this
-// component's only job is formatting, never arithmetic.
+// next dated goal beneath it. Pure presentation over an already-fetched
+// GoalsResponse, the same contract GoalCard.tsx and GoalsPage.tsx's own
+// subtitle already hold -- every figure here arrives already computed from
+// GET /goals, so this component's only job is formatting, never arithmetic.
+// The one exception is `hasAnyGoals` below, which reads `goals.goals.length`
+// rather than any field of `summary` -- see its own comment for why: the
+// summary counts alone cannot answer "does this household have any goals at
+// all" for a household whose only goal is achieved.
 import { Link } from "@tanstack/react-router";
 import { OVERVIEW_COPY } from "./copy";
 import type { GoalsResponse } from "../money/goalSchemas";
@@ -39,7 +43,19 @@ export function GoalsCard({ goals }: { goals: GoalsResponse }) {
   // dated. This is the household having no live goals at all yet -- the
   // state that would otherwise render this card as a heading over nothing,
   // the same blank-card shape the interim Overview's own defect took.
-  const hasAnyGoals = summary.datedCount + summary.noDateCount > 0;
+  //
+  // Deliberately NOT `summary.datedCount + summary.noDateCount > 0`: an
+  // achieved goal is in *neither* count (the backend's List loop,
+  // api/internal/usecase/goal.go, checks achieved before the dated/undated
+  // split, for both dated and undated goals), so that sum undercounts a
+  // household whose only live goal is fully funded and not yet archived --
+  // an ordinary, unforced state, since nothing archives a goal automatically
+  // on reaching its target. `goals.goals` is the actual list of live goals
+  // this response carries; its length is the same question GoalsPage.tsx's
+  // own empty-state check (`data.goals.length === 0`) answers, so this also
+  // keeps the two screens from disagreeing about whether the household has
+  // any goals at all.
+  const hasAnyGoals = goals.goals.length > 0;
 
   return (
     <section

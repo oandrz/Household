@@ -8,17 +8,41 @@ import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { GoalsCard } from "./GoalsCard";
-import type { GoalsResponse } from "../money/goalSchemas";
+import type { Goal, GoalsResponse } from "../money/goalSchemas";
 
-// summary is the only part of GoalsResponse this card reads -- goals stays
-// an empty array in every fixture below, the same "composed from summary,
-// never by filtering the goals array" contract GoalsPage.tsx's own
-// trackClause comment states, restated here by construction rather than by
-// comment: nothing in this file could accidentally start reading `.goals`.
-function goalsFixture(summaryOverrides: Partial<GoalsResponse["summary"]> = {}): GoalsResponse {
+// A minimal, valid live goal -- fields beyond `status`/`archivedAt` don't
+// matter to GoalsCard (it never reads an individual goal, only
+// `goals.goals.length`), but the array has to hold *something* shaped like a
+// real Goal now that the empty-state check counts it rather than deriving
+// from summary (see the fix note on `hasAnyGoals` in GoalsCard.tsx: an
+// achieved goal is in neither `datedCount` nor `noDateCount`, so a fixture
+// with real goals but all-zero summary counts is exactly the case this file
+// has to be able to represent).
+function goalFixture(overrides: Partial<Goal> = {}): Goal {
+  return {
+    id: "goal-1",
+    name: "Bali trip",
+    targetMinor: 400000,
+    currency: "SGD",
+    targetMonth: "2026-12",
+    plannedMonthlyMinor: 35000,
+    contributedMinor: 260000,
+    percent: 65,
+    status: "on_track",
+    requiredMonthlyMinor: 28000,
+    requiredMonthlyOk: true,
+    archivedAt: null,
+    ...overrides,
+  };
+}
+
+function goalsFixture(
+  summaryOverrides: Partial<GoalsResponse["summary"]> = {},
+  goals: Goal[] = [],
+): GoalsResponse {
   return {
     currency: "SGD",
-    goals: [],
+    goals,
     summary: {
       plannedMonthlyTotalMinor: 0,
       actualThisMonthMinor: 0,
@@ -42,11 +66,14 @@ describe("GoalsCard", () => {
   it("shows the on-track count and the next dated goal", async () => {
     renderWithRouter(
       <GoalsCard
-        goals={goalsFixture({
-          onTrackCount: 3,
-          datedCount: 4,
-          nextGoal: { id: "g1", name: "Bali", targetMonth: "2026-12" },
-        })}
+        goals={goalsFixture(
+          {
+            onTrackCount: 3,
+            datedCount: 4,
+            nextGoal: { id: "g1", name: "Bali", targetMonth: "2026-12" },
+          },
+          [goalFixture()],
+        )}
       />,
     );
 
@@ -59,7 +86,14 @@ describe("GoalsCard", () => {
   // dateless, so there is nothing to be "on track" against. "0 of 0" would
   // read as failure for a household that has simply not set a date yet.
   it("hides the on-track figure rather than showing 0 of 0 when no goal has a date", async () => {
-    renderWithRouter(<GoalsCard goals={goalsFixture({ datedCount: 0, noDateCount: 2 })} />);
+    renderWithRouter(
+      <GoalsCard
+        goals={goalsFixture({ datedCount: 0, noDateCount: 2 }, [
+          goalFixture({ id: "g1", targetMonth: null }),
+          goalFixture({ id: "g2", targetMonth: null }),
+        ])}
+      />,
+    );
 
     // The card still says something true about its own goals, rather than
     // rendering a heading over nothing -- the same failure mode
@@ -76,12 +110,15 @@ describe("GoalsCard", () => {
   it("names how many goals were excluded for having no date, alongside the ones that are dated", async () => {
     renderWithRouter(
       <GoalsCard
-        goals={goalsFixture({
-          onTrackCount: 2,
-          datedCount: 3,
-          noDateCount: 1,
-          nextGoal: { id: "g1", name: "Emergency fund", targetMonth: "2027-01" },
-        })}
+        goals={goalsFixture(
+          {
+            onTrackCount: 2,
+            datedCount: 3,
+            noDateCount: 1,
+            nextGoal: { id: "g1", name: "Emergency fund", targetMonth: "2027-01" },
+          },
+          [goalFixture({ id: "g1" }), goalFixture({ id: "g2" }), goalFixture({ id: "g3" }), goalFixture({ id: "g4", targetMonth: null })],
+        )}
       />,
     );
 
@@ -102,5 +139,38 @@ describe("GoalsCard", () => {
 
     const link = screen.getByRole("link", { name: "Create a goal" });
     expect(link).toHaveAttribute("href", "/money/goals");
+  });
+
+  // The exact hole a review round found: a household that fully funds its
+  // one and only goal, and hasn't archived it -- an ordinary state, since
+  // nothing archives a goal automatically on reaching its target. The
+  // backend's own summary counts (api/internal/usecase/goal.go's List loop)
+  // put an achieved goal in neither `datedCount` nor `noDateCount` -- it
+  // checks `status == domain.GoalAchieved` before the dated/undated split,
+  // for a dated or an undated goal alike -- so a household in exactly this
+  // state has `datedCount: 0, noDateCount: 0` despite a real, live,
+  // unarchived goal sitting in `goals.goals`. The empty state must not
+  // trigger here: this household is not goal-less, it is done.
+  it("does not show the empty state for a household whose only goal is achieved", async () => {
+    renderWithRouter(
+      <GoalsCard
+        goals={goalsFixture({ onTrackCount: 0, datedCount: 0, noDateCount: 0, nextGoal: null }, [
+          goalFixture({ id: "g1", status: "achieved", percent: 100 }),
+        ])}
+      />,
+    );
+
+    // The heading proves the card actually rendered (not a blank div) before
+    // the negative assertions below are asked to mean anything.
+    expect(await screen.findByText("Goals on track")).toBeInTheDocument();
+    expect(screen.queryByText("No goals yet")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Create a goal" })).not.toBeInTheDocument();
+    // Nothing in `summary` describes an achieved-only household today (the
+    // design has no copy for it, and inventing one is outside this fix's
+    // scope) -- so the honest render is the heading alone, with none of the
+    // dated/next/no-date lines, none of which apply to an achieved goal.
+    expect(screen.queryByText(/^\d+ of \d+$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^next:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/with no date/)).not.toBeInTheDocument();
   });
 });
