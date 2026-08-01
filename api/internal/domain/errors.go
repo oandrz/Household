@@ -80,6 +80,11 @@ var (
 	ErrBudgetCapNegative    = errors.New("a budget cap cannot be negative")
 	ErrBudgetIncomeNegative = errors.New("a budget's expected income cannot be negative")
 
+	// ErrUnknownContributionSource is returned for a contribution source this
+	// code did not construct -- a database column or request body holding
+	// something other than manual, starting_balance, or budget_rollover.
+	ErrUnknownContributionSource = errors.New("unknown contribution source")
+
 	// ErrBudgetCategoryUnknown is BudgetRepository.Upsert's own
 	// household-ownership check (validateLineCategories in the postgres
 	// adapter) failing: a budget line names a category id that either does
