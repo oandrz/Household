@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres"
 	"github.com/andreasoentoro/hearth/api/internal/testsupport"
 )
@@ -544,6 +546,357 @@ func TestBudgetLinesSchema(t *testing.T) {
 			t.Fatal("the database deleted a category still referenced by a budget line; NO ACTION is missing")
 		}
 	})
+}
+
+// TestGoalsSchema pins goals' shape: the table and its columns exist as
+// 00007 declares, a household's goal names are unique so an archived goal's
+// name collision can offer restore instead of a bare 409 (see the
+// migration's comment), and deleting a household cascades to its goals.
+func TestGoalsSchema(t *testing.T) {
+	db := openTestDB(t)
+	pool := db.Pool()
+	ctx := context.Background()
+
+	t.Run("table exists", func(t *testing.T) {
+		var count int
+		if err := pool.QueryRow(ctx,
+			`SELECT count(*) FROM information_schema.tables WHERE table_name = 'goals'`).Scan(&count); err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		if count != 1 {
+			t.Fatal("goals table not found; migration did not run")
+		}
+	})
+
+	t.Run("column set matches the migration", func(t *testing.T) {
+		want := map[string]string{
+			"id":                    "NO",
+			"household_id":          "NO",
+			"name":                  "NO",
+			"target_amount_minor":   "NO",
+			"currency":              "NO",
+			"target_month":          "YES",
+			"planned_monthly_minor": "NO",
+			"archived_at":           "YES",
+			"created_at":            "NO",
+			"updated_at":            "NO",
+		}
+		got := columnNullability(t, pool, "goals")
+		if len(got) != len(want) {
+			t.Fatalf("goals has %d columns, want %d: got %v", len(got), len(want), got)
+		}
+		for name, nullable := range want {
+			if got[name] != nullable {
+				t.Fatalf("goals.%s is_nullable = %q, want %q", name, got[name], nullable)
+			}
+		}
+	})
+
+	t.Run("household_id and name are unique together", func(t *testing.T) {
+		householdID := insertTestHousehold(t, db)
+		insert := `INSERT INTO goals (household_id, name, target_amount_minor, currency, planned_monthly_minor)
+		           VALUES ($1, 'Emergency fund', 600000, 'SGD', 50000)`
+		if _, err := pool.Exec(ctx, insert, householdID); err != nil {
+			t.Fatalf("first insert: %v", err)
+		}
+		if _, err := pool.Exec(ctx, insert, householdID); err == nil {
+			t.Fatal("the database accepted two goals with the same name for one household")
+		}
+		// Discriminates the pair from a single-column UNIQUE on household_id
+		// alone: a different name for the same household must still succeed.
+		otherName := `INSERT INTO goals (household_id, name, target_amount_minor, currency, planned_monthly_minor)
+		              VALUES ($1, 'New car', 2000000, 'SGD', 100000)`
+		if _, err := pool.Exec(ctx, otherName, householdID); err != nil {
+			t.Fatalf("same household, different name: %v", err)
+		}
+	})
+
+	t.Run("deleting the household cascades to its goals", func(t *testing.T) {
+		householdID := insertTestHousehold(t, db)
+		var goalID string
+		if err := pool.QueryRow(ctx,
+			`INSERT INTO goals (household_id, name, target_amount_minor, currency, planned_monthly_minor)
+			 VALUES ($1, 'New car', 2000000, 'SGD', 100000) RETURNING id`,
+			householdID).Scan(&goalID); err != nil {
+			t.Fatalf("insert goal: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM households WHERE id = $1`, householdID); err != nil {
+			t.Fatalf("delete household: %v", err)
+		}
+		var count int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM goals WHERE id = $1`, goalID).Scan(&count); err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		if count != 0 {
+			t.Fatal("goal survived its household's deletion; ON DELETE CASCADE is missing")
+		}
+	})
+}
+
+// TestGoalContributionsSchema pins goal_contributions' shape: the table and
+// its columns exist, the three CHECKs that keep a row honest hold, the
+// partial unique index backstopping RollOverToGoal is real (and genuinely
+// partial -- rows that are not rollovers must not collide with each other),
+// and deleting a goal still referenced by a contribution is refused, because
+// a goal is archived, never deleted (see the migration's comment).
+func TestGoalContributionsSchema(t *testing.T) {
+	db := openTestDB(t)
+	pool := db.Pool()
+	ctx := context.Background()
+
+	newGoal := func(t *testing.T, householdID, name string) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx,
+			`INSERT INTO goals (household_id, name, target_amount_minor, currency, planned_monthly_minor)
+			 VALUES ($1, $2, 600000, 'SGD', 50000) RETURNING id`,
+			householdID, name).Scan(&id); err != nil {
+			t.Fatalf("insert goal: %v", err)
+		}
+		return id
+	}
+
+	t.Run("table exists", func(t *testing.T) {
+		var count int
+		if err := pool.QueryRow(ctx,
+			`SELECT count(*) FROM information_schema.tables WHERE table_name = 'goal_contributions'`).Scan(&count); err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		if count != 1 {
+			t.Fatal("goal_contributions table not found; migration did not run")
+		}
+	})
+
+	t.Run("column set matches the migration", func(t *testing.T) {
+		want := map[string]string{
+			"id":                  "NO",
+			"goal_id":             "NO",
+			"household_id":        "NO",
+			"amount_minor":        "NO",
+			"occurred_on":         "NO",
+			"note":                "NO",
+			"source":              "NO",
+			"source_budget_month": "YES",
+			"created_at":          "NO",
+		}
+		got := columnNullability(t, pool, "goal_contributions")
+		if len(got) != len(want) {
+			t.Fatalf("goal_contributions has %d columns, want %d: got %v", len(got), len(want), got)
+		}
+		for name, nullable := range want {
+			if got[name] != nullable {
+				t.Fatalf("goal_contributions.%s is_nullable = %q, want %q", name, got[name], nullable)
+			}
+		}
+	})
+
+	t.Run("refuses nonsense rows", func(t *testing.T) {
+		householdID := insertTestHousehold(t, db)
+		goalID := newGoal(t, householdID, "Emergency fund")
+
+		cases := []struct {
+			name string
+			sql  string
+			// constraint is the name the violation must carry -- see the
+			// comment on the equivalent field in
+			// TestTransactionSchemaRefusesNonsenseRows.
+			constraint string
+		}{
+			{
+				name: "a zero amount",
+				sql: `INSERT INTO goal_contributions (goal_id, household_id, amount_minor, occurred_on, source)
+				      VALUES ($1, $2, 0, DATE '2026-07-18', 'manual')`,
+				constraint: "goal_contributions_amount_minor_check",
+			},
+			{
+				name: "a non-rollover row naming a budget month",
+				sql: `INSERT INTO goal_contributions (goal_id, household_id, amount_minor, occurred_on, source, source_budget_month)
+				      VALUES ($1, $2, 5000, DATE '2026-07-18', 'manual', DATE '2026-07-01')`,
+				constraint: "budget_month_is_a_rollover_thing",
+			},
+			{
+				name: "a rollover row with no budget month",
+				sql: `INSERT INTO goal_contributions (goal_id, household_id, amount_minor, occurred_on, source)
+				      VALUES ($1, $2, 5000, DATE '2026-07-18', 'budget_rollover')`,
+				constraint: "rollover_names_its_month",
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				_, err := pool.Exec(ctx, tc.sql, goalID, householdID)
+				if err == nil {
+					t.Fatal("the database accepted it")
+				}
+				if !strings.Contains(err.Error(), tc.constraint) {
+					t.Fatalf("err = %v, want a %s violation", err, tc.constraint)
+				}
+			})
+		}
+	})
+
+	t.Run("only one rollover per household-month", func(t *testing.T) {
+		householdID := insertTestHousehold(t, db)
+		goalID := newGoal(t, householdID, "Emergency fund")
+		insert := `INSERT INTO goal_contributions (goal_id, household_id, amount_minor, occurred_on, source, source_budget_month)
+		           VALUES ($1, $2, 12000, DATE '2026-07-28', 'budget_rollover', DATE '2026-07-01')`
+		if _, err := pool.Exec(ctx, insert, goalID, householdID); err != nil {
+			t.Fatalf("first insert: %v", err)
+		}
+		if _, err := pool.Exec(ctx, insert, goalID, householdID); err == nil {
+			t.Fatal("the database accepted a second rollover for the same household and month")
+		}
+		// Discriminates source_budget_month being part of the key from a
+		// UNIQUE(household_id) alone: a different month for the same
+		// household must still succeed.
+		otherMonth := `INSERT INTO goal_contributions (goal_id, household_id, amount_minor, occurred_on, source, source_budget_month)
+		               VALUES ($1, $2, 8000, DATE '2026-08-28', 'budget_rollover', DATE '2026-08-01')`
+		if _, err := pool.Exec(ctx, otherMonth, goalID, householdID); err != nil {
+			t.Fatalf("same household, different month: %v", err)
+		}
+		// Two manual contributions -- source_budget_month NULL on both --
+		// must not collide. This does not distinguish the index's WHERE
+		// source = 'budget_rollover' clause from a plain UNIQUE over the same
+		// two columns: Postgres treats NULL as distinct from NULL either way,
+		// and budget_month_is_a_rollover_thing already forbids a non-NULL
+		// source_budget_month on a non-rollover row, so the predicate is
+		// unreachable by construction -- belt and braces, per the migration's
+		// comment, not a behaviour this test can isolate.
+		manual := `INSERT INTO goal_contributions (goal_id, household_id, amount_minor, occurred_on, source)
+		          VALUES ($1, $2, 1000, DATE '2026-07-20', 'manual')`
+		if _, err := pool.Exec(ctx, manual, goalID, householdID); err != nil {
+			t.Fatalf("first manual contribution: %v", err)
+		}
+		if _, err := pool.Exec(ctx, manual, goalID, householdID); err != nil {
+			t.Fatalf("second manual contribution (NULL source_budget_month must not collide): %v", err)
+		}
+	})
+
+	t.Run("deleting a goal referenced by a contribution is refused", func(t *testing.T) {
+		householdID := insertTestHousehold(t, db)
+		goalID := newGoal(t, householdID, "Emergency fund")
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO goal_contributions (goal_id, household_id, amount_minor, occurred_on, source)
+			 VALUES ($1, $2, 5000, DATE '2026-07-18', 'manual')`, goalID, householdID); err != nil {
+			t.Fatalf("insert contribution: %v", err)
+		}
+		_, err := pool.Exec(ctx, `DELETE FROM goals WHERE id = $1`, goalID)
+		if err == nil {
+			t.Fatal("the database deleted a goal still referenced by a contribution; NO ACTION is missing")
+		}
+	})
+}
+
+// TestBudgetsRolloverSchema pins the two columns and the CHECK 00007 added to
+// budgets: the rollover stamp is set whole (both columns or neither -- half a
+// stamp is a budget that claims to be rolled over into no goal, or into a
+// goal it never says), and a rolled-over budget still names a real goal, NO
+// ACTION, because goals are never deleted.
+func TestBudgetsRolloverSchema(t *testing.T) {
+	db := openTestDB(t)
+	pool := db.Pool()
+	ctx := context.Background()
+
+	newGoal := func(t *testing.T, householdID string) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx,
+			`INSERT INTO goals (household_id, name, target_amount_minor, currency, planned_monthly_minor)
+			 VALUES ($1, 'Emergency fund', 600000, 'SGD', 50000) RETURNING id`,
+			householdID).Scan(&id); err != nil {
+			t.Fatalf("insert goal: %v", err)
+		}
+		return id
+	}
+	newBudget := func(t *testing.T, householdID, month string) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx,
+			`INSERT INTO budgets (household_id, month) VALUES ($1, $2) RETURNING id`,
+			householdID, month).Scan(&id); err != nil {
+			t.Fatalf("insert budget: %v", err)
+		}
+		return id
+	}
+
+	t.Run("rolled_over_at and rollover_goal_id are both nullable", func(t *testing.T) {
+		nullable := columnNullability(t, pool, "budgets")
+		if nullable["rolled_over_at"] != "YES" {
+			t.Fatalf("rolled_over_at is_nullable = %q, want YES", nullable["rolled_over_at"])
+		}
+		if nullable["rollover_goal_id"] != "YES" {
+			t.Fatalf("rollover_goal_id is_nullable = %q, want YES", nullable["rollover_goal_id"])
+		}
+	})
+
+	t.Run("the rollover stamp is set whole or not at all", func(t *testing.T) {
+		householdID := insertTestHousehold(t, db)
+		goalID := newGoal(t, householdID)
+		budgetID := newBudget(t, householdID, "2026-07-01")
+
+		_, err := pool.Exec(ctx,
+			`UPDATE budgets SET rolled_over_at = now() WHERE id = $1`, budgetID)
+		if err == nil {
+			t.Fatal("the database accepted a rollover timestamp with no goal")
+		}
+		if !strings.Contains(err.Error(), "rollover_stamp_is_whole") {
+			t.Fatalf("err = %v, want a rollover_stamp_is_whole violation", err)
+		}
+
+		_, err = pool.Exec(ctx,
+			`UPDATE budgets SET rollover_goal_id = $1 WHERE id = $2`, goalID, budgetID)
+		if err == nil {
+			t.Fatal("the database accepted a rollover goal with no timestamp")
+		}
+		if !strings.Contains(err.Error(), "rollover_stamp_is_whole") {
+			t.Fatalf("err = %v, want a rollover_stamp_is_whole violation", err)
+		}
+
+		if _, err := pool.Exec(ctx,
+			`UPDATE budgets SET rolled_over_at = now(), rollover_goal_id = $1 WHERE id = $2`,
+			goalID, budgetID); err != nil {
+			t.Fatalf("setting both together: %v", err)
+		}
+	})
+
+	t.Run("deleting a goal referenced by a rolled-over budget is refused", func(t *testing.T) {
+		householdID := insertTestHousehold(t, db)
+		goalID := newGoal(t, householdID)
+		budgetID := newBudget(t, householdID, "2026-08-01")
+		if _, err := pool.Exec(ctx,
+			`UPDATE budgets SET rolled_over_at = now(), rollover_goal_id = $1 WHERE id = $2`,
+			goalID, budgetID); err != nil {
+			t.Fatalf("stamp budget as rolled over: %v", err)
+		}
+		_, err := pool.Exec(ctx, `DELETE FROM goals WHERE id = $1`, goalID)
+		if err == nil {
+			t.Fatal("the database deleted a goal still named by a rolled-over budget; NO ACTION is missing")
+		}
+	})
+}
+
+// columnNullability maps a table's columns to information_schema's
+// is_nullable ("YES"/"NO"), so a schema test can assert an entire column set
+// -- names and nullability together -- in one query instead of one column at
+// a time.
+func columnNullability(t *testing.T, pool *pgxpool.Pool, table string) map[string]string {
+	t.Helper()
+	ctx := context.Background()
+	rows, err := pool.Query(ctx,
+		`SELECT column_name, is_nullable FROM information_schema.columns WHERE table_name = $1`, table)
+	if err != nil {
+		t.Fatalf("query columns for %s: %v", table, err)
+	}
+	defer rows.Close()
+	got := map[string]string{}
+	for rows.Next() {
+		var name, nullable string
+		if err := rows.Scan(&name, &nullable); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		got[name] = nullable
+	}
+	return got
 }
 
 // insertTestHousehold inserts the minimum household row needed to satisfy a
