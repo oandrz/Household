@@ -96,6 +96,10 @@ type BudgetDeps struct {
 	Households   HouseholdRepository
 	Members      MembershipRepository
 	FX           FXRateProvider
+	// Goals is read only by RollOver, to fetch the target goal before any
+	// write -- see that method's own comment for why the fetch cannot be
+	// skipped or reordered after BudgetRepository.RollOverToGoal.
+	Goals GoalRepository
 }
 
 // BudgetService composes the Budget screen from the same ledger Transactions
@@ -437,6 +441,84 @@ func (s *BudgetService) Save(ctx context.Context, householdID string, month time
 	budget.Lines = lineValues
 
 	return s.d.Budgets.Upsert(ctx, budget)
+}
+
+// RollOver moves a CLOSED month's unspent budget into a goal, as one
+// contribution, once. It is the manual half of the design's "Roll unspent
+// into savings" toggle: nothing here runs on a clock, and the spec's
+// decision 4 explains why a stored toggle that acts only when clicked would
+// be worse than this button.
+//
+// Every refusal happens before anything is written, in this order:
+//   - a current or future month            -> domain.ErrRolloverMonthOpen
+//   - a month with no budget row           -> domain.ErrNotFound
+//   - Remaining <= 0                       -> domain.ErrRolloverNothingUnspent
+//   - an archived goal                     -> domain.ErrGoalArchived
+//   - a goal not in the primary currency   -> domain.ErrRolloverCurrencyMismatch
+//   - a month already rolled over          -> domain.ErrRolloverAlreadyDone
+//
+// The closed-month check compares month-starts, not instants, using the
+// same UTC truncation domain/budget.go's own DaysLeftInMonth applies (via
+// this file's startOfMonth) -- a mid-month "unspent" figure is still moving,
+// and money moved out of a number that later shrinks is a wrong number the
+// household cannot undo.
+//
+// Remaining comes from Month, so this never computes spend a second way.
+// Month's own Budget field is nil exactly when the month has never been
+// budgeted (the empty state) -- that is checked explicitly, before Remaining
+// is ever read, because an unbudgeted month's Budgeted is zero and would
+// otherwise make Remaining go negative on its own, misreporting
+// domain.ErrNotFound as a silent domain.ErrRolloverNothingUnspent instead.
+//
+// The currency refusal is spec decision 11: budgets carry no currency column
+// and are implicitly in the household's primary currency, while a goal
+// carries an explicit one. Converting inside a rollover would store a rate
+// nobody can audit, so a non-primary goal is refused even when FX knows a
+// live rate for it -- this is about auditability, not availability.
+//
+// s.d.Goals.Get runs BEFORE BudgetRepository.RollOverToGoal, and that
+// ordering is load-bearing, not incidental: RollOverToGoalInput.GoalID
+// reaches the repository's SQL in a value position (Task 5's review), so an
+// id that does not exist, or belongs to a different household, would
+// otherwise reach a foreign-key violation and surface as an unmapped 500
+// rather than this method's own domain.ErrNotFound. Get is also what this
+// method needs anyway, to read the goal's ArchivedAt and currency -- so
+// fetching it first costs nothing extra and closes that gap at the same
+// time.
+func (s *BudgetService) RollOver(ctx context.Context, householdID string, month time.Time, goalID string, today time.Time) (domain.GoalContribution, error) {
+	if !startOfMonth(month).Before(startOfMonth(today)) {
+		return domain.GoalContribution{}, domain.ErrRolloverMonthOpen
+	}
+
+	view, err := s.Month(ctx, householdID, month, today)
+	if err != nil {
+		return domain.GoalContribution{}, err
+	}
+	if view.Budget == nil {
+		return domain.GoalContribution{}, domain.ErrNotFound
+	}
+	if view.Remaining <= 0 {
+		return domain.GoalContribution{}, domain.ErrRolloverNothingUnspent
+	}
+
+	rec, err := s.d.Goals.Get(ctx, householdID, goalID)
+	if err != nil {
+		return domain.GoalContribution{}, err
+	}
+	if rec.Goal.IsArchived() {
+		return domain.GoalContribution{}, domain.ErrGoalArchived
+	}
+	if rec.Goal.Target.Currency != view.Currency {
+		return domain.GoalContribution{}, domain.ErrRolloverCurrencyMismatch
+	}
+
+	return s.d.Budgets.RollOverToGoal(ctx, RollOverToGoalInput{
+		HouseholdID: householdID,
+		Month:       month,
+		GoalID:      goalID,
+		Amount:      domain.Money{Amount: view.Remaining, Currency: view.Currency},
+		OccurredOn:  today,
+	})
 }
 
 // History reports the viewed month (if budgeted) plus up to `months` closed

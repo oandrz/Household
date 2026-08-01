@@ -22,6 +22,7 @@ type budgetFixture struct {
 	categories   *fakeCategoryRepo
 	households   *householdDouble
 	members      *membershipDouble
+	goals        *goalDouble
 }
 
 func newBudgetFixture(t *testing.T) *budgetFixture {
@@ -41,6 +42,13 @@ func newBudgetFixture(t *testing.T) *budgetFixture {
 
 	transactions := &fakeTransactionRepo{}
 	budgets := newFakeBudgetRepo()
+	// goals is wired both ways -- fakeBudgetRepo.RollOverToGoal writes into
+	// it, and goalDouble.DeleteContribution reaches back through it to clear
+	// a rollover stamp -- the same mutual-reference pattern testdouble_test.go
+	// documents on fakeBudgetRepo.setGoals itself.
+	goals := newGoalDouble()
+	budgets.setGoals(goals)
+	goals.setBudgets(budgets)
 
 	svc := usecase.NewBudgetService(usecase.BudgetDeps{
 		Budgets:      budgets,
@@ -49,12 +57,41 @@ func newBudgetFixture(t *testing.T) *budgetFixture {
 		Households:   households,
 		Members:      members,
 		FX:           staticTestRates{},
+		Goals:        goals,
 	})
 
 	return &budgetFixture{
 		svc: svc, budgets: budgets, transactions: transactions,
 		categories: categories, households: households, members: members,
+		goals: goals,
 	}
+}
+
+// seedGoal creates a goal directly through the GoalRepository double, the
+// same way addExpense seeds the ledger double directly rather than going
+// through a service: a RollOver test needs a goal with a real id to name,
+// not also to depend on GoalService's own validation succeeding first.
+// householdID lets a test build a goal that belongs to a DIFFERENT
+// household (TestBudgetRollOverRefusesAGoalFromAnotherHousehold), which is
+// exactly the case Get's own household scoping exists to catch.
+func (f *budgetFixture) seedGoal(t *testing.T, householdID, name, currency string, targetMinor int64, archived bool) domain.Goal {
+	t.Helper()
+	ctx := context.Background()
+	g, err := f.goals.Create(ctx, domain.Goal{
+		HouseholdID: householdID,
+		Name:        name,
+		Target:      domain.Money{Amount: targetMinor, Currency: currency},
+	}, 0, julyMonth())
+	if err != nil {
+		t.Fatalf("seed goal: %v", err)
+	}
+	if archived {
+		g, err = f.goals.SetArchived(ctx, householdID, g.ID, true, julyMonth())
+		if err != nil {
+			t.Fatalf("archive seeded goal: %v", err)
+		}
+	}
+	return g
 }
 
 // addExpense appends an expense transaction straight into the fake ledger --
@@ -493,5 +530,266 @@ func TestBudgetHistoryClosedFollowsTodayNotTheAnchorMonth(t *testing.T) {
 	}
 	if !got[1].Month.Equal(may) || !got[1].Closed {
 		t.Fatalf("row 1 = %+v, want May, Closed true", got[1])
+	}
+}
+
+// --- RollOver ------------------------------------------------------------
+//
+// Every RollOver test dates `today` in August so July is unambiguously
+// closed, following DaysLeftInMonth's own month-vs-month (not
+// instant-vs-instant) comparison rule.
+
+// TestBudgetRollOverWritesTheMonthsRemainingIntoTheGoal pins the spec's own
+// worked example: July budgeted S$5,200.00, spent S$3,420.00, so RollOver
+// must write exactly one contribution of the difference, S$1,780.00, dated
+// `today`, sourced budget_rollover, naming July as its source month.
+func TestBudgetRollOverWritesTheMonthsRemainingIntoTheGoal(t *testing.T) {
+	f := newBudgetFixture(t)
+	ctx := context.Background()
+	july := julyMonth()
+	today := time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC)
+
+	if _, err := f.svc.Save(ctx, "house-1", july, nil, []usecase.BudgetLineInput{
+		{CategoryID: "cat-groceries", CapMinor: 520000}, // S$5,200.00
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	f.addExpense("tx-groceries", "cat-groceries", "", july.AddDate(0, 0, 5), 342000, "SGD") // S$3,420.00
+
+	goal := f.seedGoal(t, "house-1", "Emergency fund", "SGD", 1000000, false)
+
+	got, err := f.svc.RollOver(ctx, "house-1", july, goal.ID, today)
+	if err != nil {
+		t.Fatalf("rollover: %v", err)
+	}
+
+	if got.Amount.Amount != 178000 || got.Amount.Currency != "SGD" {
+		t.Fatalf("amount = %+v, want 178000 SGD (S$1,780.00)", got.Amount)
+	}
+	if !got.OccurredOn.Equal(today) {
+		t.Fatalf("occurredOn = %v, want today (%v)", got.OccurredOn, today)
+	}
+	if got.Source != domain.ContributionBudgetRollover {
+		t.Fatalf("source = %v, want budget_rollover", got.Source)
+	}
+	if got.SourceBudgetMonth == nil || !got.SourceBudgetMonth.Equal(july) {
+		t.Fatalf("sourceBudgetMonth = %v, want July", got.SourceBudgetMonth)
+	}
+
+	contribs, err := f.goals.ListContributions(ctx, "house-1", goal.ID, 0)
+	if err != nil {
+		t.Fatalf("list contributions: %v", err)
+	}
+	if len(contribs) != 1 {
+		t.Fatalf("contributions = %+v, want exactly 1", contribs)
+	}
+	if _, done := f.budgets.rolledOverGoalID("house-1", july); !done {
+		t.Fatal("July is not stamped as rolled over")
+	}
+}
+
+// TestBudgetRollOverRefusesAnOpenMonth is the rule worth stating twice: only
+// a CLOSED month can be rolled over. Mid-month "unspent" is still moving,
+// and money moved out of a figure that later shrinks is a wrong number the
+// household cannot undo. The goal id here is never seeded -- it does not
+// need to exist for this refusal to fire, because the month check runs
+// before any repository is ever consulted.
+func TestBudgetRollOverRefusesAnOpenMonth(t *testing.T) {
+	f := newBudgetFixture(t)
+	ctx := context.Background()
+	today := time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC)
+
+	current := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := f.svc.RollOver(ctx, "house-1", current, "goal-nonexistent", today); !errors.Is(err, domain.ErrRolloverMonthOpen) {
+		t.Fatalf("current month err = %v, want domain.ErrRolloverMonthOpen", err)
+	}
+
+	future := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := f.svc.RollOver(ctx, "house-1", future, "goal-nonexistent", today); !errors.Is(err, domain.ErrRolloverMonthOpen) {
+		t.Fatalf("future month err = %v, want domain.ErrRolloverMonthOpen", err)
+	}
+
+	if contribs, _ := f.goals.ListContributions(ctx, "house-1", "goal-nonexistent", 0); len(contribs) != 0 {
+		t.Fatalf("contributions = %+v, want none written", contribs)
+	}
+}
+
+// TestBudgetRollOverRefusesAMonthWithNoBudgetRow: a closed month can have
+// spend and no caps (Budget decision 4), and that must surface as
+// domain.ErrNotFound -- not a silent zero-remaining refusal, which is what a
+// naive "just check Remaining <= 0" implementation would produce, since an
+// unbudgeted month's Budgeted is zero and Remaining goes negative on its own.
+func TestBudgetRollOverRefusesAMonthWithNoBudgetRow(t *testing.T) {
+	f := newBudgetFixture(t)
+	ctx := context.Background()
+	july := julyMonth()
+	today := time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC)
+
+	f.addExpense("tx-groceries", "cat-groceries", "", july.AddDate(0, 0, 5), 12000, "SGD")
+
+	goal := f.seedGoal(t, "house-1", "Emergency fund", "SGD", 1000000, false)
+
+	_, err := f.svc.RollOver(ctx, "house-1", july, goal.ID, today)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("err = %v, want domain.ErrNotFound", err)
+	}
+	if errors.Is(err, domain.ErrRolloverNothingUnspent) {
+		t.Fatal("err is ErrRolloverNothingUnspent -- a missing budget row must not read as a silent zero-remaining refusal")
+	}
+}
+
+// TestBudgetRollOverRefusesNothingUnspent: spend at or above the cap leaves
+// nothing to move.
+func TestBudgetRollOverRefusesNothingUnspent(t *testing.T) {
+	f := newBudgetFixture(t)
+	ctx := context.Background()
+	july := julyMonth()
+	today := time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC)
+
+	if _, err := f.svc.Save(ctx, "house-1", july, nil, []usecase.BudgetLineInput{
+		{CategoryID: "cat-groceries", CapMinor: 50000},
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	f.addExpense("tx-groceries", "cat-groceries", "", july.AddDate(0, 0, 5), 60000, "SGD") // over budget
+
+	goal := f.seedGoal(t, "house-1", "Emergency fund", "SGD", 1000000, false)
+
+	_, err := f.svc.RollOver(ctx, "house-1", july, goal.ID, today)
+	if !errors.Is(err, domain.ErrRolloverNothingUnspent) {
+		t.Fatalf("err = %v, want domain.ErrRolloverNothingUnspent", err)
+	}
+
+	if contribs, _ := f.goals.ListContributions(ctx, "house-1", goal.ID, 0); len(contribs) != 0 {
+		t.Fatalf("contributions = %+v, want none written", contribs)
+	}
+}
+
+// TestBudgetRollOverRefusesANonPrimaryCurrencyGoal: budgets carry no
+// currency column and are implicitly in the household's primary currency,
+// while a goal carries an explicit one. Converting inside a rollover would
+// store a rate nobody can audit, so a goal outside the primary currency is
+// refused even though staticTestRates knows a live SGD<->IDR rate -- the
+// refusal is about auditability, not availability.
+func TestBudgetRollOverRefusesANonPrimaryCurrencyGoal(t *testing.T) {
+	f := newBudgetFixture(t)
+	ctx := context.Background()
+	july := julyMonth()
+	today := time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC)
+
+	if _, err := f.svc.Save(ctx, "house-1", july, nil, []usecase.BudgetLineInput{
+		{CategoryID: "cat-groceries", CapMinor: 50000},
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	f.addExpense("tx-groceries", "cat-groceries", "", july.AddDate(0, 0, 5), 20000, "SGD")
+
+	goal := f.seedGoal(t, "house-1", "Bali trip", "IDR", 100000000, false)
+
+	_, err := f.svc.RollOver(ctx, "house-1", july, goal.ID, today)
+	if !errors.Is(err, domain.ErrRolloverCurrencyMismatch) {
+		t.Fatalf("err = %v, want domain.ErrRolloverCurrencyMismatch", err)
+	}
+
+	if contribs, _ := f.goals.ListContributions(ctx, "house-1", goal.ID, 0); len(contribs) != 0 {
+		t.Fatalf("contributions = %+v, want none written", contribs)
+	}
+}
+
+// TestBudgetRollOverRefusesAnArchivedGoal.
+func TestBudgetRollOverRefusesAnArchivedGoal(t *testing.T) {
+	f := newBudgetFixture(t)
+	ctx := context.Background()
+	july := julyMonth()
+	today := time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC)
+
+	if _, err := f.svc.Save(ctx, "house-1", july, nil, []usecase.BudgetLineInput{
+		{CategoryID: "cat-groceries", CapMinor: 50000},
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	f.addExpense("tx-groceries", "cat-groceries", "", july.AddDate(0, 0, 5), 20000, "SGD")
+
+	goal := f.seedGoal(t, "house-1", "Emergency fund", "SGD", 1000000, true)
+
+	_, err := f.svc.RollOver(ctx, "house-1", july, goal.ID, today)
+	if !errors.Is(err, domain.ErrGoalArchived) {
+		t.Fatalf("err = %v, want domain.ErrGoalArchived", err)
+	}
+
+	if contribs, _ := f.goals.ListContributions(ctx, "house-1", goal.ID, 0); len(contribs) != 0 {
+		t.Fatalf("contributions = %+v, want none written", contribs)
+	}
+}
+
+// TestBudgetRollOverTwiceIsRefused: the double stamps like the real
+// repository -- a conditional write that finds the month already stamped --
+// so the second call must fail as domain.ErrRolloverAlreadyDone with
+// exactly one contribution in existence, never a second one.
+func TestBudgetRollOverTwiceIsRefused(t *testing.T) {
+	f := newBudgetFixture(t)
+	ctx := context.Background()
+	july := julyMonth()
+	today := time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC)
+
+	if _, err := f.svc.Save(ctx, "house-1", july, nil, []usecase.BudgetLineInput{
+		{CategoryID: "cat-groceries", CapMinor: 520000},
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	f.addExpense("tx-groceries", "cat-groceries", "", july.AddDate(0, 0, 5), 342000, "SGD")
+
+	goal := f.seedGoal(t, "house-1", "Emergency fund", "SGD", 1000000, false)
+
+	if _, err := f.svc.RollOver(ctx, "house-1", july, goal.ID, today); err != nil {
+		t.Fatalf("first rollover: %v", err)
+	}
+
+	_, err := f.svc.RollOver(ctx, "house-1", july, goal.ID, today)
+	if !errors.Is(err, domain.ErrRolloverAlreadyDone) {
+		t.Fatalf("second rollover err = %v, want domain.ErrRolloverAlreadyDone", err)
+	}
+
+	contribs, err := f.goals.ListContributions(ctx, "house-1", goal.ID, 0)
+	if err != nil {
+		t.Fatalf("list contributions: %v", err)
+	}
+	if len(contribs) != 1 {
+		t.Fatalf("contributions = %+v, want exactly 1 (the second call must not have written a second one)", contribs)
+	}
+}
+
+// TestBudgetRollOverRefusesAGoalFromAnotherHousehold pins the fix Task 5's
+// review required: RollOverToGoal writes the goal id into a SQL value
+// position, so an id that does not belong to this household must be caught
+// by this service's own Goals.Get BEFORE the repository is ever called --
+// otherwise it would reach a foreign-key violation and surface as an
+// unmapped 500 instead of a clean domain error. Nothing may be written: not
+// a contribution on the foreign goal, and not a stamp on July.
+func TestBudgetRollOverRefusesAGoalFromAnotherHousehold(t *testing.T) {
+	f := newBudgetFixture(t)
+	ctx := context.Background()
+	july := julyMonth()
+	today := time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC)
+
+	if _, err := f.svc.Save(ctx, "house-1", july, nil, []usecase.BudgetLineInput{
+		{CategoryID: "cat-groceries", CapMinor: 520000},
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	f.addExpense("tx-groceries", "cat-groceries", "", july.AddDate(0, 0, 5), 342000, "SGD")
+
+	foreign := f.seedGoal(t, "house-2", "Not yours", "SGD", 1000000, false)
+
+	_, err := f.svc.RollOver(ctx, "house-1", july, foreign.ID, today)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("err = %v, want domain.ErrNotFound", err)
+	}
+
+	if contribs, _ := f.goals.ListContributions(ctx, "house-2", foreign.ID, 0); len(contribs) != 0 {
+		t.Fatalf("contributions = %+v, want none written on the foreign goal", contribs)
+	}
+	if _, done := f.budgets.rolledOverGoalID("house-1", july); done {
+		t.Fatal("July stamped as rolled over even though the goal fetch should have failed first, before any write")
 	}
 }
