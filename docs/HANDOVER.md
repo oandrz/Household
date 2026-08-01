@@ -71,10 +71,10 @@ test driving the three transactions write routes without a CSRF token.
 | 0 — Skeleton | Clean-architecture layout, Docker, Compose, Make, migrations, health endpoints | **Done** |
 | 1 — Household & identity | Sign-in, magic link, invite acceptance, lockout, members, roles, capabilities, spaces, Settings | **Done** |
 | — Self-serve sign-up | Sign-up, household provisioning, an ISO 4217 currency allowlist and list endpoint, `adminctl prune`, a per-IP rate limiter | **Done, browser walk 15/15** (2026-07-30) |
-| 2 — Money | **Accounts**: manual entry, net worth, assets/liabilities breakdown, archive and restore — **done, browser walk 15/15**. **Transactions**: ledger, categories, filters, keyset paging, month-to-date spend — **done, browser walk 15/15**. **Budget**: envelope per category with pace, empty state and templates, Edit-budget modal with category create/rename/archive, History modal and month picker — **done, browser walk 15/15** (2026-07-31, two defects found at criterion 9 and fixed mid-walk; see `docs/superpowers/plans/2026-07-30-hearth-budget-verification.md`). **Goals**: savings targets whose progress is a contributions ledger (not an account balance), the New/Edit goal modal, contributions add/delete/list by source, the Monthly contributions card, and Budget's own manual rollover into a goal — **all 16 tasks implemented and reviewed clean; its own browser walk has not run yet** (next up, see "What to do next" below). Accounts, Transactions, Budget, Goals built; Bills not started | In progress |
+| 2 — Money | **Accounts**: manual entry, net worth, assets/liabilities breakdown, archive and restore — **done, browser walk 15/15**. **Transactions**: ledger, categories, filters, keyset paging, month-to-date spend — **done, browser walk 15/15**. **Budget**: envelope per category with pace, empty state and templates, Edit-budget modal with category create/rename/archive, History modal and month picker — **done, browser walk 15/15** (2026-07-31, two defects found at criterion 9 and fixed mid-walk; see `docs/superpowers/plans/2026-07-30-hearth-budget-verification.md`). **Goals**: savings targets whose progress is a contributions ledger (not an account balance), the New/Edit goal modal, contributions add/delete/list by source, the Monthly contributions card, and Budget's own manual rollover into a goal — **done, browser walk 15/15** (2026-08-01, one defect found at criterion 12 and fixed mid-walk: archive and restore shipped with no way to *archive* — every layer existed and no screen called `useGoals.archiveGoal`, so "Show archived" and every Restore button led out of a state no household could enter, `82453ff`; see `docs/superpowers/plans/2026-08-01-hearth-goals-verification.md` and `docs/LEARNING.md` pattern 15). Accounts, Transactions, Budget, Goals built; Bills not started | In progress |
 | 3 — Marriage | Retros, Vision, Agreements | Not started |
 | 4 — Family | Calendar | Not started |
-| 5 — Overview | Read-only aggregation across 2–4 | **Interim page built** (2026-08-01) — `/` carries three of the eight cards Money can supply (net worth, this month's budget, and — added the same day by Goals — goals on track), a setup checklist and a three-entry "+ Add" (Transaction, Account, Savings goal). The M2 walk on the first two cards and the two-entry menu ran **14 of 14**, one real defect found and fixed mid-walk; the goals card and its menu entry are new since and are covered by Goals' own pending browser walk (row 2 above), not yet re-walked here. The other five cards need Bills, Marriage and Family; the page grows into the designed one rather than being replaced |
+| 5 — Overview | Read-only aggregation across 2–4 | **Interim page built** (2026-08-01) — `/` carries three of the eight cards Money can supply (net worth, this month's budget, and — added the same day by Goals — goals on track), a setup checklist and a three-entry "+ Add" (Transaction, Account, Savings goal). The M2 walk on the first two cards and the two-entry menu ran **14 of 14**, one real defect found and fixed mid-walk; the goals card and its menu entry are new since, and Goals' own walk covered both at its criterion 11 (2026-08-01): the card read "Goals on track · 1 of 2 · next: Bali family trip · Dec 2026 · 1 with no date", and "+ Add → Savings goal" opened the modal, saved, and moved the card with no reload. The other five cards need Bills, Marriage and Family; the page grows into the designed one rather than being replaced |
 
 Self-serve sign-up carries no slice number on purpose: it was specified and
 built between slices 1 and 2, ahead of Money (see "What to do next" below for
@@ -310,12 +310,13 @@ that will manage it (a deferred, separate spec) so it earns real usage first
 console to administer.
 
 **Slice 2 (Money) is under way.** Accounts, Transactions, Budget and Goals —
-its first four features — are all code-complete and reviewed. Accounts,
-Transactions and Budget are also walked in a browser; Budget's own walk ran
-on 2026-07-31 and passed 15 of 15 (§1). **Goals' own browser walk has not run
-yet** — it is next (§1, and `docs/superpowers/sdd/2026-08-01-hearth-goals/`).
-Bills is not started. Money is still the largest area and still the design's
-centre of gravity.
+its first four features — are all code-complete, reviewed **and walked in a
+browser**. Goals' own walk ran on 2026-08-01 and passed 15 of 15, finding one
+real defect at criterion 12 and fixing it mid-walk (§1;
+`docs/superpowers/plans/2026-08-01-hearth-goals-verification.md`). **Bills is
+next** — it is the last of Money's five features, it has no spec yet, and it
+inherits the clean slate described below. Money is still the largest area and
+still the design's centre of gravity.
 
 **Slice 5 (Overview) is the exception to its own rule, deliberately.** The
 original order put it last because it only aggregates, so building it early
