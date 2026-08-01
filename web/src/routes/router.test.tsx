@@ -318,6 +318,49 @@ describe("the real route tree", () => {
     // Real timers restored in this file's shared afterEach below.
   });
 
+  // Task 10's own analogue of the transactions/budget redirect tests above:
+  // moneyGoalsRoute has to sit under moneyGuardRoute too, for the same
+  // reason -- a member without money must never reach the Goals screen.
+  // Unlike the budget test's pair, there is no positive "mounts the Goals
+  // page" counterpart here: Task 10 wires the route to a placeholder (Task
+  // 11 builds GoalsPage), and today, before moneyGoalsRoute exists at all,
+  // "/money/goals" already falls through to moneySplatRoute -- a sibling
+  // gated by the exact same RequireCapability parent, which redirects
+  // identically. That is exactly why this test alone cannot prove the
+  // dedicated route exists (only that *something* under moneyGuardRoute
+  // caught it) -- the mutation check that pins this re-parents
+  // moneyGoalsRoute onto shellRoute (bypassing the guard entirely) rather
+  // than deleting it, since deleting it would leave the splat's identical
+  // guard in place and this test would stay green for the wrong reason.
+  it("redirects a member without the money capability away from /money/goals", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": {
+        status: 200,
+        body: meFixture({
+          membership: {
+            id: "membership-2",
+            householdId: "household-1",
+            userId: "user-2",
+            role: "limited",
+            capabilities: ["calendar", "chores"],
+          },
+          capabilities: ["calendar", "chores"],
+        }),
+      },
+    });
+
+    const { router } = renderApp("/money/goals");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    // The <h1>, not a bare text match: the sidebar carries its own
+    // "Overview" link, so an unscoped query for that word matches two
+    // elements and throws. What this pins is unchanged -- that the
+    // redirect landed on / and / rendered its own page.
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Overview" }),
+    ).toBeInTheDocument();
+  });
+
   // Fix round 5, Finding 1 (critical): this is the exact reproduction the
   // coordinator's reviewer used -- /invite/tok with GET /api/v1/auth/me
   // returning 401 (a genuine, signed-out invitee -- Christine from `make

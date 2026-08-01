@@ -166,9 +166,9 @@ describe("Sidebar", () => {
     );
 
     // Money now expands into a group label plus one row per built page
-    // (Finances, Transactions, Budget), so the flat "Travel, Money, Garden"
-    // this test would otherwise assert no longer matches -- the grouped
-    // shape adds a label plus three link rows for Money alone.
+    // (Finances, Transactions, Budget, Goals), so the flat "Travel, Money,
+    // Garden" this test would otherwise assert no longer matches -- the
+    // grouped shape adds a label plus four link rows for Money alone.
     // "sidebar-space" tags both links and the custom-space fallback span;
     // the group label has its own "sidebar-space-label" testid (finding 5)
     // -- asserted here as row order and label presence separately, so this
@@ -181,12 +181,16 @@ describe("Sidebar", () => {
       "Finances",
       "Transactions",
       "Budget",
+      "Goals",
       "Garden",
     ]);
     expect(screen.getByTestId("sidebar-space-label")).toHaveTextContent("Money");
   });
 
-  it("groups Money into a label with Finances, Transactions and Budget links", async () => {
+  // Task 10: the design's own order (Finances, Transactions, Budget, Goals,
+  // Bills) -- Goals joins as the fourth link, after Budget, since Bills has
+  // no page yet.
+  it("groups Money into a label with Finances, Transactions, Budget and Goals links, in that order", async () => {
     stubFetchRoutes({});
     renderWithRouter(
       <Sidebar
@@ -198,6 +202,13 @@ describe("Sidebar", () => {
     // The group label is not a link.
     expect(await screen.findByText("Money")).toBeInTheDocument();
     expect(screen.getByText("Money").closest("a")).toBeNull();
+    const links = screen.getAllByTestId("sidebar-space");
+    expect(links.map((el) => el.textContent)).toEqual([
+      "Finances",
+      "Transactions",
+      "Budget",
+      "Goals",
+    ]);
     expect(screen.getByRole("link", { name: "Finances" })).toHaveAttribute("href", "/money");
     expect(screen.getByRole("link", { name: "Transactions" })).toHaveAttribute(
       "href",
@@ -206,6 +217,10 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: "Budget" })).toHaveAttribute(
       "href",
       "/money/budget",
+    );
+    expect(screen.getByRole("link", { name: "Goals" })).toHaveAttribute(
+      "href",
+      "/money/goals",
     );
   });
 
@@ -257,12 +272,15 @@ describe("Sidebar", () => {
     const finances = await screen.findByRole("link", { name: "Finances" });
     const transactions = screen.getByRole("link", { name: "Transactions" });
     const budget = screen.getByRole("link", { name: "Budget" });
+    const goals = screen.getByRole("link", { name: "Goals" });
     expect(finances).toHaveClass("text-accent");
     expect(finances).not.toHaveClass("text-ink");
     expect(transactions).toHaveClass("text-ink");
     expect(transactions).not.toHaveClass("text-accent");
     expect(budget).toHaveClass("text-ink");
     expect(budget).not.toHaveClass("text-accent");
+    expect(goals).toHaveClass("text-ink");
+    expect(goals).not.toHaveClass("text-accent");
   });
 
   // Task 11's own regression test for the activeProps cascade defect
@@ -291,6 +309,37 @@ describe("Sidebar", () => {
     expect(finances).not.toHaveClass("text-accent");
     expect(transactions).toHaveClass("text-ink");
     expect(transactions).not.toHaveClass("text-accent");
+  });
+
+  // Task 10's own regression test for the activeProps cascade defect
+  // (LEARNING pattern 3), Goals' turn: its active state has to come from the
+  // same route-driven `useMatchRoute` computation as its siblings, not from
+  // `Link`'s `activeProps`, which merges rather than replaces className and
+  // shipped the bug this comment describes. Asserts both halves -- Goals
+  // carries the accent and not the ink class while its siblings carry the
+  // reverse -- the same shape as "accents only the active Budget link".
+  it("accents only the active Goals link, on /money/goals", async () => {
+    renderWithRouter(
+      <Sidebar
+        me={meFixture([
+          space({ id: "space-money", key: "money", name: "Money", position: 1 }),
+        ])}
+      />,
+      "/money/goals",
+    );
+
+    const finances = await screen.findByRole("link", { name: "Finances" });
+    const transactions = screen.getByRole("link", { name: "Transactions" });
+    const budget = screen.getByRole("link", { name: "Budget" });
+    const goals = screen.getByRole("link", { name: "Goals" });
+    expect(goals).toHaveClass("text-accent");
+    expect(goals).not.toHaveClass("text-ink");
+    expect(finances).toHaveClass("text-ink");
+    expect(finances).not.toHaveClass("text-accent");
+    expect(transactions).toHaveClass("text-ink");
+    expect(transactions).not.toHaveClass("text-accent");
+    expect(budget).toHaveClass("text-ink");
+    expect(budget).not.toHaveClass("text-accent");
   });
 
   // Overview used to be unconditionally text-accent (finding 3): it stayed

@@ -15,7 +15,8 @@
 //       /money       RequireCapability("money") -> Finances (Task 39; slice 2's first real page)
 //       /money/transactions RequireCapability("money") -> Transactions (Task 17; the real ledger)
 //       /money/budget RequireCapability("money") -> Budget (Task 11; BudgetPage stub -- Task 12 builds the real screen)
-//       /money/$     RequireCapability("money") -> Money    (slice 2 placeholder; Goals/Bills remain)
+//       /money/goals RequireCapability("money") -> Goals (Task 10; placeholder heading -- Task 11 builds the real screen)
+//       /money/$     RequireCapability("money") -> Money    (slice 2 placeholder; Bills remains)
 //       /settings                                   -- the real Settings screen (Task 20)
 //
 // Marriage and Family have no routes: both were placeholders reading
@@ -53,8 +54,9 @@ import { SignUpCompleteScreen } from "../features/auth/SignUpCompleteScreen";
 import { useMe } from "../features/auth/useAuth";
 import { BudgetPage } from "../features/money/BudgetPage";
 import { FinancesPage } from "../features/money/FinancesPage";
+import { GOAL_COPY } from "../features/money/goalCopy";
 import { TransactionsPage } from "../features/money/TransactionsPage";
-// Still live for /money/$ -- Goals and Bills have no page yet. Overview
+// Still live for /money/$ -- Bills has no page yet. Overview
 // stopped using it when the interim Overview shipped, but it was not that
 // component's last user.
 import { PlaceholderPage } from "../features/placeholder/PlaceholderPage";
@@ -181,8 +183,8 @@ const moneyIndexRoute = createRoute({
   getParentRoute: () => moneyGuardRoute,
   path: "/",
   // Task 39 replaces the placeholder with the real Finances screen; the
-  // splat route below keeps it -- Budget, Goals and Bills (moneySplatRoute's
-  // remaining siblings under /money/*) don't exist yet.
+  // splat route below keeps it -- Bills (moneySplatRoute's remaining
+  // sibling under /money/*) doesn't exist yet.
   component: FinancesPage,
 });
 // Task 17 gives Transactions its own route, a sibling of moneyIndexRoute
@@ -215,6 +217,26 @@ const moneyBudgetRoute = createRoute({
   path: "budget",
   component: BudgetPage,
 });
+// A sibling of moneyBudgetRoute, same reasoning: nested under
+// moneyGuardRoute (not the shell) so RequireCapability still runs. Task 10
+// wires the route only -- there is no GoalsPage yet (Task 11 builds it), so
+// the component is this file's own tiny placeholder rather than a stub file
+// like BudgetPage.tsx once was; nothing outside this route needs it by name,
+// and Task 11 replaces the whole `component` value in one change rather than
+// editing a file this route no longer needs. router.test.tsx's "redirects a
+// member without the money capability away from /money/goals" pins the
+// guard; unlike moneyBudgetRoute's pair, there is deliberately no positive
+// "mounts the Goals page" counterpart here, since there is no distinctive
+// page yet for one to assert against.
+const moneyGoalsRoute = createRoute({
+  getParentRoute: () => moneyGuardRoute,
+  path: "goals",
+  component: () => (
+    <div className="flex flex-col gap-2 p-10">
+      <h1 className="font-serif text-2xl">{GOAL_COPY.title}</h1>
+    </div>
+  ),
+});
 const moneySplatRoute = createRoute({
   getParentRoute: () => moneyGuardRoute,
   path: "$",
@@ -246,6 +268,7 @@ export const routeTree = rootRoute.addChildren([
         moneyIndexRoute,
         moneyTransactionsRoute,
         moneyBudgetRoute,
+        moneyGoalsRoute,
         moneySplatRoute,
       ]),
       settingsRoute,

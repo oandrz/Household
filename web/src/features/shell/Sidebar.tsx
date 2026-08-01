@@ -7,9 +7,9 @@
 //
 // The design's 5a sidebar groups each space into an uppercase label plus
 // several sub-page links (Finances/Transactions/Budget/... under Money, and
-// so on). That grouped form arrived with Transactions and now carries Budget
-// too: Money renders as a label plus three links. SPACE_PAGES grows a row
-// per shipped page -- Goals and Bills join it once their pages exist, not
+// so on). That grouped form arrived with Transactions and now carries
+// Budget and Goals too: Money renders as a label plus four links. SPACE_PAGES
+// grows a row per shipped page -- Bills joins it once its page exists, not
 // before, because a permanent grey "soon" row reads as broken.
 import { Link, useMatchRoute, useNavigate } from "@tanstack/react-router";
 import type { Me, Space } from "../auth/schemas";
@@ -18,7 +18,7 @@ import { useSignOut } from "../auth/useAuth";
 // One entry per built page of each space, in the design's order. A space
 // present here renders as the design's uppercase group label plus a link
 // per page (the 5a sidebar) -- including a space with only one page. No
-// entry has exactly one page today (money has three), so the bare-link
+// entry has exactly one page today (money has four), so the bare-link
 // branch that used to render that case was deleted as unreachable rather
 // than kept waiting for a space that would use it. Marriage and Family were
 // the last spaces in that state; they lost their entries in task 2.
@@ -36,6 +36,7 @@ const SPACE_PAGES: Record<string, { label: string; to: string }[]> = {
     { label: "Finances", to: "/money" },
     { label: "Transactions", to: "/money/transactions" },
     { label: "Budget", to: "/money/budget" },
+    { label: "Goals", to: "/money/goals" },
   ],
 };
 
