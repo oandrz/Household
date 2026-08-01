@@ -41,6 +41,11 @@ export const GOAL_COPY = {
 
   archivedMarker: "(archived)",
   archivedToggle: "Show archived",
+  // The counterpart to restore below, and the reason it is here at all:
+  // Task 11 shipped "Show archived" and Restore with no way to ever reach
+  // the archived state (useGoals' archiveGoal had a test and no caller).
+  // Found by the Task 18 browser walk at criterion 12 -- see docs/LEARNING.md.
+  archive: "Archive",
   // AccountsPanel.tsx's own `noneArchived` shape: shown when the toggle is
   // on and the union came back with nothing archived in it, rather than
   // silently rendering the same live list with no explanation for why

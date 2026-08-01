@@ -1182,6 +1182,55 @@ proper nouns in rendered strings before calling a feature built from a
 worked example done; a name that reads naturally in a mockup is a household
 inventing itself as a person the moment it renders for someone else's family.
 
+### 15. A capability nobody can reach is not shipped, however well it is tested
+
+Goals shipped archive and restore end to end — a migration column, a
+repository method with an idempotency contract, `GoalService.SetArchived`,
+`POST /goals/{id}/archive`, a `useGoals.archiveGoal` mutation with its own
+passing test (`useGoals.test.ts`, "archiveGoal POSTs /api/v1/goals/{id}/archive
+then reloads"), a "Show archived" toggle on the Goals page, and a Restore
+button on every archived card. `FEATURE_TRACKER.md` carried the row at ✅.
+Every layer was real. **No screen ever called `archiveGoal`**, so no
+household could reach the archived state the other half of the feature was
+built to get out of. Found by the Task 18 browser walk at criterion 12,
+which said "Archive Emergency fund" and had nothing to click.
+
+Three things let it through, and each is worth checking for separately:
+
+- **The plan never assigned the control to a task.** Task 11's brief lists
+  the archived view "each marked '(archived)' with a Restore action"; Task
+  12's field list is name, target, currency, date, starting balance,
+  planned monthly. Neither mentions Archive, so no task's tests were wrong
+  — the work item simply did not exist. This is the second plan gap on this
+  branch: `d1c7248` wired `GoalModal` into `GoalsPage` for the same reason.
+- **The hook test proved the capability, not the reach.** A test that
+  mounts `useGoals` and calls `archiveGoal` is a true statement about the
+  hook and says nothing about whether any component ever does. The cheap
+  mechanical check: for each mutation a hook returns, grep the source
+  (excluding the hook and its own tests) for a caller. `archiveGoal` was
+  the only one of seven with none — thirty seconds, run once per feature.
+- **The tracker row was ticked from the backend up.** "Archive and restore
+  a goal ✅" was written while archive had no UI, because everything behind
+  it existed. A row describes what a household can *do*, not what the stack
+  can serve.
+
+Fixed by an Archive button on every live card, mirroring `AccountRow`'s own
+either/or (Archive on live, Restore on archived, never both), no
+`window.confirm` since archiving is reversible from the archived view. Two
+new mutation-checked tests in `GoalsPage.test.tsx` pin it: the button POSTs
+`/goals/{id}/archive` and the list refetches, and an archived card offers
+Restore and *not* Archive.
+
+**The trap inside the fix is the one `docs/HANDOVER.md` §1 already records.**
+`GoalCard`'s root is `role="button"` with both `onClick` and `onKeyDown`, so
+a nested button must stop *both* — a real browser fires a separate `click`
+after the Enter keydown has already bubbled, so stopping only the click
+leaves Enter archiving the goal *and* opening the edit modal behind the
+disappearing card. `fireEvent.click` never presses a key, so no unit test
+here can see that; the re-walk pressed Enter in a real browser and checked
+no modal opened. "Add contribution" carries the same pair for the same
+reason, and its comment is where this was learned the first time.
+
 ---
 
 ## Catalogue by area

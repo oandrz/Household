@@ -61,8 +61,9 @@ export function GoalCard({
   symbol,
   onEdit,
   onAddContribution,
+  onArchive,
   onRestore,
-  restorePending,
+  pending,
 }: {
   goal: Goal;
   symbol?: string;
@@ -76,12 +77,21 @@ export function GoalCard({
   // flow the server would refuse anyway.
   onAddContribution?: (goal: Goal) => void;
   onRestore?: (id: string) => void;
-  // True while a restore call for *this* card is in flight -- scoped per
-  // card, not one page-wide flag, the same reason AccountsPanel.tsx's own
-  // pendingIds is per-row: a single mutation instance is shared by every
-  // card, so its own isPending only ever reflects the most recently
-  // dispatched call.
-  restorePending?: boolean;
+  // The counterpart to onRestore, and the only way a household can reach the
+  // archived view at all. Gated on !archived below, exactly as onRestore is
+  // gated on archived, so a card never offers both at once -- AccountRow's
+  // own either/or in AccountsPanel.tsx. No window.confirm, for that row's
+  // stated reason: archiving is reversible from the archived view, and a
+  // native browser modal blocks the tooling every browser walk here uses.
+  onArchive?: (id: string) => void;
+  // True while an archive OR restore call for *this* card is in flight --
+  // scoped per card, not one page-wide flag, the same reason
+  // AccountsPanel.tsx's own pendingIds is per-row: a single mutation
+  // instance is shared by every card, so its own isPending only ever
+  // reflects the most recently dispatched call. Named `pending` rather than
+  // `restorePending` now that it covers both directions, matching
+  // AccountRow's own prop of the same name.
+  pending?: boolean;
 }) {
   const archived = goal.archivedAt !== null;
   const clickable = !archived && Boolean(onEdit);
@@ -149,38 +159,69 @@ export function GoalCard({
           <button
             type="button"
             aria-label={`Restore ${goal.name}`}
-            disabled={restorePending}
+            disabled={pending}
             onClick={() => onRestore(goal.id)}
             className="mt-2.5 text-[11px] font-semibold text-accent disabled:cursor-not-allowed disabled:opacity-60"
           >
             {GOAL_COPY.restore}
           </button>
         )}
-        {!archived && onAddContribution && (
-          <button
-            type="button"
-            // No aria-label suffixing the goal name (unlike Restore above,
-            // which disambiguates for tests that query it unscoped across
-            // several archived cards at once) -- every caller of this
-            // control in practice reaches it via `within(card)`, and the
-            // visible text alone is already this button's accessible name.
-            // Both handlers below stop the event rather than letting it
-            // bubble to the card's own onClick/onKeyDown above -- click and
-            // keydown are two independent events (a real browser's
-            // Enter-activates-a-button default action fires a *separate*
-            // click after the keydown already bubbled), so stopping only one
-            // leaves the other free to reach the card and open the edit
-            // modal behind this button instead of the contributions panel it
-            // actually asked for.
-            onClick={(event) => {
-              event.stopPropagation();
-              onAddContribution(goal);
-            }}
-            onKeyDown={(event) => event.stopPropagation()}
-            className="mt-2.5 text-[11px] font-semibold text-accent"
-          >
-            {GOAL_COPY.addContribution}
-          </button>
+        {!archived && (onAddContribution || onArchive) && (
+          <div className="mt-2.5 flex items-center gap-3.5 text-[11px] font-semibold">
+            {onAddContribution && (
+              <button
+                type="button"
+                // No aria-label suffixing the goal name (unlike Restore
+                // above, which disambiguates for tests that query it
+                // unscoped across several archived cards at once) -- every
+                // caller of this control in practice reaches it via
+                // `within(card)`, and the visible text alone is already this
+                // button's accessible name. Both handlers below stop the
+                // event rather than letting it bubble to the card's own
+                // onClick/onKeyDown above -- click and keydown are two
+                // independent events (a real browser's
+                // Enter-activates-a-button default action fires a *separate*
+                // click after the keydown already bubbled), so stopping only
+                // one leaves the other free to reach the card and open the
+                // edit modal behind this button instead of the contributions
+                // panel it actually asked for.
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onAddContribution(goal);
+                }}
+                onKeyDown={(event) => event.stopPropagation()}
+                className="text-accent"
+              >
+                {GOAL_COPY.addContribution}
+              </button>
+            )}
+            {onArchive && (
+              <button
+                type="button"
+                // Named, unlike Add contribution beside it: "Archive" alone
+                // is ambiguous the moment two cards are on screen, which is
+                // the same reason Restore above and AccountRow's own Archive
+                // both carry the row's name.
+                aria-label={`Archive ${goal.name}`}
+                disabled={pending}
+                // Stops BOTH events for the identical reason Add
+                // contribution's own comment gives -- without the keydown
+                // handler, pressing Enter on this button archives the goal
+                // AND opens the edit modal for it behind the disappearing
+                // card. fireEvent.click in a test never presses a key, so
+                // only a real browser catches that (docs/HANDOVER.md §1's
+                // TransactionFilters defect, in a second form).
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onArchive(goal.id);
+                }}
+                onKeyDown={(event) => event.stopPropagation()}
+                className="text-danger disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {GOAL_COPY.archive}
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>

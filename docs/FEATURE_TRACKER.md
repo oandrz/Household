@@ -488,6 +488,17 @@ a goal behind a "Show archived" view with restore, the Accounts pattern; a
 goal is never deleted, because contributions reference it and a rolled-over
 budget month may name it.
 
+**"Archive and restore a goal" was ticked ✅ before it was true, and this row
+is the correction.** Every layer under archiving existed — column, repository,
+service, `POST /goals/{id}/archive`, a `useGoals.archiveGoal` mutation with a
+passing test — and **no screen ever called it**, so "Show archived" and every
+card's Restore button led out of a state no household could enter. The Task 18
+browser walk found the dead end at criterion 12 and fixed it with an Archive
+button on every live card (`GoalCard.tsx`), mirroring `AccountRow`'s own
+either/or. The row is ✅ now because a household can actually do it; the lesson
+that a row describes what a household can do rather than what the stack can
+serve is `docs/LEARNING.md` pattern 15.
+
 **"Savings goals with progress and funding source" is 🟡 for one named
 reason: the design's "Fund from" account select does not ship.** Under the
 decision that a contribution moves no real money, an account link would

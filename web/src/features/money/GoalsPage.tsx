@@ -37,21 +37,37 @@ export function GoalsPage() {
   // them as two independent pieces of state means a future change to one
   // never has to reason about the other's cases.
   const [contributingGoal, setContributingGoal] = useState<Goal | null>(null);
-  // Restore is scoped per card, not one page-wide flag -- AccountsPanel.tsx's
-  // own pendingIds reasoning: useGoals exposes one restoreGoal function
-  // shared by every card, so tracking "is a call for this id in flight" has
-  // to live here, not inside a single shared mutation's own isPending.
-  const [restoringIds, setRestoringIds] = useState<Set<string>>(new Set());
+  // Archive and restore are scoped per card, not one page-wide flag --
+  // AccountsPanel.tsx's own pendingIds reasoning: useGoals exposes one
+  // archiveGoal/restoreGoal function shared by every card, so tracking "is a
+  // call for this id in flight" has to live here, not inside a single shared
+  // mutation's own isPending. One set covers both directions: a given card
+  // offers exactly one of the two at a time (GoalCard gates them on
+  // `archived`), so there is never a card with an archive and a restore in
+  // flight at once for the set to have to tell apart.
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
 
-  function handleRestore(id: string) {
-    setRestoringIds((prev) => new Set(prev).add(id));
-    void goals.restoreGoal(id).finally(() => {
-      setRestoringIds((prev) => {
+  function trackPending(id: string, call: Promise<void>) {
+    setPendingIds((prev) => new Set(prev).add(id));
+    void call.finally(() => {
+      setPendingIds((prev) => {
         const next = new Set(prev);
         next.delete(id);
         return next;
       });
     });
+  }
+
+  function handleRestore(id: string) {
+    trackPending(id, goals.restoreGoal(id));
+  }
+
+  // The only way a household reaches the archived view at all. Task 11
+  // shipped "Show archived" and Restore without it, and useGoals.archiveGoal
+  // sat unwired behind its own passing test until the Task 18 walk found the
+  // dead end at criterion 12 (docs/LEARNING.md).
+  function handleArchive(id: string) {
+    trackPending(id, goals.archiveGoal(id));
   }
 
   const symbolFor = (currency: string) =>
@@ -185,8 +201,9 @@ export function GoalsPage() {
               symbol={symbolFor(goal.currency)}
               onEdit={setModalGoal}
               onAddContribution={setContributingGoal}
+              onArchive={handleArchive}
               onRestore={handleRestore}
-              restorePending={restoringIds.has(goal.id)}
+              pending={pendingIds.has(goal.id)}
             />
           ))}
         </div>

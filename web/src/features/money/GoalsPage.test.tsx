@@ -242,6 +242,71 @@ describe("GoalsPage", () => {
     expect(screen.getByRole("button", { name: "Restore Old family car" })).toBeInTheDocument();
   });
 
+  // The dead end the Task 18 browser walk found at criterion 12: this page
+  // shipped "Show archived" and a Restore button on every archived card,
+  // useGoals.archiveGoal shipped with its own passing test -- and nothing on
+  // any screen ever called it, so a household could never reach the archived
+  // state these two tests above describe. Scoped with `within(card)` on
+  // purpose: an unscoped getByRole would still pass if the button rendered
+  // on the wrong card, or on the archived one that must offer Restore
+  // instead.
+  it("a live card offers Archive, which POSTs /goals/{id}/archive and refetches", async () => {
+    const live = goalFixture({ id: "g1", name: "Bali family trip" });
+    const archived = { ...live, archivedAt: "2026-08-01T00:00:00Z", status: "none" as const };
+    let archiveCalled = false;
+
+    renderPage(goalsFixture([live], { onTrackCount: 1, datedCount: 1 }), {
+      // Two responses in order: the page's own initial GET, then the refetch
+      // archiveGoal's onSuccess invalidation triggers. The second is what
+      // proves the invalidation reaches this page's mounted query.
+      "GET /api/v1/goals": [
+        { status: 200, body: goalsFixture([live], { onTrackCount: 1, datedCount: 1 }) },
+        { status: 200, body: goalsFixture([]) },
+      ],
+      "POST /api/v1/goals/g1/archive": {
+        status: 200,
+        body: { goal: archived },
+        capture: () => {
+          archiveCalled = true;
+        },
+      },
+    });
+
+    const card = await screen.findByTestId("goal-card");
+    fireEvent.click(within(card).getByRole("button", { name: "Archive Bali family trip" }));
+
+    await waitFor(() => expect(archiveCalled).toBe(true));
+    // The goal left the default list, and the page says so itself rather
+    // than leaving a stale card behind.
+    expect(await screen.findByTestId("goals-empty-state")).toBeInTheDocument();
+  });
+
+  // An archived card offers Restore and NOT Archive -- the either/or
+  // AccountRow keeps, so a card never states two contradictory affordances.
+  it("an archived card offers Restore and no Archive", async () => {
+    const archived = goalFixture({
+      id: "g1",
+      name: "Old family car",
+      archivedAt: "2026-06-01T00:00:00Z",
+      status: "none",
+      targetMonth: null,
+      requiredMonthlyOk: false,
+      requiredMonthlyMinor: 0,
+    });
+    renderPage(goalsFixture([]), {
+      "GET /api/v1/goals?include_archived=true": { status: 200, body: goalsFixture([archived]) },
+    });
+
+    await screen.findByTestId("goals-empty-state");
+    fireEvent.click(screen.getByRole("switch", { name: "Show archived" }));
+
+    const card = await screen.findByTestId("goal-card");
+    expect(within(card).getByRole("button", { name: "Restore Old family car" })).toBeInTheDocument();
+    expect(
+      within(card).queryByRole("button", { name: "Archive Old family car" }),
+    ).not.toBeInTheDocument();
+  });
+
   // AccountsPanel.tsx's own `noneArchived` note, restated: switching the
   // toggle on with nothing archived behind it should say so, not silently
   // re-render the identical live list with no explanation for why nothing
