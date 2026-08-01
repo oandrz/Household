@@ -48,6 +48,8 @@ function budgetFixture(overrides: Partial<BudgetMonthResponse> = {}): BudgetMont
     byPerson: [],
     excludedNoRate: 0,
     overCount: 0,
+    rolledOverAt: null,
+    rolloverGoalId: null,
     ...overrides,
   };
 }

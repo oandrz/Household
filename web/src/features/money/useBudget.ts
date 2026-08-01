@@ -18,6 +18,7 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../../api/client";
 import { categoriesQueryKey } from "./useTransactions";
+import { goalsQueryKey } from "./useGoals";
 import {
   budgetMonthResponseSchema,
   categoryResponseSchema,
@@ -173,6 +174,46 @@ export function useBudget(month: string, options: { enabled?: boolean } = {}) {
     onSuccess: () => invalidateAfterCategoryWrite(queryClient, month),
   });
 
+  // Task 15: moves a closed month's unspent budget into a goal, as one
+  // contribution -- the manual half of the design's "Roll unspent into
+  // savings" toggle (BudgetService.RollOver's own doc comment: nothing here
+  // runs on a clock). The response carries the written contribution, but
+  // this discards it and refetches instead, the same
+  // rename/archive/restoreCategory convention above: the month's own
+  // rolledOverAt/rolloverGoalId stamp and the target goal's own
+  // contributedMinor/percent/status both live in GETs this hook and
+  // useGoals.ts already own, not in this response.
+  const rollOverMutation = useMutation({
+    mutationFn: async (goalId: string) => {
+      await apiFetch<unknown>(`/api/v1/budgets/${encodeURIComponent(month)}/rollover`, {
+        method: "POST",
+        body: JSON.stringify({ goalId }),
+      });
+    },
+    // A successful move changes two screens at once: this month's own stamp
+    // (so BudgetRolloverCard.tsx swaps from the offer to the destination
+    // sentence) and the target goal's own figures on the Goals screen --
+    // both goalsQueryKey variants, the same useGoals.ts invalidateGoals
+    // shape, so the write is visible whether or not "Show archived" happens
+    // to be on there.
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: budgetQueryKey(month) }),
+        queryClient.invalidateQueries({ queryKey: goalsQueryKey(false) }),
+        queryClient.invalidateQueries({ queryKey: goalsQueryKey(true) }),
+      ]),
+    // A refusal can still mean the server's own truth moved out from under
+    // this tab: ROLLOVER_ALREADY_DONE (409) is exactly "another tab already
+    // rolled this month over," which this tab's own cached month (still
+    // showing no stamp, still offering the button) does not yet know.
+    // Invalidating here is what lets BudgetRolloverCard.tsx swap to the real
+    // destination sentence once this resolves, instead of leaving a stale,
+    // still-clickable button sitting on top of a month that is already done
+    // -- the caller's own catch block is what shows the refusal's message
+    // inline in the meantime.
+    onError: () => queryClient.invalidateQueries({ queryKey: budgetQueryKey(month) }),
+  });
+
   return {
     data: query.data,
     // v5's `isLoading` is `isPending && isFetching` -- true only while the
@@ -216,6 +257,9 @@ export function useBudget(month: string, options: { enabled?: boolean } = {}) {
     },
     restoreCategory: async (id: string) => {
       await restoreCategoryMutation.mutateAsync(id);
+    },
+    rollOver: async (goalId: string) => {
+      await rollOverMutation.mutateAsync(goalId);
     },
   };
 }

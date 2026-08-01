@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubFetchRoutes } from "../../test/fetchStub";
 import { budgetHistoryResponseSchema, categoryResponseSchema } from "./budgetSchemas";
 import { useBudget } from "./useBudget";
+import { useGoals } from "./useGoals";
 
 const julyResponse = {
   currency: "SGD",
@@ -31,6 +32,8 @@ const julyResponse = {
   byPerson: [{ membershipId: "member-1", name: "Andreas", spentMinor: 15000 }],
   excludedNoRate: 0,
   overCount: 0,
+  rolledOverAt: null,
+  rolloverGoalId: null,
 };
 
 // A second, distinguishable body -- proving `reload`/`save` actually re-GET
@@ -318,6 +321,103 @@ describe("useBudget", () => {
 
     expect(result.current.error).not.toBeNull();
     expect(result.current.data).toBeUndefined();
+  });
+
+  // Task 15: rollOver POSTs {goalId} to the month's own rollover route, then
+  // re-GETs both this month (so BudgetRolloverCard.tsx can see the stamp)
+  // and /goals (so the target goal's own contributedMinor/percent/status
+  // move on the Goals screen) -- proven the same way "save PUTs the exact
+  // body then re-GETs the month" is: a second, distinguishable body for
+  // each re-GET. useGoals() is mounted alongside useBudget() in the same
+  // QueryClient here specifically so there is an active observer for
+  // /goals to refetch through -- react-query's default
+  // `refetchType: "active"` only refetches a query invalidateQueries finds
+  // someone is actually watching, and nothing else in this test file would
+  // be.
+  it("rollOver POSTs {goalId} then re-GETs both the month and /goals", async () => {
+    let postBody: unknown;
+    const julyResponseRolledOver = {
+      ...julyResponse,
+      rolledOverAt: "2026-07-31T00:00:00Z",
+      rolloverGoalId: "goal-1",
+    };
+    const emptySummary = {
+      plannedMonthlyTotalMinor: 0,
+      actualThisMonthMinor: 0,
+      onTrackCount: 0,
+      datedCount: 0,
+      noDateCount: 0,
+      excludedNoRate: 0,
+      nextGoal: null,
+    };
+    const goalsBefore = { currency: "SGD", goals: [], summary: emptySummary };
+    const goalsAfter = {
+      currency: "SGD",
+      goals: [
+        {
+          id: "goal-1",
+          name: "Bali trip",
+          targetMinor: 400000,
+          currency: "SGD",
+          targetMonth: null,
+          plannedMonthlyMinor: 0,
+          contributedMinor: 5000,
+          percent: 1,
+          status: "on_track",
+          requiredMonthlyMinor: 0,
+          requiredMonthlyOk: false,
+          archivedAt: null,
+        },
+      ],
+      summary: emptySummary,
+    };
+    stubFetchRoutes({
+      "GET /api/v1/budgets/2026-07": [
+        { status: 200, body: julyResponse },
+        { status: 200, body: julyResponseRolledOver },
+      ],
+      "GET /api/v1/goals": [
+        { status: 200, body: goalsBefore },
+        { status: 200, body: goalsAfter },
+      ],
+      "POST /api/v1/budgets/2026-07/rollover": {
+        status: 200,
+        body: {
+          contribution: {
+            id: "contribution-1",
+            amountMinor: 5000,
+            occurredOn: "2026-07-31",
+            note: "",
+            source: "budget_rollover",
+            sourceBudgetMonth: "2026-07",
+          },
+        },
+        capture: (body) => {
+          postBody = body;
+        },
+      },
+    });
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(
+      () => ({ budget: useBudget("2026-07"), goals: useGoals() }),
+      { wrapper: ({ children }) => createElement(QueryClientProvider, { client: queryClient }, children) },
+    );
+    await waitFor(() => expect(result.current.budget.loading).toBe(false));
+    await waitFor(() => expect(result.current.goals.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.budget.rollOver("goal-1");
+    });
+
+    expect(postBody).toEqual({ goalId: "goal-1" });
+    // The month re-GET's second, stamped response -- proves rollOver
+    // actually invalidated and refetched this month rather than the hook
+    // still showing whatever GET returned on mount.
+    await waitFor(() => expect(result.current.budget.data?.rolloverGoalId).toBe("goal-1"));
+    // /goals re-GET's second, populated response -- proves the same write
+    // reaches the Goals screen's own query, not just this month's.
+    await waitFor(() => expect(result.current.goals.data?.goals).toHaveLength(1));
   });
 });
 

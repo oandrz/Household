@@ -8,7 +8,7 @@
 // 2026 -- the same pattern AccountModal.test.tsx's own today() tests use --
 // so the page always requests "GET /api/v1/budgets/2026-07" and this file
 // never has to guess which month the test runner's real clock would land on.
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
@@ -82,9 +82,35 @@ function budgetFixture(overrides: Partial<BudgetMonthResponse> = {}): BudgetMont
     ],
     excludedNoRate: 0,
     overCount: 1,
+    rolledOverAt: null,
+    rolloverGoalId: null,
     ...overrides,
   };
 }
+
+// BudgetRolloverCard.tsx mounts (and fetches /goals) whenever the viewed
+// month is closed with a positive remainingMinor or a stamp -- which every
+// daysLeft: 0 fixture in this file now is, since budgetFixture()'s own
+// default remainingMinor stays positive unless a test overrides it. Empty
+// by default so tests that don't care about the card's own content never
+// have to think about it; Task 15's own rollover describe block overrides
+// this via extraRoutes with a real goal to pick.
+const GOALS_EMPTY = {
+  status: 200,
+  body: {
+    currency: "SGD",
+    goals: [],
+    summary: {
+      plannedMonthlyTotalMinor: 0,
+      actualThisMonthMinor: 0,
+      onTrackCount: 0,
+      datedCount: 0,
+      noDateCount: 0,
+      excludedNoRate: 0,
+      nextGoal: null,
+    },
+  },
+};
 
 function renderPage(
   response: BudgetMonthResponse,
@@ -99,6 +125,7 @@ function renderPage(
     "GET /api/v1/categories": CATEGORIES,
     "GET /api/v1/categories?includeArchived=true": NO_ARCHIVED_CATEGORIES,
     "GET /api/v1/budgets/2026-07": { status: 200, body: response },
+    "GET /api/v1/goals": GOALS_EMPTY,
     ...extraRoutes,
   });
   return { fetchMock, ...renderWithRouter(<BudgetPage />) };
@@ -233,6 +260,19 @@ describe("BudgetPage", () => {
     renderPage(budgetFixture());
 
     await screen.findByTestId("budget-insight");
+    expect(document.body.textContent).not.toMatch(/rolls into/i);
+  });
+
+  // Extension of the guard above (Task 15): BudgetRolloverCard.tsx now puts
+  // real "unspent"/"Move it into a goal" copy in this exact insight area on
+  // a closed month. Re-running the guard there, with the real card's own
+  // copy actually on screen, is what proves it catches "rolls into"
+  // specifically -- not merely a screen that happens to say nothing about
+  // rollover at all.
+  it("still never renders the design's automatic rollover sentence once the manual card's own copy is on screen", async () => {
+    renderPage(budgetFixture({ daysLeft: 0, dailyPaceOk: false }));
+
+    expect(await screen.findByText(/unspent in July/)).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/rolls into/i);
   });
 
@@ -486,5 +526,159 @@ describe("BudgetPage history modal and month picker", () => {
 
     await screen.findByText("Budget history");
     expect(screen.queryByText(/export csv/i)).not.toBeInTheDocument();
+  });
+});
+
+// Task 15: BudgetRolloverCard.tsx, wired into the real page. Most of the
+// card's own behaviour (the picker's currency/archived exclusions, the
+// disabled-button reasons, the inline error on a refusal) is pinned in
+// isolation in BudgetRolloverCard.test.tsx -- this describe block proves
+// only what an isolated render of that component cannot: the two states
+// "worth stating twice" (absent on the current month, replaced by the
+// destination sentence once stamped), and the full wiring end to end,
+// where a REAL, active useBudget(month) exists to actually refetch and
+// swap the card's own props once the write lands -- something an isolated
+// render with a disabled `useBudget(month, { enabled: false })` observer
+// cannot demonstrate (BudgetRolloverCard.test.tsx's own header comment).
+describe("BudgetPage rollover card", () => {
+  const BALI_GOAL = {
+    id: "goal-1",
+    name: "Bali trip",
+    targetMinor: 400000,
+    currency: "SGD",
+    targetMonth: "2026-12",
+    plannedMonthlyMinor: 35000,
+    contributedMinor: 260000,
+    percent: 65,
+    status: "on_track",
+    requiredMonthlyMinor: 28000,
+    requiredMonthlyOk: true,
+    archivedAt: null,
+  };
+  const GOALS_WITH_BALI = {
+    status: 200,
+    body: { currency: "SGD", goals: [BALI_GOAL], summary: GOALS_EMPTY.body.summary },
+  };
+
+  it("shows neither the offer nor a destination sentence on the current (open) month", async () => {
+    renderPage(budgetFixture());
+
+    await screen.findByTestId("budget-stat-budgeted");
+    expect(screen.queryByTestId("budget-rollover-offer")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("budget-rollover-done")).not.toBeInTheDocument();
+  });
+
+  it("shows the offer on a closed month with unspent budget and no stamp", async () => {
+    renderPage(budgetFixture({ daysLeft: 0, dailyPaceOk: false }));
+
+    const offer = await screen.findByTestId("budget-rollover-offer");
+    expect(offer).toHaveTextContent("S$1,780.00 unspent in July");
+    expect(screen.getByTestId("budget-rollover-cta")).toHaveTextContent("Move it into a goal");
+  });
+
+  it("shows the destination sentence, not the offer, once the month already carries a rollover stamp", async () => {
+    renderPage(
+      budgetFixture({
+        daysLeft: 0,
+        dailyPaceOk: false,
+        rolledOverAt: "2026-07-31T00:00:00Z",
+        rolloverGoalId: "goal-1",
+      }),
+      { "GET /api/v1/goals": GOALS_WITH_BALI },
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("budget-rollover-done")).toHaveTextContent("S$1,780.00 moved into Bali trip."),
+    );
+    expect(screen.queryByTestId("budget-rollover-offer")).not.toBeInTheDocument();
+  });
+
+  it("POSTs {goalId} on a successful move, then refetches both the month and the goals list", async () => {
+    let postBody: unknown;
+    const openFixture = budgetFixture({ daysLeft: 0, dailyPaceOk: false });
+    const stampedFixture = budgetFixture({
+      daysLeft: 0,
+      dailyPaceOk: false,
+      rolledOverAt: "2026-07-31T00:00:00Z",
+      rolloverGoalId: "goal-1",
+    });
+    renderPage(openFixture, {
+      "GET /api/v1/budgets/2026-07": [
+        { status: 200, body: openFixture },
+        { status: 200, body: stampedFixture },
+      ],
+      "GET /api/v1/goals": GOALS_WITH_BALI,
+      "POST /api/v1/budgets/2026-07/rollover": {
+        status: 200,
+        body: {
+          contribution: {
+            id: "contribution-1",
+            amountMinor: 178000,
+            occurredOn: "2026-07-31",
+            note: "",
+            source: "budget_rollover",
+            sourceBudgetMonth: "2026-07",
+          },
+        },
+        capture: (body) => {
+          postBody = body;
+        },
+      },
+    });
+
+    const cta = await screen.findByTestId("budget-rollover-cta");
+    await waitFor(() => expect(cta).not.toBeDisabled());
+    cta.click();
+    const select = await screen.findByTestId("budget-rollover-select");
+    fireEvent.change(select, { target: { value: "goal-1" } });
+    screen.getByTestId("budget-rollover-confirm").click();
+
+    await waitFor(() => expect(postBody).toEqual({ goalId: "goal-1" }));
+    // The month re-GET's second, stamped response -- proves the move
+    // actually invalidated and refetched the real, active useBudget(month)
+    // this page owns, and the destination sentence replaces the offer as a
+    // consequence of that refetch, not because this test told it to.
+    await waitFor(() =>
+      expect(screen.getByTestId("budget-rollover-done")).toHaveTextContent("moved into Bali trip"),
+    );
+  });
+
+  it("shows a 409 ROLLOVER_ALREADY_DONE inline and refetches rather than leaving a stale button", async () => {
+    const openFixture = budgetFixture({ daysLeft: 0, dailyPaceOk: false });
+    const stampedFixture = budgetFixture({
+      daysLeft: 0,
+      dailyPaceOk: false,
+      rolledOverAt: "2026-07-31T00:00:00Z",
+      rolloverGoalId: "goal-1",
+    });
+    renderPage(openFixture, {
+      "GET /api/v1/budgets/2026-07": [
+        { status: 200, body: openFixture },
+        { status: 200, body: stampedFixture },
+      ],
+      "GET /api/v1/goals": GOALS_WITH_BALI,
+      "POST /api/v1/budgets/2026-07/rollover": {
+        status: 409,
+        body: { error: { code: "ROLLOVER_ALREADY_DONE", message: "That month has already been rolled over." } },
+      },
+    });
+
+    const cta = await screen.findByTestId("budget-rollover-cta");
+    await waitFor(() => expect(cta).not.toBeDisabled());
+    cta.click();
+    const select = await screen.findByTestId("budget-rollover-select");
+    fireEvent.change(select, { target: { value: "goal-1" } });
+    screen.getByTestId("budget-rollover-confirm").click();
+
+    expect(await screen.findByTestId("budget-rollover-error")).toHaveTextContent(
+      "That month has already been rolled over.",
+    );
+    // ...and the month refetched -- the second, stamped response -- so the
+    // destination sentence replaces the (now-gone) offer button rather than
+    // a stale, still-clickable one sitting on top of a month another tab
+    // already rolled over.
+    await waitFor(() =>
+      expect(screen.getByTestId("budget-rollover-done")).toHaveTextContent("moved into Bali trip"),
+    );
   });
 });

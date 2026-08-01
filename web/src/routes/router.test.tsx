@@ -307,6 +307,8 @@ describe("the real route tree", () => {
           byPerson: [],
           excludedNoRate: 0,
           overCount: 0,
+          rolledOverAt: null,
+          rolloverGoalId: null,
         },
       },
     });

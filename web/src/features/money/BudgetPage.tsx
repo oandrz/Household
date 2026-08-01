@@ -29,6 +29,7 @@ import { BudgetModal } from "./BudgetModal";
 import { BUDGET_COPY } from "./budgetCopy";
 import { BudgetByPerson } from "./BudgetByPerson";
 import { BudgetCategoryGrid } from "./BudgetCategoryGrid";
+import { BudgetRolloverCard } from "./BudgetRolloverCard";
 import { BudgetStatCards } from "./BudgetStatCards";
 import { familyOfFourTemplate, fiftyThirtyTwentyTemplate, type TemplatePrefill } from "./budgetTemplates";
 import { formatMoney } from "./formatMoney";
@@ -148,6 +149,18 @@ export function BudgetPage() {
   const spentSoFar = data.daysLeft > 0;
   const overSentence = overCategorySentence(data.overCount, data.categories);
   const categoryList = categories.data ?? [];
+  // The server's own answer to "is this month closed" (spec's formulas
+  // table: daysLeft is 0 for a past month, never for the current or a
+  // future one) -- passed straight through to BudgetRolloverCard.tsx as
+  // `closed` rather than letting that component recompute the same fact a
+  // second way (that file's own header comment explains why: an earlier
+  // version did, and it silently disagreed with this exact figure).
+  const monthClosed = data.daysLeft === 0;
+  // Whether BudgetRolloverCard.tsx could show anything at all -- purely to
+  // decide the surrounding `budget-insight` box's own visibility (a closed
+  // month with dailyPaceOk false and no over-category otherwise has nothing
+  // to put in that box).
+  const rolloverMayShow = monthClosed && (data.remainingMinor > 0 || data.rolloverGoalId !== null);
 
   function openBlank() {
     setModal({ prefill: null, awaitingIncome: false });
@@ -374,7 +387,7 @@ export function BudgetPage() {
                 <BudgetByPerson people={data.byPerson} currency={data.currency} symbol={symbol} />
               </div>
 
-              {(data.dailyPaceOk || overSentence) && (
+              {(data.dailyPaceOk || overSentence || rolloverMayShow) && (
                 <div data-testid="budget-insight" className="rounded-xl bg-callout px-5 py-[18px]">
                   {data.dailyPaceOk && (
                     <p className="text-[13px] font-semibold text-accent">
@@ -383,6 +396,25 @@ export function BudgetPage() {
                   )}
                   {overSentence && (
                     <p className="mt-1.5 text-[12px] leading-relaxed text-accent-dark">{overSentence}</p>
+                  )}
+                  {rolloverMayShow && (
+                    <div className="mt-1.5">
+                      <BudgetRolloverCard
+                        month={data.month}
+                        closed={monthClosed}
+                        remainingMinor={data.remainingMinor}
+                        currency={data.currency}
+                        rolledOverTo={data.rolloverGoalId}
+                        symbol={symbol}
+                        // No-op: useBudget.ts's own rollOver mutation
+                        // already invalidates this month and /goals on
+                        // success (its own comment) -- `data` above already
+                        // flows from the same query that refetch updates,
+                        // so this page has nothing further to do once it
+                        // fires.
+                        onRolledOver={() => {}}
+                      />
+                    </div>
                   )}
                 </div>
               )}

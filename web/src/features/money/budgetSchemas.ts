@@ -96,6 +96,13 @@ export const budgetMonthResponseSchema = z.object({
   byPerson: z.array(budgetPersonSchema),
   excludedNoRate: z.number(),
   overCount: z.number(),
+  // Task 9's rollover stamp: nullable, not optional -- both are Go pointer
+  // fields with no `omitempty` (budget_handlers.go's own comment), so they
+  // always serialise, `null` until POST .../rollover succeeds for this
+  // month and both populated together afterward, never one without the
+  // other (the database's own rollover_stamp_is_whole CHECK constraint).
+  rolledOverAt: z.string().nullable(),
+  rolloverGoalId: z.string().nullable(),
 });
 export type BudgetMonthResponse = z.infer<typeof budgetMonthResponseSchema>;
 

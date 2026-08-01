@@ -139,4 +139,37 @@ export const BUDGET_COPY = {
   // explanatory tone rather than a bare "Nothing here."
   historyEmpty: "No budget history yet. Once a month closes, it shows up here.",
   noValue: "—",
+
+  // Task 15's own copy: BudgetRolloverCard.tsx, the manual half of "Roll
+  // unspent into savings" (see onPaceToSave's own comment above on why the
+  // design's automatic version does not ship). Every string here is worded
+  // as a one-time, clicked action -- "unspent," "Move," "moved" -- never
+  // the design's own present-tense "rolls into," so BudgetPage.test.tsx's
+  // own guard has nothing to falsely trip on once this real copy is on
+  // screen.
+  rolloverOffer: (amount: string, monthName: string) => `${amount} unspent in ${monthName}`,
+  moveIntoGoal: "Move it into a goal",
+  chooseAGoal: "Choose a goal…",
+  // Spec decision 11: budgets carry no currency column of their own and are
+  // implicitly the household's primary currency, while a goal carries an
+  // explicit one -- converting inside a rollover would store a rate nobody
+  // can audit, so only a primary-currency goal can receive one. A goal in
+  // another currency is still listed in the picker, disabled, with this
+  // reason right on its own option -- never silently filtered away.
+  rolloverIneligibleOption: (goalName: string, goalCurrency: string, primaryCurrency: string) =>
+    `${goalName} (${goalCurrency} — only ${primaryCurrency} goals can receive a rollover)`,
+  rolloverNoGoalsYet: "You don't have any savings goals yet.",
+  rolloverNoPrimaryCurrencyGoal: (currency: string) =>
+    `None of your goals are in ${currency}, the only currency a rollover can move money into.`,
+  rolloverLoadError: "Couldn't load your goals.",
+  // The destination sentence, once the month carries the stamp for good.
+  // Past tense, naming one action already taken -- never "rolls into,"
+  // which reads as automatic and recurring.
+  rolledOverDone: (amount: string, goalName: string) => `${amount} moved into ${goalName}.`,
+  // The same sentence without a name, for the edge case where the goal a
+  // past rollover named can no longer be found in the live goals list this
+  // render fetched (GET /goals, no include_archived -- BudgetRolloverCard.tsx's
+  // own header comment on why that is the cheaper, still-honest answer
+  // rather than a second archived-inclusive fetch just to resolve a name).
+  rolledOverDoneUnknown: (amount: string) => `${amount} moved into a goal.`,
 } as const;
