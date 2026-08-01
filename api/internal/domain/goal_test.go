@@ -69,7 +69,7 @@ func TestGoalProgressPercent(t *testing.T) {
 		{"rounds to nearest", 129000, 400000, 32}, // 32.25 -> 32
 		{"half rounds up", 130000, 400000, 33},    // 32.5 -> 33
 		{"over target caps at 100 for the ring", 500000, 400000, 100},
-		{"net negative floors at 0, never a reversed ring", -5000, 400000, 0},
+		{"net negative floors at 0, never a reversed ring", -500000, 400000, 0},
 		{"zero target cannot happen but must not divide", 1000, 0, 0},
 	}
 	for _, tc := range cases {
