@@ -96,6 +96,27 @@ export const GOAL_COPY = {
   // reading rather than a crash or a literal "From null's unspent budget."
   rolloverUnknownMonth: "From an earlier month's unspent budget",
 
+  // Task 14's own copy: the Monthly contributions card below the grid. Two
+  // figures render side by side rather than folded into one (spec decision
+  // 7), so the labels are deliberately parallel and neither says "total"
+  // alone -- plannedMonthlyHeading scopes the bar+legend above it,
+  // plannedMonthlyTotalLabel and actualThisMonthLabel scope the two footer
+  // figures, and nothing here could be read as the other.
+  contributionsCardTitle: "Monthly contributions",
+  plannedMonthlyHeading: "Planned monthly",
+  plannedMonthlyTotalLabel: "Planned monthly total",
+  actualThisMonthLabel: "Actual this month",
+  // actualNone fires only when something was planned to compare against --
+  // a household with nothing planned and nothing logged has no divergence
+  // to report either way (MonthlyContributionsCard.tsx's own guard). Worded
+  // as an observation ("nothing yet") rather than reusing actualShort's
+  // verdict phrasing, even though "nothing logged" is arithmetically just
+  // the largest possible shortfall -- the task brief's own instruction that
+  // a zero actual "says so in words rather than hiding the figure".
+  actualNone: "Nothing logged yet this month.",
+  actualShort: (amount: string) => `${amount} short of plan this month.`,
+  actualOver: (amount: string) => `${amount} more than planned this month.`,
+
   loadError: "Couldn't load your goals.",
   // GET /goals is money AND owner-gated (spec decision 10), so a limited
   // member holding money reaches this page and the request answers 403 --

@@ -16,6 +16,7 @@ import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { GoalCard } from "./GoalCard";
 import { GoalContributionsPanel } from "./GoalContributionsPanel";
 import { GoalModal } from "./GoalModal";
+import { MonthlyContributionsCard } from "./MonthlyContributionsCard";
 import { GOAL_COPY } from "./goalCopy";
 import { useGoals } from "./useGoals";
 import type { Goal } from "./goalSchemas";
@@ -191,10 +192,24 @@ export function GoalsPage() {
         </div>
       )}
 
-      {summary.excludedNoRate > 0 && (
-        <p data-testid="goals-excluded-no-rate" className="text-xs text-muted">
-          {GOAL_COPY.excludedNoRate(summary.excludedNoRate)}
-        </p>
+      {/* Task 14's own card, below the grid -- gated the same as "+ New
+          goal" above: a household with zero goals altogether has nothing
+          for this card to summarise, and the empty state above already
+          covers that screen, so the two never render together. Once
+          toggled to "Show archived" with only archived rows in view,
+          data.goals.length is still > 0 (the union, not a filter swap) and
+          the card renders showing summary's own live-only totals -- both
+          legitimately zero there, not a bug. excludedNoRate now renders
+          from inside this card, not here -- the count explains a
+          discrepancy between the two totals the card itself states, so it
+          belongs beside them rather than elsewhere on the page. */}
+      {data.goals.length > 0 && (
+        <MonthlyContributionsCard
+          goals={data.goals}
+          summary={summary}
+          currency={data.currency}
+          symbolFor={symbolFor}
+        />
       )}
 
       {/* modalGoal is "new" for Create, a Goal for Edit -- GoalCard.tsx's
