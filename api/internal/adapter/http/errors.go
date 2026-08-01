@@ -230,6 +230,50 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, domain.ErrBudgetCategoryUnknown):
 		WriteError(w, http.StatusUnprocessableEntity, "UNKNOWN_BUDGET_CATEGORY",
 			"That category could not be found.", nil)
+	case errors.Is(err, domain.ErrGoalNameTaken):
+		// The plain case: a name collision against a LIVE goal, no restore
+		// hint to offer. goal_handlers.go's writeGoalNameConflict intercepts
+		// this same sentinel before it reaches here whenever the colliding
+		// row turns out to be archived, and builds a richer 409 (the
+		// archived goal's id in details, so the New/Edit modal can offer
+		// Restore instead of a dead end) using this case's own message and
+		// status as its fallback if that lookup itself fails.
+		WriteError(w, http.StatusConflict, "GOAL_NAME_TAKEN", "A goal with that name already exists.", nil)
+	case errors.Is(err, domain.ErrGoalNameRequired):
+		WriteError(w, http.StatusUnprocessableEntity, "GOAL_NAME_REQUIRED", "A goal name is required.", nil)
+	case errors.Is(err, domain.ErrGoalTargetNotPositive):
+		WriteError(w, http.StatusUnprocessableEntity, "GOAL_TARGET_NOT_POSITIVE",
+			"Enter a target greater than zero.", nil)
+	case errors.Is(err, domain.ErrGoalPlannedMonthlyNegative):
+		WriteError(w, http.StatusUnprocessableEntity, "GOAL_PLANNED_MONTHLY_NEGATIVE",
+			"Planned monthly cannot be negative.", nil)
+	case errors.Is(err, domain.ErrGoalCurrencyImmutable):
+		WriteError(w, http.StatusUnprocessableEntity, "GOAL_CURRENCY_IMMUTABLE",
+			"A goal's currency cannot be changed after it is created.", nil)
+	case errors.Is(err, domain.ErrGoalArchived):
+		WriteError(w, http.StatusUnprocessableEntity, "GOAL_ARCHIVED", "That goal is archived.", nil)
+	case errors.Is(err, domain.ErrContributionAmountZero):
+		WriteError(w, http.StatusUnprocessableEntity, "CONTRIBUTION_AMOUNT_ZERO",
+			"Enter an amount other than zero.", nil)
+	case errors.Is(err, domain.ErrRolloverMonthOpen):
+		WriteError(w, http.StatusUnprocessableEntity, "ROLLOVER_MONTH_OPEN",
+			"Only a closed month can be rolled over.", nil)
+	case errors.Is(err, domain.ErrRolloverNothingUnspent):
+		WriteError(w, http.StatusUnprocessableEntity, "ROLLOVER_NOTHING_UNSPENT",
+			"That month has nothing unspent to roll over.", nil)
+	case errors.Is(err, domain.ErrRolloverCurrencyMismatch):
+		WriteError(w, http.StatusUnprocessableEntity, "ROLLOVER_CURRENCY_MISMATCH",
+			"Only a goal in the household's primary currency can receive a rollover.", nil)
+	case errors.Is(err, domain.ErrRolloverAlreadyDone):
+		WriteError(w, http.StatusConflict, "ROLLOVER_ALREADY_DONE", "That month has already been rolled over.", nil)
+	// domain.ErrUnknownContributionSource has no case here, deliberately: it
+	// means a goal_contributions row holds a source value this code never
+	// wrote (ParseContributionSource's own doc comment), which is a real
+	// internal failure -- a database column disagreeing with every writer
+	// this codebase has -- not a client mistake. It falls through to the
+	// generic, logged 500 below like ErrAmountOverflow does above, rather
+	// than getting a 4xx case that would tell a caller their request was
+	// wrong when it was not.
 	case errors.Is(err, domain.ErrAlreadyExists):
 		// Every service that means a genuine, nameable conflict already
 		// translates domain.ErrAlreadyExists into its own sentinel before

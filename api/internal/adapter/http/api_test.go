@@ -233,6 +233,12 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 		FX:           fxProvider,
 		Clock:        clk,
 	})
+	goalRepo := postgres.NewGoalRepo(db)
+	goalSvc := usecase.NewGoalService(usecase.GoalDeps{
+		Goals:      goalRepo,
+		Households: households,
+		FX:         fxProvider,
+	})
 	budgetSvc := usecase.NewBudgetService(usecase.BudgetDeps{
 		Budgets:      postgres.NewBudgetRepo(db),
 		Transactions: transactionRepo,
@@ -240,6 +246,12 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 		Households:   households,
 		Members:      memberships,
 		FX:           fxProvider,
+		// Goals is read only by BudgetService.RollOver (Task 9's route) to
+		// fetch the target goal before writing a contribution -- wired here,
+		// alongside Deps.Goals below, even though no route in this task
+		// reaches it, because a nil port reachable from an already-wired
+		// service is a panic waiting for the next task to trip over.
+		Goals: goalRepo,
 	})
 
 	router := httpadapter.NewRouter(httpadapter.Deps{
@@ -253,6 +265,7 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 		Transactions: transactionSvc,
 		Categories:   categorySvc,
 		Budgets:      budgetSvc,
+		Goals:        goalSvc,
 		Users:        users,
 		Memberships:  memberships,
 		Sessions:     sessions,

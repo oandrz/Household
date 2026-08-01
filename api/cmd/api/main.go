@@ -82,6 +82,7 @@ func run() error {
 	categoryRepo := postgres.NewCategoryRepo(db)
 	transactionRepo := postgres.NewTransactionRepo(db)
 	budgetRepo := postgres.NewBudgetRepo(db)
+	goalRepo := postgres.NewGoalRepo(db)
 
 	hasher := crypto.NewArgon2Hasher(cfg.Argon2Time, cfg.Argon2MemoryKiB, cfg.Argon2Threads)
 	tokens := crypto.NewTokenGenerator()
@@ -155,6 +156,11 @@ func run() error {
 		FX:         fxProvider,
 		Clock:      sysClock,
 	})
+	goalSvc := usecase.NewGoalService(usecase.GoalDeps{
+		Goals:      goalRepo,
+		Households: households,
+		FX:         fxProvider,
+	})
 	budgetSvc := usecase.NewBudgetService(usecase.BudgetDeps{
 		Budgets:      budgetRepo,
 		Transactions: transactionRepo,
@@ -162,6 +168,13 @@ func run() error {
 		Households:   households,
 		Members:      memberships,
 		FX:           fxProvider,
+		// Goals is read only by RollOver (Task 9's route) to fetch the
+		// target goal before writing a rollover contribution. Wired here,
+		// alongside Deps.Goals below, in this task rather than that one: a
+		// nil port reachable from an already-wired service is a panic
+		// waiting for the next task to trip over, and Task 8 is the change
+		// that first constructs goalRepo.
+		Goals: goalRepo,
 	})
 
 	srv := &http.Server{
@@ -177,6 +190,7 @@ func run() error {
 			Transactions: transactionSvc,
 			Categories:   categorySvc,
 			Budgets:      budgetSvc,
+			Goals:        goalSvc,
 			Users:        users,
 			Memberships:  memberships,
 			Sessions:     sessions,

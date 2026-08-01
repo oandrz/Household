@@ -53,6 +53,7 @@ type Deps struct {
 	Transactions *usecase.TransactionService
 	Categories   *usecase.CategoryService
 	Budgets      *usecase.BudgetService
+	Goals        *usecase.GoalService
 	Users        usecase.UserRepository
 	Memberships  usecase.MembershipRepository
 	Sessions     usecase.SessionRepository
@@ -226,6 +227,30 @@ func NewRouter(deps Deps) http.Handler {
 				txn.Group(func(w chi.Router) {
 					w.Use(requireCSRF)
 					w.Put("/budgets/{month}", handlePutBudgetMonth(deps))
+				})
+
+				// Goals sit in the same money+owner group as transactions,
+				// categories and budgets, for the same reason router.go's
+				// comment above gives for those: a goal card with contributed
+				// amounts and progress figures is as much "the household's
+				// money" as a ledger row, so there is no reading of it for a
+				// limited member that would not read as broken.
+				txn.Get("/goals", handleListGoals(deps))
+				txn.Get("/goals/{id}/contributions", handleListGoalContributions(deps))
+
+				txn.Group(func(w chi.Router) {
+					w.Use(requireCSRF)
+					w.Post("/goals", handleCreateGoal(deps))
+					w.Patch("/goals/{id}", handleUpdateGoal(deps))
+					// Archive and restore are their own routes rather than a
+					// field on PATCH, the same reasoning as accounts and
+					// categories above: if archiving were patchable, an
+					// ordinary rename that happened to include it would
+					// archive the goal as a side effect of saving a name.
+					w.Post("/goals/{id}/archive", handleArchiveGoal(deps))
+					w.Post("/goals/{id}/restore", handleRestoreGoal(deps))
+					w.Post("/goals/{id}/contributions", handleAddGoalContribution(deps))
+					w.Delete("/goals/{id}/contributions/{contributionId}", handleDeleteGoalContribution(deps))
 				})
 			})
 		})
