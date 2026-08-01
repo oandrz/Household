@@ -14,6 +14,7 @@ import { ApiError } from "../../api/client";
 import { useCurrencies } from "../auth/useAuth";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { GoalCard } from "./GoalCard";
+import { GoalContributionsPanel } from "./GoalContributionsPanel";
 import { GoalModal } from "./GoalModal";
 import { GOAL_COPY } from "./goalCopy";
 import { useGoals } from "./useGoals";
@@ -28,6 +29,13 @@ export function GoalsPage() {
   // opens Create; a Goal opens Edit for that card. Task 13's panel does not
   // exist yet, so only the New/Edit modal renders below today.
   const [modalGoal, setModalGoal] = useState<Goal | "new" | null>(null);
+  // Task 13's own panel. A separate state slot from modalGoal above, not a
+  // union sharing it -- the two surfaces can never be open for the same
+  // click (GoalCard.tsx's own onAddContribution stops its event before it
+  // ever reaches the card's onClick that would set modalGoal), but keeping
+  // them as two independent pieces of state means a future change to one
+  // never has to reason about the other's cases.
+  const [contributingGoal, setContributingGoal] = useState<Goal | null>(null);
   // Restore is scoped per card, not one page-wide flag -- AccountsPanel.tsx's
   // own pendingIds reasoning: useGoals exposes one restoreGoal function
   // shared by every card, so tracking "is a call for this id in flight" has
@@ -175,6 +183,7 @@ export function GoalsPage() {
               goal={goal}
               symbol={symbolFor(goal.currency)}
               onEdit={setModalGoal}
+              onAddContribution={setContributingGoal}
               onRestore={handleRestore}
               restorePending={restoringIds.has(goal.id)}
             />
@@ -212,6 +221,20 @@ export function GoalsPage() {
           onClose={() => setModalGoal(null)}
           onSaved={() => setModalGoal(null)}
         />
+      )}
+
+      {/* Task 13's own panel, opened by GoalCard's "Add contribution"
+          control -- mounted only while a goal is selected, the same
+          conditional-mount gate modalGoal above uses, and the gate
+          GoalContributionsPanel.tsx's own header comment relies on for its
+          `useGoalContributions(goal.id, true)` call to mean "while open,"
+          not "always." No currencies.data guard needed here (unlike
+          GoalModal above): this panel takes no currencies prop at all --
+          formatMoney falls back to the bare currency code when no symbol is
+          available, so there is nothing here that must wait on a second
+          query to settle. */}
+      {contributingGoal && (
+        <GoalContributionsPanel goal={contributingGoal} onClose={() => setContributingGoal(null)} />
       )}
     </div>
   );

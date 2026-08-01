@@ -60,6 +60,7 @@ export function GoalCard({
   goal,
   symbol,
   onEdit,
+  onAddContribution,
   onRestore,
   restorePending,
 }: {
@@ -69,6 +70,11 @@ export function GoalCard({
   // affordance is Restore below; editing a goal that isn't live is not a
   // flow this feature supports (restore it first).
   onEdit?: (goal: Goal) => void;
+  // Task 13's own control. Gated on !archived the same way onEdit's own
+  // `clickable` is: the API 422s a contribution against an archived goal
+  // (GoalService's own AddContribution check), so this button never offers a
+  // flow the server would refuse anyway.
+  onAddContribution?: (goal: Goal) => void;
   onRestore?: (id: string) => void;
   // True while a restore call for *this* card is in flight -- scoped per
   // card, not one page-wide flag, the same reason AccountsPanel.tsx's own
@@ -148,6 +154,32 @@ export function GoalCard({
             className="mt-2.5 text-[11px] font-semibold text-accent disabled:cursor-not-allowed disabled:opacity-60"
           >
             {GOAL_COPY.restore}
+          </button>
+        )}
+        {!archived && onAddContribution && (
+          <button
+            type="button"
+            // No aria-label suffixing the goal name (unlike Restore above,
+            // which disambiguates for tests that query it unscoped across
+            // several archived cards at once) -- every caller of this
+            // control in practice reaches it via `within(card)`, and the
+            // visible text alone is already this button's accessible name.
+            // Both handlers below stop the event rather than letting it
+            // bubble to the card's own onClick/onKeyDown above -- click and
+            // keydown are two independent events (a real browser's
+            // Enter-activates-a-button default action fires a *separate*
+            // click after the keydown already bubbled), so stopping only one
+            // leaves the other free to reach the card and open the edit
+            // modal behind this button instead of the contributions panel it
+            // actually asked for.
+            onClick={(event) => {
+              event.stopPropagation();
+              onAddContribution(goal);
+            }}
+            onKeyDown={(event) => event.stopPropagation()}
+            className="mt-2.5 text-[11px] font-semibold text-accent"
+          >
+            {GOAL_COPY.addContribution}
           </button>
         )}
       </div>
