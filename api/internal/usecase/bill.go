@@ -487,6 +487,12 @@ func (s *BillService) Create(ctx context.Context, in NewBill, today time.Time) (
 // reinterpret every past figure. The message naming both currencies is the
 // HTTP layer's job, not this one's.
 //
+// A PayFromAccountID pointed at an ARCHIVED account is refused with
+// domain.ErrForbidden, the identical check Create runs (that method's own
+// comment) -- re-pointing a bill at a dead account would leave it silently
+// unpayable until the household hit the dead end at the pay button instead
+// of at the edit.
+//
 // A non-empty PaidByMembershipID is refused with
 // domain.ErrAccountOwnerNotInHousehold when it does not belong to this
 // household, the same check Create runs and AccountService.Create runs for
@@ -543,6 +549,17 @@ func (s *BillService) Update(ctx context.Context, householdID, billID string, pa
 		}
 		if acct.Balance.Currency != b.Amount.Currency {
 			return BillView{}, domain.ErrBillCurrencyImmutable
+		}
+		if acct.Account.IsArchived() {
+			// The same refusal Create gives (bill.go's own comment on that
+			// check): a bill re-pointed at an archived account sits
+			// unpayable, and MarkPaid would refuse it with this identical
+			// sentinel anyway (its own archived-account check) -- catching
+			// it here means the household meets the dead end at the edit,
+			// not at the pay button. This asymmetry with Create predates
+			// Task 9 (see that task's own report) and was closed once
+			// Task 10's pay route made the gap reachable.
+			return BillView{}, domain.ErrForbidden
 		}
 		b.PayFromAccountID = *patch.PayFromAccountID
 	}

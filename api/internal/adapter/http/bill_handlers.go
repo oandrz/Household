@@ -244,21 +244,6 @@ func handleCreateBill(deps Deps) http.HandlerFunc {
 			IsSubscription:     req.IsSubscription,
 		}, today)
 		if err != nil {
-			// ErrForbidden is Create's own "that pay-from account is
-			// archived" refusal (BillService.Create's own comment) -- the
-			// ONLY reason this sentinel can reach this handler at all, so
-			// the message can safely name it without checking anything
-			// further. MapDomainError's shared ErrForbidden case answers a
-			// bare 403 with no detail; that case exists for a caller this
-			// codebase has not needed yet, and widening it here would be
-			// guessing at what every OTHER future caller wants this
-			// message to say. Update carries no equivalent check (see the
-			// task report), so this interception belongs only here.
-			if errors.Is(err, domain.ErrForbidden) {
-				WriteError(w, http.StatusUnprocessableEntity, "ACCOUNT_ARCHIVED",
-					"That account is archived and cannot be used to pay a bill.", nil)
-				return
-			}
 			writeBillWriteError(w, r, deps, scope.HouseholdID, req.Name, today, err)
 			return
 		}
@@ -499,8 +484,20 @@ func writeBill(w http.ResponseWriter, view usecase.BillView, status int) {
 
 // writeBillWriteError is Create and Update's shared failure path, once each
 // has already handled whatever needs context this function is not given
-// (Create's own ErrForbidden interception above; Update's own
-// ErrBillCurrencyImmutable interception below).
+// (Update's own ErrBillCurrencyImmutable interception below, which needs a
+// lookup of both the bill's and the target account's currency this function
+// is never handed).
+//
+// ErrForbidden is Create's own "that pay-from account is archived" refusal
+// (BillService.Create's own comment) AND, since Task 10 closed the
+// asymmetry Task 9's review named as out of scope, Update's identical
+// check when a patch re-points PayFromAccountID at an archived account
+// (BillService.Update's own comment). Both mean exactly the same thing, so
+// both get the same named 422 here rather than MapDomainError's shared
+// ErrForbidden case, which answers a bare 403 with no detail -- that case
+// exists for a caller this codebase has not needed yet, and widening it
+// here would be guessing at what every OTHER future caller wants this
+// message to say.
 //
 // ErrBillNameTaken gets writeGoalNameConflict's own richer-409 treatment:
 // look for an archived bill holding the same name, and if one exists, offer
@@ -510,6 +507,11 @@ func writeBill(w http.ResponseWriter, view usecase.BillView, status int) {
 // comment). A live-name collision, or a failure of the lookup itself, falls
 // back to MapDomainError's own BILL_NAME_TAKEN case.
 func writeBillWriteError(w http.ResponseWriter, r *http.Request, deps Deps, householdID, attemptedName string, today time.Time, err error) {
+	if errors.Is(err, domain.ErrForbidden) {
+		WriteError(w, http.StatusUnprocessableEntity, "ACCOUNT_ARCHIVED",
+			"That account is archived and cannot be used to pay a bill.", nil)
+		return
+	}
 	if !errors.Is(err, domain.ErrBillNameTaken) {
 		MapDomainError(w, r, err)
 		return

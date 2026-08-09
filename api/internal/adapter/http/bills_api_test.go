@@ -890,3 +890,36 @@ func TestBillsUndoInAnotherHouseholdIsNotFound(t *testing.T) {
 	}
 }
 
+// --- Part 2/3: Update's archived-account gap ----------------------------
+
+// TestBillsUpdatePayFromArchivedAccountAnswersNamedMessageNot403 is Part 3's
+// own required test: once Part 2 closes Update's archived-account gap
+// (bill.go's own comment on why Create and Update must agree), its
+// domain.ErrForbidden must reach the SAME named 422 ACCOUNT_ARCHIVED message
+// Create already gives -- via writeBillWriteError, now shared by both
+// callers -- not MapDomainError's generic, contextless 403.
+//
+// secondAccount is created in the SAME currency as the bill (SGD, via
+// mustCreateAccountID both times): a currency mismatch would answer
+// BILL_CURRENCY_IMMUTABLE first (Update checks currency before the archived
+// check -- bill.go's own ordering) and prove nothing about this test.
+func TestBillsUpdatePayFromArchivedAccountAnswersNamedMessageNot403(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	firstAccount := env.mustCreateAccountID(t, session, csrf)
+	secondAccount := env.mustCreateAccountID(t, session, csrf)
+
+	created := env.mustCreateBill(t, session, csrf, map[string]any{
+		"name": "Electricity", "amountMinor": 12_000, "cadence": "monthly",
+		"nextDue": farFutureDate(), "payFromAccountId": firstAccount,
+	})
+
+	archiveRec := env.authed(t, http.MethodPost, "/api/v1/accounts/"+secondAccount+"/archive", nil, session, csrf)
+	if archiveRec.Code != http.StatusOK {
+		t.Fatalf("archive second account: status = %d, body = %s", archiveRec.Code, archiveRec.Body.String())
+	}
+
+	rec := env.authed(t, http.MethodPatch, "/api/v1/bills/"+created.Bill.ID,
+		map[string]any{"payFromAccountId": secondAccount}, session, csrf)
+	assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "ACCOUNT_ARCHIVED")
+}

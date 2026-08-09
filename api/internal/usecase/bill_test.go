@@ -757,6 +757,31 @@ func TestUpdateRefusesRepointingToADifferentCurrencyAccount(t *testing.T) {
 	}
 }
 
+// TestUpdateRefusesRepointingToAnArchivedAccount closes the asymmetry Task
+// 9's own review named as out of scope: Create already refuses an archived
+// pay-from account with domain.ErrForbidden (that method's own check), but
+// Update checked only currency. The gap was harmless while nothing could
+// reach it -- Task 10's pay route is what makes a bill silently re-pointed
+// at a dead account actually unpayable, so the household must meet the
+// refusal here, at the edit, not at the pay button.
+//
+// withArchivedAccount registers "acct-2" in SGD, the SAME currency as the
+// bill's own -- a mismatched currency would answer ErrBillCurrencyImmutable
+// first and prove nothing about this new check.
+func TestUpdateRefusesRepointingToAnArchivedAccount(t *testing.T) {
+	repo := &fakeBillRepo{}
+	repo.add(bill("SP utilities", "2026-08-08", 14230)) // SGD, acct-1
+	svc := newBillService(t, repo, withArchivedAccount("acct-2", "SGD"))
+
+	other := "acct-2"
+	_, err := svc.Update(context.Background(), "h1", "bill-1", usecase.BillPatch{
+		PayFromAccountID: &other,
+	}, day("2026-08-09"))
+	if !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("err = %v, want domain.ErrForbidden", err)
+	}
+}
+
 func TestUpdateValidatesNameAndAmountAndCadence(t *testing.T) {
 	repo := &fakeBillRepo{}
 	repo.add(bill("SP utilities", "2026-08-08", 14230))
