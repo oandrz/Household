@@ -499,6 +499,13 @@ func writeBill(w http.ResponseWriter, view usecase.BillView, status int) {
 // here would be guessing at what every OTHER future caller wants this
 // message to say.
 //
+// This function is Create and Update's ONLY -- errors.Is(err,
+// domain.ErrForbidden) also matches *domain.BillPaymentNotLatestError (its
+// own Unwrap), so routing UndoPayment's refusal through here instead of
+// writeUndoPaymentError would mislabel "not the latest payment" as "that
+// account is archived." Harmless today (undo never calls this function),
+// but the trap is real if a future refactor tries to share this path.
+//
 // ErrBillNameTaken gets writeGoalNameConflict's own richer-409 treatment:
 // look for an archived bill holding the same name, and if one exists, offer
 // its id so the modal can propose Restore instead of a dead end (Task 7's
