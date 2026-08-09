@@ -683,6 +683,29 @@ person to ask whether the test could ever have gone red in the first place.
   All four are filed here rather than as new patterns, because the shape is
   the one this section already tracks — an assertion satisfied by more than
   the one thing it claims to pin — not four new discoveries.
+- `stubFetchRoutes` "throws on an unregistered request, so a query that
+  fires when it should not fails loudly" is true only for a component that
+  *renders the error*. It is false for one that renders nothing on missing
+  data, which every member-state gate in this codebase does on purpose
+  (Overview's cards all return `null`/omit themselves while their query is
+  disabled or still loading — the exact shape pattern 15 and the interim
+  Overview defect both required). Task 16's `NextBillCard` mounts
+  unconditionally and calls `useBills(false, { enabled })` itself; with no
+  `GET /api/v1/bills` route registered, a wrongly-`enabled: true` query
+  still fires, the mock still throws, but that throw becomes a rejected
+  promise TanStack Query absorbs as error state — `!bills.data` is true
+  either way, so the card renders null regardless of whether the request
+  was ever sent. Twelve of fourteen `OverviewPage` owner-role tests passed
+  with `GET /bills` silently erroring on every one of them, discovered only
+  because two *unrelated* assertions (the quick-add menu's new Bill button)
+  happened to fail for their own reasons and forced a full run. The
+  "register no route" instruction in the task brief is necessary but not
+  sufficient: what actually discriminates enabled from disabled is reading
+  `fetchMock.mock.calls` directly (`.some(([url]) => ...)`) — `vi.fn` records
+  a call before its implementation throws, so this catches the request
+  regardless of what the component does with the failure. Confirmed by
+  mutation: forcing `enabled: true` left `toBeEmptyDOMElement()` passing and
+  only the `fetchMock.mock.calls` assertion went red.
 
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for

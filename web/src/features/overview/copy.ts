@@ -29,6 +29,29 @@ export const OVERVIEW_COPY = {
   budgetUsed: (percent: number) => `${percent}% used`,
   budgetOf: (spent: string, budgeted: string) => `${spent} of ${budgeted}`,
 
+  // NextBillCard.tsx. amountLabel/dateLabel are pre-formatted by the caller
+  // (formatMoney/monthDayLabel), the same split BudgetCard's own budgetOf
+  // follows -- this file's job is which words surround a figure, never the
+  // figure's own formatting.
+  nextBillHeading: "Next bill",
+  nextBillClause: (billName: string, dateLabel: string) => `${billName} · ${dateLabel}`,
+  // Overdue replaces the date half of the clause outright rather than
+  // sitting beside it -- BillStatCards.tsx's own nextDueOverdueValue rule
+  // for the identical figure, restated here: "names it as overdue rather
+  // than printing a past date as though upcoming."
+  nextBillOverdueClause: (billName: string) => `${billName} · Overdue`,
+  // The household has never added a live bill at all -- mirrors
+  // budgetNone/goalsNone's own "nothing set up yet" shape below.
+  nextBillNone: "No bills yet",
+  nextBillAdd: "Add a bill",
+  // Distinct from nextBillNone: summary.billCount > 0 here, so this
+  // household has live bills, just none with an upcoming due date -- every
+  // one is a settled one-off (paid, no next occurrence). The GoalsCard.tsx
+  // achieved-goal fix is the precedent for why this needs its own line
+  // rather than falling into the "none yet" branch above: a household with
+  // real bills is not bill-less just because none is due next.
+  nextBillCaughtUp: "Nothing due right now",
+
   // GoalsCard.tsx. Mirrors GOAL_COPY's own onTrack/withNoDate pair
   // (features/money/goalCopy.ts) rather than importing them -- a small
   // duplicated pair of one-liners is the established trade-off here
@@ -64,13 +87,17 @@ export const OVERVIEW_COPY = {
   quickAdd: "+ Add",
   quickAddTransaction: "Transaction",
   quickAddAccount: "Account",
-  // Transactions attach to an account. With none, the entry would open a
-  // modal whose account dropdown is empty -- the dead end TransactionsPage's
-  // own comment refuses.
+  quickAddBill: "Bill",
+  // Shared by Transaction and Bill: a transaction attaches to an account,
+  // and a bill needs a pay-from account, so both entries open a modal whose
+  // account dropdown would be empty with none -- the dead end
+  // TransactionsPage's own comment refuses. One string covers both rather
+  // than two copies of the same sentence, the same reasoning
+  // CADENCE_LABELS (billCopy.ts) gives for deriving instead of duplicating.
   quickAddNeedsAccount: "Add an account first",
-  // No precondition, unlike Transaction above -- the account dependency
-  // that shape follows disappeared for goals with decision 6 (contributions
-  // move no real money), so this entry is never disabled.
+  // No precondition, unlike Transaction/Bill above -- the account
+  // dependency that shape follows disappeared for goals with decision 6
+  // (contributions move no real money), so this entry is never disabled.
   quickAddGoal: "Savings goal",
 } as const;
 

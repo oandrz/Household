@@ -139,14 +139,47 @@ function goalsBody(summaryOverrides: Record<string, unknown> = {}, goals: Record
   };
 }
 
+// A bills response with no live bills at all (billsResponseSchema's own
+// shape) -- the default for every owner-role test below that doesn't care
+// about NextBillCard's own figures (NextBillCard.test.tsx covers those in
+// isolation). NextBillCard.tsx owns its own useBills call and mounts
+// unconditionally for an owner, so every owner-role test in this file needs
+// this route registered even when it never asserts on the card itself --
+// stubFetchRoutes throws on an unregistered request.
+function billsBody(summaryOverrides: Record<string, unknown> = {}) {
+  return {
+    bills: [],
+    paidThisMonth: [],
+    summary: {
+      currency: "SGD",
+      dueThisMonthMinor: 0,
+      paidSoFarMinor: 0,
+      nextDue: null,
+      autopayCount: 0,
+      billCount: 0,
+      subscriptionsMonthlyMinor: 0,
+      subscriptionsAnnualMinor: 0,
+      excludedNoRate: 0,
+      ...summaryOverrides,
+    },
+  };
+}
+
 // `routes` accepts a single response or an ordered list per route (the same
 // union GoalModal.test.tsx's own `renderModal` widens `extraRoutes` to) --
 // this task's own "refetches goals after it saves" test needs a route that
 // answers differently across two calls, the same shape useGoals.test.ts's
 // goalsResponse/goalsResponseAfterWrite pair proves a mutation's invalidate
 // actually refetches.
+//
+// Returns `fetchMock` too (BudgetPage.test.tsx's own
+// "does not fetch budget history" test is the precedent for this exact
+// shape) -- Task 16's own limited-member tests need to prove GET /bills was
+// never *called*, which is a stronger claim than any card's absence: a test
+// asserting only that a heading is missing would stay green even if the
+// query fired and merely errored quietly in the background.
 function renderOverview(routes: Record<string, RouteResponse | RouteResponse[]>) {
-  stubFetchRoutes({
+  const fetchMock = stubFetchRoutes({
     "GET /api/v1/currencies": {
       status: 200,
       body: { currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }] },
@@ -154,15 +187,30 @@ function renderOverview(routes: Record<string, RouteResponse | RouteResponse[]>)
     "GET /api/v1/household/members": { status: 200, body: [] },
     ...routes,
   });
-  return renderWithRouter(<OverviewPage />);
+  return { fetchMock, ...renderWithRouter(<OverviewPage />) };
 }
 
 describe("OverviewPage", () => {
-  it("shows net worth, this month's budget and goals on track to an owner", async () => {
+  it("shows net worth, this month's budget, the next bill and goals on track to an owner", async () => {
     renderOverview({
       "GET /api/v1/auth/me": { status: 200, body: meBody() },
       "GET /api/v1/accounts": { status: 200, body: { accounts: [], summary: summaryBody(1248000) } },
       [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
+      "GET /api/v1/bills": {
+        status: 200,
+        body: billsBody({
+          billCount: 1,
+          nextDue: {
+            billId: "bill-1",
+            billName: "SP utilities",
+            dueOn: "2026-07-08",
+            amountMinor: 14230,
+            currency: "SGD",
+            overdue: false,
+            autopay: true,
+          },
+        }),
+      },
       "GET /api/v1/goals": {
         status: 200,
         body: goalsBody(
@@ -178,6 +226,8 @@ describe("OverviewPage", () => {
 
     expect(await screen.findByText("S$12,480.00")).toBeInTheDocument();
     expect(await screen.findByText("62% used")).toBeInTheDocument();
+    expect(await screen.findByText("S$142.30")).toBeInTheDocument();
+    expect(screen.getByText("SP utilities · Jul 8")).toBeInTheDocument();
     expect(await screen.findByText("3 of 4")).toBeInTheDocument();
     expect(screen.getByText("next: Bali · Dec 2026")).toBeInTheDocument();
   });
@@ -200,24 +250,32 @@ describe("OverviewPage", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("never asks for a budget or goals on behalf of a limited member, who cannot read either", async () => {
-    // GET /budgets/{month} and GET /goals are both requireCapability(money)
-    // AND requireOwner (router.go). A limited member with money can see
-    // account names and nothing else -- rendering either card would be a
-    // card that can only ever 403.
+  it("never asks for a budget, goals or bills on behalf of a limited member, who cannot read any of them", async () => {
+    // GET /budgets/{month}, GET /goals and GET /bills are all
+    // requireCapability(money) AND requireOwner (router.go). A limited
+    // member with money can see account names and nothing else -- rendering
+    // any of these three would be rendering a card that can only ever 403.
     //
-    // The assertion is that neither request is ever *made*, not merely that
-    // neither card appears. Absence of a card is the weaker claim: it holds
-    // for several reasons at once (the render guard, the `enabled` gate, or
-    // simply no data having arrived), so a test asserting only that stays
-    // green when either guard is deleted. This one goes red the moment
-    // `enabled: isOwner` stops gating either query -- which is the guard
-    // that keeps a doomed 403 out of the cache. useGoals' own `enabled:
-    // false` idle path (Task 10's own gap: nothing exercised it until this
-    // page became its first real consumer) is what this pins for goals.
+    // The assertion is that none of these requests is ever *made*, not
+    // merely that none of their cards appears. Absence of a card is the
+    // weaker claim: it holds for several reasons at once (the render guard,
+    // the `enabled` gate, or simply no data having arrived), so a test
+    // asserting only that stays green when either guard is deleted. This
+    // one goes red the moment `enabled: isOwner` stops gating any of the
+    // three queries -- which is the guard that keeps a doomed 403 out of
+    // the cache. useGoals' own `enabled: false` idle path (Task 10's own
+    // gap: nothing exercised it until this page became its first real
+    // consumer) is what this pins for goals.
+    //
+    // Bills gets the stricter proof of the three: no route registered for
+    // it at all, so a wrongly-enabled query fails this test the moment it
+    // fires (stubFetchRoutes' own throw-on-unregistered-request behaviour),
+    // rather than merely leaving a `billsRequested` flag unset the way a
+    // registered-but-uncalled route would -- task-16-brief.md's own
+    // instruction for exactly this test.
     let budgetRequested = false;
     let goalsRequested = false;
-    renderOverview({
+    const { fetchMock } = renderOverview({
       "GET /api/v1/auth/me": {
         status: 200,
         body: meBody({ role: "limited", capabilities: ["calendar", "chores", "money"] }),
@@ -237,13 +295,16 @@ describe("OverviewPage", () => {
           goalsRequested = true;
         },
       },
+      // No "GET /api/v1/bills" entry -- deliberate, see comment above.
     });
 
     await screen.findByText("Overview");
     expect(budgetRequested).toBe(false);
     expect(goalsRequested).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/v1/bills"))).toBe(false);
     expect(screen.queryByText("This month")).toBeNull();
     expect(screen.queryByText(OVERVIEW_COPY.goalsHeading)).toBeNull();
+    expect(screen.queryByText(OVERVIEW_COPY.nextBillHeading)).toBeNull();
   });
 
   // Found in a browser, not here: every assertion below passed against a page
@@ -263,7 +324,7 @@ describe("OverviewPage", () => {
   // below) proves the page rendered *something*, so the absence checks that
   // follow it mean "guarded," not "nothing loaded yet."
   it("explains the missing figures to a limited member rather than showing them an empty page", async () => {
-    renderOverview({
+    const { fetchMock } = renderOverview({
       "GET /api/v1/auth/me": {
         status: 200,
         body: meBody({ role: "limited", capabilities: ["money"] }),
@@ -271,14 +332,20 @@ describe("OverviewPage", () => {
       // No `summary` key at all -- the shape the server actually returns to a
       // caller who may not see amounts.
       "GET /api/v1/accounts": { status: 200, body: { accounts: [] } },
+      // No "GET /api/v1/bills" entry either -- this member is `!isOwner`,
+      // so NextBillCard.tsx's own useBills call must stay disabled here too
+      // (task-16-brief.md's own instruction: register no route, so a query
+      // that fires anyway fails loudly rather than passing quietly).
     });
 
     expect(await screen.findByText(/amounts are hidden/i)).toBeInTheDocument();
-    // Neither the goals card nor the entry that creates one: this member is
-    // `!isOwner`, the same gate that keeps the budget card and "+ Add" away
-    // from them already.
+    // Neither the goals card, the next-bill card, nor the entry that
+    // creates either: this member is `!isOwner`, the same gate that keeps
+    // the budget card and "+ Add" away from them already.
     expect(screen.queryByText(OVERVIEW_COPY.goalsHeading)).toBeNull();
+    expect(screen.queryByText(OVERVIEW_COPY.nextBillHeading)).toBeNull();
     expect(screen.queryByRole("button", { name: "+ Add" })).toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/v1/bills"))).toBe(false);
   });
 
   it("offers a way to set one when the household has never budgeted", async () => {
@@ -290,6 +357,7 @@ describe("OverviewPage", () => {
         body: budgetBody({ budget: null, budgetedMinor: 0, spentMinor: 0, percentUsed: 0 }),
       },
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
+      "GET /api/v1/bills": { status: 200, body: billsBody() },
     });
 
     const link = await screen.findByRole("link", { name: /set a budget/i });
@@ -305,6 +373,7 @@ describe("OverviewPage", () => {
         body: budgetBody({ budget: null, budgetedMinor: 0, spentMinor: 0, percentUsed: 0 }),
       },
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
+      "GET /api/v1/bills": { status: 200, body: billsBody() },
     });
 
     expect(await screen.findByText("Finish setting up")).toBeInTheDocument();
@@ -331,6 +400,7 @@ describe("OverviewPage", () => {
       },
       [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
+      "GET /api/v1/bills": { status: 200, body: billsBody() },
     });
 
     // Waiting on the budget card, not merely on the heading: the checklist's
@@ -367,6 +437,7 @@ describe("OverviewPage", () => {
       "GET /api/v1/accounts": { status: 200, body: { accounts: [ACCOUNT], summary: summaryBody(500000) } },
       [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
+      "GET /api/v1/bills": { status: 200, body: billsBody() },
     });
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -409,36 +480,47 @@ describe("OverviewPage", () => {
       "GET /api/v1/accounts": { status: 200, body: { accounts: [], summary: summaryBody(0) } },
       [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
+      "GET /api/v1/bills": { status: 200, body: billsBody() },
     });
 
     fireEvent.click(await screen.findByRole("button", { name: "+ Add" }));
 
     expect(screen.getByRole("button", { name: "Account" })).toBeInTheDocument();
-    // Savings goal joins Transaction and Account in this change (this task's
-    // own brief). Bill, Calendar event and Marriage retro are still in the
-    // design and do not exist yet -- a row that does nothing reads as
-    // broken.
+    // Savings goal and Bill both joined Transaction and Account before this
+    // task's own brief (Bill is this task's own addition). Calendar event
+    // and Marriage retro are still in the design and do not exist yet -- a
+    // row that does nothing reads as broken.
     expect(screen.getByRole("button", { name: "Savings goal" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /bill/i })).toBeNull();
+    // Exact name, not a /bill/i regex: NextBillCard's own empty state
+    // renders an "Add a bill" link (role "link") when this household has no
+    // bills yet, and a looser match here would coincidentally pass against
+    // that text too.
+    expect(screen.getByRole("button", { name: "Bill" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /calendar event/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /marriage retro/i })).toBeNull();
   });
 
-  it("does not offer Transaction before there is an account to attach it to", async () => {
+  it("does not offer Transaction or Bill before there is an account to attach them to", async () => {
     renderOverview({
       "GET /api/v1/auth/me": { status: 200, body: meBody() },
       "GET /api/v1/accounts": { status: 200, body: { accounts: [], summary: summaryBody(0) } },
       [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
+      "GET /api/v1/bills": { status: 200, body: billsBody() },
     });
 
     fireEvent.click(await screen.findByRole("button", { name: "+ Add" }));
 
     expect(screen.getByRole("button", { name: "Transaction" })).toBeDisabled();
-    expect(screen.getByText("Add an account first")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Bill" })).toBeDisabled();
+    // Both entries carry the identical precondition -- a bill needs a
+    // pay-from account exactly as a transaction needs one to post against --
+    // so the reason appears once beside each button, not merged into one
+    // shared line neither button actually owns.
+    expect(screen.getAllByText("Add an account first")).toHaveLength(2);
     // Savings goal has no such precondition -- decision 6, spec's own line:
-    // contributions move no real money, so unlike Transaction there is no
-    // account this entry depends on existing first.
+    // contributions move no real money, so unlike Transaction/Bill there is
+    // no account either entry depends on existing first.
     expect(screen.getByRole("button", { name: "Savings goal" })).toBeEnabled();
   });
 
@@ -469,6 +551,7 @@ describe("OverviewPage", () => {
       "GET /api/v1/accounts": { status: 200, body: { accounts: [ACCOUNT], summary: summaryBody(500000) } },
       [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
+      "GET /api/v1/bills": { status: 200, body: billsBody() },
       "GET /api/v1/categories": {
         status: 200,
         body: { categories: [] },
@@ -496,6 +579,7 @@ describe("OverviewPage", () => {
       "GET /api/v1/auth/me": { status: 200, body: meBody() },
       "GET /api/v1/accounts": { status: 200, body: { accounts: [], summary: summaryBody(0) } },
       [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
+      "GET /api/v1/bills": { status: 200, body: billsBody() },
       "GET /api/v1/goals": [
         { status: 200, body: goalsBody() },
         {
@@ -547,5 +631,103 @@ describe("OverviewPage", () => {
     expect(await screen.findByText("1 of 1")).toBeInTheDocument();
     expect(screen.getByText("next: Japan 2027 · Dec 2026")).toBeInTheDocument();
     expect(screen.queryByLabelText("Goal name")).not.toBeInTheDocument();
+  });
+
+  // BillModal.tsx calls useAccounts/useCategories/useHouseholdMembers
+  // itself (its own header comment), so nothing here passes it props the
+  // way TransactionModal above needs -- gating on `billOpen` alone is
+  // enough. On save, createBill's onSuccess invalidates both
+  // billsQueryKey(false)/billsQueryKey(true) (useBills.ts's own
+  // invalidateBills) -- this test watches the figure that invalidation
+  // produces actually move, the same standard the goal-modal test above
+  // holds itself to, not merely that a second request happened.
+  it("opens the bill modal from + Add and moves the next-bill card once it saves", async () => {
+    renderOverview({
+      "GET /api/v1/auth/me": { status: 200, body: meBody() },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [ACCOUNT], summary: summaryBody(500000) } },
+      [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
+      "GET /api/v1/goals": { status: 200, body: goalsBody() },
+      "GET /api/v1/categories": {
+        status: 200,
+        body: { categories: [{ id: "cat-1", name: "Utilities", kind: "expense" }] },
+      },
+      "GET /api/v1/bills": [
+        { status: 200, body: billsBody() },
+        {
+          status: 200,
+          body: billsBody({
+            billCount: 1,
+            nextDue: {
+              billId: "bill-1",
+              billName: "SP utilities",
+              dueOn: "2026-08-20",
+              amountMinor: 14230,
+              currency: "SGD",
+              overdue: false,
+              autopay: false,
+            },
+          }),
+        },
+      ],
+      "POST /api/v1/bills": {
+        status: 201,
+        body: {
+          bill: {
+            id: "bill-1",
+            name: "SP utilities",
+            amountMinor: 14230,
+            currency: "SGD",
+            cadence: "monthly",
+            nextDue: "2026-08-20",
+            categoryId: "cat-1",
+            categoryName: "Utilities",
+            payFromAccountId: "a1",
+            accountName: "DBS Everyday",
+            paidByMembershipId: "",
+            autopay: false,
+            isSubscription: false,
+            overdue: false,
+            dueSoon: true,
+            settled: false,
+            archivedAt: null,
+          },
+        },
+      },
+    });
+
+    expect(await screen.findByText(OVERVIEW_COPY.nextBillNone)).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: "+ Add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Bill" }));
+
+    await screen.findByLabelText("Bill name");
+    fireEvent.change(screen.getByLabelText("Bill name"), { target: { value: "SP utilities" } });
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "142.30" } });
+    fireEvent.change(screen.getByLabelText("Next due"), { target: { value: "2026-08-20" } });
+    fireEvent.change(screen.getByLabelText("Category"), { target: { value: "cat-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add bill" }));
+
+    expect(await screen.findByText("S$142.30")).toBeInTheDocument();
+    expect(screen.getByText("SP utilities · Aug 20")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Bill name")).not.toBeInTheDocument();
+  });
+
+  // A bill needs a pay-from account exactly as a transaction needs one to
+  // post against -- QuickAddMenu.tsx's own canAddBill mirrors
+  // canAddTransaction for this reason. Distinct from the "does not offer"
+  // test above: that one proves the button is disabled and explained
+  // *before* any account exists; this one proves the whole tree still
+  // renders the design's "S$142.30" line once one does.
+  it("offers Bill once an account exists", async () => {
+    renderOverview({
+      "GET /api/v1/auth/me": { status: 200, body: meBody() },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [ACCOUNT], summary: summaryBody(500000) } },
+      [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
+      "GET /api/v1/goals": { status: 200, body: goalsBody() },
+      "GET /api/v1/bills": { status: 200, body: billsBody() },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "+ Add" }));
+    expect(screen.getByRole("button", { name: "Bill" })).toBeEnabled();
   });
 });

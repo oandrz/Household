@@ -1,5 +1,6 @@
-// The app's front door. Two of the design's eight cards -- the two Money can
-// already supply -- rather than the placeholder that stood here, which every
+// The app's front door. Four of the design's eight cards -- the four Money
+// can already supply (net worth, this month's budget, next bill, goals on
+// track) -- rather than the placeholder that stood here, which every
 // household saw on every visit, new and established alike.
 //
 // This page is the only one every member reaches: Money's pages sit behind
@@ -18,6 +19,7 @@ import { useGoals } from "../money/useGoals";
 import { BudgetCard } from "./BudgetCard";
 import { OVERVIEW_COPY } from "./copy";
 import { GoalsCard } from "./GoalsCard";
+import { NextBillCard } from "./NextBillCard";
 import { QuickAddMenu } from "./QuickAddMenu";
 import { SetupChecklist } from "./SetupChecklist";
 
@@ -76,6 +78,18 @@ export function OverviewPage() {
             )}
 
             {isOwner && budget.data && <BudgetCard month={budget.data} />}
+
+            {/* Unlike BudgetCard/GoalsCard above, mounted unconditionally
+                here rather than gated on `isOwner &&` -- NextBillCard.tsx
+                owns its own useBills call and decides for itself, from
+                `enabled`, whether GET /bills is ever asked for. See that
+                file's own header comment for why: a limited member's
+                browser still mounts this card, it just never fires the
+                request, which is what makes "renders nothing while its
+                query is disabled" a state the component itself has to
+                handle rather than one OverviewPage prevents by never
+                mounting it. */}
+            <NextBillCard enabled={isOwner} />
 
             {isOwner && goals.data && <GoalsCard goals={goals.data} />}
           </div>
