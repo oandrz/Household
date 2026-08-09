@@ -2090,7 +2090,7 @@ git commit -m "feat(bills): subscriptions rollup"
 
 - [ ] **Step 1: Read `OverviewPage.tsx`'s member-state guard before writing anything**
 
-`GET /bills` is gated `money` **and** owner, so `useBills` **403s for a limited member** — Overview is about to acquire a fourth failing query, and the limited-member panel is currently gated on `accounts.isSuccess`. Read that guard first; do not add a query to this page without knowing what decides whether the panel renders.
+`GET /bills` is gated `money` **and** owner, so a limited member must never be allowed to issue it. Task 11 built `useBills(includeArchived, { enabled })` for exactly this, and `OverviewPage.tsx` already gates `useBudget` and `useGoals` the identical way for the identical guard — follow that, so the query never fires rather than firing and 403ing. Read the page's member-state guard first; do not add a query here without knowing what decides whether the limited-member panel renders (it is currently gated on `accounts.isSuccess`).
 
 This is not hypothetical. The interim Overview's one real defect was exactly this shape: a limited member holding `money` saw a page containing the word "Overview" and nothing else. Every unit test passed against it, before and after, because each test covering that member asserted the **absence** of something — and absence holds perfectly over a blank page (`docs/LEARNING.md` pattern 2).
 
@@ -2101,8 +2101,9 @@ This is not hypothetical. The interim Overview's one real defect was exactly thi
 - A household with no bills renders the card's own empty line, never a zero.
 - `+ Add → Bill` opens `BillModal`, saves, and moves the card with no reload.
 - The entry is **disabled with its reason until an account exists** — a bill needs a pay-from account, the same precondition `+ Add → Transaction` already carries.
-- **A limited member still gets the limited-member panel**, with the bills query failing alongside the others. Assert on what is *present* — the panel's own text — not only on what is missing, or the test agrees with a blank page.
-- **`NextBillCard` renders nothing on a 403**, not an error region and not a blank card with a heading above it.
+- **A limited member still gets the limited-member panel**, with the bills query disabled alongside the others. Assert on what is *present* — the panel's own text — not only on what is missing, or the test agrees with a blank page.
+- **`NextBillCard` renders nothing while its query is disabled**, not an error region and not a blank card with a heading above it. (The earlier wording here said "on a 403"; Task 11's `enabled` option means the request is never sent, so there is no 403 to render nothing on — asserting against one would test a state that cannot occur.)
+- **The stub must register no `GET /api/v1/bills` route for the limited-member test.** `stubFetchRoutes` throws on an unregistered request, so a query that fires when it should not will fail loudly rather than passing quietly.
 
 - [ ] **Step 3: Run to verify they fail; implement; run to verify they pass**
 
