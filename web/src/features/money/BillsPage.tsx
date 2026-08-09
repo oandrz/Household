@@ -11,22 +11,23 @@
 // matches the spec (`ORDER BY next_due NULLS LAST, name`), so an overdue
 // bill's earlier date is what sorts it first; nothing here re-sorts.
 //
-// BillModal (Task 13), MarkPaidModal (Task 14) and SubscriptionsCard
-// (Task 15) do not exist yet -- this task's own scope boundary. "+ Add bill"
-// below renders with no handler rather than opening nothing when clicked (a
-// button that does nothing on click is worse than no button, the same rule
-// this task's brief states for every deferred control); BillRow's own
-// `onEdit` is scaffolded but left unpassed for the identical reason. Both
-// are Task 13's to wire, since its own file list only touches this file and
-// BillModal.tsx -- BillRow.tsx has to carry the hook already, or Task 13
-// would have nowhere to attach it without touching a file outside its scope.
+// MarkPaidModal (Task 14) and SubscriptionsCard (Task 15) do not exist yet --
+// this task's own scope boundary. BillModal (Task 13) is wired at all three
+// of its entry points below: the header's "+ Add bill", the empty state's
+// own call to action, and BillRow's `onEdit` for a live row -- Goals shipped
+// its own modal with no screen that ever mounted it, and a whole task's
+// review missed the gap (docs/LEARNING.md pattern 15), so this task's own
+// tests (BillModal.test.tsx) assert each entry point separately rather than
+// trusting that wiring one proves the other two.
 import { useState } from "react";
 import { useCurrencies } from "../auth/useAuth";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
+import { BillModal } from "./BillModal";
 import { BillRow } from "./BillRow";
 import { BillStatCards } from "./BillStatCards";
 import { BILL_COPY, dayMonthLabel } from "./billCopy";
 import { useArchiveBill, useBills, useRestoreBill } from "./useBills";
+import type { Bill } from "./billSchemas";
 
 // "What month is it right now" -- read straight from the live clock, unlike
 // BudgetPage.tsx's monthLabel/GoalCard.tsx's targetMonthLabel, which both
@@ -44,6 +45,9 @@ export function BillsPage() {
   const currencies = useCurrencies();
   const archiveBill = useArchiveBill();
   const restoreBill = useRestoreBill();
+  // "new" opens BillModal in create mode; a Bill opens it in edit mode for
+  // that row -- GoalsPage.tsx's own modalGoal shape, restated for bills.
+  const [modalBill, setModalBill] = useState<Bill | "new" | null>(null);
   // Scoped per bill id, not one page-wide flag -- useArchiveBill/useRestoreBill
   // are each one shared mutation instance, so a single mutation's own
   // isPending only ever reflects the most recently dispatched call
@@ -157,11 +161,10 @@ export function BillsPage() {
             />
             {BILL_COPY.archivedToggle}
           </div>
-          {/* Task 13's own entry point. Left unwired on purpose -- see this
-              file's header comment. */}
           <button
             type="button"
             data-testid="bills-add"
+            onClick={() => setModalBill("new")}
             className="rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white"
           >
             {BILL_COPY.addBill}
@@ -181,6 +184,21 @@ export function BillsPage() {
           <p className="mx-auto mt-2 max-w-[420px] text-[13.5px] leading-relaxed text-muted">
             {BILL_COPY.emptyBody}
           </p>
+          {/* Distinct copy from the header's own "+ Add bill" above -- both
+              render together whenever a household has zero live bills, and
+              identical text on two buttons on the same screen is two
+              elements answering to one accessible name (GoalsPage.tsx's own
+              "Create your first goal" carries the identical reasoning). */}
+          <div className="mt-6 flex justify-center">
+            <button
+              type="button"
+              data-testid="bills-create-first"
+              onClick={() => setModalBill("new")}
+              className="rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white"
+            >
+              {BILL_COPY.createFirstBill}
+            </button>
+          </div>
         </div>
       ) : (
         <>
@@ -204,6 +222,7 @@ export function BillsPage() {
                     kind="bill"
                     bill={bill}
                     symbolFor={symbolFor}
+                    onEdit={setModalBill}
                     onArchive={handleArchive}
                     onRestore={handleRestore}
                     pending={pendingIds.has(bill.id)}
@@ -226,6 +245,7 @@ export function BillsPage() {
                     kind="bill"
                     bill={bill}
                     symbolFor={symbolFor}
+                    onEdit={setModalBill}
                     onArchive={handleArchive}
                     onRestore={handleRestore}
                     pending={pendingIds.has(bill.id)}
@@ -286,12 +306,35 @@ export function BillsPage() {
               kind="bill"
               bill={bill}
               symbolFor={symbolFor}
+              onEdit={setModalBill}
               onArchive={handleArchive}
               onRestore={handleRestore}
               pending={pendingIds.has(bill.id)}
             />
           ))}
         </div>
+      )}
+
+      {/* modalBill is "new" for Create, a Bill for Edit -- BillRow.tsx's own
+          `clickable = !archived && Boolean(onEdit)` already refuses a click
+          on an archived row, so onEdit={setModalBill} above never opens this
+          in edit mode for one. No loading gate is needed here the way
+          GoalsPage.tsx gates GoalModal on `currencies.data` -- BillModal owns
+          its own accounts/categories/members queries and shows its own
+          "Loading…" state (BillModal.tsx's own header comment) while they
+          settle, so this page has nothing further to wait on before
+          rendering it. onSaved and onClose both just close the modal --
+          createBill/updateBill (useBills.ts) already invalidate the bills
+          query on success, so this page's own `useBills(includeArchived)`
+          call, mounted the whole time the modal is open, refetches on its
+          own with no extra call needed here. */}
+      {modalBill && (
+        <BillModal
+          mode={modalBill === "new" ? "create" : "edit"}
+          bill={modalBill === "new" ? undefined : modalBill}
+          onClose={() => setModalBill(null)}
+          onSaved={() => setModalBill(null)}
+        />
       )}
     </div>
   );

@@ -50,6 +50,22 @@ export function dayNumber(dateOnly: string): string {
   return String(parseDateOnly(dateOnly).getDate());
 }
 
+// The Repeats dropdown's options. billSchemas.ts's own cadenceSchema stays
+// private to that file (its header comment: Bill's inferred `cadence` field
+// already carries the union everywhere a caller needs it, the same reason
+// goalStatusSchema is never exported either) -- exporting it just for this
+// list would widen that file's public surface for a value BillModal.tsx
+// already gets, typed, from CreateBillBody["cadence"] (useBills.ts). Declared
+// here rather than inline in BillModal.tsx because the labels are
+// user-facing copy, and this file's own job is being the one place every
+// user-facing Bills string lives.
+export const CADENCE_OPTIONS = [
+  { value: "one_off", label: "One-off" },
+  { value: "monthly", label: "Monthly" },
+  { value: "quarterly", label: "Quarterly" },
+  { value: "yearly", label: "Yearly" },
+] as const;
+
 export const BILL_COPY = {
   title: "Bills & subscriptions",
   // M = 0 hides the line rather than rendering "0 of 0" -- the formulas
@@ -152,4 +168,63 @@ export const BILL_COPY = {
     `${count} ${count === 1 ? "bill is" : "bills are"} not counted: no exchange rate.`,
 
   loadError: "Couldn't load your bills.",
+
+  // BillModal (Task 13) -- add and edit, one modal, the TransactionModal.tsx
+  // pattern (the task brief's own words). The two titles vary by mode, unlike
+  // GoalModal.tsx's/AccountModal.tsx's one generic title for both -- the
+  // design draws "Add a bill" as this screen's own words, and there is no
+  // reason to discard them just because Edit needs a second string.
+  addBillModalTitle: "Add a bill",
+  editBillModalTitle: "Edit bill",
+  // The empty state's own call to action -- distinct copy from the header's
+  // "+ Add bill" above (addBill) on purpose: both render on screen together
+  // whenever a household has zero live bills, and identical text on two
+  // buttons is two elements answering to the same accessible name.
+  createFirstBill: "Add your first bill",
+
+  billNameLabel: "Bill name",
+  billNamePlaceholder: "e.g. StarHub, HDB loan",
+  amountLabel: "Amount",
+  repeatsLabel: "Repeats",
+  nextDueLabel: "Next due",
+  categoryLabel: "Category",
+  payFromLabel: "Pay from",
+  paidByLabel: "Paid by",
+  noCategoryOption: "No category",
+  unassignedPayer: "Unassigned",
+  chooseADueDate: "Choose a due date.",
+  amountMustBePositive: "Enter an amount greater than zero.",
+  // Every other modal in this codebase (GoalModal.tsx, BudgetModal.tsx,
+  // AccountModal.tsx) repeats this exact fallback inline rather than through
+  // its own copy file -- kept here instead, not to break with them, but
+  // because this file's own rule (every user-facing string lives in
+  // billCopy.ts) is the stricter one this task was asked to hold to.
+  genericSaveError: "Something went wrong. Please try again.",
+
+  onAutopayLabel: "On autopay",
+  // The rewritten toggle copy (spec decision 3), not the design's "Mark as
+  // automatically paid — otherwise you'll get a reminder". That sentence
+  // promises two things this product does not do: nothing pays itself
+  // (autopay is a display flag only -- every bill, autopay or manual, is
+  // marked paid by a person through the same MarkPaid code path), and the
+  // bill-due reminder has never sent anything (the Settings toggle for it has
+  // existed and done nothing since slice 1). This sentence promises only what
+  // MarkPaid (Task 14) actually does.
+  onAutopayHelp: "The bank pays this one — we'll still ask you to confirm it went out.",
+
+  isSubscriptionLabel: "Counts as a subscription",
+  // Spec decision 4: a subscription is a bill with a flag the household set,
+  // never one the code inferred from its category or cadence -- this says
+  // what ticking the box does, not a claim about what the bill "is".
+  isSubscriptionHelp: "Included in the household's subscription totals.",
+
+  cancelAction: "Cancel",
+  addBillSubmit: "Add bill",
+  saveBillSubmit: "Save",
+
+  // The live-name-collision half of writeBillWriteError's own BILL_NAME_TAKEN
+  // handling -- MapDomainError's generic message never carries the attempted
+  // name, so this modal composes the same sentence GOAL_COPY's own fallback
+  // does for goals, restated for a bill.
+  billNameTaken: (name: string) => `"${name}" is already the name of a bill in this household.`,
 } as const;
