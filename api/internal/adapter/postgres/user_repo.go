@@ -190,6 +190,13 @@ const goalNameUniqueConstraint = "goals_household_id_name_key"
 // INSERT cannot surface as an unmapped 500.
 const goalContributionRolloverUniqueConstraint = "goal_contributions_one_rollover_per_month"
 
+// billNameUniqueConstraint is the name Postgres gave bills' own UNIQUE
+// (household_id, name) (migrations/00008_bills.sql), the same default naming
+// categoryNameUniqueConstraint's own comment explains. translate checks this
+// by name so BillRepository.Create and .Update's own doc comments -- a name
+// collision, archived rows included, is domain.ErrBillNameTaken -- hold.
+const billNameUniqueConstraint = "bills_household_id_name_key"
+
 // translate converts driver errors into domain errors so nothing above the
 // adapter layer ever sees pgx types.
 func translate(err error, op string) error {
@@ -212,6 +219,11 @@ func translate(err error, op string) error {
 		// occupies-its-key rule categories follow (00007_goals.sql's own
 		// comment).
 		return fmt.Errorf("%s: constraint %q: %w", op, pgErr.ConstraintName, domain.ErrGoalNameTaken)
+	case errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == billNameUniqueConstraint:
+		// BillRepository's own contract: Create and Update both hit this on a
+		// name collision, archived rows included -- the same archived-still-
+		// occupies-its-key rule categories and goals follow.
+		return fmt.Errorf("%s: constraint %q: %w", op, pgErr.ConstraintName, domain.ErrBillNameTaken)
 	case errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == goalContributionRolloverUniqueConstraint:
 		// BudgetRepo.RollOverToGoal's own doc comment: a concurrent pair
 		// that both reach the INSERT must not surface as a raw 23505.

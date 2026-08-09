@@ -23,6 +23,35 @@ type Account struct {
 	CreatedAt               pgtype.Timestamptz
 }
 
+type Bill struct {
+	ID                 pgtype.UUID
+	HouseholdID        pgtype.UUID
+	Name               string
+	AmountMinor        int64
+	Cadence            string
+	NextDue            pgtype.Date
+	DueAnchorDay       int16
+	CategoryID         pgtype.UUID
+	PayFromAccountID   pgtype.UUID
+	PaidByMembershipID pgtype.UUID
+	Autopay            bool
+	IsSubscription     bool
+	ArchivedAt         pgtype.Timestamptz
+	CreatedAt          pgtype.Timestamptz
+	UpdatedAt          pgtype.Timestamptz
+}
+
+type BillPayment struct {
+	ID            pgtype.UUID
+	BillID        pgtype.UUID
+	HouseholdID   pgtype.UUID
+	DueOn         pgtype.Date
+	PaidOn        pgtype.Date
+	AmountMinor   int64
+	TransactionID pgtype.UUID
+	CreatedAt     pgtype.Timestamptz
+}
+
 type Budget struct {
 	ID                  pgtype.UUID
 	HouseholdID         pgtype.UUID

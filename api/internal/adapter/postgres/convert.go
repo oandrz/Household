@@ -225,4 +225,5 @@ var (
 	_ usecase.TransactionRepository  = (*TransactionRepo)(nil)
 	_ usecase.BudgetRepository       = (*BudgetRepo)(nil)
 	_ usecase.GoalRepository         = (*GoalRepo)(nil)
+	_ usecase.BillRepository         = (*BillRepo)(nil)
 )
