@@ -681,18 +681,22 @@ type GoalRepository interface {
 }
 
 // BillRecord is a bill joined to the names the screen displays -- its category
-// and its pay-from account's nickname and currency. Same shape and same reason
-// as AccountView and TransactionView above: every consumer of the list wants
+// and its pay-from account's nickname. Same shape and same reason as
+// AccountView and TransactionView above: every consumer of the list wants
 // the names, and re-reading them per row is a query per row.
 //
-// Currency is the ACCOUNT's, not a column on bills. There is no currency on a
-// bill (see 00008_bills.sql's own comment); this field is the account's,
-// carried here so the service can build a Money without a second lookup.
+// Bill.Amount carries the pay-from account's currency: a bill has no
+// currency column of its own (see 00008_bills.sql's own comment), so every
+// method below that returns a BillRecord -- Create included -- populates
+// Bill.Amount.Currency from the same account join that supplies AccountName,
+// the same way TransactionService.Create already forces an expense's
+// currency to its from-account's. There is deliberately no second Currency
+// field here: two fields carrying the same fact would let them disagree
+// with nothing to catch it.
 type BillRecord struct {
 	Bill         domain.Bill
 	CategoryName string
 	AccountName  string
-	Currency     string
 }
 
 // BillPaymentRecord is one settled occurrence joined to its bill's name and
@@ -711,7 +715,9 @@ type BillPaymentRecord struct {
 
 // NewBillRow is Create's input. DueAnchorDay is derived by the service from
 // NextDue, never supplied by a caller: an anchor that disagreed with the first
-// due date would drift on the very first advance.
+// due date would drift on the very first advance. BillService derives it the
+// same way on any update that moves NextDue, so the one calendar computation
+// lives in a single layer rather than being duplicated in the repository.
 type NewBillRow struct {
 	HouseholdID        string
 	Name               string
@@ -724,32 +730,6 @@ type NewBillRow struct {
 	PaidByMembershipID string
 	Autopay            bool
 	IsSubscription     bool
-}
-
-// BillPatch is a PATCH: a nil field is unchanged. There is deliberately no
-// ArchivedAt field -- archive and restore are their own routes, so an ordinary
-// rename cannot archive a bill as a side effect (router.go's own comment for
-// accounts, categories and goals).
-//
-// ClearCategory and ClearPayer are how a set field is unset, the same explicit
-// -clear convention clearReceivedAmount uses on transactions: a nil pointer
-// already means "unchanged", so it cannot also mean "clear".
-//
-// When NextDue is set, the implementation must also reset due_anchor_day from
-// it. An explicit edit is the household choosing a new anchor; leaving the old
-// one would make the next advance jump to a day they did not pick.
-type BillPatch struct {
-	Name               *string
-	AmountMinor        *int64
-	Cadence            *domain.Cadence
-	NextDue            *time.Time
-	CategoryID         *string
-	ClearCategory      bool
-	PayFromAccountID   *string
-	PaidByMembershipID *string
-	ClearPayer         bool
-	Autopay            *bool
-	IsSubscription     *bool
 }
 
 // PaymentWrite is everything RecordPayment needs to write all three rows. The
@@ -811,16 +791,24 @@ type BillRepository interface {
 	// must be indistinguishable from not existing at all.
 	Get(ctx context.Context, householdID, billID string) (BillRecord, error)
 	// Create writes one row. A name colliding with UNIQUE (household_id, name)
-	// -- archived rows included -- surfaces as domain.ErrBillNameTaken.
+	// -- archived rows included -- surfaces as domain.ErrBillNameTaken. The
+	// returned record's Bill.Amount.Currency comes from the pay-from account,
+	// per BillRecord's own comment -- NewBillRow carries no currency of its
+	// own for Create to fall back on.
 	Create(ctx context.Context, in NewBillRow) (BillRecord, error)
-	// Update applies a patch. Same collision contract as Create. When
-	// p.NextDue is non-nil the implementation also resets due_anchor_day from
-	// it; see BillPatch's own comment.
-	Update(ctx context.Context, householdID, billID string, p BillPatch) (BillRecord, error)
+	// Update replaces every mutable column. BillService is what turns a
+	// partial PATCH into a complete domain.Bill; this port never merges. Same
+	// collision contract as Create.
+	Update(ctx context.Context, b domain.Bill) (BillRecord, error)
 	// SetArchived stamps archived_at with at, or clears it when archived is
-	// false -- the AccountRepository.SetArchived signature, at supplied by the
-	// caller rather than read with time.Now() inside the adapter.
-	SetArchived(ctx context.Context, householdID, billID string, archived bool, at time.Time) error
+	// false, and returns the bill as it now stands -- the same
+	// at-supplied-by-the-caller convention AccountRepository.SetArchived and
+	// GoalRepository.SetArchived use, returning the record (BillRecord here,
+	// rather than a bare domain.Bill, so the joined names come with it) as
+	// they do rather than a bare error. Every 2xx except 204 carries a JSON
+	// body in this product, so a bare error would force the archive handler
+	// into a second Get purely to build its response.
+	SetArchived(ctx context.Context, householdID, billID string, archived bool, at time.Time) (BillRecord, error)
 	// RecordPayment writes the bill_payments row, the expense transaction and
 	// the advanced next_due in ONE database transaction. A bill left advanced
 	// with no payment, or a payment with no expense, is not a state this port
