@@ -118,6 +118,37 @@ func (e *BillPaymentNotLatestError) Error() string {
 
 func (e *BillPaymentNotLatestError) Unwrap() error { return ErrForbidden }
 
+// BillNotPayableReason is which of MarkPaid's three checks refused the
+// attempt -- the archived bill, the settled one-off and the archived
+// pay-from account each mean a different thing to the household, and the
+// design's own error table gives two of the three their own named 422
+// ("Paying from an archived account | 422, naming the account"; "Paying a
+// settled one-off | 422"). A bare domain.ErrForbidden cannot carry which one
+// happened; this can.
+type BillNotPayableReason string
+
+const (
+	BillArchived           BillNotPayableReason = "bill_archived"
+	BillSettled            BillNotPayableReason = "bill_settled"
+	PayFromAccountArchived BillNotPayableReason = "pay_from_account_archived"
+)
+
+// BillNotPayableError is MarkPaid's own refusal, enriched with which of the
+// three checks it was. Unwrap returns ErrForbidden -- the
+// BillPaymentNotLatestError precedent above applied here -- so the existing
+// bare-sentinel assertions (TestMarkPaidRefusesAnArchivedBill,
+// TestMarkPaidRefusesAnArchivedPayFromAccount,
+// TestMarkPaidRefusesASettledOneOff) need no change. Only the HTTP layer,
+// which has to name each cause rather than answer one generic 403 for all
+// three, needs to reach for the richer type via errors.As.
+type BillNotPayableError struct {
+	Reason BillNotPayableReason
+}
+
+func (e *BillNotPayableError) Error() string { return "bill is not payable: " + string(e.Reason) }
+
+func (e *BillNotPayableError) Unwrap() error { return ErrForbidden }
+
 // NextDue advances a due date by one period of the cadence, clamping to the
 // last day of the destination month.
 //

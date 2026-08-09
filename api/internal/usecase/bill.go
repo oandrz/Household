@@ -634,6 +634,15 @@ func (s *BillService) SetArchived(ctx context.Context, householdID, billID strin
 // not an acceptable answer to a bad request body. Checked before the Get
 // below, the same "validate the caller's own input before spending a query
 // on it" order Create uses.
+//
+// Three separate conditions refuse with *domain.BillNotPayableError, not a
+// bare domain.ErrForbidden: an archived bill, a settled one-off with no
+// occurrence left, and an archived pay-from account each mean something
+// different to the household, and the design's own error table gives two of
+// the three their own named 422. The error's Reason field is what the HTTP
+// layer switches on to answer each with its own message -- see that type's
+// own doc comment for why this does not disturb errors.Is(err,
+// domain.ErrForbidden) callers.
 func (s *BillService) MarkPaid(ctx context.Context, in MarkPayment) (BillPaymentView, error) {
 	if in.AmountMinor <= 0 {
 		return BillPaymentView{}, domain.ErrBillAmountNotPositive
@@ -643,12 +652,12 @@ func (s *BillService) MarkPaid(ctx context.Context, in MarkPayment) (BillPayment
 		return BillPaymentView{}, err
 	}
 	if rec.Bill.IsArchived() {
-		return BillPaymentView{}, domain.ErrForbidden
+		return BillPaymentView{}, &domain.BillNotPayableError{Reason: domain.BillArchived}
 	}
 	if rec.Bill.NextDue == nil {
 		// A settled one-off has no occurrence left to pay -- nil here means
 		// exactly that (Bill.NextDue's own comment), not "not yet loaded".
-		return BillPaymentView{}, domain.ErrForbidden
+		return BillPaymentView{}, &domain.BillNotPayableError{Reason: domain.BillSettled}
 	}
 
 	acct, err := s.deps.Accounts.Get(ctx, in.HouseholdID, rec.Bill.PayFromAccountID)
@@ -656,7 +665,7 @@ func (s *BillService) MarkPaid(ctx context.Context, in MarkPayment) (BillPayment
 		return BillPaymentView{}, err
 	}
 	if acct.Account.IsArchived() {
-		return BillPaymentView{}, domain.ErrForbidden
+		return BillPaymentView{}, &domain.BillNotPayableError{Reason: domain.PayFromAccountArchived}
 	}
 	// The expense's currency is the pay-from ACCOUNT's, never the bill's own
 	// stored figure reinterpreted -- transaction.go:232 is the identical rule

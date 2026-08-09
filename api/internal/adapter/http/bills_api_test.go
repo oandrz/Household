@@ -789,6 +789,89 @@ func TestBillsMarkPaidInAnotherHouseholdIsNotFound(t *testing.T) {
 	}
 }
 
+// TestBillsMarkPaidRefusesAnArchivedPayFromAccountWithNamedMessage is the
+// design's own "Paying from an archived account | 422, naming the account"
+// row: MarkPaid's domain.ErrForbidden used to fall through to
+// MapDomainError's generic, contextless 403 -- this pins the fix
+// (writeMarkPaidError) at the wire, the same "assert the message, not just
+// the status" hardening the two NOT_FOUND tests above already needed.
+func TestBillsMarkPaidRefusesAnArchivedPayFromAccountWithNamedMessage(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	accountID := env.mustCreateAccountID(t, session, csrf)
+	created := env.mustCreateBill(t, session, csrf, map[string]any{
+		"name": "Electricity", "amountMinor": 12_000, "cadence": "monthly",
+		"nextDue": farFutureDate(), "payFromAccountId": accountID,
+	})
+
+	archiveRec := env.authed(t, http.MethodPost, "/api/v1/accounts/"+accountID+"/archive", nil, session, csrf)
+	if archiveRec.Code != http.StatusOK {
+		t.Fatalf("archive account: status = %d, body = %s", archiveRec.Code, archiveRec.Body.String())
+	}
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/bills/"+created.Bill.ID+"/pay",
+		map[string]any{"amountMinor": 12_000, "paidOn": "2026-01-01"}, session, csrf)
+	body := assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "ACCOUNT_ARCHIVED")
+	if body.Error.Message != "That account is archived and cannot be used to pay a bill." {
+		t.Fatalf("message = %q, want the account-archived wording", body.Error.Message)
+	}
+}
+
+// TestBillsMarkPaidRefusesASettledOneOffWithNamedMessage is the design's
+// own "Paying a settled one-off | 422" row: a one-off bill's first pay
+// settles it (NextDue -> nil), and a second pay attempt used to answer the
+// same generic 403 the archived-account case did.
+func TestBillsMarkPaidRefusesASettledOneOffWithNamedMessage(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	accountID := env.mustCreateAccountID(t, session, csrf)
+	created := env.mustCreateBill(t, session, csrf, map[string]any{
+		"name": "Renew passport", "amountMinor": 7_000, "cadence": "one_off",
+		"nextDue": "2030-01-01", "payFromAccountId": accountID,
+	})
+	paid := env.mustPayBill(t, session, csrf, created.Bill.ID, map[string]any{
+		"amountMinor": 7_000, "paidOn": "2030-01-01",
+	})
+	if paid.Bill.NextDue != nil {
+		t.Fatalf("nextDue after settling = %v, want nil", paid.Bill.NextDue)
+	}
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/bills/"+created.Bill.ID+"/pay",
+		map[string]any{"amountMinor": 7_000, "paidOn": "2030-01-02"}, session, csrf)
+	body := assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "BILL_SETTLED")
+	if body.Error.Message == "You do not have permission to do that." {
+		t.Fatalf("message = %q, want a bill-settled specific message, not the generic FORBIDDEN one", body.Error.Message)
+	}
+}
+
+// TestBillsMarkPaidRefusesAnArchivedBillWithARestoreMessage is the row the
+// design's own table has none for -- paying an archived bill -- ruled on
+// specifically for this task: named, not a bare 403, and framed as
+// Archive/Restore (the household's own reversible act) rather than a
+// permission failure, the same framing every other archived-thing message
+// in this product uses.
+func TestBillsMarkPaidRefusesAnArchivedBillWithARestoreMessage(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	accountID := env.mustCreateAccountID(t, session, csrf)
+	created := env.mustCreateBill(t, session, csrf, map[string]any{
+		"name": "Old gym", "amountMinor": 8_000, "cadence": "monthly",
+		"nextDue": farFutureDate(), "payFromAccountId": accountID,
+	})
+
+	archiveRec := env.authed(t, http.MethodPost, "/api/v1/bills/"+created.Bill.ID+"/archive", nil, session, csrf)
+	if archiveRec.Code != http.StatusOK {
+		t.Fatalf("archive bill: status = %d, body = %s", archiveRec.Code, archiveRec.Body.String())
+	}
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/bills/"+created.Bill.ID+"/pay",
+		map[string]any{"amountMinor": 8_000, "paidOn": "2026-01-01"}, session, csrf)
+	body := assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "BILL_ARCHIVED")
+	if !strings.Contains(body.Error.Message, "estore") {
+		t.Fatalf("message = %q, want it to point at Restore", body.Error.Message)
+	}
+}
+
 // TestBillsUndoDeletesThePaymentRewindsNextDueAndAnswers204WithNoBody proves
 // step 7's own self-review question directly: the DELETE response really
 // carries zero bytes (not merely status 204), and undoing genuinely rewinds

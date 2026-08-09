@@ -345,14 +345,15 @@ func setBillArchived(deps Deps, archived bool) http.HandlerFunc {
 // (MarkPayment's own comment on why the amount is the caller's, not the
 // bill's).
 //
-// Every failure MarkPaid can return already has a home in the shared
+// Most of what MarkPaid can return already has a home in the shared
 // MapDomainError switch: domain.ErrBillAmountNotPositive -> 422, domain.
 // ErrNotFound (unknown bill, or one in another household -- BillRepository.
 // Get's own "indistinguishable from not existing" contract) -> 404, and
 // domain.ErrAlreadyExists (the UNIQUE (bill_id, due_on) backstop behind an
-// occurrence paid twice) -> 409. None needs bill-specific interception the
-// way ErrBillNameTaken and ErrForbidden do for Create/Update, so this
-// handler calls MapDomainError directly.
+// occurrence paid twice) -> 409. *domain.BillNotPayableError is the one
+// exception, intercepted by writeMarkPaidError below -- see that function's
+// own comment for why a bare MapDomainError call would answer the wrong
+// status for two of its three causes.
 func handleMarkBillPaid(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
@@ -396,7 +397,7 @@ func handleMarkBillPaid(deps Deps) http.HandlerFunc {
 			PaidOn:      paidOn,
 		})
 		if err != nil {
-			MapDomainError(w, r, err)
+			writeMarkPaidError(w, r, err)
 			return
 		}
 
@@ -426,6 +427,52 @@ func handleMarkBillPaid(deps Deps) http.HandlerFunc {
 			Bill:    toBillDTO(updated),
 		})
 	}
+}
+
+// writeMarkPaidError intercepts MarkPaid's own *domain.BillNotPayableError
+// and gives each of its three Reasons its own named 422 -- the design's own
+// error table ("Paying from an archived account | 422, naming the
+// account"; "Paying a settled one-off | 422"), plus an archived bill, which
+// the table has no row for. That third case gets a ruling, not a guess: a
+// bill answers to Archive/Restore everywhere else in this product (the same
+// reversible-by-the-household framing router.go's own comments give
+// accounts, categories, goals and bills alike), so a household hitting
+// "Mark paid" on one they archived is told to restore it, not told they
+// lack permission.
+//
+// A bare MapDomainError(w, r, err) call would answer all three with the
+// SAME generic 403 "You do not have permission to do that." -- correct for
+// no household reading it, and the exact mislabelling this function exists
+// to close (writeBillWriteError's own ACCOUNT_ARCHIVED case is deliberately
+// NOT reused here: applying it to all three would relabel "this bill is
+// archived" and "this bill is settled" as "that account is archived," a
+// fresh instance of the same class of bug). Anything else -- the amount
+// guard, an unknown bill, the double-pay backstop -- falls through to
+// MapDomainError unchanged.
+func writeMarkPaidError(w http.ResponseWriter, r *http.Request, err error) {
+	var notPayable *domain.BillNotPayableError
+	if errors.As(err, &notPayable) {
+		switch notPayable.Reason {
+		case domain.BillArchived:
+			WriteError(w, http.StatusUnprocessableEntity, "BILL_ARCHIVED",
+				"This bill is archived. Restore it before marking a payment.", nil)
+			return
+		case domain.BillSettled:
+			WriteError(w, http.StatusUnprocessableEntity, "BILL_SETTLED",
+				"This bill has already been paid in full and has no next occurrence due.", nil)
+			return
+		case domain.PayFromAccountArchived:
+			WriteError(w, http.StatusUnprocessableEntity, "ACCOUNT_ARCHIVED", accountArchivedMessage, nil)
+			return
+		}
+		// An unrecognised Reason is a value this code did not construct
+		// reaching here regardless -- fail closed the same way a switch over
+		// a database column would (CLAUDE.md's own house rule), rather than
+		// silently falling through to a misleading generic message.
+		logAndWriteInternal(w, r, fmt.Errorf("bill_handlers: unknown BillNotPayableReason %q", notPayable.Reason))
+		return
+	}
+	MapDomainError(w, r, err)
 }
 
 // handleUndoBillPayment answers 204 with no body -- the one exemption to the
@@ -482,6 +529,14 @@ func writeBill(w http.ResponseWriter, view usecase.BillView, status int) {
 	WriteJSON(w, status, billResponse{Bill: toBillDTO(view)})
 }
 
+// accountArchivedMessage is the one wording for "that account cannot be
+// used" -- Create and Update's shared writeBillWriteError below, and
+// MarkPaid's own writeMarkPaidError, both answer with this exact text for
+// the exact same underlying fact (the pay-from account is archived), so
+// there is exactly one string to keep in sync rather than two that could
+// drift apart.
+const accountArchivedMessage = "That account is archived and cannot be used to pay a bill."
+
 // writeBillWriteError is Create and Update's shared failure path, once each
 // has already handled whatever needs context this function is not given
 // (Update's own ErrBillCurrencyImmutable interception below, which needs a
@@ -499,12 +554,14 @@ func writeBill(w http.ResponseWriter, view usecase.BillView, status int) {
 // here would be guessing at what every OTHER future caller wants this
 // message to say.
 //
-// This function is Create and Update's ONLY -- errors.Is(err,
-// domain.ErrForbidden) also matches *domain.BillPaymentNotLatestError (its
-// own Unwrap), so routing UndoPayment's refusal through here instead of
-// writeUndoPaymentError would mislabel "not the latest payment" as "that
-// account is archived." Harmless today (undo never calls this function),
-// but the trap is real if a future refactor tries to share this path.
+// This function is Create and Update's ONLY. errors.Is(err,
+// domain.ErrForbidden) also matches *domain.BillPaymentNotLatestError and
+// *domain.BillNotPayableError (both their own Unwrap), so routing
+// UndoPayment's or MarkPaid's refusal through here instead of their own
+// writeUndoPaymentError/writeMarkPaidError would mislabel "not the latest
+// payment" or "this bill is archived"/"this bill is settled" as "that
+// account is archived." Harmless today (neither calls this function), but
+// the trap is real if a future refactor tries to share this path.
 //
 // ErrBillNameTaken gets writeGoalNameConflict's own richer-409 treatment:
 // look for an archived bill holding the same name, and if one exists, offer
@@ -515,8 +572,7 @@ func writeBill(w http.ResponseWriter, view usecase.BillView, status int) {
 // back to MapDomainError's own BILL_NAME_TAKEN case.
 func writeBillWriteError(w http.ResponseWriter, r *http.Request, deps Deps, householdID, attemptedName string, today time.Time, err error) {
 	if errors.Is(err, domain.ErrForbidden) {
-		WriteError(w, http.StatusUnprocessableEntity, "ACCOUNT_ARCHIVED",
-			"That account is archived and cannot be used to pay a bill.", nil)
+		WriteError(w, http.StatusUnprocessableEntity, "ACCOUNT_ARCHIVED", accountArchivedMessage, nil)
 		return
 	}
 	if !errors.Is(err, domain.ErrBillNameTaken) {

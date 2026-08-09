@@ -932,6 +932,26 @@ func TestMarkPaidSettlesAOneOffAsNeitherDueSoonNorLater(t *testing.T) {
 	}
 }
 
+// markPaidReason is the shared assertion the three refusal tests below use:
+// each must still satisfy errors.Is(err, domain.ErrForbidden) (nothing that
+// already matches the bare sentinel elsewhere may stop working) AND must
+// carry the ONE Reason that check produced -- not just any
+// *domain.BillNotPayableError, since a bug that swapped two of the three
+// reasons would otherwise slip past a bare errors.As check.
+func markPaidReason(t *testing.T, err error, want domain.BillNotPayableReason) {
+	t.Helper()
+	if !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("err = %v, want it to satisfy errors.Is(err, domain.ErrForbidden)", err)
+	}
+	var notPayable *domain.BillNotPayableError
+	if !errors.As(err, &notPayable) {
+		t.Fatalf("err = %v, want a *domain.BillNotPayableError", err)
+	}
+	if notPayable.Reason != want {
+		t.Fatalf("reason = %q, want %q", notPayable.Reason, want)
+	}
+}
+
 func TestMarkPaidRefusesAnArchivedBill(t *testing.T) {
 	repo := &fakeBillRepo{}
 	svc := newBillService(t, repo)
@@ -940,9 +960,7 @@ func TestMarkPaidRefusesAnArchivedBill(t *testing.T) {
 	_, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
 		HouseholdID: "h1", BillID: "bill-1", AmountMinor: 8000, PaidOn: day("2026-08-09"),
 	})
-	if !errors.Is(err, domain.ErrForbidden) {
-		t.Fatalf("MarkPaid(archived bill) = %v, want ErrForbidden", err)
-	}
+	markPaidReason(t, err, domain.BillArchived)
 }
 
 func TestMarkPaidRefusesAnArchivedPayFromAccount(t *testing.T) {
@@ -953,9 +971,7 @@ func TestMarkPaidRefusesAnArchivedPayFromAccount(t *testing.T) {
 	_, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
 		HouseholdID: "h1", BillID: "bill-1", AmountMinor: 14230, PaidOn: day("2026-08-09"),
 	})
-	if !errors.Is(err, domain.ErrForbidden) {
-		t.Fatalf("MarkPaid(archived account) = %v, want ErrForbidden", err)
-	}
+	markPaidReason(t, err, domain.PayFromAccountArchived)
 }
 
 func TestMarkPaidRefusesASettledOneOff(t *testing.T) {
@@ -968,9 +984,7 @@ func TestMarkPaidRefusesASettledOneOff(t *testing.T) {
 	_, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
 		HouseholdID: "h1", BillID: "bill-1", AmountMinor: 7000, PaidOn: day("2026-08-25"),
 	})
-	if !errors.Is(err, domain.ErrForbidden) {
-		t.Fatalf("MarkPaid(settled one-off) = %v, want ErrForbidden", err)
-	}
+	markPaidReason(t, err, domain.BillSettled)
 }
 
 // TestMarkPaidRefusesANonPositiveAmount is the symmetry Create and Update
