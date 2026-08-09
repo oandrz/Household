@@ -315,6 +315,19 @@ export const BILL_COPY = {
   // The empty state (point 4): explains how a bill becomes a subscription --
   // the checkbox in the Add/Edit-bill modal -- rather than leaving a
   // household with bills and a blank panel and no way to know what it is
-  // for.
+  // for. Only true when NOTHING is ticked -- SubscriptionsCard picks between
+  // this and subscriptionsEmptyExcludedBody below depending on which is
+  // actually the case, so this one never has to cover the ticked-but-
+  // excluded state by accident.
   subscriptionsEmptyBody: `No bills are marked as subscriptions yet. Tick "${IS_SUBSCRIPTION_LABEL}" when adding or editing a bill to see it listed here.`,
+  // A second empty state a review round found this panel's first cut did
+  // not have: a household CAN tick "Counts as a subscription" on a bill and
+  // still see this same blank panel, because a one-off or an archived bill
+  // is excluded regardless of the flag (SubscriptionsCard.tsx's own filter
+  // comment). subscriptionsEmptyBody's "not marked yet" would be false in
+  // that state -- the household marked one, and Hearth is not showing it --
+  // so this names the actual reason instead of repeating a sentence that
+  // contradicts what the household just did.
+  subscriptionsEmptyExcludedBody:
+    "A bill marked as a subscription isn't always counted here: a one-off isn't a recurring cost, and an archived bill isn't a live one.",
 } as const;

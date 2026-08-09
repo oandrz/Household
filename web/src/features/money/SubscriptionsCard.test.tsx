@@ -150,17 +150,33 @@ describe("SubscriptionsCard", () => {
     // Names the exact control (the modal's own checkbox label) that turns
     // this state into the populated one -- not just "nothing here yet".
     expect(empty).toHaveTextContent('Tick "Counts as a subscription"');
+    // This sentence says nothing is marked -- which is only true because
+    // nothing here is ticked at all. The sibling excluded-state sentence
+    // (below) must not also render, or the two would contradict each other.
+    expect(empty).not.toHaveTextContent("isn't always counted here");
     // Point 3 holds in the empty state too, not only once rows exist.
     expect(screen.queryByText(/reviewed/i)).not.toBeInTheDocument();
   });
 
-  it("an archived bill that is ticked as a subscription is never counted or rendered", () => {
+  // A review round found this exact gap: the panel's first cut showed
+  // "No bills are marked as subscriptions yet" to a household that HAD
+  // ticked one -- the sentence was false the moment a ticked bill existed
+  // that this filter still excludes. archivedAt and cadence are two
+  // independent ways a ticked bill can land here (this test / the one
+  // below), so both must produce the same honest explanation rather than
+  // the "nothing ticked" sentence repeating a claim that is not true.
+  it("an archived bill that is ticked as a subscription explains why, rather than claiming nothing is ticked", () => {
     renderCard([
       billFixture({ id: "b1", isSubscription: true, archivedAt: "2026-06-01T00:00:00Z" }),
     ]);
 
     expect(screen.queryByTestId("subscription-row")).not.toBeInTheDocument();
-    expect(screen.getByTestId("subscriptions-empty")).toBeInTheDocument();
+    const empty = screen.getByTestId("subscriptions-empty");
+    expect(empty).toHaveTextContent("isn't always counted here");
+    expect(empty).toHaveTextContent("an archived bill isn't a live one");
+    // The "nothing ticked" sentence would be false here -- this bill IS
+    // ticked -- so it must not render instead.
+    expect(empty).not.toHaveTextContent("No bills are marked as subscriptions yet");
   });
 
   // BillModal's own checkbox never refuses a one-off (nothing gates it on
@@ -171,7 +187,7 @@ describe("SubscriptionsCard", () => {
   // figure neither total above it ever moves for, while isSubscriptionHelp's
   // own copy promises every ticked bill is "included in the household's
   // subscription totals" -- a promise this exact bill would break.
-  it("a ticked one-off is excluded entirely -- it never contributes to either total", () => {
+  it("a ticked one-off explains why it is excluded, rather than claiming nothing is ticked", () => {
     renderCard(
       [
         billFixture({ id: "b1", name: "Piano tuning", cadence: "one_off", amountMinor: 12000 }),
@@ -181,7 +197,10 @@ describe("SubscriptionsCard", () => {
 
     expect(screen.queryByTestId("subscription-row")).not.toBeInTheDocument();
     expect(screen.queryByText("Piano tuning")).not.toBeInTheDocument();
-    expect(screen.getByTestId("subscriptions-empty")).toBeInTheDocument();
+    const empty = screen.getByTestId("subscriptions-empty");
+    expect(empty).toHaveTextContent("isn't always counted here");
+    expect(empty).toHaveTextContent("a one-off isn't a recurring cost");
+    expect(empty).not.toHaveTextContent("No bills are marked as subscriptions yet");
   });
 
   it("a ticked one-off does not hide a real subscription alongside it, and is still excluded", () => {

@@ -59,13 +59,25 @@ export function SubscriptionsCard({
   );
 
   if (subscriptions.length === 0) {
+    // Two different reasons land here, and they read very differently to a
+    // household: nobody has ticked anything yet, or somebody ticked a bill
+    // that this filter excludes anyway (a one-off, or one since archived).
+    // `subscriptionsEmptyBody` ("No bills are marked as subscriptions yet")
+    // is false in the second case -- a review round caught the first cut of
+    // this panel showing that same sentence to a household that HAD just
+    // ticked "Counts as a subscription" on a one-off, telling them they had
+    // not done the thing they had just done. `anyTicked` checks every bill
+    // handed in, not `subscriptions` (which is empty either way here), so it
+    // sees a ticked-but-excluded bill even though the filter above already
+    // dropped it.
+    const anyTicked = bills.some((bill) => bill.isSubscription);
     return (
       <div data-testid="subscriptions-card" className="rounded-xl border border-hairline bg-card p-[22px]">
         <h2 data-testid="subscriptions-heading" className="text-[14px] font-semibold text-ink">
           {BILL_COPY.subscriptionsTitle}
         </h2>
         <p data-testid="subscriptions-empty" className="mt-3 text-[12.5px] leading-relaxed text-muted">
-          {BILL_COPY.subscriptionsEmptyBody}
+          {anyTicked ? BILL_COPY.subscriptionsEmptyExcludedBody : BILL_COPY.subscriptionsEmptyBody}
         </p>
       </div>
     );
