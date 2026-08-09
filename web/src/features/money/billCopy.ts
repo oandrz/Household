@@ -86,6 +86,16 @@ export const BILL_COPY = {
   statDueThisMonth: "Due this month",
   statPaidSoFar: "Paid so far",
   statNextDue: "Next due",
+  // The zero-state's own copy (state 2's contract line: "stat cards render
+  // zeros with their own copy," not bare "S$0.00") -- shown as a subtitle
+  // beside the figure whenever it actually is zero, on either card
+  // independently, since a household can easily have nothing due this month
+  // while still having paid something (or the reverse).
+  // Leading "· " matches nextDueBillNameClause's own connector, so a zero
+  // card's subtitle reads consistently with the Next-due card's "· Tax
+  // GIRO" alongside it.
+  dueThisMonthZero: "· Nothing due this month",
+  paidSoFarZero: "· Nothing paid yet",
   // Replaces the date value outright on an overdue next-due bill -- "names
   // it as overdue rather than printing a past date as though upcoming" (the
   // task brief's own words for state 5).

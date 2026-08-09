@@ -151,8 +151,13 @@ describe("BillsPage", () => {
       }),
     );
 
-    expect(await screen.findByTestId("bills-stat-due-this-month")).toHaveTextContent("S$0.00");
-    expect(screen.getByTestId("bills-stat-paid-so-far")).toHaveTextContent("S$0.00");
+    // "the stat cards explain rather than showing bare zeros" -- the test's
+    // own name -- so this checks for the explanatory text, not merely that
+    // the figure happens to be "S$0.00".
+    expect(await screen.findByTestId("bills-stat-due-this-month")).toHaveTextContent(
+      "S$0.00· Nothing due this month",
+    );
+    expect(screen.getByTestId("bills-stat-paid-so-far")).toHaveTextContent("S$0.00· Nothing paid yet");
 
     const dueSoonSection = screen.getByTestId("bills-due-soon");
     expect(within(dueSoonSection).getByText("Nothing due in the next 30 days.")).toBeInTheDocument();
@@ -240,6 +245,48 @@ describe("BillsPage", () => {
     expect(panel).toHaveTextContent("All caught up");
     expect(panel).toHaveTextContent("everything due in August is paid.");
     expect(panel).toHaveTextContent("Next bill: School fees, 15 Sep.");
+  });
+
+  // dueThisMonthMinor only sums a bill whose next_due falls in the CURRENT
+  // month -- an overdue bill from a previous month contributes to neither
+  // half of the union, so the two totals can agree while that bill still
+  // sits, unpaid, in Due soon. Without the `nextDue.overdue !== true` guard
+  // this would have rendered "All caught up" directly above "Overdue since
+  // 20 Jul" -- caught in review before it shipped, not found by a browser
+  // walk.
+  it("all caught up stays hidden while an overdue bill from a previous month is still unpaid", async () => {
+    const overdue = billFixture({
+      id: "b1",
+      name: "Property tax",
+      nextDue: "2026-07-20",
+      overdue: true,
+      dueSoon: true,
+      autopay: false,
+    });
+    const payment = paymentFixture({ id: "p1", billName: "Netflix", dueOn: "2026-08-05" });
+    renderPage(
+      billsFixture([overdue], [payment], {
+        // Equal, both positive, and nothing excluded -- every other clause
+        // of the allCaughtUp condition holds; only the overdue guard stops
+        // the panel here.
+        dueThisMonthMinor: 1998,
+        paidSoFarMinor: 1998,
+        nextDue: {
+          billId: "b1",
+          billName: "Property tax",
+          dueOn: "2026-07-20",
+          amountMinor: 23000,
+          currency: "SGD",
+          overdue: true,
+          autopay: false,
+        },
+        autopayCount: 0,
+        billCount: 1,
+      }),
+    );
+
+    await screen.findByText("Property tax");
+    expect(screen.queryByTestId("bills-all-caught-up")).not.toBeInTheDocument();
   });
 
   it("overdue: sorts first, and an autopay bill's copy differs from a manual one's", async () => {

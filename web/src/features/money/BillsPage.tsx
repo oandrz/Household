@@ -114,17 +114,28 @@ export function BillsPage() {
 
   // "Every bill due this month is paid": dueThisMonthMinor already sums both
   // this month's payments and this month's still-unpaid bills (the formulas
-  // table's own union), so the two totals agree exactly once nothing is left
-  // unpaid. Guarded on `> 0` so a month with nothing due at all (state 2)
-  // does not read as "caught up" merely because 0 equals 0, and on
-  // `excludedNoRate === 0` so an unpaid foreign-currency bill excluded from
-  // both sums cannot make the panel claim victory while that bill still sits
-  // in Due soon -- the BudgetRolloverCard precedent (commit 8a1114b) for the
-  // identical shape of lie.
+  // table's own union), so the two totals agree exactly once nothing *this
+  // month* is left unpaid. Guarded on `> 0` so a month with nothing due at
+  // all (state 2) does not read as "caught up" merely because 0 equals 0,
+  // and on `excludedNoRate === 0` so an unpaid foreign-currency bill
+  // excluded from both sums cannot make the panel claim victory while that
+  // bill still sits in Due soon -- the BudgetRolloverCard precedent (commit
+  // 8a1114b) for the identical shape of lie.
+  //
+  // None of that catches an overdue bill from a PREVIOUS month, though: an
+  // overdue `next_due` contributes to neither sum (dueThisMonthMinor only
+  // counts a bill whose next_due falls in the current month), so the two
+  // totals can agree while an overdue row is still sitting in Due soon.
+  // `nextDue` is the earliest non-null next_due over every live bill, so if
+  // any live bill is overdue, the earliest one is too -- `nextDue.overdue`
+  // is therefore the server's own answer to "is anything still overdue,"
+  // read off the one figure already on this page rather than a second scan
+  // of `liveBills`.
   const allCaughtUp =
     summary.dueThisMonthMinor > 0 &&
     summary.dueThisMonthMinor === summary.paidSoFarMinor &&
-    summary.excludedNoRate === 0;
+    summary.excludedNoRate === 0 &&
+    summary.nextDue?.overdue !== true;
 
   return (
     <div data-testid="bills-page" className="flex flex-col gap-5 px-9 py-8">
