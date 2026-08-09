@@ -176,6 +176,15 @@ func TestBillsRoutesRequireMoneyAndOwner(t *testing.T) {
 		{http.MethodPatch, "/api/v1/bills/" + zeroUUID, http.StatusBadRequest, false},
 		{http.MethodPost, "/api/v1/bills/" + zeroUUID + "/archive", http.StatusNotFound, true},
 		{http.MethodPost, "/api/v1/bills/" + zeroUUID + "/restore", http.StatusNotFound, true},
+		// pay decodes its body before it ever looks the bill up (the same
+		// order Create and Update already follow), so a bodiless request as
+		// owner answers 400 INVALID_BODY exactly like POST /bills and PATCH
+		// /bills/{id} above, never reaching the not-found check.
+		{http.MethodPost, "/api/v1/bills/" + zeroUUID + "/pay", http.StatusBadRequest, false},
+		// undo needs no body at all -- chi URL params only -- so a made-up
+		// bill AND payment id reaches UndoPayment, which answers the same
+		// {404, "That could not be found."} shape as archive/restore above.
+		{http.MethodDelete, "/api/v1/bills/" + zeroUUID + "/payments/" + zeroUUID, http.StatusNotFound, true},
 	}
 
 	for _, route := range routes {
@@ -235,6 +244,8 @@ func TestBillsWriteRoutesRequireCSRF(t *testing.T) {
 		{http.MethodPatch, "/api/v1/bills/" + zeroUUID},
 		{http.MethodPost, "/api/v1/bills/" + zeroUUID + "/archive"},
 		{http.MethodPost, "/api/v1/bills/" + zeroUUID + "/restore"},
+		{http.MethodPost, "/api/v1/bills/" + zeroUUID + "/pay"},
+		{http.MethodDelete, "/api/v1/bills/" + zeroUUID + "/payments/" + zeroUUID},
 	}
 
 	for _, route := range routes {
@@ -577,3 +588,305 @@ func TestBillsCreatePayerFromAnotherHouseholdIsInvalidOwner(t *testing.T) {
 	}, session, csrf)
 	assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "INVALID_OWNER")
 }
+
+// --- Task 10: pay and undo ----------------------------------------------
+
+// billPaymentResponseBody mirrors bill_handlers.go's billPaymentResponse --
+// POST /bills/{id}/pay's whole body.
+type billPaymentResponseBody struct {
+	Payment billPaymentBody `json:"payment"`
+	Bill    billDTOBody     `json:"bill"`
+}
+
+func decodeBillPayment(t *testing.T, rec *httptest.ResponseRecorder) billPaymentResponseBody {
+	t.Helper()
+	var body billPaymentResponseBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode bill payment: %v (body = %s)", err, rec.Body.String())
+	}
+	return body
+}
+
+// mustPayBill POSTs .../pay as the owner and fails the test immediately if
+// the pay itself did not succeed -- setup, not the assertion under test, the
+// same shape mustCreateBill uses.
+func (env *testEnv) mustPayBill(t *testing.T, session, csrf *http.Cookie, billID string, body map[string]any) billPaymentResponseBody {
+	t.Helper()
+	rec := env.authed(t, http.MethodPost, "/api/v1/bills/"+billID+"/pay", body, session, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("pay bill: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	return decodeBillPayment(t, rec)
+}
+
+// TestBillsMarkPaidDefaultsAmountAdvancesNextDueAndAnswersPaymentAndBill is
+// the happy path: amountMinor omitted falls back to the bill's own stored
+// figure (the brief's own default), the response carries both halves the
+// brief promises ({"payment": ..., "bill": ...}), DueOn is the occurrence
+// that was due (not paidOn), and NextDue advances by one cadence period from
+// that due date -- the same rule TestMarkPaidAdvancesNextDueByTheCadenceFromTheDueDate
+// pins at the service layer, now proven to reach the wire.
+func TestBillsMarkPaidDefaultsAmountAdvancesNextDueAndAnswersPaymentAndBill(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	accountID := env.mustCreateAccountID(t, session, csrf)
+
+	created := env.mustCreateBill(t, session, csrf, map[string]any{
+		"name": "Internet", "amountMinor": 45_000, "cadence": "monthly",
+		"nextDue": "2030-01-15", "payFromAccountId": accountID,
+	})
+
+	paid := env.mustPayBill(t, session, csrf, created.Bill.ID, map[string]any{
+		"paidOn": "2030-01-16",
+	})
+
+	if paid.Payment.AmountMinor != 45_000 {
+		t.Fatalf("payment.amountMinor = %d, want 45000 (the bill's own, since amountMinor was omitted)", paid.Payment.AmountMinor)
+	}
+	if paid.Payment.BillID != created.Bill.ID {
+		t.Fatalf("payment.billId = %q, want %q", paid.Payment.BillID, created.Bill.ID)
+	}
+	if paid.Payment.DueOn != "2030-01-15" {
+		t.Fatalf("payment.dueOn = %q, want 2030-01-15 -- the occurrence settled, not paidOn", paid.Payment.DueOn)
+	}
+	if paid.Payment.PaidOn != "2030-01-16" {
+		t.Fatalf("payment.paidOn = %q, want 2030-01-16", paid.Payment.PaidOn)
+	}
+	if paid.Bill.NextDue == nil || *paid.Bill.NextDue != "2030-02-15" {
+		t.Fatalf("bill.nextDue = %v, want 2030-02-15", paid.Bill.NextDue)
+	}
+	if paid.Bill.Settled {
+		t.Fatal("bill.settled = true, want false: a monthly bill always has a next occurrence")
+	}
+}
+
+// TestBillsMarkPaidTwiceOnTheSameOccurrenceIsConflict is the brief's own
+// "paying an occurrence twice is 409". next_due always advances after a
+// successful pay, so the only way to present the SAME due_on twice through
+// the API is to pay, then PATCH nextDue back to the occurrence just paid --
+// UNIQUE (bill_id, due_on) is what refuses the second pay, exactly the
+// backstop-behind-a-race the design's own error table describes.
+func TestBillsMarkPaidTwiceOnTheSameOccurrenceIsConflict(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	accountID := env.mustCreateAccountID(t, session, csrf)
+
+	created := env.mustCreateBill(t, session, csrf, map[string]any{
+		"name": "Netflix", "amountMinor": 1_998, "cadence": "monthly",
+		"nextDue": "2030-01-05", "payFromAccountId": accountID,
+	})
+	env.mustPayBill(t, session, csrf, created.Bill.ID, map[string]any{
+		"amountMinor": 1_998, "paidOn": "2030-01-05",
+	})
+
+	patchRec := env.authed(t, http.MethodPatch, "/api/v1/bills/"+created.Bill.ID,
+		map[string]any{"nextDue": "2030-01-05"}, session, csrf)
+	if patchRec.Code != http.StatusOK {
+		t.Fatalf("patch nextDue back to the paid occurrence: status = %d, body = %s", patchRec.Code, patchRec.Body.String())
+	}
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/bills/"+created.Bill.ID+"/pay",
+		map[string]any{"amountMinor": 1_998, "paidOn": "2030-01-06"}, session, csrf)
+	assertErrorResponse(t, rec, http.StatusConflict, "ALREADY_EXISTS")
+}
+
+// TestBillsMarkPaidRejectsANonPositiveAmount is item 1 of the task's "two
+// things to get right": MarkPaid does not itself validate AmountMinor > 0
+// (unlike Create and Update), so without a guard a non-positive amount would
+// reach bill_payments' own CHECK (amount_minor > 0) as a raw constraint
+// violation and surface as a 500 -- not an acceptable answer to a bad
+// request body. The guard lives in BillService.MarkPaid (see the task
+// report for why), which is why this is a behaviour test here rather than a
+// handler-only one: it proves the whole path, not just a decode check.
+func TestBillsMarkPaidRejectsANonPositiveAmount(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	accountID := env.mustCreateAccountID(t, session, csrf)
+	created := env.mustCreateBill(t, session, csrf, map[string]any{
+		"name": "Water", "amountMinor": 5_000, "cadence": "monthly",
+		"nextDue": farFutureDate(), "payFromAccountId": accountID,
+	})
+
+	for _, amount := range []int64{0, -500} {
+		rec := env.authed(t, http.MethodPost, "/api/v1/bills/"+created.Bill.ID+"/pay",
+			map[string]any{"amountMinor": amount, "paidOn": "2026-01-01"}, session, csrf)
+		assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "BILL_AMOUNT_NOT_POSITIVE")
+	}
+}
+
+// TestBillsMarkPaidRejectsAnUnparseablePaidOn is item 2 of the task's "two
+// things to get right": paidOn is a date from a request body, and must fail
+// closed -- an empty string (an omitted key round-trips as one, since
+// payBillRequest's own field is a plain string) or garbage both answer 422,
+// never a zero time silently written as the payment date.
+func TestBillsMarkPaidRejectsAnUnparseablePaidOn(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	accountID := env.mustCreateAccountID(t, session, csrf)
+	created := env.mustCreateBill(t, session, csrf, map[string]any{
+		"name": "Water", "amountMinor": 5_000, "cadence": "monthly",
+		"nextDue": farFutureDate(), "payFromAccountId": accountID,
+	})
+
+	cases := []struct {
+		name string
+		body map[string]any
+	}{
+		{"omitted entirely", map[string]any{"amountMinor": 5_000}},
+		{"empty string", map[string]any{"amountMinor": 5_000, "paidOn": ""}},
+		{"not a date", map[string]any{"amountMinor": 5_000, "paidOn": "not-a-date"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rec := env.authed(t, http.MethodPost, "/api/v1/bills/"+created.Bill.ID+"/pay", c.body, session, csrf)
+			assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "INVALID_DATE")
+		})
+	}
+}
+
+// TestBillsMarkPaidInAnotherHouseholdIsNotFound is the brief's own "paying a
+// bill in another household is 404". zeroUUID stands in for "a bill in
+// another household" -- the goals_api_test.go/budget_api_test.go convention
+// (this suite has no second-household fixture to build a real
+// cross-household id from), valid here because BillRepository.Get's own
+// contract makes the two indistinguishable: both simply match no row scoped
+// to this household.
+//
+// Both the amount-supplied and amount-omitted paths are covered: the first
+// reaches MarkPaid's own Bills.Get, the second reaches the handler's own
+// default-amount lookup first -- two different code paths that must both
+// answer the same 404.
+//
+// The message is checked, not just the code: chi's own route-not-found
+// catch-all (router.go's r.NotFound) answers the identical {404,
+// "NOT_FOUND"} CODE a real refusal would, with a different MESSAGE ("That
+// endpoint does not exist." vs "That could not be found.") -- exactly the
+// hazard TestBillsRoutesRequireMoneyAndOwner's own comment names, and
+// without this check a route that was never wired at all would pass this
+// test for the wrong reason.
+func TestBillsMarkPaidInAnotherHouseholdIsNotFound(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	zeroUUID := "00000000-0000-0000-0000-000000000000"
+
+	cases := []struct {
+		name string
+		body map[string]any
+	}{
+		{"amount supplied", map[string]any{"amountMinor": 1_000, "paidOn": "2030-01-01"}},
+		{"amount omitted", map[string]any{"paidOn": "2030-01-01"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rec := env.authed(t, http.MethodPost, "/api/v1/bills/"+zeroUUID+"/pay", c.body, session, csrf)
+			body := assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
+			if body.Error.Message != "That could not be found." {
+				t.Fatalf("message = %q, want %q -- a mismatch here means this 404 came from chi's own "+
+					"route-not-found catch-all, not a real BillService refusal",
+					body.Error.Message, "That could not be found.")
+			}
+		})
+	}
+}
+
+// TestBillsUndoDeletesThePaymentRewindsNextDueAndAnswers204WithNoBody proves
+// step 7's own self-review question directly: the DELETE response really
+// carries zero bytes (not merely status 204), and undoing genuinely rewinds
+// next_due back to the undone payment's own due date -- the same
+// TestUndoReversesAllThreeWrites assertion, now proven to reach the wire.
+func TestBillsUndoDeletesThePaymentRewindsNextDueAndAnswers204WithNoBody(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	accountID := env.mustCreateAccountID(t, session, csrf)
+
+	created := env.mustCreateBill(t, session, csrf, map[string]any{
+		"name": "Gym", "amountMinor": 8_000, "cadence": "monthly",
+		"nextDue": "2030-01-20", "payFromAccountId": accountID,
+	})
+	paid := env.mustPayBill(t, session, csrf, created.Bill.ID, map[string]any{
+		"amountMinor": 8_000, "paidOn": "2030-01-20",
+	})
+
+	rec := env.authed(t, http.MethodDelete,
+		"/api/v1/bills/"+created.Bill.ID+"/payments/"+paid.Payment.ID, nil, session, csrf)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("undo: status = %d, want 204 (body = %s)", rec.Code, rec.Body.String())
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("undo body = %q (%d bytes), want empty -- the one exemption to the every-2xx-carries-a-body rule",
+			rec.Body.String(), rec.Body.Len())
+	}
+
+	list := decodeBillsList(t, env.authedGet(t, "/api/v1/bills", session))
+	var found *billDTOBody
+	for i := range list.Bills {
+		if list.Bills[i].ID == created.Bill.ID {
+			found = &list.Bills[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("bill %s missing from GET /bills after undo", created.Bill.ID)
+	}
+	if found.NextDue == nil || *found.NextDue != "2030-01-20" {
+		t.Fatalf("nextDue after undo = %v, want rewound to 2030-01-20", found.NextDue)
+	}
+}
+
+// TestBillsUndoRefusesAnOlderPaymentNamingTheUndoable is the brief's own
+// "undoing an older payment is 409 naming the payment that can be undone" --
+// the design's identical wording, appearing three times in its own spec.
+// The repository already knows which due date WOULD be accepted (it
+// computes MAX(due_on) to decide THIS one wasn't it); this proves that fact
+// reaches the wire as BILL_PAYMENT_NOT_LATEST, both in the message and in
+// details.undoableDueOn -- Task 14's frontend needs the latter to read
+// without parsing prose out of the former.
+func TestBillsUndoRefusesAnOlderPaymentNamingTheUndoable(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	accountID := env.mustCreateAccountID(t, session, csrf)
+
+	created := env.mustCreateBill(t, session, csrf, map[string]any{
+		"name": "Netflix", "amountMinor": 1_998, "cadence": "monthly",
+		"nextDue": "2030-01-15", "payFromAccountId": accountID,
+	})
+	first := env.mustPayBill(t, session, csrf, created.Bill.ID, map[string]any{
+		"amountMinor": 1_998, "paidOn": "2030-01-15",
+	})
+	env.mustPayBill(t, session, csrf, created.Bill.ID, map[string]any{
+		"amountMinor": 1_998, "paidOn": "2030-02-15",
+	})
+
+	rec := env.authed(t, http.MethodDelete,
+		"/api/v1/bills/"+created.Bill.ID+"/payments/"+first.Payment.ID, nil, session, csrf)
+	body := assertErrorResponse(t, rec, http.StatusConflict, "BILL_PAYMENT_NOT_LATEST")
+	if !strings.Contains(body.Error.Message, "2030-02-15") {
+		t.Fatalf("message = %q, want it to name 2030-02-15, the payment that IS undoable", body.Error.Message)
+	}
+	gotDue, _ := body.Error.Details["undoableDueOn"].(string)
+	if gotDue != "2030-02-15" {
+		t.Fatalf("details.undoableDueOn = %q, want 2030-02-15", gotDue)
+	}
+}
+
+// TestBillsUndoInAnotherHouseholdIsNotFound is TestBillsMarkPaidInAnotherHouseholdIsNotFound's
+// undo-side mirror, and the identical GoalRepository/BillRepository
+// household-scoping contract handleDeleteGoalContribution's own comment
+// states for contributions: a payment id from another household is not
+// found, not forbidden. The message check is the same defence against
+// chi's own route-not-found catch-all -- see the pay-side test's own
+// comment.
+func TestBillsUndoInAnotherHouseholdIsNotFound(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	zeroUUID := "00000000-0000-0000-0000-000000000000"
+
+	rec := env.authed(t, http.MethodDelete,
+		"/api/v1/bills/"+zeroUUID+"/payments/"+zeroUUID, nil, session, csrf)
+	body := assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
+	if body.Error.Message != "That could not be found." {
+		t.Fatalf("message = %q, want %q -- a mismatch here means this 404 came from chi's own "+
+			"route-not-found catch-all, not a real BillService refusal",
+			body.Error.Message, "That could not be found.")
+	}
+}
+

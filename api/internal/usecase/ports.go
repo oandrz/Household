@@ -820,9 +820,12 @@ type BillRepository interface {
 	// ONE database transaction, all three or none.
 	//
 	// It refuses any payment that is not the bill's most recent, with
-	// domain.ErrForbidden: undoing an older one would rewind next_due behind a
-	// period that is still paid, and the screen would show a due date for
-	// money already spent.
+	// *domain.BillPaymentNotLatestError (whose Unwrap is domain.ErrForbidden,
+	// so a caller matching the bare sentinel still works): undoing an older
+	// one would rewind next_due behind a period that is still paid, and the
+	// screen would show a due date for money already spent. The error itself
+	// carries the due date that WOULD have been accepted, so the HTTP layer
+	// can name it rather than answering a bare, contextless refusal.
 	UndoPayment(ctx context.Context, householdID, billID, paymentID string) error
 	// ListPayments returns one household's payments whose due_on falls in the
 	// month containing `month`, newest paid_on first, ties by bill name.

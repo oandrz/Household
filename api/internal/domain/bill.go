@@ -92,6 +92,32 @@ type BillPayment struct {
 	TransactionID string // "" once the ledger row has been deleted
 }
 
+// BillPaymentNotLatestError is BillRepository.UndoPayment's own
+// most-recent-only refusal (that method's own doc comment), enriched with
+// the due date that WOULD have been accepted. The repository already
+// computes that date to decide the refusal in the first place -- it is not
+// a second lookup, just carrying forward a fact already in hand.
+//
+// Unwrap returns ErrForbidden, the SignInFailedError precedent in
+// usecase/auth.go applied here: errors.Is(err, ErrForbidden) still matches
+// through this type, so the postgres and usecase suites' existing
+// bare-sentinel assertions (TestUndoRefusesAnythingButTheMostRecentPayment,
+// TestUndoPaymentPassesThroughTheMostRecentOnlyRefusal) need no change.
+// Only the HTTP layer, which has to NAME which payment is undoable (the
+// design's own "409, naming which payment is undoable"), needs to reach for
+// the richer type via errors.As -- exactly the same split SignInFailedError
+// draws between the sentinel most callers match and the struct one caller
+// needs the detail from.
+type BillPaymentNotLatestError struct {
+	MostRecentDueOn time.Time
+}
+
+func (e *BillPaymentNotLatestError) Error() string {
+	return "only the bill's most recent payment can be undone"
+}
+
+func (e *BillPaymentNotLatestError) Unwrap() error { return ErrForbidden }
+
 // NextDue advances a due date by one period of the cadence, clamping to the
 // last day of the destination month.
 //

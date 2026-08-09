@@ -317,6 +317,18 @@ func TestUndoRefusesAnythingButTheMostRecentPayment(t *testing.T) {
 	if !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("UndoPayment(older) = %v, want ErrForbidden", err)
 	}
+	// The HTTP layer's own "409, naming which payment is undoable" (Task
+	// 10) reaches for this richer type via errors.As -- pinning that it
+	// carries the August due date, not just the bare sentinel, is what
+	// proves that path has real data to name, not just a status code.
+	var notLatest *domain.BillPaymentNotLatestError
+	if !errors.As(err, &notLatest) {
+		t.Fatalf("UndoPayment(older) = %v, want a *domain.BillPaymentNotLatestError", err)
+	}
+	if !notLatest.MostRecentDueOn.Equal(day("2026-08-05")) {
+		t.Fatalf("MostRecentDueOn = %s, want 2026-08-05 (August's, the payment that IS undoable)",
+			notLatest.MostRecentDueOn.Format("2006-01-02"))
+	}
 }
 
 func TestUndoReversesAllThreeWrites(t *testing.T) {

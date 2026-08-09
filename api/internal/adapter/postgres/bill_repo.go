@@ -276,8 +276,11 @@ func (r *BillRepo) UndoPayment(ctx context.Context, householdID, billID, payment
 	// Only the bill's most recent payment can be undone: undoing an older
 	// one would rewind next_due behind a later occurrence that is still
 	// paid, and the screen would show a due date for money already spent.
+	// MostRecentDueOn carries forward the mostRecent value this branch
+	// already computed above -- see BillPaymentNotLatestError's own comment
+	// for why this is not a second query.
 	if !dateToTime(pay.DueOn).Equal(dateToTime(mostRecent)) {
-		return domain.ErrForbidden
+		return &domain.BillPaymentNotLatestError{MostRecentDueOn: dateToTime(mostRecent)}
 	}
 
 	if _, err := q.DeleteBillPayment(ctx, sqlcgen.DeleteBillPaymentParams{

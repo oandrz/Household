@@ -948,6 +948,26 @@ func TestMarkPaidRefusesASettledOneOff(t *testing.T) {
 	}
 }
 
+// TestMarkPaidRefusesANonPositiveAmount is the symmetry Create and Update
+// already have (bill.go's own domain.ErrBillAmountNotPositive checks) --
+// checked here, in the service, before the repository ever gets a chance to
+// let bill_payments' own CHECK (amount_minor > 0) surface a raw constraint
+// violation as a 500.
+func TestMarkPaidRefusesANonPositiveAmount(t *testing.T) {
+	repo := &fakeBillRepo{}
+	svc := newBillService(t, repo)
+	repo.add(bill("SP utilities", "2026-08-08", 14230))
+
+	for _, amount := range []int64{0, -100} {
+		_, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
+			HouseholdID: "h1", BillID: "bill-1", AmountMinor: amount, PaidOn: day("2026-08-08"),
+		})
+		if !errors.Is(err, domain.ErrBillAmountNotPositive) {
+			t.Fatalf("MarkPaid(amount=%d) = %v, want domain.ErrBillAmountNotPositive", amount, err)
+		}
+	}
+}
+
 func TestUndoPaymentPassesThroughTheMostRecentOnlyRefusal(t *testing.T) {
 	// The rule lives in the repository, which owns the transaction that reads
 	// the latest due_on and rewinds next_due together. This asserts the

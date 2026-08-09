@@ -152,6 +152,32 @@ type updateBillRequest struct {
 	IsSubscription     *bool   `json:"isSubscription"`
 }
 
+// payBillRequest is POST /bills/{id}/pay's body. AmountMinor is a pointer,
+// not a plain int64: omitted means "the bill's own stored amount" (the
+// brief's own default), and a pointer is the only way to tell that apart
+// from an explicit amountMinor: 0, which must reach BillService.MarkPaid as
+// a genuine bad request -- the same reason updateBillRequest's own fields
+// are all pointers, applied here to a request rather than a patch.
+//
+// PaidOn carries no default: the brief gives one for the amount and
+// pointedly not for the date, so an absent or unparseable PaidOn fails
+// closed as 422 rather than silently falling back to the clock -- a
+// payment dated by guesswork is a worse answer than a rejected request.
+type payBillRequest struct {
+	AmountMinor *int64 `json:"amountMinor"`
+	PaidOn      string `json:"paidOn"`
+}
+
+// billPaymentResponse is POST /bills/{id}/pay's whole body: the payment just
+// recorded plus the bill as it now stands (next_due advanced, or settled),
+// so the caller never needs a second GET to see what paying just changed --
+// the same "the write already knows, hand it back" rule writeBill's own
+// comment states for Create/Update/Archive/Restore.
+type billPaymentResponse struct {
+	Payment billPaymentDTO `json:"payment"`
+	Bill    billDTO        `json:"bill"`
+}
+
 // parseBillDueDate parses a "YYYY-MM-DD" body field the same way
 // occurredOnLayout already reads a transaction's or a goal contribution's
 // own date -- a bill's next_due is a calendar date, not an instant, the same
@@ -325,6 +351,140 @@ func setBillArchived(deps Deps, archived bool) http.HandlerFunc {
 		}
 		writeBill(w, view, http.StatusOK)
 	}
+}
+
+// handleMarkBillPaid is POST /bills/{id}/pay. It resolves AmountMinor's
+// default itself (the bill's own stored amount) before calling
+// BillService.MarkPaid, since MarkPayment carries no "use the bill's own"
+// convention of its own -- the caller always supplies a concrete figure
+// (MarkPayment's own comment on why the amount is the caller's, not the
+// bill's).
+//
+// Every failure MarkPaid can return already has a home in the shared
+// MapDomainError switch: domain.ErrBillAmountNotPositive -> 422, domain.
+// ErrNotFound (unknown bill, or one in another household -- BillRepository.
+// Get's own "indistinguishable from not existing" contract) -> 404, and
+// domain.ErrAlreadyExists (the UNIQUE (bill_id, due_on) backstop behind an
+// occurrence paid twice) -> 409. None needs bill-specific interception the
+// way ErrBillNameTaken and ErrForbidden do for Create/Update, so this
+// handler calls MapDomainError directly.
+func handleMarkBillPaid(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope, _ := RequestScope(r)
+		id := chi.URLParam(r, "id")
+		today := deps.Clock.Now()
+
+		var req payBillRequest
+		if !decodeJSONBody(w, r, &req) {
+			return
+		}
+		paidOn, ok := parseBillDueDate(w, req.PaidOn)
+		if !ok {
+			return
+		}
+
+		amount := req.AmountMinor
+		if amount == nil {
+			views, err := listBillViews(r.Context(), deps, scope.HouseholdID, today)
+			if err != nil {
+				MapDomainError(w, r, err)
+				return
+			}
+			view, found := findBillViewByID(views, id)
+			if !found {
+				// Not found here means exactly what BillRepository.Get's own
+				// contract says an unknown or another-household id means:
+				// domain.ErrNotFound -> 404, indistinguishable from a real
+				// miss (the identical reasoning MapDomainError already gives
+				// that sentinel elsewhere).
+				MapDomainError(w, r, domain.ErrNotFound)
+				return
+			}
+			a := view.Bill.Amount.Amount
+			amount = &a
+		}
+
+		payment, err := deps.Bills.MarkPaid(r.Context(), usecase.MarkPayment{
+			HouseholdID: scope.HouseholdID,
+			BillID:      id,
+			AmountMinor: *amount,
+			PaidOn:      paidOn,
+		})
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+
+		// The response's "bill" half needs the full joined view (category and
+		// account names, the freshly recomputed Overdue/DueSoon/Settled) that
+		// BillPaymentView does not carry -- the same re-read
+		// writeBillCurrencyMismatch already performs, for the same reason: no
+		// BillService method returns both a payment and its bill's own view
+		// in one call.
+		views, err := listBillViews(r.Context(), deps, scope.HouseholdID, today)
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		updated, found := findBillViewByID(views, id)
+		if !found {
+			// MarkPaid just succeeded against this exact household/bill pair
+			// above -- a miss on this immediate re-read is this handler's own
+			// invariant broken, not a client mistake (writeBillCurrencyMismatch's
+			// own comment on the identical situation).
+			logAndWriteInternal(w, r, fmt.Errorf("bill %s not found on the re-read after MarkPaid succeeded", id))
+			return
+		}
+
+		WriteJSON(w, http.StatusOK, billPaymentResponse{
+			Payment: toBillPaymentDTO(payment),
+			Bill:    toBillDTO(updated),
+		})
+	}
+}
+
+// handleUndoBillPayment answers 204 with no body -- the one exemption to the
+// "every 2xx carries a JSON body" rule, matching handleDeleteTransaction's
+// and handleDeleteGoalContribution's own comments. UndoPayment scopes its
+// delete by household_id AND bill_id AND payment id together
+// (BillRepository's own doc comment), so a payment belonging to a different
+// bill of this same household -- not just a foreign household -- answers
+// the same 404, the identical contract handleDeleteGoalContribution states
+// for goal contributions.
+func handleUndoBillPayment(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope, _ := RequestScope(r)
+		billID := chi.URLParam(r, "id")
+		paymentID := chi.URLParam(r, "paymentId")
+
+		if err := deps.Bills.UndoPayment(r.Context(), scope.HouseholdID, billID, paymentID); err != nil {
+			writeUndoPaymentError(w, r, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// writeUndoPaymentError intercepts UndoPayment's own most-recent-only
+// refusal. The repository already knows which due date WOULD have been
+// accepted -- it computed MAX(due_on) to decide this payment wasn't it
+// (postgres UndoPayment's own comment) -- and carries that forward as
+// *domain.BillPaymentNotLatestError specifically so this handler can name
+// it (the design's own "409, naming which payment is undoable"), rather
+// than letting it fall through to MapDomainError's bare, contextless 403
+// for domain.ErrForbidden. Anything else -- domain.ErrNotFound for an
+// unknown or cross-household payment id chief among them -- falls through
+// unchanged.
+func writeUndoPaymentError(w http.ResponseWriter, r *http.Request, err error) {
+	var notLatest *domain.BillPaymentNotLatestError
+	if errors.As(err, &notLatest) {
+		due := notLatest.MostRecentDueOn.Format(occurredOnLayout)
+		WriteError(w, http.StatusConflict, "BILL_PAYMENT_NOT_LATEST",
+			fmt.Sprintf("Only the most recent payment, due %s, can be undone.", due),
+			map[string]any{"undoableDueOn": due})
+		return
+	}
+	MapDomainError(w, r, err)
 }
 
 // writeBill answers a Create/Update/SetArchived call with the BillView it

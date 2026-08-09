@@ -608,7 +608,19 @@ func (s *BillService) SetArchived(ctx context.Context, householdID, billID strin
 // The amount is the caller's, not the bill's own stored figure -- see
 // MarkPayment's own comment. The bill's own amount_minor is left untouched by
 // paying.
+//
+// AmountMinor must be positive, the same domain.ErrBillAmountNotPositive
+// refusal Create (bill.go's own check) and Update give -- checked here, in
+// the service, not by the HTTP layer: bill_payments' own CHECK
+// (amount_minor > 0) would otherwise be the first thing to catch a
+// non-positive amount, and a raw constraint violation surfacing as a 500 is
+// not an acceptable answer to a bad request body. Checked before the Get
+// below, the same "validate the caller's own input before spending a query
+// on it" order Create uses.
 func (s *BillService) MarkPaid(ctx context.Context, in MarkPayment) (BillPaymentView, error) {
+	if in.AmountMinor <= 0 {
+		return BillPaymentView{}, domain.ErrBillAmountNotPositive
+	}
 	rec, err := s.deps.Bills.Get(ctx, in.HouseholdID, in.BillID)
 	if err != nil {
 		return BillPaymentView{}, err

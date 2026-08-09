@@ -278,11 +278,13 @@ func NewRouter(deps Deps) http.Handler {
 					// of saving a name.
 					w.Post("/bills/{id}/archive", handleArchiveBill(deps))
 					w.Post("/bills/{id}/restore", handleRestoreBill(deps))
-					// POST /bills/{id}/pay and DELETE
-					// /bills/{id}/payments/{paymentId} are Task 10's own
-					// routes, not this task's -- MarkPaid and UndoPayment
-					// already exist on BillService but are deliberately
-					// unrouted here.
+					// The two routes that move money: pay writes a payment,
+					// an expense and the advanced due date in one
+					// transaction (BillRepository.RecordPayment's own
+					// comment); undo reverses all three
+					// (BillRepository.UndoPayment's own comment).
+					w.Post("/bills/{id}/pay", handleMarkBillPaid(deps))
+					w.Delete("/bills/{id}/payments/{paymentId}", handleUndoBillPayment(deps))
 				})
 			})
 		})
