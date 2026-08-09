@@ -1917,6 +1917,30 @@ route with a missing guard has no second line of defence.
   to the section under test, or wait on structure (a testid) rather than
   content that a sibling component might legitimately repeat.
 
+- Bills slice, Task 15 (the Subscriptions panel), found in review rather
+  than by a test: `BillModal`'s "Counts as a subscription" checkbox does
+  not gate on cadence, so a household can tick it on a one-off bill — and
+  the dev seed already has one (`Piano tuning`, `S$120.00`, one-off). But
+  `domain.AnnualEquivalentMinor`'s own comment is categorical: a one-off
+  "is not a recurring cost" and contributes to the rollup **never**, ticked
+  or not. The panel's first cut rendered the row anyway — a row that would
+  visibly never move either total above it — while `isSubscriptionHelp`'s
+  own copy tells the household every ticked bill is "included in the
+  household's subscription totals," a promise that exact row would break.
+  This is a sharper case than the ordinary "figure the UI can't back up":
+  a flag the UI *lets a household set* that a downstream computation
+  *categorically ignores for one specific value of a different field*, with
+  nothing in either the checkbox or the field stopping the combination.
+  Fixed by adding the same cadence check to the panel's own filter
+  (`SubscriptionsCard.tsx`), verified against the real seeded bill in a
+  running browser, not only the fixture. **When a flag and a second field
+  interact, check what every value of the second field does to the flag's
+  own promise — not just the values a form's own defaults happen to
+  produce.** The checkbox itself is unchanged and still does not warn a
+  household ticking it on a one-off; that residual gap is written down at
+  `SubscriptionsCard.tsx`'s own filter for whoever next reads `isSubscription`
+  without this same cadence check.
+
 ### Tooling and infrastructure
 
 - The architecture lint **never enforced the rule it existed for**. Both branches
