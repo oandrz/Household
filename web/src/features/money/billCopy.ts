@@ -234,4 +234,46 @@ export const BILL_COPY = {
   // name, so this modal composes the same sentence GOAL_COPY's own fallback
   // does for goals, restated for a bill.
   billNameTaken: (name: string) => `"${name}" is already the name of a bill in this household.`,
+
+  // MarkPaidModal (Task 14). Reachable from every LIVE bill row -- Due soon,
+  // Later, overdue and settled alike -- never from an archived one: writeMarkPaidError's
+  // own BILL_ARCHIVED message already reads "Restore it before marking a
+  // payment," and the archived section's own affordance is Restore, not a
+  // second way to pay (BillRow.tsx's own comment on this choice). Settled is
+  // deliberately NOT excluded client-side, unlike archived: a settled one-off
+  // is exactly the shape BILL_SETTLED exists to catch -- a household that
+  // forgot it already paid a one-off, or two members marking the same
+  // occurrence within moments of each other -- and hiding the control would
+  // make that refusal untestable by a real click rather than making it
+  // impossible to reach.
+  markPaidModalTitle: "Mark as paid",
+  markPaidTrigger: "Mark paid",
+  markPaidAriaLabel: (billName: string) => `Mark ${billName} paid`,
+  paidOnLabel: "Paid on",
+  markPaidSubmit: "Mark paid",
+  // Spec decision 1's own accepted cost, stated at the point of clicking: a
+  // household that marks a bill paid *and* separately hand-enters the same
+  // expense double-counts it. Naming the ledger description (the bill's own
+  // name) is what makes that duplicate recognisable later, on the
+  // Transactions screen -- the task brief's own reason this sentence exists
+  // at all.
+  markPaidWritesExpense: (billName: string) =>
+    `This writes an expense to the ledger, described as "${billName}". If you've already entered this payment yourself, marking it paid here will double-count it.`,
+
+  // Undo (Task 14), the GoalContributionsPanel.tsx pattern: an in-page
+  // confirmation, never window.confirm. Shown on every row in "Paid this
+  // month" regardless of position -- the server's own rule is per-bill
+  // (only that bill's own most recent payment can be undone), and
+  // paidThisMonth mixes payments from different bills, each already its own
+  // latest. This screen has no way to compute which rows would succeed
+  // without asking the server, so every row offers Undo and
+  // BILL_PAYMENT_NOT_LATEST's own message (surfaced verbatim, naming the
+  // due date that IS undoable) is what tells a household when it guessed
+  // wrong -- the honest design, not a client-side guess that is wrong
+  // whenever a bill's own most recent payment is not the newest row on
+  // screen.
+  undoTrigger: "Undo",
+  undoAriaLabel: (billName: string) => `Undo ${billName} payment`,
+  undoConfirmBody: "This removes the expense it wrote to the ledger.",
+  undoConfirmAction: "Undo payment",
 } as const;

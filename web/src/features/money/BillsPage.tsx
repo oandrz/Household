@@ -11,23 +11,34 @@
 // matches the spec (`ORDER BY next_due NULLS LAST, name`), so an overdue
 // bill's earlier date is what sorts it first; nothing here re-sorts.
 //
-// MarkPaidModal (Task 14) and SubscriptionsCard (Task 15) do not exist yet --
-// this task's own scope boundary. BillModal (Task 13) is wired at all three
-// of its entry points below: the header's "+ Add bill", the empty state's
-// own call to action, and BillRow's `onEdit` for a live row -- Goals shipped
-// its own modal with no screen that ever mounted it, and a whole task's
-// review missed the gap (docs/LEARNING.md pattern 15), so this task's own
-// tests (BillModal.test.tsx) assert each entry point separately rather than
-// trusting that wiring one proves the other two.
+// SubscriptionsCard (Task 15) does not exist yet -- this task's own scope
+// boundary. BillModal (Task 13) is wired at all three of its entry points
+// below: the header's "+ Add bill", the empty state's own call to action,
+// and BillRow's `onEdit` for a live row -- Goals shipped its own modal with
+// no screen that ever mounted it, and a whole task's review missed the gap
+// (docs/LEARNING.md pattern 15), so this task's own tests (BillModal.test.tsx)
+// assert each entry point separately rather than trusting that wiring one
+// proves the other two.
+//
+// MarkPaidModal (Task 14) is wired the identical way, on every live bill's
+// own `onMarkPaid` (MarkPaidModal.test.tsx asserts it opens from a real
+// BillsPage render, the same reason above). Undo lives entirely as row-level
+// state here -- confirmingPaymentId/undoingPaymentId/undoErrors -- rather
+// than inside BillRow.tsx, because the confirmation must survive the row
+// re-rendering with fresh props on every refetch (the same reason
+// GoalContributionsPanel.tsx owns confirmingId/deletingId itself rather than
+// letting ContributionRow track its own).
 import { useState } from "react";
 import { useCurrencies } from "../auth/useAuth";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
+import { apiErrorMessage } from "../auth/copy";
 import { BillModal } from "./BillModal";
+import { MarkPaidModal } from "./MarkPaidModal";
 import { BillRow } from "./BillRow";
 import { BillStatCards } from "./BillStatCards";
 import { BILL_COPY, dayMonthLabel } from "./billCopy";
-import { useArchiveBill, useBills, useRestoreBill } from "./useBills";
-import type { Bill } from "./billSchemas";
+import { useArchiveBill, useBills, useRestoreBill, useUndoPayment } from "./useBills";
+import type { Bill, BillPayment } from "./billSchemas";
 
 // "What month is it right now" -- read straight from the live clock, unlike
 // BudgetPage.tsx's monthLabel/GoalCard.tsx's targetMonthLabel, which both
@@ -45,14 +56,29 @@ export function BillsPage() {
   const currencies = useCurrencies();
   const archiveBill = useArchiveBill();
   const restoreBill = useRestoreBill();
+  const undoPayment = useUndoPayment();
   // "new" opens BillModal in create mode; a Bill opens it in edit mode for
   // that row -- GoalsPage.tsx's own modalGoal shape, restated for bills.
   const [modalBill, setModalBill] = useState<Bill | "new" | null>(null);
+  // The bill MarkPaidModal is currently open for, or null when it is closed
+  // -- a second, independent modal slot from modalBill above: opening
+  // MarkPaidModal must never also be mistaken for opening BillModal in edit
+  // mode, the two being different components with different write paths.
+  const [payingBill, setPayingBill] = useState<Bill | null>(null);
   // Scoped per bill id, not one page-wide flag -- useArchiveBill/useRestoreBill
   // are each one shared mutation instance, so a single mutation's own
   // isPending only ever reflects the most recently dispatched call
   // (AccountsPanel.tsx's own pendingIds carries the identical reasoning).
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
+
+  // Undo's own in-page-confirmation state (GoalContributionsPanel.tsx's own
+  // confirmingId/deletingId/deleteErrors, restated for a payment id): which
+  // row is asking to confirm, which row's DELETE is in flight, and each
+  // row's own error keyed by payment id so a 409 on one payment reads next
+  // to that payment and not under whichever row is last on screen.
+  const [confirmingPaymentId, setConfirmingPaymentId] = useState<string | null>(null);
+  const [undoingPaymentId, setUndoingPaymentId] = useState<string | null>(null);
+  const [undoErrors, setUndoErrors] = useState<Record<string, string>>({});
 
   function trackPending(id: string, call: Promise<unknown>) {
     setPendingIds((prev) => new Set(prev).add(id));
@@ -73,6 +99,40 @@ export function BillsPage() {
   }
   function handleRestore(id: string) {
     trackPending(id, restoreBill.mutateAsync(id));
+  }
+
+  // Confirming clears this payment's own stale error (GoalContributionsPanel.tsx's
+  // own handleAdd/handleDelete convention: a fresh attempt starts from a
+  // clean slate, not a message from the attempt before it).
+  function handleAskUndo(payment: BillPayment) {
+    setUndoErrors((prev) => {
+      const next = { ...prev };
+      delete next[payment.id];
+      return next;
+    });
+    setConfirmingPaymentId(payment.id);
+  }
+  function handleCancelUndo() {
+    setConfirmingPaymentId(null);
+  }
+  async function handleConfirmUndo(payment: BillPayment) {
+    setUndoingPaymentId(payment.id);
+    try {
+      await undoPayment.mutateAsync({ billId: payment.billId, paymentId: payment.id });
+    } catch (err) {
+      // BILL_PAYMENT_NOT_LATEST's own message already names the due date
+      // that IS undoable (writeUndoPaymentError, bill_handlers.go) --
+      // apiErrorMessage's verbatim pass-through is the whole job here, the
+      // same reason MarkPaidModal.tsx's own catch needs no special case.
+      setUndoErrors((prev) => ({ ...prev, [payment.id]: apiErrorMessage(err, BILL_COPY.genericSaveError) }));
+    } finally {
+      setUndoingPaymentId(null);
+      // Collapses back to the plain trigger regardless of outcome --
+      // GoalContributionsPanel.tsx's own handleDelete does the same in its
+      // `finally`, and the error (when there is one) is what stays visible
+      // on this same row, not the confirm pair.
+      setConfirmingPaymentId(null);
+    }
   }
 
   if (bills.isLoading) {
@@ -225,6 +285,7 @@ export function BillsPage() {
                     onEdit={setModalBill}
                     onArchive={handleArchive}
                     onRestore={handleRestore}
+                    onMarkPaid={setPayingBill}
                     pending={pendingIds.has(bill.id)}
                   />
                 ))
@@ -248,6 +309,7 @@ export function BillsPage() {
                     onEdit={setModalBill}
                     onArchive={handleArchive}
                     onRestore={handleRestore}
+                    onMarkPaid={setPayingBill}
                     pending={pendingIds.has(bill.id)}
                   />
                 ))}
@@ -260,7 +322,18 @@ export function BillsPage() {
                   {BILL_COPY.paidThisMonth}
                 </h2>
                 {paidThisMonth.map((payment) => (
-                  <BillRow key={payment.id} kind="payment" payment={payment} symbolFor={symbolFor} />
+                  <BillRow
+                    key={payment.id}
+                    kind="payment"
+                    payment={payment}
+                    symbolFor={symbolFor}
+                    onAskUndo={handleAskUndo}
+                    onCancelUndo={handleCancelUndo}
+                    onConfirmUndo={() => handleConfirmUndo(payment)}
+                    confirming={confirmingPaymentId === payment.id}
+                    undoing={undoingPaymentId === payment.id}
+                    error={undoErrors[payment.id] ?? null}
+                  />
                 ))}
               </div>
             )}
@@ -336,6 +409,15 @@ export function BillsPage() {
           onSaved={() => setModalBill(null)}
         />
       )}
+
+      {/* payingBill is a separate slot from modalBill above -- opening
+          MarkPaidModal for a row must never be read as opening BillModal in
+          edit mode for the same row. onPaid/onClose both just close it:
+          useMarkPaid (useBills.ts) already invalidates the bills query on
+          success, so this page's own mounted useBills(includeArchived) call
+          refetches on its own, the identical reasoning BillModal's own
+          onSaved/onClose comment gives just above. */}
+      {payingBill && <MarkPaidModal bill={payingBill} onClose={() => setPayingBill(null)} onPaid={() => setPayingBill(null)} />}
     </div>
   );
 }

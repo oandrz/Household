@@ -13,6 +13,15 @@
 // yet) means the row is simply not clickable, which is how this task leaves
 // a hook for Task 13's BillModal without shipping a control that opens
 // nothing (this task's own scope-boundary rule).
+//
+// Mark paid (Task 14) is the same either-or as Archive/Restore, on the same
+// `bill.archivedAt` gate -- never shown on an archived row. writeMarkPaidError's
+// own BILL_ARCHIVED message reads "Restore it before marking a payment," and
+// this row's own archived branch already offers Restore as its one action;
+// a second, dead-ending way to attempt payment on the same row would just
+// repeat what that message already has to correct. Settled is deliberately
+// NOT excluded the same way (billCopy.ts's own comment on markPaidTrigger) --
+// only bill.archivedAt gates it.
 import { BILL_COPY, dayMonthLabel, dayNumber, monthAbbrev } from "./billCopy";
 import { formatMoney } from "./formatMoney";
 import type { Bill, BillPayment } from "./billSchemas";
@@ -30,6 +39,7 @@ type BillRowProps =
       onEdit?: (bill: Bill) => void;
       onArchive?: (id: string) => void;
       onRestore?: (id: string) => void;
+      onMarkPaid?: (bill: Bill) => void;
       // True while an archive OR restore call for *this* row is in flight --
       // scoped per row because useArchiveBill/useRestoreBill are each one
       // shared mutation instance, so a single mutation's own isPending only
@@ -41,6 +51,23 @@ type BillRowProps =
       kind: "payment";
       payment: BillPayment;
       symbolFor: SymbolFor;
+      // Undo (Task 14), the GoalContributionsPanel.tsx/ContributionRow.tsx
+      // pattern restated for a payment row: onAskUndo opens THIS row's own
+      // in-page confirmation (never window.confirm -- the house rule),
+      // onConfirmUndo/onCancelUndo answer it. All four are optional so a
+      // caller that never wires them (none exists yet outside BillsPage.tsx)
+      // gets a row with no Undo control rather than one wired to nothing --
+      // the identical reasoning onEdit's own comment gives above.
+      onAskUndo?: (payment: BillPayment) => void;
+      onCancelUndo?: () => void;
+      onConfirmUndo?: () => void;
+      confirming?: boolean;
+      undoing?: boolean;
+      // Scoped to this one row, not a page-wide slot -- ContributionRow.tsx's
+      // own `error` prop comment gives the exact reason: a 409 on one payment
+      // must read next to that payment, not detached under whichever row
+      // happens to be last in "Paid this month."
+      error?: string | null;
     };
 
 // The two-line date badge (design: a small uppercase month over a large day
@@ -66,35 +93,106 @@ function DateBadge({ nextDue, settled, overdue }: { nextDue: string | null; sett
   );
 }
 
-function PaymentRow({ payment, symbolFor }: { payment: BillPayment; symbolFor: SymbolFor }) {
+function PaymentRow({
+  payment,
+  symbolFor,
+  onAskUndo,
+  onCancelUndo,
+  onConfirmUndo,
+  confirming,
+  undoing,
+  error,
+}: {
+  payment: BillPayment;
+  symbolFor: SymbolFor;
+  onAskUndo?: (payment: BillPayment) => void;
+  onCancelUndo?: () => void;
+  onConfirmUndo?: () => void;
+  confirming?: boolean;
+  undoing?: boolean;
+  error?: string | null;
+}) {
   return (
     <div
       data-testid="bill-row"
-      className="flex items-center justify-between gap-3 border-b border-hairline py-3 opacity-65 last:border-b-0"
+      className="flex flex-col gap-2 border-b border-hairline py-3 last:border-b-0"
     >
-      <div className="flex items-center gap-3">
-        <DateBadge nextDue={payment.dueOn} settled={false} overdue={false} />
-        <div>
-          <div className="text-[13.5px] font-semibold text-ink">{payment.billName}</div>
-          <div className="text-[11.5px] text-muted">{BILL_COPY.paymentSubtitle(payment.autopay)}</div>
+      <div className="flex items-center justify-between gap-3 opacity-65">
+        <div className="flex items-center gap-3">
+          <DateBadge nextDue={payment.dueOn} settled={false} overdue={false} />
+          <div>
+            <div className="text-[13.5px] font-semibold text-ink">{payment.billName}</div>
+            <div className="text-[11.5px] text-muted">{BILL_COPY.paymentSubtitle(payment.autopay)}</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-[11px] font-semibold text-accent">{BILL_COPY.paidLabel}</span>
+          <span className="w-20 text-right text-[13.5px] font-semibold text-ink">
+            {formatMoney(payment.amountMinor, payment.currency, symbolFor(payment.currency))}
+          </span>
+          {!confirming && onAskUndo && (
+            <button
+              type="button"
+              aria-label={BILL_COPY.undoAriaLabel(payment.billName)}
+              onClick={() => onAskUndo(payment)}
+              className="text-[11px] font-semibold text-danger"
+            >
+              {BILL_COPY.undoTrigger}
+            </button>
+          )}
         </div>
       </div>
-      <div className="flex items-center gap-3">
-        <span className="text-[11px] font-semibold text-accent">{BILL_COPY.paidLabel}</span>
-        <span className="w-20 text-right text-[13.5px] font-semibold text-ink">
-          {formatMoney(payment.amountMinor, payment.currency, symbolFor(payment.currency))}
-        </span>
-      </div>
+      {/* In-page confirmation, never window.confirm -- the house rule
+          GoalContributionsPanel.tsx's own header comment states, and its
+          ContributionRow is the pattern this mirrors. */}
+      {confirming && (
+        <div className="flex flex-col gap-2 rounded-[10px] border border-hairline p-2.5">
+          <p className="text-[12.5px] text-ink">{BILL_COPY.undoConfirmBody}</p>
+          <div className="flex gap-2.5">
+            <button
+              type="button"
+              onClick={onCancelUndo}
+              className="flex-1 rounded-lg border border-hairline py-1.5 text-center text-[12.5px] font-semibold text-label"
+            >
+              {BILL_COPY.cancelAction}
+            </button>
+            <button
+              type="button"
+              disabled={undoing}
+              onClick={onConfirmUndo}
+              className="flex-1 rounded-lg bg-danger py-1.5 text-center text-[12.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {BILL_COPY.undoConfirmAction}
+            </button>
+          </div>
+        </div>
+      )}
+      {error != null && (
+        <p role="alert" className="text-xs leading-snug text-danger">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
 
 export function BillRow(props: BillRowProps) {
   if (props.kind === "payment") {
-    return <PaymentRow payment={props.payment} symbolFor={props.symbolFor} />;
+    return (
+      <PaymentRow
+        payment={props.payment}
+        symbolFor={props.symbolFor}
+        onAskUndo={props.onAskUndo}
+        onCancelUndo={props.onCancelUndo}
+        onConfirmUndo={props.onConfirmUndo}
+        confirming={props.confirming}
+        undoing={props.undoing}
+        error={props.error}
+      />
+    );
   }
 
-  const { bill, symbolFor, onEdit, onArchive, onRestore, pending } = props;
+  const { bill, symbolFor, onEdit, onArchive, onRestore, onMarkPaid, pending } = props;
   const archived = bill.archivedAt !== null;
   const clickable = !archived && Boolean(onEdit);
   // The overdue sentence REPLACES the ordinary category/autopay/account
@@ -162,6 +260,29 @@ export function BillRow(props: BillRowProps) {
         <span className="w-20 text-right text-[13.5px] font-semibold text-ink">
           {formatMoney(bill.amountMinor, bill.currency, symbolFor(bill.currency))}
         </span>
+        {/* Never on an archived row -- see this file's own header comment on
+            why Restore is that row's one action, not a second way to pay. */}
+        {!archived && onMarkPaid && (
+          <button
+            type="button"
+            aria-label={BILL_COPY.markPaidAriaLabel(bill.name)}
+            onClick={(event) => {
+              // Row-level onClick opens BillModal in edit mode; onKeyDown's
+              // own stopPropagation below is just as load-bearing as this one
+              // -- without it, Enter/Space on THIS button would still bubble
+              // to the row's own onKeyDown and open the edit modal alongside
+              // this one (the identical pair Archive/Restore already need,
+              // restated here since this row can be clickable at the same
+              // time this button is present).
+              event.stopPropagation();
+              onMarkPaid(bill);
+            }}
+            onKeyDown={(event) => event.stopPropagation()}
+            className="text-[11px] font-semibold text-accent"
+          >
+            {BILL_COPY.markPaidTrigger}
+          </button>
+        )}
         {archived && onRestore && (
           <button
             type="button"
