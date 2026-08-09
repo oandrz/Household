@@ -229,6 +229,64 @@ describe("MarkPaidModal", () => {
     expect(screen.queryByText("Something went wrong. Please try again.")).not.toBeInTheDocument();
   });
 
+  // A refusal's own message can go stale: two payments on the SAME bill,
+  // due in the same month (a very-overdue bill caught up twice). Undoing
+  // the older one first is refused, naming the newer one as the undoable
+  // payment -- correct at that moment. Undoing the newer one next succeeds,
+  // which makes the older payment THE bill's own most recent remaining one
+  // -- so the first message ("only the payment due on the newer date can be
+  // undone") is no longer true the instant the newer payment stops existing.
+  // A stale copy of that sentence left sitting under the older row would
+  // tell a household it still can't do the thing it can now do.
+  it("a successful undo clears a stale refusal left on another row of the same bill", async () => {
+    const older = paymentFixture({ id: "payment-older", billId: "bill-1", billName: "Property tax", dueOn: "2026-08-02" });
+    const newer = paymentFixture({ id: "payment-newer", billId: "bill-1", billName: "Property tax", dueOn: "2026-08-20" });
+    const bill = billFixture({ id: "bill-2", name: "Insurance", nextDue: "2026-08-25" });
+
+    const { fetchMock } = renderBillsPage([bill], [newer, older], {
+      "DELETE /api/v1/bills/bill-1/payments/payment-older": {
+        status: 409,
+        body: {
+          error: {
+            code: "BILL_PAYMENT_NOT_LATEST",
+            message: "Only the most recent payment, due 2026-08-20, can be undone.",
+            details: { undoableDueOn: "2026-08-20" },
+          },
+        },
+      },
+      "DELETE /api/v1/bills/bill-1/payments/payment-newer": { status: 204, body: undefined },
+    });
+
+    const paidSection = await screen.findByTestId("bills-paid-this-month");
+    const rows = within(paidSection).getAllByTestId("bill-row");
+    expect(rows).toHaveLength(2);
+
+    // paidThisMonth is fed in as [newer, older], and BillsPage preserves
+    // that order (never re-sorts) -- so row 0 is the newer payment, row 1
+    // the older one.
+    const newerRow = rows[0];
+    const olderRow = rows[1];
+
+    // Fail undoing the older payment first -- its own row now carries the
+    // "only the newer one can be undone" message.
+    fireEvent.click(within(olderRow).getByRole("button", { name: "Undo Property tax payment" }));
+    fireEvent.click(within(olderRow).getByRole("button", { name: "Undo payment" }));
+    await within(olderRow).findByRole("alert");
+
+    // Succeed undoing the newer payment -- the fact the older row's message
+    // was built on (a newer payment exists and is the only undoable one) is
+    // now false.
+    fireEvent.click(within(newerRow).getByRole("button", { name: "Undo Property tax payment" }));
+    fireEvent.click(within(newerRow).getByRole("button", { name: "Undo payment" }));
+
+    await waitFor(() =>
+      expect(mutatingCalls(fetchMock)).toContain("DELETE /api/v1/bills/bill-1/payments/payment-newer"),
+    );
+    // The older row is still on screen (its own undo never succeeded) but
+    // must no longer carry the now-false refusal.
+    expect(within(olderRow).queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   // Every refusal MarkPaid can return -- BILL_ARCHIVED, BILL_SETTLED,
   // ACCOUNT_ARCHIVED, the already-paid 409, an unparseable date -- flows
   // through the identical apiErrorMessage pass-through (MarkPaidModal.tsx's

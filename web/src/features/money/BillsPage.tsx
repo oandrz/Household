@@ -119,6 +119,20 @@ export function BillsPage() {
     setUndoingPaymentId(payment.id);
     try {
       await undoPayment.mutateAsync({ billId: payment.billId, paymentId: payment.id });
+      // A successful undo can make ANOTHER row's own stored refusal false:
+      // BILL_PAYMENT_NOT_LATEST names a due date as "the one that can be
+      // undone" at the moment it was returned, and undoing that exact
+      // payment is what most often follows a household reading that
+      // message -- which immediately makes an older payment on the same
+      // bill the new most-recent, and its own stale copy of that sentence
+      // would now be telling the household the opposite of the truth
+      // (BudgetRolloverCard's own "a stale figure is a live lie" class of
+      // bug, restated here for a row's own message instead of a total).
+      // Clearing every row's error rather than scoping to this payment's
+      // own bill is the simpler, always-safe choice: a stale error on an
+      // unrelated bill's row was never going to be made MORE wrong by this
+      // success, so there is nothing lost by clearing it too.
+      setUndoErrors({});
     } catch (err) {
       // BILL_PAYMENT_NOT_LATEST's own message already names the due date
       // that IS undoable (writeUndoPaymentError, bill_handlers.go) --
