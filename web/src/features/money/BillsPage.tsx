@@ -80,6 +80,44 @@ export function BillsPage() {
   const [undoingPaymentId, setUndoingPaymentId] = useState<string | null>(null);
   const [undoErrors, setUndoErrors] = useState<Record<string, string>>({});
 
+  // A stored BILL_PAYMENT_NOT_LATEST message names a due date that WAS a
+  // bill's own MAX(due_on) the moment the server answered it. TWO different
+  // writes can move that fact out from under the message: a successful
+  // UndoPayment (removes the latest, promoting whichever payment was
+  // second) and a successful MarkPaid (writes a new payment and advances
+  // next_due, which becomes the new latest -- bill.go's own arithmetic).
+  // Both call this after their own mutation resolves, rather than each
+  // inlining `setUndoErrors({})` separately, so there is exactly one place
+  // that states the reason instead of two copies that could drift.
+  //
+  // Tried first as a derived effect (clearing on `bills`'s own fetch
+  // finishing, so no call site could forget it): a `useEffect` keyed on
+  // `bills.dataUpdatedAt` never re-fired under test, because that field is
+  // stamped from `Date.now()` and every Bills test in this codebase runs
+  // under `vi.useFakeTimers({ toFake: ["Date"] })` with the clock frozen
+  // (so "today" stays stable for date-prefill assertions) -- every fetch in
+  // a test, including a real refetch, stamps the identical millisecond.
+  // Switching to `bills.isFetching`'s own true->false transition (clock-
+  // independent) still failed: React 18's automatic batching collapsed the
+  // mutation's own fetch-refetch cycle into a single commit often enough
+  // that the effect's dependency never observed an intermediate `true`, so
+  // the effect silently skipped re-running for exactly the writes it
+  // existed to catch (confirmed by instrumenting it: only the initial
+  // mount's own transition ever fired). An explicit call at each of the
+  // two known write sites is less elegant than "cannot be forgotten by a
+  // future third site," but it is the one that is actually reliable here,
+  // and both existing sites call the same one function so there is still
+  // only one place to remember for the two that exist today.
+  //
+  // Clearing every row's error rather than scoping to the one bill just
+  // written is deliberate: a stale error sitting on an unrelated bill's row
+  // was never going to be made MORE wrong by clearing it early too, so
+  // nothing true is lost -- only ever a possibly-stale refusal, gone one
+  // write sooner than strictly necessary.
+  function clearUndoErrors() {
+    setUndoErrors({});
+  }
+
   function trackPending(id: string, call: Promise<unknown>) {
     setPendingIds((prev) => new Set(prev).add(id));
     void call.finally(() => {
@@ -119,20 +157,7 @@ export function BillsPage() {
     setUndoingPaymentId(payment.id);
     try {
       await undoPayment.mutateAsync({ billId: payment.billId, paymentId: payment.id });
-      // A successful undo can make ANOTHER row's own stored refusal false:
-      // BILL_PAYMENT_NOT_LATEST names a due date as "the one that can be
-      // undone" at the moment it was returned, and undoing that exact
-      // payment is what most often follows a household reading that
-      // message -- which immediately makes an older payment on the same
-      // bill the new most-recent, and its own stale copy of that sentence
-      // would now be telling the household the opposite of the truth
-      // (BudgetRolloverCard's own "a stale figure is a live lie" class of
-      // bug, restated here for a row's own message instead of a total).
-      // Clearing every row's error rather than scoping to this payment's
-      // own bill is the simpler, always-safe choice: a stale error on an
-      // unrelated bill's row was never going to be made MORE wrong by this
-      // success, so there is nothing lost by clearing it too.
-      setUndoErrors({});
+      clearUndoErrors();
     } catch (err) {
       // BILL_PAYMENT_NOT_LATEST's own message already names the due date
       // that IS undoable (writeUndoPaymentError, bill_handlers.go) --
@@ -426,12 +451,23 @@ export function BillsPage() {
 
       {/* payingBill is a separate slot from modalBill above -- opening
           MarkPaidModal for a row must never be read as opening BillModal in
-          edit mode for the same row. onPaid/onClose both just close it:
-          useMarkPaid (useBills.ts) already invalidates the bills query on
-          success, so this page's own mounted useBills(includeArchived) call
-          refetches on its own, the identical reasoning BillModal's own
-          onSaved/onClose comment gives just above. */}
-      {payingBill && <MarkPaidModal bill={payingBill} onClose={() => setPayingBill(null)} onPaid={() => setPayingBill(null)} />}
+          edit mode for the same row. onClose just closes it: useMarkPaid
+          (useBills.ts) already invalidates the bills query on success, so
+          this page's own mounted useBills(includeArchived) call refetches
+          on its own, the identical reasoning BillModal's own onSaved/onClose
+          comment gives just above. onPaid additionally clears undoErrors
+          (clearUndoErrors's own comment) -- a successful MarkPaid moves the
+          same MAX(due_on) fact a successful UndoPayment does. */}
+      {payingBill && (
+        <MarkPaidModal
+          bill={payingBill}
+          onClose={() => setPayingBill(null)}
+          onPaid={() => {
+            setPayingBill(null);
+            clearUndoErrors();
+          }}
+        />
+      )}
     </div>
   );
 }

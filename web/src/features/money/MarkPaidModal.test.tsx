@@ -279,11 +279,85 @@ describe("MarkPaidModal", () => {
     fireEvent.click(within(newerRow).getByRole("button", { name: "Undo Property tax payment" }));
     fireEvent.click(within(newerRow).getByRole("button", { name: "Undo payment" }));
 
-    await waitFor(() =>
-      expect(mutatingCalls(fetchMock)).toContain("DELETE /api/v1/bills/bill-1/payments/payment-newer"),
-    );
+    // Waiting on the mutating call itself (fetchMock.mock.calls) proves only
+    // that the DELETE was DISPATCHED -- apiFetch's own fetch() call happens
+    // synchronously, before mutateAsync's promise (and the onSuccess ->
+    // invalidateBills -> refetch chain it awaits) has settled. Waiting for
+    // the row to show its plain trigger again instead proves the FULL
+    // chain landed: `finally` only resets confirmingPaymentId once
+    // mutateAsync itself resolves, which is after that refetch -- the same
+    // refetch this fix's own useEffect (BillsPage.tsx) is keyed on.
+    await within(newerRow).findByRole("button", { name: "Undo Property tax payment" });
+    expect(mutatingCalls(fetchMock)).toEqual([
+      "DELETE /api/v1/bills/bill-1/payments/payment-older",
+      "DELETE /api/v1/bills/bill-1/payments/payment-newer",
+    ]);
     // The older row is still on screen (its own undo never succeeded) but
     // must no longer carry the now-false refusal.
+    expect(within(olderRow).queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  // The sibling of the test above, in the OTHER write path that moves the
+  // same fact: every successful MarkPaid writes a new payment for the bill
+  // and advances next_due (bill.go), which -- exactly like a successful
+  // UndoPayment -- changes which payment is that bill's own most recent.
+  // A stored BILL_PAYMENT_NOT_LATEST message is just as stale after a
+  // Mark-paid success as after an Undo success; nothing about which write
+  // path caused the change is part of what makes the message true or false.
+  it("a successful mark-paid also clears a stale refusal left on a payment of the same bill", async () => {
+    const older = paymentFixture({ id: "payment-older", billId: "bill-1", billName: "Property tax", dueOn: "2026-08-02" });
+    const newer = paymentFixture({ id: "payment-newer", billId: "bill-1", billName: "Property tax", dueOn: "2026-08-20" });
+    // The same bill, still carrying a THIRD, not-yet-paid occurrence -- a
+    // bill can have payment history behind it while still having a live
+    // `nextDue` in front of it; that unpaid occurrence is what Mark paid
+    // targets below.
+    const bill = billFixture({ id: "bill-1", name: "Property tax", nextDue: "2026-08-25", dueSoon: true });
+
+    const { fetchMock } = renderBillsPage([bill], [newer, older], {
+      "DELETE /api/v1/bills/bill-1/payments/payment-older": {
+        status: 409,
+        body: {
+          error: {
+            code: "BILL_PAYMENT_NOT_LATEST",
+            message: "Only the most recent payment, due 2026-08-20, can be undone.",
+            details: { undoableDueOn: "2026-08-20" },
+          },
+        },
+      },
+      "POST /api/v1/bills/bill-1/pay": {
+        status: 200,
+        body: {
+          payment: paymentFixture({ id: "payment-newest", billId: "bill-1", billName: "Property tax", dueOn: "2026-08-25" }),
+          bill: { ...bill, nextDue: "2026-09-25" },
+        },
+      },
+    });
+
+    const paidSection = await screen.findByTestId("bills-paid-this-month");
+    const rows = within(paidSection).getAllByTestId("bill-row");
+    const olderRow = rows[1];
+
+    fireEvent.click(within(olderRow).getByRole("button", { name: "Undo Property tax payment" }));
+    fireEvent.click(within(olderRow).getByRole("button", { name: "Undo payment" }));
+    await within(olderRow).findByRole("alert");
+
+    // Mark paid the bill's own still-unpaid THIRD occurrence, not undo --
+    // the other write path that moves MAX(due_on) for this same bill.
+    fireEvent.click(await screen.findByRole("button", { name: "Mark Property tax paid" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Mark paid" }));
+
+    // The mutating call itself proves only that the POST was dispatched --
+    // apiFetch's own fetch() fires synchronously, before markPaid.mutateAsync
+    // (and the onSuccess -> invalidateBills -> refetch chain it awaits) has
+    // settled. Waiting for the modal to actually close instead proves the
+    // FULL chain landed: MarkPaidModal's own onPaid/onClose only fire once
+    // mutateAsync resolves, which is after that same refetch -- the one
+    // this fix's own useEffect (BillsPage.tsx) is keyed on.
+    await waitFor(() => expect(screen.queryByLabelText("Paid on")).not.toBeInTheDocument());
+    expect(mutatingCalls(fetchMock)).toEqual([
+      "DELETE /api/v1/bills/bill-1/payments/payment-older",
+      "POST /api/v1/bills/bill-1/pay",
+    ]);
     expect(within(olderRow).queryByRole("alert")).not.toBeInTheDocument();
   });
 
