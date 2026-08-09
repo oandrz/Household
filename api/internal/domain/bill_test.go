@@ -69,15 +69,6 @@ func TestNextDueHasNoNextDateForAOneOff(t *testing.T) {
 	}
 }
 
-// It advances from the date passed in, never from today: a bill paid three
-// days late must not shift its due date three days every month.
-func TestNextDueAdvancesFromTheDueDateNotThePaidDate(t *testing.T) {
-	got, _ := domain.NextDue(domain.CadenceMonthly, day("2026-08-08"), 8)
-	if !got.Equal(day("2026-09-08")) {
-		t.Fatalf("NextDue = %s, want 2026-09-08", got.Format("2006-01-02"))
-	}
-}
-
 func TestIsOverdue(t *testing.T) {
 	today := day("2026-08-09")
 	if !domain.IsOverdue(day("2026-08-08"), today) {
@@ -89,6 +80,37 @@ func TestIsOverdue(t *testing.T) {
 	}
 	if domain.IsOverdue(day("2026-08-10"), today) {
 		t.Fatal("tomorrow is not overdue")
+	}
+}
+
+// Time.Year/Month/Day report components in the receiver's own Location, not
+// UTC, so a from or today built in a non-UTC zone must be converted before
+// NextDue or IsOverdue read its calendar date -- the same family of bug
+// docs/HANDOVER.md §6 records shipping at two other call sites in this
+// project. Every other test in this file builds its times through day(),
+// which time.Parse defaults to UTC, so none of them can exercise this path;
+// this one builds its times directly with a non-UTC time.FixedZone.
+func TestNextDueAndIsOverdueNormaliseNonUTCInputToUTC(t *testing.T) {
+	sevenHoursEast := time.FixedZone("+07:00", 7*60*60)
+
+	// 2026-08-09T02:00+07:00 is 2026-08-08T19:00Z -- the same UTC calendar
+	// day as the due date, so the bill is due today, not overdue. Reading
+	// the +07:00 components directly would see 9 August and call it overdue.
+	today := time.Date(2026, time.August, 9, 2, 0, 0, 0, sevenHoursEast)
+	if domain.IsOverdue(day("2026-08-08"), today) {
+		t.Fatal("IsOverdue read today in its own Location instead of UTC and called a bill due today overdue")
+	}
+
+	// 2026-02-01T00:30+07:00 is 2026-01-31T17:30Z -- NextDue must advance
+	// from January. Reading the +07:00 components directly would see
+	// 1 February and land a month late.
+	from := time.Date(2026, time.February, 1, 0, 30, 0, 0, sevenHoursEast)
+	got, ok := domain.NextDue(domain.CadenceMonthly, from, 31)
+	if !ok {
+		t.Fatal("NextDue reported no next date for a recurring cadence")
+	}
+	if !got.Equal(day("2026-02-28")) {
+		t.Fatalf("NextDue = %s, want 2026-02-28 (read from in its own Location instead of UTC)", got.Format("2006-01-02"))
 	}
 }
 

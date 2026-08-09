@@ -115,6 +115,10 @@ func NextDue(c Cadence, from time.Time, anchorDay int) (time.Time, bool) {
 	if months == 0 {
 		return time.Time{}, false
 	}
+	// Year/Month/Day report components in from's own Location, not UTC.
+	// Converting first means the calendar date read below is the same one
+	// UTC would show, regardless of what zone the caller built from in.
+	from = from.UTC()
 	// Move to the first of the destination month, so the day never
 	// participates in the month arithmetic and cannot overflow it.
 	first := time.Date(from.Year(), from.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, months, 0)
@@ -139,6 +143,10 @@ func IsOverdue(nextDue, today time.Time) bool {
 }
 
 func startOfDay(t time.Time) time.Time {
+	// Same reason as NextDue's from.UTC(): Year/Month/Day read t's own
+	// Location, and wrapping the result in time.UTC only labels it, it
+	// never converts the input.
+	t = t.UTC()
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }
 
