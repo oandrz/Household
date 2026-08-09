@@ -261,13 +261,18 @@ func (s *BudgetService) Month(ctx context.Context, householdID string, month, to
 
 		// Accumulate unconditionally, keyed on the possibly-empty payer id.
 		// The old `if t.PaidByMembershipID != ""` guard here is what let
-		// this card's rows sum to less than Spent above it -- every other
-		// accumulator in this loop (spent, spentByCategory) has no such
-		// guard, and this one should not either. Real members are recorded
-		// into personOrder as they first appear; "" is deliberately left
-		// out of that here and appended once after the loop, so it lands
-		// last regardless of when the first unattributed transaction showed
-		// up.
+		// this card's rows sum to less than Spent above it. `spent` a few
+		// lines up has no such guard, and this accumulator now matches it.
+		// `spentByCategory` just above DOES still guard on `t.CategoryID !=
+		// ""` -- that one is deliberate, not a sibling to copy: Categories
+		// has no "uncategorised" row for a bare category id to land in, so a
+		// transaction with no category is correctly left out of it. ByPerson
+		// is different on purpose -- it now has an unattributed bucket for
+		// exactly that case, which is the whole point of this change. Real
+		// members are recorded into personOrder as they first appear; "" is
+		// deliberately left out of that here and appended once after the
+		// loop, so it lands last regardless of when the first unattributed
+		// transaction showed up.
 		total, seen := spentByPerson[t.PaidByMembershipID]
 		if !seen {
 			total = zero
