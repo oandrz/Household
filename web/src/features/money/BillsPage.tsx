@@ -34,6 +34,7 @@
 // GoalContributionsPanel.tsx owns confirmingId/deletingId itself rather than
 // letting ContributionRow track its own).
 import { useState } from "react";
+import { ApiError } from "../../api/client";
 import { useCurrencies } from "../auth/useAuth";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { apiErrorMessage } from "../auth/copy";
@@ -184,6 +185,23 @@ export function BillsPage() {
     return <p className="p-9 text-xs text-muted">Loading…</p>;
   }
   if (bills.error) {
+    // GET /bills is money AND owner-gated (router.go's own comment), so a
+    // limited member holding money reaches this route (the sidebar link and
+    // moneyGuardRoute both only check the capability, never the role) and
+    // the request answers 403. Branching on the real status, not a second
+    // useMe() role check -- GoalsPage.tsx's own comment on its identical
+    // branch: a role check here would be a second source of truth that
+    // could disagree with what the server actually decided.
+    const status = bills.error instanceof ApiError ? bills.error.status : undefined;
+    if (status === 403) {
+      return (
+        <section data-testid="bills-owner-only" className="m-9 rounded-xl border border-hairline bg-card p-[22px]">
+          <h1 className="text-[23px] font-semibold tracking-[-0.02em] text-ink">{BILL_COPY.title}</h1>
+          <h2 className="mt-4 text-xs text-muted">{BILL_COPY.ownerOnlyHeading}</h2>
+          <p className="mt-1.5 text-[13px] text-ink">{BILL_COPY.ownerOnlyBody}</p>
+        </section>
+      );
+    }
     return (
       <p role="alert" data-testid="bills-load-error" className="p-9 text-xs text-danger">
         {BILL_COPY.loadError}

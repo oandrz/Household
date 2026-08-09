@@ -613,4 +613,48 @@ describe("BillsPage", () => {
     expect(await screen.findByTestId("bills-archived-empty")).toHaveTextContent("No archived bills.");
     expect(screen.queryByTestId("bills-archived-section")).not.toBeInTheDocument();
   });
+
+  // The Task 18 browser walk found this: GET /bills is money AND
+  // owner-gated exactly like GET /goals, but this page answered every
+  // failure -- a genuine 500 and a routine "you're not the owner" 403 --
+  // with the identical scary red alert, where GoalsPage.tsx's own copy
+  // distinguishes them. A limited member holding money who follows the
+  // sidebar's own Bills link (moneyGuardRoute only checks the capability,
+  // never the role) landed on "Couldn't load your bills," which reads as
+  // broken rather than as the ordinary, expected boundary it is. Mirrors
+  // GoalsPage.test.tsx's own "renders the owner-only explanation" test
+  // verbatim in shape, the same interim-Overview pattern-2 reasoning: this
+  // asserts the explanation's *presence*, not merely the generic error's
+  // absence.
+  it("a 403 from GET /bills renders the owner-only explanation, not the generic load error", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/bills": {
+        status: 403,
+        body: { error: { code: "FORBIDDEN", message: "Only an owner may do that." } },
+      },
+    });
+
+    renderWithRouter(<BillsPage />);
+
+    const explanation = await screen.findByTestId("bills-owner-only");
+    expect(explanation).toHaveTextContent("Owner only");
+    expect(explanation).toHaveTextContent("Bills is visible to the household owner.");
+    expect(screen.queryByTestId("bills-load-error")).not.toBeInTheDocument();
+  });
+
+  it("a non-403 failure renders the generic load error, not the owner-only explanation", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/bills": {
+        status: 500,
+        body: { error: { code: "INTERNAL", message: "Something broke." } },
+      },
+    });
+
+    renderWithRouter(<BillsPage />);
+
+    expect(await screen.findByTestId("bills-load-error")).toHaveTextContent("Couldn't load your bills.");
+    expect(screen.queryByTestId("bills-owner-only")).not.toBeInTheDocument();
+  });
 });

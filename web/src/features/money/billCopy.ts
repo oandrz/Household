@@ -183,6 +183,20 @@ export const BILL_COPY = {
     `${count} ${count === 1 ? "bill is" : "bills are"} not counted: no exchange rate.`,
 
   loadError: "Couldn't load your bills.",
+  // GET /bills is money AND owner-gated (router.go's own comment: "there is
+  // no reading of it for a limited member that would not read as broken"),
+  // so a limited member holding money reaches this route (RequireCapability
+  // only checks the capability, not the role -- moneyGuardRoute's own
+  // comment in router.tsx) and the request answers 403. GoalsPage.tsx's
+  // identical guard already distinguishes this from a genuine failure with
+  // its own ownerOnlyHeading/ownerOnlyBody rather than the generic
+  // loadError above; this task's own Task 18 walk found BillsPage had not
+  // followed that precedent -- a limited member who clicks the Bills link
+  // the sidebar itself offers them landed on a red "Couldn't load your
+  // bills" alert, the exact shape of surprise docs/LEARNING.md pattern 2
+  // names, even though nothing is actually broken.
+  ownerOnlyHeading: "Owner only",
+  ownerOnlyBody: "Bills is visible to the household owner. Ask them if you'd like to see where things stand.",
 
   // BillModal (Task 13) -- add and edit, one modal, the TransactionModal.tsx
   // pattern (the task brief's own words). The two titles vary by mode, unlike

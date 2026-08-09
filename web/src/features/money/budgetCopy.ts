@@ -101,6 +101,17 @@ export const BUDGET_COPY = {
   fiftyThirtyTwentyPrompt: "Enter your expected income and we'll split it 50/30/20",
 
   loadError: "Couldn't load your budget.",
+  // GET /budgets/{month} is money AND owner-gated exactly like GET /goals
+  // (router.go's own comment on the whole `txn` group), so a limited member
+  // holding money reaches this route (the sidebar link and the /money route
+  // guard both check only the capability, never the role) and the request
+  // answers 403. GoalsPage.tsx's identical guard already distinguishes this
+  // from a genuine failure with its own ownerOnlyHeading/ownerOnlyBody; this
+  // page had not been given the same branch until Bills' Task 18 walk found
+  // the identical gap in BillsPage.tsx and swept for the class rather than
+  // stopping at the one instance (docs/LEARNING.md pattern 1).
+  ownerOnlyHeading: "Owner only",
+  ownerOnlyBody: "Budget is visible to the household owner. Ask them if you'd like to see where things stand.",
 
   // BudgetModal.tsx (Task 14) copy below.
   expectedIncome: "Expected income",

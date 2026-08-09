@@ -23,7 +23,7 @@ gets rebuilt.
 
 ### 1. Fixing an instance rarely fixes the class
 
-This happened **eleven times** — one bullet each below, and the count is the
+This happened **twelve times** — one bullet each below, and the count is the
 number of bullets, so recount it when you add one (it had already drifted by
 one before the UX-repair round noticed). Almost every time, the fix was
 correct and the sibling kept the bug; two of them are the variant where
@@ -185,6 +185,37 @@ a reader nobody thought to look at.
   when the grep is the thing that is wrong (fixed in `8fe1f1a`; see
   `docs/superpowers/plans/2026-07-31-hearth-ux-repair-verification.md`
   criterion 15).
+
+- **Goals fixed "a limited member's routine 403 needs its own explanation,
+  not the generic alert" for Goals alone, and nobody swept for the class —
+  Bills' Task 18 walk found it recurring in two more places at once.**
+  `GET /goals` is money-AND-owner gated, and `GoalsPage.tsx` distinguishes
+  that 403 from a genuine failure with its own `goals-owner-only` branch.
+  `router.go`'s own comment says the identical guard covers the whole `txn`
+  group — transactions, categories, budgets, goals, bills — not goals alone.
+  `BillsPage.tsx` had never been given the branch (criterion 14 of the
+  walk's own brief found it: a limited member holding `money`, following
+  nothing more alarming than the sidebar's own Bills link, landed on the
+  same red `bills-load-error` alert a database outage would produce).
+  Fixing that one instance and re-reading `router.go`'s own comment — which
+  names the whole group in one sentence — was what prompted checking the
+  other three pages built against the same guard rather than closing the
+  task on Bills alone: `BudgetPage.tsx` had the identical gap, one line
+  worse (`if (budget.error || !budget.data)` collapsed the 403 and the
+  post-`TanStack`-contract type-guard into the same generic alert, so
+  splitting them was part of the fix); `TransactionsPage.tsx` had it too,
+  with no test in either direction, same as Bills' own gap. Neither page
+  had so much as an absence test to have been fooled by — the branch had
+  simply never been written, in three different files, by three different
+  tasks, none of which had reason to know a sibling page existed with the
+  same guard. All three fixed in the same mirror shape `GoalsPage.tsx`
+  already used, each pinned by its own two-test pair (403 renders the
+  explanation and not the generic alert; a 500 renders the generic alert
+  and not the explanation) and mutation-checked independently. **A comment
+  naming "the whole group" in one file is not the same as every reader of
+  that group having read it** — `router.go`'s own sentence was true and
+  specific the entire time; nothing made the three frontend pages built
+  against it go and act on it.
 
 **When you fix something, grep for its shape before you close it.** The question
 that finds these is not "is this fixed?" but "where else does this pattern

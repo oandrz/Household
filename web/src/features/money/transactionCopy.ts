@@ -58,6 +58,15 @@ export const TRANSACTIONS_COPY = {
   saveTransaction: "Save transaction",
   noCategory: "No category",
 
+  // A limited member holding `money` reaches this page (the sidebar link and
+  // the /money route guard both check only the capability) but GET
+  // /transactions is money AND owner-gated, so the request 403s. Mirrors
+  // GoalsPage.tsx's own ownerOnly copy in shape and BillsPage.tsx/
+  // BudgetPage.tsx's copies in wording (billCopy.ts, budgetCopy.ts).
+  ownerOnlyHeading: "Owner only",
+  ownerOnlyBody:
+    "Transactions is visible to the household owner. Ask them if you'd like to see where things stand.",
+
   deleteTransaction: "Delete transaction",
   // Said plainly rather than offered as an undo that doesn't exist -- a
   // transaction is hard deleted (transaction_handlers.go's

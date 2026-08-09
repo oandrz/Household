@@ -572,8 +572,24 @@ as their own rows rather than folded silently into the cards above them.
 | Archive and restore a bill (no mockup — see below) | ✅ |
 
 **A household can add a bill, see it come due, mark it paid and undo that if
-it was a mistake — sixteen tasks deep, code-complete and reviewed clean;
-Bills' own browser walk (Task 18) has not run yet.** The Bills page
+it was a mistake — sixteen tasks deep, code-complete and reviewed clean, and
+now walked in a browser too: Task 18's 15-criterion walk (2026-08-10) passed
+15 of 15, after one real defect found at criterion 14, fixed, and swept for
+the class rather than stopped at the one instance — `GET /bills` is
+money-AND-owner-gated exactly like `GET /goals`, but `BillsPage.tsx` answered
+every failure, a routine "you're not the owner" 403 included, with the same
+red `bills-load-error` alert a genuine server error gets, where
+`GoalsPage.tsx`'s own copy already distinguishes the two. Fixing it and
+re-reading `router.go`'s own comment — which names the whole money-AND-owner
+group in one sentence, not Bills alone — found the identical gap already
+sitting in `BudgetPage.tsx` and `TransactionsPage.tsx`, neither of them a
+Bills file. All three fixed to mirror `GoalsPage.tsx`'s `goals-owner-only`
+branch exactly (`bills-owner-only`/`budget-owner-only`/
+`transactions-owner-only`, each with its own copy), pinned by six tests in
+`GoalsPage.test.tsx`'s own pair-shape (two per page) and mutation-checked
+independently. See
+`docs/superpowers/plans/2026-08-09-hearth-bills-verification.md` and
+`docs/LEARNING.md` pattern 1.** The Bills page
 (`/money/bills`) lists
 live bills split into Due soon and Later (both server-computed, so the rule
 lives in one place), a Paid this month list, and an Archived view; the

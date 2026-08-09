@@ -722,4 +722,46 @@ describe("BudgetPage rollover card", () => {
       expect(screen.getByTestId("budget-rollover-done")).toHaveTextContent("moved into Bali trip"),
     );
   });
+
+  // GET /budgets/{month} is money AND owner-gated, identically to GET
+  // /goals (router.go's own `txn` group). Found during Bills' Task 18 walk:
+  // this page collapsed `budget.error || !budget.data` into one generic
+  // alert, so a limited member's routine "not the owner" 403 read exactly
+  // like a genuine outage -- the same gap BillsPage.tsx and
+  // TransactionsPage.tsx both had (docs/LEARNING.md pattern 1: fixing one
+  // instance is not fixing the class). Mirrors GoalsPage.test.tsx's own
+  // pair in shape.
+  it("a 403 from GET /budgets/{month} renders the owner-only explanation, not the generic load error", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/categories": CATEGORIES,
+      "GET /api/v1/budgets/2026-07": {
+        status: 403,
+        body: { error: { code: "FORBIDDEN", message: "Only an owner may do that." } },
+      },
+    });
+
+    renderWithRouter(<BudgetPage />);
+
+    const explanation = await screen.findByTestId("budget-owner-only");
+    expect(explanation).toHaveTextContent("Owner only");
+    expect(explanation).toHaveTextContent("Budget is visible to the household owner.");
+    expect(screen.queryByTestId("budget-load-error")).not.toBeInTheDocument();
+  });
+
+  it("a non-403 failure from GET /budgets/{month} renders the generic load error, not the owner-only explanation", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/categories": CATEGORIES,
+      "GET /api/v1/budgets/2026-07": {
+        status: 500,
+        body: { error: { code: "INTERNAL", message: "Something broke." } },
+      },
+    });
+
+    renderWithRouter(<BudgetPage />);
+
+    expect(await screen.findByTestId("budget-load-error")).toHaveTextContent("Couldn't load your budget.");
+    expect(screen.queryByTestId("budget-owner-only")).not.toBeInTheDocument();
+  });
 });
