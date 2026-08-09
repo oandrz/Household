@@ -229,6 +229,63 @@ func TestRecordPaymentLeavesNoOrphanExpenseWhenTheSecondWriteFails(t *testing.T)
 	}
 }
 
+// TestRecordPaymentRefusesAHouseholdBillMismatchInsteadOfLeavingNextDueBehind
+// pins a review finding: neither bill_payments nor transactions carries a
+// database constraint tying its household_id to the bill's own (this file's
+// header comment on UndoPayment repeats why), so writes 1 and 2 succeed
+// regardless of whether the household actually owns the bill -- only
+// SetBillNextDue's own WHERE clause on bills can catch the mismatch, and
+// only if it is written to fail loud on a zero-row match. Before the fix,
+// SetBillNextDue was a bare :exec; a zero-row UPDATE returns success with no
+// error in Postgres, so RecordPayment would have committed the expense and
+// the payment row while silently leaving next_due untouched -- exactly the
+// partial state this transaction exists to make impossible, arriving
+// through a silent no-op instead of a caught error.
+func TestRecordPaymentRefusesAHouseholdBillMismatchInsteadOfLeavingNextDueBehind(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	repo := postgres.NewBillRepo(db)
+	h, acct := seedHouseholdAndAccount(t, ctx, db)
+	other, _ := seedHouseholdAndAccount(t, ctx, db)
+	bill := createBill(t, ctx, repo, h, acct, "SP utilities", domain.CadenceMonthly, day("2026-08-08"), 14230)
+
+	// other is a real household, just not the one this bill belongs to.
+	next := day("2026-09-08")
+	_, err := repo.RecordPayment(ctx, usecase.PaymentWrite{
+		HouseholdID: other, BillID: bill.Bill.ID, DueOn: day("2026-08-08"), PaidOn: day("2026-08-08"),
+		AmountMinor: 14230, Currency: "SGD", Description: "SP utilities",
+		PayFromAccountID: acct, NextDue: &next,
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("RecordPayment(mismatched household) = %v, want ErrNotFound", err)
+	}
+
+	// The whole transaction must have rolled back: no orphan payment row, no
+	// orphan expense, and the real bill's next_due untouched.
+	payments, err := repo.ListPayments(ctx, h, day("2026-08-01"))
+	if err != nil {
+		t.Fatalf("ListPayments: %v", err)
+	}
+	if len(payments) != 0 {
+		t.Fatalf("got %d payments, want 0 -- the payment row must not survive the mismatch", len(payments))
+	}
+	var txns int
+	if err := db.Pool().QueryRow(ctx,
+		`SELECT count(*) FROM transactions WHERE household_id = $1 OR household_id = $2`, h, other).Scan(&txns); err != nil {
+		t.Fatalf("count transactions: %v", err)
+	}
+	if txns != 0 {
+		t.Fatalf("got %d transactions, want 0 -- the expense must not survive the mismatch", txns)
+	}
+	after, err := repo.Get(ctx, h, bill.Bill.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !after.Bill.NextDue.Equal(day("2026-08-08")) {
+		t.Fatalf("next_due = %s, want it unmoved at 2026-08-08 -- SetBillNextDue's zero-row match must not silently no-op", after.Bill.NextDue.Format("2006-01-02"))
+	}
+}
+
 func TestUndoRefusesAnythingButTheMostRecentPayment(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)

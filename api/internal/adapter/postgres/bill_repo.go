@@ -212,8 +212,12 @@ func (r *BillRepo) RecordPayment(ctx context.Context, in usecase.PaymentWrite) (
 	//    partial state this transaction exists to make impossible. NextDue is
 	//    nil for a settled one-off (PaymentWrite's own doc comment);
 	//    nullableDate carries that through as SQL NULL, which the schema
-	//    allows only for a one-off.
-	if err := q.SetBillNextDue(ctx, sqlcgen.SetBillNextDueParams{
+	//    allows only for a one-off. SetBillNextDue returns the row's id
+	//    (RETURNING, not a bare :exec) so a household/bill mismatch that
+	//    matches zero rows surfaces as pgx.ErrNoRows -> domain.ErrNotFound
+	//    and rolls this transaction back, instead of committing writes 1 and
+	//    2 while silently leaving next_due untouched.
+	if _, err := q.SetBillNextDue(ctx, sqlcgen.SetBillNextDueParams{
 		HouseholdID: uuid(in.HouseholdID),
 		ID:          uuid(in.BillID),
 		NextDue:     nullableDate(in.NextDue),
@@ -296,8 +300,11 @@ func (r *BillRepo) UndoPayment(ctx context.Context, householdID, billID, payment
 	}
 	// Rewind to the undone payment's own due_on. SetBillNextDue never writes
 	// due_anchor_day -- see its own doc comment in queries/bill.sql for the
-	// worked example of what writing it here would destroy.
-	if err := q.SetBillNextDue(ctx, sqlcgen.SetBillNextDueParams{
+	// worked example of what writing it here would destroy. RETURNING id
+	// (not a bare :exec) is what stops a household/bill mismatch from
+	// committing both deletions above while silently leaving next_due
+	// un-rewound -- see SetBillNextDue's own comment.
+	if _, err := q.SetBillNextDue(ctx, sqlcgen.SetBillNextDueParams{
 		HouseholdID: uuid(householdID),
 		ID:          uuid(billID),
 		NextDue:     pay.DueOn,

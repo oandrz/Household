@@ -636,10 +636,11 @@ func (q *Queries) SetBillArchived(ctx context.Context, arg SetBillArchivedParams
 	return i, err
 }
 
-const setBillNextDue = `-- name: SetBillNextDue :exec
+const setBillNextDue = `-- name: SetBillNextDue :one
 UPDATE bills
 SET next_due = $3, updated_at = now()
 WHERE household_id = $1 AND id = $2
+RETURNING id
 `
 
 type SetBillNextDueParams struct {
@@ -656,9 +657,21 @@ type SetBillNextDueParams struct {
 // due 31 Jan -> pay -> 28 Feb -> pay -> 31 Mar -> undo -> 28 Feb, and if undo
 // reset the anchor to 28 the next advance would land on 28 March, the bill
 // having silently lost its 31st forever (BillRepository's own doc comment).
-func (q *Queries) SetBillNextDue(ctx context.Context, arg SetBillNextDueParams) error {
-	_, err := q.db.Exec(ctx, setBillNextDue, arg.HouseholdID, arg.ID, arg.NextDue)
-	return err
+//
+// :one ... RETURNING id, not :exec -- the same DeleteBillPayment reason: a
+// plain :exec UPDATE that matches zero rows still returns success with no
+// error, which would let RecordPayment commit the expense and the payment
+// row while silently leaving next_due untouched (or UndoPayment commit both
+// deletions while silently leaving next_due un-rewound) -- exactly the
+// partial state this transaction exists to make impossible, arriving
+// through a silent no-op instead of a caught error. RETURNING id turns
+// "nothing matched" into pgx.ErrNoRows, which translate maps to
+// domain.ErrNotFound, rolling the whole transaction back.
+func (q *Queries) SetBillNextDue(ctx context.Context, arg SetBillNextDueParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, setBillNextDue, arg.HouseholdID, arg.ID, arg.NextDue)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const updateBill = `-- name: UpdateBill :one

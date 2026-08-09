@@ -186,10 +186,21 @@ RETURNING id, bill_id, household_id, due_on, paid_on, amount_minor, transaction_
 -- due 31 Jan -> pay -> 28 Feb -> pay -> 31 Mar -> undo -> 28 Feb, and if undo
 -- reset the anchor to 28 the next advance would land on 28 March, the bill
 -- having silently lost its 31st forever (BillRepository's own doc comment).
--- name: SetBillNextDue :exec
+--
+-- :one ... RETURNING id, not :exec -- the same DeleteBillPayment reason: a
+-- plain :exec UPDATE that matches zero rows still returns success with no
+-- error, which would let RecordPayment commit the expense and the payment
+-- row while silently leaving next_due untouched (or UndoPayment commit both
+-- deletions while silently leaving next_due un-rewound) -- exactly the
+-- partial state this transaction exists to make impossible, arriving
+-- through a silent no-op instead of a caught error. RETURNING id turns
+-- "nothing matched" into pgx.ErrNoRows, which translate maps to
+-- domain.ErrNotFound, rolling the whole transaction back.
+-- name: SetBillNextDue :one
 UPDATE bills
 SET next_due = $3, updated_at = now()
-WHERE household_id = $1 AND id = $2;
+WHERE household_id = $1 AND id = $2
+RETURNING id;
 
 -- GetBillPayment reads one payment scoped by household_id AND bill_id
 -- together, never by id alone -- bill_payments carries no database
