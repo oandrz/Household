@@ -253,6 +253,12 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 		// service is a panic waiting for the next task to trip over.
 		Goals: goalRepo,
 	})
+	billSvc := usecase.NewBillService(usecase.BillDeps{
+		Bills:      postgres.NewBillRepo(db),
+		Households: households,
+		FX:         fxProvider,
+		Accounts:   accountRepo,
+	})
 
 	router := httpadapter.NewRouter(httpadapter.Deps{
 		Pinger:       db,
@@ -266,6 +272,7 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 		Categories:   categorySvc,
 		Budgets:      budgetSvc,
 		Goals:        goalSvc,
+		Bills:        billSvc,
 		Users:        users,
 		Memberships:  memberships,
 		Sessions:     sessions,

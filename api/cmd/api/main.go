@@ -83,6 +83,7 @@ func run() error {
 	transactionRepo := postgres.NewTransactionRepo(db)
 	budgetRepo := postgres.NewBudgetRepo(db)
 	goalRepo := postgres.NewGoalRepo(db)
+	billRepo := postgres.NewBillRepo(db)
 
 	hasher := crypto.NewArgon2Hasher(cfg.Argon2Time, cfg.Argon2MemoryKiB, cfg.Argon2Threads)
 	tokens := crypto.NewTokenGenerator()
@@ -176,6 +177,15 @@ func run() error {
 		// that first constructs goalRepo.
 		Goals: goalRepo,
 	})
+	billSvc := usecase.NewBillService(usecase.BillDeps{
+		Bills:      billRepo,
+		Households: households,
+		FX:         fxProvider,
+		// AccountRepo already satisfies the narrower AccountLookup BillService
+		// declares, the same one TransactionDeps.Accounts is wired with above
+		// -- one repository, two ports, each caller seeing only what it needs.
+		Accounts: accountRepo,
+	})
 
 	srv := &http.Server{
 		Addr: fmt.Sprintf(":%d", cfg.Port),
@@ -191,6 +201,7 @@ func run() error {
 			Categories:   categorySvc,
 			Budgets:      budgetSvc,
 			Goals:        goalSvc,
+			Bills:        billSvc,
 			Users:        users,
 			Memberships:  memberships,
 			Sessions:     sessions,

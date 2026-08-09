@@ -54,6 +54,7 @@ type Deps struct {
 	Categories   *usecase.CategoryService
 	Budgets      *usecase.BudgetService
 	Goals        *usecase.GoalService
+	Bills        *usecase.BillService
 	Users        usecase.UserRepository
 	Memberships  usecase.MembershipRepository
 	Sessions     usecase.SessionRepository
@@ -256,6 +257,32 @@ func NewRouter(deps Deps) http.Handler {
 					w.Post("/goals/{id}/restore", handleRestoreGoal(deps))
 					w.Post("/goals/{id}/contributions", handleAddGoalContribution(deps))
 					w.Delete("/goals/{id}/contributions/{contributionId}", handleDeleteGoalContribution(deps))
+				})
+
+				// Bills sit in the same money+owner group as transactions,
+				// categories, budgets and goals, for the same reason this
+				// file's own comment above gives for those: a bill's amount
+				// and due date are as much "the household's money" as a
+				// ledger row, so there is no reading of it for a limited
+				// member that would not read as broken.
+				txn.Get("/bills", handleListBills(deps))
+				txn.Group(func(w chi.Router) {
+					w.Use(requireCSRF)
+					w.Post("/bills", handleCreateBill(deps))
+					w.Patch("/bills/{id}", handleUpdateBill(deps))
+					// Archive and restore are their own routes rather than a
+					// field on PATCH, the same reasoning as accounts,
+					// categories and goals above: if archiving were
+					// patchable, an ordinary rename that happened to
+					// include it would archive the bill as a side effect
+					// of saving a name.
+					w.Post("/bills/{id}/archive", handleArchiveBill(deps))
+					w.Post("/bills/{id}/restore", handleRestoreBill(deps))
+					// POST /bills/{id}/pay and DELETE
+					// /bills/{id}/payments/{paymentId} are Task 10's own
+					// routes, not this task's -- MarkPaid and UndoPayment
+					// already exist on BillService but are deliberately
+					// unrouted here.
 				})
 			})
 		})
