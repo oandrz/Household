@@ -285,7 +285,12 @@ describe("BillsPage", () => {
       }),
     );
 
-    await screen.findByText("Property tax");
+    // Waits on the section itself, not the bill's own name -- SubscriptionsCard
+    // (Task 15) renders every isSubscription bill's name too (billFixture's
+    // own default is `isSubscription: true`), so a bare findByText("Property
+    // tax") is now ambiguous between the row here and that panel's own row
+    // for the identical bill.
+    await screen.findByTestId("bills-due-soon");
     expect(screen.queryByTestId("bills-all-caught-up")).not.toBeInTheDocument();
   });
 
@@ -425,7 +430,11 @@ describe("BillsPage", () => {
       },
     });
 
-    await screen.findByText("Car insurance");
+    // SubscriptionsCard (Task 15) renders this same bill's name a second
+    // time (billFixture's own default is `isSubscription: true`), so this
+    // waits on the row's own Archive control -- unambiguous, since that
+    // panel has no buttons at all -- rather than the bill's bare name.
+    await screen.findByRole("button", { name: "Archive Car insurance" });
     fireEvent.click(screen.getByRole("button", { name: "Archive Car insurance" }));
 
     expect(await screen.findByTestId("bills-empty-state")).toBeInTheDocument();
@@ -457,7 +466,11 @@ describe("BillsPage", () => {
       },
     );
 
-    expect(await screen.findByText("Car insurance")).toBeInTheDocument();
+    // Scoped to Due soon -- SubscriptionsCard (Task 15) renders this same
+    // bill's name a second time (billFixture's own default is
+    // `isSubscription: true`), so a bare findByText("Car insurance") is
+    // ambiguous between the two panels.
+    expect(await within(await screen.findByTestId("bills-due-soon")).findByText("Car insurance")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("switch", { name: "Show archived" }));
 
     const archivedSection = await screen.findByTestId("bills-archived-section");
@@ -503,7 +516,10 @@ describe("BillsPage", () => {
       },
     });
 
-    await screen.findByText("Car insurance");
+    // SubscriptionsCard (Task 15) renders this same bill's name a second
+    // time (billFixture's own default is `isSubscription: true`), so this
+    // waits on the section rather than the bill's bare name.
+    await screen.findByTestId("bills-due-soon");
     // The header count is unaffected by the archived bill even once it is
     // in view -- summary counts live bills only, whether or not the toggle
     // is on (billsSummarySchema's own comment).
@@ -588,7 +604,10 @@ describe("BillsPage", () => {
       },
     });
 
-    await screen.findByText("Car insurance");
+    // SubscriptionsCard (Task 15) renders this same bill's name a second
+    // time (billFixture's own default is `isSubscription: true`), so this
+    // waits on the section rather than the bill's bare name.
+    await screen.findByTestId("bills-due-soon");
     fireEvent.click(screen.getByRole("switch", { name: "Show archived" }));
 
     expect(await screen.findByTestId("bills-archived-empty")).toHaveTextContent("No archived bills.");

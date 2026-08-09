@@ -1897,6 +1897,26 @@ route with a missing guard has no second line of defence.
   builds the exact achieved-and-unarchived, both-counts-zero state and goes
   red on the old formula (commits `f04ce11..acbf52d`).
 
+- Bills slice, Task 15 (the Subscriptions panel): wiring `SubscriptionsCard`
+  into `BillsPage` turned five previously-green `BillsPage.test.tsx` tests
+  red with `TestingLibraryElementError: multiple elements found`, on assertions
+  that had never needed scoping before — `await screen.findByText("Car
+  insurance")` used purely to wait for the page to finish loading, not to
+  check anything about that bill in particular. `billFixture`'s own default
+  is `isSubscription: true`, so once the panel existed, every fixture bill's
+  name legitimately appeared twice on the page: once in its list row, once in
+  the new panel's own row for the same bill. Nothing was wrong with either
+  render — the tests were implicitly asserting "this name is unique on the
+  whole page," a property that held by accident until a second, correct
+  panel started showing the same data. Fixed by scoping each assertion to the
+  section it actually meant (`within(dueSoonSection)`, or waiting on a
+  `data-testid` instead of a name that was never guaranteed unique). **A bare
+  `screen.getByText`/`findByText` on a value that also appears in test data
+  elsewhere on the page is an unstated uniqueness assumption; it only fails
+  the day a second, entirely correct feature reuses that same value** — scope
+  to the section under test, or wait on structure (a testid) rather than
+  content that a sibling component might legitimately repeat.
+
 ### Tooling and infrastructure
 
 - The architecture lint **never enforced the rule it existed for**. Both branches

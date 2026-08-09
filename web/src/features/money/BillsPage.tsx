@@ -11,8 +11,13 @@
 // matches the spec (`ORDER BY next_due NULLS LAST, name`), so an overdue
 // bill's earlier date is what sorts it first; nothing here re-sorts.
 //
-// SubscriptionsCard (Task 15) does not exist yet -- this task's own scope
-// boundary. BillModal (Task 13) is wired at all three of its entry points
+// SubscriptionsCard (Task 15) sits in the right column of the two-column
+// grid below, beside the lists -- the design's own layout, deferred to that
+// task because it is the thing that needed to sit beside. It does its own
+// isSubscription/archived filtering internally (its own header comment), so
+// this file passes it `data.bills` unfiltered, the identical shape
+// GoalsPage.tsx passes MonthlyContributionsCard.tsx. BillModal (Task 13) is
+// wired at all three of its entry points
 // below: the header's "+ Add bill", the empty state's own call to action,
 // and BillRow's `onEdit` for a live row -- Goals shipped its own modal with
 // no screen that ever mounted it, and a whole task's review missed the gap
@@ -36,6 +41,7 @@ import { BillModal } from "./BillModal";
 import { MarkPaidModal } from "./MarkPaidModal";
 import { BillRow } from "./BillRow";
 import { BillStatCards } from "./BillStatCards";
+import { SubscriptionsCard } from "./SubscriptionsCard";
 import { BILL_COPY, dayMonthLabel } from "./billCopy";
 import { useArchiveBill, useBills, useRestoreBill, useUndoPayment } from "./useBills";
 import type { Bill, BillPayment } from "./billSchemas";
@@ -309,88 +315,108 @@ export function BillsPage() {
             nextDue={summary.nextDue}
           />
 
-          <div className="rounded-xl border border-hairline bg-card p-[22px]">
-            <div data-testid="bills-due-soon">
-              <h2 className="mb-2 text-[11px] uppercase tracking-[0.08em] text-muted">{BILL_COPY.dueSoon}</h2>
-              {dueSoonBills.length === 0 ? (
-                <p className="py-3 text-[13px] text-muted">{BILL_COPY.dueSoonEmpty}</p>
-              ) : (
-                dueSoonBills.map((bill) => (
-                  <BillRow
-                    key={bill.id}
-                    kind="bill"
-                    bill={bill}
-                    symbolFor={symbolFor}
-                    onEdit={setModalBill}
-                    onArchive={handleArchive}
-                    onRestore={handleRestore}
-                    onMarkPaid={setPayingBill}
-                    pending={pendingIds.has(bill.id)}
-                  />
-                ))
+          {/* The design's own two-column row: lists on the left, the
+              Subscriptions panel and (when it applies) "All caught up"
+              stacked on the right -- Task 12 shipped this single-column and
+              deferred the grid to this task, since the Subscriptions panel
+              is what sits beside the lists (this task's own brief). Single
+              column below `lg` -- BudgetPage.tsx's own identical
+              [1.7fr 1fr] row is the precedent this mirrors, proportions
+              included. */}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.7fr_1fr]">
+            <div className="rounded-xl border border-hairline bg-card p-[22px]">
+              <div data-testid="bills-due-soon">
+                <h2 className="mb-2 text-[11px] uppercase tracking-[0.08em] text-muted">{BILL_COPY.dueSoon}</h2>
+                {dueSoonBills.length === 0 ? (
+                  <p className="py-3 text-[13px] text-muted">{BILL_COPY.dueSoonEmpty}</p>
+                ) : (
+                  dueSoonBills.map((bill) => (
+                    <BillRow
+                      key={bill.id}
+                      kind="bill"
+                      bill={bill}
+                      symbolFor={symbolFor}
+                      onEdit={setModalBill}
+                      onArchive={handleArchive}
+                      onRestore={handleRestore}
+                      onMarkPaid={setPayingBill}
+                      pending={pendingIds.has(bill.id)}
+                    />
+                  ))
+                )}
+              </div>
+
+              {/* No explanatory text when empty, unlike Due soon above -- the
+                  task brief pins the empty-heading failure specifically for
+                  Due soon (state 2's own contract line); a far-out household
+                  with nothing beyond 30 days just has no Later section to
+                  show, which is unremarkable rather than a state to explain. */}
+              {laterBills.length > 0 && (
+                <div data-testid="bills-later" className="mt-4">
+                  <h2 className="mb-2 text-[11px] uppercase tracking-[0.08em] text-muted">{BILL_COPY.later}</h2>
+                  {laterBills.map((bill) => (
+                    <BillRow
+                      key={bill.id}
+                      kind="bill"
+                      bill={bill}
+                      symbolFor={symbolFor}
+                      onEdit={setModalBill}
+                      onArchive={handleArchive}
+                      onRestore={handleRestore}
+                      onMarkPaid={setPayingBill}
+                      pending={pendingIds.has(bill.id)}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {paidThisMonth.length > 0 && (
+                <div data-testid="bills-paid-this-month" className="mt-4">
+                  <h2 className="mb-2 text-[11px] uppercase tracking-[0.08em] text-muted">
+                    {BILL_COPY.paidThisMonth}
+                  </h2>
+                  {paidThisMonth.map((payment) => (
+                    <BillRow
+                      key={payment.id}
+                      kind="payment"
+                      payment={payment}
+                      symbolFor={symbolFor}
+                      onAskUndo={handleAskUndo}
+                      onCancelUndo={handleCancelUndo}
+                      onConfirmUndo={() => handleConfirmUndo(payment)}
+                      confirming={confirmingPaymentId === payment.id}
+                      undoing={undoingPaymentId === payment.id}
+                      error={undoErrors[payment.id] ?? null}
+                    />
+                  ))}
+                </div>
               )}
             </div>
 
-            {/* No explanatory text when empty, unlike Due soon above -- the
-                task brief pins the empty-heading failure specifically for
-                Due soon (state 2's own contract line); a far-out household
-                with nothing beyond 30 days just has no Later section to
-                show, which is unremarkable rather than a state to explain. */}
-            {laterBills.length > 0 && (
-              <div data-testid="bills-later" className="mt-4">
-                <h2 className="mb-2 text-[11px] uppercase tracking-[0.08em] text-muted">{BILL_COPY.later}</h2>
-                {laterBills.map((bill) => (
-                  <BillRow
-                    key={bill.id}
-                    kind="bill"
-                    bill={bill}
-                    symbolFor={symbolFor}
-                    onEdit={setModalBill}
-                    onArchive={handleArchive}
-                    onRestore={handleRestore}
-                    onMarkPaid={setPayingBill}
-                    pending={pendingIds.has(bill.id)}
-                  />
-                ))}
-              </div>
-            )}
+            <div className="flex flex-col gap-4">
+              <SubscriptionsCard
+                bills={data.bills}
+                currency={summary.currency}
+                symbolFor={symbolFor}
+                monthlyMinor={summary.subscriptionsMonthlyMinor}
+                annualMinor={summary.subscriptionsAnnualMinor}
+              />
 
-            {paidThisMonth.length > 0 && (
-              <div data-testid="bills-paid-this-month" className="mt-4">
-                <h2 className="mb-2 text-[11px] uppercase tracking-[0.08em] text-muted">
-                  {BILL_COPY.paidThisMonth}
-                </h2>
-                {paidThisMonth.map((payment) => (
-                  <BillRow
-                    key={payment.id}
-                    kind="payment"
-                    payment={payment}
-                    symbolFor={symbolFor}
-                    onAskUndo={handleAskUndo}
-                    onCancelUndo={handleCancelUndo}
-                    onConfirmUndo={() => handleConfirmUndo(payment)}
-                    confirming={confirmingPaymentId === payment.id}
-                    undoing={undoingPaymentId === payment.id}
-                    error={undoErrors[payment.id] ?? null}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-
-          {allCaughtUp && (
-            <div data-testid="bills-all-caught-up" className="rounded-xl bg-callout px-5 py-[18px]">
-              <p className="text-[13px] font-semibold text-accent">{BILL_COPY.allCaughtUpHeadline}</p>
-              <p className="mt-1.5 text-[12px] leading-relaxed text-accent-dark">
-                {BILL_COPY.allCaughtUpBody(
-                  currentMonthName(),
-                  summary.nextDue
-                    ? BILL_COPY.nextBillClause(summary.nextDue.billName, dayMonthLabel(summary.nextDue.dueOn))
-                    : null,
-                )}
-              </p>
+              {allCaughtUp && (
+                <div data-testid="bills-all-caught-up" className="rounded-xl bg-callout px-5 py-[18px]">
+                  <p className="text-[13px] font-semibold text-accent">{BILL_COPY.allCaughtUpHeadline}</p>
+                  <p className="mt-1.5 text-[12px] leading-relaxed text-accent-dark">
+                    {BILL_COPY.allCaughtUpBody(
+                      currentMonthName(),
+                      summary.nextDue
+                        ? BILL_COPY.nextBillClause(summary.nextDue.billName, dayMonthLabel(summary.nextDue.dueOn))
+                        : null,
+                    )}
+                  </p>
+                </div>
+              )}
             </div>
-          )}
+          </div>
 
           {summary.excludedNoRate > 0 && (
             <p data-testid="bills-excluded-no-rate" className="text-xs text-muted">

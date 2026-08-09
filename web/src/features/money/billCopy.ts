@@ -66,6 +66,21 @@ export const CADENCE_OPTIONS = [
   { value: "yearly", label: "Yearly" },
 ] as const;
 
+// Row-level cadence label for the Subscriptions panel (SubscriptionsCard.tsx)
+// -- derived from CADENCE_OPTIONS above rather than a second, separately
+// typed-out set of the same four strings, so a future rename of one only
+// ever has one place to change.
+export const CADENCE_LABELS: Record<string, string> = Object.fromEntries(
+  CADENCE_OPTIONS.map((option) => [option.value, option.label]),
+);
+
+// Shared between isSubscriptionLabel below (the modal's own checkbox) and
+// subscriptionsEmptyBody (the panel's own empty state) -- the empty state
+// names this exact label so a household reading it can go straight to the
+// control that makes the panel stop being empty, and a future rename of the
+// checkbox's own words cannot silently leave that sentence quoting stale text.
+const IS_SUBSCRIPTION_LABEL = "Counts as a subscription";
+
 export const BILL_COPY = {
   title: "Bills & subscriptions",
   // M = 0 hides the line rather than rendering "0 of 0" -- the formulas
@@ -219,7 +234,7 @@ export const BILL_COPY = {
   // MarkPaid (Task 14) actually does.
   onAutopayHelp: "The bank pays this one — we'll still ask you to confirm it went out.",
 
-  isSubscriptionLabel: "Counts as a subscription",
+  isSubscriptionLabel: IS_SUBSCRIPTION_LABEL,
   // Spec decision 4: a subscription is a bill with a flag the household set,
   // never one the code inferred from its category or cadence -- this says
   // what ticking the box does, not a claim about what the bill "is".
@@ -276,4 +291,30 @@ export const BILL_COPY = {
   undoAriaLabel: (billName: string) => `Undo ${billName} payment`,
   undoConfirmBody: "This removes the expense it wrote to the ledger.",
   undoConfirmAction: "Undo payment",
+
+  // SubscriptionsCard (Task 15), beside the lists on BillsPage's own
+  // two-column grid. subscriptionsMonthlyMinor/subscriptionsAnnualMinor
+  // (BillsSummary) are the server's own rollup -- bill.go's own comment:
+  // integer-first, one division, at the very end -- so every figure this
+  // card shows is formatted here, never re-summed from the bills array.
+  subscriptionsTitle: "Subscriptions",
+  // One composed string, not two sibling elements read as one line only by
+  // CSS spacing -- the design draws "Subscriptions" and "S$70.90/mo" as
+  // separate divs, but a screen reader (and a test asserting text content)
+  // needs the "· " connector to actually be text.
+  subscriptionsHeading: (monthlyLabel: string) => `Subscriptions · ${monthlyLabel}/mo`,
+  subscriptionsAnnualLine: (annualLabel: string) => `${annualLabel}/year`,
+  // The task brief's own point 2: a row shows what is actually charged (a
+  // quarterly bill's own S$120), while the heading and this line show the
+  // monthly-equivalent totals the server already normalised -- without this
+  // sentence a household has no way to tell the two kinds of figure apart on
+  // the same card. Says nothing about when the totals were last checked --
+  // the design's own "last reviewed Mar 2026" names a date nothing in this
+  // product can set (point 3), so it is not carried into this rewrite.
+  subscriptionsEquivalentNote: "Totals above are monthly equivalents — each row shows what's actually charged.",
+  // The empty state (point 4): explains how a bill becomes a subscription --
+  // the checkbox in the Add/Edit-bill modal -- rather than leaving a
+  // household with bills and a blank panel and no way to know what it is
+  // for.
+  subscriptionsEmptyBody: `No bills are marked as subscriptions yet. Tick "${IS_SUBSCRIPTION_LABEL}" when adding or editing a bill to see it listed here.`,
 } as const;
