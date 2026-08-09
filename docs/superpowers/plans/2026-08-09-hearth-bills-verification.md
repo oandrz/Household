@@ -44,7 +44,13 @@ every criterion by its own number.
 criterion 14, fixed, mutation-checked, re-walked live mid-walk, and then
 swept for the class rather than closed on the one instance — the identical
 gap turned out to be sitting in two more Money pages that are not Bills'
-own.**
+own.** Review then named a gap in the walk itself: criterion 14 speaks of
+"a limited member" without saying which of the product's two limited states
+it means, and the first pass only ever walked one of them (holding
+`money`). A third state — limited, holding no capabilities at all — is
+walked below as "Criterion 14, extended," added rather than deferred, since
+that state is exactly where a defect would hide from every check this
+record already made.
 
 The defect is the reason this walk exists. `GET /bills` is money-AND-owner
 gated exactly like `GET /goals`, `GET /budgets/{month}` and `GET
@@ -157,8 +163,151 @@ S$65.00 after payment 2, for the identical reason — see product question 1.
 | 11 | All-caught-up state appears once every bill due this month is paid, and names the next one | **PASS, walked immediately after criteria 2/3/5** (see the reordering note above — no overdue or no-rate bill existed yet). With only Internet on the household, paid once: `bills-all-caught-up` read **"All caught up — everything due in August is paid. Next bill: Internet, 20 Sep."**, gated correctly on `dueThisMonthMinor (S$65.00) === paidSoFarMinor (S$65.00)`, `excludedNoRate === 0`, and the earliest bill (Internet itself) not overdue. Screenshot `05` |
 | 12 | A subscription-flagged bill appears in the panel; the monthly and annual figures agree (`× 12`) | **PASS** — Netflix, S$15.99/mo, "Counts as a subscription" ticked. Subscriptions panel: heading **"Subscriptions · S$15.99/mo"**, row **"Netflix S$15.99"**, footer **"S$191.88/year"**. Arithmetic: 15.99 × 12 = 191.88 exactly (integer minor units: 1,599 × 12 = 19,188 minor = S$191.88, no rounding involved). Screenshot `10` |
 | 13 | A bill on a second-currency account converts into primary in the stat cards, and a currency with no rate is **excluded and counted on screen** | **PASS, both halves** — Jakarta apartment (IDR, Jakarta Savings, Rp1,241,000, due 25 Aug): "Due this month" moved **S$155.00 → S$255.00**, +S$100.00 exactly (Rp1,241,000 ÷ 12,410 = S$100.00 exact, the design's own static rate, no rounding). US streaming (USD, US Brokerage, $9.99, due 28 Aug, also ticked as a subscription): "Due this month" **stayed at S$255.00** — not counted — and `bills-excluded-no-rate` read **"1 bill is not counted: no exchange rate."** Screenshot `11` |
-| 14 | A limited member holding `money` is refused the Bills page — reads included — **and then loads Overview as that same member** and sees the limited-member panel, not a page with a heading and nothing under it. Bills gives Overview a fourth failing query; this is the criterion that proves it did not blank the page (`docs/LEARNING.md` pattern 2) | **FAIL on the first walk (Bills' own page, not Overview) — PASS after the fix, re-walked live, then swept for the class.** `GET /api/v1/bills` as Jamie (limited, holds `money`, not owner) answered **403 `FORBIDDEN` "Only an owner may do that."`** both before and after the fix — the refusal itself was never in question. Before the fix, `/money/bills` rendered the same `bills-load-error` red alert ("Couldn't load your bills.") a genuine outage would produce. After the fix: `bills-owner-only` — **"Bills / Owner only / Bills is visible to the household owner. Ask them if you'd like to see where things stand."** Overview, both before and after (this half never needed a fix — that is the criterion's own literal claim, and it held throughout), rendered `overview-limited-heading` — "Money / Amounts are hidden for your account. The accounts shared with you are in Finances. / Go to Finances" — 223 characters of real content, not a blank page. **The sweep prompted by this fix then found the identical gap in `/money/budget` and `/money/transactions`, neither of them a Bills page** — both fixed and re-walked as Jamie the same way: `budget-owner-only` reading "Budget / Owner only / Budget is visible to the household owner...", `transactions-owner-only` reading the equivalent for Transactions. See "The defect, and the fix" below. Screenshots `13`, `14`, `16`, `17` |
+| 14 | A limited member holding `money` is refused the Bills page — reads included — **and then loads Overview as that same member** and sees the limited-member panel, not a page with a heading and nothing under it. Bills gives Overview a fourth failing query [premise superseded — see result]; this is the criterion that proves it did not blank the page (`docs/LEARNING.md` pattern 2) | **FAIL on the first walk (Bills' own page, not Overview) — PASS after the fix, re-walked live, then swept for the class.** `GET /api/v1/bills` as Jamie (limited, holds `money`, not owner) answered **403 `FORBIDDEN` "Only an owner may do that."`** both before and after the fix — the refusal itself was never in question. Before the fix, `/money/bills` rendered the same `bills-load-error` red alert ("Couldn't load your bills.") a genuine outage would produce. After the fix: `bills-owner-only` — **"Bills / Owner only / Bills is visible to the household owner. Ask them if you'd like to see where things stand."** Overview, both before and after, rendered `overview-limited-heading` — "Money / Amounts are hidden for your account. The accounts shared with you are in Finances. / Go to Finances" — 223 characters of real content, not a blank page. **That panel is `GET /accounts`'s doing, not Bills'** — `accounts.isSuccess && !accounts.data.summary` (`OverviewPage.tsx`), the money-only-no-owner guard Jamie passes because she does hold `money`; nothing about Bills feeds it. **Correction (found by review): the criterion's own premise — "Bills gives Overview a fourth failing query" — is not what the shipped code does, and the walk's first pass repeated the premise rather than naming the mismatch.** `NextBillCard.tsx:26` calls `useBills(false, { enabled })` with `enabled={isOwner}` (`OverviewPage.tsx`'s own prop, the same boolean gating `useBudget`/`useGoals` there); Jamie is not an owner, so for her `enabled` is false and the query is never issued at all — not issued and 403ed, never issued. `NextBillCard.tsx`'s own comment names this as deliberate: "Task 11's own `enabled` option: the request is never sent, not sent and 403ed." So there was never a fourth failing query for the `overview-limited-heading` panel to have survived, and `NextBillCard` itself contributes nothing to Jamie's Overview either way — not a passing query, not a failing one, no query at all. The brief's premise (written before Task 11 added `enabled`) was superseded, and what actually protects a limited member here is stronger than catching a 403: the request that would produce one is never sent. The behaviour this criterion verified is correct; the sentence this replaces had affirmed a false premise instead of correcting it, and had tied the `/accounts`-sourced panel to a Bills-sourced claim that was never true. **The sweep prompted by this fix then found the identical gap in `/money/budget` and `/money/transactions`, neither of them a Bills page** — both fixed and re-walked as Jamie the same way: `budget-owner-only` reading "Budget / Owner only / Budget is visible to the household owner...", `transactions-owner-only` reading the equivalent for Transactions. See "The defect, and the fix" below. **A third member state — limited, holding no capabilities at all — was walked after review named it as the state this criterion's own two-state walk had skipped; see "Criterion 14, extended" below.** Screenshots `13`, `14`, `16`, `17` |
 | 15 | Overview's Next bill card shows the earliest unpaid bill and moves without a reload after `+ Add → Bill` | **PASS** — Card read **"Next bill / S$1,200.00 / Rent · Overdue"** (Rent, due 2026-03-31, the earliest `next_due` across every live bill at that point). A `window.__noReloadSentinel` value was set before opening `+ Add → Bill`; it survived the whole round trip (a full page reload would have wiped it). Created **Car loan** (S$350.00, due **2026-01-01** — earlier than Rent's Mar 31), and the card updated, with no navigation and no reload, to **"S$350.00 / Car loan · Overdue"**. Viewed inline, not saved to disk (see the Screenshots section below) — the numbers above are the DOM/sentinel reads taken at the time, which is the evidence this walk's own instructions call for |
+
+---
+
+## Criterion 14, extended: the third member state (added after review)
+
+The first pass of this walk covered two of the three member states this
+product has: an owner (Andreas) and a limited member holding `money`
+(Jamie). Review named the gap directly: **a limited member holding no
+capabilities at all** is the third reachable state, and it is the state
+none of this feature's unit tests exercise either — precisely the shape of
+gap the interim Overview's own real defect once hid in. Walked here rather
+than deferred, with the same numeric evidence used throughout this record,
+not a screenshot alone.
+
+**Setup.** `docker compose exec api go run ./cmd/adminctl create-invite
+--email=noaccess@hearth.family --name=Noor --role=limited
+--inviter-email=andreas@hearth.family` — no `--capabilities` flag at all, so
+`domain.ParseCapabilities` received an empty list. The invite screen itself
+named the resulting state before it was even accepted: **"Joining as Kid —
+no access only."** Accepted in the browser (password set there).
+
+**`GET /api/v1/auth/me` as Noor**, read directly rather than inferred from
+the screen:
+
+```json
+{
+  "user": {
+    "id": "5fc4a987-88f6-4f1a-8af4-93f3335ee59d",
+    "email": "noaccess@hearth.family",
+    "displayName": "Noor",
+    "avatarInitial": "N"
+  },
+  "household": {
+    "id": "77d86a8e-6ea2-4daf-872f-8fa9f6f87b94",
+    "name": "Andreas & Christine",
+    "familyName": "Oentoro",
+    "primaryCurrency": "SGD",
+    "showSecondaryCurrency": true,
+    "secondaryCurrency": "IDR",
+    "fxRateMode": "auto"
+  },
+  "membership": {
+    "id": "e53ec904-c82f-44b2-bcad-cd7d6ffa5f1e",
+    "householdId": "77d86a8e-6ea2-4daf-872f-8fa9f6f87b94",
+    "userId": "5fc4a987-88f6-4f1a-8af4-93f3335ee59d",
+    "role": "limited",
+    "capabilities": []
+  },
+  "capabilities": [],
+  "spaces": [
+    {
+      "id": "6368367c-aebf-45d7-9e88-7521cedb1c8a",
+      "key": "family",
+      "name": "Family",
+      "visibility": "everyone",
+      "position": 3,
+      "isBuiltin": true
+    }
+  ]
+}
+```
+
+The full, unabridged response — nothing trimmed, since this record's own
+credibility rests on verbatim reads.
+
+No `money` entry in `capabilities`, and — the load-bearing detail —
+**no `money` entry in `spaces` either.** `Sidebar.tsx`'s own comment states
+the server has already filtered this array by capability before the
+frontend ever sees it ("The server has already filtered this array by the
+caller's capabilities... this component renders it exactly as given"), and
+the response confirms that: the `money` space itself is absent, not merely
+hidden by a client-side check. The rendered sidebar held exactly two links,
+**"Overview" and "Settings"** — no "MONEY" group label, no Bills link, no
+link a limited-money member like Jamie would still see (Jamie's own sidebar
+carries the full five-page Money group; only the guard behind each page
+differs for her).
+
+**Overview**, as Noor, rendered the `!hasMoney` branch (`OverviewPage.tsx`
+line 49): a single panel reading **"You don't have access to Money in this
+household."** — `OVERVIEW_COPY.noMoneyAccess`'s exact string, read from the
+DOM. No net-worth card, no budget card, no goals card, no next-bill card, no
+setup checklist, no "+ Add" — `isOwner && hasMoney` gates the last of those,
+and `hasMoney` alone gates the rest, both false here. Real content, not a
+blank page — the same standard this criterion holds Jamie's Overview to.
+
+**Direct navigation to all five Money routes** (typed URL each time, not a
+sidebar click, since Noor's sidebar offers no link there to click):
+`/money`, `/money/bills`, `/money/transactions`, `/money/budget`,
+`/money/goals` — every one landed on `/`, Overview, not on the page typed
+and not on a 403 page. `window.location.href` confirmed
+`http://localhost:5173/` after each navigation settled, checked
+individually rather than assumed from the first. `RequireCapability.tsx`
+(wraps every Money route, `router.tsx`'s own route tree) is why: `if
+(!me.data.capabilities.includes(cap)) return <Navigate to="/" replace
+/>;` — a client-side redirect, before `BillsPage.tsx` (or any of its
+siblings) or its `useBills` hook ever mounts. This is a categorically
+different code path from Jamie's: Jamie's requests reach the server and get
+refused there; Noor's requests are never issued by the client at all, the
+same `enabled`-style prevention criterion 14's own correction above
+describes for `NextBillCard`. Its own comment states plainly this is
+presentation only, not the security boundary: "Client-side gating is
+presentation only, per the identity spec: the server enforces every
+capability rule independently on the endpoints themselves... its absence
+would not be a security hole, only a worse UI for an already-rejected
+request."
+
+**All four money-AND-owner endpoints called directly** (bypassing the SPA,
+to check the server's own boundary, not just the client's, and checked
+individually rather than inferred from one and extrapolated from
+`router.go`'s grouping alone):
+
+```json
+[
+  { "url": "/api/v1/bills", "status": 403, "message": "You do not have permission to do that." },
+  { "url": "/api/v1/transactions", "status": 403, "message": "You do not have permission to do that." },
+  { "url": "/api/v1/budgets/2026-08", "status": 403, "message": "You do not have permission to do that." },
+  { "url": "/api/v1/goals", "status": 403, "message": "You do not have permission to do that." }
+]
+```
+
+All four answered `403 FORBIDDEN` with the identical message — but a
+**different** message than Jamie's own 403 on `/bills`: "You do not have
+permission to do that.", not "Only an owner may do that." The two messages
+come from two different middlewares stacked on the same route group
+(`router.go:190-199`): `requireCapability(domain.CapMoney)` runs first and
+answers its own generic FORBIDDEN (`middleware_capability.go:26`) the
+moment `money` is absent from the caller's scope — Noor never reaches
+`requireOwner` (`middleware_csrf.go:73`), the middleware that produced
+Jamie's "Only an owner" wording on the same routes, because the capability
+check already refused her. Both are 403 `FORBIDDEN` at the wire level; the
+message differs because a different guard answered first.
+
+**Result: correct in every part checked.** Console tracking was cleared and
+the whole sequence — reload Overview, navigate through all five Money
+routes in turn, land back on Overview each time — re-run with tracking
+already active rather than checked after the fact (a first pass here
+checked only after the actions had already happened, which the tool's own
+tracking-starts-at-first-call behaviour would have made retroactive and
+unreliable; caught before this record was written, not after). The re-run,
+filtered for `error|Error|exception|Exception|warn|Warn`, returned **zero
+matches**. No fix was needed for this state — it is included here because a
+state this walk had not looked at is exactly where a defect would have
+hidden, not because one turned up. Screenshot `18`.
 
 ---
 
@@ -372,21 +521,23 @@ Stated exactly, since several criteria depend on reading it precisely.
 
 ---
 
-## Screenshots: 15 files, 15 distinct hashes
+## Screenshots: 16 files, 16 distinct hashes
 
 `shasum -a 256` over `docs/superpowers/plans/2026-08-09-hearth-bills-screenshots/`
-returns **15 distinct hashes across 15 files** — no accidental duplicate
+returns **16 distinct hashes across 16 files** — no accidental duplicate
 this walk (files `16` and `17` are the sibling fix's own before/after,
 `BudgetPage.tsx` and `TransactionsPage.tsx` re-walked as Jamie after their
-fix). The numbering runs `02`–`14`, `16`–`17`: two criteria's own screens —
-**1** (the first-run empty state) and **15** (Overview's Next bill card
-moving without a reload) — were viewed inline during the walk but not saved
-to disk before the state moved on to the next criterion. Both criteria's
-numbers in the table above (criterion 1: `bills-empty-state` present,
-`bills-due-soon`/every stat card absent; criterion 15: the card's own text
-and the `window.__noReloadSentinel` surviving the round trip) are asserted
-directly from the DOM/sentinel read taken at the time, which is the
-evidence this walk's own instructions call for — screenshots are the
+fix; file `18`, added after review, is the third member state's Overview —
+sidebar and the `!hasMoney` panel together in one frame). The numbering
+runs `02`–`14`, `16`–`18`: two criteria's own
+screens — **1** (the first-run empty state) and **15** (Overview's Next
+bill card moving without a reload) — were viewed inline during the walk but
+not saved to disk before the state moved on to the next criterion. Both
+criteria's numbers in the table above (criterion 1: `bills-empty-state`
+present, `bills-due-soon`/every stat card absent; criterion 15: the card's
+own text and the `window.__noReloadSentinel` surviving the round trip) are
+asserted directly from the DOM/sentinel read taken at the time, which is
+the evidence this walk's own instructions call for — screenshots are the
 record, not the evidence.
 
 ---
