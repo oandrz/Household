@@ -2,10 +2,10 @@ package postgres
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres/sqlcgen"
@@ -156,20 +156,158 @@ func (r *BillRepo) SetArchived(ctx context.Context, householdID, billID string, 
 	}, row.CategoryName, row.AccountName, row.Currency)
 }
 
-// RecordPayment is Task 5's job: writing the bill_payments row, the expense
-// transaction and the advanced next_due in ONE database transaction
-// (BillRepository.RecordPayment's own doc comment). This stub exists only so
-// the package compiles against usecase.BillRepository -- Task 5 replaces it
-// with the real three-way transactional write.
+// RecordPayment writes the bill_payments row, the expense transaction and
+// the advanced next_due in ONE database transaction
+// (BillRepository.RecordPayment's own doc comment): a bill left advanced
+// with no payment, or a payment with no expense, is not a state this method
+// can produce. The transaction is begun and committed by hand, not via
+// pgx.BeginFunc (contrast GoalRepo.Create) -- Step 6's mutation check
+// (removing the deferred rollback and committing after each statement to
+// prove TestRecordPaymentIsAtomic actually catches a partial write) is only
+// expressible against this shape.
 func (r *BillRepo) RecordPayment(ctx context.Context, in usecase.PaymentWrite) (usecase.BillPaymentRecord, error) {
-	return usecase.BillPaymentRecord{}, errors.New("not implemented: Task 5")
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return usecase.BillPaymentRecord{}, translate(err, "begin record payment")
+	}
+	defer tx.Rollback(ctx)
+	q := r.q.WithTx(tx)
+
+	// 1. The expense. Its currency is the account's, resolved by the service
+	//    through AccountLookup -- the same rule TransactionService.Create
+	//    applies at usecase/transaction.go:232. occurred_on is PaidOn, not
+	//    DueOn: the money left the account on the day it was actually paid,
+	//    which may be later than the occurrence it settles.
+	txn, err := q.CreateTransaction(ctx, sqlcgen.CreateTransactionParams{
+		HouseholdID:            uuid(in.HouseholdID),
+		Kind:                   "expense",
+		OccurredOn:             dateOnly(in.PaidOn),
+		Description:            in.Description,
+		CategoryID:             nullableUUID(optionalID(in.CategoryID)),
+		PaidByMembershipID:     nullableUUID(optionalID(in.PaidByMembershipID)),
+		FromAccountID:          uuid(in.PayFromAccountID),
+		ToAccountID:            pgtype.UUID{}, // NULL: an expense has no destination account
+		AmountMinor:            in.AmountMinor,
+		AmountCurrency:         in.Currency,
+		ReceivedAmountMinor:    nil, // an expense is never a transfer
+		ReceivedAmountCurrency: nil,
+	})
+	if err != nil {
+		return usecase.BillPaymentRecord{}, translate(err, "create bill expense")
+	}
+	// 2. The payment row. UNIQUE (bill_id, due_on) is what refuses a second
+	//    payment of one occurrence; translate() maps it to ErrAlreadyExists.
+	pay, err := q.CreateBillPayment(ctx, sqlcgen.CreateBillPaymentParams{
+		BillID:        uuid(in.BillID),
+		HouseholdID:   uuid(in.HouseholdID),
+		DueOn:         dateOnly(in.DueOn),
+		PaidOn:        dateOnly(in.PaidOn),
+		AmountMinor:   in.AmountMinor,
+		TransactionID: txn.ID,
+	})
+	if err != nil {
+		return usecase.BillPaymentRecord{}, translate(err, "create bill payment")
+	}
+	// 3. The advance. A bill left advanced with no payment is exactly the
+	//    partial state this transaction exists to make impossible. NextDue is
+	//    nil for a settled one-off (PaymentWrite's own doc comment);
+	//    nullableDate carries that through as SQL NULL, which the schema
+	//    allows only for a one-off.
+	if err := q.SetBillNextDue(ctx, sqlcgen.SetBillNextDueParams{
+		HouseholdID: uuid(in.HouseholdID),
+		ID:          uuid(in.BillID),
+		NextDue:     nullableDate(in.NextDue),
+	}); err != nil {
+		return usecase.BillPaymentRecord{}, translate(err, "advance bill next due")
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return usecase.BillPaymentRecord{}, translate(err, "commit record payment")
+	}
+	// BillName is in.Description: PaymentWrite's own doc comment says
+	// Description IS the bill's name. Autopay is left false on purpose --
+	// BillPaymentRecord's own doc comment explains why RecordPayment does not
+	// join it back.
+	return toRecordedBillPayment(pay, in.Description, in.Currency)
 }
 
-// UndoPayment is Task 5's job, for the same reason RecordPayment is stubbed
-// above: deleting the payment, deleting its transaction and rewinding
-// next_due all belong to one database transaction that does not exist yet.
+// UndoPayment reverses RecordPayment's three writes in ONE database
+// transaction: deletes the payment, deletes its transaction when
+// transaction_id is still non-NULL, and rewinds next_due to the payment's
+// due_on. Every read and write here is scoped by household_id AND bill_id
+// together, never by payment id alone -- bill_payments carries no database
+// constraint tying its household_id to its bill's, so an id from a
+// mismatched household or bill would otherwise leak across the boundary.
 func (r *BillRepo) UndoPayment(ctx context.Context, householdID, billID, paymentID string) error {
-	return errors.New("not implemented: Task 5")
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return translate(err, "begin undo payment")
+	}
+	defer tx.Rollback(ctx)
+	q := r.q.WithTx(tx)
+
+	pay, err := q.GetBillPayment(ctx, sqlcgen.GetBillPaymentParams{
+		HouseholdID: uuid(householdID),
+		BillID:      uuid(billID),
+		ID:          uuid(paymentID),
+	})
+	if err != nil {
+		return translate(err, "get bill payment")
+	}
+
+	mostRecent, err := q.MostRecentBillPaymentDueOn(ctx, sqlcgen.MostRecentBillPaymentDueOnParams{
+		HouseholdID: uuid(householdID),
+		BillID:      uuid(billID),
+	})
+	if err != nil {
+		return translate(err, "most recent bill payment due on")
+	}
+	// GetBillPayment above already proved at least one payment -- this one --
+	// exists for this bill, so MAX(due_on) cannot come back NULL. A stray
+	// invalid value here is a bug in the query, not a real "no payments"
+	// case, and is refused rather than let the comparison below pass on a
+	// zero time by accident.
+	if !mostRecent.Valid {
+		return fmt.Errorf("postgres: most recent bill payment due_on is NULL for bill %s with a payment already confirmed to exist", billID)
+	}
+	// Only the bill's most recent payment can be undone: undoing an older
+	// one would rewind next_due behind a later occurrence that is still
+	// paid, and the screen would show a due date for money already spent.
+	if !dateToTime(pay.DueOn).Equal(dateToTime(mostRecent)) {
+		return domain.ErrForbidden
+	}
+
+	if _, err := q.DeleteBillPayment(ctx, sqlcgen.DeleteBillPaymentParams{
+		HouseholdID: uuid(householdID),
+		BillID:      uuid(billID),
+		ID:          uuid(paymentID),
+	}); err != nil {
+		return translate(err, "delete bill payment")
+	}
+	// transaction_id is nullable: a payment whose expense was already
+	// deleted from the Transactions page (bill_payments.transaction_id ON
+	// DELETE SET NULL) has nothing left here to delete.
+	if pay.TransactionID.Valid {
+		if _, err := q.DeleteTransaction(ctx, sqlcgen.DeleteTransactionParams{
+			HouseholdID: uuid(householdID),
+			ID:          pay.TransactionID,
+		}); err != nil {
+			return translate(err, "delete bill expense")
+		}
+	}
+	// Rewind to the undone payment's own due_on. SetBillNextDue never writes
+	// due_anchor_day -- see its own doc comment in queries/bill.sql for the
+	// worked example of what writing it here would destroy.
+	if err := q.SetBillNextDue(ctx, sqlcgen.SetBillNextDueParams{
+		HouseholdID: uuid(householdID),
+		ID:          uuid(billID),
+		NextDue:     pay.DueOn,
+	}); err != nil {
+		return translate(err, "rewind bill next due")
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return translate(err, "commit undo payment")
+	}
+	return nil
 }
 
 // ListPayments returns one household's payments due in month, newest paid_on
@@ -288,26 +426,49 @@ func toBillRecord(b sqlcgen.Bill, categoryName, accountName, currency string) (u
 	return usecase.BillRecord{Bill: bill, CategoryName: categoryName, AccountName: accountName}, nil
 }
 
-// toBillPaymentRecord converts one ListBillPaymentsForMonth row into a
-// usecase.BillPaymentRecord. transaction_id maps through optionalIDToString:
-// "" once the ledger row has been deleted, per domain.BillPayment's own doc
-// comment, matching bill_payments.transaction_id's ON DELETE SET NULL.
-func toBillPaymentRecord(p sqlcgen.ListBillPaymentsForMonthRow) (usecase.BillPaymentRecord, error) {
-	amount, err := domain.NewMoney(p.AmountMinor, p.Currency)
+// billPaymentRecord builds one usecase.BillPaymentRecord from bill_payments'
+// own columns plus the three facts a caller joins or already holds --
+// billName, autopay and currency. transaction_id maps through
+// optionalIDToString: "" once the ledger row has been deleted, per
+// domain.BillPayment's own doc comment, matching bill_payments.transaction_id's
+// ON DELETE SET NULL. Shared by toBillPaymentRecord (ListBillPaymentsForMonth,
+// which joins all three) and toRecordedBillPayment (RecordPayment, whose
+// caller already holds billName and currency and leaves autopay false) the
+// same way GoalRepo's toGoal underlies toGoalRecord.
+func billPaymentRecord(id, billID, householdID pgtype.UUID, dueOn, paidOn pgtype.Date,
+	amountMinor int64, transactionID pgtype.UUID, billName string, autopay bool, currency string) (usecase.BillPaymentRecord, error) {
+	amount, err := domain.NewMoney(amountMinor, currency)
 	if err != nil {
 		return usecase.BillPaymentRecord{}, fmt.Errorf("postgres: bill payment money: %w", err)
 	}
 	return usecase.BillPaymentRecord{
 		Payment: domain.BillPayment{
-			ID:            uuidToString(p.ID),
-			BillID:        uuidToString(p.BillID),
-			HouseholdID:   uuidToString(p.HouseholdID),
-			DueOn:         dateToTime(p.DueOn),
-			PaidOn:        dateToTime(p.PaidOn),
+			ID:            uuidToString(id),
+			BillID:        uuidToString(billID),
+			HouseholdID:   uuidToString(householdID),
+			DueOn:         dateToTime(dueOn),
+			PaidOn:        dateToTime(paidOn),
 			Amount:        amount,
-			TransactionID: optionalIDToString(p.TransactionID),
+			TransactionID: optionalIDToString(transactionID),
 		},
-		BillName: p.BillName,
-		Autopay:  p.Autopay,
+		BillName: billName,
+		Autopay:  autopay,
 	}, nil
+}
+
+// toBillPaymentRecord converts one ListBillPaymentsForMonth row into a
+// usecase.BillPaymentRecord.
+func toBillPaymentRecord(p sqlcgen.ListBillPaymentsForMonthRow) (usecase.BillPaymentRecord, error) {
+	return billPaymentRecord(p.ID, p.BillID, p.HouseholdID, p.DueOn, p.PaidOn, p.AmountMinor, p.TransactionID,
+		p.BillName, p.Autopay, p.Currency)
+}
+
+// toRecordedBillPayment converts CreateBillPayment's row into a
+// usecase.BillPaymentRecord. billName and currency come from the caller,
+// not a join: RecordPayment's own service caller has just read the whole
+// bill and already holds both (BillPaymentRecord's own doc comment). Autopay
+// is always false here -- only ListPayments' join populates it.
+func toRecordedBillPayment(p sqlcgen.BillPayment, billName, currency string) (usecase.BillPaymentRecord, error) {
+	return billPaymentRecord(p.ID, p.BillID, p.HouseholdID, p.DueOn, p.PaidOn, p.AmountMinor, p.TransactionID,
+		billName, false, currency)
 }

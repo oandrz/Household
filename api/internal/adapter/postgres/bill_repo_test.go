@@ -145,6 +145,224 @@ func TestMonthTotalsPaidHalfIncludesAnArchivedBill(t *testing.T) {
 	}
 }
 
+// All three writes or none. Guarding-partial-writes exists because four
+// defects in this project returned success for work that had only partly
+// happened.
+func TestRecordPaymentIsAtomic(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	repo := postgres.NewBillRepo(db)
+	h, acct := seedHouseholdAndAccount(t, ctx, db)
+	bill := createBill(t, ctx, repo, h, acct, "SP utilities", domain.CadenceMonthly, day("2026-08-08"), 14230)
+
+	// A category id that does not exist fails the transactions FK, which is
+	// the second of the three writes.
+	next := day("2026-09-08")
+	_, err := repo.RecordPayment(ctx, usecase.PaymentWrite{
+		HouseholdID: h, BillID: bill.Bill.ID, DueOn: day("2026-08-08"), PaidOn: day("2026-08-08"),
+		AmountMinor: 14230, Currency: "SGD", Description: "SP utilities",
+		CategoryID:       "00000000-0000-0000-0000-000000000001",
+		PayFromAccountID: acct, NextDue: &next,
+	})
+	if err == nil {
+		t.Fatal("expected the bad category to fail the write")
+	}
+
+	after, err := repo.Get(ctx, h, bill.Bill.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !after.Bill.NextDue.Equal(day("2026-08-08")) {
+		t.Fatalf("next_due = %s, want it unmoved at 2026-08-08", after.Bill.NextDue.Format("2006-01-02"))
+	}
+	payments, err := repo.ListPayments(ctx, h, day("2026-08-01"))
+	if err != nil {
+		t.Fatalf("ListPayments: %v", err)
+	}
+	if len(payments) != 0 {
+		t.Fatalf("got %d payments, want none -- a failed write left one behind", len(payments))
+	}
+}
+
+// TestRecordPaymentLeavesNoOrphanExpenseWhenTheSecondWriteFails is
+// TestRecordPaymentIsAtomic's sibling for the one failure mode that test
+// cannot reach. TestRecordPaymentIsAtomic's bad category fails on
+// CreateTransaction -- the FIRST of the three writes -- so nothing before it
+// has ever been written, and it stays green whether or not the transaction
+// actually protects anything (it even passes vacuously against the
+// not-implemented stub). This test instead fails on CreateBillPayment, the
+// SECOND write, via UNIQUE (bill_id, due_on): the first write (the expense)
+// has already gone through by the time the second one is rejected, so this
+// is the only one of the two tests that can catch an orphan expense left
+// behind by a payment that never landed.
+func TestRecordPaymentLeavesNoOrphanExpenseWhenTheSecondWriteFails(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	repo := postgres.NewBillRepo(db)
+	h, acct := seedHouseholdAndAccount(t, ctx, db)
+	bill := createBill(t, ctx, repo, h, acct, "SP utilities", domain.CadenceMonthly, day("2026-08-08"), 14230)
+
+	next := day("2026-09-08")
+	write := usecase.PaymentWrite{
+		HouseholdID: h, BillID: bill.Bill.ID, DueOn: day("2026-08-08"), PaidOn: day("2026-08-08"),
+		AmountMinor: 14230, Currency: "SGD", Description: "SP utilities",
+		PayFromAccountID: acct, NextDue: &next,
+	}
+	if _, err := repo.RecordPayment(ctx, write); err != nil {
+		t.Fatalf("first payment: %v", err)
+	}
+
+	// Same DueOn again: the expense (write 1) succeeds -- it has no
+	// UNIQUE constraint of its own -- but the payment (write 2) collides
+	// with the one already recorded for 8 Aug.
+	if _, err := repo.RecordPayment(ctx, write); !errors.Is(err, domain.ErrAlreadyExists) {
+		t.Fatalf("second RecordPayment = %v, want ErrAlreadyExists", err)
+	}
+
+	var txns int
+	if err := db.Pool().QueryRow(ctx,
+		`SELECT count(*) FROM transactions WHERE household_id = $1`, h).Scan(&txns); err != nil {
+		t.Fatalf("count transactions: %v", err)
+	}
+	if txns != 1 {
+		t.Fatalf("got %d transactions, want 1 -- the second call's expense must not survive its own rejected payment", txns)
+	}
+}
+
+func TestUndoRefusesAnythingButTheMostRecentPayment(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	repo := postgres.NewBillRepo(db)
+	h, acct := seedHouseholdAndAccount(t, ctx, db)
+	bill := createBill(t, ctx, repo, h, acct, "Netflix", domain.CadenceMonthly, day("2026-07-05"), 1998)
+
+	aug := day("2026-08-05")
+	july, err := repo.RecordPayment(ctx, usecase.PaymentWrite{
+		HouseholdID: h, BillID: bill.Bill.ID, DueOn: day("2026-07-05"), PaidOn: day("2026-07-05"),
+		AmountMinor: 1998, Currency: "SGD", Description: "Netflix",
+		PayFromAccountID: acct, NextDue: &aug,
+	})
+	if err != nil {
+		t.Fatalf("july payment: %v", err)
+	}
+	sep := day("2026-09-05")
+	if _, err := repo.RecordPayment(ctx, usecase.PaymentWrite{
+		HouseholdID: h, BillID: bill.Bill.ID, DueOn: day("2026-08-05"), PaidOn: day("2026-08-05"),
+		AmountMinor: 1998, Currency: "SGD", Description: "Netflix",
+		PayFromAccountID: acct, NextDue: &sep,
+	}); err != nil {
+		t.Fatalf("august payment: %v", err)
+	}
+
+	// Undoing July would rewind next_due to 5 July -- behind August, which is
+	// still paid -- and the screen would show a due date for money spent.
+	err = repo.UndoPayment(ctx, h, bill.Bill.ID, july.Payment.ID)
+	if !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("UndoPayment(older) = %v, want ErrForbidden", err)
+	}
+}
+
+func TestUndoReversesAllThreeWrites(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	repo := postgres.NewBillRepo(db)
+	h, acct := seedHouseholdAndAccount(t, ctx, db)
+	bill := createBill(t, ctx, repo, h, acct, "SP utilities", domain.CadenceMonthly, day("2026-08-08"), 14230)
+
+	next := day("2026-09-08")
+	pay, err := repo.RecordPayment(ctx, usecase.PaymentWrite{
+		HouseholdID: h, BillID: bill.Bill.ID, DueOn: day("2026-08-08"), PaidOn: day("2026-08-08"),
+		AmountMinor: 14230, Currency: "SGD", Description: "SP utilities",
+		PayFromAccountID: acct, NextDue: &next,
+	})
+	if err != nil {
+		t.Fatalf("RecordPayment: %v", err)
+	}
+	if err := repo.UndoPayment(ctx, h, bill.Bill.ID, pay.Payment.ID); err != nil {
+		t.Fatalf("UndoPayment: %v", err)
+	}
+
+	// 1. The payment row is gone.
+	payments, err := repo.ListPayments(ctx, h, day("2026-08-01"))
+	if err != nil {
+		t.Fatalf("ListPayments: %v", err)
+	}
+	if len(payments) != 0 {
+		t.Fatalf("got %d payments after undo, want 0", len(payments))
+	}
+	// 2. The expense is gone from the ledger. Counted in SQL rather than
+	//    through a repository, so this asserts the row's absence and not some
+	//    other layer's filtering of it.
+	var txns int
+	if err := db.Pool().QueryRow(ctx,
+		`SELECT count(*) FROM transactions WHERE household_id = $1`, h).Scan(&txns); err != nil {
+		t.Fatalf("count transactions: %v", err)
+	}
+	if txns != 0 {
+		t.Fatalf("got %d transactions after undo, want 0 -- the expense survived", txns)
+	}
+	// 3. The due date is back where it was.
+	after, err := repo.Get(ctx, h, bill.Bill.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !after.Bill.NextDue.Equal(day("2026-08-08")) {
+		t.Fatalf("next_due = %s, want it rewound to 2026-08-08", after.Bill.NextDue.Format("2006-01-02"))
+	}
+}
+
+// TestUndoDoesNotDestroyTheDueAnchorDay is the sibling of Task 2's clamp
+// test: that one proves the arithmetic, this proves the anchor is not
+// quietly overwritten by the one write that has no business touching it.
+// SetBillNextDue runs on both the advance (RecordPayment) and the rewind
+// (UndoPayment) paths and must never write due_anchor_day on either --
+// bill_repo.go's own comment on RecordPayment/UndoPayment works the 31 Jan
+// -> 28 Feb -> 31 Mar -> undo -> 28 Feb example this test pins.
+func TestUndoDoesNotDestroyTheDueAnchorDay(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	repo := postgres.NewBillRepo(db)
+	h, acct := seedHouseholdAndAccount(t, ctx, db)
+	// Due on the 31st: the only anchor that can be lost.
+	bill := createBill(t, ctx, repo, h, acct, "Rent", domain.CadenceMonthly, day("2026-01-31"), 250000)
+
+	feb := day("2026-02-28")
+	if _, err := repo.RecordPayment(ctx, usecase.PaymentWrite{
+		HouseholdID: h, BillID: bill.Bill.ID, DueOn: day("2026-01-31"), PaidOn: day("2026-01-31"),
+		AmountMinor: 250000, Currency: "SGD", Description: "Rent",
+		PayFromAccountID: acct, NextDue: &feb,
+	}); err != nil {
+		t.Fatalf("january payment: %v", err)
+	}
+	mar := day("2026-03-31")
+	febPay, err := repo.RecordPayment(ctx, usecase.PaymentWrite{
+		HouseholdID: h, BillID: bill.Bill.ID, DueOn: day("2026-02-28"), PaidOn: day("2026-02-28"),
+		AmountMinor: 250000, Currency: "SGD", Description: "Rent",
+		PayFromAccountID: acct, NextDue: &mar,
+	})
+	if err != nil {
+		t.Fatalf("february payment: %v", err)
+	}
+
+	if err := repo.UndoPayment(ctx, h, bill.Bill.ID, febPay.Payment.ID); err != nil {
+		t.Fatalf("UndoPayment: %v", err)
+	}
+
+	after, err := repo.Get(ctx, h, bill.Bill.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !after.Bill.NextDue.Equal(day("2026-02-28")) {
+		t.Fatalf("next_due = %s, want it rewound to 2026-02-28", after.Bill.NextDue.Format("2006-01-02"))
+	}
+	// The whole point: undo rewound the date but must not have taken the
+	// anchor with it. An anchor of 28 here means the bill has silently lost
+	// its 31st, and the next advance would land on 28 March.
+	if after.Bill.DueAnchorDay != 31 {
+		t.Fatalf("due_anchor_day = %d, want 31 -- undo overwrote the anchor", after.Bill.DueAnchorDay)
+	}
+}
+
 func TestGetHidesABillFromAnotherHousehold(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)

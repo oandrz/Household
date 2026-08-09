@@ -164,3 +164,58 @@ WHERE p.household_id = $1
   AND p.due_on >= sqlc.arg(month_start)::date
   AND p.due_on <  sqlc.arg(next_month)::date
 ORDER BY p.paid_on DESC, b.name;
+
+-- CreateBillPayment writes the settled-occurrence row -- the second of
+-- RecordPayment's three writes (bill_repo.go's own doc comment), always
+-- carrying the expense transaction's id it was written alongside in the same
+-- transaction. UNIQUE (bill_id, due_on) is the backstop that refuses a
+-- double-clicked Mark paid; it has no name of its own
+-- (00008_bills.sql), so translate's generic 23505 branch is what turns it
+-- into domain.ErrAlreadyExists, not a named-constraint case like
+-- billNameUniqueConstraint.
+-- name: CreateBillPayment :one
+INSERT INTO bill_payments (bill_id, household_id, due_on, paid_on, amount_minor, transaction_id)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, bill_id, household_id, due_on, paid_on, amount_minor, transaction_id, created_at;
+
+-- SetBillNextDue moves next_due and NOTHING else -- due_anchor_day is
+-- deliberately absent from this SET list. RecordPayment calls this to
+-- advance and UndoPayment calls it to rewind, and neither is the household
+-- choosing a day: only CreateBill and an explicit PATCH of next_due set the
+-- anchor. Writing it here would let UndoPayment destroy it -- with anchor 31,
+-- due 31 Jan -> pay -> 28 Feb -> pay -> 31 Mar -> undo -> 28 Feb, and if undo
+-- reset the anchor to 28 the next advance would land on 28 March, the bill
+-- having silently lost its 31st forever (BillRepository's own doc comment).
+-- name: SetBillNextDue :exec
+UPDATE bills
+SET next_due = $3, updated_at = now()
+WHERE household_id = $1 AND id = $2;
+
+-- GetBillPayment reads one payment scoped by household_id AND bill_id
+-- together, never by id alone -- bill_payments carries no database
+-- constraint tying its household_id to its bill's, so an id from a
+-- mismatched household or bill must match no row rather than leaking across
+-- the boundary (the brief's own instruction, restated on UndoPayment below).
+-- name: GetBillPayment :one
+SELECT id, bill_id, household_id, due_on, paid_on, amount_minor, transaction_id
+FROM bill_payments
+WHERE household_id = $1 AND bill_id = $2 AND id = $3;
+
+-- MostRecentBillPaymentDueOn is UndoPayment's own guard: only the bill's most
+-- recent payment can be undone, because rewinding an older one would pull
+-- next_due behind a later occurrence that is still paid, and the screen
+-- would show a due date for money already spent (BillRepository.UndoPayment's
+-- own doc comment). MAX over an empty set is NULL, but UndoPayment only ever
+-- runs this after GetBillPayment has already confirmed at least one row --
+-- the payment being undone itself -- exists for this bill.
+-- name: MostRecentBillPaymentDueOn :one
+SELECT MAX(due_on)::date FROM bill_payments WHERE household_id = $1 AND bill_id = $2;
+
+-- DeleteBillPayment removes one payment row, scoped by household_id AND
+-- bill_id together, the same reason GetBillPayment above is. RETURNING id
+-- rather than :exec turns "nothing matched" into pgx.ErrNoRows, which
+-- translate maps to domain.ErrNotFound the same way DeleteTransaction does.
+-- name: DeleteBillPayment :one
+DELETE FROM bill_payments
+WHERE household_id = $1 AND bill_id = $2 AND id = $3
+RETURNING id;

@@ -204,6 +204,75 @@ func (q *Queries) CreateBill(ctx context.Context, arg CreateBillParams) (CreateB
 	return i, err
 }
 
+const createBillPayment = `-- name: CreateBillPayment :one
+INSERT INTO bill_payments (bill_id, household_id, due_on, paid_on, amount_minor, transaction_id)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, bill_id, household_id, due_on, paid_on, amount_minor, transaction_id, created_at
+`
+
+type CreateBillPaymentParams struct {
+	BillID        pgtype.UUID
+	HouseholdID   pgtype.UUID
+	DueOn         pgtype.Date
+	PaidOn        pgtype.Date
+	AmountMinor   int64
+	TransactionID pgtype.UUID
+}
+
+// CreateBillPayment writes the settled-occurrence row -- the second of
+// RecordPayment's three writes (bill_repo.go's own doc comment), always
+// carrying the expense transaction's id it was written alongside in the same
+// transaction. UNIQUE (bill_id, due_on) is the backstop that refuses a
+// double-clicked Mark paid; it has no name of its own
+// (00008_bills.sql), so translate's generic 23505 branch is what turns it
+// into domain.ErrAlreadyExists, not a named-constraint case like
+// billNameUniqueConstraint.
+func (q *Queries) CreateBillPayment(ctx context.Context, arg CreateBillPaymentParams) (BillPayment, error) {
+	row := q.db.QueryRow(ctx, createBillPayment,
+		arg.BillID,
+		arg.HouseholdID,
+		arg.DueOn,
+		arg.PaidOn,
+		arg.AmountMinor,
+		arg.TransactionID,
+	)
+	var i BillPayment
+	err := row.Scan(
+		&i.ID,
+		&i.BillID,
+		&i.HouseholdID,
+		&i.DueOn,
+		&i.PaidOn,
+		&i.AmountMinor,
+		&i.TransactionID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const deleteBillPayment = `-- name: DeleteBillPayment :one
+DELETE FROM bill_payments
+WHERE household_id = $1 AND bill_id = $2 AND id = $3
+RETURNING id
+`
+
+type DeleteBillPaymentParams struct {
+	HouseholdID pgtype.UUID
+	BillID      pgtype.UUID
+	ID          pgtype.UUID
+}
+
+// DeleteBillPayment removes one payment row, scoped by household_id AND
+// bill_id together, the same reason GetBillPayment above is. RETURNING id
+// rather than :exec turns "nothing matched" into pgx.ErrNoRows, which
+// translate maps to domain.ErrNotFound the same way DeleteTransaction does.
+func (q *Queries) DeleteBillPayment(ctx context.Context, arg DeleteBillPaymentParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, deleteBillPayment, arg.HouseholdID, arg.BillID, arg.ID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getBill = `-- name: GetBill :one
 SELECT b.id, b.household_id, b.name, b.amount_minor, b.cadence, b.next_due,
        b.due_anchor_day, b.category_id, b.pay_from_account_id,
@@ -265,6 +334,48 @@ func (q *Queries) GetBill(ctx context.Context, arg GetBillParams) (GetBillRow, e
 		&i.CategoryName,
 		&i.AccountName,
 		&i.Currency,
+	)
+	return i, err
+}
+
+const getBillPayment = `-- name: GetBillPayment :one
+SELECT id, bill_id, household_id, due_on, paid_on, amount_minor, transaction_id
+FROM bill_payments
+WHERE household_id = $1 AND bill_id = $2 AND id = $3
+`
+
+type GetBillPaymentParams struct {
+	HouseholdID pgtype.UUID
+	BillID      pgtype.UUID
+	ID          pgtype.UUID
+}
+
+type GetBillPaymentRow struct {
+	ID            pgtype.UUID
+	BillID        pgtype.UUID
+	HouseholdID   pgtype.UUID
+	DueOn         pgtype.Date
+	PaidOn        pgtype.Date
+	AmountMinor   int64
+	TransactionID pgtype.UUID
+}
+
+// GetBillPayment reads one payment scoped by household_id AND bill_id
+// together, never by id alone -- bill_payments carries no database
+// constraint tying its household_id to its bill's, so an id from a
+// mismatched household or bill must match no row rather than leaking across
+// the boundary (the brief's own instruction, restated on UndoPayment below).
+func (q *Queries) GetBillPayment(ctx context.Context, arg GetBillPaymentParams) (GetBillPaymentRow, error) {
+	row := q.db.QueryRow(ctx, getBillPayment, arg.HouseholdID, arg.BillID, arg.ID)
+	var i GetBillPaymentRow
+	err := row.Scan(
+		&i.ID,
+		&i.BillID,
+		&i.HouseholdID,
+		&i.DueOn,
+		&i.PaidOn,
+		&i.AmountMinor,
+		&i.TransactionID,
 	)
 	return i, err
 }
@@ -422,6 +533,29 @@ func (q *Queries) ListBills(ctx context.Context, arg ListBillsParams) ([]ListBil
 	return items, nil
 }
 
+const mostRecentBillPaymentDueOn = `-- name: MostRecentBillPaymentDueOn :one
+SELECT MAX(due_on)::date FROM bill_payments WHERE household_id = $1 AND bill_id = $2
+`
+
+type MostRecentBillPaymentDueOnParams struct {
+	HouseholdID pgtype.UUID
+	BillID      pgtype.UUID
+}
+
+// MostRecentBillPaymentDueOn is UndoPayment's own guard: only the bill's most
+// recent payment can be undone, because rewinding an older one would pull
+// next_due behind a later occurrence that is still paid, and the screen
+// would show a due date for money already spent (BillRepository.UndoPayment's
+// own doc comment). MAX over an empty set is NULL, but UndoPayment only ever
+// runs this after GetBillPayment has already confirmed at least one row --
+// the payment being undone itself -- exists for this bill.
+func (q *Queries) MostRecentBillPaymentDueOn(ctx context.Context, arg MostRecentBillPaymentDueOnParams) (pgtype.Date, error) {
+	row := q.db.QueryRow(ctx, mostRecentBillPaymentDueOn, arg.HouseholdID, arg.BillID)
+	var column_1 pgtype.Date
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const setBillArchived = `-- name: SetBillArchived :one
 WITH archived AS (
     UPDATE bills
@@ -500,6 +634,31 @@ func (q *Queries) SetBillArchived(ctx context.Context, arg SetBillArchivedParams
 		&i.Currency,
 	)
 	return i, err
+}
+
+const setBillNextDue = `-- name: SetBillNextDue :exec
+UPDATE bills
+SET next_due = $3, updated_at = now()
+WHERE household_id = $1 AND id = $2
+`
+
+type SetBillNextDueParams struct {
+	HouseholdID pgtype.UUID
+	ID          pgtype.UUID
+	NextDue     pgtype.Date
+}
+
+// SetBillNextDue moves next_due and NOTHING else -- due_anchor_day is
+// deliberately absent from this SET list. RecordPayment calls this to
+// advance and UndoPayment calls it to rewind, and neither is the household
+// choosing a day: only CreateBill and an explicit PATCH of next_due set the
+// anchor. Writing it here would let UndoPayment destroy it -- with anchor 31,
+// due 31 Jan -> pay -> 28 Feb -> pay -> 31 Mar -> undo -> 28 Feb, and if undo
+// reset the anchor to 28 the next advance would land on 28 March, the bill
+// having silently lost its 31st forever (BillRepository's own doc comment).
+func (q *Queries) SetBillNextDue(ctx context.Context, arg SetBillNextDueParams) error {
+	_, err := q.db.Exec(ctx, setBillNextDue, arg.HouseholdID, arg.ID, arg.NextDue)
+	return err
 }
 
 const updateBill = `-- name: UpdateBill :one
