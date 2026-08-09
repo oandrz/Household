@@ -20,6 +20,11 @@
 // variants on success regardless -- the returned Bill has no aggregate
 // figures (billsSummaryDTO's counts, paidThisMonth), so only a refetch of
 // the list keeps those true.
+//
+// useBills itself is the one place this file borrows from useBudget.ts
+// instead: its own `enabled` option, not anything useAccounts.ts carries --
+// see useBills's own comment below for why GET /bills needs it and GET
+// /accounts doesn't.
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../../api/client";
 import {
@@ -100,10 +105,23 @@ async function fetchBills(includeArchived: boolean): Promise<BillsResponse> {
   return billsResponseSchema.parse(body);
 }
 
-export function useBills(includeArchived: boolean) {
+// `enabled` exists for Overview (Task 16), which renders for every member
+// but may only read bills for an owner (GET /bills is requireCapability
+// (money) AND requireOwner, task-9-report.md's own note). A caller cannot
+// skip the hook -- that breaks the rules of hooks -- and firing the request
+// anyway would both cost a doomed 403 and cache that failure under
+// `billsQueryKey(includeArchived)`, poisoning the same key BillsPage itself
+// reads next. useBudget.ts's own `enabled` carries the identical reasoning
+// for the identical money+owner gate; useAccounts.ts has no such option
+// because GET /accounts is money-only (a limited member gets a real body
+// with `summary` omitted, never a 403), so it was never the right model for
+// this one option even though it is for every mutation shape below.
+export function useBills(includeArchived: boolean, options: { enabled?: boolean } = {}) {
+  const enabled = options.enabled ?? true;
   return useQuery({
     queryKey: billsQueryKey(includeArchived),
     queryFn: () => fetchBills(includeArchived),
+    enabled,
   });
 }
 

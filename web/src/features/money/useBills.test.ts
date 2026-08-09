@@ -84,12 +84,12 @@ function renderUseBills(includeArchived = false) {
 // GET returned (the useGoals.test.ts precedent this file otherwise follows,
 // adapted for useBills.ts's useAccounts.ts-shaped separate hooks instead of
 // one hook exposing every write as a method).
-function renderBillsWith<T>(useExtra: () => T) {
+function renderBillsWith<T>(useExtra: () => T, includeArchived = false) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   return renderHook(
-    () => ({ bills: useBills(false), extra: useExtra() }),
+    () => ({ bills: useBills(includeArchived), extra: useExtra() }),
     { wrapper: ({ children }) => createElement(QueryClientProvider, { client: queryClient }, children) },
   );
 }
@@ -173,6 +173,34 @@ describe("useBills", () => {
 
     expect(result.current.error).not.toBeNull();
     expect(result.current.data).toBeUndefined();
+  });
+
+  // GET /bills is money AND owner-gated (task-9-report.md's own note, the
+  // same shape GET /budgets/{month} carries), so Overview (Task 16) -- which
+  // renders for every member, owner or not -- has to be able to mount this
+  // hook without firing a doomed 403. Mirrors useGoalContributions' own
+  // "only while enabled" test: no request at all while disabled, then a
+  // real fetch once a rerender flips it on.
+  it("does not fire GET /api/v1/bills while enabled is false", async () => {
+    const fetchMock = stubFetchRoutes({
+      "GET /api/v1/bills": { status: 200, body: billsResponse },
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) => useBills(false, { enabled }),
+      {
+        initialProps: { enabled: false },
+        wrapper: ({ children }) => createElement(QueryClientProvider, { client: queryClient }, children),
+      },
+    );
+
+    expect(result.current.isLoading).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    rerender({ enabled: true });
+    await waitFor(() => expect(result.current.data?.bills).toHaveLength(1));
   });
 
   it("useCreateBill POSTs the exact body and returns the parsed bill", async () => {
@@ -270,6 +298,40 @@ describe("useBills", () => {
     });
 
     await waitFor(() => expect(result.current.bills.data?.bills).toHaveLength(0));
+  });
+
+  // Every mutation invalidates BOTH billsQueryKey variants (invalidateBills'
+  // own comment), not just the `includeArchived: false` one every other
+  // test in this file renders -- a write performed while "Show archived" is
+  // on must not leave that variant's own cache stale. Rendering useBills(true)
+  // here, not useBills(false) like every test above, is what a dropped
+  // `billsQueryKey(true)` invalidation would slip past: every test above
+  // would still stay green (proven -- see this task's own mutation check),
+  // since none of them ever asks for the archived-included variant at all.
+  it("useArchiveBill also refreshes the include_archived=true variant", async () => {
+    const archivedBill = { ...bill, archivedAt: "2026-09-01T00:00:00Z" };
+    stubFetchRoutes({
+      "GET /api/v1/bills?include_archived=true": [
+        { status: 200, body: billsResponse },
+        { status: 200, body: { ...billsResponse, bills: [archivedBill] } },
+      ],
+      "POST /api/v1/bills/bill-1/archive": {
+        status: 200,
+        body: { bill: archivedBill },
+      },
+    });
+
+    const { result } = renderBillsWith(() => useArchiveBill(), true);
+    await waitFor(() => expect(result.current.bills.isLoading).toBe(false));
+    expect(result.current.bills.data?.bills[0].archivedAt).toBeNull();
+
+    await act(async () => {
+      await result.current.extra.mutateAsync("bill-1");
+    });
+
+    await waitFor(() =>
+      expect(result.current.bills.data?.bills[0].archivedAt).toBe("2026-09-01T00:00:00Z"),
+    );
   });
 
   it("useRestoreBill POSTs /api/v1/bills/{id}/restore then reloads", async () => {
