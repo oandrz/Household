@@ -597,16 +597,10 @@ Append to `api/internal/usecase/ports.go`, after the goal section:
 // bill (see 00008_bills.sql's own comment); this field is the account's,
 // carried here so the service can build a Money without a second lookup.
 type BillRecord struct {
-	Bill        domain.Bill
+	Bill         domain.Bill
 	CategoryName string
 	AccountName  string
 	Currency     string
-	// Paid reports whether the occurrence at Bill.NextDue has already been
-	// settled. It is always false in practice -- RecordPayment advances
-	// next_due past every paid occurrence -- but the list query asserts it so
-	// a future code path that forgets the advance cannot silently offer the
-	// same occurrence twice.
-	Paid bool
 }
 
 // BillPaymentRecord is one settled occurrence joined to its bill's name and
@@ -706,6 +700,13 @@ type PaymentWrite struct {
 //     far" half of the figure. The implementation must union bill_payments by
 //     due_on with unpaid bills by next_due. The naive query passes review and
 //     returns a wrong number.
+//
+//     The two halves filter archived bills differently, on purpose. The unpaid
+//     half excludes an archived bill: a bill nobody intends to pay again is
+//     not an obligation. The paid half includes it: the money left the
+//     household, and archiving a bill afterwards must not retroactively empty
+//     the month it was paid in. A reviewer meeting this asymmetry cold will
+//     read it as a bug, which is why it is written here.
 type BillRepository interface {
 	// List returns one household's bills with their category and account
 	// names. includeArchived is a UNION, not a filter swap: false returns the
@@ -795,11 +796,7 @@ SELECT b.id, b.household_id, b.name, b.amount_minor, b.cadence, b.next_due,
        b.paid_by_membership_id, b.autopay, b.is_subscription, b.archived_at,
        COALESCE(c.name, '')  AS category_name,
        a.nickname            AS account_name,
-       a.currency            AS currency,
-       EXISTS (
-           SELECT 1 FROM bill_payments p
-           WHERE p.bill_id = b.id AND p.due_on = b.next_due
-       ) AS paid
+       a.currency            AS currency
 FROM bills b
 JOIN accounts a ON a.id = b.pay_from_account_id
 LEFT JOIN categories c ON c.id = b.category_id
@@ -811,6 +808,10 @@ ORDER BY b.next_due NULLS LAST, b.name;
 -- The union the port's doc comment demands. A bill paid this month has already
 -- advanced past it, so the two halves come from different tables and neither
 -- alone is the figure.
+--
+-- No archived_at filter here, unlike BillMonthUnpaidTotals below, and that
+-- asymmetry is deliberate: this money already left the household, so archiving
+-- the bill afterwards must not retroactively empty the month it was paid in.
 SELECT a.currency, SUM(p.amount_minor)::bigint AS minor
 FROM bill_payments p
 JOIN bills b    ON b.id = p.bill_id
@@ -1141,18 +1142,73 @@ func (r *BillRepo) RecordPayment(ctx context.Context, in usecase.PaymentWrite) (
 }
 ```
 
-`UndoPayment` opens its own transaction and, inside it: reads the payment filtered by `household_id` **and** `bill_id` (never by payment id alone — the port's contract); reads the bill's most recent `due_on` and returns `domain.ErrForbidden` if this payment is not it; deletes the payment; deletes the transaction when `transaction_id` is non-NULL; and sets `next_due` back to the payment's `due_on`, restoring `due_anchor_day` from it too.
+`UndoPayment` opens its own transaction and, inside it: reads the payment filtered by `household_id` **and** `bill_id` (never by payment id alone — the port's contract); reads the bill's most recent `due_on` and returns `domain.ErrForbidden` if this payment is not it; deletes the payment; deletes the transaction when `transaction_id` is non-NULL; and sets `next_due` back to the payment's `due_on`.
 
-- [ ] **Step 4: Run to verify they pass**
+**`SetBillNextDue` must never write `due_anchor_day`, on either path.** Only create and an explicit `PATCH` of `next_due` set the anchor, because only those are the household choosing a day. Advancing and rewinding are both mechanical. Writing it here would destroy the anchor through undo, which is the exact failure the column exists to prevent — with anchor 31: due 31 Jan → pay → 28 Feb → pay → 31 Mar → **undo** → 28 Feb, and if undo reset the anchor to 28 the next advance lands on 28 March and the bill has lost its 31st permanently.
+
+- [ ] **Step 4: Add the anchor-survives-undo test**
+
+This is the sibling of Task 2's designated mutation, and nothing else in the plan covers it. The clamp test proves the arithmetic; this proves the anchor is not quietly overwritten by the one write that has no business touching it.
+
+```go
+func TestUndoDoesNotDestroyTheDueAnchorDay(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	repo := postgres.NewBillRepo(db)
+	h, acct := seedHouseholdAndAccount(t, ctx, db)
+	// Due on the 31st: the only anchor that can be lost.
+	bill := createBill(t, ctx, repo, h, acct, "Rent", domain.CadenceMonthly, day("2026-01-31"), 250000)
+
+	feb := day("2026-02-28")
+	if _, err := repo.RecordPayment(ctx, usecase.PaymentWrite{
+		HouseholdID: h, BillID: bill.Bill.ID, DueOn: day("2026-01-31"), PaidOn: day("2026-01-31"),
+		AmountMinor: 250000, Currency: "SGD", Description: "Rent",
+		PayFromAccountID: acct, NextDue: &feb,
+	}); err != nil {
+		t.Fatalf("january payment: %v", err)
+	}
+	mar := day("2026-03-31")
+	febPay, err := repo.RecordPayment(ctx, usecase.PaymentWrite{
+		HouseholdID: h, BillID: bill.Bill.ID, DueOn: day("2026-02-28"), PaidOn: day("2026-02-28"),
+		AmountMinor: 250000, Currency: "SGD", Description: "Rent",
+		PayFromAccountID: acct, NextDue: &mar,
+	})
+	if err != nil {
+		t.Fatalf("february payment: %v", err)
+	}
+
+	if err := repo.UndoPayment(ctx, h, bill.Bill.ID, febPay.Payment.ID); err != nil {
+		t.Fatalf("UndoPayment: %v", err)
+	}
+
+	after, err := repo.Get(ctx, h, bill.Bill.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !after.Bill.NextDue.Equal(day("2026-02-28")) {
+		t.Fatalf("next_due = %s, want it rewound to 2026-02-28", after.Bill.NextDue.Format("2006-01-02"))
+	}
+	// The whole point: undo rewound the date but must not have taken the
+	// anchor with it. An anchor of 28 here means the bill has silently lost
+	// its 31st, and the next advance would land on 28 March.
+	if after.Bill.DueAnchorDay != 31 {
+		t.Fatalf("due_anchor_day = %d, want 31 -- undo overwrote the anchor", after.Bill.DueAnchorDay)
+	}
+}
+```
+
+- [ ] **Step 5: Run to verify they pass**
 
 Run: `cd api && go test ./internal/adapter/postgres/ -run 'TestRecordPayment|TestUndo' -v`
-Expected: PASS.
+Expected: PASS, the anchor test included.
 
-- [ ] **Step 5: Mutation-check the atomicity test**
+- [ ] **Step 6: Mutation-check the atomicity test**
 
 Remove the `defer tx.Rollback(ctx)` and commit after each statement instead. Run `TestRecordPaymentIsAtomic`. Expected: **FAIL** — a payment row survives a failed write. Restore.
 
-- [ ] **Step 6: Commit**
+Then mutate the anchor: make `SetBillNextDue` also write `due_anchor_day = EXTRACT(day FROM $next_due)`. Run `TestUndoDoesNotDestroyTheDueAnchorDay`. Expected: **FAIL** — `due_anchor_day = 28, want 31`. Restore.
+
+- [ ] **Step 7: Commit**
 
 ```bash
 git add api/internal/adapter/postgres/
@@ -2010,19 +2066,27 @@ git commit -m "feat(bills): subscriptions rollup"
 **Interfaces:**
 - Consumes: `useBills` and `billsQueryKey` — **the same hook and the same cache entry the Bills page itself uses**, which is what `GoalsCard` does and why the card moves without a reload after a write.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Read `OverviewPage.tsx`'s member-state guard before writing anything**
+
+`GET /bills` is gated `money` **and** owner, so `useBills` **403s for a limited member** — Overview is about to acquire a fourth failing query, and the limited-member panel is currently gated on `accounts.isSuccess`. Read that guard first; do not add a query to this page without knowing what decides whether the panel renders.
+
+This is not hypothetical. The interim Overview's one real defect was exactly this shape: a limited member holding `money` saw a page containing the word "Overview" and nothing else. Every unit test passed against it, before and after, because each test covering that member asserted the **absence** of something — and absence holds perfectly over a blank page (`docs/LEARNING.md` pattern 2).
+
+- [ ] **Step 2: Write the failing tests**
 
 - Renders the design's line: `S$142.30` over `SP utilities · Jul 8`.
 - An overdue next bill says so rather than printing a past date as though it were upcoming.
 - A household with no bills renders the card's own empty line, never a zero.
 - `+ Add → Bill` opens `BillModal`, saves, and moves the card with no reload.
 - The entry is **disabled with its reason until an account exists** — a bill needs a pay-from account, the same precondition `+ Add → Transaction` already carries.
+- **A limited member still gets the limited-member panel**, with the bills query failing alongside the others. Assert on what is *present* — the panel's own text — not only on what is missing, or the test agrees with a blank page.
+- **`NextBillCard` renders nothing on a 403**, not an error region and not a blank card with a heading above it.
 
-- [ ] **Step 2: Run to verify they fail; implement; run to verify they pass**
+- [ ] **Step 3: Run to verify they fail; implement; run to verify they pass**
 
 Run: `cd web && npx vitest run src/features/overview/`
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add web/src/features/overview/
@@ -2046,6 +2110,8 @@ Invoke the skill; do not hand-edit around it. What changed structurally: seven n
 - [ ] **Step 2: `docs/FEATURE_TRACKER.md`**
 
 Move Bills' four rows ⬜ → ✅. Move Overview's "Next bill card" ⬜ → ✅ and update the "+ Add" row (four of six entries live now). Add new rows for what the design never draws: **undo a payment**, **archive and restore a bill**, and **the Unattributed row on Spending by person** — each with a sentence saying why it has no mockup, the way the Accounts and Goals sections already do.
+
+**The Navigation shell section changes too, and it is easy to miss.** Its "Placeholder pages for unbuilt areas" row names `/money/$` as one of the two left; Task 11 deleted that route, so `/` is the only one remaining. Fix the row's prose, not just its symbol.
 
 **Recount the summary table by counting symbols**, not by adjusting the stated totals. Count the first symbol in each row's own cell, whether the cell is a bare `| ✅ |` or has prose after it. This file records that estimating those numbers produced two errors that cancelled.
 
@@ -2096,7 +2162,7 @@ make seed
 11. All-caught-up state appears once every bill due this month is paid, and names the next one.
 12. A subscription-flagged bill appears in the panel; the monthly and annual figures agree (`× 12`).
 13. A bill on a second-currency account converts into primary in the stat cards, and a currency with no rate is **excluded and counted on screen**.
-14. A limited member holding `money` is refused the Bills page — reads included.
+14. A limited member holding `money` is refused the Bills page — reads included — **and then loads Overview as that same member** and sees the limited-member panel, not a page with a heading and nothing under it. Bills gives Overview a fourth failing query; this is the criterion that proves it did not blank the page (`docs/LEARNING.md` pattern 2).
 15. Overview's Next bill card shows the earliest unpaid bill and moves without a reload after `+ Add → Bill`.
 
 **Assert on numbers, not screenshots** — `getBoundingClientRect()` or `innerText` read in page script. Screenshots are the record, not the evidence, and two byte-identical before/after files mean the change did not land (`shasum -a 256` them).
