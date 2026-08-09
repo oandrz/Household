@@ -708,18 +708,18 @@ person to ask whether the test could ever have gone red in the first place.
   All four are filed here rather than as new patterns, because the shape is
   the one this section already tracks — an assertion satisfied by more than
   the one thing it claims to pin — not four new discoveries.
-  **A fifth, in a different feature, is why this shape earns its own callout
-  rather than staying folded into "Goals":** Bills' Task 10 review found the
-  identical gap at a fresh call site, not a repeat of the one above. `router.go`'s
-  catch-all "That endpoint does not exist." and `errors.go`'s
-  `domain.ErrNotFound` translation "That could not be found." share the same
-  `NOT_FOUND` code by design — both really do mean "there is nothing here" —
-  which means a never-wired `/bills` route 404s exactly like a real service
-  refusal, and a test asserting only `{404, "NOT_FOUND"}` cannot tell them
-  apart. Found while confirming every one of Bills' seven new routes was
-  genuinely wired, not merely answering the right shape some other way. The
-  fix each time is the same one line: assert the message, not just the code,
-  whenever a test's whole job is proving a route exists.
+- **The same NOT_FOUND-message shape recurred in a different feature — Bills,
+  Task 10 — which is why it gets its own bullet here rather than a fifth
+  sub-item folded into "Goals" above.** `router.go`'s catch-all "That
+  endpoint does not exist." and `errors.go`'s `domain.ErrNotFound`
+  translation "That could not be found." share the same `NOT_FOUND` code by
+  design — both really do mean "there is nothing here" — which means a
+  never-wired `/bills` route 404s exactly like a real service refusal, and a
+  test asserting only `{404, "NOT_FOUND"}` cannot tell them apart. Found
+  while confirming every one of Bills' seven new routes was genuinely wired,
+  not merely answering the right shape some other way. The fix is the same
+  one line each time: assert the message, not just the code, whenever a
+  test's whole job is proving a route exists.
 - `stubFetchRoutes` "throws on an unregistered request, so a query that
   fires when it should not fails loudly" is true only for a component that
   *renders the error*. It is false for one that renders nothing on missing

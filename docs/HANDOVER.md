@@ -10,7 +10,8 @@ in three months or someone new.
 
 ## 1. Where things stand
 
-Everything shipped so far is now walked end to end in a browser. Self-serve
+Everything shipped so far is walked end to end in a browser, except Bills,
+whose own walk is next (§4). Self-serve
 sign-up's own 15-criterion walk ran on 2026-07-30 — three days after its code
 was finished and reviewed — and **passed 15 of 15**, recorded in
 `docs/superpowers/plans/2026-07-27-hearth-signup-verification.md`. No product
