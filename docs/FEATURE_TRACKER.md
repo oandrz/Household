@@ -13,7 +13,35 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 64 of 99 features built or partly built.
+**Where things stand:** 72 of 102 features built or partly built.
+
+**The Bills update, recorded before the ones below it — Money's fifth and
+last feature.** Every number below is a fresh count of the ✅/🟡/⬜/🚫 symbols
+in the tables — the first symbol in each row's own cell, whichever comes
+first whether the cell is bare or carries prose after it — never the
+previous totals adjusted in place; this file records that adjusting by delta
+instead of recounting has produced wrong numbers before (see the Budget
+update below). Four rows move ⬜ → ✅ in the Bills table: the due-soon/paid
+timeline, autopay status, the subscriptions summary and Add bill (modal).
+Two new rows the design's own mockup never draws — **Undo a payment** and
+**Archive and restore a bill** — are added at ✅, the same shape Accounts'
+and Goals' own no-mockup rows already take. One more new row lands in
+Budget: **Unattributed row on Spending by person**, also ✅, the gap Bills'
+Task 8 closed before Bills itself existed to reach it. One row moves in
+Overview: **Next bill card** reaches ✅, reading `useBills` the same way
+`/money/bills` itself does; the **"+ Add" quick-create menu**'s own cell is
+rewritten in place (still 🟡) to say four of six entries are now live
+(Transaction, Account, Savings goal, Bill) rather than three. The
+**Navigation shell**'s "Placeholder pages for unbuilt areas" row keeps its
+✅ but its prose is corrected: it had named `/money/$` as one of two routes
+still using the placeholder component, but Bills' own route replaced that
+splat outright (commit `946630e`) rather than joining beside it, and `/`
+had already stopped using the placeholder back when the interim Overview
+shipped — so the row now says, correctly, that none are left rather than
+naming two that were already down to zero. Recounting by this file's own
+rule takes the totals from 52/12/33/2 = 99 to 60/12/28/2 = 102 — three rows
+added (two Bills, one Budget), five moved from Not started to Built (four
+in Bills, one in Overview).
 
 **The Goals update, recorded before the ones below it.** Slice 2's fourth
 feature shipped: savings targets whose progress is a contributions ledger,
@@ -101,12 +129,12 @@ mockup draws beyond the cards and the contributions summary themselves.
 | Entry & authentication | 10 | 1 | 0 | 0 |
 | Navigation shell | 7 | 0 | 1 | 0 |
 | Household settings | 15 | 4 | 2 | 0 |
-| Overview (home) | 3 | 3 | 4 | 0 |
-| Money | 17 | 4 | 11 | 0 |
+| Overview (home) | 4 | 3 | 3 | 0 |
+| Money | 24 | 4 | 7 | 0 |
 | Marriage | 0 | 0 | 13 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **52** | **12** | **33** | **2** |
+| **Total** | **60** | **12** | **28** | **2** |
 
 ---
 
@@ -190,7 +218,7 @@ The full checklist is at the end of `docs/LEARNING.md`.
 | Space visibility per member | ✅ | Money is capability-gated, Marriage is parents-only, Family is for everyone |
 | Household footer with members and plan | ✅ | "Free plan" is static text, as specified |
 | Modal primitive | ✅ | Native `<dialog>`; backdrop dismissal, Escape, focus trap. Slices 2–4 build on it |
-| Placeholder pages for unbuilt areas | ✅ | Two are left, and each names the slice that will ship it: `/` (Overview) and `/money/$` (Bills). Marriage's and Family's were deleted with their routes in `110ab0a` — a placeholder is honest as the *inside* of a space a household already has, and dishonest as a whole navigation destination offering a page that does not exist |
+| Placeholder pages for unbuilt areas | ✅ | None are left. `/` stopped using it when the interim Overview shipped (M2, before Bills); `/money/$` — the last route still pointing at it — was replaced outright by `/money/bills` when Bills shipped (commit `946630e`), not merely joined by a sibling. The component itself is unreferenced today, kept rather than deleted because Marriage and Family will each want it again the moment either grows a route with no page behind it yet. Marriage's and Family's own placeholders were deleted with their routes in `110ab0a` — a placeholder is honest as the *inside* of a space a household already has, and dishonest as a whole navigation destination offering a page that does not exist |
 | `⌘K` command palette | ⬜ | Shown in the sidebar header; no behaviour behind it |
 | "+ New space" | ✅ | See Household settings below |
 
@@ -232,12 +260,12 @@ grows into the designed Overview rather than being replaced.
 |---|---|
 | Net worth card | 🟡 — the figure and the not-computable case only, by reusing Finances' own card. The design's card also carries an assets/liabilities split and a trend |
 | July budget card — percentage used | 🟡 — percentage used plus the two figures behind it, and a "Set a budget" link when the household has never budgeted. No sparkline. Owner-only: `GET /budgets/{month}` is `requireCapability(money)` **and** `requireOwner` |
-| Next bill card | ⬜ |
+| Next bill card | ✅ — the next-due bill's name, amount and due date (or the overdue/autopay state in its place), reading `useBills`, the same hook and cache entry `/money/bills` itself uses |
 | Goals on track card | ✅ — the real `X of Y on track` figure and the next dated goal beneath it, reading `useGoals`, the same hook and cache entry `/money/goals` itself uses |
 | Next retro card with carried-over actions | ⬜ |
 | Vision check-in strip | ⬜ |
 | "This week" agenda | ⬜ |
-| "+ Add" quick-create menu | 🟡 — Transaction, Account and Savings goal now live. Transaction is disabled with its reason until an account exists; Savings goal has no such precondition (Goals decision 6 — there is no funding-source account to require). Bill, Calendar event and Marriage retro still join it in the change that builds each |
+| "+ Add" quick-create menu | 🟡 — four of six entries now live: Transaction, Account, Savings goal and Bill. Transaction and Bill are both disabled with their reason until an account exists — a bill needs a pay-from account the same way an expense needs a from-account; Savings goal has no such precondition (Goals decision 6 — there is no funding-source account to require). Calendar event and Marriage retro still join it in the change that builds each |
 | Setup checklist (no mockup — see below) | ✅ |
 | Limited-member "amounts are hidden" panel (no mockup — see below) | ✅ |
 
@@ -261,10 +289,15 @@ browser walk, `2026-07-31-hearth-interim-overview-verification.md` criterion 9).
 
 ## 5 · Money
 
-Accounts, Transactions, Budget and Goals are built — Budget's own history
-modal is whole except for Export CSV, and Goals is whole except for the
-funding-source account the design draws and decision 6 deliberately drops.
-Bills is still to come. This is still the largest area.
+All five features are built — Budget's own history modal is whole except for
+Export CSV, and Goals is whole except for the funding-source account the
+design draws and decision 6 deliberately drops. Bills is the last of the
+five to ship: recurring bills on a one-off/monthly/quarterly/yearly cadence,
+marked paid by writing a real expense transaction so Budget, Spending by
+person and net worth all move, archive and restore, undo, and a
+subscriptions rollup. This is still the largest area, and every task on it
+is code-complete and reviewed clean — its own browser walk (Task 18) has not
+run yet, so "built" here means the code, not yet a walk confirming it.
 
 **Finances**
 
@@ -392,6 +425,7 @@ screen for.
 | Envelope per category with pace | ✅ |
 | Empty state with Family-of-four, 50/30/20 and import templates | ✅ |
 | Spending by person | ✅ |
+| Unattributed row on Spending by person (no mockup — see below) | ✅ |
 | Edit budget (modal) | ✅ |
 | Budget history (modal) | 🟡 *(Export CSV deferred — `apiFetch`'s JSON-only contract, transactions decision 7)* |
 | Roll unspent into savings | 🟡 *(the manual move ships; the design's automatic month-end toggle does not)* |
@@ -460,6 +494,18 @@ the excluded count next to the button whenever it is non-zero (commit
 `8a1114b`) rather than blocking the move — see `docs/SYSTEM_DESIGN.md` §5's
 Goals flow for the ruling in full.
 
+**The Unattributed row has no mockup of its own — the design's Spending by
+person chart only ever draws named members.** It exists because a
+transaction can be payer-less, and until Bills shipped that was rare enough
+that the grouping (`usecase/budget.go:252`) silently dropped it rather than
+showing a row for it. A bill's own `paid_by_membership_id` is optional the
+same way, and autopay makes a payer-less expense the common case rather than
+the exception — a household paying several bills by autopay would otherwise
+watch its budget's by-person total quietly under-count the very spend the
+screen exists to show. Bills' own Task 8 built the row before Bills itself
+shipped, since the gap was reachable by hand-entering a payer-less
+transaction even before any bill could create one.
+
 **Goals**
 
 | Feature | State |
@@ -518,21 +564,57 @@ as their own rows rather than folded silently into the cards above them.
 
 | Feature | State |
 |---|---|
-| Due-soon and paid-this-month timeline | ⬜ |
-| Autopay status | ⬜ |
-| Subscriptions summary | ⬜ |
-| Add bill (modal) | ⬜ |
+| Due-soon and paid-this-month timeline | ✅ |
+| Autopay status | ✅ |
+| Subscriptions summary | ✅ |
+| Add bill (modal) | ✅ |
+| Undo a payment (no mockup — see below) | ✅ |
+| Archive and restore a bill (no mockup — see below) | ✅ |
 
-**Every derived figure the design shows across Accounts, Budget and Goals is
-now pinned and built.** Net worth from assets minus liabilities (Accounts);
-`66% used`, `S$137/day left` and `on pace to save S$1,780` — all
-Remaining-based rather than a run-rate projection — in the formula table of
+**A household can add a bill, see it come due, mark it paid and undo that if
+it was a mistake — sixteen tasks deep, code-complete and reviewed clean;
+Bills' own browser walk (Task 18) has not run yet.** The Bills page
+(`/money/bills`) lists
+live bills split into Due soon and Later (both server-computed, so the rule
+lives in one place), a Paid this month list, and an Archived view; the
+Add/Edit bill modal sets name, amount, cadence, due date, pay-from account,
+optional category and payer, autopay and "counts as a subscription"; Mark
+paid writes a real expense transaction into the ledger — the currency comes
+from the pay-from account, the identical rule `TransactionService.Create`
+applies, and a test pins the two agreeing — and its undo reverses the
+expense, the payment record and the advanced due date together, refusing to
+undo anything but a bill's most recent payment. The Subscriptions panel
+totals what autopay-and-subscription bills cost monthly and annually,
+converting like every other cross-currency sum and naming what could not
+convert rather than dropping it. A bill due on the 31st survives every short
+month: `next_due` clamps to the destination month's real length off a
+stored anchor day, not the date it last advanced from, which is what stops a
+one-way clamp walking the bill off the 31st for good (`docs/SYSTEM_DESIGN.md`
+§5).
+
+**Two rows here have no mockup of their own**, the same shape Accounts' and
+Goals' own archive/restore rows take. **Undo a payment** is Bills'
+equivalent of deleting a transaction or a goal contribution — the design
+draws no such control because it draws no history of past payments at all,
+only the current due date. **Archive and restore a bill** is the identical
+"never delete, stamp instead" pattern every other Money entity already
+uses; unlike Goals' own archive control, which shipped with every layer
+built and no screen that could reach it (`docs/LEARNING.md` pattern 15),
+Bills' Archive button is wired onto every live row from the same commit
+that built the list, so there is no equivalent dead end to find here.
+
+**Every derived figure the design shows anywhere in Money is now pinned and
+built.** Net worth from assets minus liabilities (Accounts); `66% used`,
+`S$137/day left` and `on pace to save S$1,780` — all Remaining-based rather
+than a run-rate projection — in the formula table of
 `docs/superpowers/specs/2026-07-30-hearth-budget-design.md` (decision 2);
-and `X of Y on track` plus the manual move of unspent budget into a
-nominated goal, in the formula table of
-`docs/superpowers/specs/2026-08-01-hearth-goals-design.md`. Bills is the one
-area left where an implementer would be inventing a figure with no decision
-recorded first.
+`X of Y on track` plus the manual move of unspent budget into a nominated
+goal, in the formula table of
+`docs/superpowers/specs/2026-08-01-hearth-goals-design.md`; and Bills' own
+three — the due-soon/later split, autopay's badge and copy, and the
+subscriptions monthly/annual totals — in its own spec's formula table.
+Nothing in Money is left where an implementer would be inventing a figure
+with no decision recorded first.
 
 ## 6 · Marriage
 

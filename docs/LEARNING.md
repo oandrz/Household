@@ -72,6 +72,31 @@ a reader nobody thought to look at.
   answering before it is coded, not after. Recorded against Transactions; not
   M2's to fix.
 
+  **A fifth instance, found in review rather than live, and one step removed
+  from `Truncate` itself: Bills' `domain.NextDue`/`startOfDay`.** Go's
+  `time.Time.AddDate(0, 1, 0)` on 31 January returns 3 March, not 28
+  February — it normalises "31 February" forward instead of refusing it —
+  so a bill due on the 31st would walk off the end of every short month if
+  the month arithmetic simply added one. The plan's own brief already named
+  the fix (clamp the destination month's real length), but the first draft
+  of `NextDue` and its sibling `startOfDay` read `from.Year()`/`.Month()`/
+  `.Day()` straight off the caller's `time.Time` without converting to UTC
+  first — the same family's essence restated: those three methods report
+  components in the value's own `Location`, not UTC, so a bill built from a
+  non-UTC input could compute its clamp against the wrong calendar day
+  entirely. Task 2's review, following the plan's own constraint that month
+  arithmetic must truncate in UTC and citing this very pattern, required
+  `from = from.UTC()` in `NextDue` and `t = t.UTC()` in `startOfDay` before
+  either reads a component; `TestNextDueAndIsOverdueNormaliseNonUTCInputToUTC`
+  builds its inputs with `time.FixedZone` and was mutation-checked at both
+  call sites independently. **The second-order lesson is why
+  `due_anchor_day` is its own column rather than derived from `next_due`:
+  clamping alone is one-way.** 31 Jan clamps to 28 Feb; if the next advance
+  clamped from that already-clamped 28, it would give 28 Mar, and a bill due
+  on the 31st would silently become a bill due on the 28th forever after its
+  first February. Storing the anchor separately and clamping *it* fresh each
+  time — 31 Jan → 28 Feb → 31 Mar — is what keeps the drift from compounding.
+
 - Same slice, Task 15: `AccountModal`'s Balance field distinguishes "not a
   number" from "this currency doesn't use cents" (a switch to IDR/VND without
   touching the figure), with a comment explaining why restating the number
@@ -683,6 +708,18 @@ person to ask whether the test could ever have gone red in the first place.
   All four are filed here rather than as new patterns, because the shape is
   the one this section already tracks — an assertion satisfied by more than
   the one thing it claims to pin — not four new discoveries.
+  **A fifth, in a different feature, is why this shape earns its own callout
+  rather than staying folded into "Goals":** Bills' Task 10 review found the
+  identical gap at a fresh call site, not a repeat of the one above. `router.go`'s
+  catch-all "That endpoint does not exist." and `errors.go`'s
+  `domain.ErrNotFound` translation "That could not be found." share the same
+  `NOT_FOUND` code by design — both really do mean "there is nothing here" —
+  which means a never-wired `/bills` route 404s exactly like a real service
+  refusal, and a test asserting only `{404, "NOT_FOUND"}` cannot tell them
+  apart. Found while confirming every one of Bills' seven new routes was
+  genuinely wired, not merely answering the right shape some other way. The
+  fix each time is the same one line: assert the message, not just the code,
+  whenever a test's whole job is proving a route exists.
 - `stubFetchRoutes` "throws on an unregistered request, so a query that
   fires when it should not fails loudly" is true only for a component that
   *renders the error*. It is false for one that renders nothing on missing
@@ -1482,6 +1519,37 @@ reason, and its comment is where this was learned the first time.
   repository is ever called, and the paging cursor's id half is checked
   separately again in `decodeCursor`, deliberately, since `TransactionRepository.List`
   has no `Valid` guard on `CursorID` the way it does on the other three.
+- Bills slice, Task 5: a prescribed mutation check on `BillRepo.RecordPayment`
+  — remove `defer tx.Rollback(ctx)`, commit after each write, confirm the
+  test the brief named goes red on "a payment row survives a failed write" —
+  went red for a completely different reason. `TestRecordPaymentIsAtomic`'s
+  bad-category input fails on the transaction's own first write
+  (`CreateTransaction`), so nothing existed yet for a partial write to
+  leave behind; the actual failure was `panic: test timed out after 40s`,
+  `t.Cleanup(db.Close)` hung inside `pgxpool.Pool.Close()` forever, waiting
+  on a `sync.WaitGroup` no goroutine would ever signal. **An un-rolled-back
+  pgx transaction does not just fail to undo its writes — it permanently
+  leaks its connection back to the pool**, because pgx has no finalizer for
+  an abandoned `pgx.Tx`; the pool's own `Close()` waits for every checked-out
+  connection to be returned, and one that was never rolled back nor
+  committed is checked out forever. In production this pool is long-lived
+  and never closed mid-request, so the hang is a test-harness-only symptom —
+  but it turns a mutation check that should read as a clean, fast assertion
+  failure into a 40-second CI timeout with a `puddle.Pool.Close` stack trace
+  that says nothing about the actual property under test. The mutation was
+  still genuine (Step 6's letter was satisfied), but it proved "the deferred
+  rollback is what lets the test suite finish at all," not "a partial write
+  is visible" — a different property than the one it was written to catch.
+  The implementer added `TestRecordPaymentLeavesNoOrphanExpenseWhenTheSecondWriteFails`,
+  which pays the same occurrence twice so the second call's first write
+  (the expense) really does land before its second write is rejected by
+  `UNIQUE (bill_id, due_on)` — the only shape where a write has something to
+  leak before the failure — and re-ran the same style of mutation against
+  it, watching it go red on the actual claim (`got 2 transactions, want 1`).
+  **If a repository test hangs instead of failing an assertion, check
+  whether the transaction under test ever got something to roll back before
+  its forced failure fired** — a hang there is a leaked connection, not a
+  flake to retry.
 
 ### HTTP layer
 

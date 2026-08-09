@@ -6,7 +6,7 @@ sitting.
 
 **Scope:** what exists today — slices 0 and 1, self-serve sign-up and
 household provisioning (which shipped ahead of slice 2 in the build order, see
-`docs/HANDOVER.md`), and the first four features of slice 2 (Money):
+`docs/HANDOVER.md`), and all five features of slice 2 (Money), now complete:
 Accounts — a household records what it owns and owes by hand and sees a net
 worth built from it; Transactions — the ledger a household logs expenses,
 income and transfers into, categorised and filterable, which is also what
@@ -14,21 +14,26 @@ turns an account's balance from a copy of its opening figure into a real
 sum; Budget — an envelope per category with pace, built directly on
 Transactions' own month totals, plus the category management (rename,
 create, archive) the design folds into its Edit-budget modal rather than a
-dedicated screen; and Goals — a savings target with an optional date, its
+dedicated screen; Goals — a savings target with an optional date, its
 progress kept as a contributions ledger rather than an account balance, and
-the manual move that finally gives Budget's unspent money somewhere to go.
-Bills, the rest of Money, and all of Marriage and Family are not built; see
-`docs/FEATURE_TRACKER.md`. Overview is **partly** built: `/` carries an
-interim page composed of three of the design's eight cards Money can already
-supply, plus a setup checklist and a quick-create menu, and it grows into the
-designed Overview as Bills, Marriage and Family arrive rather than being
-replaced (§7). It adds no endpoint, no table and no port — it is composition
-over what Accounts, Transactions, Budget and Goals already expose. The
-UX-repair round of 2026-07-31 that preceded it shipped no feature at all — it
-bounded the page container, removed the two unbuilt spaces from the
-navigation along with their four routes, and rewrote copy; where either round
-changed the shape of something drawn here, the change is recorded at that
-diagram (§7 in particular).
+the manual move that finally gives Budget's unspent money somewhere to go;
+and Bills — a household's recurring fixed costs on a one-off, monthly,
+quarterly or yearly cadence, whose due date survives a short month by
+clamping a stored anchor day rather than the date itself (§5), and whose
+"mark paid" writes a real expense transaction into `transactions` — the one
+place in Money something outside Transactions writes its ledger — so Budget,
+Spending by person and net worth all move the moment a bill is settled.
+All of Marriage and Family are not built; see `docs/FEATURE_TRACKER.md`.
+Overview is **partly** built: `/` carries an interim page composed of four of
+the design's eight cards Money can now supply, plus a setup checklist and a
+quick-create menu, and it grows into the designed Overview as Marriage and
+Family arrive rather than being replaced (§7). It adds no endpoint, no table
+and no port — it is composition over what Accounts, Transactions, Budget,
+Goals and Bills already expose. The UX-repair round of 2026-07-31 that
+preceded it shipped no feature at all — it bounded the page container,
+removed the two unbuilt spaces from the navigation along with their four
+routes, and rewrote copy; where either round changed the shape of something
+drawn here, the change is recorded at that diagram (§7 in particular).
 
 ---
 
@@ -113,6 +118,7 @@ graph TD
         Transaction["TransactionService — MonthSummary<br/>converts then adds, like Account"]
         Budget["BudgetService — Month, Save, History,<br/>RollOver; RollOver moves a closed<br/>month's Remaining into a goal, once"]
         Goal["GoalService — composes the whole<br/>Goals screen in one List call;<br/>a contribution moves no real money"]
+        Bill["BillService — MarkPaid/UndoPayment write<br/>into TransactionRepository through<br/>BillRepository, not TransactionService"]
         Seed["Seed"]
     end
 
@@ -168,7 +174,8 @@ points inward, which is why every service is testable against in-memory doubles.
 | `TransactionRepository` | `adapter/postgres` | Thirteenth. Keyset-paged `List` (a cursor is the last row's date and id, not an offset); `Update` never merges a patch — `TransactionService` turns a partial `PATCH` into a complete `domain.Transaction` first; `MonthTotals` returns rows rather than a SQL `SUM`, because a sum is only correct within one currency and the FX conversion lives in the service, not the repository |
 | `BudgetRepository` | `adapter/postgres` | Fourteenth. `Get` returns `domain.ErrNotFound` for an unbudgeted month, which the service turns into the empty state, not an error; `Upsert` replaces one household-month wholesale in a single transaction — parent row upserted on `(household_id, month)`, every existing line deleted, every new line inserted, category ownership validated first — never a merge, so a category the caller left out of the payload is unambiguously gone after the call; `History` returns the closed months in range that actually have a budget row, never zero-filled; `RollOverToGoal` writes a `goal_contributions` row **and** stamps `budgets.rolled_over_at`/`rollover_goal_id` in one transaction — the stamp is a conditional `UPDATE ... WHERE rolled_over_at IS NULL`, so a second concurrent call finds no row to update and answers `ErrRolloverAlreadyDone` rather than writing a second contribution (§5) |
 | `GoalRepository` | `adapter/postgres` | Fifteenth. `List`/`Get` return each goal's stored fields plus the one figure only SQL can cheaply supply — the summed `contributed` — leaving percent, status and required-monthly to `domain.` arithmetic in the service; `Create` writes the goal and, when a starting balance is given, its opening contribution in one transaction, so a goal with a missing opening contribution cannot exist; `DeleteContribution` clears a rolled-over month's stamp in the same transaction as the delete when the row being removed is that month's rollover (§5). The port's own doc comment carries a warning no other repository needs: `goal_contributions.household_id` has no database-level constraint tying it to its own `goal_id`'s household, so every method that reads or writes a contribution filters by `household_id` **and** `goal_id` together, never by contribution id alone |
-| `AccountLookup`, `CategoryLookup` | `adapter/postgres` (`*AccountRepo` and `*CategoryRepo` already satisfy them) | Narrower ports `TransactionService` depends on instead of the full repositories above — interface segregation: it needs an account's currency and household, and whether a category id belongs to this household and what kind it is, never `List` or `EnsureSeeded` |
+| `BillRepository` | `adapter/postgres` | Sixteenth. `List`'s `includeArchived` is the same UNION-not-filter-swap contract as `AccountRepository`/`GoalRepository`. `RecordPayment` writes the expense (`transactions`), the payment (`bill_payments`) and the advanced `next_due` in one transaction — a bill left advanced with no payment, or a payment with no expense, is not a state this port can produce; `UndoPayment` reverses all three the same way, refusing any payment that is not the bill's most recent with `*domain.BillPaymentNotLatestError`. `MonthTotals` cannot come from `bills` alone — a bill already paid this month has `next_due` in the *next* one — so it unions `bill_payments` (by `due_on`) with still-unpaid live bills (by `next_due`); the two halves filter archived bills differently on purpose (§5). `bill_payments.household_id` carries the same unenforced-by-the-database warning as `goal_contributions`: every method filters by `household_id` **and** `bill_id` together, never by payment id alone (§6) |
+| `AccountLookup`, `CategoryLookup` | `adapter/postgres` (`*AccountRepo` and `*CategoryRepo` already satisfy them) | Narrower ports `TransactionService` depends on instead of the full repositories above — interface segregation: it needs an account's currency and household, and whether a category id belongs to this household and what kind it is, never `List` or `EnsureSeeded`. `BillService.MarkPaid` depends on this same `AccountLookup`, for the same reason and to the same effect: the pay-from account's currency, not a value Bills stores of its own (§5) |
 | `PasswordHasher`, `TokenGenerator` | `adapter/crypto` | argon2id with cost from config; tokens are random, stored hashed |
 | `Mailer` | `adapter/mail` | SMTP; TLS policy and credentials from config |
 | `Clock` | `adapter/clock` | So lockout windows and expiry are deterministic in tests |
@@ -205,7 +212,7 @@ graph TD
 
     Session --> Cap{"Capability-gated<br/>route group?"}
     Cap -->|"accounts: money"| RequireCap["requireCapability(money)<br/>403 unless the caller's membership has it"]
-    Cap -->|"transactions, categories,<br/>budgets, goals: money AND owner —<br/>reads included"| RequireCapTxn["requireCapability(money)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
+    Cap -->|"transactions, categories,<br/>budgets, goals, bills: money AND owner —<br/>reads included"| RequireCapTxn["requireCapability(money)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
     Cap -->|"no — most routes"| Safe{"GET or HEAD?"}
     RequireCap --> Safe
     RequireCapTxn --> Safe
@@ -248,25 +255,26 @@ first time the *server* enforces one. `/marriage` has had no route since
 `110ab0a`, so today `RequireCapability` guards only `/money`'s subtree, and
 the server-side gate below is the enforcement either way.)
 
-**Transactions, categories, budgets and goals are the routes where
+**Transactions, categories, budgets, goals and bills are the routes where
 `requireOwner` gates a `GET`.** Every other owner-gated route in this table
 only reaches `requireOwner` after the `CSRF` check, which by construction
 means never on a read. This group instead runs `requireCapability(money)`
 then `requireOwner` before the GET/HEAD branch even exists, so a limited
-member is refused the ledger — and the budget and goals screens — themselves,
-not merely their writes. This is deliberate, not copied from accounts by
-mistake: a limited member's accounts view already renders names with every
-amount blank (§5); applied to a ledger, a budget screen or a goal card, that
-is nothing but figures — a table whose every figure would be blank, next to a
-"Spent this month" that has to be absent rather than shown as zero, a page of
-caps and pace with nothing left to show, or a card whose whole point is a
-progress ring and a dollar figure — the page would read as broken rather than
-merely restricted. So for a limited member the `money` capability on
-Transactions, Budget and Goals means only "see which accounts this household
-has" (via `/accounts`), and nothing about the ledger, the budget or a goal at
-all. Budget's spec named this explicitly as the Transactions shape reused for
-the same reason (decision 8); Goals' own spec (decision 10) reuses it a third
-time rather than inventing a new one.
+member is refused the ledger — and the budget, goals and bills screens —
+themselves, not merely their writes. This is deliberate, not copied from
+accounts by mistake: a limited member's accounts view already renders names
+with every amount blank (§5); applied to a ledger, a budget screen, a goal
+card or a bill row, that is nothing but figures — a table whose every figure
+would be blank, next to a "Spent this month" that has to be absent rather
+than shown as zero, a page of caps and pace with nothing left to show, a card
+whose whole point is a progress ring and a dollar figure, or a due date with
+an amount beside it — the page would read as broken rather than merely
+restricted. So for a limited member the `money` capability on Transactions,
+Budget, Goals and Bills means only "see which accounts this household has"
+(via `/accounts`), and nothing about the ledger, the budget, a goal or a bill
+at all. Budget's spec named this explicitly as the Transactions shape reused
+for the same reason (decision 8); Goals' own spec (decision 10) reused it a
+third time, and Bills a fourth, rather than any of them inventing a new one.
 
 **`PUT /budgets/{month}` sits in its own `requireCSRF` sub-group**, separate
 from the one wrapping the category-write routes and the transaction writes,
@@ -328,6 +336,12 @@ to a real address and so are not on that path.
 | POST | `/goals/{id}/archive`, `/goals/{id}/restore` | session · money · owner · CSRF |
 | POST | `/goals/{id}/contributions` | session · money · owner · CSRF |
 | DELETE | `/goals/{id}/contributions/{contributionId}` | session · money · owner · CSRF |
+| GET | `/bills` | session · money · owner — same reasoning as the transactions/categories/budgets/goals reads above |
+| POST | `/bills` | session · money · owner · CSRF |
+| PATCH | `/bills/{id}` | session · money · owner · CSRF |
+| POST | `/bills/{id}/archive`, `/bills/{id}/restore` | session · money · owner · CSRF |
+| POST | `/bills/{id}/pay` | session · money · owner · CSRF — writes the payment, the expense and the advanced due date in one transaction (§5) |
+| DELETE | `/bills/{id}/payments/{paymentId}` | session · money · owner · CSRF — reverses all three |
 | GET | `/healthz`, `/readyz` | none — outside `/api/v1` |
 
 Three test matrices walk the live router and assert this: every non-public
@@ -375,6 +389,12 @@ a third**, since it shares that group's exact guard stack (§4 above). Goals
 gets its own pair in `goals_api_test.go` —
 `TestGoalRoutesRequireMoneyAndOwner` and `TestGoalWriteRoutesRequireCSRF` —
 covering all eight `/goals` routes, the same one-file-per-feature split.
+Bills follows the identical shape in `bills_api_test.go` —
+`TestBillsRoutesRequireMoneyAndOwner` and `TestBillsWriteRoutesRequireCSRF` —
+for all seven `/bills` routes, asserting an exact expected status per route
+rather than "not 401/403", the same discipline Transactions' own matrix
+established (above) after a looser assertion once let a nil-dependency panic
+recover into a `500` indistinguishable from a correctly-enforced guard.
 
 ---
 
@@ -858,6 +878,142 @@ information, not a refusal, and it is deliberate: do not "fix" this by
 blocking the button on a positive exclusion count without a further product
 conversation.
 
+### Bills — marking paid writes into Transactions; undo reverses all three writes
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant H as Handler
+    participant Svc as BillService
+    participant Acct as AccountLookup
+    participant Repo as BillRepository
+    participant DB as Postgres
+
+    B->>H: POST /api/v1/bills/{id}/pay { amountMinor, paidOn }
+    H->>Svc: MarkPaid(...)
+    Svc->>Repo: Get(householdID, billID)
+    alt bill is archived
+        Svc-->>H: BillNotPayableError{BillArchived}
+    else NextDue is nil -- a settled one-off
+        Svc-->>H: BillNotPayableError{BillSettled}
+    else payable
+        Svc->>Acct: Get(householdID, payFromAccountID)
+        alt pay-from account is archived
+            Svc-->>H: BillNotPayableError{PayFromAccountArchived}
+        else
+            Svc->>Svc: currency := account's own currency --<br/>transaction.go:232's identical rule;<br/>a test asserts the two agree
+            Svc->>Svc: next, ok := domain.NextDue(cadence, dueOn, anchorDay)<br/>-- advances from the DUE date, never PaidOn
+            Svc->>Repo: RecordPayment(...)
+            Repo->>DB: BEGIN
+            Repo->>DB: INSERT transactions (kind=expense,<br/>currency=account's)
+            Repo->>DB: INSERT bill_payments (due_on, paid_on, amount,<br/>transaction_id) -- UNIQUE(bill_id, due_on)<br/>-> ErrAlreadyExists on a double-pay
+            Repo->>DB: UPDATE bills SET next_due<br/>WHERE household_id AND id -- 0 rows -> ErrNotFound,<br/>rolls the whole transaction back
+            Repo->>DB: COMMIT
+            Repo-->>H: BillPaymentView
+        end
+    end
+
+    B->>H: DELETE /api/v1/bills/{id}/payments/{paymentId}
+    H->>Svc: UndoPayment(...)
+    Svc->>Repo: UndoPayment(...)
+    Repo->>DB: BEGIN
+    Repo->>DB: SELECT the payment, and MAX(due_on) for this bill
+    alt payment is not the bill's most recent
+        Repo-->>H: BillPaymentNotLatestError{MostRecentDueOn}
+    else is the most recent
+        Repo->>DB: DELETE the bill_payments row
+        Repo->>DB: DELETE the transactions row, if still linked
+        Repo->>DB: UPDATE bills SET next_due = the undone<br/>payment's own due_on
+        Repo->>DB: COMMIT
+    end
+```
+
+**Marking a bill paid writes into `transactions` from outside Transactions —
+the only place in Money that happens, and it is allowed because the
+alternative is a bill that pays itself with no ledger trace at all.** The
+expense `RecordPayment` writes is what feeds Budget's `Spent`, the daily pace
+figures, Spending by person and net worth; a household that marks a bill paid
+and sees none of those move would rightly distrust the feature. What keeps it
+honest is the same rule Transactions enforces on itself: the expense's
+currency is the pay-from **account's** currency, resolved through
+`AccountLookup` — the identical assignment `TransactionService.Create` makes
+at `usecase/transaction.go:232`, `t.Amount.Currency = fromCurrency` — never
+a value Bills stores or infers on its own. `TestMarkPaidWritesTheExpenseInTheAccountsCurrency`
+asserts the two agree, so a bill on an IDR account writes an IDR expense even
+if the bill's own display figure is read in a stale currency somewhere else.
+The amount and date are `MarkPayment`'s own caller-supplied fields, not the
+bill's stored `amount_minor` re-read — a utility bill varies month to month,
+and paying it once must not silently rewrite what the household expects to
+owe next time.
+
+**Marking paid is three rows in one database transaction, and undo reverses
+all three.** `RecordPayment` writes the expense, the payment row and the
+advanced `next_due` inside one `BEGIN...COMMIT`; a bill left advanced with no
+payment, or a payment with no expense, is a state this port cannot produce. A
+review found the third write (`SetBillNextDue`) was originally a bare `:exec`
+with no rows-affected check, so a household/bill mismatch — nothing in the
+schema ties `bill_payments.household_id` or `transactions.household_id` to
+the bill's own household by a foreign key — would have committed the expense
+and the payment while silently leaving `next_due` untouched: the exact
+partial state the transaction exists to prevent, arriving through a silent
+no-op rather than a caught error. Fixed to the same `:one ... RETURNING id`
+shape `DeleteBillPayment` already used two lines away, so a zero-row match
+now rolls the whole transaction back as `domain.ErrNotFound`
+(`docs/LEARNING.md`). `UndoPayment` mirrors this the other way — delete the
+payment, delete its transaction if the link still points at one (it is
+nullable: deleting the expense from the Transactions page must not erase the
+record that the bill was paid), and rewind `next_due` to the undone
+occurrence's own `due_on` — all in one transaction, and it refuses any
+payment that is not the bill's most recent
+(`*domain.BillPaymentNotLatestError`): undoing an older one would rewind
+`next_due` behind a period that is still paid, and the screen would show a
+due date for money already spent.
+
+**`NextDue` clamps to the destination month's last day using a stored anchor
+day, never the date it is advancing from.** Go's `time.Time.AddDate(0, 1, 0)`
+on 31 January returns 3 March — it normalises "31 February" forward instead
+of refusing it — so a bill due on the 31st would walk off the end of every
+short month if the code simply added a month. `NextDue` clamps `anchorDay`,
+not `from.Day()`, to the destination month's real length each time it
+advances: 31 Jan → 28 Feb → 31 Mar. Clamping the already-clamped value is why
+`bills.due_anchor_day` is its own column rather than derived from `next_due`
+on the fly — deriving it would make the clamp one-way: advancing from a
+`next_due` of 28 Feb would give 28 Mar, and a bill due on the 31st would
+silently become a bill due on the 28th forever after its first February.
+
+**`MonthTotals` cannot be computed from `bills` alone, and its two halves
+filter archived bills differently on purpose.** A monthly bill paid on 8
+July has `next_due = 8 August` the moment it is paid, so a query filtering
+`bills.next_due` into July misses the entire "paid so far" half of the
+figure — `BillRepository.MonthTotals` unions `bill_payments` (by `due_on`)
+with still-unpaid live bills (by `next_due`) to get both halves right. The
+unpaid half excludes an archived bill — nobody intends to pay it again, so it
+is not a current obligation — while the paid half includes it: the money
+already left the household, and archiving a bill afterwards must not
+retroactively empty the month it was paid in.
+
+**`BillsView` composes the whole screen in one call**, the same shape every
+other Money screen uses: every bill row (with `DueSoon`/`Overdue`/`Settled`
+computed server-side, so the rule lives in one place), the paid-this-month
+list, and the summary — due this month, paid so far, the next-due bill, and
+the subscriptions rollup (`AnnualEquivalentMinor`, converted like every other
+cross-currency sum, with `ExcludedNoRate` naming what could not convert
+rather than silently dropping it). `Settled` exists because a live bill can
+have `NextDue == nil` — a paid one-off — which the design's own "Due soon"
+and "Later" formulas both define as requiring a non-null due date; without
+the flag there would be no way to tell "genuinely far out" from "done, and
+deliberately not archived so the household can still see it" (`00008_bills.sql`'s
+own comment on `next_due`).
+
+**A bill with no payer is why Spending by person gained an Unattributed
+row.** `paid_by_membership_id` is optional on a bill the same way it is on a
+transaction, but before Bills existed, a payer-less transaction was rare
+enough that `BudgetService`'s by-person grouping (`usecase/budget.go:252`)
+simply dropped it — every real transaction until now had a human behind it. A
+bill autopaying with no named person makes that the common case, not the
+exception, so the grouping now emits an explicit `Unattributed` row rather
+than silently under-counting the month's spend.
+
 ### What the frontend loads
 
 ```mermaid
@@ -881,14 +1037,18 @@ client-side map (`SPACE_PAGES` in `Sidebar.tsx`) turns a space with several
 shipped pages into the design's uppercase group label plus one link per page
 — Money renders as "MONEY" over Finances, Transactions and Budget.
 
-**Overview fetches nothing of its own.** Its four requests are the ones
-Accounts, Budget, Goals and Settings already make, through the same hooks and
-the same cache keys, so a figure on the front door cannot disagree with the
-same figure on the screen it links to — the browser walk checks exactly that
-(net worth on `/` against net worth on `/money`). `useGoals` is the same
-hook `GoalsPage` itself calls, so the "X of Y on track" figure on Overview's
-Goals card and the same count on `/money/goals` share one cache entry rather
-than risking two independent reads of `GET /goals` disagreeing. One of those hooks is new
+**Overview fetches nothing of its own.** Its five requests are the ones
+Accounts, Budget, Goals, Bills and Settings already make, through the same
+hooks and the same cache keys, so a figure on the front door cannot disagree
+with the same figure on the screen it links to — the browser walk checks
+exactly that (net worth on `/` against net worth on `/money`). `useGoals` is
+the same hook `GoalsPage` itself calls, so the "X of Y on track" figure on
+Overview's Goals card and the same count on `/money/goals` share one cache
+entry rather than risking two independent reads of `GET /goals` disagreeing;
+`NextBillCard` reuses `useBills` the identical way, against `/money/bills`'s
+own cache entry, and gained no query of its own — the `enabled` option
+`useBills` grew for exactly this reuse (Task 11) predates `NextBillCard` by
+several tasks. One of those hooks is new
 only in the sense that it stopped being three: `useHouseholdMembers` was
 declared privately and identically in `AccountModal`, `TransactionsPage` and
 `MembersPanel`, all against `["household", "members"]`, sharing one cache
@@ -944,6 +1104,13 @@ erDiagram
     goals ||--o{ goal_contributions : has
     households ||--o{ goal_contributions : scopes
     goals ||--o{ budgets : "may receive a rollover (nullable)"
+    households ||--o{ bills : has
+    accounts ||--o{ bills : "pays from (NOT NULL, supplies currency)"
+    categories ||--o{ bills : "labels (nullable, SET NULL)"
+    memberships ||--o{ bills : "paid by (nullable, SET NULL)"
+    bills ||--o{ bill_payments : has
+    households ||--o{ bill_payments : scopes
+    transactions ||--o| bill_payments : "the expense it wrote (nullable, SET NULL)"
     users ||--o{ memberships : holds
     users ||--o{ sessions : owns
     users ||--o{ magic_links : owns
@@ -1097,6 +1264,33 @@ erDiagram
         date source_budget_month "nullable — set only for source=budget_rollover"
         timestamptz created_at
     }
+    bills {
+        uuid id PK
+        uuid household_id FK
+        text name
+        bigint amount_minor "CHECK > 0"
+        text cadence "one_off | monthly | quarterly | yearly"
+        date next_due "nullable — NULL only for a settled one-off"
+        smallint due_anchor_day "CHECK 1-31 — the clamp target, kept apart from next_due"
+        uuid category_id FK "nullable — SET NULL"
+        uuid pay_from_account_id FK "NOT NULL — no currency column; this supplies it"
+        uuid paid_by_membership_id FK "nullable — SET NULL"
+        bool autopay "default false — display only, nothing schedules a payment"
+        bool is_subscription "default false"
+        timestamptz archived_at "nullable — never deleted"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    bill_payments {
+        uuid id PK
+        uuid bill_id FK
+        uuid household_id FK "redundant with the bill's own — every read scopes by both"
+        date due_on "the occurrence settled, NOT paid_on — every month figure keys off this"
+        date paid_on
+        bigint amount_minor "CHECK > 0 — may differ from the bill's own amount_minor"
+        uuid transaction_id FK "nullable — ON DELETE SET NULL"
+        timestamptz created_at
+    }
 ```
 
 Notes that are not obvious from the shapes:
@@ -1244,6 +1438,43 @@ Notes that are not obvious from the shapes:
   `starting_balance` or `budget_rollover` row — is the same reasoning
   Transactions applies to a transaction (§5), and it is how a household
   undoes a mistyped figure or a rollover it wants to redo.
+- **`bills` carries no `currency` column, unlike `goals`.** It is
+  denominated in whatever the pay-from account's currency is, because
+  `TransactionService.Create` already forces an expense's currency to its
+  from-account's (`usecase/transaction.go:232`) — a currency stored on
+  `bills` itself would be overwritten the moment a payment wrote its
+  transaction, and the two would disagree in the meantime. Do not add one;
+  the migration's own comment says so.
+- **`due_anchor_day` is a column, not derived from `next_due`, because
+  clamping the destination month's last day is one-way.** 31 Jan clamps to
+  28 Feb; advancing from a `next_due` of 28 would give 28 Mar, and a bill
+  due on the 31st would silently walk itself off the 31st forever. See §5's
+  Bills flow for the mechanism.
+- **`only_a_one_off_has_no_next_due` is the one schema-level guarantee that
+  a NULL `next_due` always means "settled one-off".** Anything else with a
+  NULL there would be a bug that vanished from every list — `BillView`'s own
+  `Settled` flag (§5) exists downstream of this constraint holding.
+- **`bill_payments.household_id` has no database-level constraint tying it
+  to its own `bill_id`'s household**, the identical gap
+  `goal_contributions.household_id` has against its `goal_id` (above).
+  `BillRepository`'s own doc comment in `usecase/ports.go` carries the same
+  warning: every method filters by `household_id` **and** `bill_id`
+  together, never by payment id alone.
+- **`bill_payments.transaction_id` is `ON DELETE SET NULL`, not `CASCADE`.**
+  Deleting the expense from the Transactions page must not erase the
+  household's record that the bill was paid — the payment row's own
+  `amount_minor` and `paid_on` survive regardless of what happens to the
+  ledger entry that once backed them.
+- **`UNIQUE (bill_id, due_on)` is belt-and-braces beside `BillService`'s own
+  checks** — a double-clicked "Mark paid" cannot write two payments for one
+  occurrence; `RecordPayment` translates the violation to
+  `domain.ErrAlreadyExists` rather than surfacing a raw constraint error.
+- **A bill is archived, never deleted — `bill_payments` references it**,
+  the same `accounts`/`categories`/`goals` reasoning applied to a fourth
+  table. A payment itself is never deleted either; `DELETE
+  /bills/{id}/payments/{paymentId}` is the undo flow (§5), not a generic
+  delete, and it always reverses the payment's own three writes rather than
+  removing the row alone.
 
 ---
 
@@ -1275,16 +1506,26 @@ web/src/
                        goal modal, the contributions panel (add/delete,
                        listed by source), the Monthly contributions card,
                        and the Budget page's own rollover card, mounted at
-                       /money/goals
-    overview/          the interim Overview at / — three of the design's
+                       /money/goals; the Bills page — Due soon / Later /
+                       Archived lists, the Add/Edit bill modal, Mark paid
+                       and its undo, and the Subscriptions panel, mounted
+                       at /money/bills (replacing moneySplatRoute, the
+                       last route that ever used it)
+    overview/          the interim Overview at / — four of the design's
                        eight cards Money can supply (net worth, reusing
                        money/NetWorthCard; this month's budget; goals on
-                       track), a setup checklist, and the "+ Add"
-                       quick-create menu
+                       track; and the next bill, reading the same useBills
+                       hook /money/bills itself uses), a setup checklist,
+                       and the "+ Add" quick-create menu
     placeholder/       named stand-ins for unbuilt areas, and only for areas
-                       a household can already reach — now /money/$ alone
-                       (Bills, still to come); / stopped using it when the
-                       interim Overview shipped
+                       a household can already reach. Empty of callers as of
+                       this feature: / stopped using it when the interim
+                       Overview shipped, and Bills' own route was the last
+                       one still pointing at it (moneySplatRoute). The
+                       component is unreferenced dead code today, kept
+                       rather than deleted because Marriage and Family will
+                       want it again the moment either grows a route with
+                       no page behind it yet — see `docs/FEATURE_TRACKER.md`
   routes/router.tsx        the route tree; its header comment is the route
                            list, kept beside the code it describes
   routes/publicRoutes.ts   the one list of pre-auth routes and API prefixes;
@@ -1296,18 +1537,22 @@ web/src/
 recent-transactions strip — five newest, reading through the same
 `useTransactions({})` query the Transactions page's own default (unfiltered)
 state resolves to, so the two share one cache entry rather than the strip
-standing up a second endpoint. `/money/transactions`, `/money/budget` and
-`/money/goals` are all real routes, siblings of `/money` nested under the
-same `moneyGuardRoute` (a literal path segment beats `/money/$`'s catch-all,
-so each is declared and added to that route's children ahead of the splat).
-`/money/$` now covers only Bills. The sidebar still renders from the
+standing up a second endpoint. `/money/transactions`, `/money/budget`,
+`/money/goals` and `/money/bills` are all real routes, siblings of `/money`
+nested under the same `moneyGuardRoute` (a literal path segment beats a
+catch-all, so each was declared and added to that route's children ahead of
+the splat while one still existed). **`/money/$` itself is gone.** Bills was
+its last remaining reason to exist — every other page in Money had already
+claimed its own literal segment — so `/money/bills` replaced the splat
+outright rather than joining beside it (commit `946630e`); there is no
+catch-all left anywhere under `/money`. The sidebar still renders from the
 server's own filtered, ordered space list, but Transactions is what expired
-the flat-links deferral and Budget and Goals are what grew it a third and
-fourth link: Money takes the design's grouped form — an uppercase "MONEY"
-label over Finances (`/money`), Transactions (`/money/transactions`), Budget
-(`/money/budget`) and Goals (`/money/goals`) — via the `SPACE_PAGES` map in
-`Sidebar.tsx` (see "What the frontend loads" above). Bills joins the map, and
-adds a fifth Money link, only once its own page ships.
+the flat-links deferral and Budget, Goals and Bills are what grew it a
+third, fourth and fifth link in turn: Money takes the design's grouped
+form — an uppercase "MONEY" label over Finances (`/money`), Transactions
+(`/money/transactions`), Budget (`/money/budget`), Goals (`/money/goals`)
+and Bills (`/money/bills`) — via the `SPACE_PAGES` map in `Sidebar.tsx` (see
+"What the frontend loads" above).
 
 **`/` is a real page, and it is the only one with no capability guard above
 it.** Every other screen sits behind `RequireAuth` *and* `RequireCapability`,
@@ -1319,17 +1564,17 @@ cases:
 
 | Caller | What renders | Why |
 |---|---|---|
-| owner | net worth card, budget card, goals card, setup checklist, "+ Add" | the only caller `GET /budgets/{month}` and `GET /goals` admit, and the only one who may write an account, a transaction, a budget or a goal |
-| limited, holds `money` | a panel saying amounts are hidden, linking to Finances | `GET /accounts` answers 200 but **omits `summary` entirely** rather than zeroing it (§5); with no budget card, no goals card and no checklist either, this panel is the only thing on the page |
+| owner | net worth card, budget card, goals card, next bill card, setup checklist, "+ Add" | the only caller `GET /budgets/{month}`, `GET /goals` and `GET /bills` admit, and the only one who may write an account, a transaction, a budget, a goal or a bill |
+| limited, holds `money` | a panel saying amounts are hidden, linking to Finances | `GET /accounts` answers 200 but **omits `summary` entirely** rather than zeroing it (§5); with no budget card, no goals card, no next bill card and no checklist either, this panel is the only thing on the page |
 | limited, no `money` | a single "You don't have access to Money" panel | `GET /accounts` answers 403 |
 
 Two details here are load-bearing and neither is visible from the route table
-alone. First, **`/accounts` and `/budgets/{month}`/`/goals` do not carry the
-same guards** — accounts is `requireCapability(money)`, budgets and goals are
-that *and* `requireOwner` — so the budget card and the goals card are both
-owner-only, and `useBudget`/`useGoals` each take an `enabled` flag rather than
-being called unconditionally: a limited member must not fire a request that
-can only 403 and cache the failure. Second,
+alone. First, **`/accounts` and `/budgets/{month}`/`/goals`/`/bills` do not carry
+the same guards** — accounts is `requireCapability(money)`, the other three
+are that *and* `requireOwner` — so the budget, goals and next bill cards are
+all owner-only, and `useBudget`/`useGoals`/`useBills` each take an `enabled`
+flag rather than being called unconditionally: a limited member must not
+fire a request that can only 403 and cache the failure. Second,
 **the absent `summary` is the only signal the frontend has** that a caller may
 not see amounts, so the page must never synthesise one; a zero there would be a
 claim about the household's money. The middle row of that table is the one that
