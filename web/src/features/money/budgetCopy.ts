@@ -46,6 +46,15 @@ export const BUDGET_COPY = {
   overMarker: "· over",
 
   spendingByPerson: "Spending by person",
+  // The row for `membershipId: ""` -- spend the server could not attach to
+  // any member, either a hand-entered transaction saved without a payer or
+  // (once Bills ships) a bill with no "Paid by". Copy for it lives here, not
+  // in Go (BudgetPersonView's own comment): budget.go sends an empty name,
+  // BudgetByPerson.tsx supplies both strings below so a household seeing the
+  // row on screen never has to guess it isn't a bug.
+  unattributed: "Unattributed",
+  unattributedExplanation:
+    'Spending with nobody recorded as the payer — bills without a "Paid by", and transactions saved without one.',
 
   onPaceToSave: (amount: string) => `On pace to save ${amount}`,
   // The over-category sentence, derived from `overCount` (decision: the

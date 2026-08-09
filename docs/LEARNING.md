@@ -1349,6 +1349,26 @@ reason, and its comment is where this was learned the first time.
   next to a past-tense sentence about a completed write: is this value
   actually read back from what was written, or is it recomputed fresh on
   every read of the surrounding screen?
+- Bills slice, Task 8: `BudgetService.Month`'s `Spent` accumulator had no
+  guard on `PaidByMembershipID`, but the `ByPerson` breakdown built two lines
+  later did — `if t.PaidByMembershipID != ""` — so a transaction saved
+  without a payer counted toward the total above the Spending-by-person card
+  and was silently dropped from the rows under it. The card's rows could sum
+  to less than the figure they sit under, with nothing on screen saying so;
+  a hand-entered transaction was the only way to trigger it before Bills,
+  but a bill with no "Paid by" makes it the common case once Bills ships.
+  Fixed by removing the guard and accumulating on the possibly-empty key —
+  the same shape every other accumulator in that loop already used — with
+  the unattributed bucket (`MembershipID ""`) appended to `personOrder`
+  after the loop so it sorts last regardless of when its first transaction
+  appeared, rather than at its own first-appearance position. Copy for the
+  row ("Unattributed", and the explanation beneath the card) lives in
+  `budgetCopy.ts`/`BudgetByPerson.tsx`, never composed in Go — `Name`
+  arrives `""` on the wire on purpose. **A total and a breakdown of that
+  total must apply the exact same filter; the moment they diverge, the
+  breakdown can quietly stop reconciling with the number above it, and nothing
+  short of summing the rows and comparing catches that** — the same shape as
+  pattern 5's silent partial success, on a read path instead of a write.
 
 ### Database and repositories
 

@@ -25,10 +25,17 @@ type BudgetCategoryView struct {
 	Over         bool
 }
 
-// BudgetPersonView is one row of Spending by person. Only memberships that
-// actually paid for something this month get a row -- an unattributed
-// transaction (PaidByMembershipID "") has nobody to attach a name to and is
-// left out rather than becoming a synthetic "Unknown" row.
+// BudgetPersonView is one row of Spending by person. Every membership that
+// paid for something this month gets a row, and so does the unattributed
+// bucket (MembershipID "") for spend with no payer on file -- a hand-entered
+// transaction saved without one, or (once Bills ships) a bill with no "Paid
+// by". That bucket's Name is deliberately "": copy for it belongs in the
+// frontend (BudgetByPerson.tsx), the same house rule budgetCopy.ts follows
+// for everything else this screen renders, not composed here. Dropping the
+// bucket instead -- the earlier shape -- let the rows sum to less than Spent
+// with nothing on screen explaining the gap; this is not the "Kids (shared)"
+// grouping the spec rejects, since it attributes spend to nobody, it only
+// names the absence of a payer.
 type BudgetPersonView struct {
 	MembershipID string
 	Name         string
@@ -206,10 +213,13 @@ func (s *BudgetService) Month(ctx context.Context, householdID string, month, to
 	spent := zero
 	spentByCategory := map[string]domain.Money{}
 	spentByPerson := map[string]domain.Money{}
-	// personOrder keeps ByPerson's row order deterministic (first-appearance
-	// in views, which MonthTotals already returns in a stable order) --
-	// ranging over the spentByPerson map directly would make the response
-	// order vary run to run.
+	// personOrder keeps ByPerson's row order deterministic: real members in
+	// first-appearance order (the order MonthTotals already returns in a
+	// stable way), with the unattributed key "" appended after the loop
+	// below so it always renders last -- ranging over spentByPerson directly
+	// would make the order vary run to run, and putting "" in at its own
+	// first appearance would let an unattributed transaction that happened
+	// to be dated (or entered) first jump ahead of real members.
 	var personOrder []string
 	var excluded []ExcludedTransaction
 
@@ -249,18 +259,30 @@ func (s *BudgetService) Month(ctx context.Context, householdID string, month, to
 			spentByCategory[t.CategoryID] = total
 		}
 
-		if t.PaidByMembershipID != "" {
-			total, seen := spentByPerson[t.PaidByMembershipID]
-			if !seen {
-				total = zero
+		// Accumulate unconditionally, keyed on the possibly-empty payer id.
+		// The old `if t.PaidByMembershipID != ""` guard here is what let
+		// this card's rows sum to less than Spent above it -- every other
+		// accumulator in this loop (spent, spentByCategory) has no such
+		// guard, and this one should not either. Real members are recorded
+		// into personOrder as they first appear; "" is deliberately left
+		// out of that here and appended once after the loop, so it lands
+		// last regardless of when the first unattributed transaction showed
+		// up.
+		total, seen := spentByPerson[t.PaidByMembershipID]
+		if !seen {
+			total = zero
+			if t.PaidByMembershipID != "" {
 				personOrder = append(personOrder, t.PaidByMembershipID)
 			}
-			total, err = total.Add(inPrimary)
-			if err != nil {
-				return BudgetMonthView{}, err
-			}
-			spentByPerson[t.PaidByMembershipID] = total
 		}
+		total, err = total.Add(inPrimary)
+		if err != nil {
+			return BudgetMonthView{}, err
+		}
+		spentByPerson[t.PaidByMembershipID] = total
+	}
+	if _, sawUnattributed := spentByPerson[""]; sawUnattributed {
+		personOrder = append(personOrder, "")
 	}
 
 	categoryViews, overCount := buildCategoryViews(categories, caps, spentByCategory, zero)
@@ -273,6 +295,9 @@ func (s *BudgetService) Month(ctx context.Context, householdID string, month, to
 		}
 		byPerson = make([]BudgetPersonView, 0, len(personOrder))
 		for _, membershipID := range personOrder {
+			// names[""] is never set by memberNames (it only ever keys on
+			// real membership ids), so this already comes back "" for the
+			// unattributed row with no extra case needed here.
 			byPerson = append(byPerson, BudgetPersonView{
 				MembershipID: membershipID,
 				Name:         names[membershipID],

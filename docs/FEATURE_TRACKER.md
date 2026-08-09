@@ -400,7 +400,11 @@ screen for.
 four stat cards (Budgeted, Spent, Remaining, Daily pace), the per-category
 caps grid with the over state, and Spending by person all render live from
 `GET /budgets/{month}` — `BudgetPage.tsx` and its own card components, backed
-by `useBudget`. The empty state (`budget: null`) renders the design's real
+by `useBudget`. Spending by person's rows always sum to the Spent figure
+above them: spend with no payer recorded gets its own "Unattributed" row
+(sorted last) rather than being silently dropped, closing a gap that
+predates Bills but that Bills makes common (`docs/LEARNING.md`, Domain and
+money). The empty state (`budget: null`) renders the design's real
 "No budget set for &lt;Month&gt; yet" panel, both templates and the
 conditional "Import last month" card, with every template's caps computed for
 real (`budgetTemplates.ts`: exact name mapping onto the household's live

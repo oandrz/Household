@@ -254,6 +254,43 @@ describe("BudgetPage", () => {
     expect(rows[1]).toHaveTextContent("S$1,240.00");
   });
 
+  // Neither budgetFixture()'s own byPerson rows carries an empty
+  // membershipId, so the "Unattributed" label and its explanation must not
+  // appear on a month where every transaction has a payer -- the negative
+  // half of the test below, without which a component that always renders
+  // the label would still pass it.
+  it("never mentions unattributed spend when every byPerson row has a payer", async () => {
+    renderPage(budgetFixture());
+
+    await screen.findAllByTestId("budget-person-row");
+    expect(screen.queryByText("Unattributed")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("budget-unattributed-explanation")).not.toBeInTheDocument();
+  });
+
+  // BudgetService.Month sends `{ membershipId: "", name: "" }` for spend
+  // nobody paid (budget.go's BudgetPersonView doc comment) -- copy for that
+  // row lives in the frontend, never composed in Go, so this is the test
+  // that actually exercises BUDGET_COPY.unattributed rendering rather than
+  // an empty string reaching the screen.
+  it("labels the unattributed row and explains it beneath the card", async () => {
+    renderPage(
+      budgetFixture({
+        byPerson: [
+          { membershipId: "m2", name: "Andreas", spentMinor: 124000 },
+          { membershipId: "", name: "", spentMinor: 14230 },
+        ],
+      }),
+    );
+
+    const rows = await screen.findAllByTestId("budget-person-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toHaveTextContent("Unattributed");
+    expect(rows[1]).toHaveTextContent("S$142.30");
+    expect(await screen.findByTestId("budget-unattributed-explanation")).toHaveTextContent(
+      'Spending with nobody recorded as the payer — bills without a "Paid by", and transactions saved without one.',
+    );
+  });
+
   // Spec decision 1, pinned: rollover is deferred to Goals, whole, and the
   // design's own "Unspent budget rolls into the Bali trip goal at month end"
   // sentence must never come back from a future copy-paste of the design.

@@ -358,8 +358,12 @@ func TestBudgetMonthArchivedCategoryWithCapStillRenders(t *testing.T) {
 }
 
 // TestBudgetMonthGroupsSpendByPerson: two memberships each get a converted
-// total; the unattributed expense (PaidByMembershipID "") gets no row at
-// all, per the spec's rejection of a synthetic "shared" bucket.
+// total, and the unattributed expense (PaidByMembershipID "") gets a row of
+// its own rather than being dropped -- see TestByPersonRowsSumToSpent below
+// for why the row exists. This is not the "Kids (shared)" grouping the spec
+// rejects: that would have attributed spend to people who never paid it.
+// This row attributes nothing to anyone -- it names the absence of a payer,
+// which is exactly what lets the rows reconcile with Spent.
 func TestBudgetMonthGroupsSpendByPerson(t *testing.T) {
 	f := newBudgetFixture(t)
 	ctx := context.Background()
@@ -377,8 +381,8 @@ func TestBudgetMonthGroupsSpendByPerson(t *testing.T) {
 		t.Fatalf("month: %v", err)
 	}
 
-	if len(got.ByPerson) != 2 {
-		t.Fatalf("byPerson = %+v, want exactly 2 rows", got.ByPerson)
+	if len(got.ByPerson) != 3 {
+		t.Fatalf("byPerson = %+v, want exactly 3 rows (two members plus unattributed)", got.ByPerson)
 	}
 	andreas, ok := findPerson(got.ByPerson, "membership-andreas")
 	if !ok || andreas.Name != "Andreas" || andreas.Spent.Amount != 3000 {
@@ -388,8 +392,86 @@ func TestBudgetMonthGroupsSpendByPerson(t *testing.T) {
 	if !ok || mira.Name != "Mira" || mira.Spent.Amount != 5000 {
 		t.Fatalf("mira = %+v, want name Mira, spent 5000", mira)
 	}
-	if _, ok := findPerson(got.ByPerson, ""); ok {
-		t.Fatal("an unattributed row exists -- PaidByMembershipID \"\" must never get a ByPerson row")
+	unattributed, ok := findPerson(got.ByPerson, "")
+	if !ok || unattributed.Name != "" || unattributed.Spent.Amount != 2000 {
+		t.Fatalf("unattributed = %+v, want empty name, spent 2000 -- copy for the row lives in the frontend, not Go", unattributed)
+	}
+}
+
+// TestByPersonRowsSumToSpent pins the fix for a defect that already existed
+// in shipped code and that Bills makes common: before this, a transaction
+// with no payer was counted in Spent but dropped from ByPerson, so the
+// card's rows quietly summed to less than the month's spend with nothing on
+// screen saying so. Once a bill can be saved with no "Paid by", that becomes
+// the common case -- a bill with no payer pays every month.
+func TestByPersonRowsSumToSpent(t *testing.T) {
+	f := newBudgetFixture(t)
+	ctx := context.Background()
+	july := julyMonth()
+
+	f.addMember("membership-andreas", "user-andreas", "Andreas")
+
+	// The unattributed expense is dated BEFORE the attributed one and is
+	// also the first transaction appended to the ledger -- proving
+	// personOrder sorts the unattributed row last on its own merit, not
+	// merely because it happened to arrive after every attributed row.
+	f.addExpense("tx-utilities", "cat-dining", "", july.AddDate(0, 0, 5), 14230, "SGD") // a bill payment, no payer
+	f.addExpense("tx-groceries", "cat-groceries", "membership-andreas", july.AddDate(0, 0, 6), 12000, "SGD")
+
+	got, err := f.svc.Month(ctx, "house-1", july, july.AddDate(0, 0, 17))
+	if err != nil {
+		t.Fatalf("month: %v", err)
+	}
+	if len(got.ByPerson) != 2 {
+		t.Fatalf("got %d rows, want 2 -- unattributed spend needs a row of its own", len(got.ByPerson))
+	}
+	// The unattributed bucket sorts last, regardless of when its first
+	// transaction happened to appear.
+	last := got.ByPerson[len(got.ByPerson)-1]
+	if last.MembershipID != "" {
+		t.Fatalf("last row membership = %q, want the empty unattributed key", last.MembershipID)
+	}
+	var total int64
+	for _, p := range got.ByPerson {
+		total += p.Spent.Amount
+	}
+	// The whole point: the card's rows must account for every cent of Spent,
+	// or it quietly disagrees with the figure above it.
+	if total != got.Spent.Amount {
+		t.Fatalf("rows sum to %d but Spent is %d", total, got.Spent.Amount)
+	}
+}
+
+// TestByPersonRowsSumToSpentAcrossCurrencyConversion extends the sum-to-Spent
+// guarantee to a mixed-currency month. Spent and the unattributed bucket both
+// call convert() once per transaction and Add the identical converted
+// result, so an unattributed transaction in a foreign currency must not make
+// the rows fall short by the unconverted difference the way the pre-fix code
+// did for every unattributed transaction, converted or not.
+func TestByPersonRowsSumToSpentAcrossCurrencyConversion(t *testing.T) {
+	f := newBudgetFixture(t)
+	ctx := context.Background()
+	july := julyMonth()
+
+	f.addMember("membership-andreas", "user-andreas", "Andreas")
+	f.addExpense("tx-groceries", "cat-groceries", "membership-andreas", july.AddDate(0, 0, 5), 12000, "SGD")
+	// IDR, not SGD -- staticTestRates knows SGD<->IDR, so this converts
+	// rather than landing in ExcludedNoRate.
+	f.addExpense("tx-foreign-bill", "cat-dining", "", july.AddDate(0, 0, 6), 1_000_000, "IDR")
+
+	got, err := f.svc.Month(ctx, "house-1", july, july.AddDate(0, 0, 17))
+	if err != nil {
+		t.Fatalf("month: %v", err)
+	}
+	if len(got.ExcludedNoRate) != 0 {
+		t.Fatalf("excludedNoRate = %+v, want none -- staticTestRates knows SGD<->IDR", got.ExcludedNoRate)
+	}
+	var total int64
+	for _, p := range got.ByPerson {
+		total += p.Spent.Amount
+	}
+	if total != got.Spent.Amount {
+		t.Fatalf("rows sum to %d but Spent is %d -- conversion must land in the unattributed bucket the same way it lands in Spent", total, got.Spent.Amount)
 	}
 }
 
