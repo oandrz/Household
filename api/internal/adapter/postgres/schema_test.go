@@ -894,6 +894,14 @@ func TestBillsSchema(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected only_a_one_off_has_no_next_due to refuse a monthly bill with no next date")
 		}
+		// Names the constraint, not just any failure -- see the comment on
+		// the equivalent field in TestTransactionSchemaRefusesNonsenseRows: a
+		// later migration that absorbs this case into some other check (a new
+		// NOT NULL column, say) must not leave this subtest green while
+		// silently losing the rule it pins.
+		if !strings.Contains(err.Error(), "only_a_one_off_has_no_next_due") {
+			t.Fatalf("err = %v, want an only_a_one_off_has_no_next_due violation", err)
+		}
 	})
 
 	t.Run("one occurrence can be paid only once", func(t *testing.T) {
