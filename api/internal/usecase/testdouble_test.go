@@ -2527,10 +2527,14 @@ func (f *fakeCategoryLookup) Kind(_ context.Context, _, categoryID string) (doma
 }
 
 // fakeAccountRecord is one account's currency and the household it actually
-// belongs to.
+// belongs to. archived, added in Task 6 for BillService's own archived-account
+// guards (Create's pay-from check, MarkPaid's in Task 7), defaults to false so
+// every existing fakeAccountRecord{...} literal elsewhere in this package --
+// none of which name the field -- is unaffected.
 type fakeAccountRecord struct {
 	householdID string
 	currency    string
+	archived    bool
 }
 
 // fakeAccountLookup holds accounts keyed by id, each carrying its own
@@ -2544,17 +2548,29 @@ type fakeAccountLookup struct {
 	memberships map[string]string // membership id -> owning household
 }
 
+// archivedStamp is the fixed ArchivedAt every archived fakeAccountRecord
+// gets. No test reads its value, only its non-nilness (domain.Account.
+// IsArchived), so a fixed constant is used rather than time.Now() -- a test
+// double has no more business reading the wall clock than the service it
+// stands in for.
+var archivedStamp = time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+
 func (f *fakeAccountLookup) Get(_ context.Context, householdID, accountID string) (usecase.AccountView, error) {
 	a, ok := f.accounts[accountID]
 	if !ok || a.householdID != householdID {
 		return usecase.AccountView{}, domain.ErrNotFound
 	}
+	acct := domain.Account{
+		ID:             accountID,
+		HouseholdID:    a.householdID,
+		OpeningBalance: domain.Money{Currency: a.currency},
+	}
+	if a.archived {
+		stamp := archivedStamp
+		acct.ArchivedAt = &stamp
+	}
 	return usecase.AccountView{
-		Account: domain.Account{
-			ID:             accountID,
-			HouseholdID:    a.householdID,
-			OpeningBalance: domain.Money{Currency: a.currency},
-		},
+		Account: acct,
 		Balance: domain.Money{Currency: a.currency},
 	}, nil
 }
@@ -2562,3 +2578,286 @@ func (f *fakeAccountLookup) Get(_ context.Context, householdID, accountID string
 func (f *fakeAccountLookup) MembershipBelongsToHousehold(_ context.Context, householdID, membershipID string) (bool, error) {
 	return f.memberships[membershipID] == householdID, nil
 }
+
+// --- BillRepository ------------------------------------------------------
+
+// fakeBillRepo implements usecase.BillRepository entirely in memory. add
+// assigns a sequential id ("bill-1", "bill-2", ...) to any record arriving
+// with no id of its own, mirroring how the postgres adapter's INSERT assigns
+// one -- Task 6's own fixtures rely on this, and so does Task 7's
+// repo.add(bill(...)) followed by a literal "bill-1" in the same test.
+//
+// RecordPayment and UndoPayment are deliberately minimal: Task 6 does not
+// implement BillService.MarkPaid/UndoPayment (that is Task 7's job), so
+// these two exist only to satisfy the interface and to give Task 7 something
+// to extend -- RecordPayment records lastWrite and advances the matching
+// bill's NextDue but does not yet enforce the real port's ErrAlreadyExists
+// duplicate-occurrence rule, and UndoPayment is a plain delete rather than
+// the real port's most-recent-only guard (undoErr lets a test force that
+// refusal directly instead).
+type fakeBillRepo struct {
+	records  []usecase.BillRecord
+	payments []usecase.BillPaymentRecord
+	n, payN  int
+
+	// err, when set, is returned unconditionally by every method below
+	// except RecordPayment/UndoPayment, which have their own dedicated
+	// force-failure hooks -- a single shared err would make "the list call
+	// failed" and "the payment call failed" indistinguishable to a test that
+	// armed it.
+	err error
+
+	// lastWrite is the PaymentWrite RecordPayment most recently received --
+	// Task 7's MarkPaid assertions read this directly, since it is what the
+	// SERVICE assembled and is the thing actually worth pinning down.
+	lastWrite usecase.PaymentWrite
+
+	// undoErr, when set, is what UndoPayment returns unconditionally, letting
+	// a test force the most-recent-only refusal (or any other repository
+	// failure) without needing two real payments to construct it.
+	undoErr error
+}
+
+// add appends rec, assigning a "bill-N" id when rec.Bill.ID is empty and "h1"
+// as the household when rec.Bill.HouseholdID is empty -- every fixture
+// helper in bill_test.go already sets HouseholdID, but leaving this fallback
+// costs nothing and matches goalDouble.Create's own "assign what a real
+// INSERT would" convention.
+func (r *fakeBillRepo) add(rec usecase.BillRecord) usecase.BillRecord {
+	if rec.Bill.ID == "" {
+		r.n++
+		rec.Bill.ID = fmt.Sprintf("bill-%d", r.n)
+	}
+	if rec.Bill.HouseholdID == "" {
+		rec.Bill.HouseholdID = "h1"
+	}
+	r.records = append(r.records, rec)
+	return rec
+}
+
+func (r *fakeBillRepo) List(_ context.Context, householdID string, includeArchived bool) ([]usecase.BillRecord, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	var out []usecase.BillRecord
+	for _, rec := range r.records {
+		if rec.Bill.HouseholdID != householdID {
+			continue
+		}
+		if rec.Bill.IsArchived() && !includeArchived {
+			continue
+		}
+		out = append(out, rec)
+	}
+	return out, nil
+}
+
+func (r *fakeBillRepo) Get(_ context.Context, householdID, billID string) (usecase.BillRecord, error) {
+	if r.err != nil {
+		return usecase.BillRecord{}, r.err
+	}
+	for _, rec := range r.records {
+		if rec.Bill.ID == billID && rec.Bill.HouseholdID == householdID {
+			return rec, nil
+		}
+	}
+	return usecase.BillRecord{}, domain.ErrNotFound
+}
+
+// nameTaken mirrors goalDouble.nameTaken/fakeCategoryRepo.nameTaken for
+// bills: a name already used in this household, archived rows included,
+// collides -- the same UNIQUE (household_id, name) contract BillRepository's
+// own doc comment states for Create and Update alike.
+func (r *fakeBillRepo) nameTaken(householdID, name, excludeID string) bool {
+	for _, rec := range r.records {
+		if rec.Bill.HouseholdID == householdID && rec.Bill.Name == name && rec.Bill.ID != excludeID {
+			return true
+		}
+	}
+	return false
+}
+
+// Create mirrors BillRepository.Create's own contract, with one known gap:
+// BillRecord.Amount.Currency is meant to come from the pay-from account's
+// join (that type's own doc comment), but this double holds no accounts
+// table to join against -- NewBillRow itself carries no currency for Create
+// to fall back on either. No test in this package's suite reads the
+// resulting Amount.Currency, so the gap is left undocumented-but-real rather
+// than papered over with a guess; a future test that needs it should wire
+// this double to the fakeAccountLookup it is already built alongside.
+func (r *fakeBillRepo) Create(_ context.Context, in usecase.NewBillRow) (usecase.BillRecord, error) {
+	if r.err != nil {
+		return usecase.BillRecord{}, r.err
+	}
+	if r.nameTaken(in.HouseholdID, in.Name, "") {
+		return usecase.BillRecord{}, domain.ErrBillNameTaken
+	}
+	due := in.NextDue
+	rec := usecase.BillRecord{
+		Bill: domain.Bill{
+			HouseholdID:        in.HouseholdID,
+			Name:               in.Name,
+			Amount:             domain.Money{Amount: in.AmountMinor},
+			Cadence:            in.Cadence,
+			NextDue:            &due,
+			DueAnchorDay:       in.DueAnchorDay,
+			CategoryID:         in.CategoryID,
+			PayFromAccountID:   in.PayFromAccountID,
+			PaidByMembershipID: in.PaidByMembershipID,
+			Autopay:            in.Autopay,
+			IsSubscription:     in.IsSubscription,
+		},
+	}
+	return r.add(rec), nil
+}
+
+// Update mirrors BillRepository.Update: it replaces b wholesale. CategoryName
+// and AccountName are carried over from the existing record unchanged, since
+// b (a domain.Bill) carries no names of its own to promote into them -- the
+// same "read the names back off the existing row" contract goalDouble.Update
+// follows for a currency neither side is allowed to touch.
+func (r *fakeBillRepo) Update(_ context.Context, b domain.Bill) (usecase.BillRecord, error) {
+	if r.err != nil {
+		return usecase.BillRecord{}, r.err
+	}
+	for i, rec := range r.records {
+		if rec.Bill.ID != b.ID || rec.Bill.HouseholdID != b.HouseholdID {
+			continue
+		}
+		if r.nameTaken(b.HouseholdID, b.Name, b.ID) {
+			return usecase.BillRecord{}, domain.ErrBillNameTaken
+		}
+		r.records[i].Bill = b
+		return r.records[i], nil
+	}
+	return usecase.BillRecord{}, domain.ErrNotFound
+}
+
+// SetArchived only stamps ArchivedAt the first time a bill is archived,
+// mirroring goalDouble.SetArchived's own idempotence: calling it again with
+// archived=true keeps the FIRST at rather than moving the timestamp forward.
+func (r *fakeBillRepo) SetArchived(_ context.Context, householdID, billID string, archived bool, at time.Time) (usecase.BillRecord, error) {
+	if r.err != nil {
+		return usecase.BillRecord{}, r.err
+	}
+	for i, rec := range r.records {
+		if rec.Bill.ID != billID || rec.Bill.HouseholdID != householdID {
+			continue
+		}
+		if archived {
+			if rec.Bill.ArchivedAt == nil {
+				stamp := at
+				r.records[i].Bill.ArchivedAt = &stamp
+			}
+		} else {
+			r.records[i].Bill.ArchivedAt = nil
+		}
+		return r.records[i], nil
+	}
+	return usecase.BillRecord{}, domain.ErrNotFound
+}
+
+// RecordPayment -- see this type's own doc comment for what it deliberately
+// does not yet do.
+func (r *fakeBillRepo) RecordPayment(_ context.Context, in usecase.PaymentWrite) (usecase.BillPaymentRecord, error) {
+	if r.err != nil {
+		return usecase.BillPaymentRecord{}, r.err
+	}
+	r.lastWrite = in
+	r.payN++
+	pay := domain.BillPayment{
+		ID:            fmt.Sprintf("pay-%d", r.payN),
+		BillID:        in.BillID,
+		HouseholdID:   in.HouseholdID,
+		DueOn:         in.DueOn,
+		PaidOn:        in.PaidOn,
+		Amount:        domain.Money{Amount: in.AmountMinor, Currency: in.Currency},
+		TransactionID: fmt.Sprintf("txn-%d", r.payN),
+	}
+	rec := usecase.BillPaymentRecord{Payment: pay, BillName: in.Description}
+	r.payments = append(r.payments, rec)
+
+	for i, existing := range r.records {
+		if existing.Bill.ID == in.BillID && existing.Bill.HouseholdID == in.HouseholdID {
+			r.records[i].Bill.NextDue = in.NextDue
+		}
+	}
+	return rec, nil
+}
+
+// UndoPayment -- see this type's own doc comment for what it deliberately
+// does not yet do.
+func (r *fakeBillRepo) UndoPayment(_ context.Context, householdID, billID, paymentID string) error {
+	if r.undoErr != nil {
+		return r.undoErr
+	}
+	for i, p := range r.payments {
+		if p.Payment.ID == paymentID && p.Payment.BillID == billID && p.Payment.HouseholdID == householdID {
+			r.payments = append(r.payments[:i], r.payments[i+1:]...)
+			return nil
+		}
+	}
+	return domain.ErrNotFound
+}
+
+func (r *fakeBillRepo) ListPayments(_ context.Context, householdID string, month time.Time) ([]usecase.BillPaymentRecord, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	var out []usecase.BillPaymentRecord
+	for _, p := range r.payments {
+		if p.Payment.HouseholdID != householdID {
+			continue
+		}
+		if p.Payment.DueOn.Year() == month.Year() && p.Payment.DueOn.Month() == month.Month() {
+			out = append(out, p)
+		}
+	}
+	// Newest paid_on first, ties by bill name -- BillRepository.ListPayments'
+	// own contract.
+	sort.SliceStable(out, func(i, j int) bool {
+		if !out[i].Payment.PaidOn.Equal(out[j].Payment.PaidOn) {
+			return out[i].Payment.PaidOn.After(out[j].Payment.PaidOn)
+		}
+		return out[i].BillName < out[j].BillName
+	})
+	return out, nil
+}
+
+// MonthTotals reproduces the port's own union rule (see BillRepository's
+// header comment): dueMinor is every unarchived bill's amount still due in
+// month, PLUS every payment due in month; paidMinor is payments due in month
+// alone. Both are keyed by currency -- bills.Amount.Currency (via its
+// pay-from account) is the only currency this double, like the real schema,
+// ever carries.
+func (r *fakeBillRepo) MonthTotals(_ context.Context, householdID string, month time.Time) (map[string]int64, map[string]int64, error) {
+	if r.err != nil {
+		return nil, nil, r.err
+	}
+	dueMinor := map[string]int64{}
+	paidMinor := map[string]int64{}
+
+	for _, rec := range r.records {
+		b := rec.Bill
+		if b.HouseholdID != householdID || b.IsArchived() || b.NextDue == nil {
+			continue
+		}
+		if b.NextDue.Year() == month.Year() && b.NextDue.Month() == month.Month() {
+			dueMinor[b.Amount.Currency] += b.Amount.Amount
+		}
+	}
+	for _, p := range r.payments {
+		if p.Payment.HouseholdID != householdID {
+			continue
+		}
+		if p.Payment.DueOn.Year() == month.Year() && p.Payment.DueOn.Month() == month.Month() {
+			paidMinor[p.Payment.Amount.Currency] += p.Payment.Amount.Amount
+			dueMinor[p.Payment.Amount.Currency] += p.Payment.Amount.Amount
+		}
+	}
+	return dueMinor, paidMinor, nil
+}
+
+// var _ usecase.BillRepository = (*fakeBillRepo)(nil) below is load-bearing,
+// not decoration -- see goalDouble's own identical assertion for why.
+var _ usecase.BillRepository = (*fakeBillRepo)(nil)
