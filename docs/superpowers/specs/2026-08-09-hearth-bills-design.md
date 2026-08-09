@@ -327,7 +327,7 @@ changes this spec first.
 | Next due | The earliest non-NULL `next_due` over unarchived bills, with that bill's name and amount. **Overdue** when it is before today. None → the card and the stat are omitted, never rendered as a zero |
 | `N of M on autopay` | `M` counts unarchived bills; `N` counts those with `autopay`. `M = 0` hides the line rather than rendering "0 of 0" |
 | Due soon (list) | Unarchived bills with a non-NULL `next_due` **within the next 30 days inclusive, or already past**, ordered by `next_due` ascending, ties by name. Overdue rows sort first by virtue of their earlier date |
-| Later (list) | Every remaining unarchived bill with a non-NULL `next_due`, same ordering. Due soon and Later together account for every unpaid bill, so nothing the header counts is missing from the page |
+| Later (list) | Every remaining unarchived bill, same ordering — those due beyond 30 days, and **settled one-offs** (paid, no next date), which render "Settled" where a date would go. Due soon and Later together account for every unarchived bill, so nothing the header counts is missing from the page |
 | Paid this month (list) | `bill_payments` with `due_on` in `month`, newest `paid_on` first, ties by bill name |
 | Subscriptions per year | Over unarchived bills with `is_subscription`: `monthly × 12`, `quarterly × 4`, `yearly × 1`. `one_off` is excluded — a one-off is not a subscription by definition |
 | Subscriptions per month | The annual figure ÷ 12, floored |

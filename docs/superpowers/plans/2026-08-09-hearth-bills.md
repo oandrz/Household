@@ -38,7 +38,7 @@ Copied from the spec and `CLAUDE.md`; every task's requirements include these.
 | Next due | earliest non-NULL `next_due` over unarchived bills, with that bill's name and amount; **overdue** when before today; none → omitted, never a zero |
 | `N of M on autopay` | `M` = unarchived bills, `N` = those with `autopay`; `M = 0` hides the line |
 | Due soon (list) | unarchived, non-NULL `next_due`, **within 30 days inclusive or already past**, by `next_due` ascending, ties by name |
-| Later (list) | every remaining unarchived bill with a non-NULL `next_due`, same ordering |
+| Later (list) | every remaining unarchived bill, same ordering — those due beyond 30 days, **and settled one-offs** (`NextDue == nil`, `Settled` true), which render "Settled" where a date would go. Due soon and Later together account for every unarchived bill, so nothing the header counts is missing from the page |
 | Paid this month (list) | `bill_payments` with `due_on` in month, newest `paid_on` first, ties by bill name |
 | Subscriptions per year | over unarchived `is_subscription` bills: `monthly × 12`, `quarterly × 4`, `yearly × 1`; `one_off` excluded |
 | Subscriptions per month | the annual figure ÷ 12, floored |
@@ -1808,13 +1808,16 @@ type billDTO struct {
 	IsSubscription     bool    `json:"isSubscription"`
 	Overdue            bool    `json:"overdue"`
 	DueSoon            bool    `json:"dueSoon"`
+	Settled            bool    `json:"settled"`
 	ArchivedAt         *string `json:"archivedAt"`
 }
 ```
 
 `billsResponse` carries `bills`, `paidThisMonth` and `summary`. The frontend splits `bills` into Due soon and Later on the server-computed `dueSoon` flag rather than recomputing 30 days in TypeScript.
 
-Error mapping: `ErrBillNameTaken` → 409 whose body names the taken name and whether the holder is archived (so the modal can offer restore); `ErrBillCurrencyImmutable` → 422 naming both currencies; `ErrUnknownCadence`, `ErrBillNameRequired`, `ErrBillAmountNotPositive` → 422; `ErrForbidden` → 422 with the reason; `ErrNotFound` → 404. Every 2xx carries a body, archive and restore included.
+**`Settled` must be serialised, and Task 12 must render it.** A settled one-off — paid, with no next date — has `NextDue == nil`, so it belongs to neither Due soon nor Later by their own definitions (both require a non-null `next_due`), and it is deliberately not auto-archived, because that would hide a record the household may still want. But it is still counted in `BillCount` and `N of M on autopay`. Drop the field and a bill is counted in the header while appearing nowhere on the page — the same defect the 30-day window had before this plan grew its Later heading, and the same shape as a feature no screen can reach. Task 7's own review found this gap in these very sketches; it is closed here.
+
+Error mapping: `ErrBillNameTaken` → 409 whose body names the taken name and whether the holder is archived (so the modal can offer restore); `ErrBillCurrencyImmutable` → 422 naming both currencies; `ErrUnknownCadence`, `ErrBillNameRequired`, `ErrBillAmountNotPositive` → 422; `ErrForbidden` → 422 with the reason; `ErrAccountOwnerNotInHousehold` → 422 (already mapped by the shared switch in `internal/adapter/http/errors.go`; confirm rather than re-add); `ErrNotFound` → 404. Every 2xx carries a body, archive and restore included.
 
 - [ ] **Step 4: Wire the routes**
 
@@ -1950,7 +1953,10 @@ it("bills exist but none is due this month: the stat cards explain rather than s
 it("ordinary: splits Due soon from Later on the server's dueSoon flag", …)
 it("all caught up: names the next bill and the month that is settled", …)
 it("overdue: sorts first, and an autopay bill's copy differs from a manual one's", …)
+it("a settled one-off appears under Later with 'Settled' where a date would go", …)
 ```
+
+**That last state is not optional.** A settled one-off — a one-off bill that has been paid — has no next due date, so it belongs to neither Due soon nor Later by their own definitions, and it is deliberately not auto-archived. It is still counted in the header's `N of M on autopay` and in `BillCount`. Render it under Later on the server-sent `settled` flag, showing "Settled" in place of the date, or it is a bill counted in a figure and visible nowhere — the same defect the 30-day window had before this plan grew its Later heading.
 
 The overdue test asserts both strings: autopay → `Should have gone out on 24 Jul — confirm it did`; manual → `Overdue since 24 Jul`.
 
