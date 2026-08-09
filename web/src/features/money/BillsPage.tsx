@@ -418,6 +418,16 @@ export function BillsPage() {
             </div>
           </div>
 
+          {/* Stays a page-level footnote rather than moving inside
+              SubscriptionsCard the way MonthlyContributionsCard.tsx nests
+              goals-excluded-no-rate -- that precedent holds when the count
+              is scoped to the one card it sits beside, but BillsSummary's
+              own ExcludedNoRate is deduped ACROSS three totals (due this
+              month, paid so far, and subscriptions -- bill.go's own
+              comment: "counts once per BILL," not once per total), so a
+              bill it counts might never touch the subscriptions rollup at
+              all. Nesting it in the one card that only explains a third of
+              what it counts would misattribute the other two thirds. */}
           {summary.excludedNoRate > 0 && (
             <p data-testid="bills-excluded-no-rate" className="text-xs text-muted">
               {BILL_COPY.excludedNoRate(summary.excludedNoRate)}

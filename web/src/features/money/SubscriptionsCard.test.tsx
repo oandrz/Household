@@ -150,6 +150,8 @@ describe("SubscriptionsCard", () => {
     // Names the exact control (the modal's own checkbox label) that turns
     // this state into the populated one -- not just "nothing here yet".
     expect(empty).toHaveTextContent('Tick "Counts as a subscription"');
+    // Point 3 holds in the empty state too, not only once rows exist.
+    expect(screen.queryByText(/reviewed/i)).not.toBeInTheDocument();
   });
 
   it("an archived bill that is ticked as a subscription is never counted or rendered", () => {
@@ -159,5 +161,41 @@ describe("SubscriptionsCard", () => {
 
     expect(screen.queryByTestId("subscription-row")).not.toBeInTheDocument();
     expect(screen.getByTestId("subscriptions-empty")).toBeInTheDocument();
+  });
+
+  // BillModal's own checkbox never refuses a one-off (nothing gates it on
+  // cadence), so a household CAN tick "Counts as a subscription" on a
+  // one-off bill -- but domain.AnnualEquivalentMinor's own comment is
+  // categorical: a one-off "is not a recurring cost" and never contributes
+  // to the rollup, ticked or not. Rendering its row anyway would show a
+  // figure neither total above it ever moves for, while isSubscriptionHelp's
+  // own copy promises every ticked bill is "included in the household's
+  // subscription totals" -- a promise this exact bill would break.
+  it("a ticked one-off is excluded entirely -- it never contributes to either total", () => {
+    renderCard(
+      [
+        billFixture({ id: "b1", name: "Piano tuning", cadence: "one_off", amountMinor: 12000 }),
+      ],
+      { monthlyMinor: 0, annualMinor: 0 },
+    );
+
+    expect(screen.queryByTestId("subscription-row")).not.toBeInTheDocument();
+    expect(screen.queryByText("Piano tuning")).not.toBeInTheDocument();
+    expect(screen.getByTestId("subscriptions-empty")).toBeInTheDocument();
+  });
+
+  it("a ticked one-off does not hide a real subscription alongside it, and is still excluded", () => {
+    renderCard(
+      [
+        billFixture({ id: "b1", name: "Netflix", cadence: "monthly", amountMinor: 1998 }),
+        billFixture({ id: "b2", name: "Piano tuning", cadence: "one_off", amountMinor: 12000 }),
+      ],
+      { monthlyMinor: 1998, annualMinor: 23976 },
+    );
+
+    const rows = screen.getAllByTestId("subscription-row");
+    expect(rows).toHaveLength(1);
+    expect(within(rows[0]).getByText("Netflix")).toBeInTheDocument();
+    expect(screen.queryByText("Piano tuning")).not.toBeInTheDocument();
   });
 });

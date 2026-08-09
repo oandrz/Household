@@ -10,8 +10,9 @@
 //
 // `bills` is BillsPage's own full `data.bills` -- the union that includes
 // archived rows once "Show archived" is on -- not a pre-filtered list.
-// This card does its own `archivedAt === null && isSubscription` filter
-// internally, GoalsPage.tsx/MonthlyContributionsCard.tsx's own precedent
+// This card does its own archived/isSubscription/one-off filter internally
+// (see the filter's own comment below for the one-off half), GoalsPage.tsx/
+// MonthlyContributionsCard.tsx's own precedent
 // for the identical shape (goals filtered live inside the card, not by the
 // page before the prop is passed): the server's own subscriptionsMonthlyMinor/
 // subscriptionsAnnualMinor already exclude an archived bill (usecase/bill.go's
@@ -43,7 +44,19 @@ export function SubscriptionsCard({
   // by name -- bill.go's own sort) -- BillsPage.tsx's own rule for
   // dueSoonBills/laterBills, restated here: this card filters, it never
   // re-sorts.
-  const subscriptions = bills.filter((bill) => bill.archivedAt === null && bill.isSubscription);
+  //
+  // A one-off is excluded even when ticked -- BillModal's own checkbox
+  // never refuses one, but domain.AnnualEquivalentMinor's own comment is
+  // categorical: a one-off "is not a recurring cost" and contributes to
+  // monthlyMinor/annualMinor NEVER, ticked or not. Rendering its row anyway
+  // would show a figure that visibly never moves either total above it,
+  // while isSubscriptionHelp's own copy ("Included in the household's
+  // subscription totals") promises the opposite. Filtering it out here
+  // keeps that promise true by construction: every row on this panel is a
+  // bill this panel's own two totals actually include.
+  const subscriptions = bills.filter(
+    (bill) => bill.archivedAt === null && bill.isSubscription && bill.cadence !== "one_off",
+  );
 
   if (subscriptions.length === 0) {
     return (
