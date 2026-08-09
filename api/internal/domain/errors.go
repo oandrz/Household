@@ -112,4 +112,17 @@ var (
 	ErrRolloverAlreadyDone      = errors.New("that month has already been rolled over")
 	ErrRolloverNothingUnspent   = errors.New("that month has nothing unspent to roll over")
 	ErrRolloverCurrencyMismatch = errors.New("only a goal in the household's primary currency can receive a rollover")
+
+	// Bills. ErrUnknownCadence is returned for a cadence this code did not
+	// construct -- it arrives from a database column and from a request body,
+	// so both layers refuse it, the same rule ParseTransactionKind and
+	// ParseContributionSource already follow.
+	ErrUnknownCadence        = errors.New("unknown bill cadence")
+	ErrBillNameRequired      = errors.New("a bill name is required")
+	ErrBillAmountNotPositive = errors.New("a bill amount must be positive")
+	// ErrBillNameTaken is UNIQUE (household_id, name) on bills, translated the
+	// same way ErrCategoryNameTaken and ErrGoalNameTaken are. An archived bill
+	// still holds its name, so the HTTP layer offers restore rather than a
+	// bare 409.
+	ErrBillNameTaken = errors.New("bill name taken")
 )
