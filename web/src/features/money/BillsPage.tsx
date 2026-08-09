@@ -268,6 +268,15 @@ export function BillsPage() {
         </>
       )}
 
+      {/* A sibling of the noLiveBills branch above, deliberately not nested
+          inside it -- a household that archives its only live bill must
+          still see this section (and the toggle above it) once "Show
+          archived" is on, or archiving the last live bill becomes a dead
+          end with no way back (Goals' own defect, docs/LEARNING.md pattern
+          15, one layer up). The test named for exactly this shape --
+          "archiving a household's only live bill still leaves ... the
+          archived section ... reachable" -- is what pins these two blocks
+          as siblings against a future edit that nests them. */}
       {includeArchived && archivedBills.length > 0 && (
         <div data-testid="bills-archived-section" className="rounded-xl border border-hairline bg-card p-[22px]">
           <h2 className="mb-2 text-[11px] uppercase tracking-[0.08em] text-muted">{BILL_COPY.archivedSection}</h2>

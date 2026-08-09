@@ -520,4 +520,78 @@ describe("BillsPage", () => {
     expect(screen.queryByTestId("bills-later")).not.toBeInTheDocument();
     expect(screen.getByTestId("bills-subtitle")).toHaveTextContent("1 of 1 on autopay");
   });
+
+  // Goals shipped archiving with every layer beneath it built and no screen
+  // that called it -- "Show archived" and Restore led out of a state no
+  // household could enter (docs/LEARNING.md pattern 15). Every archive/
+  // restore test above still leaves at least one live bill standing, so
+  // none of them actually proves the toggle and the archived section are
+  // still reachable once a household archives its *only* live bill --
+  // exactly the shape that defect had. The empty-state gate (`noLiveBills`)
+  // and the archived section are independent sibling blocks in
+  // BillsPage.tsx, not nested inside one another; this is what pins that
+  // shape against a future edit that nests them.
+  it("archiving a household's only live bill still leaves the empty state, the toggle and the archived section all reachable", async () => {
+    const archived = billFixture({
+      id: "b1",
+      name: "Old gym membership",
+      archivedAt: "2026-06-01T00:00:00Z",
+      dueSoon: false,
+      nextDue: "2026-05-01",
+    });
+
+    renderPage(
+      billsFixture([], [], { dueThisMonthMinor: 0, paidSoFarMinor: 0, nextDue: null, autopayCount: 0, billCount: 0 }),
+      {
+        "GET /api/v1/bills?include_archived=true": {
+          status: 200,
+          body: billsFixture([archived], [], {
+            dueThisMonthMinor: 0,
+            paidSoFarMinor: 0,
+            nextDue: null,
+            autopayCount: 0,
+            billCount: 0,
+          }),
+        },
+      },
+    );
+
+    expect(await screen.findByTestId("bills-empty-state")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("switch", { name: "Show archived" }));
+
+    // Both blocks render together once the toggle is on -- neither hides
+    // the other, which is exactly the household's way back from having
+    // archived its last live bill.
+    expect(await screen.findByTestId("bills-empty-state")).toBeInTheDocument();
+    const archivedSection = screen.getByTestId("bills-archived-section");
+    expect(within(archivedSection).getByText("Old gym membership")).toBeInTheDocument();
+    expect(
+      within(archivedSection).getByRole("button", { name: "Restore Old gym membership" }),
+    ).toBeInTheDocument();
+    // Direction one of the `noneArchived` branch (BillsPage.tsx:171-176,
+    // previously untested in either direction): something IS archived, so
+    // "No archived bills." must not also render alongside the section that
+    // just listed it.
+    expect(screen.queryByTestId("bills-archived-empty")).not.toBeInTheDocument();
+  });
+
+  // Direction two of the same `noneArchived` branch: nothing archived, with
+  // a live bill still on screen so this exercises the populated branch, not
+  // the empty-state one above -- AccountsPanel.tsx's own `noneArchived`
+  // shape, restated for Bills and, until now, never actually asserted here.
+  it("Show archived says so when nothing is archived, even with live bills still on screen", async () => {
+    const live = billFixture({ id: "b1", name: "Car insurance", dueSoon: true, nextDue: "2026-08-15" });
+    renderPage(billsFixture([live], [], { autopayCount: 1, billCount: 1 }), {
+      "GET /api/v1/bills?include_archived=true": {
+        status: 200,
+        body: billsFixture([live], [], { autopayCount: 1, billCount: 1 }),
+      },
+    });
+
+    await screen.findByText("Car insurance");
+    fireEvent.click(screen.getByRole("switch", { name: "Show archived" }));
+
+    expect(await screen.findByTestId("bills-archived-empty")).toHaveTextContent("No archived bills.");
+    expect(screen.queryByTestId("bills-archived-section")).not.toBeInTheDocument();
+  });
 });
