@@ -782,7 +782,7 @@ SELECT b.id, b.household_id, b.name, b.amount_minor, b.cadence, b.next_due,
        b.paid_by_membership_id, b.autopay, b.is_subscription, b.archived_at,
        COALESCE(c.name, '')  AS category_name,
        a.nickname            AS account_name,
-       a.currency            AS currency
+       a.opening_balance_currency AS currency
 FROM bills b
 JOIN accounts a ON a.id = b.pay_from_account_id
 LEFT JOIN categories c ON c.id = b.category_id
@@ -798,28 +798,28 @@ ORDER BY b.next_due NULLS LAST, b.name;
 -- No archived_at filter here, unlike BillMonthUnpaidTotals below, and that
 -- asymmetry is deliberate: this money already left the household, so archiving
 -- the bill afterwards must not retroactively empty the month it was paid in.
-SELECT a.currency, SUM(p.amount_minor)::bigint AS minor
+SELECT a.opening_balance_currency AS currency, SUM(p.amount_minor)::bigint AS minor
 FROM bill_payments p
 JOIN bills b    ON b.id = p.bill_id
 JOIN accounts a ON a.id = b.pay_from_account_id
 WHERE p.household_id = $1
   AND p.due_on >= sqlc.arg(month_start)::date
   AND p.due_on <  sqlc.arg(next_month)::date
-GROUP BY a.currency;
+GROUP BY a.opening_balance_currency;
 
 -- name: BillMonthUnpaidTotals :many
-SELECT a.currency, SUM(b.amount_minor)::bigint AS minor
+SELECT a.opening_balance_currency AS currency, SUM(b.amount_minor)::bigint AS minor
 FROM bills b
 JOIN accounts a ON a.id = b.pay_from_account_id
 WHERE b.household_id = $1
   AND b.archived_at IS NULL
   AND b.next_due >= sqlc.arg(month_start)::date
   AND b.next_due <  sqlc.arg(next_month)::date
-GROUP BY a.currency;
+GROUP BY a.opening_balance_currency;
 
 -- name: ListBillPaymentsForMonth :many
 SELECT p.id, p.bill_id, p.household_id, p.due_on, p.paid_on, p.amount_minor,
-       p.transaction_id, b.name AS bill_name, b.autopay, a.currency
+       p.transaction_id, b.name AS bill_name, b.autopay, a.opening_balance_currency AS currency
 FROM bill_payments p
 JOIN bills b    ON b.id = p.bill_id
 JOIN accounts a ON a.id = b.pay_from_account_id
@@ -831,7 +831,7 @@ ORDER BY p.paid_on DESC, b.name;
 
 Write `GetBill`, `CreateBill`, `UpdateBill` and `SetBillArchived` in the same file, following `queries/goal.sql`'s shapes exactly. `GetBill` filters on `household_id` and `id` together. **`UpdateBill` is an unconditional full-row `SET` — every mutable column including `due_anchor_day`, no `COALESCE` and no dynamic SQL.** `BillService` merges a partial PATCH into a complete `domain.Bill` before this port ever sees it (`ports.go`'s `Update` comment, and the same rule `AccountRepository.Update` and `GoalRepository.Update` already state), so the anchor arrives already derived and the adapter never computes a calendar day.
 
-Every query that returns a bill joins `accounts` and selects `a.currency`, because `Bill.Amount` carries the pay-from account's currency — there is no currency column on `bills`, and no second `Currency` field on `BillRecord` to fill instead.
+Every query that returns a bill joins `accounts` and selects `a.opening_balance_currency` (the column is named for the balance it was introduced with; it is the account's currency, full stop — there is no bare `currency` column on `accounts`), because `Bill.Amount` carries the pay-from account's currency — there is no currency column on `bills`, and no second `Currency` field on `BillRecord` to fill instead.
 
 - [ ] **Step 2: Regenerate**
 
