@@ -81,7 +81,7 @@ export function BillModal({
     return (
       <Modal open onClose={onClose} title={isEditing ? BILL_COPY.editBillModalTitle : BILL_COPY.addBillModalTitle}>
         <p className="text-xs text-muted" data-testid="bill-modal-loading">
-          Loading…
+          {BILL_COPY.loading}
         </p>
       </Modal>
     );

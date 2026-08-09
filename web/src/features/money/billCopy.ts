@@ -176,6 +176,13 @@ export const BILL_COPY = {
   // reason to discard them just because Edit needs a second string.
   addBillModalTitle: "Add a bill",
   editBillModalTitle: "Edit bill",
+  // Shown in place of the form while BillModal's own useAccounts() is still
+  // settling (BillModal.tsx's own header comment on why that one query
+  // gates the split). Ten other files in this codebase hardcode this exact
+  // string inline rather than through their own copy file -- unremarkable by
+  // house convention, kept here anyway because billCopy.ts's own rule for
+  // this file is the stricter "every user-facing string lives here."
+  loading: "Loading…",
   // The empty state's own call to action -- distinct copy from the header's
   // "+ Add bill" above (addBill) on purpose: both render on screen together
   // whenever a household has zero live bills, and identical text on two
