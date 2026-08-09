@@ -166,9 +166,9 @@ describe("Sidebar", () => {
     );
 
     // Money now expands into a group label plus one row per built page
-    // (Finances, Transactions, Budget, Goals), so the flat "Travel, Money,
-    // Garden" this test would otherwise assert no longer matches -- the
-    // grouped shape adds a label plus four link rows for Money alone.
+    // (Finances, Transactions, Budget, Goals, Bills), so the flat "Travel,
+    // Money, Garden" this test would otherwise assert no longer matches --
+    // the grouped shape adds a label plus five link rows for Money alone.
     // "sidebar-space" tags both links and the custom-space fallback span;
     // the group label has its own "sidebar-space-label" testid (finding 5)
     // -- asserted here as row order and label presence separately, so this
@@ -182,15 +182,16 @@ describe("Sidebar", () => {
       "Transactions",
       "Budget",
       "Goals",
+      "Bills",
       "Garden",
     ]);
     expect(screen.getByTestId("sidebar-space-label")).toHaveTextContent("Money");
   });
 
-  // Task 10: the design's own order (Finances, Transactions, Budget, Goals,
-  // Bills) -- Goals joins as the fourth link, after Budget, since Bills has
-  // no page yet.
-  it("groups Money into a label with Finances, Transactions, Budget and Goals links, in that order", async () => {
+  // Bills' own Task 11: the design's own order (Finances, Transactions,
+  // Budget, Goals, Bills) -- Bills joins as the fifth link, after Goals, now
+  // that its own route and page exist.
+  it("groups Money into a label with Finances, Transactions, Budget, Goals and Bills links, in that order", async () => {
     stubFetchRoutes({});
     renderWithRouter(
       <Sidebar
@@ -208,6 +209,7 @@ describe("Sidebar", () => {
       "Transactions",
       "Budget",
       "Goals",
+      "Bills",
     ]);
     expect(screen.getByRole("link", { name: "Finances" })).toHaveAttribute("href", "/money");
     expect(screen.getByRole("link", { name: "Transactions" })).toHaveAttribute(
@@ -221,6 +223,10 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: "Goals" })).toHaveAttribute(
       "href",
       "/money/goals",
+    );
+    expect(screen.getByRole("link", { name: "Bills" })).toHaveAttribute(
+      "href",
+      "/money/bills",
     );
   });
 
@@ -340,6 +346,36 @@ describe("Sidebar", () => {
     expect(transactions).not.toHaveClass("text-accent");
     expect(budget).toHaveClass("text-ink");
     expect(budget).not.toHaveClass("text-accent");
+  });
+
+  // Bills' own Task 11 regression test for the identical activeProps
+  // cascade defect (LEARNING pattern 3), Bills' turn -- the same shape as
+  // "accents only the active Goals link".
+  it("accents only the active Bills link, on /money/bills", async () => {
+    renderWithRouter(
+      <Sidebar
+        me={meFixture([
+          space({ id: "space-money", key: "money", name: "Money", position: 1 }),
+        ])}
+      />,
+      "/money/bills",
+    );
+
+    const finances = await screen.findByRole("link", { name: "Finances" });
+    const transactions = screen.getByRole("link", { name: "Transactions" });
+    const budget = screen.getByRole("link", { name: "Budget" });
+    const goals = screen.getByRole("link", { name: "Goals" });
+    const bills = screen.getByRole("link", { name: "Bills" });
+    expect(bills).toHaveClass("text-accent");
+    expect(bills).not.toHaveClass("text-ink");
+    expect(finances).toHaveClass("text-ink");
+    expect(finances).not.toHaveClass("text-accent");
+    expect(transactions).toHaveClass("text-ink");
+    expect(transactions).not.toHaveClass("text-accent");
+    expect(budget).toHaveClass("text-ink");
+    expect(budget).not.toHaveClass("text-accent");
+    expect(goals).toHaveClass("text-ink");
+    expect(goals).not.toHaveClass("text-accent");
   });
 
   // Overview used to be unconditionally text-accent (finding 3): it stayed

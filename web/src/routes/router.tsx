@@ -16,7 +16,7 @@
 //       /money/transactions RequireCapability("money") -> Transactions (Task 17; the real ledger)
 //       /money/budget RequireCapability("money") -> Budget (Task 11; BudgetPage stub -- Task 12 builds the real screen)
 //       /money/goals RequireCapability("money") -> Goals (Task 11; the real GoalsPage)
-//       /money/$     RequireCapability("money") -> Money    (slice 2 placeholder; Bills remains)
+//       /money/bills RequireCapability("money") -> Bills (the Bills plan's Task 11; BillsPage shell -- its own Task 12 builds the real screen)
 //       /settings                                   -- the real Settings screen (Task 20)
 //
 // Marriage and Family have no routes: both were placeholders reading
@@ -52,14 +52,11 @@ import { SignInScreen } from "../features/auth/SignInScreen";
 import { SignUpScreen } from "../features/auth/SignUpScreen";
 import { SignUpCompleteScreen } from "../features/auth/SignUpCompleteScreen";
 import { useMe } from "../features/auth/useAuth";
+import { BillsPage } from "../features/money/BillsPage";
 import { BudgetPage } from "../features/money/BudgetPage";
 import { FinancesPage } from "../features/money/FinancesPage";
 import { GoalsPage } from "../features/money/GoalsPage";
 import { TransactionsPage } from "../features/money/TransactionsPage";
-// Still live for /money/$ -- Bills has no page yet. Overview
-// stopped using it when the interim Overview shipped, but it was not that
-// component's last user.
-import { PlaceholderPage } from "../features/placeholder/PlaceholderPage";
 import { OverviewPage } from "../features/overview/OverviewPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { AppShell } from "../features/shell/AppShell";
@@ -182,36 +179,25 @@ const moneyGuardRoute = createRoute({
 const moneyIndexRoute = createRoute({
   getParentRoute: () => moneyGuardRoute,
   path: "/",
-  // Task 39 replaces the placeholder with the real Finances screen; the
-  // splat route below keeps it -- Bills (moneySplatRoute's remaining
-  // sibling under /money/*) doesn't exist yet.
+  // Task 39 replaced the Money placeholder with the real Finances screen.
   component: FinancesPage,
 });
-// Task 17 gives Transactions its own route, a sibling of moneyIndexRoute
-// rather than folded into moneySplatRoute below. TanStack Router ranks a
-// literal path segment above a splat's "$" by specificity, so
-// "/money/transactions" resolves to this route over moneySplatRoute
-// regardless of which one is declared or added to addChildren([...]) first --
-// it is still declared and listed ahead of the splat here so the file reads
-// in the same order the router actually resolves it, not because that order
-// changes the outcome. Nested under moneyGuardRoute, not the shell: a route
-// hung off the shell directly would never run RequireCapability at all, and
-// a member without `money` would reach a ledger the sidebar never offered
-// them -- router.test.tsx's own "redirects a member without the money
-// capability away from /money/transactions" pins exactly this.
+// Task 17 gives Transactions its own route, a sibling of moneyIndexRoute.
+// Nested under moneyGuardRoute, not the shell: a route hung off the shell
+// directly would never run RequireCapability at all, and a member without
+// `money` would reach a ledger the sidebar never offered them --
+// router.test.tsx's own "redirects a member without the money capability
+// away from /money/transactions" pins exactly this.
 const moneyTransactionsRoute = createRoute({
   getParentRoute: () => moneyGuardRoute,
   path: "transactions",
   component: TransactionsPage,
 });
 // A sibling of moneyTransactionsRoute, same reasoning: nested under
-// moneyGuardRoute (not the shell) so RequireCapability still runs, and
-// declared/listed ahead of moneySplatRoute below even though TanStack
-// Router would rank this literal segment above the splat's "$" regardless
-// of declaration order -- router.test.tsx's "redirects a member without the
-// money capability away from /money/budget" pins the guard, and its
-// positive counterpart pins that this route (not the splat's placeholder)
-// is what actually mounts.
+// moneyGuardRoute (not the shell) so RequireCapability still runs --
+// router.test.tsx's "redirects a member without the money capability away
+// from /money/budget" pins the guard, and its positive counterpart pins
+// that this route is what actually mounts.
 const moneyBudgetRoute = createRoute({
   getParentRoute: () => moneyGuardRoute,
   path: "budget",
@@ -232,10 +218,21 @@ const moneyGoalsRoute = createRoute({
   path: "goals",
   component: GoalsPage,
 });
-const moneySplatRoute = createRoute({
+// A sibling of moneyGoalsRoute, same reasoning: nested under moneyGuardRoute
+// (not the shell) so RequireCapability still runs. Bills was
+// moneySplatRoute's last remaining reason to exist -- this file's own
+// header comment named it -- so this route replaces the splat outright
+// rather than sitting beside it: there is no path left under /money/* for a
+// catch-all to still be serving. router.test.tsx's "redirects a member
+// without the money capability away from /money/bills" pins the guard, and
+// "mounts the Bills page at /money/bills" is the positive counterpart
+// proving this route (not a vanished splat's placeholder) is what actually
+// mounts. BillsPage itself is a shell only here -- Task 12 builds the real
+// screen (stat cards, the three lists, five states, archive and restore).
+const moneyBillsRoute = createRoute({
   getParentRoute: () => moneyGuardRoute,
-  path: "$",
-  component: () => <PlaceholderPage page="Money" slice={2} />,
+  path: "bills",
+  component: BillsPage,
 });
 
 const settingsRoute = createRoute({
@@ -264,7 +261,7 @@ export const routeTree = rootRoute.addChildren([
         moneyTransactionsRoute,
         moneyBudgetRoute,
         moneyGoalsRoute,
-        moneySplatRoute,
+        moneyBillsRoute,
       ]),
       settingsRoute,
     ]),

@@ -395,6 +395,72 @@ describe("the real route tree", () => {
     expect(router.state.location.pathname).toBe("/money/goals");
   });
 
+  // Bills' own Task 11: moneyGuardRoute has to sit above /money/bills too,
+  // the same reason every other /money/* route above pins it -- a member
+  // without money must never reach the Bills screen.
+  it("redirects a member without the money capability away from /money/bills", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": {
+        status: 200,
+        body: meFixture({
+          membership: {
+            id: "membership-2",
+            householdId: "household-1",
+            userId: "user-2",
+            role: "limited",
+            capabilities: ["calendar", "chores"],
+          },
+          capabilities: ["calendar", "chores"],
+        }),
+      },
+    });
+
+    const { router } = renderApp("/money/bills");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    // The <h1>, not a bare text match: the sidebar carries its own
+    // "Overview" link, so an unscoped query for that word matches two
+    // elements and throws. What this pins is unchanged -- that the
+    // redirect landed on / and / rendered its own page.
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Overview" }),
+    ).toBeInTheDocument();
+  });
+
+  // The positive counterpart the redirect test above needs -- and the one
+  // that actually proves moneyBillsRoute exists and mounts the real
+  // BillsPage, not moneySplatRoute's placeholder (deleted in this same
+  // task -- router.tsx's own header comment named Bills as the splat's last
+  // remaining reason to exist).
+  it("mounts the Bills page at /money/bills for a caller who has the money capability", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      "GET /api/v1/bills": {
+        status: 200,
+        body: {
+          bills: [],
+          paidThisMonth: [],
+          summary: {
+            currency: "SGD",
+            dueThisMonthMinor: 0,
+            paidSoFarMinor: 0,
+            nextDue: null,
+            autopayCount: 0,
+            billCount: 0,
+            subscriptionsMonthlyMinor: 0,
+            subscriptionsAnnualMinor: 0,
+            excludedNoRate: 0,
+          },
+        },
+      },
+    });
+
+    const { router } = renderApp("/money/bills");
+
+    expect(await screen.findByTestId("bills-page")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/money/bills");
+  });
+
   // Fix round 5, Finding 1 (critical): this is the exact reproduction the
   // coordinator's reviewer used -- /invite/tok with GET /api/v1/auth/me
   // returning 401 (a genuine, signed-out invitee -- Christine from `make
