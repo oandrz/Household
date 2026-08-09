@@ -23,6 +23,19 @@ type BillView struct {
 	// overdue, or due within 30 days inclusive. Computed here rather than in
 	// the frontend so the rule lives in exactly one place.
 	DueSoon bool
+	// Settled is true for a live bill with no next occurrence -- a paid
+	// one-off. The design's own formula table defines BOTH "Due soon" and
+	// "Later" as requiring a non-NULL next_due, so a bill like this belongs
+	// in neither: DueSoon is always false for one, and without this flag the
+	// frontend has no way to tell "genuinely Later, just far out" from "done,
+	// nothing left to schedule" -- both arrive with NextDue nil once a bill
+	// this old existed before MarkPaid could produce one.
+	//
+	// It is never dropped from the page to compensate: 00008_bills.sql's own
+	// comment on next_due says a settled one-off is deliberately not
+	// auto-archived, "that would hide a record the household may still want
+	// to see." Settled is how it stays visible without being miscategorised.
+	Settled bool
 }
 
 // BillPaymentView is one row of "Paid this month" -- ListPayments' own
@@ -111,6 +124,18 @@ type BillPatch struct {
 	ClearPayer         bool
 	Autopay            *bool
 	IsSubscription     *bool
+}
+
+// MarkPayment is MarkPaid's input. AmountMinor is the caller's, not the
+// bill's own stored figure: the modal that produces this prefills the bill's
+// amount but leaves it editable, because a utility bill varies month to
+// month, and marking one payment does not change the bill's own standing
+// amount.
+type MarkPayment struct {
+	HouseholdID string
+	BillID      string
+	AmountMinor int64
+	PaidOn      time.Time
 }
 
 // BillDeps gathers every port BillService needs, mirroring GoalDeps. There is
@@ -573,6 +598,91 @@ func (s *BillService) SetArchived(ctx context.Context, householdID, billID strin
 	return s.toView(rec, at), nil
 }
 
+// MarkPaid writes the payment, the expense and the advanced due date, through
+// BillRepository.RecordPayment's single transaction -- this is the seam
+// where Bills writes into the ledger: the expense it creates is what feeds
+// Budget's Spent, the daily pace figures, Spending by person and net worth,
+// so getting the currency or the date wrong here is wrong money on three
+// other screens.
+//
+// The amount is the caller's, not the bill's own stored figure -- see
+// MarkPayment's own comment. The bill's own amount_minor is left untouched by
+// paying.
+func (s *BillService) MarkPaid(ctx context.Context, in MarkPayment) (BillPaymentView, error) {
+	rec, err := s.deps.Bills.Get(ctx, in.HouseholdID, in.BillID)
+	if err != nil {
+		return BillPaymentView{}, err
+	}
+	if rec.Bill.IsArchived() {
+		return BillPaymentView{}, domain.ErrForbidden
+	}
+	if rec.Bill.NextDue == nil {
+		// A settled one-off has no occurrence left to pay -- nil here means
+		// exactly that (Bill.NextDue's own comment), not "not yet loaded".
+		return BillPaymentView{}, domain.ErrForbidden
+	}
+
+	acct, err := s.deps.Accounts.Get(ctx, in.HouseholdID, rec.Bill.PayFromAccountID)
+	if err != nil {
+		return BillPaymentView{}, err
+	}
+	if acct.Account.IsArchived() {
+		return BillPaymentView{}, domain.ErrForbidden
+	}
+	// The expense's currency is the pay-from ACCOUNT's, never the bill's own
+	// stored figure reinterpreted -- transaction.go:232 is the identical rule
+	// TransactionService.Create applies, and a test asserts the two agree.
+	currency := acct.Balance.Currency
+
+	// dueOn is the occurrence being settled: the bill's CURRENT next_due, not
+	// PaidOn. A bill due the 8th paid on the 11th still settles the 8th's
+	// occurrence -- PaidOn only ever feeds the payment's own paid_on column
+	// and, for a recurring bill, the advance below.
+	dueOn := *rec.Bill.NextDue
+
+	var next *time.Time
+	// Advance from the DUE date, never from PaidOn: domain.NextDue's own
+	// comment states the same rule for the mechanical rewind it performs --
+	// paying three days late must not shift the bill's day, or a year of late
+	// payments walks it a month off. ok is false only for a one-off, which
+	// settles with no next occurrence at all (PaymentWrite.NextDue stays
+	// nil).
+	if n, ok := domain.NextDue(rec.Bill.Cadence, dueOn, rec.Bill.DueAnchorDay); ok {
+		next = &n
+	}
+
+	pay, err := s.deps.Bills.RecordPayment(ctx, PaymentWrite{
+		HouseholdID:        in.HouseholdID,
+		BillID:             in.BillID,
+		DueOn:              dueOn,
+		PaidOn:             in.PaidOn,
+		AmountMinor:        in.AmountMinor,
+		Currency:           currency,
+		Description:        rec.Bill.Name,
+		CategoryID:         rec.Bill.CategoryID,
+		PayFromAccountID:   rec.Bill.PayFromAccountID,
+		PaidByMembershipID: rec.Bill.PaidByMembershipID,
+		NextDue:            next,
+	})
+	if err != nil {
+		return BillPaymentView{}, err
+	}
+	// Autopay comes from the bill this method already read, not from pay:
+	// BillPaymentRecord's own doc comment says RecordPayment deliberately
+	// leaves Autopay false because its caller -- this method -- already holds
+	// the flag, so joining it back would be a second read of something
+	// already in hand.
+	return BillPaymentView{Payment: pay.Payment, BillName: pay.BillName, Autopay: rec.Bill.Autopay}, nil
+}
+
+// UndoPayment is a straight delegation. The repository owns the whole
+// transaction -- deleting the payment, deleting its linked expense, rewinding
+// next_due -- and owns the most-recent-only refusal (domain.ErrForbidden):
+// this method neither swallows nor reinterprets whatever comes back.
+func (s *BillService) UndoPayment(ctx context.Context, householdID, billID, paymentID string) error {
+	return s.deps.Bills.UndoPayment(ctx, householdID, billID, paymentID)
+}
+
 // toView composes one BillView from a repository record, computing Overdue
 // and DueSoon against today -- the one calculation every method that returns
 // a BillView shares, so List, Create, Update and SetArchived cannot drift on
@@ -596,6 +706,10 @@ func (s *BillService) toView(rec BillRecord, today time.Time) BillView {
 		AccountName:  rec.AccountName,
 		Overdue:      overdue,
 		DueSoon:      dueSoon,
+		// See BillView.Settled's own comment: a live bill with no next_due
+		// (only possible once MarkPaid settles a one-off) is neither Due soon
+		// nor Later.
+		Settled: !b.IsArchived() && b.NextDue == nil,
 	}
 }
 

@@ -251,6 +251,13 @@ func TestListSplitsDueSoonFromLaterAndKeepsBoth(t *testing.T) {
 	if byName["Car insurance"].DueSoon {
 		t.Error("a bill 84 days out belongs under Later")
 	}
+	// The negative case for Settled (see TestMarkPaidSettlesAOneOffAsNeitherDueSoonNorLater
+	// for the positive one): an ordinary bill with a real next_due is never
+	// Settled, which is what stops a hardcoded `Settled: true` from passing
+	// the whole suite unnoticed.
+	if byName["Car insurance"].Settled {
+		t.Error("a bill with a real next_due is never Settled")
+	}
 }
 
 func TestListMarksAnOverdueBillOverdueAndSortsItFirst(t *testing.T) {
@@ -770,6 +777,185 @@ func TestUpdateValidatesNameAndAmountAndCadence(t *testing.T) {
 	bad := domain.Cadence("fortnightly")
 	if _, err := svc.Update(ctx, "h1", "bill-1", usecase.BillPatch{Cadence: &bad}, today); !errors.Is(err, domain.ErrUnknownCadence) {
 		t.Fatalf("bad cadence err = %v, want domain.ErrUnknownCadence", err)
+	}
+}
+
+// --- MarkPaid / UndoPayment ----------------------------------------------
+
+// The expense a bill payment writes must carry the ACCOUNT's currency -- the
+// same rule TransactionService.Create applies at transaction.go:232. If these
+// two ever disagree, a household's ledger row and its bill say different
+// things about the same money.
+func TestMarkPaidWritesTheExpenseInTheAccountsCurrency(t *testing.T) {
+	repo := &fakeBillRepo{}
+	svc := newBillService(t, repo, withAccount("acct-idr", "IDR"))
+	repo.add(billOn("Arisan", "IDR", "2026-08-15", 50_000_000))
+
+	if _, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
+		HouseholdID: "h1", BillID: "bill-1", AmountMinor: 50_000_000, PaidOn: day("2026-08-15"),
+	}); err != nil {
+		t.Fatalf("MarkPaid: %v", err)
+	}
+	if got := repo.lastWrite.Currency; got != "IDR" {
+		t.Fatalf("expense currency = %q, want the account's IDR", got)
+	}
+	// And the description is the bill's own name, so an accidental duplicate
+	// hand-entered in the ledger is recognisable rather than invisible.
+	if got := repo.lastWrite.Description; got != "Arisan" {
+		t.Fatalf("description = %q, want the bill's name", got)
+	}
+}
+
+func TestMarkPaidAdvancesNextDueByTheCadenceFromTheDueDate(t *testing.T) {
+	repo := &fakeBillRepo{}
+	svc := newBillService(t, repo)
+	repo.add(bill("SP utilities", "2026-08-08", 14230)) // monthly, anchor 8
+
+	// Paid three days late.
+	if _, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
+		HouseholdID: "h1", BillID: "bill-1", AmountMinor: 14230, PaidOn: day("2026-08-11"),
+	}); err != nil {
+		t.Fatalf("MarkPaid: %v", err)
+	}
+	// 2026-09-08, NOT 2026-09-11: paying late must not move the bill's day,
+	// or a year of late payments walks it a month off.
+	if got := repo.lastWrite.NextDue; got == nil || !got.Equal(day("2026-09-08")) {
+		t.Fatalf("next due = %v, want 2026-09-08", got)
+	}
+	// The occurrence settled is the one that was due, not the day it was paid.
+	if !repo.lastWrite.DueOn.Equal(day("2026-08-08")) {
+		t.Fatalf("due_on = %s, want 2026-08-08", repo.lastWrite.DueOn.Format("2006-01-02"))
+	}
+}
+
+// TestMarkPaidAdvancesNextDueFromTheDueDateAcrossAMonthBoundary closes a gap
+// the test above cannot: its own due (8 Aug) and paid (11 Aug) dates share a
+// month, and domain.NextDue clamps the result to the bill's stored
+// DueAnchorDay regardless of which date it was told to advance from -- so a
+// service that (wrongly) advanced from PaidOn while still passing the
+// correct DueAnchorDay would land on the SAME 8 September and pass that test
+// undetected. Paying five days into the FOLLOWING month is what actually
+// tells the two apart: advancing from the due date (28 Aug) reaches 28
+// September; advancing from PaidOn (2 Sep) would reach 28 OCTOBER instead --
+// a whole month later.
+func TestMarkPaidAdvancesNextDueFromTheDueDateAcrossAMonthBoundary(t *testing.T) {
+	repo := &fakeBillRepo{}
+	svc := newBillService(t, repo)
+	repo.add(bill("Rent", "2026-08-28", 250000)) // monthly, anchor 28
+
+	if _, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
+		HouseholdID: "h1", BillID: "bill-1", AmountMinor: 250000, PaidOn: day("2026-09-02"),
+	}); err != nil {
+		t.Fatalf("MarkPaid: %v", err)
+	}
+	if got := repo.lastWrite.NextDue; got == nil || !got.Equal(day("2026-09-28")) {
+		t.Fatalf("next due = %v, want 2026-09-28 -- advanced from the due date, not from paying into the next month", got)
+	}
+}
+
+func TestMarkPaidSettlesAOneOffWithNoNextDate(t *testing.T) {
+	repo := &fakeBillRepo{}
+	svc := newBillService(t, repo)
+	repo.add(oneOff("Renew passport", "2026-08-20", 7000))
+
+	if _, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
+		HouseholdID: "h1", BillID: "bill-1", AmountMinor: 7000, PaidOn: day("2026-08-20"),
+	}); err != nil {
+		t.Fatalf("MarkPaid: %v", err)
+	}
+	if repo.lastWrite.NextDue != nil {
+		t.Fatalf("next due = %v, want nil -- a one-off has no next occurrence", repo.lastWrite.NextDue)
+	}
+}
+
+// TestMarkPaidSettlesAOneOffAsNeitherDueSoonNorLater settles the question
+// Task 6's review flagged: a live bill with NextDue == nil satisfies
+// neither list's own contract -- the design's own formula table defines
+// both "Due soon" and "Later" as requiring a non-NULL next_due -- yet
+// 00008_bills.sql's own comment on next_due says a settled one-off is
+// deliberately NOT auto-archived, "that would hide a record the household
+// may still want to see." So the row stays on the page (never dropped from
+// Bills) but is marked Settled, which is the signal the frontend needs to
+// place it in neither heading instead of guessing from a null due date.
+func TestMarkPaidSettlesAOneOffAsNeitherDueSoonNorLater(t *testing.T) {
+	repo := &fakeBillRepo{}
+	svc := newBillService(t, repo)
+	repo.add(oneOff("Renew passport", "2026-08-20", 7000))
+
+	if _, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
+		HouseholdID: "h1", BillID: "bill-1", AmountMinor: 7000, PaidOn: day("2026-08-20"),
+	}); err != nil {
+		t.Fatalf("MarkPaid: %v", err)
+	}
+
+	view, err := svc.List(context.Background(), "h1", false, day("2026-08-25"))
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(view.Bills) != 1 {
+		t.Fatalf("got %d bills, want the settled one-off still on the page", len(view.Bills))
+	}
+	row := view.Bills[0]
+	if !row.Settled {
+		t.Error("Settled = false, want true for a live bill with no next occurrence")
+	}
+	if row.DueSoon {
+		t.Error("a settled one-off must not render under Due soon")
+	}
+	if row.Bill.NextDue != nil {
+		t.Fatalf("next due = %v, want nil", row.Bill.NextDue)
+	}
+}
+
+func TestMarkPaidRefusesAnArchivedBill(t *testing.T) {
+	repo := &fakeBillRepo{}
+	svc := newBillService(t, repo)
+	repo.add(archivedBill(bill("Old gym", "2026-08-02", 8000)))
+
+	_, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
+		HouseholdID: "h1", BillID: "bill-1", AmountMinor: 8000, PaidOn: day("2026-08-09"),
+	})
+	if !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("MarkPaid(archived bill) = %v, want ErrForbidden", err)
+	}
+}
+
+func TestMarkPaidRefusesAnArchivedPayFromAccount(t *testing.T) {
+	repo := &fakeBillRepo{}
+	svc := newBillService(t, repo, withArchivedAccount("acct-1", "SGD"))
+	repo.add(bill("SP utilities", "2026-08-08", 14230))
+
+	_, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
+		HouseholdID: "h1", BillID: "bill-1", AmountMinor: 14230, PaidOn: day("2026-08-09"),
+	})
+	if !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("MarkPaid(archived account) = %v, want ErrForbidden", err)
+	}
+}
+
+func TestMarkPaidRefusesASettledOneOff(t *testing.T) {
+	repo := &fakeBillRepo{}
+	svc := newBillService(t, repo)
+	settled := oneOff("Renew passport", "2026-08-20", 7000)
+	settled.Bill.NextDue = nil // already paid; there is no occurrence left
+	repo.add(settled)
+
+	_, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
+		HouseholdID: "h1", BillID: "bill-1", AmountMinor: 7000, PaidOn: day("2026-08-25"),
+	})
+	if !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("MarkPaid(settled one-off) = %v, want ErrForbidden", err)
+	}
+}
+
+func TestUndoPaymentPassesThroughTheMostRecentOnlyRefusal(t *testing.T) {
+	// The rule lives in the repository, which owns the transaction that reads
+	// the latest due_on and rewinds next_due together. This asserts the
+	// service does not swallow or reinterpret the refusal on the way out.
+	repo := &fakeBillRepo{undoErr: domain.ErrForbidden}
+	svc := newBillService(t, repo)
+	if err := svc.UndoPayment(context.Background(), "h1", "bill-1", "pay-old"); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("UndoPayment = %v, want ErrForbidden passed through", err)
 	}
 }
 
