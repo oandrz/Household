@@ -40,6 +40,15 @@ type BillPaymentView struct {
 // household's primary currency; a bill whose account currency has no rate to
 // primary is excluded from every one of them and counted in ExcludedNoRate,
 // never silently dropped (the BudgetRolloverCard precedent, 8a1114b).
+//
+// NextDueAmount is the one figure here that does NOT convert: it is the
+// single next-due bill's own Amount, in that bill's own currency, exactly
+// the way BillView's own Amount is -- converting only it would leave the
+// card pairing an amount with a currency symbol from Summary.Currency that
+// disagrees with it. It is the zero domain.Money{} (no currency at all) when
+// there is no next-due bill; NextDueOn == nil is the field to gate on, the
+// same "nil, not a zero Money" rule TestNextDueIsOmittedWhenThereIsNone pins
+// for NextDueOn itself.
 type BillsSummary struct {
 	Currency             string
 	DueThisMonth         domain.Money
@@ -138,15 +147,23 @@ func NewBillService(deps BillDeps) *BillService {
 // list once via Bills.ListPayments -- four repository calls regardless of how
 // many bills or payments the household has.
 //
-// ExcludedNoRate counts a BILL, never a currency and never a total: it is
-// built once, while walking every unarchived bill below (the NetWorthSummary
-// and GoalsSummary precedent -- one entity, one exclusion, whichever totals
-// it would have touched). Bills.MonthTotals only returns currency-aggregated
-// sums, though, so a currency that first turns up unconvertible there (a
-// payment made before its bill was archived, in a currency no live bill
-// carries any more) is counted the first time it is seen and never again --
-// noRateCurrencies is the set shared across both passes for exactly that
-// reason.
+// ExcludedNoRate counts once per BILL (a bill due this month that is also
+// ticked as a subscription counts once, not twice, even though it would
+// otherwise touch two totals -- the NetWorthSummary and GoalService.List
+// precedent: one entity, one exclusion) plus once per PAYMENT whose own bill
+// was not already counted that way (a payment made from a bill that has
+// since stopped being due this month, or been archived, is a distinct fact
+// from that bill's current state, so it is not folded into the same count).
+//
+// DueThisMonth and PaidSoFar themselves still sum from Bills.MonthTotals'
+// own currency-aggregated maps -- that repository call exists specifically
+// because the paid half cannot be reconstructed from bills alone (its own
+// header comment explains why), and nothing here second-guesses that. What
+// an aggregated map cannot do is say which bill or payment a given currency's
+// contribution came from, which is what ExcludedNoRate needs to be precise
+// -- so that identity is recovered separately, by walking the same `records`
+// and `paymentRecords` this method already fetches for the page's other
+// purposes, entirely independent of the dueMinor/paidMinor summing below.
 func (s *BillService) List(ctx context.Context, householdID string, includeArchived bool, today time.Time) (BillsView, error) {
 	household, err := s.deps.Households.Get(ctx, householdID)
 	if err != nil {
@@ -172,12 +189,18 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 		return BillsView{}, err
 	}
 	dueTotal, paidSoFarTotal, subscriptionsAnnual := zero, zero, zero
-
-	noRateCurrencies := map[string]bool{}
 	excludedNoRate := 0
+	// excludedBillIDs is what stops the per-bill pass below and the
+	// per-payment pass after it from counting the same bill twice: a bill
+	// paid this month that is also a currently-ticked subscription is one
+	// underlying no-rate fact, not two.
+	excludedBillIDs := map[string]bool{}
 
+	// views is built with make(..., 0, ...), never left nil: a household
+	// with no bills must still serialise Bills as JSON [], not null (the
+	// GoalService.List precedent for the same reason).
+	views := make([]BillView, 0, len(records))
 	var (
-		views                          []BillView
 		autopayCount, billCount        int
 		nextDueBillID, nextDueBillName string
 		nextDueOn                      *time.Time
@@ -199,6 +222,7 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 		if b.Autopay {
 			autopayCount++
 		}
+		dueThisMonth := false
 		if b.NextDue != nil {
 			candidate := *b.NextDue
 			if nextDueOn == nil || candidate.Before(*nextDueOn) ||
@@ -209,38 +233,69 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 				nextDueOverdue = view.Overdue
 				nextDueAutopay = b.Autopay
 			}
+			dueThisMonth = candidate.Year() == today.Year() && candidate.Month() == today.Month()
 		}
 
-		if !b.IsSubscription {
-			continue
-		}
-		annual, ok := domain.AnnualEquivalentMinor(b.Cadence, b.Amount.Amount)
-		if !ok {
-			continue // a one-off is not a recurring cost, ticked or not
-		}
-		converted, convErr := s.convert(ctx, domain.Money{Amount: annual, Currency: b.Amount.Currency}, primary)
-		if convErr != nil {
-			if !noRateCurrencies[b.Amount.Currency] {
-				noRateCurrencies[b.Amount.Currency] = true
-				excludedNoRate++
+		// excludedThisBill is one flag for the whole bill, covering both
+		// totals it might touch below, per this method's own comment on
+		// ExcludedNoRate. The due-this-month probe here exists only to
+		// recover per-bill identity for the count -- DueThisMonth's actual
+		// figure is unaffected either way, since it sums dueMinor
+		// (Bills.MonthTotals' own aggregated figure) further down, which
+		// already omits this bill's contribution when its currency has no
+		// rate.
+		excludedThisBill := false
+		if dueThisMonth {
+			if _, convErr := s.convert(ctx, b.Amount, primary); convErr != nil {
+				excludedThisBill = true
 			}
-			continue
 		}
-		subscriptionsAnnual, err = subscriptionsAnnual.Add(converted)
-		if err != nil {
-			return BillsView{}, err
+
+		if b.IsSubscription {
+			if annual, ok := domain.AnnualEquivalentMinor(b.Cadence, b.Amount.Amount); ok {
+				converted, convErr := s.convert(ctx, domain.Money{Amount: annual, Currency: b.Amount.Currency}, primary)
+				if convErr != nil {
+					excludedThisBill = true
+				} else {
+					subscriptionsAnnual, err = subscriptionsAnnual.Add(converted)
+					if err != nil {
+						return BillsView{}, err
+					}
+				}
+			}
+			// ok == false is a one-off: not a recurring cost, ticked or not,
+			// and never a reason to exclude anything.
+		}
+
+		if excludedThisBill {
+			excludedNoRate++
+			excludedBillIDs[b.ID] = true
 		}
 	}
 
-	// Due this month and paid so far can only be walked per currency --
-	// Bills.MonthTotals already collapsed every bill into one sum per
-	// currency, for the reason its own doc comment gives (the paid half
-	// cannot be reconstructed from bills alone). noRateCurrencies is
-	// consulted, never re-added-to for a currency it already names, so a
-	// currency already excluded by the subscriptions pass above does not
-	// count twice.
+	// Payments due this month also feed DueThisMonth (the union rule
+	// Bills.MonthTotals' own header comment states), but a payment is a
+	// distinct entity from the bill that generated it, so its own
+	// no-rate exclusion is counted here -- unless that bill was already
+	// counted above, per this method's own comment.
+	for _, p := range paymentRecords {
+		if excludedBillIDs[p.Payment.BillID] {
+			continue
+		}
+		if _, convErr := s.convert(ctx, p.Payment.Amount, primary); convErr != nil {
+			excludedNoRate++
+			excludedBillIDs[p.Payment.BillID] = true
+		}
+	}
+
+	// The actual sums: Bills.MonthTotals' own currency-aggregated maps,
+	// converted per currency then added. A currency with no rate is simply
+	// skipped here -- its exclusion was already counted, precisely, by the
+	// two per-entity passes above; counting it again here (once per
+	// currency) is exactly the bug this method's own comment describes
+	// fixing.
 	for currency, amount := range dueMinor {
-		converted, convErr := s.convertCurrency(ctx, currency, amount, primary, noRateCurrencies, &excludedNoRate)
+		converted, convErr := s.convert(ctx, domain.Money{Amount: amount, Currency: currency}, primary)
 		if convErr != nil {
 			continue
 		}
@@ -250,7 +305,7 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 		}
 	}
 	for currency, amount := range paidMinor {
-		converted, convErr := s.convertCurrency(ctx, currency, amount, primary, noRateCurrencies, &excludedNoRate)
+		converted, convErr := s.convert(ctx, domain.Money{Amount: amount, Currency: currency}, primary)
 		if convErr != nil {
 			continue
 		}
@@ -323,6 +378,13 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 // the returned BillView's Overdue and DueSoon are meaningless without it, and
 // BillDeps carries no Clock (see its own comment) for this method to read the
 // date from instead.
+//
+// A non-empty PaidByMembershipID that does not belong to this household is
+// refused with domain.ErrAccountOwnerNotInHousehold, the identical check
+// AccountService.Create runs for OwnerMembershipID and TransactionService
+// runs for its own PaidByMembershipID: a bill's payer, like an account's
+// owner, is a validity question this layer answers, not something left for
+// the HTTP layer to have caught by then.
 func (s *BillService) Create(ctx context.Context, in NewBill, today time.Time) (BillView, error) {
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
@@ -342,6 +404,23 @@ func (s *BillService) Create(ctx context.Context, in NewBill, today time.Time) (
 	}
 	if acct.Account.IsArchived() {
 		return BillView{}, domain.ErrForbidden
+	}
+
+	// "" is the "" <-> SQL NULL convention (PaidByMembershipID's own comment
+	// in ports.go): unattributed is always valid, so this only runs for a
+	// caller-supplied id. AccountService.Create's identical check on
+	// OwnerMembershipID is the reason domain.ErrAccountOwnerNotInHousehold's
+	// own wording ("that member is not in this household") is already
+	// generic enough to share rather than duplicate as a bills-only
+	// sentinel -- see that sentinel's own comment in errors.go.
+	if in.PaidByMembershipID != "" {
+		ok, err := s.deps.Accounts.MembershipBelongsToHousehold(ctx, in.HouseholdID, in.PaidByMembershipID)
+		if err != nil {
+			return BillView{}, err
+		}
+		if !ok {
+			return BillView{}, domain.ErrAccountOwnerNotInHousehold
+		}
 	}
 
 	rec, err := s.deps.Bills.Create(ctx, NewBillRow{
@@ -382,6 +461,12 @@ func (s *BillService) Create(ctx context.Context, in NewBill, today time.Time) (
 // own comment), so re-pointing across a currency boundary would silently
 // reinterpret every past figure. The message naming both currencies is the
 // HTTP layer's job, not this one's.
+//
+// A non-empty PaidByMembershipID is refused with
+// domain.ErrAccountOwnerNotInHousehold when it does not belong to this
+// household, the same check Create runs and AccountService.Create runs for
+// OwnerMembershipID -- services enforce what is valid, and a payer from
+// another household is not.
 //
 // today is one parameter wider than the brief's own sketch, for the same
 // reason Create's own comment gives.
@@ -439,6 +524,24 @@ func (s *BillService) Update(ctx context.Context, householdID, billID string, pa
 	if patch.ClearPayer {
 		b.PaidByMembershipID = ""
 	} else if patch.PaidByMembershipID != nil {
+		// A nil patch.PaidByMembershipID means "leave alone" and ClearPayer
+		// already handled "unset it" above, so the membership check below
+		// only ever needs to run for a caller genuinely naming a member --
+		// the same guard Create's own comment explains, checked again here
+		// because Update's patch can name a DIFFERENT membership than the
+		// one Create originally validated. An empty-but-non-nil pointer
+		// (which a well-behaved caller sends via ClearPayer instead, never
+		// this field) still clears it exactly as it always has, needing no
+		// check.
+		if *patch.PaidByMembershipID != "" {
+			ok, err := s.deps.Accounts.MembershipBelongsToHousehold(ctx, householdID, *patch.PaidByMembershipID)
+			if err != nil {
+				return BillView{}, err
+			}
+			if !ok {
+				return BillView{}, domain.ErrAccountOwnerNotInHousehold
+			}
+		}
 		b.PaidByMembershipID = *patch.PaidByMembershipID
 	}
 	if patch.Autopay != nil {
@@ -514,21 +617,4 @@ func (s *BillService) convert(ctx context.Context, m domain.Money, primary strin
 		return domain.Money{}, err
 	}
 	return domain.Money{Amount: amount, Currency: primary}, nil
-}
-
-// convertCurrency is convert's wrapper for the two currency-aggregated
-// passes in List (dueMinor/paidMinor): it consults and updates
-// noRateCurrencies/excludedNoRate itself, so neither pass has to repeat the
-// "have we already counted this currency" check inline.
-func (s *BillService) convertCurrency(ctx context.Context, currency string, amountMinor int64, primary string,
-	noRateCurrencies map[string]bool, excludedNoRate *int) (domain.Money, error) {
-	converted, err := s.convert(ctx, domain.Money{Amount: amountMinor, Currency: currency}, primary)
-	if err != nil {
-		if !noRateCurrencies[currency] {
-			noRateCurrencies[currency] = true
-			*excludedNoRate++
-		}
-		return domain.Money{}, err
-	}
-	return converted, nil
 }

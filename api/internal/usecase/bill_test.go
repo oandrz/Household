@@ -58,6 +58,17 @@ func withArchivedAccount(id, currency string) billServiceOption {
 	}
 }
 
+// withMembership registers membershipID as belonging to householdID in the
+// AccountLookup double's memberships map -- for a test proving
+// PaidByMembershipID is validated against the CALLER's household, not just
+// "some membership exists somewhere" (transaction_test.go's own
+// "someone-elses-m" pattern, reused here for bills).
+func withMembership(membershipID, householdID string) billServiceOption {
+	return func(f *billServiceFixture) {
+		f.accounts.memberships[membershipID] = householdID
+	}
+}
+
 // withFX swaps the FX double -- newBillServiceWithFX's own reason to exist,
 // factored out as one more option rather than a second constructor with its
 // own household/account wiring to keep in sync with newBillService's.
@@ -77,9 +88,12 @@ func newBillService(t *testing.T, repo *fakeBillRepo, opts ...billServiceOption)
 	households.put(domain.Household{ID: "h1", PrimaryCurrency: "SGD"})
 
 	f := &billServiceFixture{
-		accounts: &fakeAccountLookup{accounts: map[string]fakeAccountRecord{
-			"acct-1": {householdID: "h1", currency: "SGD"},
-		}},
+		accounts: &fakeAccountLookup{
+			accounts: map[string]fakeAccountRecord{
+				"acct-1": {householdID: "h1", currency: "SGD"},
+			},
+			memberships: map[string]string{},
+		},
 		fx: staticTestRates{},
 	}
 	for _, opt := range opts {
@@ -378,6 +392,87 @@ func TestSummaryExcludesABillWithNoRateAndCountsIt(t *testing.T) {
 	}
 }
 
+// TestSummaryCountsEveryNoRateSubscriptionSeparately is the review finding's
+// own example: three bills sharing one no-rate currency are three
+// exclusions, not one deduped by currency. A prior version of this method
+// kept a "have we already counted this currency" set and reported 1 here --
+// the annual figure being correctly 0 is what would have made that bug
+// invisible without this test naming the count directly.
+func TestSummaryCountsEveryNoRateSubscriptionSeparately(t *testing.T) {
+	// Due in November, well outside the August query month, so the ONLY
+	// path that can exclude these bills is the subscriptions one -- a due
+	// date inside the query month would independently set the exclusion
+	// flag through the due-this-month path too, masking a subscriptions-only
+	// regression.
+	makeSub := func(name string) usecase.BillRecord {
+		rec := billOn(name, "IDR", "2026-11-20", 50_000)
+		rec.Bill.IsSubscription = true
+		return rec
+	}
+	svc := newBillServiceWithFX(t, noRateFX{},
+		makeSub("Netflix ID"),
+		makeSub("Spotify ID"),
+		makeSub("iCloud ID"),
+	)
+	view, err := svc.List(context.Background(), "h1", false, day("2026-08-09"))
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if got := view.Summary.SubscriptionsAnnual.Amount; got != 0 {
+		t.Fatalf("annual = %d, want 0 -- none of the three could convert", got)
+	}
+	if got := view.Summary.ExcludedNoRate; got != 3 {
+		t.Fatalf("ExcludedNoRate = %d, want 3 -- one per bill, never deduped by currency", got)
+	}
+}
+
+// TestSummaryCountsABillOnceEvenWhenBothDueThisMonthAndASubscription pins
+// the other half of "one entity, one exclusion": a single bill that is BOTH
+// due this month AND a ticked subscription touches two totals, but is still
+// one no-rate bill.
+func TestSummaryCountsABillOnceEvenWhenBothDueThisMonthAndASubscription(t *testing.T) {
+	rec := billOn("Arisan", "IDR", "2026-08-15", 500_000) // due this month
+	rec.Bill.IsSubscription = true
+	svc := newBillServiceWithFX(t, noRateFX{}, rec)
+
+	view, err := svc.List(context.Background(), "h1", false, day("2026-08-09"))
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if got := view.Summary.ExcludedNoRate; got != 1 {
+		t.Fatalf("ExcludedNoRate = %d, want 1 -- one bill touching two totals is still one exclusion", got)
+	}
+}
+
+// TestSummaryCountsANoRatePaymentSeparatelyFromItsCurrentBill covers the
+// other identity ExcludedNoRate must recover: a payment already made this
+// month, from a bill whose NextDue has since advanced past this month (so
+// the per-bill pass never sees it as "due this month"). The payment is
+// still a distinct no-rate fact and must still be counted -- seeded directly
+// into the fake's payments, since MarkPaid (Task 7) does not exist yet to
+// produce one.
+func TestSummaryCountsANoRatePaymentSeparatelyFromItsCurrentBill(t *testing.T) {
+	repo := &fakeBillRepo{}
+	added := repo.add(billOn("Arisan", "IDR", "2026-09-15", 500_000)) // now due next month
+	repo.payments = append(repo.payments, usecase.BillPaymentRecord{
+		Payment: domain.BillPayment{
+			ID: "pay-1", BillID: added.Bill.ID, HouseholdID: "h1",
+			DueOn: day("2026-08-15"), PaidOn: day("2026-08-15"),
+			Amount: domain.Money{Amount: 500_000, Currency: "IDR"},
+		},
+		BillName: "Arisan",
+	})
+	svc := newBillService(t, repo, withFX(noRateFX{}))
+
+	view, err := svc.List(context.Background(), "h1", false, day("2026-08-09"))
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if got := view.Summary.ExcludedNoRate; got != 1 {
+		t.Fatalf("ExcludedNoRate = %d, want 1 -- the payment, not the (no longer due) bill", got)
+	}
+}
+
 func TestNextDueIsOmittedWhenThereIsNone(t *testing.T) {
 	svc := newBillServiceWith(t)
 	view, err := svc.List(context.Background(), "h1", false, day("2026-08-09"))
@@ -387,6 +482,12 @@ func TestNextDueIsOmittedWhenThereIsNone(t *testing.T) {
 	// nil, not a zero Money: the card renders nothing rather than "S$0.00".
 	if view.Summary.NextDueOn != nil {
 		t.Fatalf("NextDueOn = %v, want nil for a household with no bills", view.Summary.NextDueOn)
+	}
+	// [], not null: this is the screen's literal first-run state, and a JSON
+	// encoder turns a nil slice into `null`, which the frontend would have to
+	// special-case separately from an empty array meaning the same thing.
+	if view.Bills == nil {
+		t.Fatal("Bills = nil, want an empty (non-nil) slice")
 	}
 }
 
@@ -459,6 +560,77 @@ func TestBillCreateRefusesAnArchivedPayFromAccount(t *testing.T) {
 	}, day("2026-08-09"))
 	if !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("err = %v, want domain.ErrForbidden", err)
+	}
+}
+
+// TestBillCreateRefusesAPayerFromAnotherHousehold: a membership id that
+// genuinely exists, just not in the caller's household -- the same scoping
+// AccountService.Create enforces for OwnerMembershipID.
+func TestBillCreateRefusesAPayerFromAnotherHousehold(t *testing.T) {
+	svc := newBillService(t, &fakeBillRepo{}, withMembership("m-foreign", "other-house"))
+
+	_, err := svc.Create(context.Background(), usecase.NewBill{
+		HouseholdID: "h1", Name: "Rent", AmountMinor: 250000,
+		Cadence: domain.CadenceMonthly, NextDue: day("2026-08-20"),
+		PayFromAccountID: "acct-1", PaidByMembershipID: "m-foreign",
+	}, day("2026-08-09"))
+	if !errors.Is(err, domain.ErrAccountOwnerNotInHousehold) {
+		t.Fatalf("err = %v, want domain.ErrAccountOwnerNotInHousehold", err)
+	}
+}
+
+// TestBillCreateAcceptsAPayerInTheHousehold is the guard's non-empty happy
+// path -- a membership genuinely in "h1" must round-trip onto the bill.
+func TestBillCreateAcceptsAPayerInTheHousehold(t *testing.T) {
+	svc := newBillService(t, &fakeBillRepo{}, withMembership("m-andreas", "h1"))
+
+	created, err := svc.Create(context.Background(), usecase.NewBill{
+		HouseholdID: "h1", Name: "Rent", AmountMinor: 250000,
+		Cadence: domain.CadenceMonthly, NextDue: day("2026-08-20"),
+		PayFromAccountID: "acct-1", PaidByMembershipID: "m-andreas",
+	}, day("2026-08-09"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if created.Bill.PaidByMembershipID != "m-andreas" {
+		t.Fatalf("payer = %q, want m-andreas", created.Bill.PaidByMembershipID)
+	}
+}
+
+// TestUpdateRefusesAPayerFromAnotherHousehold is Update's own half of the
+// same guard: the patch can name a DIFFERENT membership than the one Create
+// originally validated, so Update must check again.
+func TestUpdateRefusesAPayerFromAnotherHousehold(t *testing.T) {
+	repo := &fakeBillRepo{}
+	repo.add(bill("SP utilities", "2026-08-08", 14230))
+	svc := newBillService(t, repo, withMembership("m-foreign", "other-house"))
+
+	foreign := "m-foreign"
+	_, err := svc.Update(context.Background(), "h1", "bill-1", usecase.BillPatch{
+		PaidByMembershipID: &foreign,
+	}, day("2026-08-09"))
+	if !errors.Is(err, domain.ErrAccountOwnerNotInHousehold) {
+		t.Fatalf("err = %v, want domain.ErrAccountOwnerNotInHousehold", err)
+	}
+}
+
+// TestUpdateClearPayerBypassesTheMembershipCheck: ClearPayer never needs to
+// name a membership at all, so it must never be validated as one.
+func TestUpdateClearPayerBypassesTheMembershipCheck(t *testing.T) {
+	repo := &fakeBillRepo{}
+	rec := bill("SP utilities", "2026-08-08", 14230)
+	rec.Bill.PaidByMembershipID = "m-andreas"
+	repo.add(rec)
+	svc := newBillService(t, repo)
+
+	updated, err := svc.Update(context.Background(), "h1", "bill-1", usecase.BillPatch{
+		ClearPayer: true,
+	}, day("2026-08-09"))
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.Bill.PaidByMembershipID != "" {
+		t.Fatalf("payer = %q, want cleared", updated.Bill.PaidByMembershipID)
 	}
 }
 
