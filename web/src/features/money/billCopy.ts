@@ -198,6 +198,25 @@ export const BILL_COPY = {
   ownerOnlyHeading: "Owner only",
   ownerOnlyBody: "Bills is visible to the household owner. Ask them if you'd like to see where things stand.",
 
+  // A bill's pay_from_account_id is NOT NULL and is where its currency comes
+  // from, so a household with no accounts cannot create one at all. Both
+  // "Add bill" buttons are disabled with the reason rather than opening a
+  // modal whose Pay from select has nothing in it -- browser constraint
+  // validation on submit, with no explanation, is a dead end reached after
+  // four clicks, and this is first-run reachable. TransactionsPage.tsx
+  // already refuses the identical class (its own noAccounts* copy, worded
+  // the same way here for the same screen family) and QuickAddMenu.tsx
+  // already gates Overview's own Add-bill entry on `accounts.length > 0`.
+  noAccountsTitle: "Add an account first",
+  noAccountsBody: "A bill is paid from an account, so Hearth needs one before you can add a bill.",
+  noAccountsAction: "Add an account",
+  noAccountsYet: "Add an account first, and bills can be paid from it.",
+  // Shown when BillModal's own GET /accounts fails outright. Distinct from
+  // `loading` above: the two used to be one state, so a failed fetch showed
+  // "Loading…" for as long as the modal stayed open (react-query stops
+  // retrying, so nothing ever arrived to replace it).
+  accountsLoadError: "Couldn't load your accounts, so there's nothing to pay this bill from yet. Close this and try again.",
+
   // BillModal (Task 13) -- add and edit, one modal, the TransactionModal.tsx
   // pattern (the task brief's own words). The two titles vary by mode, unlike
   // GoalModal.tsx's/AccountModal.tsx's one generic title for both -- the

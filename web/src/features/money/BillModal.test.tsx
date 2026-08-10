@@ -249,11 +249,13 @@ describe("BillModal", () => {
     // An exact match pins "no archive field" by construction -- Archiving is
     // deliberately not a patchable field (UpdateBillBody's own comment), so
     // this object must never grow one, whatever it might be called.
+    //
+    // payFromAccountId is absent because this save never changed it. See the
+    // rename-only test below for why restating it is not harmless.
     expect(patchBody).toEqual({
       name: "StarHub",
       amountMinor: 6800,
       cadence: "monthly",
-      payFromAccountId: "acct-1",
       autopay: false,
       isSubscription: false,
       nextDue: "2026-08-20",
@@ -263,6 +265,87 @@ describe("BillModal", () => {
     expect(patchBody).not.toHaveProperty("archivedAt");
     expect(patchBody).not.toHaveProperty("archived");
     expect(mutatingCalls(fetchMock)).toEqual([`PATCH /api/v1/bills/${bill.id}`]);
+  });
+
+  // BillService.Update refuses a patch pointing at an ARCHIVED account. This
+  // form used to put payFromAccountId in every PATCH body unconditionally, so
+  // a bill whose pay-from account had since been archived could not be
+  // renamed at all: the save came back "That account is archived and cannot
+  // be used to pay a bill," for an edit that never touched the account. The
+  // currency check runs before the archived one, so a household whose
+  // archived account was its only one in that currency could never edit that
+  // bill again -- the fix that introduced the archived-account check is what
+  // created this, which is why the omission is pinned here by name.
+  it("renaming a bill whose pay-from account was archived never restates the account", async () => {
+    // acct-archived is deliberately absent from ACCOUNTS: useAccounts(false)
+    // fetches live accounts only, so this is exactly what the household sees.
+    const bill = billFixture({ payFromAccountId: "acct-archived", accountName: "Old OCBC" });
+    let patchBody: Record<string, unknown> | undefined;
+    const { onSaved } = renderModal(
+      { mode: "edit", bill },
+      {
+        [`PATCH /api/v1/bills/${bill.id}`]: {
+          status: 200,
+          body: { bill },
+          capture: (body) => {
+            patchBody = body as Record<string, unknown>;
+          },
+        },
+      },
+    );
+
+    // The select still SHOWS the archived account -- otherwise the field
+    // would read blank and look like the bill had lost it (BillModal.tsx's
+    // own comment on that fallback <option>).
+    expect(await screen.findByLabelText("Pay from")).toHaveValue("acct-archived");
+
+    fireEvent.change(screen.getByLabelText("Bill name"), { target: { value: "StarHub fibre" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(patchBody).not.toHaveProperty("payFromAccountId");
+    expect(patchBody?.name).toBe("StarHub fibre");
+  });
+
+  // The other side of the same rule: an account the household actually
+  // changed must still be sent, or re-pointing a bill would silently do
+  // nothing.
+  it("changing the pay-from account does send it", async () => {
+    const bill = billFixture();
+    let patchBody: Record<string, unknown> | undefined;
+    const { onSaved } = renderModal(
+      { mode: "edit", bill },
+      {
+        [`PATCH /api/v1/bills/${bill.id}`]: {
+          status: 200,
+          body: { bill },
+          capture: (body) => {
+            patchBody = body as Record<string, unknown>;
+          },
+        },
+      },
+    );
+
+    await screen.findByLabelText("Pay from");
+    fireEvent.change(screen.getByLabelText("Pay from"), { target: { value: "acct-2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(patchBody?.payFromAccountId).toBe("acct-2");
+  });
+
+  // Loading and failed used to be one state (`if (!accounts.data)`), so a
+  // failed GET /accounts left this modal on "Loading…" for as long as it
+  // stayed open -- react-query stops retrying, so nothing ever arrived to
+  // replace it. BudgetModal.tsx closed this exact shape.
+  it("a failed accounts fetch says so instead of showing Loading forever", async () => {
+    renderModal(
+      { mode: "create" },
+      { "GET /api/v1/accounts": { status: 500, body: { error: { code: "INTERNAL", message: "nope" } } } },
+    );
+
+    expect(await screen.findByTestId("bill-modal-accounts-error")).toBeInTheDocument();
+    expect(screen.queryByTestId("bill-modal-loading")).not.toBeInTheDocument();
   });
 
   // A settled one-off (paid, no next occurrence) has nextDue: null --

@@ -34,8 +34,10 @@
 // GoalContributionsPanel.tsx owns confirmingId/deletingId itself rather than
 // letting ContributionRow track its own).
 import { useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { ApiError } from "../../api/client";
 import { useCurrencies } from "../auth/useAuth";
+import { useAccounts } from "./useAccounts";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { apiErrorMessage } from "../auth/copy";
 import { BillModal } from "./BillModal";
@@ -47,20 +49,38 @@ import { BILL_COPY, dayMonthLabel } from "./billCopy";
 import { useArchiveBill, useBills, useRestoreBill, useUndoPayment } from "./useBills";
 import type { Bill, BillPayment } from "./billSchemas";
 
-// "What month is it right now" -- read straight from the live clock, unlike
-// BudgetPage.tsx's monthLabel/GoalCard.tsx's targetMonthLabel, which both
-// anchor on day 2 to avoid a UTC-offset shift when *parsing a stored date
-// string*. There is no stored string here to parse -- `new Date()` already
-// names today in the caller's own local timezone -- so that anchor trick has
-// nothing to guard against.
+// "What month is it right now" -- in UTC, which is the month the figures
+// this name labels were actually scoped to.
+//
+// The anchor-on-day-2 trick BudgetPage.tsx's monthLabel and GoalCard.tsx's
+// targetMonthLabel use is genuinely not needed here: there is no stored date
+// string to parse, so there is no parse-time offset shift to guard against.
+// That is what this comment used to say, and it is where it stopped -- it
+// missed that a *live* clock read locally has its own version of the same
+// problem. `allCaughtUp` below is derived entirely from server figures, and
+// the server scopes "this month" in UTC. In SGT (UTC+8) the two disagree for
+// the first eight hours of every month: at local 1 Sep 03:00 it is still
+// 31 Aug in UTC, so every August bill being paid fires the panel -- which
+// would then read "everything due in September is paid" while September's
+// unpaid bills sat in Due soon beside it.
+//
+// Fixed here rather than by having the server put the month it scoped onto
+// BillsSummary: this is a label, and the server-side version would cost a new
+// summary field, a DTO field, a schema change and a system-design update to
+// carry one string that toLocaleDateString already knows how to produce.
 function currentMonthName(): string {
-  return new Date().toLocaleDateString("en-US", { month: "long" });
+  return new Date().toLocaleDateString("en-US", { month: "long", timeZone: "UTC" });
 }
 
 export function BillsPage() {
   const [includeArchived, setIncludeArchived] = useState(false);
   const bills = useBills(includeArchived);
   const currencies = useCurrencies();
+  // Live accounts only: a bill cannot be paid from an archived one
+  // (BillService.Create refuses it), so an archived-inclusive count would
+  // enable an "Add bill" button that leads to a modal offering nothing
+  // selectable -- the same dead end this query exists to close.
+  const accounts = useAccounts(false);
   const archiveBill = useArchiveBill();
   const restoreBill = useRestoreBill();
   const undoPayment = useUndoPayment();
@@ -239,6 +259,13 @@ export function BillsPage() {
   const noLiveBills = liveBills.length === 0;
   const noneArchived = includeArchived && data.bills.length > 0 && archivedBills.length === 0;
 
+  // `accounts.data !== undefined` first, deliberately: `?? 0` would read a
+  // still-loading accounts query as "zero accounts" and disable the button on
+  // first paint for every household, which is a new defect in place of the
+  // one being fixed. Only a query that has actually answered can say a
+  // household has none.
+  const noAccounts = accounts.data !== undefined && accounts.data.accounts.length === 0;
+
   // "Every bill due this month is paid": dueThisMonthMinor already sums both
   // this month's payments and this month's still-unpaid bills (the formulas
   // table's own union), so the two totals agree exactly once nothing *this
@@ -284,14 +311,23 @@ export function BillsPage() {
             />
             {BILL_COPY.archivedToggle}
           </div>
-          <button
-            type="button"
-            data-testid="bills-add"
-            onClick={() => setModalBill("new")}
-            className="rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white"
-          >
-            {BILL_COPY.addBill}
-          </button>
+          {/* Disabled with the reason beside it, never a modal whose Pay from
+              select is empty -- TransactionsPage.tsx's own header button
+              carries the identical pair for the identical reason. */}
+          <div className="flex flex-col items-end gap-1">
+            <button
+              type="button"
+              data-testid="bills-add"
+              disabled={noAccounts}
+              onClick={() => setModalBill("new")}
+              className="rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {BILL_COPY.addBill}
+            </button>
+            {noAccounts && (
+              <p className="max-w-[220px] text-right text-[11px] text-muted">{BILL_COPY.noAccountsYet}</p>
+            )}
+          </div>
         </div>
       </div>
 
@@ -303,24 +339,43 @@ export function BillsPage() {
 
       {noLiveBills ? (
         <div data-testid="bills-empty-state" className="rounded-xl border border-hairline bg-card p-16 text-center">
-          <div className="text-[19px] font-semibold tracking-[-0.01em] text-ink">{BILL_COPY.emptyHeadline}</div>
+          {/* A household with no accounts is told what to do FIRST, not
+              offered a button that opens a modal it cannot fill in. The way
+              out lives here, in the middle of the screen, not only in the
+              header's hint beside the disabled button -- TransactionsPage.tsx's
+              own no-accounts empty state is the precedent, wording and link
+              target included. */}
+          <div className="text-[19px] font-semibold tracking-[-0.01em] text-ink">
+            {noAccounts ? BILL_COPY.noAccountsTitle : BILL_COPY.emptyHeadline}
+          </div>
           <p className="mx-auto mt-2 max-w-[420px] text-[13.5px] leading-relaxed text-muted">
-            {BILL_COPY.emptyBody}
+            {noAccounts ? BILL_COPY.noAccountsBody : BILL_COPY.emptyBody}
           </p>
-          {/* Distinct copy from the header's own "+ Add bill" above -- both
-              render together whenever a household has zero live bills, and
-              identical text on two buttons on the same screen is two
-              elements answering to one accessible name (GoalsPage.tsx's own
-              "Create your first goal" carries the identical reasoning). */}
           <div className="mt-6 flex justify-center">
-            <button
-              type="button"
-              data-testid="bills-create-first"
-              onClick={() => setModalBill("new")}
-              className="rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white"
-            >
-              {BILL_COPY.createFirstBill}
-            </button>
+            {noAccounts ? (
+              <Link
+                to="/money"
+                data-testid="bills-add-account"
+                className="rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white"
+              >
+                {BILL_COPY.noAccountsAction}
+              </Link>
+            ) : (
+              /* Distinct copy from the header's own "+ Add bill" above --
+                 both render together whenever a household has zero live
+                 bills, and identical text on two buttons on the same screen
+                 is two elements answering to one accessible name
+                 (GoalsPage.tsx's own "Create your first goal" carries the
+                 identical reasoning). */
+              <button
+                type="button"
+                data-testid="bills-create-first"
+                onClick={() => setModalBill("new")}
+                className="rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white"
+              >
+                {BILL_COPY.createFirstBill}
+              </button>
+            )}
           </div>
         </div>
       ) : (

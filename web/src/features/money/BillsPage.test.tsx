@@ -25,6 +25,32 @@ const CURRENCIES = {
   body: { currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }] },
 };
 
+// BillsPage itself calls useAccounts(false) -- a bill is paid FROM an
+// account, so with none there is nothing to add a bill against and both
+// Add-bill entry points are disabled (BillsPage.tsx's own comment). Every
+// test here registers the route; the one that is about the no-accounts state
+// overrides it with an empty list.
+const ACCOUNTS = {
+  status: 200,
+  body: {
+    accounts: [
+      {
+        id: "acct-1",
+        nickname: "DBS",
+        type: "cash",
+        ownerMembershipId: null,
+        ownerName: null,
+        balance: { amountMinor: 500000, currency: "SGD" },
+        countTowardNetWorth: true,
+        visibleToLimitedMembers: false,
+        archivedAt: null,
+      },
+    ],
+  },
+};
+
+const NO_ACCOUNTS = { status: 200, body: { accounts: [] } };
+
 function billFixture(overrides: Partial<Bill> = {}): Bill {
   return {
     id: "bill-1",
@@ -88,6 +114,7 @@ function billsFixture(
 function renderPage(response: BillsResponse, extraRoutes: Record<string, RouteResponse | RouteResponse[]> = {}) {
   const fetchMock = stubFetchRoutes({
     "GET /api/v1/currencies": CURRENCIES,
+    "GET /api/v1/accounts": ACCOUNTS,
     "GET /api/v1/bills": { status: 200, body: response },
     ...extraRoutes,
   });
@@ -122,6 +149,44 @@ describe("BillsPage", () => {
     // billCount === 0 hides the "N of M on autopay" line rather than
     // rendering "0 of 0" -- the formulas table's own rule.
     expect(screen.queryByTestId("bills-subtitle")).not.toBeInTheDocument();
+  });
+
+  // A household with no accounts cannot create a bill at all:
+  // pay_from_account_id is NOT NULL and is where a bill's currency comes
+  // from, so "+ Add bill" opened a modal whose Pay from select had nothing
+  // in it -- browser constraint validation on submit, no explanation, and
+  // first-run reachable. Both sibling screens already refuse this class, and
+  // one of them (QuickAddMenu) refuses it for this very modal.
+  it("no accounts: both Add-bill entry points are refused, with the way out on screen", async () => {
+    renderPage(billsFixture([]), { "GET /api/v1/accounts": NO_ACCOUNTS });
+
+    expect(await screen.findByTestId("bills-empty-state")).toBeInTheDocument();
+    expect(screen.getByTestId("bills-add")).toBeDisabled();
+    expect(screen.getByText("Add an account first, and bills can be paid from it.")).toBeInTheDocument();
+
+    // The empty state explains the same thing and links to Finances, rather
+    // than offering a second button into the same dead end.
+    expect(screen.queryByTestId("bills-create-first")).not.toBeInTheDocument();
+    expect(screen.getByText("Add an account first")).toBeInTheDocument();
+    expect(screen.getByTestId("bills-add-account")).toHaveAttribute("href", "/money");
+  });
+
+  // The other half of the guard: only a query that has actually answered may
+  // say a household has no accounts. `accounts.data?.accounts.length ?? 0`
+  // would read every not-yet-answered query -- still loading, or failed --
+  // as "zero accounts" and disable Add bill for every household on first
+  // paint, a new defect in place of the one being fixed. A failed GET is the
+  // reachable, deterministic form of "never answered"; the modal has its own
+  // message for what the household meets next (BillModal.tsx's own
+  // accounts-error branch).
+  it("accounts unavailable: Add bill is not disabled on a query that never answered", async () => {
+    renderPage(billsFixture([]), {
+      "GET /api/v1/accounts": { status: 500, body: { error: { code: "INTERNAL", message: "nope" } } },
+    });
+
+    expect(await screen.findByTestId("bills-empty-state")).toBeInTheDocument();
+    expect(screen.getByTestId("bills-add")).toBeEnabled();
+    expect(screen.getByTestId("bills-create-first")).toBeInTheDocument();
   });
 
   it("bills exist but none is due this month: the stat cards explain rather than showing bare zeros", async () => {

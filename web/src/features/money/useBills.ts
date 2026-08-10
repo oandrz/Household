@@ -27,6 +27,7 @@
 // /accounts doesn't.
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../../api/client";
+import { accountsQueryKey } from "./useAccounts";
 import {
   billPaymentResponseSchema,
   billResponseSchema,
@@ -139,6 +140,31 @@ function invalidateBills(queryClient: QueryClient) {
   ]);
 }
 
+// invalidateBillsAndLedger is what the two mutations that WRITE MONEY use
+// instead of invalidateBills. Creating, renaming or archiving a bill only
+// changes bills; paying one does not -- POST /bills/{id}/pay writes a real
+// transactions row, and DELETE .../payments/{id} deletes one. That is the
+// same fact useTransactions.ts's own invalidateLedger states for hand-entered
+// transactions: "a transaction changes an account's balance and the net worth
+// built from it, so leaving those cached shows a ledger that disagrees with
+// the Finances page one click away." Marking a bill paid and clicking
+// straight to Transactions showed neither the expense nor the moved balance
+// for up to the 30-second staleTime in main.tsx.
+//
+// `["budget"]` is deliberately NOT in this list. Budget going stale after a
+// money write is real, but it is a pre-existing gap shared with every
+// hand-entered transaction (invalidateLedger does not invalidate it either) --
+// fixing it on this one path would leave the two write paths disagreeing about
+// what a money write refreshes, which is worse than one honest gap.
+function invalidateBillsAndLedger(queryClient: QueryClient) {
+  return Promise.all([
+    invalidateBills(queryClient),
+    queryClient.invalidateQueries({ queryKey: ["transactions"] }),
+    queryClient.invalidateQueries({ queryKey: accountsQueryKey(false) }),
+    queryClient.invalidateQueries({ queryKey: accountsQueryKey(true) }),
+  ]);
+}
+
 export function useCreateBill() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -207,7 +233,7 @@ export function useMarkPaid() {
       });
       return billPaymentResponseSchema.parse(raw);
     },
-    onSuccess: () => invalidateBills(queryClient),
+    onSuccess: () => invalidateBillsAndLedger(queryClient),
   });
 }
 
@@ -224,6 +250,6 @@ export function useUndoPayment() {
         { method: "DELETE" },
       );
     },
-    onSuccess: () => invalidateBills(queryClient),
+    onSuccess: () => invalidateBillsAndLedger(queryClient),
   });
 }

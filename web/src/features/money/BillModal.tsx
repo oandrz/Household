@@ -77,9 +77,28 @@ export function BillModal({
   const categories = useCategories();
   const members = useHouseholdMembers();
 
+  const title = isEditing ? BILL_COPY.editBillModalTitle : BILL_COPY.addBillModalTitle;
+
+  // Loading and failed are two states, not one. `!accounts.data` alone meant
+  // a failed GET /accounts rendered "Loading…" for as long as the modal
+  // stayed open -- react-query gives up retrying, so nothing ever arrives to
+  // replace it. BudgetModal.tsx closed this exact shape and its own comment
+  // says why. Unlike BudgetModal there is no fallback list to degrade to
+  // here: this modal cannot offer a Pay from account, or know the currency
+  // an amount is being typed in, without accounts -- so it says so plainly
+  // instead of pretending to still be working.
+  if (accounts.isError) {
+    return (
+      <Modal open onClose={onClose} title={title}>
+        <p role="alert" className="text-xs leading-snug text-danger" data-testid="bill-modal-accounts-error">
+          {BILL_COPY.accountsLoadError}
+        </p>
+      </Modal>
+    );
+  }
   if (!accounts.data) {
     return (
-      <Modal open onClose={onClose} title={isEditing ? BILL_COPY.editBillModalTitle : BILL_COPY.addBillModalTitle}>
+      <Modal open onClose={onClose} title={title}>
         <p className="text-xs text-muted" data-testid="bill-modal-loading">
           {BILL_COPY.loading}
         </p>
@@ -208,24 +227,35 @@ function BillModalForm({
     setIsSaving(true);
     try {
       if (isEditing) {
-        // Every field but category/payer/date is safe to resend
-        // unconditionally: none of name/amountMinor/cadence/payFromAccountId/
-        // autopay/isSubscription is a derived figure this form could restate
-        // wrongly the way AccountModal's Balance once was
-        // (docs/LEARNING.md pattern 1) -- each is exactly what is showing in
-        // the field, prefilled from the same bill this PATCH targets.
-        // Archiving is never one of these fields -- UpdateBillBody has no
-        // archive key at all (its own comment: archiving is not a patchable
-        // field, so an ordinary rename can never archive a bill as a side
-        // effect of saving).
+        // Every field but category/payer/date/pay-from is safe to resend
+        // unconditionally: none of name/amountMinor/cadence/autopay/
+        // isSubscription is a derived figure this form could restate wrongly
+        // the way AccountModal's Balance once was (docs/LEARNING.md pattern 1)
+        // -- each is exactly what is showing in the field, prefilled from the
+        // same bill this PATCH targets. Archiving is never one of these
+        // fields -- UpdateBillBody has no archive key at all (its own comment:
+        // archiving is not a patchable field, so an ordinary rename can never
+        // archive a bill as a side effect of saving).
         const body: UpdateBillBody = {
           name: trimmedName,
           amountMinor,
           cadence,
-          payFromAccountId,
           autopay,
           isSubscription,
         };
+        // payFromAccountId is sent ONLY when it actually changed -- the same
+        // "don't restate a field the form didn't touch" rule the category and
+        // payer lines below already follow, and here it is not a nicety.
+        // BillService.Update refuses a patch pointing at an ARCHIVED account,
+        // so restating an already-archived account (which the select still
+        // shows, deliberately, so the field is not blank) turned every edit of
+        // that bill into "That account is archived and cannot be used to pay a
+        // bill" -- including an edit that only changed the name. The currency
+        // check runs first, so a household whose archived account was its only
+        // one in that currency could never edit that bill again.
+        if (payFromAccountId !== bill!.payFromAccountId) {
+          body.payFromAccountId = payFromAccountId;
+        }
         if (nextDueInput.trim() !== "") {
           body.nextDue = nextDueInput;
         }
