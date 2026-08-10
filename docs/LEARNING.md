@@ -23,12 +23,13 @@ gets rebuilt.
 
 ### 1. Fixing an instance rarely fixes the class
 
-This happened **twelve times** — one bullet each below, and the count is the
+This happened **fourteen times** — one bullet each below, and the count is the
 number of bullets, so recount it when you add one (it had already drifted by
 one before the UX-repair round noticed). Almost every time, the fix was
 correct and the sibling kept the bug; two of them are the variant where
 nothing was broken at all until a field's or a product's meaning moved under
-a reader nobody thought to look at.
+a reader nobody thought to look at, and one is the variant where an earlier
+fix in the same branch *created* the sibling.
 
 - `PATCH` implemented as `PUT` — fixed in `/household` and
   `/notification-preferences`, missed in `/household/members/:id`. Found two
@@ -234,6 +235,41 @@ a reader nobody thought to look at.
   specific the entire time; nothing made the three frontend pages built
   against it go and act on it.
 
+- **A fix created the very sibling it was meant to close — inside the same
+  branch.** Bills' Task 10 added an archived-account refusal to
+  `BillService.Update`, correct on its own and the mirror of the one `Create`
+  already had. But `BillModal`'s edit body put `payFromAccountId` in *every*
+  PATCH, so from that commit onward a bill whose pay-from account had since
+  been archived could not be renamed at all: the save came back "That account
+  is archived and cannot be used to pay a bill," for an edit that never touched
+  the account. The currency check runs first, so a household whose archived
+  account was its only one in that currency could never edit that bill again.
+  The service change and the form that feeds it were reviewed in different
+  tasks, and each was right about its own file. **When you add a refusal, grep
+  for who already sends that field unconditionally** — a new guard's blast
+  radius is every caller that restates a value it did not change, which is the
+  same "don't restate a field the form didn't touch" habit this pattern already
+  teaches for derived figures. Fixed by sending the field only when it differs;
+  the class turned out to have exactly one member (`Account.IsArchived()` is
+  checked on a write path in `bill.go` and nowhere else in `usecase`, so
+  `TransactionModal` restating its own account ids is harmless), and confirming
+  that was part of the fix.
+
+- **The class can be an invariant rather than a line of code.**
+  `TransactionService.Create` enforces four write-invariants on anything
+  entering the ledger: accounts, amount, payer, category. `BillService` — the
+  ledger's second front door, because `MarkPaid` writes a real `transactions`
+  row — re-implemented three of them and omitted the category one, so
+  `POST /bills` accepted an **income** category id and the resulting expense
+  landed in Budget's `Spent` but in no category row at all
+  (`buildCategoryViews` walks expense categories only). Task 8 of the same
+  branch had *already* fixed the payer axis after exactly this reasoning; no
+  one then asked which other axes the same argument covered. **When you find
+  one invariant missing at a new door, enumerate the whole set at the old door
+  and check each one** rather than fixing the axis the report happened to name.
+  The port to depend on already existed (`CategoryLookup`) and the repository
+  already satisfied it — the omission was never a design constraint.
+
 **When you fix something, grep for its shape before you close it.** The question
 that finds these is not "is this fixed?" but "where else does this pattern
 appear?" `Truncate` is now that grep for date-and-location bugs specifically —
@@ -271,31 +307,6 @@ not two. And treat a comment that says "this is only safe until X" as a debt
 that comes due: whoever ships X owns it. Here the comment was right, specific,
 and load-bearing, and it still did not stop the defect, because nothing made
 shipping Transactions go and read it.
-
-**And a fix can create the very sibling it was meant to close.** Bills' Task 10
-added an archived-account refusal to `BillService.Update` — correct on its own,
-and the mirror of the one `Create` already had. But `BillModal`'s edit body put
-`payFromAccountId` in *every* PATCH, so from that commit onward a bill whose
-pay-from account had since been archived could not be renamed at all: the save
-came back "That account is archived and cannot be used to pay a bill," for an
-edit that never touched the account. The service change and the form that feeds
-it were reviewed in different tasks, and each was right about its own file.
-**When you add a refusal, grep for who already sends that field unconditionally**
-— the new guard's blast radius is every caller that restates a value it did not
-change, which is exactly the "don't restate a field the form didn't touch"
-habit this pattern already teaches for derived figures. Three of this branch's
-nine review findings were instances of this pattern, and this one was an
-instance created *by an earlier fix inside the same branch*.
-
-**And the class can be an invariant, not a line of code.** `TransactionService`
-enforces four write-invariants on anything entering the ledger: accounts,
-amount, payer, and category. `BillService` — the ledger's second front door,
-because `MarkPaid` writes a real `transactions` row — re-implemented three of
-them and omitted the category one. Task 8 of the same branch had *already*
-fixed the payer axis after the same reasoning; nobody then asked which other
-axes the same argument covered. **When you find one invariant missing at a new
-door, enumerate the whole set at the old door and check each one**, rather than
-fixing the axis the bug report happened to name.
 
 ### 2. A test that cannot fail protects nothing
 

@@ -728,13 +728,18 @@ by the same index a name lookup uses):
 
 These were each learned from a defect that shipped past a green test suite.
 
-- **Fix the class, not the instance.** Six times in this project a defect was
-  fixed at one site while its siblings kept the bug — a PATCH corrected in two
-  of three endpoints, an error oracle closed at the mailer and left two lines
-  away, a non-awaited invalidation fixed in one panel with two untouched, and
-  (most recently) a `time.Truncate`-and-location mistake that shipped at two
-  separate call sites before a third, correctly-written one got its test.
-  When you fix something, grep for its shape.
+- **Fix the class, not the instance.** Fourteen times in this project a defect
+  was fixed at one site while its siblings kept the bug — a PATCH corrected in
+  two of three endpoints, an error oracle closed at the mailer and left two
+  lines away, a non-awaited invalidation fixed in one panel with two untouched,
+  a `time.Truncate`-and-location mistake that shipped at two separate call
+  sites before a third, correctly-written one got its test, and (most recently)
+  Bills' whole-branch review, where an archived-account refusal added by an
+  earlier task in the same branch turned a rename into a dead end because the
+  form beside it restated the field unconditionally. **`docs/LEARNING.md`
+  pattern 1 is the list, one bullet per instance, and the count there is
+  authoritative — recount it rather than copying this sentence.** When you fix
+  something, grep for its shape.
 - **Verify UI behaviour in a real browser.** jsdom's `<dialog>` is a stub, so
   five passing tests hid a modal that threw on every open in production. If a
   behaviour depends on the platform, a simulated DOM cannot tell you it works.

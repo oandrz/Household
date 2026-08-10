@@ -22,6 +22,25 @@ const CURRENCIES = {
   body: { currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }] },
 };
 
+const ACCOUNTS = {
+  status: 200,
+  body: {
+    accounts: [
+      {
+        id: "acct-1",
+        nickname: "OCBC Everyday",
+        type: "cash",
+        ownerMembershipId: null,
+        ownerName: null,
+        balance: { amountMinor: 500000, currency: "SGD" },
+        countTowardNetWorth: true,
+        visibleToLimitedMembers: false,
+        archivedAt: null,
+      },
+    ],
+  },
+};
+
 function billFixture(overrides: Partial<Bill> = {}): Bill {
   return {
     id: "bill-1",
@@ -85,6 +104,14 @@ function renderBillsPage(
 ) {
   const fetchMock = stubFetchRoutes({
     "GET /api/v1/currencies": CURRENCIES,
+    // BillsPage fetches its own accounts (a bill is paid FROM one, so with
+    // none both Add-bill entry points are disabled -- BillsPage.tsx's own
+    // comment). Registered even though nothing here asserts on it:
+    // stubFetchRoutes throws on an unregistered request, react-query swallows
+    // that throw into `accounts.isError`, and every test in this file would
+    // stay green while running against a failed accounts query rather than
+    // the ordinary path.
+    "GET /api/v1/accounts": ACCOUNTS,
     "GET /api/v1/bills": { status: 200, body: billsResponseFixture(bills, paidThisMonth) },
     ...extraRoutes,
   });

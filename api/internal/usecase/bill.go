@@ -799,8 +799,11 @@ func (s *BillService) toView(rec BillRecord, today time.Time) BillView {
 // `date` column. Calling the wrong one here would leave Overdue (which goes
 // through domain.IsOverdue, and does convert) and DueSoon (which does not)
 // disagreeing about the same two times for eight hours of every day in
-// UTC+8 -- the family docs/HANDOVER.md §6 records, whose thirteenth instance
-// this was. Do not "simplify" this by pointing it back at signup.go's.
+// UTC+8 -- the read-a-date-in-its-own-Location family catalogued under
+// docs/LEARNING.md pattern 1's `time.Truncate` bullet, which is where the
+// running list of instances lives (no count is repeated here on purpose: a
+// number copied into a comment is a number that goes stale). Do not
+// "simplify" this by pointing it back at signup.go's.
 func billStartOfDay(t time.Time) time.Time {
 	t = t.UTC()
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)

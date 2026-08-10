@@ -516,7 +516,22 @@ func TestUndoPaymentIsAtomic(t *testing.T) {
 	// the failed call left its transaction open rather than rolling it back.
 	// The queries above each acquired and released their own connection
 	// synchronously, so anything still held is UndoPayment's.
-	if held := db.Pool().Stat().AcquiredConns(); held != 0 {
+	//
+	// Polled rather than read once: pgxpool runs a background health check on
+	// a 500ms timer that acquires idle connections briefly, so a single
+	// sample can catch an unrelated blip. A LEAKED connection never returns,
+	// so requiring the count to reach zero within a second distinguishes the
+	// two without weakening what is being asserted.
+	var held int32
+	deadline := time.Now().Add(time.Second)
+	for {
+		held = db.Pool().Stat().AcquiredConns()
+		if held == 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if held != 0 {
 		t.Fatalf("%d connection(s) still checked out after a failed undo, want 0 -- the transaction was never rolled back", held)
 	}
 }

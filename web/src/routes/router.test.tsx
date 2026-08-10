@@ -435,6 +435,13 @@ describe("the real route tree", () => {
   it("mounts the Bills page at /money/bills for a caller who has the money capability", async () => {
     stubFetchRoutes({
       "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      // BillsPage fetches accounts of its own: a bill is paid FROM one, so
+      // with none both Add-bill entry points are disabled (BillsPage.tsx's
+      // own comment). Registered here so this mount exercises the ordinary
+      // path -- stubFetchRoutes throws on an unregistered request, and
+      // react-query would swallow that throw into `accounts.isError`,
+      // leaving the test silently green against a state it is not about.
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [] } },
       "GET /api/v1/bills": {
         status: 200,
         body: {
