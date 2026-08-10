@@ -16,6 +16,10 @@ React + TypeScript frontend, Postgres, Docker Compose.
   before changing anything structural**, and keep it true as you go (below).
 - `docs/SKILL_TRACKER.md` — the project skills in `.claude/skills/`, and when to
   reach for each. Each exists because a real defect got through here.
+- **`docs/adr/`** — decisions with consequences outlasting the code that
+  prompted them. **Read the ones touching your area before changing it**, and
+  say so explicitly if your work contradicts one rather than silently
+  overriding it. Deployment and hosting live here.
 - `docs/HANDOVER.md` — current state, what to build next, open items.
 - `docs/GUIDE.md` — how to use the product.
 - `docs/superpowers/specs/` and `docs/superpowers/plans/` — the specs and plans

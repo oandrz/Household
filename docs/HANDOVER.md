@@ -10,8 +10,8 @@ in three months or someone new.
 
 ## 1. Where things stand
 
-Everything shipped so far is walked end to end in a browser, except Bills,
-whose own walk is next (§4). Self-serve
+Everything shipped so far is walked end to end in a browser, Bills included
+— its own walk ran 2026-08-10 and passed 15 of 15 (§4). Self-serve
 sign-up's own 15-criterion walk ran on 2026-07-30 — three days after its code
 was finished and reviewed — and **passed 15 of 15**, recorded in
 `docs/superpowers/plans/2026-07-27-hearth-signup-verification.md`. No product
@@ -381,10 +381,63 @@ finding one real defect at criterion 12 and fixing it mid-walk (§1;
 `docs/superpowers/plans/2026-08-01-hearth-goals-verification.md`). Bills' own
 walk ran on 2026-08-10, finding one real defect at criterion 14 and fixing it
 mid-walk (§1; `docs/superpowers/plans/2026-08-09-hearth-bills-verification.md`).
-**Marriage is the next feature** — independent of Money, and the first area
-whose spec starts from a genuinely clean slate rather than inheriting
-anything from this section (below). Money is still the largest area and
-still the design's centre of gravity.
+**The next work is not a feature — it is the first production deployment**
+(decided 2026-08-10, see the subsection below and `docs/adr/`). Money being
+done and walked is what makes that the right order: a stranger can already
+sign up and use the product, so there is something worth deploying, and every
+deployment problem is cheaper to find with zero users than with ten. Marriage
+is thirteen features and several weeks; shipping it into a stack nobody has
+ever run in production only means meeting the same problems later with more
+code on top of them.
+
+**Marriage is the next feature after the deployment** — independent of Money,
+and the first area whose spec starts from a genuinely clean slate rather than
+inheriting anything from this section (below). Money is still the largest area
+and still the design's centre of gravity.
+
+### Deploying to production — the decision and what it still needs
+
+Two ADRs carry the reasoning; read them before changing any of it:
+
+- **`docs/adr/0001-optimise-for-exit-cost.md`** — the product owner intends to
+  run Hearth for roughly forty years. No hosting provider is a forty-year bet,
+  so hosts are chosen for how cheaply we can *leave* them, not how long they
+  are expected to last. That is why plain Postgres, a static Go binary and our
+  own identity layer are load-bearing properties rather than incidental ones,
+  and why Vercel and Supabase were rejected on architecture rather than price.
+- **`docs/adr/0002-first-production-host.md`** — the concrete purchase: a
+  Hetzner CPX11 in Singapore running the existing Compose stack, Caddy in
+  front for automatic TLS, Postgres on the same box, nightly plain-SQL
+  `pg_dump` off-provider, Resend's free plan for mail. Roughly S$10–13/month.
+
+**Nothing has been deployed yet.** Seven things stand between the decision and
+a live install, in this order:
+
+1. **A production Compose file.** `docker-compose.yml` is development-only:
+   `air` hot reload, bind mounts, Mailpit, Postgres published on the host, the
+   password literally `hearth:hearth`, and no `.env` interpolation anywhere.
+   (`sslmode=disable` is **not** on that list: Postgres stays on the Compose
+   bridge network and is never published, so the connection never crosses a
+   network and requiring TLS would mean issuing certificates for a link that
+   does not leave the machine. An earlier draft of this section listed
+   `sslmode=require` as a production change; the deployment spec's decision 9
+   corrects it.)
+2. **An image that can administer production.** See §5 — the prod image has no
+   shell, no `goose` and no `adminctl`, so as things stand a migration cannot
+   be run and a locked-out household cannot be unlocked. **This is the one open
+   design decision**: a third Dockerfile target carrying both binaries, or a
+   sidecar built from the existing `dev` target.
+3. **`set_real_ip_from` in `web/nginx.conf`.** Two lines, and mandatory once
+   Caddy sits in front — without them the per-IP sign-up limiter collapses into
+   a single global bucket (§5, and `docs/SYSTEM_DESIGN.md` §1).
+4. **`APP_BASE_URL` set to the public HTTPS origin.** It is embedded in every
+   magic link, invite and sign-up mail; wrong, and every mailed link points at
+   `localhost`.
+5. **Backups: the nightly dump, and one restore actually performed and timed.**
+6. **DNS**: the A record, plus Resend's SPF, DKIM and DMARC records.
+7. **A browser walk against the deployed install**, to the same standard every
+   feature here has been held to. First-run is exactly where these walks have
+   found things before.
 
 **Slice 5 (Overview) is the exception to its own rule, deliberately.** The
 original order put it last because it only aggregates, so building it early
@@ -730,6 +783,81 @@ by the same index a name lookup uses):
   walk (§1) cannot exercise the fix either way. The global daily mail ceiling
   (1000/day, reset at midnight, counted from `signups`) is what actually bounds
   the damage in the meantime.
+- **The production image cannot administer itself, and that is a lockout with
+  no key.** `api/Dockerfile`'s prod target is
+  `gcr.io/distroless/static-debian12:nonroot` with `ENTRYPOINT ["/app/api"]` —
+  no shell, no `goose`, no `adminctl`. So in production today: no migration can
+  be applied, no password reset (`make reset-password` is the *only* password
+  recovery path this product has — see the tracker's 🟡 on "Forgot?"), no
+  `create-invite`, no `prune`, and **no `unlock-household`**. Chain that last
+  one out: the lockout is household-wide and uncapped by deliberate decision
+  (above), magic link is the documented way back in, and mail failing is
+  documented as failing *silently*. A customer who locks themselves out on a
+  day the mail relay is unhappy cannot be helped by anyone. **Decide the shape
+  before deploying** — a third Dockerfile target carrying `goose` and
+  `adminctl`, or a sidecar built from the existing `dev` target.
+- **Putting any second proxy in front of nginx silently disables the per-IP
+  sign-up limiter.** `web/nginx.conf` overwrites `X-Real-IP` with
+  `$remote_addr` and strips `True-Client-IP` precisely so a client cannot spoof
+  the limiter's key — and that comment assumes nginx is the edge. Put Caddy, a
+  Cloudflare tunnel or a managed load balancer in front and `$remote_addr`
+  becomes *the proxy's* address on every request, so `middleware.RealIP` keys
+  every caller to one value and the per-IP limit becomes one global bucket.
+  Per the rate-limit note above, a tripped global ceiling is silent and
+  platform-wide. Fix: `set_real_ip_from <the proxy's address>` plus
+  `real_ip_header X-Forwarded-For` in `nginx.conf`, or terminate TLS inside
+  that same nginx so there is only ever one proxy. `docs/adr/0002` chose Caddy
+  in front, so the two nginx lines are mandatory, not optional.
+- **The domain is the most fragile asset here — more fragile than the server.**
+  `APP_BASE_URL` is embedded in every magic link and invite; SPF and DKIM bind
+  to the domain; the cookie origin is the domain. A dead server is restored in
+  an hour from the dump. A domain that lapses and is re-registered by someone
+  else is gone permanently, and takes the only account-recovery path with it.
+  Register long, auto-renew, and point the registrar's expiry notices at an
+  address that is not hosted on that domain.
+- **Succession is unanswered.** Over the forty-year horizon in
+  `docs/adr/0001`, this holds a family's complete financial history on a VPS
+  account and a registrar account in one person's name, behind a household-wide
+  uncapped lockout whose only recovery is email. If that person is unavailable,
+  nobody else can get in — not to the product, not to the box, not to the
+  domain. This is a product question, not ops trivia, and it is the only item
+  in this section that cannot be retrofitted after the fact.
+- **A backup is not a backup until it has been restored.** Dumps in plain SQL
+  rather than custom format (any future Postgres can load them, and a human can
+  read them), at least one copy off the hosting provider entirely — a lapsed
+  payment card takes the server and its snapshots together — and one restore
+  actually performed and timed before it is needed for real.
+
+### Assumptions with a long horizon, recorded rather than fixed
+
+Neither of these is wrong today. Both are written down here because the
+forty-year horizon in `docs/adr/0001` is what turns them from "fine" into
+"someone will meet this and need to know it was a decision".
+
+- **Argon2 parameters are frozen at the moment each password is set.**
+  `ARGON2_TIME=3` and `ARGON2_MEMORY_KIB=65536` are appropriate for 2026 and
+  will not be in twenty years. **The port makes a rehash-on-login impossible as
+  written**, which is a sharper statement than "nobody implemented one":
+  `usecase.PasswordHasher` is `Hash(plain) (string, error)` and
+  `Verify(plain, encoded) bool`, so there is no channel to report that a stored
+  hash's parameters differ from the configured ones.
+  `Argon2Hasher.Verify` does parse `m`, `t` and `p` out of the stored
+  string — it has to, to re-derive the key — and then discards them with the
+  `bool`. Sign-in (`usecase/auth.go`) calls `Verify` and nothing else. So
+  raising the configured cost protects only passwords set after the change, and
+  every existing hash keeps its creation-time cost forever. The fix, whenever
+  it is wanted, starts at the port rather than the adapter: widen the `Verify`
+  result so a caller can learn "correct, but stored below the configured cost",
+  then re-hash on that signal during a successful sign-in — the one moment the
+  plaintext is in hand.
+- **Money assumes two decimal places, everywhere.** `Money.String()` hard-codes
+  them, which is why the ISO 4217 allowlist offers only two-minor-unit codes
+  (see the tracker's Household settings section). A currency's minor unit can be
+  redefined — Indonesian rupiah redenomination has been on the legislative
+  agenda repeatedly, and this product is SGD/IDR by design — and the schema has
+  no way to express "this amount predates the change". Deliberately not built
+  for: the cost of carrying a per-row scale today is real and the event may
+  never come.
 
 ---
 
