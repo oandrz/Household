@@ -271,6 +271,15 @@ silently wins host ports 5173/8080/8025 out from under colima's stack, so
 browser and every `curl` still talk to whatever Docker Desktop published —
 check `docker ps` on both engines before concluding the code is broken.
 
+**Host edits to `web/src/**` do not reliably reach the running dev server.**
+Vite runs inside `hearth-web-1` against a bind mount, and chokidar misses the
+host's filesystem events, so a change simply never arrives: the browser shows
+the old bundle, and a hard reload changes nothing because the server is still
+serving what it last built. `docker restart hearth-web-1` fixes it instantly.
+Bills' own page task lost time to this before recognising it — the symptom
+reads exactly like a change that did not compile, which is the wrong thing to
+go looking for.
+
 Mailpit catches all outbound mail at `http://localhost:8025`. Its API is
 easier to drive than its UI:
 
