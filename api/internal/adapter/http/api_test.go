@@ -258,6 +258,7 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 		Households: households,
 		FX:         fxProvider,
 		Accounts:   accountRepo,
+		Categories: categoryRepo,
 	})
 
 	router := httpadapter.NewRouter(httpadapter.Deps{

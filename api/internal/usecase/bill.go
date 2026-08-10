@@ -142,11 +142,20 @@ type MarkPayment struct {
 // no Clock here for the same reason: every method that needs the current
 // date takes it as a parameter (today, at), so nothing in this service reads
 // the wall clock and every test is deterministic.
+//
+// Categories is the same narrow CategoryLookup TransactionDeps carries, and
+// it is here for the same reason: MarkPaid writes a real expense into the
+// ledger carrying the bill's own category_id, so a bill that stored an
+// income category would produce spend that Budget's own buildCategoryViews
+// skips entirely -- money in Spent, but in no category row. A bill validates
+// its category at the two points one can be chosen (Create and Update), not
+// at the point it is spent.
 type BillDeps struct {
 	Bills      BillRepository
 	Households HouseholdRepository
 	FX         FXRateProvider
 	Accounts   AccountLookup
+	Categories CategoryLookup
 }
 
 // BillService composes the Bills screen and every write against it. Like
@@ -258,7 +267,13 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 				nextDueOverdue = view.Overdue
 				nextDueAutopay = b.Autopay
 			}
-			dueThisMonth = candidate.Year() == today.Year() && candidate.Month() == today.Month()
+			// Both sides through billStartOfDay: Year/Month read a time's
+			// own Location, so an unconverted `today` would answer this in
+			// the caller's zone while Bills.MonthTotals -- the figure this
+			// probe recovers per-bill identity for -- scoped its month in
+			// UTC. See billStartOfDay's own comment.
+			c, t := billStartOfDay(candidate), billStartOfDay(today)
+			dueThisMonth = c.Year() == t.Year() && c.Month() == t.Month()
 		}
 
 		// excludedThisBill is one flag for the whole bill, covering both
@@ -410,6 +425,11 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 // runs for its own PaidByMembershipID: a bill's payer, like an account's
 // owner, is a validity question this layer answers, not something left for
 // the HTTP layer to have caught by then.
+//
+// A CategoryID that is not this household's, or is not an expense category,
+// is refused with domain.ErrCategoryKindMismatch -- see validateCategory's
+// own comment for why a bill needs the ledger's category rule and not just
+// the ledger's account and payer rules.
 func (s *BillService) Create(ctx context.Context, in NewBill, today time.Time) (BillView, error) {
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
@@ -446,6 +466,10 @@ func (s *BillService) Create(ctx context.Context, in NewBill, today time.Time) (
 		if !ok {
 			return BillView{}, domain.ErrAccountOwnerNotInHousehold
 		}
+	}
+
+	if err := s.validateCategory(ctx, in.HouseholdID, in.CategoryID); err != nil {
+		return BillView{}, err
 	}
 
 	rec, err := s.deps.Bills.Create(ctx, NewBillRow{
@@ -499,6 +523,11 @@ func (s *BillService) Create(ctx context.Context, in NewBill, today time.Time) (
 // OwnerMembershipID -- services enforce what is valid, and a payer from
 // another household is not.
 //
+// A CategoryID naming a category that is not this household's, or is not an
+// expense category, is refused with domain.ErrCategoryKindMismatch -- the
+// same check Create runs, re-run here because a patch can name a different
+// category than the one Create validated.
+//
 // today is one parameter wider than the brief's own sketch, for the same
 // reason Create's own comment gives.
 func (s *BillService) Update(ctx context.Context, householdID, billID string, patch BillPatch, today time.Time) (BillView, error) {
@@ -540,6 +569,13 @@ func (s *BillService) Update(ctx context.Context, householdID, billID string, pa
 	if patch.ClearCategory {
 		b.CategoryID = ""
 	} else if patch.CategoryID != nil {
+		// Checked again here, for the same reason the membership check below
+		// is: a patch can name a DIFFERENT category than the one Create
+		// validated. ClearCategory above needs no check -- "" is
+		// uncategorised, which is always valid.
+		if err := s.validateCategory(ctx, householdID, *patch.CategoryID); err != nil {
+			return BillView{}, err
+		}
 		b.CategoryID = *patch.CategoryID
 	}
 	if patch.PayFromAccountID != nil {
@@ -731,12 +767,14 @@ func (s *BillService) toView(rec BillRecord, today time.Time) BillView {
 	overdue := b.NextDue != nil && domain.IsOverdue(*b.NextDue, today)
 	dueSoon := overdue
 	if !dueSoon && b.NextDue != nil {
-		// Day boundaries, not a raw duration: startOfDay strips both times
-		// down to midnight (in their own location, which is UTC everywhere a
-		// bill's dates come from) before the 30-day comparison, the same
-		// normalisation domain.IsOverdue applies to NextDue and today before
-		// comparing them.
-		dueSoon = startOfDay(*b.NextDue).Sub(startOfDay(today)) <= 30*24*time.Hour
+		// Day boundaries, not a raw duration: billStartOfDay converts both
+		// times to UTC and strips them to midnight before the 30-day
+		// comparison, which is the same normalisation domain.IsOverdue
+		// applies to the same two values on the Overdue line above. The two
+		// fields have to agree: Overdue and DueSoon are read off one row on
+		// one screen, and a bill the page calls overdue but not due soon is
+		// a contradiction the household can see.
+		dueSoon = billStartOfDay(*b.NextDue).Sub(billStartOfDay(today)) <= 30*24*time.Hour
 	}
 	return BillView{
 		Bill:         b,
@@ -749,6 +787,60 @@ func (s *BillService) toView(rec BillRecord, today time.Time) BillView {
 		// nor Later.
 		Settled: !b.IsArchived() && b.NextDue == nil,
 	}
+}
+
+// billStartOfDay is midnight UTC for t -- t converted to UTC first, then
+// stripped, exactly as domain.startOfDay does it.
+//
+// It exists because this package already has a startOfDay (signup.go) that
+// deliberately does NOT convert: it keeps t.Location() because the signup
+// rate limit resets at the household's own local midnight. That is correct
+// for signups and wrong for bills, whose dates are UTC calendar days from a
+// `date` column. Calling the wrong one here would leave Overdue (which goes
+// through domain.IsOverdue, and does convert) and DueSoon (which does not)
+// disagreeing about the same two times for eight hours of every day in
+// UTC+8 -- the family docs/HANDOVER.md §6 records, whose thirteenth instance
+// this was. Do not "simplify" this by pointing it back at signup.go's.
+func billStartOfDay(t time.Time) time.Time {
+	t = t.UTC()
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+// validateCategory refuses a category that is not this household's, and one
+// that is not an EXPENSE category -- the same two checks
+// TransactionService.validateCategory runs, minus its choice between expense
+// and income: a bill is always a payment to a company (spec decision 1), so
+// there is no kind here to branch on.
+//
+// Without this, POST /bills would accept an income category id (the modal
+// filters to expense, but an API caller is not the modal), and the expense
+// MarkPaid later writes from it would land in Budget's Spent total while
+// appearing in no category row at all -- buildCategoryViews walks expense
+// categories only. domain.ErrCategoryKindMismatch is the sentinel because it
+// is the one the HTTP layer already answers 422 INVALID_CATEGORY for; a
+// bills-only sentinel would need its own arm to say the same thing.
+//
+// "" is uncategorised, which is always valid -- the same "" <-> SQL NULL
+// convention PaidByMembershipID's own check above skips on.
+func (s *BillService) validateCategory(ctx context.Context, householdID, categoryID string) error {
+	if categoryID == "" {
+		return nil
+	}
+	ok, err := s.deps.Categories.BelongsToHousehold(ctx, householdID, categoryID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return domain.ErrCategoryKindMismatch
+	}
+	kind, err := s.deps.Categories.Kind(ctx, householdID, categoryID)
+	if err != nil {
+		return err
+	}
+	if kind != domain.CategoryExpense {
+		return domain.ErrCategoryKindMismatch
+	}
+	return nil
 }
 
 // convert turns one amount into the household's primary currency. This

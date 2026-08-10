@@ -32,10 +32,12 @@ func day(s string) time.Time {
 
 // billServiceFixture is what newBillService's opts mutate before the service
 // is built: the account double every Create/Update/MarkPaid guard consults,
-// and the FX double every summary conversion consults.
+// the category double Create/Update's own category check consults, and the FX
+// double every summary conversion consults.
 type billServiceFixture struct {
-	accounts *fakeAccountLookup
-	fx       usecase.FXRateProvider
+	accounts   *fakeAccountLookup
+	categories *fakeCategoryLookup
+	fx         usecase.FXRateProvider
 }
 
 type billServiceOption func(*billServiceFixture)
@@ -94,6 +96,16 @@ func newBillService(t *testing.T, repo *fakeBillRepo, opts ...billServiceOption)
 			},
 			memberships: map[string]string{},
 		},
+		// "cat-utilities" is the id every bill() fixture carries, so it has
+		// to be a category this household knows -- and an expense one, since
+		// that is the only kind a bill may hold (BillService.validateCategory).
+		// "cat-salary" is the income category the refusal test needs; it is
+		// seeded here rather than by an option so both halves of the rule
+		// (wrong household, wrong kind) can be reached without extra wiring.
+		categories: &fakeCategoryLookup{kinds: map[string]domain.CategoryKind{
+			"cat-utilities": domain.CategoryExpense,
+			"cat-salary":    domain.CategoryIncome,
+		}},
 		fx: staticTestRates{},
 	}
 	for _, opt := range opts {
@@ -105,6 +117,7 @@ func newBillService(t *testing.T, repo *fakeBillRepo, opts ...billServiceOption)
 		Households: households,
 		FX:         f.fx,
 		Accounts:   f.accounts,
+		Categories: f.categories,
 	})
 }
 
@@ -307,6 +320,56 @@ func TestListDueSoonBoundaryIsThirtyDaysInclusive(t *testing.T) {
 	}
 	if byName["Thirty-one days out"].DueSoon {
 		t.Error("31 days out belongs under Later")
+	}
+}
+
+// TestListReadsDueSoonInUTCRegardlessOfTodaysLocation is the usecase-layer
+// counterpart of domain's own TestNextDueAndIsOverdueNormaliseNonUTCInputToUTC.
+// Overdue goes through domain.IsOverdue, which converts to UTC; DueSoon is
+// computed here, and before this fix went through the package-local
+// startOfDay in signup.go, which deliberately does NOT convert. Two fields on
+// one row, from the same two times, under two normalisations.
+func TestListReadsDueSoonInUTCRegardlessOfTodaysLocation(t *testing.T) {
+	// 2026-08-08T20:00-07:00 is 2026-08-09T03:00Z: the UTC calendar day is
+	// 9 August, so a bill due 8 September is exactly 30 days out -- Due soon
+	// by the inclusive boundary above. Read in -07:00 instead, "today" is
+	// 8 August and the same bill is 31 days out, which lands it under Later.
+	sevenHoursWest := time.FixedZone("-07:00", -7*60*60)
+	today := time.Date(2026, time.August, 8, 20, 0, 0, 0, sevenHoursWest)
+
+	svc := newBillServiceWith(t, bill("Exactly thirty days out in UTC", "2026-09-08", 5000))
+	view, err := svc.List(context.Background(), "h1", false, today)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if !view.Bills[0].DueSoon {
+		t.Fatal("DueSoon read today in its own Location instead of UTC and pushed a bill 30 days out into Later")
+	}
+}
+
+// TestListReadsTheDueThisMonthProbeInUTCRegardlessOfTodaysLocation is the
+// sibling of the test above for List's other date comparison: the
+// due-this-month probe that decides which bill an ExcludedNoRate count is
+// attributed to. Year/Month read a time's own Location too, so an
+// unconverted `today` answers "which month is it" in the caller's zone while
+// Bills.MonthTotals -- the figure the probe recovers per-bill identity for --
+// scoped its month in UTC.
+func TestListReadsTheDueThisMonthProbeInUTCRegardlessOfTodaysLocation(t *testing.T) {
+	// 2026-07-31T20:00-07:00 is 2026-08-01T03:00Z: August in UTC, July in
+	// -07:00. The bill is due 9 August on an IDR account with no rate, so it
+	// is excluded from DueThisMonth either way -- but only a UTC reading of
+	// `today` says the month it was excluded FROM is this one, and counts it.
+	sevenHoursWest := time.FixedZone("-07:00", -7*60*60)
+	today := time.Date(2026, time.July, 31, 20, 0, 0, 0, sevenHoursWest)
+
+	svc := newBillServiceWithFX(t, noRateFX{}, billOn("Arisan", "IDR", "2026-08-09", 50_000_000))
+	view, err := svc.List(context.Background(), "h1", false, today)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if view.Summary.ExcludedNoRate != 1 {
+		t.Fatalf("ExcludedNoRate = %d, want 1 -- the month probe read today in its own Location instead of UTC",
+			view.Summary.ExcludedNoRate)
 	}
 }
 
@@ -604,6 +667,64 @@ func TestBillCreateAcceptsAPayerInTheHousehold(t *testing.T) {
 	}
 }
 
+// TestBillCreateValidatesTheCategory is the ledger's own category rule,
+// applied to the other door into the ledger. TransactionService.Create has
+// refused a foreign or wrong-kind category since Transactions shipped;
+// BillService.MarkPaid writes an expense carrying the bill's stored
+// category_id, so a bill created with an income category produces spend that
+// Budget counts in Spent and shows in no category row at all
+// (buildCategoryViews walks expense categories only).
+//
+// The frontend already filters its dropdown to expense categories -- and
+// that is exactly why this test exists at this layer: an API caller is not
+// the dropdown.
+func TestBillCreateValidatesTheCategory(t *testing.T) {
+	svc := newBillService(t, &fakeBillRepo{})
+	ctx := context.Background()
+	today := day("2026-08-09")
+
+	base := usecase.NewBill{
+		HouseholdID: "h1", Name: "Rent", AmountMinor: 250000,
+		Cadence: domain.CadenceMonthly, NextDue: day("2026-08-20"),
+		PayFromAccountID: "acct-1",
+	}
+
+	income := base
+	income.CategoryID = "cat-salary"
+	if _, err := svc.Create(ctx, income, today); !errors.Is(err, domain.ErrCategoryKindMismatch) {
+		t.Fatalf("income category err = %v, want domain.ErrCategoryKindMismatch", err)
+	}
+
+	// A category id that is not one this household has at all -- the other
+	// half of the rule, and the one that stops an id from another household
+	// being written onto a bill.
+	foreign := base
+	foreign.Name = "Rent elsewhere"
+	foreign.CategoryID = "cat-someone-elses"
+	if _, err := svc.Create(ctx, foreign, today); !errors.Is(err, domain.ErrCategoryKindMismatch) {
+		t.Fatalf("foreign category err = %v, want domain.ErrCategoryKindMismatch", err)
+	}
+
+	// "" is uncategorised, which is always valid: the "" <-> SQL NULL
+	// convention, not a missing value to refuse.
+	uncategorised := base
+	uncategorised.Name = "Rent uncategorised"
+	if _, err := svc.Create(ctx, uncategorised, today); err != nil {
+		t.Fatalf("uncategorised create: %v -- \"\" must never reach the category lookup", err)
+	}
+
+	expense := base
+	expense.Name = "Rent categorised"
+	expense.CategoryID = "cat-utilities"
+	created, err := svc.Create(ctx, expense, today)
+	if err != nil {
+		t.Fatalf("expense category create: %v", err)
+	}
+	if created.Bill.CategoryID != "cat-utilities" {
+		t.Fatalf("category = %q, want cat-utilities", created.Bill.CategoryID)
+	}
+}
+
 // TestUpdateRefusesAPayerFromAnotherHousehold is Update's own half of the
 // same guard: the patch can name a DIFFERENT membership than the one Create
 // originally validated, so Update must check again.
@@ -618,6 +739,30 @@ func TestUpdateRefusesAPayerFromAnotherHousehold(t *testing.T) {
 	}, day("2026-08-09"))
 	if !errors.Is(err, domain.ErrAccountOwnerNotInHousehold) {
 		t.Fatalf("err = %v, want domain.ErrAccountOwnerNotInHousehold", err)
+	}
+}
+
+// TestUpdateAcceptsAPayerInTheHousehold is the membership guard's happy path
+// on the Update side. Without it, nothing at any layer set a VALID payer
+// through Update -- the refusal test above passes just as well with
+// MembershipBelongsToHousehold's two arguments swapped (the double answers
+// false either way), and ClearPayer routes around the check entirely. This
+// is the test that pins the argument ORDER, the same way
+// TestBillCreateAcceptsAPayerInTheHousehold pins it for Create.
+func TestUpdateAcceptsAPayerInTheHousehold(t *testing.T) {
+	repo := &fakeBillRepo{}
+	repo.add(bill("SP utilities", "2026-08-08", 14230))
+	svc := newBillService(t, repo, withMembership("m-andreas", "h1"))
+
+	andreas := "m-andreas"
+	updated, err := svc.Update(context.Background(), "h1", "bill-1", usecase.BillPatch{
+		PaidByMembershipID: &andreas,
+	}, day("2026-08-09"))
+	if err != nil {
+		t.Fatalf("Update: %v -- a membership genuinely in this household must be accepted", err)
+	}
+	if updated.Bill.PaidByMembershipID != "m-andreas" {
+		t.Fatalf("payer = %q, want m-andreas", updated.Bill.PaidByMembershipID)
 	}
 }
 
@@ -740,6 +885,38 @@ func TestUpdateClearsCategoryAndPayer(t *testing.T) {
 	}
 	if updated.Bill.PaidByMembershipID != "" {
 		t.Errorf("payer = %q, want cleared", updated.Bill.PaidByMembershipID)
+	}
+}
+
+// TestUpdateValidatesTheCategory is Create's category rule on the Update
+// side: a patch can name a different category than the one Create validated,
+// so re-pointing a bill at an income category has to be refused too. Clearing
+// it is not the same act and must stay free of the check -- "" is
+// uncategorised, not an invalid category.
+func TestUpdateValidatesTheCategory(t *testing.T) {
+	repo := &fakeBillRepo{}
+	repo.add(bill("SP utilities", "2026-08-08", 14230))
+	svc := newBillService(t, repo)
+	ctx := context.Background()
+	today := day("2026-08-09")
+
+	income := "cat-salary"
+	if _, err := svc.Update(ctx, "h1", "bill-1", usecase.BillPatch{CategoryID: &income}, today); !errors.Is(err, domain.ErrCategoryKindMismatch) {
+		t.Fatalf("income category err = %v, want domain.ErrCategoryKindMismatch", err)
+	}
+
+	foreign := "cat-someone-elses"
+	if _, err := svc.Update(ctx, "h1", "bill-1", usecase.BillPatch{CategoryID: &foreign}, today); !errors.Is(err, domain.ErrCategoryKindMismatch) {
+		t.Fatalf("foreign category err = %v, want domain.ErrCategoryKindMismatch", err)
+	}
+
+	expense := "cat-utilities"
+	updated, err := svc.Update(ctx, "h1", "bill-1", usecase.BillPatch{CategoryID: &expense}, today)
+	if err != nil {
+		t.Fatalf("expense category patch: %v", err)
+	}
+	if updated.Bill.CategoryID != "cat-utilities" {
+		t.Fatalf("category = %q, want cat-utilities", updated.Bill.CategoryID)
 	}
 }
 

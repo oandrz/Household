@@ -406,6 +406,41 @@ func TestBillsCreateDuplicateNameOffersRestoreWhenArchived(t *testing.T) {
 	}
 }
 
+// TestBillsRefuseAnIncomeCategoryOnBothWritePaths is the wire-level half of
+// the category rule. The Add-bill modal only ever offers expense categories,
+// so this is the case that only an API caller can reach -- and it had to be
+// closed here rather than there, because a bill's category is copied onto the
+// real expense MarkPaid writes, and Budget's category rows are built from
+// expense categories only: an income-categorised bill would put money in
+// Spent that appears against no category at all.
+//
+// Both write paths are asserted, not just Create: Update takes the category
+// as its own field and would otherwise be a second, open door to the same
+// state.
+func TestBillsRefuseAnIncomeCategoryOnBothWritePaths(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	accountID := env.mustCreateAccountID(t, session, csrf)
+	incomeCategoryID := env.firstIncomeCategory(t, session)
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/bills", map[string]any{
+		"name": "Salary as a bill", "amountMinor": 2_000, "cadence": "monthly",
+		"nextDue": farFutureDate(), "categoryId": incomeCategoryID, "payFromAccountId": accountID,
+	}, session, csrf)
+	assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "INVALID_CATEGORY")
+
+	// A bill created without a category is where the Update path starts: the
+	// income id has to be refused when it is patched on afterwards too.
+	created := env.mustCreateBill(t, session, csrf, map[string]any{
+		"name": "Internet", "amountMinor": 45_000, "cadence": "monthly",
+		"nextDue": farFutureDate(), "payFromAccountId": accountID,
+	})
+	patchRec := env.authed(t, http.MethodPatch, "/api/v1/bills/"+created.Bill.ID, map[string]any{
+		"categoryId": incomeCategoryID,
+	}, session, csrf)
+	assertErrorResponse(t, patchRec, http.StatusUnprocessableEntity, "INVALID_CATEGORY")
+}
+
 // TestBillUpdateCurrencyMismatchNamesBothCurrencies is BillService.Update's
 // own doc comment realised on the wire: the service returns the bare
 // domain.ErrBillCurrencyImmutable sentinel deliberately, and "the message

@@ -185,6 +185,11 @@ func run() error {
 		// declares, the same one TransactionDeps.Accounts is wired with above
 		// -- one repository, two ports, each caller seeing only what it needs.
 		Accounts: accountRepo,
+		// The same CategoryLookup TransactionDeps is wired with: a bill's
+		// category ends up on a real expense the moment it is paid, so it is
+		// validated against the same rule the ledger applies to a
+		// hand-entered one (BillDeps' own comment).
+		Categories: categoryRepo,
 	})
 
 	srv := &http.Server{

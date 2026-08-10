@@ -22,6 +22,21 @@ func monthPath(t time.Time) string {
 // would offer.
 func (env *testEnv) firstExpenseCategory(t *testing.T, session *http.Cookie) (id, name string) {
 	t.Helper()
+	return env.firstCategoryOfKind(t, session, "expense")
+}
+
+// firstIncomeCategory is firstExpenseCategory's counterpart, for a test that
+// needs a category of the WRONG kind -- bills refuse one (BillService's own
+// category check), and the only way to try it is with a real income id from
+// this household's own starter set.
+func (env *testEnv) firstIncomeCategory(t *testing.T, session *http.Cookie) string {
+	t.Helper()
+	id, _ := env.firstCategoryOfKind(t, session, "income")
+	return id
+}
+
+func (env *testEnv) firstCategoryOfKind(t *testing.T, session *http.Cookie, kind string) (id, name string) {
+	t.Helper()
 	rec := env.authedGet(t, "/api/v1/categories", session)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list categories: status = %d, body = %s", rec.Code, rec.Body.String())
@@ -37,11 +52,11 @@ func (env *testEnv) firstExpenseCategory(t *testing.T, session *http.Cookie) (id
 		t.Fatalf("decode categories: %v", err)
 	}
 	for _, c := range body.Categories {
-		if c.Kind == "expense" {
+		if c.Kind == kind {
 			return c.ID, c.Name
 		}
 	}
-	t.Fatal("no expense category in the starter set")
+	t.Fatalf("no %s category in the starter set", kind)
 	return "", ""
 }
 
