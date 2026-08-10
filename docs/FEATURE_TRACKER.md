@@ -296,8 +296,9 @@ five to ship: recurring bills on a one-off/monthly/quarterly/yearly cadence,
 marked paid by writing a real expense transaction so Budget, Spending by
 person and net worth all move, archive and restore, undo, and a
 subscriptions rollup. This is still the largest area, and every task on it
-is code-complete and reviewed clean — its own browser walk (Task 18) has not
-run yet, so "built" here means the code, not yet a walk confirming it.
+is code-complete, reviewed clean, and walked — Task 18's own 15-criterion
+browser walk ran 2026-08-10 and passed 15 of 15, so "built" here means the
+code *and* a walk confirming it. All five Money features are now walked.
 
 **Finances**
 

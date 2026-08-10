@@ -35,6 +35,12 @@ removed the two unbuilt spaces from the navigation along with their four
 routes, and rewrote copy; where either round changed the shape of something
 drawn here, the change is recorded at that diagram (§7 in particular).
 
+**Nothing is deployed anywhere.** Everything above runs only in development,
+under `docker compose`. §1 carries a second diagram of the production topology
+chosen in `docs/adr/0002-first-production-host.md`; that one is a target, not a
+description, and it is the only diagram in this document drawing something that
+does not exist yet. It is labelled as such at the diagram.
+
 ---
 
 ## 1 · Containers
@@ -83,6 +89,63 @@ suppresses `True-Client-IP`, which is what stops a client from spoofing the
 sign-up per-IP rate limiter's key (§4). Development has no nginx service at
 all — Vite proxies `/api` straight to `api:8080` with no header rewriting — so
 the per-IP limiter is fully spoofable there; see `docs/HANDOVER.md`.
+
+### The production topology — decided, not yet deployed
+
+Nothing is deployed anywhere as of 2026-08-10. The shape below is the one
+chosen in `docs/adr/0002-first-production-host.md`; there is no production
+Compose file yet, so this diagram is the target, not a description of something
+running.
+
+```mermaid
+graph TD
+    Browser["Browser"]
+    LE["Let's Encrypt"]
+
+    subgraph host["One VPS (target: Hetzner CPX11, Singapore)"]
+        Caddy["caddy :443<br/>terminates TLS, renews certs"]
+        Nginx["web — nginx :80<br/>serves the SPA, proxies /api"]
+        API["api — Go service :8080<br/>distroless, no shell"]
+        PG[("postgres — volume, not published")]
+        Admin["NOT BUILT — admin image<br/>goose + adminctl, see HANDOVER §5"]
+    end
+
+    Relay["Resend — SMTP relay"]
+    Backup[("Off-provider dump<br/>nightly pg_dump, plain SQL")]
+
+    Browser -->|HTTPS| Caddy
+    Caddy -->|"HTTP, one origin"| Nginx
+    Nginx -->|"/api/v1, /healthz, /readyz"| API
+    API --> PG
+    API -->|"SMTP, TLS mandatory"| Relay
+    Caddy -.->|"ACME"| LE
+    Admin -.->|"migrations, unlock, prune"| PG
+    PG -.-> Backup
+```
+
+Three things about this shape are not obvious from the boxes.
+
+**Caddy exists to renew certificates, not to route.** nginx already does the
+routing, and `web/nginx.conf` carries a security control in its header
+rewriting that would have to be re-implemented if Caddy served the SPA
+directly. Caddy sits in front purely so TLS issuance and renewal are automatic
+for as long as the product runs — a certbot cron is the kind of thing that
+works for six years and then quietly stops.
+
+**That second proxy breaks the per-IP rate limiter unless nginx is told about
+it.** With Caddy in front, the `$remote_addr` nginx sees is *Caddy's* address on
+every request, so the `X-Real-IP` it sets is the same value for every caller and
+`middleware.RealIP` keys the whole world to one bucket (§4). `nginx.conf` needs
+`set_real_ip_from <Caddy's address>` and `real_ip_header X-Forwarded-For` for
+`$remote_addr` to resolve to the real client again. Two lines, mandatory, and
+invisible when wrong — the limiter does not error, it just stops limiting.
+
+**The admin image is drawn dashed because it does not exist.** The prod API
+image is `distroless/static-debian12:nonroot` with `ENTRYPOINT ["/app/api"]`:
+no shell, no `goose`, no `adminctl`. As things stand a deployed install cannot
+apply a migration, reset a password or unlock a locked-out household. Closing
+that is a prerequisite for deploying, not a follow-up; `docs/HANDOVER.md` §5
+carries the reasoning and the two candidate shapes.
 
 ---
 
@@ -1641,8 +1704,12 @@ prefix, which is what made the duplication stop being optional.
 | Mail | Mailpit in development; TLS policy and credentials from config elsewhere |
 | Seeding | `adminctl seed`, refused unless `APP_ENV=development` **and** the database host is local — both checked before the connection opens |
 | Retention | `adminctl prune --older-than=<days>` (default 30, floor 7) deletes consumed/expired `signups` and stale `login_attempts`; `magic_links`, `invites` and `sessions` still grow forever |
-| Rate limiting | Per-address (3/hour) and a global daily ceiling (1000, reset at midnight, not a rolling 24 hours), both counted from `signups` so a restart cannot reset them; per-IP (5/hour) is an in-memory token bucket in the HTTP layer — process-local, spoofable in development (see §1). The per-IP limit binds before the global one by construction (5 × 24 = 120 ≪ 1000) so one IP alone can never exhaust the global ceiling |
+| Rate limiting | Per-address (3/hour) and a global daily ceiling (1000, reset at midnight, not a rolling 24 hours), both counted from `signups` so a restart cannot reset them; per-IP (5/hour) is an in-memory token bucket in the HTTP layer — process-local, spoofable in development, and keyed to the *proxy* rather than the client if a second proxy is put in front of nginx without `set_real_ip_from` (both in §1). The per-IP limit binds before the global one by construction (5 × 24 = 120 ≪ 1000) so one IP alone can never exhaust the global ceiling |
 | Health | `/healthz` ignores the database; `/readyz` pings it |
+| Hosting | Nothing deployed yet. Decided: one VPS running the same Compose stack, `docs/adr/0002-first-production-host.md`. The choice follows `docs/adr/0001-optimise-for-exit-cost.md` — hosts are picked for how cheaply we can leave them |
+| TLS | Caddy in front, automatic Let's Encrypt issuance and renewal (§1). Neither `api` nor `web` terminates TLS itself, and both are unusable without something that does — cookies are `Secure` outside development |
+| Backups | Planned, not running: nightly `pg_dump` in **plain SQL** (readable by any future Postgres, and by a human) to storage off the hosting provider, plus provider snapshots for fast recovery. A restore has never been performed; `docs/HANDOVER.md` §5 treats that as the gap, not the dump |
+| Production administration | **Missing.** The prod image is distroless with no shell, no `goose` and no `adminctl`, so a deployed install cannot migrate, reset a password or unlock a household (§1, `docs/HANDOVER.md` §5) |
 
 ---
 
