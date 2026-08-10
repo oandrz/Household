@@ -255,7 +255,7 @@ Bare `make` lists every target. The ones you will actually use:
 | `make unlock-household` | clears a lockout without waiting 15 minutes |
 | `make migrate-new NAME=…` | runs through the pinned dev image, not a host binary |
 | `make lint` | arch lint, frontend typecheck, eslint, `go vet` |
-| `make test` | Go suite (needs Docker) plus 272 frontend tests |
+| `make test` | Go suite (needs Docker) plus 465 frontend tests |
 
 **Docker is colima on the original machine.** The Go suite uses testcontainers
 and needs:

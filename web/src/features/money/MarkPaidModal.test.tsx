@@ -282,11 +282,14 @@ describe("MarkPaidModal", () => {
     // Waiting on the mutating call itself (fetchMock.mock.calls) proves only
     // that the DELETE was DISPATCHED -- apiFetch's own fetch() call happens
     // synchronously, before mutateAsync's promise (and the onSuccess ->
-    // invalidateBills -> refetch chain it awaits) has settled. Waiting for
-    // the row to show its plain trigger again instead proves the FULL
-    // chain landed: `finally` only resets confirmingPaymentId once
-    // mutateAsync itself resolves, which is after that refetch -- the same
-    // refetch this fix's own useEffect (BillsPage.tsx) is keyed on.
+    // invalidateBillsAndLedger -> refetch chain it awaits) has settled.
+    // Waiting for the row to show its plain trigger again instead proves the
+    // FULL chain landed: `finally` only resets confirmingPaymentId once
+    // mutateAsync itself resolves, which is after that refetch -- and it is
+    // handleConfirmUndo's own explicit clearUndoErrors() call that clears the
+    // stale refusal, not a derived effect (BillsPage.tsx's own comment
+    // records both effect shapes that were tried first and why neither
+    // fired).
     await within(newerRow).findByRole("button", { name: "Undo Property tax payment" });
     expect(mutatingCalls(fetchMock)).toEqual([
       "DELETE /api/v1/bills/bill-1/payments/payment-older",
@@ -348,11 +351,12 @@ describe("MarkPaidModal", () => {
 
     // The mutating call itself proves only that the POST was dispatched --
     // apiFetch's own fetch() fires synchronously, before markPaid.mutateAsync
-    // (and the onSuccess -> invalidateBills -> refetch chain it awaits) has
-    // settled. Waiting for the modal to actually close instead proves the
-    // FULL chain landed: MarkPaidModal's own onPaid/onClose only fire once
-    // mutateAsync resolves, which is after that same refetch -- the one
-    // this fix's own useEffect (BillsPage.tsx) is keyed on.
+    // (and the onSuccess -> invalidateBillsAndLedger -> refetch chain it
+    // awaits) has settled. Waiting for the modal to actually close instead
+    // proves the FULL chain landed: MarkPaidModal's own onPaid/onClose only
+    // fire once mutateAsync resolves, which is after that same refetch --
+    // and onPaid is where BillsPage calls clearUndoErrors(), explicitly, at
+    // the second of the two write sites that move MAX(due_on).
     await waitFor(() => expect(screen.queryByLabelText("Paid on")).not.toBeInTheDocument());
     expect(mutatingCalls(fetchMock)).toEqual([
       "DELETE /api/v1/bills/bill-1/payments/payment-older",

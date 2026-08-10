@@ -16,7 +16,7 @@
 //       /money/transactions RequireCapability("money") -> Transactions (Task 17; the real ledger)
 //       /money/budget RequireCapability("money") -> Budget (Task 11; BudgetPage stub -- Task 12 builds the real screen)
 //       /money/goals RequireCapability("money") -> Goals (Task 11; the real GoalsPage)
-//       /money/bills RequireCapability("money") -> Bills (the Bills plan's Task 11; BillsPage shell -- its own Task 12 builds the real screen)
+//       /money/bills RequireCapability("money") -> Bills (the real BillsPage)
 //       /settings                                   -- the real Settings screen (Task 20)
 //
 // Marriage and Family have no routes: both were placeholders reading

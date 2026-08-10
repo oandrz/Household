@@ -1,10 +1,10 @@
 # Hearth — learning log
 
-Every defect found while building slices 0, 1, self-serve sign-up, Accounts,
-Transactions and Budget (slice 2's first three features), the finance-fixes
-round that followed the owner's first real day-one use of Transactions, and
-the UX-repair round (M1) that followed his first look at the app as a whole —
-and what each one teaches. That last round is worth noticing for what it
+Every defect found while building slices 0, 1, self-serve sign-up and the
+whole of slice 2 — Accounts, Transactions, Budget, Goals and Bills — plus the
+finance-fixes round that followed the owner's first real day-one use of
+Transactions, and the UX-repair round (M1) that followed his first look at the
+app as a whole — and what each one teaches. That last round is worth noticing for what it
 contains: not one of its defects was a broken function. Every one was
 something correct in isolation that nobody had looked at as a product.
 Written because almost none of them were caught by a failing test — they were
@@ -96,6 +96,23 @@ a reader nobody thought to look at.
   on the 31st would silently become a bill due on the 28th forever after its
   first February. Storing the anchor separately and clamping *it* fresh each
   time — 31 Jan → 28 Feb → 31 Mar — is what keeps the drift from compounding.
+
+  **A sixth instance, in the layer above, and the reason to distrust a comment
+  that says two things match.** `BillService.toView` computes `Overdue` through
+  `domain.IsOverdue` → `domain.startOfDay`, which converts to UTC (the fix
+  above). It computed `DueSoon` through the *package-local* `startOfDay` in
+  `usecase/signup.go`, which deliberately keeps `t.Location()` because the
+  signup rate limit resets at the household's own local midnight — correct
+  there, wrong here. Two fields on one row, derived from the same two times
+  under two different normalisations, with a comment asserting they were the
+  same normalisation. `List`'s due-this-month probe read a raw `today` the same
+  way. Latent rather than live, because `clock.System.Now()` returns UTC — but
+  the false comment is what would have stopped the next person finding it.
+  Fixed with a bills-local `billStartOfDay` whose comment says why signup.go's
+  must not be reused, and pinned by a usecase-layer counterpart of the domain
+  test. **A shared helper whose correctness depends on the caller's domain is
+  not shared; it is two functions with one name.** When you reach for a
+  package-local helper, read what its comment says it is for.
 
 - Same slice, Task 15: `AccountModal`'s Balance field distinguishes "not a
   number" from "this currency doesn't use cents" (a switch to IDR/VND without
@@ -255,6 +272,31 @@ that comes due: whoever ships X owns it. Here the comment was right, specific,
 and load-bearing, and it still did not stop the defect, because nothing made
 shipping Transactions go and read it.
 
+**And a fix can create the very sibling it was meant to close.** Bills' Task 10
+added an archived-account refusal to `BillService.Update` — correct on its own,
+and the mirror of the one `Create` already had. But `BillModal`'s edit body put
+`payFromAccountId` in *every* PATCH, so from that commit onward a bill whose
+pay-from account had since been archived could not be renamed at all: the save
+came back "That account is archived and cannot be used to pay a bill," for an
+edit that never touched the account. The service change and the form that feeds
+it were reviewed in different tasks, and each was right about its own file.
+**When you add a refusal, grep for who already sends that field unconditionally**
+— the new guard's blast radius is every caller that restates a value it did not
+change, which is exactly the "don't restate a field the form didn't touch"
+habit this pattern already teaches for derived figures. Three of this branch's
+nine review findings were instances of this pattern, and this one was an
+instance created *by an earlier fix inside the same branch*.
+
+**And the class can be an invariant, not a line of code.** `TransactionService`
+enforces four write-invariants on anything entering the ledger: accounts,
+amount, payer, and category. `BillService` — the ledger's second front door,
+because `MarkPaid` writes a real `transactions` row — re-implemented three of
+them and omitted the category one. Task 8 of the same branch had *already*
+fixed the payer axis after the same reasoning; nobody then asked which other
+axes the same argument covered. **When you find one invariant missing at a new
+door, enumerate the whole set at the old door and check each one**, rather than
+fixing the axis the bug report happened to name.
+
 ### 2. A test that cannot fail protects nothing
 
 - A sidebar ordering test supplied spaces **already in ascending order**, so a
@@ -263,6 +305,30 @@ shipping Transactions go and read it.
 - `TestUsersWithoutAPasswordCannotSignIn` passed with the guard deleted, because
   the fake hasher happened to reject an empty hash for its own reasons.
 - A capability filter had no test that would notice its deletion.
+- `BillService.Update`'s payer check could have its two arguments **swapped**
+  and every test still passed: the double computes
+  `memberships[membershipID] == householdID`, which is false for a swapped
+  pair too, so the refusal test was satisfied either way. `Create`'s identical
+  call *was* pinned, by a happy-path test that set a valid payer. A refusal
+  test alone never fixes the argument order — only a case that must SUCCEED
+  can. Check every guard for whether its happy path is tested, not just its
+  refusal.
+- `MostRecentBillPaymentDueOn`'s `bill_id = $2` filter could be dropped with
+  the whole suite green, because no test ever gave one household two bills
+  that both carried payments. In production that refuses a legitimate undo on
+  bill A because bill B has a later payment. **A scoping clause needs a
+  fixture with something for it to exclude**; a one-row fixture tests the
+  query minus its WHERE.
+- `defer tx.Rollback(ctx)` in `BillRepo.UndoPayment` could be deleted with the
+  whole suite green, and — this is the trap — the obvious test for it stays
+  green too. Removing the rollback does not make the partial writes visible:
+  nothing commits them either, so "assert the rows survived" passes both ways.
+  What actually breaks is that the transaction is never *ended*: its
+  connection never returns to the pool and its row locks are never released.
+  The assertion that catches it is `pool.Stat().AcquiredConns() == 0`. **Before
+  writing a test for a cleanup call, work out what observably differs when it
+  is missing** — for rollback-on-error that is usually resource release, not
+  data.
 - Five of seven invite tests used a fetch stub that **matched positionally and
   ignored the URL** — they would have passed while the component called a
   different endpoint entirely.
@@ -1657,6 +1723,50 @@ route with a missing guard has no second line of defence.
 
 ### Frontend
 
+- **A mutation must invalidate every cache its endpoint writes to, not every
+  cache its own feature owns.** Bills' `useMarkPaid`/`useUndoPayment`
+  invalidated only the bills keys — but `POST /bills/{id}/pay` writes a real
+  `transactions` row and the undo deletes one. Mark a bill paid, click through
+  to Transactions or Finances, and the expense was absent and balances
+  un-moved for up to the 30-second `staleTime`. `useTransactions.ts` states the
+  rule verbatim for its own writes, and the Bills hook was written by looking
+  at `useAccounts.ts`'s *shape* rather than at what its endpoint touches.
+  **The question to ask is "what rows does this request change?", never "which
+  screen am I on?"** — and the honest scope matters both ways: `["budget"]`
+  was deliberately left out, because Budget staleness after a money write is a
+  pre-existing gap shared with hand-entered transactions, and fixing it on one
+  path only would leave two write paths disagreeing about what a money write
+  refreshes.
+- **A primary action that opens a form the household cannot complete is a dead
+  end, and it is usually first-run.** `BillsPage`'s "+ Add bill" opened a modal
+  whose Pay from `<select required>` was empty when the household had no
+  accounts — browser constraint validation on submit, no explanation, four
+  clicks in. Both sibling screens already refused exactly this
+  (`TransactionsPage` disables its button with a hint; `QuickAddMenu` gates
+  `canAddBill` on `accounts.length > 0`), and one of them was gating *this very
+  modal*. The prerequisite lives in the schema: `pay_from_account_id` is NOT
+  NULL. **When a form's required field comes from another feature's list,
+  the screen that opens it owns the empty case.** The fix has its own trap:
+  `accounts.data?.accounts.length ?? 0 === 0` reads a still-loading query as
+  "zero accounts" and disables the button on first paint for everyone — only a
+  query that has answered may say a household has none.
+- **Loading and failed are two states.** `if (!accounts.data)` in `BillModal`
+  showed "Loading…" forever on a failed `GET /accounts`: react-query stops
+  retrying, so nothing ever arrived to replace it. `BudgetModal` had closed
+  the identical shape one feature earlier, comment and all. A `!data` gate is
+  a bug wherever the query can fail; branch on `isError` first.
+- **A live clock read locally is not the month the server scoped.** Bills'
+  "All caught up — everything due in September is paid" derived `allCaughtUp`
+  from server figures scoped to the **UTC** month, and took the month *name*
+  from `new Date().toLocaleDateString(...)`, which reads the **browser's**
+  month. In SGT they disagree for the first eight hours of every month: at
+  local 1 Sep 03:00 it is 31 Aug in UTC, so every August bill being paid fired
+  the panel, which then named September while September's unpaid bills sat in
+  Due soon beside it. The comment above the function argued there was nothing
+  to guard against — correctly, about *parsing a stored date string*, which is
+  what the sibling helpers do — and stopped there. **A comment that rules out
+  one hazard reads as ruling out the family.** State what the label is
+  describing, not only where its input came from.
 - **The only page every member reaches is where "who can see what" stops being
   the router's problem.** Every other screen in this app sits behind
   `RequireAuth` plus `RequireCapability`, so "what does a limited member see

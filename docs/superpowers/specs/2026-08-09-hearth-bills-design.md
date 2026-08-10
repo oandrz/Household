@@ -227,6 +227,13 @@ CREATE TABLE bills (
     -- A settled one-off is not auto-archived -- that would hide a record the
     -- household may still want to see.
     next_due              date,
+    -- The day of the month the household actually chose, kept apart from
+    -- next_due because clamping is lossy. 31 Jan clamps to 28 Feb; advancing
+    -- from 28 would give 28 Mar and the bill would have silently moved off the
+    -- 31st forever. Each advance clamps THIS value to the destination month,
+    -- so 31 Jan -> 28 Feb -> 31 Mar. Set from next_due at create, reset when
+    -- next_due is patched.
+    due_anchor_day        smallint    NOT NULL CHECK (due_anchor_day BETWEEN 1 AND 31),
     category_id           uuid        REFERENCES categories(id) ON DELETE SET NULL,
     -- NOT NULL because it supplies the currency as well as the account the
     -- expense leaves. No ON DELETE clause: accounts are never deleted, only
@@ -287,16 +294,31 @@ column too, and both layers refusing an unknown value is the house pattern
 
 **`next_due` advances from `due_on`, never from today.** A bill paid three days
 late would otherwise drift three days every month, and a year later sit a month
-out. `domain.NextDue(cadence, dueOn)` owns the arithmetic and is a pure
-function over values.
+out. `domain.NextDue(cadence, dueOn, anchorDay)` owns the arithmetic and is a
+pure function over values.
 
-**The month-end case is pinned because Go gets it wrong by default.**
-`time.Time.AddDate(0, 1, 0)` on 31 January returns **3 March**, not 28
-February. `NextDue` advances by calendar month and clamps to the target month's
-last day: 31 Jan → 28 Feb (29 in a leap year) → 31 Mar. `docs/HANDOVER.md` §6
-records a `time.Truncate`-and-location mistake that shipped at two call sites
-in this project; this is the same family, and it is the plan's designated
-mutation.
+**The month-end case is pinned because Go gets it wrong by default, and
+because clamping alone is not enough.** `time.Time.AddDate(0, 1, 0)` on
+31 January returns **3 March**, not 28 February. `NextDue` advances by
+calendar month and clamps to the target month's last day — but it clamps
+`anchorDay`, never the date it was handed, because clamping a clamped value is
+one-way and loses the day the household actually chose:
+
+| step | `next_due` | `due_anchor_day` |
+|---|---|---|
+| created, due the 31st | 31 Jan | 31 |
+| paid → advance | 28 Feb (29 in a leap year) | 31 |
+| paid → advance | **31 Mar** | 31 |
+
+Advancing from 28 February with no anchor gives 28 March, and the bill has
+silently become a bill due on the 28th forever. That is why the anchor is a
+stored column rather than `next_due.Day()` read back: the two disagree for
+exactly the bills that most need to be right. It is set from `next_due` at
+create, re-derived whenever a PATCH moves `next_due` (an explicit edit is the
+household choosing a new anchor), and never written by the advance or the undo
+rewind. `docs/HANDOVER.md` §6 records a `time.Truncate`-and-location mistake
+that shipped at two call sites in this project; this is the same family, and it
+is the plan's designated mutation.
 
 **Household scoping gets the `GoalRepository` treatment.** `bill_payments` has
 no database constraint tying its `household_id` to its bill's, so a row could
@@ -369,7 +391,7 @@ body; a household with no bills is `200 {"bills": [], "summary": {…}}`, never
 
 | Route | Behaviour |
 |---|---|
-| `GET /bills` | The whole screen in one response: `summary` (due-this-month, paid-so-far, next-due with its bill name and overdue flag, the autopay counts, the excluded-for-no-rate count, the subscription monthly and annual totals), `dueSoon`, `later`, `paidThisMonth` and `subscriptions`. `?archived=true` returns archived bills instead, the `AccountRepository.List` contract |
+| `GET /bills` | The whole screen in one response: `summary` (due-this-month, paid-so-far, next-due with its bill name and overdue flag, the autopay counts, the excluded-for-no-rate count, the subscription monthly and annual totals), one `bills` array, and `paidThisMonth`. **Not** four pre-split arrays: every row carries its own `dueSoon` and `settled` flags, computed server-side so the 30-day rule lives in one place, and the page splits Due soon from Later (and picks the subscriptions out) on those flags — one order, arriving once. `?include_archived=true` returns live **and** archived bills as a union, never archived ones instead, the `AccountRepository.List` contract |
 | `POST /bills` | `{name, amountMinor, cadence, nextDue, categoryId?, payFromAccountId, paidByMembershipId?, autopay, isSubscription}`. Duplicate name against `UNIQUE (household_id, name)` → 409 naming the taken name, and offering restore when the holder is archived; unknown cadence → 422; archived pay-from account → 422 naming it; `amountMinor ≤ 0` → 422 |
 | `PATCH /bills/{id}` | Any of name, amount, cadence, next due, category, payer, autopay, subscription flag. **Re-pointing `payFromAccountId` at an account in a different currency → 422 naming both currencies** (decision 7). Archiving is deliberately **not** a patchable field — see the archive routes below |
 | `POST /bills/{id}/pay` | `{amountMinor, paidOn}` — the amount defaults to the bill's but is editable, because utilities vary. **One database transaction writes three rows:** the `bill_payments` row (`due_on` = the bill's current `next_due`), the `transactions` expense, and the advanced `next_due`. Refuses: an occurrence already paid → 409; an archived bill → 422; an archived pay-from account → 422; a settled one-off with `next_due IS NULL` → 422 |

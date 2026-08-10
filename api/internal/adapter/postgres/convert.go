@@ -183,9 +183,10 @@ func dateOnly(t time.Time) pgtype.Date {
 func dateToTime(d pgtype.Date) time.Time { return d.Time }
 
 // nullableDate is dateOnly's counterpart for the columns that are genuinely
-// optional -- goals.target_month and goal_contributions.source_budget_month
-// -- where the port passes *time.Time and a nil pointer must reach Postgres
-// as NULL, the same "" <-> SQL NULL shape nullableUUID gives ids.
+// optional -- goals.target_month, goal_contributions.source_budget_month and
+// bills.next_due (NULL there means a settled one-off, 00008_bills.sql's own
+// comment) -- where the port passes *time.Time and a nil pointer must reach
+// Postgres as NULL, the same "" <-> SQL NULL shape nullableUUID gives ids.
 func nullableDate(t *time.Time) pgtype.Date {
 	if t == nil {
 		return pgtype.Date{}
