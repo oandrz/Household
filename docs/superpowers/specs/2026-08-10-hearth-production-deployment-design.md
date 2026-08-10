@@ -48,7 +48,7 @@ minus the audit trail.
 **4. Images are tagged with the git SHA, and the Compose file names that tag
 through `IMAGE_TAG`.** CI builds three images — `hearth-api`, `hearth-web`,
 `hearth-admin` — and tags each `ghcr.io/oandrz/<name>:<git-sha>`. The Compose
-file references `${IMAGE_TAG}`, read from `.env.production`; deploying is
+file references `${IMAGE_TAG}`, read from `deploy/.env`; deploying is
 changing that one value and running `up -d`.
 
 A moving `:latest` was rejected for two reasons that only appear when you chase
@@ -112,6 +112,14 @@ compose file with `-f` was rejected: it hardcodes every value inline with no
 consist mostly of deletions — hard to read and easy to get wrong. Copying files
 by `scp` was rejected because the running config would drift from the repo with
 nothing recording it.
+
+**The secret file is named `deploy/.env`, not `.env.production`, and the name is
+forced.** Compose reads a file called exactly `.env` for `${VAR}` interpolation
+in the Compose file itself; any other name has to be passed as `--env-file` on
+every single command. Decision 4 requires `${IMAGE_TAG}` to interpolate, so the
+file must be `.env` — or every break-glass command in the runbook grows a flag
+that must be remembered at the moment an operator is least able to remember it.
+The tracked template beside it is `deploy/.env.example`.
 
 **9. `sslmode=disable` is correct for this topology, and is a decision rather
 than an oversight.** Postgres sits on the Compose bridge network on the same
@@ -199,12 +207,12 @@ The box stays at 2 GB because decision 2 moved every build off it.
 | `admin` Dockerfile target | `api/Dockerfile` | Distroless, carrying `adminctl`, `goose` and `migrations/`. No `ENTRYPOINT` — the binary is named at run time |
 | `deploy/docker-compose.prod.yml` | new | Five services, `env_file`, no bind mounts, no Mailpit, Postgres unpublished |
 | `deploy/Caddyfile` | new | One site block, reverse proxy to `web:80` |
-| `deploy/.env.production.example` | new | Every variable `config.Load()` requires, plus `IMAGE_TAG`, with the two secrets blank |
+| `deploy/.env.example` | new | Every variable `config.Load()` requires, plus `IMAGE_TAG`, with the two secrets blank |
 | `deploy/backup.sh` | new | `pg_dump` → `gzip` → `age` → `rclone`, then the heartbeat ping |
 | `deploy/README.md` | new | The deploy runbook and the restore procedure |
 | `.github/workflows/images.yml` | new | Build **three** images — api, web, admin — tag each with the git SHA, push to GHCR on `main` (decision 4) |
 | `set_real_ip_from` lines | `web/nginx.conf` | Two lines; mandatory once Caddy is in front |
-| `.gitignore` | edit | `deploy/.env.production` |
+| `.gitignore` | edit | `deploy/.env` |
 
 ## Configuration
 
@@ -216,7 +224,7 @@ passwords: the Postgres password and the Resend API key.
 **There is a third secret that is not an application variable.** The images are
 private, so the box needs a GitHub fine-grained token with `read:packages` and
 nothing else, supplied once via `docker login ghcr.io` rather than through
-`.env.production`. It belongs in the escrow envelope alongside the backup key and
+`deploy/.env`. It belongs in the escrow envelope alongside the backup key and
 the Postgres password — without it a rebuilt box cannot pull the images it is
 supposed to run.
 
