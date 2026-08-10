@@ -432,6 +432,155 @@ func TestUndoDoesNotDestroyTheDueAnchorDay(t *testing.T) {
 	}
 }
 
+// TestUndoPaymentIsAtomic is TestRecordPaymentIsAtomic's missing other
+// direction. The design requires atomicity BOTH ways, and until this test
+// existed, deleting `defer tx.Rollback(ctx)` from UndoPayment left the whole
+// suite green: every other undo test drives the happy path, which commits.
+//
+// The lever is the same one TestRecordPaymentRefusesAHouseholdBillMismatch...
+// uses, applied one write later. bill_payments carries no constraint tying
+// its household_id to its bill's, so moving the bill to another household
+// leaves the payment and its expense perfectly findable under the ORIGINAL
+// household while the final rewind -- the only statement that touches
+// `bills` -- matches zero rows and fails. That puts the failure AFTER both
+// deletions, which is the only place a missing rollback could do damage.
+//
+// Two things are asserted, because a missing rollback and a mistaken commit
+// break differently:
+//
+//  1. The payment row and its expense are still there. This is what fails if
+//     the deferred call is ever changed to Commit -- the two deletions would
+//     land despite the error.
+//  2. The pool has no connection still checked out. This is what fails if the
+//     deferred call is simply DELETED: the writes stay invisible either way
+//     (nothing commits them), but the transaction is never ended, so its
+//     connection never returns to the pool and its row locks are never
+//     released -- every later write to those rows blocks forever, and
+//     db.Close() at teardown blocks with them.
+func TestUndoPaymentIsAtomic(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	repo := postgres.NewBillRepo(db)
+	h, acct := seedHouseholdAndAccount(t, ctx, db)
+	other, _ := seedHouseholdAndAccount(t, ctx, db)
+	bill := createBill(t, ctx, repo, h, acct, "SP utilities", domain.CadenceMonthly, day("2026-08-08"), 14230)
+
+	next := day("2026-09-08")
+	pay, err := repo.RecordPayment(ctx, usecase.PaymentWrite{
+		HouseholdID: h, BillID: bill.Bill.ID, DueOn: day("2026-08-08"), PaidOn: day("2026-08-08"),
+		AmountMinor: 14230, Currency: "SGD", Description: "SP utilities",
+		PayFromAccountID: acct, NextDue: &next,
+	})
+	if err != nil {
+		t.Fatalf("RecordPayment: %v", err)
+	}
+
+	// The bill moves households; the payment and the expense do not. Now the
+	// two deletions still match, and only the rewind cannot.
+	if _, err := db.Pool().Exec(ctx,
+		`UPDATE bills SET household_id = $1 WHERE id = $2`, other, bill.Bill.ID); err != nil {
+		t.Fatalf("move the bill to another household: %v", err)
+	}
+
+	if err := repo.UndoPayment(ctx, h, bill.Bill.ID, pay.Payment.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("UndoPayment = %v, want ErrNotFound from the rewind matching no bill", err)
+	}
+
+	var payments int
+	if err := db.Pool().QueryRow(ctx,
+		`SELECT count(*) FROM bill_payments WHERE household_id = $1`, h).Scan(&payments); err != nil {
+		t.Fatalf("count bill payments: %v", err)
+	}
+	if payments != 1 {
+		t.Fatalf("got %d payments, want 1 -- the deletion must not survive a failed rewind", payments)
+	}
+	var txns int
+	if err := db.Pool().QueryRow(ctx,
+		`SELECT count(*) FROM transactions WHERE household_id = $1`, h).Scan(&txns); err != nil {
+		t.Fatalf("count transactions: %v", err)
+	}
+	if txns != 1 {
+		t.Fatalf("got %d transactions, want 1 -- the expense must not be deleted by an undo that failed", txns)
+	}
+	// The bill itself is untouched: its due date never rewound, so the household
+	// is left with exactly the state it started in, not half of an undo.
+	var nextDue time.Time
+	if err := db.Pool().QueryRow(ctx, `SELECT next_due FROM bills WHERE id = $1`, bill.Bill.ID).Scan(&nextDue); err != nil {
+		t.Fatalf("read next_due: %v", err)
+	}
+	if !nextDue.Equal(day("2026-09-08")) {
+		t.Fatalf("next_due = %s, want it still advanced at 2026-09-08", nextDue.Format("2006-01-02"))
+	}
+
+	// See this test's own comment: a connection still checked out here means
+	// the failed call left its transaction open rather than rolling it back.
+	// The queries above each acquired and released their own connection
+	// synchronously, so anything still held is UndoPayment's.
+	if held := db.Pool().Stat().AcquiredConns(); held != 0 {
+		t.Fatalf("%d connection(s) still checked out after a failed undo, want 0 -- the transaction was never rolled back", held)
+	}
+}
+
+// TestUndoMostRecentIsScopedToTheBillNotTheHousehold pins which set the
+// "only the most recent payment" guard compares against.
+// MostRecentBillPaymentDueOn filters on bill_id as well as household_id;
+// with that filter dropped, undoing a legitimately-latest
+// payment on one bill is refused because a DIFFERENT bill happens to carry a
+// later one. Every other undo test uses a household with a single paying
+// bill, which is exactly why none of them can see it.
+func TestUndoMostRecentIsScopedToTheBillNotTheHousehold(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	repo := postgres.NewBillRepo(db)
+	h, acct := seedHouseholdAndAccount(t, ctx, db)
+
+	netflix := createBill(t, ctx, repo, h, acct, "Netflix", domain.CadenceMonthly, day("2026-08-05"), 1998)
+	rent := createBill(t, ctx, repo, h, acct, "Rent", domain.CadenceMonthly, day("2026-09-01"), 250000)
+
+	sep := day("2026-09-05")
+	netflixPay, err := repo.RecordPayment(ctx, usecase.PaymentWrite{
+		HouseholdID: h, BillID: netflix.Bill.ID, DueOn: day("2026-08-05"), PaidOn: day("2026-08-05"),
+		AmountMinor: 1998, Currency: "SGD", Description: "Netflix",
+		PayFromAccountID: acct, NextDue: &sep,
+	})
+	if err != nil {
+		t.Fatalf("netflix payment: %v", err)
+	}
+	// Due AFTER Netflix's, and on a different bill: the household's own
+	// MAX(due_on) is now September, while Netflix's is still August.
+	oct := day("2026-10-01")
+	if _, err := repo.RecordPayment(ctx, usecase.PaymentWrite{
+		HouseholdID: h, BillID: rent.Bill.ID, DueOn: day("2026-09-01"), PaidOn: day("2026-09-01"),
+		AmountMinor: 250000, Currency: "SGD", Description: "Rent",
+		PayFromAccountID: acct, NextDue: &oct,
+	}); err != nil {
+		t.Fatalf("rent payment: %v", err)
+	}
+
+	// Netflix's August payment IS its own most recent, so this undo is
+	// legitimate. Unscoped, the guard compares it against Rent's September
+	// and refuses.
+	if err := repo.UndoPayment(ctx, h, netflix.Bill.ID, netflixPay.Payment.ID); err != nil {
+		t.Fatalf("UndoPayment = %v, want success -- the guard must compare against THIS bill's payments", err)
+	}
+
+	after, err := repo.Get(ctx, h, netflix.Bill.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !after.Bill.NextDue.Equal(day("2026-08-05")) {
+		t.Fatalf("next_due = %s, want it rewound to 2026-08-05", after.Bill.NextDue.Format("2006-01-02"))
+	}
+	// Rent is untouched: undoing one bill's payment must not disturb another's.
+	rentAfter, err := repo.Get(ctx, h, rent.Bill.ID)
+	if err != nil {
+		t.Fatalf("Get rent: %v", err)
+	}
+	if !rentAfter.Bill.NextDue.Equal(day("2026-10-01")) {
+		t.Fatalf("rent next_due = %s, want it still at 2026-10-01", rentAfter.Bill.NextDue.Format("2006-01-02"))
+	}
+}
+
 func TestGetHidesABillFromAnotherHousehold(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
