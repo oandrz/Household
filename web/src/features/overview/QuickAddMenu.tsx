@@ -1,15 +1,16 @@
 // The design's "+ Add" offers Transaction, Account, Bill, Savings goal,
-// Calendar event and Marriage retro. Three of those features do not exist,
+// Calendar event and Marriage retro. Two of those features do not exist,
 // and a permanently greyed row reads as broken rather than as a roadmap --
 // the same rule Sidebar.tsx's SPACE_PAGES states. Each entry joins this list
-// in the change that builds the thing it creates -- Savings goal is this
-// change's own.
+// in the change that builds the thing it creates -- Bill is this change's
+// own (Task 16), joining Account/Transaction/Savings goal before it.
 //
-// Rendered only for an owner: POST /transactions, POST /accounts and
-// POST /goals are all requireOwner.
+// Rendered only for an owner: POST /transactions, POST /accounts,
+// POST /bills and POST /goals are all requireOwner.
 import { useState } from "react";
 import { useCurrencies, useMe } from "../auth/useAuth";
 import { AccountModal } from "../money/AccountModal";
+import { BillModal } from "../money/BillModal";
 import { GoalModal } from "../money/GoalModal";
 import { TransactionModal, type TransactionFormValues } from "../money/TransactionModal";
 import { useCreateTransaction } from "../money/useTransactions";
@@ -21,6 +22,7 @@ export function QuickAddMenu({ accounts }: { accounts: Account[] }) {
   const [open, setOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [transactionOpen, setTransactionOpen] = useState(false);
+  const [billOpen, setBillOpen] = useState(false);
   const [goalOpen, setGoalOpen] = useState(false);
   const members = useHouseholdMembers();
   const createTransaction = useCreateTransaction();
@@ -41,6 +43,11 @@ export function QuickAddMenu({ accounts }: { accounts: Account[] }) {
   const currencies = useCurrencies();
 
   const canAddTransaction = accounts.length > 0;
+  // Same condition as canAddTransaction, named separately for its own entry
+  // below -- a bill needs a pay-from account exactly as a transaction needs
+  // one to post against, the same precondition the brief pins directly to
+  // this existing pattern.
+  const canAddBill = accounts.length > 0;
 
   return (
     <div className="relative">
@@ -84,7 +91,27 @@ export function QuickAddMenu({ accounts }: { accounts: Account[] }) {
             {OVERVIEW_COPY.quickAddAccount}
           </button>
 
-          {/* No `disabled` guard, unlike Transaction above -- decision 6
+          <button
+            type="button"
+            disabled={!canAddBill}
+            onClick={() => {
+              setOpen(false);
+              setBillOpen(true);
+            }}
+            className="rounded-lg px-2.5 py-2 text-left text-[13px] text-ink disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {OVERVIEW_COPY.quickAddBill}
+          </button>
+          {/* Same reason as Transaction's own disabled state above -- a bill
+              needs a pay-from account, and BillModal's own Pay from select
+              would otherwise open with nothing to choose. */}
+          {!canAddBill && (
+            <p className="px-2.5 pb-1 text-[11px] text-muted">
+              {OVERVIEW_COPY.quickAddNeedsAccount}
+            </p>
+          )}
+
+          {/* No `disabled` guard, unlike Transaction/Bill above -- decision 6
               (goal contributions move no real money) means this has no
               account precondition to wait on. */}
           <button
@@ -123,6 +150,16 @@ export function QuickAddMenu({ accounts }: { accounts: Account[] }) {
           members={(members.data ?? []).map((m) => ({ id: m.id, name: m.user.displayName }))}
         />
       )}
+      {/* BillModal fetches its own accounts/categories/members (BillModal.tsx's
+          own header comment on why), so it needs no props sourced here the
+          way TransactionModal above does -- gating on `billOpen` alone is
+          enough, the same shape AccountModal uses. createBill (useBills.ts)
+          invalidates both billsQueryKey variants on success, and
+          NextBillCard's own `useBills(false, { enabled: isOwner })` --
+          mounted and active the whole time this menu exists -- shares that
+          exact cache entry, so it refetches on its own; nothing here needs
+          to ask again. */}
+      {billOpen && <BillModal mode="create" onClose={() => setBillOpen(false)} onSaved={() => setBillOpen(false)} />}
       {/* Gated on both me.data and currencies.data, the same guard
           GoalsPage.tsx's own modal mount uses: GoalModal's props are
           required, not optional, and this only matters for an implausibly

@@ -38,7 +38,7 @@ Copied from the spec and `CLAUDE.md`; every task's requirements include these.
 | Next due | earliest non-NULL `next_due` over unarchived bills, with that bill's name and amount; **overdue** when before today; none → omitted, never a zero |
 | `N of M on autopay` | `M` = unarchived bills, `N` = those with `autopay`; `M = 0` hides the line |
 | Due soon (list) | unarchived, non-NULL `next_due`, **within 30 days inclusive or already past**, by `next_due` ascending, ties by name |
-| Later (list) | every remaining unarchived bill with a non-NULL `next_due`, same ordering |
+| Later (list) | every remaining unarchived bill, same ordering — those due beyond 30 days, **and settled one-offs** (`NextDue == nil`, `Settled` true), which render "Settled" where a date would go. Due soon and Later together account for every unarchived bill, so nothing the header counts is missing from the page |
 | Paid this month (list) | `bill_payments` with `due_on` in month, newest `paid_on` first, ties by bill name |
 | Subscriptions per year | over unarchived `is_subscription` bills: `monthly × 12`, `quarterly × 4`, `yearly × 1`; `one_off` excluded |
 | Subscriptions per month | the annual figure ÷ 12, floored |
@@ -581,7 +581,7 @@ git commit -m "feat(bills): cadence arithmetic with the month-end clamp"
 - Modify: `api/internal/usecase/ports.go`
 
 **Interfaces:**
-- Produces: `usecase.BillRecord`, `usecase.BillPaymentRecord`, `usecase.NewBillRow`, `usecase.BillPatch`, `usecase.PaymentWrite`, and the `usecase.BillRepository` interface. Task 4 and Task 5 implement it; Tasks 6 and 7 consume it.
+- Produces: `usecase.BillRecord`, `usecase.BillPaymentRecord`, `usecase.NewBillRow`, `usecase.PaymentWrite`, and the `usecase.BillRepository` interface. Task 4 and Task 5 implement it; Tasks 6 and 7 consume it. `BillPatch` is **not** here — it is a usecase-layer type Task 6 declares in `internal/usecase/bill.go`, exactly as `GoalUpdate` lives in `usecase/goal.go`.
 
 - [ ] **Step 1: Add the records and the port**
 
@@ -589,18 +589,21 @@ Append to `api/internal/usecase/ports.go`, after the goal section:
 
 ```go
 // BillRecord is a bill joined to the names the screen displays -- its category
-// and its pay-from account's nickname and currency. Same shape and same reason
-// as AccountView and TransactionView above: every consumer of the list wants
-// the names, and re-reading them per row is a query per row.
+// and its pay-from account's nickname. Same shape and same reason as
+// AccountView and TransactionView above: every consumer of the list wants the
+// names, and re-reading them per row is a query per row.
 //
-// Currency is the ACCOUNT's, not a column on bills. There is no currency on a
-// bill (see 00008_bills.sql's own comment); this field is the account's,
-// carried here so the service can build a Money without a second lookup.
+// Bill.Amount carries the PAY-FROM ACCOUNT's currency, populated by the
+// repository from the same account join that supplies AccountName. A bill has
+// no currency column of its own (00008_bills.sql says why), and
+// TransactionService.Create already forces an expense's currency to its
+// from-account's (usecase/transaction.go:232) -- so the account is the single
+// source, and there is deliberately no second Currency field here that could
+// disagree with it.
 type BillRecord struct {
 	Bill         domain.Bill
 	CategoryName string
 	AccountName  string
-	Currency     string
 }
 
 // BillPaymentRecord is one settled occurrence joined to its bill's name and
@@ -619,7 +622,9 @@ type BillPaymentRecord struct {
 
 // NewBillRow is Create's input. DueAnchorDay is derived by the service from
 // NextDue, never supplied by a caller: an anchor that disagreed with the first
-// due date would drift on the very first advance.
+// due date would drift on the very first advance. The service derives it the
+// same way on any update that moves NextDue, so the one-line calendar
+// computation lives in one layer rather than two.
 type NewBillRow struct {
 	HouseholdID        string
 	Name               string
@@ -632,32 +637,6 @@ type NewBillRow struct {
 	PaidByMembershipID string
 	Autopay            bool
 	IsSubscription     bool
-}
-
-// BillPatch is a PATCH: a nil field is unchanged. There is deliberately no
-// ArchivedAt field -- archive and restore are their own routes, so an ordinary
-// rename cannot archive a bill as a side effect (router.go's own comment for
-// accounts, categories and goals).
-//
-// ClearCategory and ClearPayer are how a set field is unset, the same explicit
-// -clear convention clearReceivedAmount uses on transactions: a nil pointer
-// already means "unchanged", so it cannot also mean "clear".
-//
-// When NextDue is set, the implementation must also reset due_anchor_day from
-// it. An explicit edit is the household choosing a new anchor; leaving the old
-// one would make the next advance jump to a day they did not pick.
-type BillPatch struct {
-	Name               *string
-	AmountMinor        *int64
-	Cadence            *domain.Cadence
-	NextDue            *time.Time
-	CategoryID         *string
-	ClearCategory      bool
-	PayFromAccountID   *string
-	PaidByMembershipID *string
-	ClearPayer         bool
-	Autopay            *bool
-	IsSubscription     *bool
 }
 
 // PaymentWrite is everything RecordPayment needs to write all three rows. The
@@ -721,14 +700,21 @@ type BillRepository interface {
 	// Create writes one row. A name colliding with UNIQUE (household_id, name)
 	// -- archived rows included -- surfaces as domain.ErrBillNameTaken.
 	Create(ctx context.Context, in NewBillRow) (BillRecord, error)
-	// Update applies a patch. Same collision contract as Create. When
-	// p.NextDue is non-nil the implementation also resets due_anchor_day from
-	// it; see BillPatch's own comment.
-	Update(ctx context.Context, householdID, billID string, p BillPatch) (BillRecord, error)
+	// Update replaces every mutable column, DueAnchorDay included. BillService
+	// is what turns a partial PATCH into a complete domain.Bill; this port
+	// never merges -- the AccountRepository.Update and GoalRepository.Update
+	// contract, for the same reason: conditional SQL in the adapter is a
+	// second place for the update rules to live. Same collision contract as
+	// Create.
+	Update(ctx context.Context, b domain.Bill) (BillRecord, error)
 	// SetArchived stamps archived_at with at, or clears it when archived is
-	// false -- the AccountRepository.SetArchived signature, at supplied by the
-	// caller rather than read with time.Now() inside the adapter.
-	SetArchived(ctx context.Context, householdID, billID string, archived bool, at time.Time) error
+	// false, and returns the bill as it now stands. It returns the record
+	// rather than a bare error because every 2xx except 204 carries a JSON
+	// body in this product, so an error-only signature would force the archive
+	// handler into a second Get purely to build its response. `at` is supplied
+	// by the caller rather than read with time.Now() inside the adapter, the
+	// AccountRepository.SetArchived convention.
+	SetArchived(ctx context.Context, householdID, billID string, archived bool, at time.Time) (BillRecord, error)
 	// RecordPayment writes the bill_payments row, the expense transaction and
 	// the advanced next_due in ONE database transaction. A bill left advanced
 	// with no payment, or a payment with no expense, is not a state this port
@@ -796,7 +782,7 @@ SELECT b.id, b.household_id, b.name, b.amount_minor, b.cadence, b.next_due,
        b.paid_by_membership_id, b.autopay, b.is_subscription, b.archived_at,
        COALESCE(c.name, '')  AS category_name,
        a.nickname            AS account_name,
-       a.currency            AS currency
+       a.opening_balance_currency AS currency
 FROM bills b
 JOIN accounts a ON a.id = b.pay_from_account_id
 LEFT JOIN categories c ON c.id = b.category_id
@@ -812,28 +798,28 @@ ORDER BY b.next_due NULLS LAST, b.name;
 -- No archived_at filter here, unlike BillMonthUnpaidTotals below, and that
 -- asymmetry is deliberate: this money already left the household, so archiving
 -- the bill afterwards must not retroactively empty the month it was paid in.
-SELECT a.currency, SUM(p.amount_minor)::bigint AS minor
+SELECT a.opening_balance_currency AS currency, SUM(p.amount_minor)::bigint AS minor
 FROM bill_payments p
 JOIN bills b    ON b.id = p.bill_id
 JOIN accounts a ON a.id = b.pay_from_account_id
 WHERE p.household_id = $1
   AND p.due_on >= sqlc.arg(month_start)::date
   AND p.due_on <  sqlc.arg(next_month)::date
-GROUP BY a.currency;
+GROUP BY a.opening_balance_currency;
 
 -- name: BillMonthUnpaidTotals :many
-SELECT a.currency, SUM(b.amount_minor)::bigint AS minor
+SELECT a.opening_balance_currency AS currency, SUM(b.amount_minor)::bigint AS minor
 FROM bills b
 JOIN accounts a ON a.id = b.pay_from_account_id
 WHERE b.household_id = $1
   AND b.archived_at IS NULL
   AND b.next_due >= sqlc.arg(month_start)::date
   AND b.next_due <  sqlc.arg(next_month)::date
-GROUP BY a.currency;
+GROUP BY a.opening_balance_currency;
 
 -- name: ListBillPaymentsForMonth :many
 SELECT p.id, p.bill_id, p.household_id, p.due_on, p.paid_on, p.amount_minor,
-       p.transaction_id, b.name AS bill_name, b.autopay, a.currency
+       p.transaction_id, b.name AS bill_name, b.autopay, a.opening_balance_currency AS currency
 FROM bill_payments p
 JOIN bills b    ON b.id = p.bill_id
 JOIN accounts a ON a.id = b.pay_from_account_id
@@ -843,7 +829,9 @@ WHERE p.household_id = $1
 ORDER BY p.paid_on DESC, b.name;
 ```
 
-Write `GetBill`, `CreateBill`, `UpdateBill` and `SetBillArchived` in the same file, following `queries/goal.sql`'s shapes exactly — `GetBill` filters on `household_id` and `id` together, and `UpdateBill` sets `due_anchor_day = EXTRACT(day FROM sqlc.arg(next_due)::date)` whenever `next_due` is written.
+Write `GetBill`, `CreateBill`, `UpdateBill` and `SetBillArchived` in the same file, following `queries/goal.sql`'s shapes exactly. `GetBill` filters on `household_id` and `id` together. **`UpdateBill` is an unconditional full-row `SET` — every mutable column including `due_anchor_day`, no `COALESCE` and no dynamic SQL.** `BillService` merges a partial PATCH into a complete `domain.Bill` before this port ever sees it (`ports.go`'s `Update` comment, and the same rule `AccountRepository.Update` and `GoalRepository.Update` already state), so the anchor arrives already derived and the adapter never computes a calendar day.
+
+Every query that returns a bill joins `accounts` and selects `a.opening_balance_currency` (the column is named for the balance it was introduced with; it is the account's currency, full stop — there is no bare `currency` column on `accounts`), because `Bill.Amount` carries the pay-from account's currency — there is no currency column on `bills`, and no second `Currency` field on `BillRecord` to fill instead.
 
 - [ ] **Step 2: Regenerate**
 
@@ -1226,7 +1214,33 @@ git commit -m "feat(bills): atomic payment and undo"
 
 **Interfaces:**
 - Consumes: `BillRepository`, `HouseholdRepository`, `FXRateProvider`, `AccountLookup`.
-- Produces: `usecase.BillDeps`, `usecase.BillService`, `NewBillService(BillDeps) *BillService`, and the view types `BillView`, `BillPaymentView`, `BillsSummary`, `BillsView`. `List(ctx, householdID string, includeArchived bool, today time.Time) (BillsView, error)`, `Create(ctx, NewBill) (BillView, error)`, `Update(ctx, householdID, billID string, BillPatch) (BillView, error)`, `SetArchived(ctx, householdID, billID string, archived bool, at time.Time) error`. Task 9 calls all four.
+- Produces: `usecase.BillDeps`, `usecase.BillService`, `NewBillService(BillDeps) *BillService`, the view types `BillView`, `BillPaymentView`, `BillsSummary`, `BillsView`, and **`usecase.BillPatch`** — declared here in `bill.go`, not in `ports.go`, exactly as `GoalUpdate` is. `List(ctx, householdID string, includeArchived bool, today time.Time) (BillsView, error)`, `Create(ctx, NewBill) (BillView, error)`, `Update(ctx, householdID, billID string, BillPatch) (BillView, error)`, `SetArchived(ctx, householdID, billID string, archived bool, at time.Time) (BillView, error)`. Task 9 calls all four.
+
+**`Update` is where the merge happens, and it is the reason `BillPatch` lives at this layer.** The service `Get`s the bill, applies each non-nil field of the patch onto it, re-derives `DueAnchorDay` from `NextDue` whenever the patch moved it, and hands `BillRepository.Update` a complete `domain.Bill`. The port never merges — the rule `AccountRepository.Update`, `TransactionRepository.Update` and `GoalRepository.Update` each state in their own doc comments.
+
+```go
+// BillPatch is a PATCH: a nil field is unchanged. There is deliberately no
+// ArchivedAt field -- archive and restore are their own routes, so an ordinary
+// rename cannot archive a bill as a side effect (router.go's own comment for
+// accounts, categories and goals).
+//
+// ClearCategory and ClearPayer are how a set field is unset, the same explicit
+// -clear convention clearReceivedAmount uses on transactions: a nil pointer
+// already means "unchanged", so it cannot also mean "clear".
+type BillPatch struct {
+	Name               *string
+	AmountMinor        *int64
+	Cadence            *domain.Cadence
+	NextDue            *time.Time
+	CategoryID         *string
+	ClearCategory      bool
+	PayFromAccountID   *string
+	PaidByMembershipID *string
+	ClearPayer         bool
+	Autopay            *bool
+	IsSubscription     *bool
+}
+```
 
 - [ ] **Step 1: Write the view types and the failing tests**
 
@@ -1438,7 +1452,9 @@ In `testdouble_test.go`, add a `fakeBillRepo` beside the existing fakes: a slice
 
 `Create` derives `DueAnchorDay` from `NextDue.Day()` — never from a caller — trims and refuses an empty name (`ErrBillNameRequired`), refuses a non-positive amount (`ErrBillAmountNotPositive`), and refuses an archived pay-from account by asking `AccountLookup.Get`.
 
-`Update` refuses a `PayFromAccountID` whose account currency differs from the bill's current one, with a new sentinel `domain.ErrBillCurrencyImmutable` — add it to `errors.go` in this task. The message names both currencies at the HTTP layer, not here.
+`Update` `Get`s the bill, applies each non-nil field of the `BillPatch` onto it, and hands `BillRepository.Update` a **complete** `domain.Bill` — the port never merges. It re-derives `DueAnchorDay` from the new `NextDue` whenever the patch moved it: an explicit edit is the household choosing a new anchor, and leaving the old one would make the next advance jump to a day they did not pick. It refuses a `PayFromAccountID` whose account currency differs from the bill's current one, with a new sentinel `domain.ErrBillCurrencyImmutable` — add it to `errors.go` in this task. The message names both currencies at the HTTP layer, not here.
+
+Write a test for the anchor on update: patching a bill's `NextDue` to the 15th makes a later advance land on the 15th, not on the day the bill previously carried. Nothing else covers that path — Task 5's own anchor test covers the *mechanical* rewind, which must NOT touch the anchor, and this is the opposite case.
 
 - [ ] **Step 5: Run to verify they pass**
 
@@ -1792,13 +1808,16 @@ type billDTO struct {
 	IsSubscription     bool    `json:"isSubscription"`
 	Overdue            bool    `json:"overdue"`
 	DueSoon            bool    `json:"dueSoon"`
+	Settled            bool    `json:"settled"`
 	ArchivedAt         *string `json:"archivedAt"`
 }
 ```
 
 `billsResponse` carries `bills`, `paidThisMonth` and `summary`. The frontend splits `bills` into Due soon and Later on the server-computed `dueSoon` flag rather than recomputing 30 days in TypeScript.
 
-Error mapping: `ErrBillNameTaken` → 409 whose body names the taken name and whether the holder is archived (so the modal can offer restore); `ErrBillCurrencyImmutable` → 422 naming both currencies; `ErrUnknownCadence`, `ErrBillNameRequired`, `ErrBillAmountNotPositive` → 422; `ErrForbidden` → 422 with the reason; `ErrNotFound` → 404. Every 2xx carries a body, archive and restore included.
+**`Settled` must be serialised, and Task 12 must render it.** A settled one-off — paid, with no next date — has `NextDue == nil`, so it belongs to neither Due soon nor Later by their own definitions (both require a non-null `next_due`), and it is deliberately not auto-archived, because that would hide a record the household may still want. But it is still counted in `BillCount` and `N of M on autopay`. Drop the field and a bill is counted in the header while appearing nowhere on the page — the same defect the 30-day window had before this plan grew its Later heading, and the same shape as a feature no screen can reach. Task 7's own review found this gap in these very sketches; it is closed here.
+
+Error mapping: `ErrBillNameTaken` → 409 whose body names the taken name and whether the holder is archived (so the modal can offer restore); `ErrBillCurrencyImmutable` → 422 naming both currencies; `ErrUnknownCadence`, `ErrBillNameRequired`, `ErrBillAmountNotPositive` → 422; `ErrForbidden` → 422 with the reason; `ErrAccountOwnerNotInHousehold` → 422 (already mapped by the shared switch in `internal/adapter/http/errors.go`; confirm rather than re-add); `ErrNotFound` → 404. Every 2xx carries a body, archive and restore included.
 
 - [ ] **Step 4: Wire the routes**
 
@@ -1934,7 +1953,10 @@ it("bills exist but none is due this month: the stat cards explain rather than s
 it("ordinary: splits Due soon from Later on the server's dueSoon flag", …)
 it("all caught up: names the next bill and the month that is settled", …)
 it("overdue: sorts first, and an autopay bill's copy differs from a manual one's", …)
+it("a settled one-off appears under Later with 'Settled' where a date would go", …)
 ```
+
+**That last state is not optional.** A settled one-off — a one-off bill that has been paid — has no next due date, so it belongs to neither Due soon nor Later by their own definitions, and it is deliberately not auto-archived. It is still counted in the header's `N of M on autopay` and in `BillCount`. Render it under Later on the server-sent `settled` flag, showing "Settled" in place of the date, or it is a bill counted in a figure and visible nowhere — the same defect the 30-day window had before this plan grew its Later heading.
 
 The overdue test asserts both strings: autopay → `Should have gone out on 24 Jul — confirm it did`; manual → `Overdue since 24 Jul`.
 
@@ -2068,7 +2090,7 @@ git commit -m "feat(bills): subscriptions rollup"
 
 - [ ] **Step 1: Read `OverviewPage.tsx`'s member-state guard before writing anything**
 
-`GET /bills` is gated `money` **and** owner, so `useBills` **403s for a limited member** — Overview is about to acquire a fourth failing query, and the limited-member panel is currently gated on `accounts.isSuccess`. Read that guard first; do not add a query to this page without knowing what decides whether the panel renders.
+`GET /bills` is gated `money` **and** owner, so a limited member must never be allowed to issue it. Task 11 built `useBills(includeArchived, { enabled })` for exactly this, and `OverviewPage.tsx` already gates `useBudget` and `useGoals` the identical way for the identical guard — follow that, so the query never fires rather than firing and 403ing. Read the page's member-state guard first; do not add a query here without knowing what decides whether the limited-member panel renders (it is currently gated on `accounts.isSuccess`).
 
 This is not hypothetical. The interim Overview's one real defect was exactly this shape: a limited member holding `money` saw a page containing the word "Overview" and nothing else. Every unit test passed against it, before and after, because each test covering that member asserted the **absence** of something — and absence holds perfectly over a blank page (`docs/LEARNING.md` pattern 2).
 
@@ -2079,8 +2101,9 @@ This is not hypothetical. The interim Overview's one real defect was exactly thi
 - A household with no bills renders the card's own empty line, never a zero.
 - `+ Add → Bill` opens `BillModal`, saves, and moves the card with no reload.
 - The entry is **disabled with its reason until an account exists** — a bill needs a pay-from account, the same precondition `+ Add → Transaction` already carries.
-- **A limited member still gets the limited-member panel**, with the bills query failing alongside the others. Assert on what is *present* — the panel's own text — not only on what is missing, or the test agrees with a blank page.
-- **`NextBillCard` renders nothing on a 403**, not an error region and not a blank card with a heading above it.
+- **A limited member still gets the limited-member panel**, with the bills query disabled alongside the others. Assert on what is *present* — the panel's own text — not only on what is missing, or the test agrees with a blank page.
+- **`NextBillCard` renders nothing while its query is disabled**, not an error region and not a blank card with a heading above it. (The earlier wording here said "on a 403"; Task 11's `enabled` option means the request is never sent, so there is no 403 to render nothing on — asserting against one would test a state that cannot occur.)
+- **The stub must register no `GET /api/v1/bills` route for the limited-member test.** `stubFetchRoutes` throws on an unregistered request, so a query that fires when it should not will fail loudly rather than passing quietly.
 
 - [ ] **Step 3: Run to verify they fail; implement; run to verify they pass**
 

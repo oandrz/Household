@@ -10,7 +10,8 @@ in three months or someone new.
 
 ## 1. Where things stand
 
-Everything shipped so far is now walked end to end in a browser. Self-serve
+Everything shipped so far is walked end to end in a browser, except Bills,
+whose own walk is next (§4). Self-serve
 sign-up's own 15-criterion walk ran on 2026-07-30 — three days after its code
 was finished and reviewed — and **passed 15 of 15**, recorded in
 `docs/superpowers/plans/2026-07-27-hearth-signup-verification.md`. No product
@@ -71,10 +72,10 @@ test driving the three transactions write routes without a CSRF token.
 | 0 — Skeleton | Clean-architecture layout, Docker, Compose, Make, migrations, health endpoints | **Done** |
 | 1 — Household & identity | Sign-in, magic link, invite acceptance, lockout, members, roles, capabilities, spaces, Settings | **Done** |
 | — Self-serve sign-up | Sign-up, household provisioning, an ISO 4217 currency allowlist and list endpoint, `adminctl prune`, a per-IP rate limiter | **Done, browser walk 15/15** (2026-07-30) |
-| 2 — Money | **Accounts**: manual entry, net worth, assets/liabilities breakdown, archive and restore — **done, browser walk 15/15**. **Transactions**: ledger, categories, filters, keyset paging, month-to-date spend — **done, browser walk 15/15**. **Budget**: envelope per category with pace, empty state and templates, Edit-budget modal with category create/rename/archive, History modal and month picker — **done, browser walk 15/15** (2026-07-31, two defects found at criterion 9 and fixed mid-walk; see `docs/superpowers/plans/2026-07-30-hearth-budget-verification.md`). **Goals**: savings targets whose progress is a contributions ledger (not an account balance), the New/Edit goal modal, contributions add/delete/list by source, the Monthly contributions card, and Budget's own manual rollover into a goal — **done, browser walk 15/15** (2026-08-01, one defect found at criterion 12 and fixed mid-walk: archive and restore shipped with no way to *archive* — every layer existed and no screen called `useGoals.archiveGoal`, so "Show archived" and every Restore button led out of a state no household could enter, `82453ff`; see `docs/superpowers/plans/2026-08-01-hearth-goals-verification.md` and `docs/LEARNING.md` pattern 15). Accounts, Transactions, Budget, Goals built; Bills not started | In progress |
+| 2 — Money | **Accounts**: manual entry, net worth, assets/liabilities breakdown, archive and restore — **done, browser walk 15/15**. **Transactions**: ledger, categories, filters, keyset paging, month-to-date spend — **done, browser walk 15/15**. **Budget**: envelope per category with pace, empty state and templates, Edit-budget modal with category create/rename/archive, History modal and month picker — **done, browser walk 15/15** (2026-07-31, two defects found at criterion 9 and fixed mid-walk; see `docs/superpowers/plans/2026-07-30-hearth-budget-verification.md`). **Goals**: savings targets whose progress is a contributions ledger (not an account balance), the New/Edit goal modal, contributions add/delete/list by source, the Monthly contributions card, and Budget's own manual rollover into a goal — **done, browser walk 15/15** (2026-08-01, one defect found at criterion 12 and fixed mid-walk: archive and restore shipped with no way to *archive* — every layer existed and no screen called `useGoals.archiveGoal`, so "Show archived" and every Restore button led out of a state no household could enter, `82453ff`; see `docs/superpowers/plans/2026-08-01-hearth-goals-verification.md` and `docs/LEARNING.md` pattern 15). **Bills**: recurring bills on a one-off/monthly/quarterly/yearly cadence, Mark paid writing a real expense transaction and its undo reversing all three writes, archive and restore, a subscriptions rollup — **done, browser walk 15/15** (2026-08-10, one defect found at criterion 14 and swept for the class rather than fixed as one instance: `BillsPage.tsx` answered a limited member's routine "not the owner" 403 with the same red alert a genuine server failure gets, where sibling `GoalsPage.tsx` already distinguishes the two — and the identical gap turned out to be sitting in `BudgetPage.tsx` and `TransactionsPage.tsx` too, fixed the same walk; see `docs/superpowers/plans/2026-08-09-hearth-bills-verification.md` and `docs/LEARNING.md` pattern 1). Accounts, Transactions, Budget, Goals, Bills all built and walked; **slice 2 (Money) is done** | **Done** |
 | 3 — Marriage | Retros, Vision, Agreements | Not started |
-| 4 — Family | Calendar | Not started |
-| 5 — Overview | Read-only aggregation across 2–4 | **Interim page built** (2026-08-01) — `/` carries three of the eight cards Money can supply (net worth, this month's budget, and — added the same day by Goals — goals on track), a setup checklist and a three-entry "+ Add" (Transaction, Account, Savings goal). The M2 walk on the first two cards and the two-entry menu ran **14 of 14**, one real defect found and fixed mid-walk; the goals card and its menu entry are new since, and Goals' own walk covered both at its criterion 11 (2026-08-01): the card read "Goals on track · 1 of 2 · next: Bali family trip · Dec 2026 · 1 with no date", and "+ Add → Savings goal" opened the modal, saved, and moved the card with no reload. The other five cards need Bills, Marriage and Family; the page grows into the designed one rather than being replaced |
+| 4 — Family | Calendar | Not started — its own dependency on Bills (bill dates on the month grid) is now satisfied |
+| 5 — Overview | Read-only aggregation across 2–4 | **Interim page built** (2026-08-01, grown 2026-08-10) — `/` carries four of the eight cards Money can supply (net worth, this month's budget, goals on track, and — added by Bills — the next bill due), a setup checklist and a four-entry "+ Add" (Transaction, Account, Savings goal, Bill). The M2 walk on the first two cards and the two-entry menu ran **14 of 14**, one real defect found and fixed mid-walk; the goals card and its menu entry were covered by Goals' own walk at its criterion 11 (2026-08-01). **The next-bill card and its quick-add entry are new since and have not been walked** — Bills' own Task 18 walk covers them, the same way Goals' walk covered its own Overview additions. The other three cards need Marriage and Family; the page grows into the designed one rather than being replaced |
 
 Self-serve sign-up carries no slice number on purpose: it was specified and
 built between slices 1 and 2, ahead of Money (see "What to do next" below for
@@ -171,6 +172,61 @@ from the same milestone: the plan's own designated mutation could never go
 red, because two guards defend that behaviour and removing either alone
 changes nothing observable.
 
+**Bills, Money's fifth and last feature, is code-complete, reviewed and now
+walked — sixteen tasks deep, every task's own review clean including fix
+rounds, plus Task 18's own 15-criterion browser walk (2026-08-10, 15 of 15
+pass).** Two tasks landed real,
+implementer-found defects along the way rather than review catching them
+cold: Task 12's "All caught up" state could render directly above a bill
+still overdue from a *prior* month, because such a bill contributes to
+neither of the two totals the empty-state check compares — found and fixed
+before commit, then verified live against the real backend before and after
+(`17b2f78`); and Task 14's undo-refusal message ("only the most recent
+payment, due X") could name a payment that no longer existed, with a sibling
+staleness hole in Mark paid that review caught once the first was fixed —
+another instance of "fix the class, not the instance" (§6 below), the
+pattern this feature's own ledger names at least twice more on top of it.
+Review also found and fixed three defects with no working state to
+demonstrate them from: `SetBillNextDue` committing two of three writes
+silently on a zero-row match (Task 5), a bill silently re-pointed at an
+archived account with no way back to pay it (Task 9, carried into Task 10),
+and `MarkPaid` answering a bare 403 for three different refusal reasons
+where the design's own error table names two of them (Task 10). By the
+ledger's own running tally, six separate prescribed mutations or proof
+techniques across this feature's plan turned out to prove nothing, or the
+wrong thing, and every one was caught before the task closed — see
+`docs/LEARNING.md`'s Database-and-repositories catalogue (the pgx
+transaction-leak instance) and Pattern 2 (the recurring NOT_FOUND-message
+one) for two of the six in full.
+
+**Task 18's own walk (2026-08-10) then found a seventh — and, once the sweep
+it prompted ran, two more beyond that — of the shape "code-complete and
+reviewed" cannot catch by construction: a limited member holding
+`money` who visited `/money/bills` (the sidebar's own link, reachable because
+the route guard checks only the capability, never the role) saw the same red
+"Couldn't load your bills" alert a genuine server failure produces, for the
+routine, expected 403 the money-AND-owner guard answers with. `GoalsPage.tsx`
+carries the identical guard and already distinguishes the two states with its
+own `goals-owner-only` explanation; `BillsPage.tsx` had not been given the
+same branch, and no test — not even an absence test — covered either shape of
+its `bills.error` case. Fixing it and re-reading `router.go`'s own comment —
+which names transactions, categories, budgets, goals **and** bills as one
+money-AND-owner group, not Bills alone — found the identical gap already
+sitting in `BudgetPage.tsx` (one line worse: `budget.error || !budget.data`
+collapsed the 403 into the same branch as the ordinary type-narrowing guard)
+and `TransactionsPage.tsx` (no branch and no test either). All three fixed
+to mirror `GoalsPage.tsx` exactly, each with its own copy and its own
+mutation-checked test pair (`docs/LEARNING.md` pattern 1 — Goals fixed the
+instance, and fixing Bills' instance is what prompted the sweep that found
+the other two, rather than the task closing on Bills alone). Full record,
+all fifteen criteria, the three-page sweep, and the answers to the walk's
+three product questions (Paid-this-month buckets by `due_on` so a paid
+prior-month bill is invisible there though the money is real on the ledger;
+Spending by person is invisible for any month with no budget row, bills or
+not; a no-rate subscription renders its row but not its total, with the page
+footnote as the only explanation) are in
+`docs/superpowers/plans/2026-08-09-hearth-bills-verification.md`.
+
 Two screens the design marks "· not built" are deliberately absent: the **kids
 view** and **custom space pages**. That is the design's own scoping, not an
 omission.
@@ -199,7 +255,7 @@ Bare `make` lists every target. The ones you will actually use:
 | `make unlock-household` | clears a lockout without waiting 15 minutes |
 | `make migrate-new NAME=…` | runs through the pinned dev image, not a host binary |
 | `make lint` | arch lint, frontend typecheck, eslint, `go vet` |
-| `make test` | Go suite (needs Docker) plus 272 frontend tests |
+| `make test` | Go suite (needs Docker) plus 465 frontend tests |
 
 **Docker is colima on the original machine.** The Go suite uses testcontainers
 and needs:
@@ -309,24 +365,28 @@ that will manage it (a deferred, separate spec) so it earns real usage first
 — and a household has to be able to exist before there is anything for that
 console to administer.
 
-**Slice 2 (Money) is under way.** Accounts, Transactions, Budget and Goals —
-its first four features — are all code-complete, reviewed **and walked in a
-browser**. Goals' own walk ran on 2026-08-01 and passed 15 of 15, finding one
-real defect at criterion 12 and fixing it mid-walk (§1;
-`docs/superpowers/plans/2026-08-01-hearth-goals-verification.md`). **Bills is
-next** — it is the last of Money's five features, it has no spec yet, and it
-inherits the clean slate described below. Money is still the largest area and
+**Slice 2 (Money) is done.** Accounts, Transactions, Budget, Goals and
+Bills — all five features — are code-complete, reviewed, and now all
+**walked in a browser**, each 15 of 15. Goals' own walk ran on 2026-08-01,
+finding one real defect at criterion 12 and fixing it mid-walk (§1;
+`docs/superpowers/plans/2026-08-01-hearth-goals-verification.md`). Bills' own
+walk ran on 2026-08-10, finding one real defect at criterion 14 and fixing it
+mid-walk (§1; `docs/superpowers/plans/2026-08-09-hearth-bills-verification.md`).
+**Marriage is the next feature** — independent of Money, and the first area
+whose spec starts from a genuinely clean slate rather than inheriting
+anything from this section (below). Money is still the largest area and
 still the design's centre of gravity.
 
 **Slice 5 (Overview) is the exception to its own rule, deliberately.** The
 original order put it last because it only aggregates, so building it early
 means stubbing everything it reads. That still holds for the *designed*
-Overview. What shipped on 2026-08-01 is an interim page built strictly on
-what already exists — two of the eight cards at first, a third (goals on
-track) added the same day once Goals itself shipped — no stubs, no invented
+Overview. What shipped on 2026-08-01, and grew twice since, is an interim
+page built strictly on what already exists — two of the eight cards at
+first, a third (goals on track) the same day once Goals shipped, a fourth
+(next bill due) on 2026-08-10 once Bills did — no stubs, no invented
 figures, taken early because `/` was showing every household "Arriving in
-slice 5" on every visit, established households included. The remaining five
-cards still wait on Bills, Marriage and Family, and the same route and the
+slice 5" on every visit, established households included. The remaining
+three cards still wait on Marriage and Family, and the same route and the
 same component grow into them.
 
 Each slice gets its own spec → plan → implementation cycle, the same way these
@@ -338,28 +398,29 @@ Accounts' own is `docs/superpowers/specs/2026-07-28-hearth-accounts-design.md`;
 Transactions' own is
 `docs/superpowers/specs/2026-07-29-hearth-transactions-design.md`; Budget's
 own is `docs/superpowers/specs/2026-07-30-hearth-budget-design.md`; Goals'
-own is `docs/superpowers/specs/2026-08-01-hearth-goals-design.md`. The
+own is `docs/superpowers/specs/2026-08-01-hearth-goals-design.md`; Bills'
+own is `docs/superpowers/specs/2026-08-09-hearth-bills-design.md`. The
 completed plans beside them are worth skimming for house style before writing
-a sixth.
+Marriage's.
 
-### What Accounts, Transactions, Budget and Goals closed, and what Bills inherits
+### What Accounts through Bills closed, across all five Money features
 
 Three things a prior review flagged as "must not be forgotten" before slice 2's
 first task. Accounts closed the first, upheld the second, and pinned the start
 of the third; Transactions pinned two more figures of its own, Budget pinned
-three more, and Goals pinned the last two the design shows anywhere in Money.
-Bills inherits a clean slate on all three:
+three more, Goals pinned two more, and Bills pinned the last three the design
+shows anywhere in Money:
 
 1. **`requireCapability` middleware exists and no route uses it — closed.**
    The spec promised the server enforces capabilities independently of the
    UI; until Accounts, that promise was vacuous. `GET /api/v1/accounts` and
    its four write routes are now gated on the `money` capability (reads) and
-   `money` plus owner (writes); Transactions, Categories, Budget and Goals go
-   further — `money` **and** owner gate their reads too, not just their
-   writes, because a ledger, a budget screen or a goal card with every figure
-   blank reads as broken rather than merely restricted
+   `money` plus owner (writes); Transactions, Categories, Budget, Goals and
+   Bills go further — `money` **and** owner gate their reads too, not just
+   their writes, because a ledger, a budget screen, a goal card or a bill row
+   with every figure blank reads as broken rather than merely restricted
    (`docs/SYSTEM_DESIGN.md` §4). The route-walk test matrices under
-   `api/internal/adapter/http/` cover all four shapes.
+   `api/internal/adapter/http/` cover all five shapes.
 2. **Money is `int64` minor units plus an ISO 4217 code, everywhere — held.**
    `domain.Money` refuses to mix currencies; `AccountService.Summary`,
    `TransactionService.MonthSummary` and `GoalService.List` all convert into
@@ -369,30 +430,43 @@ Bills inherits a clean slate on all three:
    expected income by a float literal (`incomeMinor * 0.3`) before flooring,
    which drifted by a minor unit on at least one real income figure — caught
    in review, fixed to integer-first arithmetic (`docs/LEARNING.md`, Domain
-   and money catalogue). No `float64` survived in a monetary path anywhere
-   in the stack, on any of the four features.
-3. **The derived figures the design shows are now all pinned and built.** Net
-   worth (Accounts). `Count` and `Spent`, expenses only (Transactions).
-   `66% used`, `S$137/day left` and `on pace to save S$1,780`, all
-   Remaining-based rather than a run-rate projection (Budget spec decision
-   2 — a projection can contradict the mockup's own numbers with the
-   mockup's own data). And the last two anywhere in Money: `X of Y on
-   track` and the manual move of unspent budget into a nominated goal, both
-   pinned in Goals' own formula table
-   (`docs/superpowers/specs/2026-08-01-hearth-goals-design.md`). The
-   rollover is deliberately not the design's automatic toggle — a stored
+   and money catalogue). Bills held it under a different pressure: it
+   stores no currency of its own at all, deliberately — the pay-from
+   account's currency is authoritative, resolved through the same
+   `AccountLookup` `TransactionService.Create` already uses, so a bill
+   cannot come to disagree with the expense it eventually writes
+   (`docs/SYSTEM_DESIGN.md` §5). No `float64` survived in a monetary path
+   anywhere in the stack, on any of the five features.
+3. **The derived figures the design shows anywhere in Money are now all
+   pinned and built.** Net worth (Accounts). `Count` and `Spent`, expenses
+   only (Transactions). `66% used`, `S$137/day left` and `on pace to save
+   S$1,780`, all Remaining-based rather than a run-rate projection (Budget
+   spec decision 2 — a projection can contradict the mockup's own numbers
+   with the mockup's own data). `X of Y on track` and the manual move of
+   unspent budget into a nominated goal, both pinned in Goals' own formula
+   table (`docs/superpowers/specs/2026-08-01-hearth-goals-design.md`) — the
+   rollover deliberately not the design's automatic toggle, since a stored
    setting that acts only when clicked would read as automatic, the same
    dishonesty Budget's own spec had already refused for this row (Budget
    decision 1, Goals decision 4); the manual button ships instead
-   (`docs/FEATURE_TRACKER.md`'s Budget row).
+   (`docs/FEATURE_TRACKER.md`'s Budget row). And the last three anywhere in
+   Money, Bills' own: the due-soon/later split, autopay's badge and copy,
+   and the subscriptions monthly/annual totals, all pinned in Bills' own
+   formula table (`docs/superpowers/specs/2026-08-09-hearth-bills-design.md`).
 
-**Bills is the next feature, and it starts with nothing already pinned.**
-Money's fourth build task, Goals, closed out every derived figure the
-design's Money mockups show; Bills' own timeline, autopay status and
-subscriptions summary are figures nobody has defined yet. An implementer who
-invents any of them without a decision recorded first in Bills' own spec is
-building on sand — the same warning this section has carried since before
-Budget was written, now discharged three times over rather than once.
+**Marriage is the next feature, and — unlike every feature above — it does
+not inherit a clean slate from this section.** Money closed all three items
+above across five features in a row; Marriage is a different domain (mood,
+retros, agreements, none of it money), so items 1 and 2 do not transfer as
+written — Marriage will need its own capability-gating shape decided (it is
+already `marriage`-gated at the space level, per `domain.BuiltinSpaces`, but
+nothing in Marriage has a route yet to apply it to) and carries no monetary
+figures to keep `int64`-honest. What *does* transfer is the discipline
+behind item 3: an implementer who invents Marriage's own derived figures —
+mood trends, agreement version diffs, whatever Vision's "on track" turns out
+to mean — without a decision recorded first in Marriage's own spec is
+building on sand, the same warning this section has now enforced across
+five features running.
 
 ### The seams slice 2 will use
 
@@ -468,8 +542,21 @@ the reasoning for each. The headlines:
   blocking the button on a positive exclusion count without a further
   product conversation; see `docs/SYSTEM_DESIGN.md` §5's Goals flow for the
   full reasoning.
+- **Autopay is a display flag; nothing pays a bill by itself.** Every bill,
+  autopay or not, is marked paid by a person clicking a button — there is no
+  scheduler anywhere in this codebase, and Budget decision 1 and Goals
+  decision 4 both already refused to invent one for their own features
+  (Bills spec decision 3). The accepted cost is real: a bill the bank has
+  already auto-paid sits unpaid on screen, and can go overdue there, until a
+  person confirms it. The flag exists precisely for that moment — it is what
+  tells the household whether an overdue row is an errand or a five-second
+  click — not to make the row disappear on its own. Do not "fix" the
+  overdue-while-autopaying state by auto-stamping a payment on read: that
+  writes a row during a `GET`, invents money the bank may not actually have
+  taken (a failed GIRO would show as paid), and the amount would be a guess
+  that moves net worth.
 
-All four are documented in the code at the point a future editor would change them.
+All five are documented in the code at the point a future editor would change them.
 
 ### Worth doing when convenient
 
@@ -641,13 +728,18 @@ by the same index a name lookup uses):
 
 These were each learned from a defect that shipped past a green test suite.
 
-- **Fix the class, not the instance.** Six times in this project a defect was
-  fixed at one site while its siblings kept the bug — a PATCH corrected in two
-  of three endpoints, an error oracle closed at the mailer and left two lines
-  away, a non-awaited invalidation fixed in one panel with two untouched, and
-  (most recently) a `time.Truncate`-and-location mistake that shipped at two
-  separate call sites before a third, correctly-written one got its test.
-  When you fix something, grep for its shape.
+- **Fix the class, not the instance.** Fourteen times in this project a defect
+  was fixed at one site while its siblings kept the bug — a PATCH corrected in
+  two of three endpoints, an error oracle closed at the mailer and left two
+  lines away, a non-awaited invalidation fixed in one panel with two untouched,
+  a `time.Truncate`-and-location mistake that shipped at two separate call
+  sites before a third, correctly-written one got its test, and (most recently)
+  Bills' whole-branch review, where an archived-account refusal added by an
+  earlier task in the same branch turned a rename into a dead end because the
+  form beside it restated the field unconditionally. **`docs/LEARNING.md`
+  pattern 1 is the list, one bullet per instance, and the count there is
+  authoritative — recount it rather than copying this sentence.** When you fix
+  something, grep for its shape.
 - **Verify UI behaviour in a real browser.** jsdom's `<dialog>` is a stub, so
   five passing tests hid a modal that threw on every open in production. If a
   behaviour depends on the platform, a simulated DOM cannot tell you it works.

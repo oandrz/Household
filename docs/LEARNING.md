@@ -1,10 +1,10 @@
 # Hearth — learning log
 
-Every defect found while building slices 0, 1, self-serve sign-up, Accounts,
-Transactions and Budget (slice 2's first three features), the finance-fixes
-round that followed the owner's first real day-one use of Transactions, and
-the UX-repair round (M1) that followed his first look at the app as a whole —
-and what each one teaches. That last round is worth noticing for what it
+Every defect found while building slices 0, 1, self-serve sign-up and the
+whole of slice 2 — Accounts, Transactions, Budget, Goals and Bills — plus the
+finance-fixes round that followed the owner's first real day-one use of
+Transactions, and the UX-repair round (M1) that followed his first look at the
+app as a whole — and what each one teaches. That last round is worth noticing for what it
 contains: not one of its defects was a broken function. Every one was
 something correct in isolation that nobody had looked at as a product.
 Written because almost none of them were caught by a failing test — they were
@@ -23,12 +23,13 @@ gets rebuilt.
 
 ### 1. Fixing an instance rarely fixes the class
 
-This happened **eleven times** — one bullet each below, and the count is the
+This happened **fourteen times** — one bullet each below, and the count is the
 number of bullets, so recount it when you add one (it had already drifted by
 one before the UX-repair round noticed). Almost every time, the fix was
 correct and the sibling kept the bug; two of them are the variant where
 nothing was broken at all until a field's or a product's meaning moved under
-a reader nobody thought to look at.
+a reader nobody thought to look at, and one is the variant where an earlier
+fix in the same branch *created* the sibling.
 
 - `PATCH` implemented as `PUT` — fixed in `/household` and
   `/notification-preferences`, missed in `/household/members/:id`. Found two
@@ -71,6 +72,48 @@ a reader nobody thought to look at.
   product decision (whose timezone?) wearing a bug's clothes, and it needs
   answering before it is coded, not after. Recorded against Transactions; not
   M2's to fix.
+
+  **A fifth instance, found in review rather than live, and one step removed
+  from `Truncate` itself: Bills' `domain.NextDue`/`startOfDay`.** Go's
+  `time.Time.AddDate(0, 1, 0)` on 31 January returns 3 March, not 28
+  February — it normalises "31 February" forward instead of refusing it —
+  so a bill due on the 31st would walk off the end of every short month if
+  the month arithmetic simply added one. The plan's own brief already named
+  the fix (clamp the destination month's real length), but the first draft
+  of `NextDue` and its sibling `startOfDay` read `from.Year()`/`.Month()`/
+  `.Day()` straight off the caller's `time.Time` without converting to UTC
+  first — the same family's essence restated: those three methods report
+  components in the value's own `Location`, not UTC, so a bill built from a
+  non-UTC input could compute its clamp against the wrong calendar day
+  entirely. Task 2's review, following the plan's own constraint that month
+  arithmetic must truncate in UTC and citing this very pattern, required
+  `from = from.UTC()` in `NextDue` and `t = t.UTC()` in `startOfDay` before
+  either reads a component; `TestNextDueAndIsOverdueNormaliseNonUTCInputToUTC`
+  builds its inputs with `time.FixedZone` and was mutation-checked at both
+  call sites independently. **The second-order lesson is why
+  `due_anchor_day` is its own column rather than derived from `next_due`:
+  clamping alone is one-way.** 31 Jan clamps to 28 Feb; if the next advance
+  clamped from that already-clamped 28, it would give 28 Mar, and a bill due
+  on the 31st would silently become a bill due on the 28th forever after its
+  first February. Storing the anchor separately and clamping *it* fresh each
+  time — 31 Jan → 28 Feb → 31 Mar — is what keeps the drift from compounding.
+
+  **A sixth instance, in the layer above, and the reason to distrust a comment
+  that says two things match.** `BillService.toView` computes `Overdue` through
+  `domain.IsOverdue` → `domain.startOfDay`, which converts to UTC (the fix
+  above). It computed `DueSoon` through the *package-local* `startOfDay` in
+  `usecase/signup.go`, which deliberately keeps `t.Location()` because the
+  signup rate limit resets at the household's own local midnight — correct
+  there, wrong here. Two fields on one row, derived from the same two times
+  under two different normalisations, with a comment asserting they were the
+  same normalisation. `List`'s due-this-month probe read a raw `today` the same
+  way. Latent rather than live, because `clock.System.Now()` returns UTC — but
+  the false comment is what would have stopped the next person finding it.
+  Fixed with a bills-local `billStartOfDay` whose comment says why signup.go's
+  must not be reused, and pinned by a usecase-layer counterpart of the domain
+  test. **A shared helper whose correctness depends on the caller's domain is
+  not shared; it is two functions with one name.** When you reach for a
+  package-local helper, read what its comment says it is for.
 
 - Same slice, Task 15: `AccountModal`'s Balance field distinguishes "not a
   number" from "this currency doesn't use cents" (a switch to IDR/VND without
@@ -161,6 +204,72 @@ a reader nobody thought to look at.
   `docs/superpowers/plans/2026-07-31-hearth-ux-repair-verification.md`
   criterion 15).
 
+- **Goals fixed "a limited member's routine 403 needs its own explanation,
+  not the generic alert" for Goals alone, and nobody swept for the class —
+  Bills' Task 18 walk found it recurring in two more places at once.**
+  `GET /goals` is money-AND-owner gated, and `GoalsPage.tsx` distinguishes
+  that 403 from a genuine failure with its own `goals-owner-only` branch.
+  `router.go`'s own comment says the identical guard covers the whole `txn`
+  group — transactions, categories, budgets, goals, bills — not goals alone.
+  `BillsPage.tsx` had never been given the branch (criterion 14 of the
+  walk's own brief found it: a limited member holding `money`, following
+  nothing more alarming than the sidebar's own Bills link, landed on the
+  same red `bills-load-error` alert a database outage would produce).
+  Fixing that one instance and re-reading `router.go`'s own comment — which
+  names the whole group in one sentence — was what prompted checking the
+  other three pages built against the same guard rather than closing the
+  task on Bills alone: `BudgetPage.tsx` had the identical gap, one line
+  worse (`if (budget.error || !budget.data)` collapsed the 403 and the
+  post-`TanStack`-contract type-guard into the same generic alert, so
+  splitting them was part of the fix); `TransactionsPage.tsx` had it too,
+  with no test in either direction, same as Bills' own gap. Neither page
+  had so much as an absence test to have been fooled by — the branch had
+  simply never been written, in three different files, by three different
+  tasks, none of which had reason to know a sibling page existed with the
+  same guard. All three fixed in the same mirror shape `GoalsPage.tsx`
+  already used, each pinned by its own two-test pair (403 renders the
+  explanation and not the generic alert; a 500 renders the generic alert
+  and not the explanation) and mutation-checked independently. **A comment
+  naming "the whole group" in one file is not the same as every reader of
+  that group having read it** — `router.go`'s own sentence was true and
+  specific the entire time; nothing made the three frontend pages built
+  against it go and act on it.
+
+- **A fix created the very sibling it was meant to close — inside the same
+  branch.** Bills' Task 10 added an archived-account refusal to
+  `BillService.Update`, correct on its own and the mirror of the one `Create`
+  already had. But `BillModal`'s edit body put `payFromAccountId` in *every*
+  PATCH, so from that commit onward a bill whose pay-from account had since
+  been archived could not be renamed at all: the save came back "That account
+  is archived and cannot be used to pay a bill," for an edit that never touched
+  the account. The currency check runs first, so a household whose archived
+  account was its only one in that currency could never edit that bill again.
+  The service change and the form that feeds it were reviewed in different
+  tasks, and each was right about its own file. **When you add a refusal, grep
+  for who already sends that field unconditionally** — a new guard's blast
+  radius is every caller that restates a value it did not change, which is the
+  same "don't restate a field the form didn't touch" habit this pattern already
+  teaches for derived figures. Fixed by sending the field only when it differs;
+  the class turned out to have exactly one member (`Account.IsArchived()` is
+  checked on a write path in `bill.go` and nowhere else in `usecase`, so
+  `TransactionModal` restating its own account ids is harmless), and confirming
+  that was part of the fix.
+
+- **The class can be an invariant rather than a line of code.**
+  `TransactionService.Create` enforces four write-invariants on anything
+  entering the ledger: accounts, amount, payer, category. `BillService` — the
+  ledger's second front door, because `MarkPaid` writes a real `transactions`
+  row — re-implemented three of them and omitted the category one, so
+  `POST /bills` accepted an **income** category id and the resulting expense
+  landed in Budget's `Spent` but in no category row at all
+  (`buildCategoryViews` walks expense categories only). Task 8 of the same
+  branch had *already* fixed the payer axis after exactly this reasoning; no
+  one then asked which other axes the same argument covered. **When you find
+  one invariant missing at a new door, enumerate the whole set at the old door
+  and check each one** rather than fixing the axis the report happened to name.
+  The port to depend on already existed (`CategoryLookup`) and the repository
+  already satisfied it — the omission was never a design constraint.
+
 **When you fix something, grep for its shape before you close it.** The question
 that finds these is not "is this fixed?" but "where else does this pattern
 appear?" `Truncate` is now that grep for date-and-location bugs specifically —
@@ -207,6 +316,30 @@ shipping Transactions go and read it.
 - `TestUsersWithoutAPasswordCannotSignIn` passed with the guard deleted, because
   the fake hasher happened to reject an empty hash for its own reasons.
 - A capability filter had no test that would notice its deletion.
+- `BillService.Update`'s payer check could have its two arguments **swapped**
+  and every test still passed: the double computes
+  `memberships[membershipID] == householdID`, which is false for a swapped
+  pair too, so the refusal test was satisfied either way. `Create`'s identical
+  call *was* pinned, by a happy-path test that set a valid payer. A refusal
+  test alone never fixes the argument order — only a case that must SUCCEED
+  can. Check every guard for whether its happy path is tested, not just its
+  refusal.
+- `MostRecentBillPaymentDueOn`'s `bill_id = $2` filter could be dropped with
+  the whole suite green, because no test ever gave one household two bills
+  that both carried payments. In production that refuses a legitimate undo on
+  bill A because bill B has a later payment. **A scoping clause needs a
+  fixture with something for it to exclude**; a one-row fixture tests the
+  query minus its WHERE.
+- `defer tx.Rollback(ctx)` in `BillRepo.UndoPayment` could be deleted with the
+  whole suite green, and — this is the trap — the obvious test for it stays
+  green too. Removing the rollback does not make the partial writes visible:
+  nothing commits them either, so "assert the rows survived" passes both ways.
+  What actually breaks is that the transaction is never *ended*: its
+  connection never returns to the pool and its row locks are never released.
+  The assertion that catches it is `pool.Stat().AcquiredConns() == 0`. **Before
+  writing a test for a cleanup call, work out what observably differs when it
+  is missing** — for rollback-on-error that is usually resource release, not
+  data.
 - Five of seven invite tests used a fetch stub that **matched positionally and
   ignored the URL** — they would have passed while the component called a
   different endpoint entirely.
@@ -683,6 +816,41 @@ person to ask whether the test could ever have gone red in the first place.
   All four are filed here rather than as new patterns, because the shape is
   the one this section already tracks — an assertion satisfied by more than
   the one thing it claims to pin — not four new discoveries.
+- **The same NOT_FOUND-message shape recurred in a different feature — Bills,
+  Task 10 — which is why it gets its own bullet here rather than a fifth
+  sub-item folded into "Goals" above.** `router.go`'s catch-all "That
+  endpoint does not exist." and `errors.go`'s `domain.ErrNotFound`
+  translation "That could not be found." share the same `NOT_FOUND` code by
+  design — both really do mean "there is nothing here" — which means a
+  never-wired `/bills` route 404s exactly like a real service refusal, and a
+  test asserting only `{404, "NOT_FOUND"}` cannot tell them apart. Found
+  while confirming every one of Bills' seven new routes was genuinely wired,
+  not merely answering the right shape some other way. The fix is the same
+  one line each time: assert the message, not just the code, whenever a
+  test's whole job is proving a route exists.
+- `stubFetchRoutes` "throws on an unregistered request, so a query that
+  fires when it should not fails loudly" is true only for a component that
+  *renders the error*. It is false for one that renders nothing on missing
+  data, which every member-state gate in this codebase does on purpose
+  (Overview's cards all return `null`/omit themselves while their query is
+  disabled or still loading — the exact shape pattern 15 and the interim
+  Overview defect both required). Task 16's `NextBillCard` mounts
+  unconditionally and calls `useBills(false, { enabled })` itself; with no
+  `GET /api/v1/bills` route registered, a wrongly-`enabled: true` query
+  still fires, the mock still throws, but that throw becomes a rejected
+  promise TanStack Query absorbs as error state — `!bills.data` is true
+  either way, so the card renders null regardless of whether the request
+  was ever sent. Twelve of fourteen `OverviewPage` owner-role tests passed
+  with `GET /bills` silently erroring on every one of them, discovered only
+  because two *unrelated* assertions (the quick-add menu's new Bill button)
+  happened to fail for their own reasons and forced a full run. The
+  "register no route" instruction in the task brief is necessary but not
+  sufficient: what actually discriminates enabled from disabled is reading
+  `fetchMock.mock.calls` directly (`.some(([url]) => ...)`) — `vi.fn` records
+  a call before its implementation throws, so this catches the request
+  regardless of what the component does with the failure. Confirmed by
+  mutation: forcing `enabled: true` left `toBeEmptyDOMElement()` passing and
+  only the `fetchMock.mock.calls` assertion went red.
 
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
@@ -1349,6 +1517,26 @@ reason, and its comment is where this was learned the first time.
   next to a past-tense sentence about a completed write: is this value
   actually read back from what was written, or is it recomputed fresh on
   every read of the surrounding screen?
+- Bills slice, Task 8: `BudgetService.Month`'s `Spent` accumulator had no
+  guard on `PaidByMembershipID`, but the `ByPerson` breakdown built two lines
+  later did — `if t.PaidByMembershipID != ""` — so a transaction saved
+  without a payer counted toward the total above the Spending-by-person card
+  and was silently dropped from the rows under it. The card's rows could sum
+  to less than the figure they sit under, with nothing on screen saying so;
+  a hand-entered transaction was the only way to trigger it before Bills,
+  but a bill with no "Paid by" makes it the common case once Bills ships.
+  Fixed by removing the guard and accumulating on the possibly-empty key —
+  the same shape every other accumulator in that loop already used — with
+  the unattributed bucket (`MembershipID ""`) appended to `personOrder`
+  after the loop so it sorts last regardless of when its first transaction
+  appeared, rather than at its own first-appearance position. Copy for the
+  row ("Unattributed", and the explanation beneath the card) lives in
+  `budgetCopy.ts`/`BudgetByPerson.tsx`, never composed in Go — `Name`
+  arrives `""` on the wire on purpose. **A total and a breakdown of that
+  total must apply the exact same filter; the moment they diverge, the
+  breakdown can quietly stop reconciling with the number above it, and nothing
+  short of summing the rows and comparing catches that** — the same shape as
+  pattern 5's silent partial success, on a read path instead of a write.
 
 ### Database and repositories
 
@@ -1439,6 +1627,37 @@ reason, and its comment is where this was learned the first time.
   repository is ever called, and the paging cursor's id half is checked
   separately again in `decodeCursor`, deliberately, since `TransactionRepository.List`
   has no `Valid` guard on `CursorID` the way it does on the other three.
+- Bills slice, Task 5: a prescribed mutation check on `BillRepo.RecordPayment`
+  — remove `defer tx.Rollback(ctx)`, commit after each write, confirm the
+  test the brief named goes red on "a payment row survives a failed write" —
+  went red for a completely different reason. `TestRecordPaymentIsAtomic`'s
+  bad-category input fails on the transaction's own first write
+  (`CreateTransaction`), so nothing existed yet for a partial write to
+  leave behind; the actual failure was `panic: test timed out after 40s`,
+  `t.Cleanup(db.Close)` hung inside `pgxpool.Pool.Close()` forever, waiting
+  on a `sync.WaitGroup` no goroutine would ever signal. **An un-rolled-back
+  pgx transaction does not just fail to undo its writes — it permanently
+  leaks its connection back to the pool**, because pgx has no finalizer for
+  an abandoned `pgx.Tx`; the pool's own `Close()` waits for every checked-out
+  connection to be returned, and one that was never rolled back nor
+  committed is checked out forever. In production this pool is long-lived
+  and never closed mid-request, so the hang is a test-harness-only symptom —
+  but it turns a mutation check that should read as a clean, fast assertion
+  failure into a 40-second CI timeout with a `puddle.Pool.Close` stack trace
+  that says nothing about the actual property under test. The mutation was
+  still genuine (Step 6's letter was satisfied), but it proved "the deferred
+  rollback is what lets the test suite finish at all," not "a partial write
+  is visible" — a different property than the one it was written to catch.
+  The implementer added `TestRecordPaymentLeavesNoOrphanExpenseWhenTheSecondWriteFails`,
+  which pays the same occurrence twice so the second call's first write
+  (the expense) really does land before its second write is rejected by
+  `UNIQUE (bill_id, due_on)` — the only shape where a write has something to
+  leak before the failure — and re-ran the same style of mutation against
+  it, watching it go red on the actual claim (`got 2 transactions, want 1`).
+  **If a repository test hangs instead of failing an assertion, check
+  whether the transaction under test ever got something to roll back before
+  its forced failure fired** — a hang there is a leaked connection, not a
+  flake to retry.
 
 ### HTTP layer
 
@@ -1515,6 +1734,50 @@ route with a missing guard has no second line of defence.
 
 ### Frontend
 
+- **A mutation must invalidate every cache its endpoint writes to, not every
+  cache its own feature owns.** Bills' `useMarkPaid`/`useUndoPayment`
+  invalidated only the bills keys — but `POST /bills/{id}/pay` writes a real
+  `transactions` row and the undo deletes one. Mark a bill paid, click through
+  to Transactions or Finances, and the expense was absent and balances
+  un-moved for up to the 30-second `staleTime`. `useTransactions.ts` states the
+  rule verbatim for its own writes, and the Bills hook was written by looking
+  at `useAccounts.ts`'s *shape* rather than at what its endpoint touches.
+  **The question to ask is "what rows does this request change?", never "which
+  screen am I on?"** — and the honest scope matters both ways: `["budget"]`
+  was deliberately left out, because Budget staleness after a money write is a
+  pre-existing gap shared with hand-entered transactions, and fixing it on one
+  path only would leave two write paths disagreeing about what a money write
+  refreshes.
+- **A primary action that opens a form the household cannot complete is a dead
+  end, and it is usually first-run.** `BillsPage`'s "+ Add bill" opened a modal
+  whose Pay from `<select required>` was empty when the household had no
+  accounts — browser constraint validation on submit, no explanation, four
+  clicks in. Both sibling screens already refused exactly this
+  (`TransactionsPage` disables its button with a hint; `QuickAddMenu` gates
+  `canAddBill` on `accounts.length > 0`), and one of them was gating *this very
+  modal*. The prerequisite lives in the schema: `pay_from_account_id` is NOT
+  NULL. **When a form's required field comes from another feature's list,
+  the screen that opens it owns the empty case.** The fix has its own trap:
+  `accounts.data?.accounts.length ?? 0 === 0` reads a still-loading query as
+  "zero accounts" and disables the button on first paint for everyone — only a
+  query that has answered may say a household has none.
+- **Loading and failed are two states.** `if (!accounts.data)` in `BillModal`
+  showed "Loading…" forever on a failed `GET /accounts`: react-query stops
+  retrying, so nothing ever arrived to replace it. `BudgetModal` had closed
+  the identical shape one feature earlier, comment and all. A `!data` gate is
+  a bug wherever the query can fail; branch on `isError` first.
+- **A live clock read locally is not the month the server scoped.** Bills'
+  "All caught up — everything due in September is paid" derived `allCaughtUp`
+  from server figures scoped to the **UTC** month, and took the month *name*
+  from `new Date().toLocaleDateString(...)`, which reads the **browser's**
+  month. In SGT they disagree for the first eight hours of every month: at
+  local 1 Sep 03:00 it is 31 Aug in UTC, so every August bill being paid fired
+  the panel, which then named September while September's unpaid bills sat in
+  Due soon beside it. The comment above the function argued there was nothing
+  to guard against — correctly, about *parsing a stored date string*, which is
+  what the sibling helpers do — and stopped there. **A comment that rules out
+  one hazard reads as ruling out the family.** State what the label is
+  describing, not only where its input came from.
 - **The only page every member reaches is where "who can see what" stops being
   the router's problem.** Every other screen in this app sits behind
   `RequireAuth` plus `RequireCapability`, so "what does a limited member see
@@ -1876,6 +2139,50 @@ route with a missing guard has no second line of defence.
   question `GoalsPage` itself answers the same way — with a new test that
   builds the exact achieved-and-unarchived, both-counts-zero state and goes
   red on the old formula (commits `f04ce11..acbf52d`).
+
+- Bills slice, Task 15 (the Subscriptions panel): wiring `SubscriptionsCard`
+  into `BillsPage` turned five previously-green `BillsPage.test.tsx` tests
+  red with `TestingLibraryElementError: multiple elements found`, on assertions
+  that had never needed scoping before — `await screen.findByText("Car
+  insurance")` used purely to wait for the page to finish loading, not to
+  check anything about that bill in particular. `billFixture`'s own default
+  is `isSubscription: true`, so once the panel existed, every fixture bill's
+  name legitimately appeared twice on the page: once in its list row, once in
+  the new panel's own row for the same bill. Nothing was wrong with either
+  render — the tests were implicitly asserting "this name is unique on the
+  whole page," a property that held by accident until a second, correct
+  panel started showing the same data. Fixed by scoping each assertion to the
+  section it actually meant (`within(dueSoonSection)`, or waiting on a
+  `data-testid` instead of a name that was never guaranteed unique). **A bare
+  `screen.getByText`/`findByText` on a value that also appears in test data
+  elsewhere on the page is an unstated uniqueness assumption; it only fails
+  the day a second, entirely correct feature reuses that same value** — scope
+  to the section under test, or wait on structure (a testid) rather than
+  content that a sibling component might legitimately repeat.
+
+- Bills slice, Task 15 (the Subscriptions panel), found in review rather
+  than by a test: `BillModal`'s "Counts as a subscription" checkbox does
+  not gate on cadence, so a household can tick it on a one-off bill — and
+  the dev seed already has one (`Piano tuning`, `S$120.00`, one-off). But
+  `domain.AnnualEquivalentMinor`'s own comment is categorical: a one-off
+  "is not a recurring cost" and contributes to the rollup **never**, ticked
+  or not. The panel's first cut rendered the row anyway — a row that would
+  visibly never move either total above it — while `isSubscriptionHelp`'s
+  own copy tells the household every ticked bill is "included in the
+  household's subscription totals," a promise that exact row would break.
+  This is a sharper case than the ordinary "figure the UI can't back up":
+  a flag the UI *lets a household set* that a downstream computation
+  *categorically ignores for one specific value of a different field*, with
+  nothing in either the checkbox or the field stopping the combination.
+  Fixed by adding the same cadence check to the panel's own filter
+  (`SubscriptionsCard.tsx`), verified against the real seeded bill in a
+  running browser, not only the fixture. **When a flag and a second field
+  interact, check what every value of the second field does to the flag's
+  own promise — not just the values a form's own defaults happen to
+  produce.** The checkbox itself is unchanged and still does not warn a
+  household ticking it on a one-off; that residual gap is written down at
+  `SubscriptionsCard.tsx`'s own filter for whoever next reads `isSubscription`
+  without this same cadence check.
 
 ### Tooling and infrastructure
 

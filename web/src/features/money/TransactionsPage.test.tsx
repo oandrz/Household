@@ -593,4 +593,50 @@ describe("TransactionsPage", () => {
       expect(screen.queryByText("Grab")).not.toBeInTheDocument(),
     );
   });
+
+  // GET /transactions is money AND owner-gated, identically to GET /goals
+  // and GET /bills (router.go's own `txn` group). Found during Bills' Task
+  // 18 walk: this page had no branch at all for that routine 403 -- not
+  // even a test to have been fooled by, the same gap BillsPage.tsx and
+  // BudgetPage.tsx both had (docs/LEARNING.md pattern 1). Mirrors
+  // GoalsPage.test.tsx's own pair in shape.
+  it("a 403 from GET /transactions renders the owner-only explanation, not the generic load error", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/categories": { status: 200, body: { categories: [] } },
+      "GET /api/v1/household/members": { status: 200, body: [] },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [accountFixture()] } },
+      "GET /api/v1/transactions": {
+        status: 403,
+        body: { error: { code: "FORBIDDEN", message: "Only an owner may do that." } },
+      },
+    });
+
+    renderWithRouter(<TransactionsPage />);
+
+    const explanation = await screen.findByTestId("transactions-owner-only");
+    expect(explanation).toHaveTextContent("Owner only");
+    expect(explanation).toHaveTextContent("Transactions is visible to the household owner.");
+    expect(screen.queryByTestId("transactions-load-error")).not.toBeInTheDocument();
+  });
+
+  it("a non-403 failure from GET /transactions renders the generic load error, not the owner-only explanation", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/categories": { status: 200, body: { categories: [] } },
+      "GET /api/v1/household/members": { status: 200, body: [] },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [accountFixture()] } },
+      "GET /api/v1/transactions": {
+        status: 500,
+        body: { error: { code: "INTERNAL", message: "Something broke." } },
+      },
+    });
+
+    renderWithRouter(<TransactionsPage />);
+
+    expect(await screen.findByTestId("transactions-load-error")).toHaveTextContent(
+      "Couldn't load your transactions.",
+    );
+    expect(screen.queryByTestId("transactions-owner-only")).not.toBeInTheDocument();
+  });
 });

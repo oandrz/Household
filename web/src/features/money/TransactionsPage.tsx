@@ -10,7 +10,7 @@
 // product cannot do is a promise it cannot keep.
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { apiFetch } from "../../api/client";
+import { apiFetch, ApiError } from "../../api/client";
 import { useCurrencies } from "../auth/useAuth";
 import { useHouseholdMembers } from "../settings/useHouseholdMembers";
 import { formatMoney } from "./formatMoney";
@@ -290,8 +290,31 @@ export function TransactionsPage() {
     return <p className="p-9 text-xs text-muted">Loading…</p>;
   }
   if (transactionsQuery.isError) {
+    // GET /transactions is money AND owner-gated, identically to GET
+    // /goals and GET /bills (router.go's own comment on the whole `txn`
+    // group) -- a limited member holding money reaches this route (the
+    // sidebar link and the /money route guard both check only the
+    // capability, never the role) and the request answers 403. Branching
+    // on the real status, not a second useMe() role check -- GoalsPage.tsx's
+    // own comment on its identical branch: a role check here would be a
+    // second source of truth that could disagree with what the server
+    // actually decided. Found and fixed alongside the identical gap in
+    // BillsPage.tsx and BudgetPage.tsx during Bills' Task 18 walk
+    // (docs/LEARNING.md pattern 1: fixing one instance is not fixing the
+    // class) -- this file's own error branch had never been given the
+    // GoalsPage.tsx-style split either.
+    const status = transactionsQuery.error instanceof ApiError ? transactionsQuery.error.status : undefined;
+    if (status === 403) {
+      return (
+        <section data-testid="transactions-owner-only" className="m-9 rounded-xl border border-hairline bg-card p-[22px]">
+          <h1 className="text-[23px] font-semibold tracking-[-0.02em] text-ink">{TRANSACTIONS_COPY.title}</h1>
+          <h2 className="mt-4 text-xs text-muted">{TRANSACTIONS_COPY.ownerOnlyHeading}</h2>
+          <p className="mt-1.5 text-[13px] text-ink">{TRANSACTIONS_COPY.ownerOnlyBody}</p>
+        </section>
+      );
+    }
     return (
-      <p role="alert" className="p-9 text-xs text-danger">
+      <p role="alert" data-testid="transactions-load-error" className="p-9 text-xs text-danger">
         Couldn't load your transactions.
       </p>
     );

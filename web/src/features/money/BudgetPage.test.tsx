@@ -254,6 +254,43 @@ describe("BudgetPage", () => {
     expect(rows[1]).toHaveTextContent("S$1,240.00");
   });
 
+  // Neither budgetFixture()'s own byPerson rows carries an empty
+  // membershipId, so the "Unattributed" label and its explanation must not
+  // appear on a month where every transaction has a payer -- the negative
+  // half of the test below, without which a component that always renders
+  // the label would still pass it.
+  it("never mentions unattributed spend when every byPerson row has a payer", async () => {
+    renderPage(budgetFixture());
+
+    await screen.findAllByTestId("budget-person-row");
+    expect(screen.queryByText("Unattributed")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("budget-unattributed-explanation")).not.toBeInTheDocument();
+  });
+
+  // BudgetService.Month sends `{ membershipId: "", name: "" }` for spend
+  // nobody paid (budget.go's BudgetPersonView doc comment) -- copy for that
+  // row lives in the frontend, never composed in Go, so this is the test
+  // that actually exercises BUDGET_COPY.unattributed rendering rather than
+  // an empty string reaching the screen.
+  it("labels the unattributed row and explains it beneath the card", async () => {
+    renderPage(
+      budgetFixture({
+        byPerson: [
+          { membershipId: "m2", name: "Andreas", spentMinor: 124000 },
+          { membershipId: "", name: "", spentMinor: 14230 },
+        ],
+      }),
+    );
+
+    const rows = await screen.findAllByTestId("budget-person-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toHaveTextContent("Unattributed");
+    expect(rows[1]).toHaveTextContent("S$142.30");
+    expect(await screen.findByTestId("budget-unattributed-explanation")).toHaveTextContent(
+      'Spending with nobody recorded as the payer — bills without a "Paid by", and transactions saved without one.',
+    );
+  });
+
   // Spec decision 1, pinned: rollover is deferred to Goals, whole, and the
   // design's own "Unspent budget rolls into the Bali trip goal at month end"
   // sentence must never come back from a future copy-paste of the design.
@@ -684,5 +721,47 @@ describe("BudgetPage rollover card", () => {
     await waitFor(() =>
       expect(screen.getByTestId("budget-rollover-done")).toHaveTextContent("moved into Bali trip"),
     );
+  });
+
+  // GET /budgets/{month} is money AND owner-gated, identically to GET
+  // /goals (router.go's own `txn` group). Found during Bills' Task 18 walk:
+  // this page collapsed `budget.error || !budget.data` into one generic
+  // alert, so a limited member's routine "not the owner" 403 read exactly
+  // like a genuine outage -- the same gap BillsPage.tsx and
+  // TransactionsPage.tsx both had (docs/LEARNING.md pattern 1: fixing one
+  // instance is not fixing the class). Mirrors GoalsPage.test.tsx's own
+  // pair in shape.
+  it("a 403 from GET /budgets/{month} renders the owner-only explanation, not the generic load error", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/categories": CATEGORIES,
+      "GET /api/v1/budgets/2026-07": {
+        status: 403,
+        body: { error: { code: "FORBIDDEN", message: "Only an owner may do that." } },
+      },
+    });
+
+    renderWithRouter(<BudgetPage />);
+
+    const explanation = await screen.findByTestId("budget-owner-only");
+    expect(explanation).toHaveTextContent("Owner only");
+    expect(explanation).toHaveTextContent("Budget is visible to the household owner.");
+    expect(screen.queryByTestId("budget-load-error")).not.toBeInTheDocument();
+  });
+
+  it("a non-403 failure from GET /budgets/{month} renders the generic load error, not the owner-only explanation", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/categories": CATEGORIES,
+      "GET /api/v1/budgets/2026-07": {
+        status: 500,
+        body: { error: { code: "INTERNAL", message: "Something broke." } },
+      },
+    });
+
+    renderWithRouter(<BudgetPage />);
+
+    expect(await screen.findByTestId("budget-load-error")).toHaveTextContent("Couldn't load your budget.");
+    expect(screen.queryByTestId("budget-owner-only")).not.toBeInTheDocument();
   });
 });

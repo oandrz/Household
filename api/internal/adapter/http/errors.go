@@ -266,6 +266,32 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 			"Only a goal in the household's primary currency can receive a rollover.", nil)
 	case errors.Is(err, domain.ErrRolloverAlreadyDone):
 		WriteError(w, http.StatusConflict, "ROLLOVER_ALREADY_DONE", "That month has already been rolled over.", nil)
+	case errors.Is(err, domain.ErrUnknownCadence):
+		WriteError(w, http.StatusUnprocessableEntity, "INVALID_CADENCE", "That cadence is not recognised.", nil)
+	case errors.Is(err, domain.ErrBillNameRequired):
+		WriteError(w, http.StatusUnprocessableEntity, "BILL_NAME_REQUIRED", "A bill name is required.", nil)
+	case errors.Is(err, domain.ErrBillAmountNotPositive):
+		WriteError(w, http.StatusUnprocessableEntity, "BILL_AMOUNT_NOT_POSITIVE",
+			"Enter an amount greater than zero.", nil)
+	case errors.Is(err, domain.ErrBillNameTaken):
+		// The plain case: a name collision against a LIVE bill, no restore
+		// hint to offer. bill_handlers.go's writeBillWriteError intercepts
+		// this same sentinel before it reaches here whenever the colliding
+		// row turns out to be archived, and builds a richer 409 (the
+		// archived bill's id in details, so the New/Edit modal can offer
+		// Restore instead of a dead end) using this case's own message and
+		// status as its fallback if that lookup itself fails -- the
+		// ErrGoalNameTaken precedent above, applied to bills.
+		WriteError(w, http.StatusConflict, "BILL_NAME_TAKEN", "A bill with that name already exists.", nil)
+	case errors.Is(err, domain.ErrBillCurrencyImmutable):
+		// bill_handlers.go's handleUpdateBill intercepts this same sentinel
+		// before it reaches here whenever the request carries a
+		// payFromAccountId, building a 422 that names both currencies
+		// (BillService.Update's own doc comment says that message is
+		// deliberately the HTTP layer's job, not the service's). This case
+		// is the fallback for whenever that lookup itself cannot complete.
+		WriteError(w, http.StatusUnprocessableEntity, "BILL_CURRENCY_IMMUTABLE",
+			"A bill's currency cannot be changed after it is created.", nil)
 	// domain.ErrUnknownContributionSource has no case here, deliberately: it
 	// means a goal_contributions row holds a source value this code never
 	// wrote (ParseContributionSource's own doc comment), which is a real

@@ -22,6 +22,7 @@
 // stub branch carrying the prefill's line count in a testid -- the seam
 // Task 14 replaces, not something this task tries to half-build.
 import { useState } from "react";
+import { ApiError } from "../../api/client";
 import { useCurrencies } from "../auth/useAuth";
 import { Modal } from "../../components/Modal";
 import { BudgetHistoryModal } from "./BudgetHistoryModal";
@@ -133,12 +134,36 @@ export function BudgetPage() {
   if (budget.loading) {
     return <p className="p-9 text-xs text-muted">Loading…</p>;
   }
-  if (budget.error || !budget.data) {
+  if (budget.error) {
+    // GET /budgets/{month} is money AND owner-gated, identically to GET
+    // /goals (router.go's own comment on the whole `txn` group) -- a
+    // limited member holding money reaches this route (the sidebar link
+    // and the /money route guard both check only the capability, never the
+    // role) and the request answers 403. Branching on the real status, not
+    // a second useMe() role check -- GoalsPage.tsx's own comment on its
+    // identical branch: a role check here would be a second source of
+    // truth that could disagree with what the server actually decided.
+    const status = budget.error instanceof ApiError ? budget.error.status : undefined;
+    if (status === 403) {
+      return (
+        <section data-testid="budget-owner-only" className="m-9 rounded-xl border border-hairline bg-card p-[22px]">
+          <h1 className="text-[23px] font-semibold tracking-[-0.02em] text-ink">{BUDGET_COPY.title}</h1>
+          <h2 className="mt-4 text-xs text-muted">{BUDGET_COPY.ownerOnlyHeading}</h2>
+          <p className="mt-1.5 text-[13px] text-ink">{BUDGET_COPY.ownerOnlyBody}</p>
+        </section>
+      );
+    }
     return (
-      <p role="alert" className="p-9 text-xs text-danger">
+      <p role="alert" data-testid="budget-load-error" className="p-9 text-xs text-danger">
         {BUDGET_COPY.loadError}
       </p>
     );
+  }
+  // budget.error is null and budget.loading is false here, so data is
+  // present -- TanStack Query's own contract. This guards the type only,
+  // the same defensive shape GoalsPage.tsx's `!goals.data` guard uses.
+  if (!budget.data) {
+    return null;
   }
 
   const data = budget.data;

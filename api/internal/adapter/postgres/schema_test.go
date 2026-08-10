@@ -875,6 +875,91 @@ func TestBudgetsRolloverSchema(t *testing.T) {
 	})
 }
 
+// TestBillsSchema pins the two constraints bills and bill_payments enforce
+// beyond plain column shape: a NULL next_due is only legal for a settled
+// one-off (see the migration's comment on only_a_one_off_has_no_next_due),
+// and one occurrence of a bill can be paid only once, the belt-and-braces
+// UNIQUE (bill_id, due_on) that backstops BillService's own check against a
+// double-clicked Mark paid.
+func TestBillsSchema(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+
+	t.Run("only a one-off may have a NULL next_due", func(t *testing.T) {
+		h, acct := seedHouseholdAndAccount(t, ctx, db)
+		_, err := db.Pool().Exec(ctx, `
+			INSERT INTO bills (household_id, name, amount_minor, cadence, next_due,
+			                   due_anchor_day, pay_from_account_id)
+			VALUES ($1, 'Broken', 1000, 'monthly', NULL, 1, $2)`, h, acct)
+		if err == nil {
+			t.Fatal("expected only_a_one_off_has_no_next_due to refuse a monthly bill with no next date")
+		}
+		// Names the constraint, not just any failure -- see the comment on
+		// the equivalent field in TestTransactionSchemaRefusesNonsenseRows: a
+		// later migration that absorbs this case into some other check (a new
+		// NOT NULL column, say) must not leave this subtest green while
+		// silently losing the rule it pins.
+		if !strings.Contains(err.Error(), "only_a_one_off_has_no_next_due") {
+			t.Fatalf("err = %v, want an only_a_one_off_has_no_next_due violation", err)
+		}
+	})
+
+	t.Run("one occurrence can be paid only once", func(t *testing.T) {
+		h, acct := seedHouseholdAndAccount(t, ctx, db)
+		bill := insertBill(t, ctx, db, h, acct, "SP utilities", "monthly", "2026-08-08")
+		pay := func() error {
+			_, err := db.Pool().Exec(ctx, `
+				INSERT INTO bill_payments (bill_id, household_id, due_on, paid_on, amount_minor)
+				VALUES ($1, $2, '2026-08-08', '2026-08-08', 14230)`, bill, h)
+			return err
+		}
+		if err := pay(); err != nil {
+			t.Fatalf("first payment: %v", err)
+		}
+		if err := pay(); err == nil {
+			t.Fatal("expected UNIQUE (bill_id, due_on) to refuse a second payment of one occurrence")
+		}
+	})
+}
+
+// seedHouseholdAndAccount inserts the minimum household and account bills'
+// two required foreign keys need (household_id and pay_from_account_id), for
+// tests that only care about valid IDs and have no other requirement on
+// either row.
+func seedHouseholdAndAccount(t *testing.T, ctx context.Context, db *postgres.DB) (householdID, accountID string) {
+	t.Helper()
+	householdID = insertTestHousehold(t, db)
+	if err := db.Pool().QueryRow(ctx,
+		`INSERT INTO accounts (household_id, nickname, type, opening_balance_minor,
+		                      opening_balance_currency, opening_balance_as_of)
+		 VALUES ($1, 'Test account', 'cash', 0, 'SGD', DATE '2026-07-01') RETURNING id`,
+		householdID).Scan(&accountID); err != nil {
+		t.Fatalf("insert account: %v", err)
+	}
+	return householdID, accountID
+}
+
+// insertBill inserts a bill with a fixed amount, deriving due_anchor_day from
+// nextDue's day-of-month the way BillService will at create -- so a caller
+// only states what the test actually varies (cadence, next_due) and still
+// gets a schema-valid row.
+func insertBill(t *testing.T, ctx context.Context, db *postgres.DB, householdID, accountID, name, cadence, nextDue string) string {
+	t.Helper()
+	due, err := time.Parse("2006-01-02", nextDue)
+	if err != nil {
+		t.Fatalf("parse nextDue %q: %v", nextDue, err)
+	}
+	var id string
+	if err := db.Pool().QueryRow(ctx,
+		`INSERT INTO bills (household_id, name, amount_minor, cadence, next_due,
+		                   due_anchor_day, pay_from_account_id)
+		 VALUES ($1, $2, 10000, $3, $4, $5, $6) RETURNING id`,
+		householdID, name, cadence, nextDue, due.Day(), accountID).Scan(&id); err != nil {
+		t.Fatalf("insert bill: %v", err)
+	}
+	return id
+}
+
 // columnNullability maps a table's columns to information_schema's
 // is_nullable ("YES"/"NO"), so a schema test can assert an entire column set
 // -- names and nullability together -- in one query instead of one column at
