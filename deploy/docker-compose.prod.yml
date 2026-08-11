@@ -1,0 +1,90 @@
+name: hearth
+
+services:
+  # Caddy is the only thing on the public internet. It exists to obtain and
+  # renew certificates automatically for as long as this product runs; the
+  # routing is still nginx's job below.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [web]
+    networks: [hearth]
+
+  web:
+    image: ghcr.io/oandrz/hearth-web:${IMAGE_TAG}
+    restart: unless-stopped
+    depends_on: [api]
+    networks: [hearth]
+
+  api:
+    image: ghcr.io/oandrz/hearth-api:${IMAGE_TAG}
+    restart: unless-stopped
+    env_file: [.env]
+    depends_on:
+      postgres: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    networks: [hearth]
+
+  # One-shot. `api` will not start until this exits 0, so a failed migration
+  # blocks the new API rather than half-upgrading the install.
+  migrate:
+    image: ghcr.io/oandrz/hearth-admin:${IMAGE_TAG}
+    restart: "no"
+    env_file: [.env]
+    environment:
+      GOOSE_DRIVER: postgres
+      GOOSE_MIGRATION_DIR: /app/migrations
+    # Exec form is mandatory: the image has no shell.
+    command: ["/app/goose", "up"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    networks: [hearth]
+
+  # Never started by `up`. Reached with:
+  #   docker compose -f docker-compose.prod.yml run --rm admin /app/adminctl …
+  admin:
+    image: ghcr.io/oandrz/hearth-admin:${IMAGE_TAG}
+    profiles: [manual]
+    env_file: [.env]
+    depends_on:
+      postgres: {condition: service_healthy}
+    networks: [hearth]
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    # Deliberately no `ports:`. The database is reachable only from this
+    # network, which is what makes sslmode=disable correct.
+    environment:
+      POSTGRES_USER: hearth
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: hearth
+    volumes: ["hearth-pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hearth -d hearth"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks: [hearth]
+
+networks:
+  # The subnet is fixed rather than assigned, because web/nginx.conf names it
+  # in set_real_ip_from. A floating subnet would silently break the per-IP
+  # sign-up rate limiter the first time Docker chose a different range.
+  hearth:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  hearth-pgdata:
+  caddy-data:
+  caddy-config:

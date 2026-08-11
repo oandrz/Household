@@ -11,3 +11,6 @@ web/dist/
 
 # Serena's project config, language-server index and agent memories — per-developer
 .serena/
+
+# The real production environment file. Only deploy/.env.example is tracked.
+deploy/.env
