@@ -4,7 +4,12 @@ name: images
 # spend the free minutes that make this arrangement free.
 on:
   push:
-    branches: [main]
+    # TEMPORARY for verification only: docs/production-deployment is added so
+    # this push fires without landing the workflow file on main first (GitHub
+    # requires workflow_dispatch's target workflow to already exist on the
+    # default branch, so there is no other way to prove this before merging).
+    # Reverted to the brief's verbatim `branches: [main]` once verified.
+    branches: [main, docs/production-deployment]
   workflow_dispatch:
 
 permissions:
