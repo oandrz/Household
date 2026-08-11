@@ -31,7 +31,7 @@ Every command below runs from this directory (`~/Household/deploy`) on the box.
    not start and the previous container keeps serving.
 
 6. ```bash
-   curl -fsS "https://$(grep '^DOMAIN=' .env | cut -d= -f2)/readyz" && echo
+   curl -fsS "https://$(grep '^DOMAIN=' .env | cut -d= -f2 | tr -d '"')/readyz" && echo
    docker compose -f docker-compose.prod.yml ps
    ```
 
@@ -84,6 +84,12 @@ resolves the *seeded* owner, and production is never seeded.
 `adminctl seed` refuses outside development and refuses a non-local database,
 checked before it opens a connection. It cannot damage this install.
 
+**If any `adminctl` command above (not `goose`) exits with `SMTP_USERNAME and
+SMTP_PASSWORD must both be set, or both left empty`**, that is `.env`, not a
+lockout: config loading refuses before any subcommand runs, so a `.env` with
+one of that pair filled and the other blank breaks every `adminctl` command,
+not just mail-sending ones. Fix `.env`, then retry.
+
 ## Backups
 
 A host cron runs `backup.sh` nightly:
@@ -132,7 +138,10 @@ IP, or another hostname are all fine, which is why the example above uses
 
 **Rehearse this with the escrowed copy of the key, not your own.** An escrow
 that has never been used is not an escrow; it is a hope. Pass it as the third
-argument: `./restore.sh /tmp/b.age "<dsn>" /path/to/escrowed/hearth.key`.
+argument: `./restore.sh /tmp/b.age "<dsn>" /path/to/escrowed/hearth.key`. Omit
+it and `restore.sh` defaults to `$HOME/.config/age/hearth.key` — the box's own
+key, not the escrow, so an escrow drill must always pass this argument
+explicitly.
 
 ## What is where
 
