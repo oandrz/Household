@@ -24,15 +24,8 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api
 
-# --- prod ------------------------------------------------------------------
-FROM gcr.io/distroless/static-debian12:nonroot AS prod
-COPY --from=builder /out/api /app/api
-EXPOSE 8080
-USER nonroot:nonroot
-ENTRYPOINT ["/app/api"]
-
 # --- admin: migrations and break-glass -------------------------------------
-# The prod image above is deliberately a single binary with no shell, which
+# The prod image below is deliberately a single binary with no shell, which
 # also means a deployed install cannot migrate itself or be rescued. This
 # target carries the two tools that do, on the same distroless base, so the
 # production surface grows by two static binaries rather than by a Go
@@ -50,3 +43,10 @@ COPY --from=admin-builder /src/migrations /app/migrations
 USER nonroot:nonroot
 # No ENTRYPOINT on purpose: this image is two tools, not one service. The
 # binary is named at run time -- `docker compose run --rm admin /app/adminctl …`
+
+# --- prod ------------------------------------------------------------------
+FROM gcr.io/distroless/static-debian12:nonroot AS prod
+COPY --from=builder /out/api /app/api
+EXPOSE 8080
+USER nonroot:nonroot
+ENTRYPOINT ["/app/api"]
