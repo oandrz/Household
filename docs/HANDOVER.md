@@ -816,6 +816,19 @@ by the same index a name lookup uses):
   needs its own address or CIDR added there and must write the true peer as
   the last `X-Forwarded-For` element. Anything put in front of *Caddy* is a
   different fix: `trusted_proxies` in `deploy/Caddyfile`.
+- **Spoof-resistance has no permanent test home.** Forged `X-Forwarded-For` /
+  `X-Real-IP` / `True-Client-IP` headers failing to open a fresh rate-limit
+  bucket (the bullet above) was proven end to end through the real Caddy →
+  nginx chain, but only by a throwaway script deleted once it passed. The
+  deployment walk's own criterion 10 does not cover the gap: it exercises only
+  the two-client property (two callers get two independent budgets), never the
+  forged-header case. The Go suite cannot fill this in either — it tests
+  `chi`'s `middleware.RealIP`, and the control being asserted lives in nginx's
+  config, above the Go process entirely. So a regression in nginx's header
+  rewriting would be caught by no test and no walk criterion today. Closing
+  this needs either a scripted probe kept in the repo (not just run once and
+  discarded) or a criterion added to the next verification walk that sends
+  forged headers, not just two distinct source addresses.
 - **The domain is the most fragile asset here — more fragile than the server.**
   `APP_BASE_URL` is embedded in every magic link and invite; SPF and DKIM bind
   to the domain; the cookie origin is the domain. A dead server is restored in
