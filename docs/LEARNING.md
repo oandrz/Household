@@ -2205,6 +2205,23 @@ route with a missing guard has no second line of defence.
   the flag set is parsed — `go build` and `go vet` both pass. Renamed to
   `--inviter-email`, with the flag name threaded through so each caller's own
   error names the flag it actually means.
+- `goose -dir <dir> status`, with no `GOOSE_DRIVER`/`GOOSE_DBSTRING` supplied
+  either as flags or as environment variables, always prints goose's usage
+  block and exits 1 — there is no driver-less mode that just lists local
+  migration files, even though `-dir` alone looks like it should be enough to
+  inspect a directory. A deployment plan's step assumed one existed and would
+  have failed the same way for every operator who ever ran it. The production
+  runbook documents the working form instead: supply the driver and migration
+  directory (as flags, or as `GOOSE_DRIVER`/`GOOSE_DBSTRING`/
+  `GOOSE_MIGRATION_DIR` in the environment) every time, `status` included.
+- `restore.sh` called `psql` as a host binary, but the box's own provisioning
+  step installs only Docker, `age` and `rclone` — no Postgres client. The
+  symptom would not have shown up until the restore drill was run for real on
+  the production box, by which point a dev machine's own leftover client had
+  already made the script look fine everywhere it had been tried. Fixed by
+  running `psql` through `docker run --rm -i --network host postgres:17-alpine`
+  instead: the client version always matches the server that produced the
+  dump, and the box needs no extra package.
 
 ---
 
