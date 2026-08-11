@@ -326,7 +326,15 @@ DATABASE_URL=postgres://hearth:CHANGEME@postgres:5432/hearth?sslmode=disable
 APP_BASE_URL=https://hearth.example.com
 SMTP_ADDR=smtp.resend.com:587
 SMTP_FROM="Hearth <noreply@hearth.example.com>"
-SMTP_USERNAME=resend
+# SMTP_USERNAME and SMTP_PASSWORD: set BOTH together (Resend's SMTP username is
+# literally "resend"; the password is the API key) or leave BOTH blank.
+# config.Load() refuses one set and the other empty, and it runs before every
+# adminctl subcommand too -- so a lone leftover value here does not just
+# affect mail, it breaks unlock-household, reset-password, create-invite and
+# prune as well, with an error that says nothing about any of them. Blank is
+# the safe starting value for exactly that reason: it cannot produce this trap
+# by omission the way a pre-filled username with no password can.
+SMTP_USERNAME=
 SMTP_PASSWORD=
 # SMTP_TLS_MODE is deliberately unset: it defaults to "mandatory" whenever
 # APP_ENV is not development.
@@ -349,7 +357,20 @@ GOOSE_DBSTRING=postgres://hearth:CHANGEME@postgres:5432/hearth?sslmode=disable
 - [ ] **Step 2: Write `deploy/docker-compose.prod.yml`**
 
 ```yaml
-name: hearth
+# `hearth-prod`, deliberately not `hearth`: the development stack in the repo
+# root declares `name: hearth` and a volume `hearth-pgdata` too, so both files
+# used to resolve to the identical Docker volume `hearth_hearth-pgdata`. The
+# consequence that decides this is not the mixed-up containers -- it is that
+# `backup.sh` run from a developer's checkout would dump the *development*
+# database, encrypt it, upload it to the production bucket under tonight's
+# date and ping the heartbeat green. Every detector reports healthy while the
+# backup holds the wrong data, which is worse than having no backup. Two more
+# follow from the same collision: `down -v` from either directory destroys the
+# other's database, and a prod `POSTGRES_PASSWORD` is silently ignored against
+# an already-initialised dev volume, which then looks like a secret problem
+# rather than a volume problem. Renaming makes every prod resource
+# `hearth-prod_*`, so a wrong-directory command fails loudly instead.
+name: hearth-prod
 
 services:
   # Caddy is the only thing on the public internet. It exists to obtain and
@@ -535,7 +556,7 @@ C="docker compose -f docker-compose.prod.yml"
 url="https://${DOMAIN:?set DOMAIN}/api/v1/auth/sign-up"
 
 burst() { # $1 = container name, $2 = email prefix
-  docker run --rm --network hearth_hearth --name "$1" curlimages/curl:8.11.1 \
+  docker run --rm --network hearth-prod_hearth --name "$1" curlimages/curl:8.11.1 \
     sh -c "for i in 1 2 3 4 5 6; do
              curl -sk -o /dev/null -w '%{http_code} ' -X POST '$url' \
                -H 'Content-Type: application/json' \
@@ -549,7 +570,7 @@ echo "$a"
 [[ "$a" == *"429"* ]] || { echo "FAIL: client A never hit the limit"; exit 1; }
 
 echo "--- client B, one request, must NOT be limited ---"
-b="$(docker run --rm --network hearth_hearth curlimages/curl:8.11.1 \
+b="$(docker run --rm --network hearth-prod_hearth curlimages/curl:8.11.1 \
       curl -sk -o /dev/null -w '%{http_code}' -X POST "$url" \
       -H 'Content-Type: application/json' -d '{"email":"b-1@example.test"}')"
 echo "$b"
@@ -626,7 +647,7 @@ Expected: `PASS` — client A ends in `429`, client B gets `202`.
 - [ ] **Step 6: Prove a client cannot spoof past it**
 
 ```bash
-docker run --rm --network hearth_hearth curlimages/curl:8.11.1 \
+docker run --rm --network hearth-prod_hearth curlimages/curl:8.11.1 \
   curl -sk -o /dev/null -w '%{http_code}\n' -X POST "https://hearth.localhost/api/v1/auth/sign-up" \
   -H 'Content-Type: application/json' \
   -H 'X-Forwarded-For: 9.9.9.9' -H 'X-Real-IP: 9.9.9.9' -H 'True-Client-IP: 9.9.9.9' \
@@ -827,6 +848,18 @@ This file is the operations surface only.
 
 Every command below runs from this directory on the box.
 
+## First install
+
+`cp .env.example .env`, `chmod 600 .env`, then fill in `IMAGE_TAG`, `DOMAIN`,
+`ACME_EMAIL`, `POSTGRES_PASSWORD` (the same password again inside both
+`DATABASE_URL` and `GOOSE_DBSTRING`), `APP_BASE_URL`, `SMTP_FROM`,
+`SMTP_USERNAME` (literally `resend`) and `SMTP_PASSWORD` (the Resend API key).
+
+The full table, and why leaving *both* SMTP values blank produces an install
+that looks completely healthy and mails nothing, is written out in the shipped
+`deploy/README.md`. It has to live there rather than only in this plan: the box
+sparse-checks out `deploy/` alone and never receives this file.
+
 ## Deploying a change
 
 1. Merge to `main` and wait for the `images` workflow to go green.
@@ -899,11 +932,17 @@ checked before it opens a connection. It cannot damage this install.
 
 ## Backups
 
-A host cron runs `backup.sh` nightly:
+A host cron runs `backup.sh` nightly. It is the **`deploy` user's** crontab —
+`crontab -e` as `deploy`, not `sudo crontab -e` — and `rclone config` must be
+run as that same user, since `rclone` reads `$HOME/.config/rclone/rclone.conf`:
 
 ```cron
-17 3 * * * AGE_RECIPIENT=age1… RCLONE_REMOTE=r2:hearth-backups HC_PING_URL=https://hc-ping.com/… /home/deploy/Household/deploy/backup.sh >> /var/log/hearth-backup.log 2>&1
+17 3 * * * AGE_RECIPIENT=age1… RCLONE_REMOTE=r2:hearth-backups HC_PING_URL=https://hc-ping.com/… /home/deploy/Household/deploy/backup.sh >> /home/deploy/hearth-backup.log 2>&1
 ```
+
+The log path is under `/home/deploy`, not `/var/log`: on Ubuntu 24.04
+`/var/log` is `drwxrwxr-x root:syslog`, so cron's `/bin/sh` fails on the
+redirection before `backup.sh` runs at all.
 
 A missed night emails you, via the heartbeat. That is the only monitoring the
 backups have, and it is the one that matters: the failure mode is silence.
@@ -922,14 +961,19 @@ that has never been used is not an escrow; it is a hope.
 
 ## What is where
 
+Resolved names — what `docker volume ls` prints, not the bare names declared in
+the Compose file.
+
 | | |
 |---|---|
-| Compose project | `hearth` |
-| Data | Docker volume `hearth-pgdata` |
-| Certificates | Docker volume `caddy-data` |
+| Compose project | `hearth-prod` |
+| Data | Docker volume `hearth-prod_hearth-pgdata` |
+| Certificates | Docker volume `hearth-prod_caddy-data` |
+| Network | `hearth-prod_hearth`, subnet `172.28.0.0/16` |
 | Secrets | `deploy/.env`, mode 600, gitignored |
 | Registry | `ghcr.io/oandrz/hearth-{api,web,admin}` |
 | Logs | `docker compose -f docker-compose.prod.yml logs -f <service>` |
+| Backup log | `/home/deploy/hearth-backup.log` |
 ````
 
 - [ ] **Step 2: Check every command in it is real**
@@ -1021,7 +1065,9 @@ The source tree is deliberately absent. If `api/` or `web/` appear, the sparse c
 cp .env.example .env && chmod 600 .env
 ```
 
-Fill in: `IMAGE_TAG` (the SHA CI built), `DOMAIN`, `ACME_EMAIL`, a generated `POSTGRES_PASSWORD` (and the same password inside both `DATABASE_URL` and `GOOSE_DBSTRING`), `SMTP_PASSWORD`, and the real `APP_BASE_URL` / `SMTP_FROM`.
+Fill in: `IMAGE_TAG` (the SHA CI built), `DOMAIN`, `ACME_EMAIL`, a generated `POSTGRES_PASSWORD` (and the same password inside both `DATABASE_URL` and `GOOSE_DBSTRING`), **`SMTP_USERNAME` (literally `resend`)**, `SMTP_PASSWORD` (the Resend API key), and the real `APP_BASE_URL` / `SMTP_FROM`.
+
+`SMTP_USERNAME` ships **blank** and must be filled — leaving it out is the one omission here that does not announce itself. Filling only `SMTP_PASSWORD` makes `config.Load()` refuse and `api` restart-loop, which is loud. Leaving *both* blank is accepted by `config.Load()`: `api` boots, `/readyz` is green and sign-up answers `202`, but `SMTP_TLS_MODE` defaults to `mandatory` with no AUTH, Resend rejects every send, and `sendMagicLinkAsync` is fire-and-forget — so the install looks healthy and mails nothing, with mail being the only account-recovery path this product has. `deploy/README.md`'s "First install" section is the copy of this that actually reaches the box, since the box sparse-checks out `deploy/` only and never sees this file.
 
 Then log in to the registry:
 
@@ -1049,12 +1095,14 @@ Without all four, a successor has ciphertext they cannot read or images they can
 
 - [ ] **Step 9: `rclone` and the bucket**
 
-Create a Cloudflare R2 bucket, then on the box:
+Create a Cloudflare R2 bucket, then on the box, **as the `deploy` user** (`su - deploy` first if you are not already):
 
 ```bash
 rclone config    # S3-compatible provider, R2 endpoint, name the remote `r2`
 rclone lsd r2:   # expected: the bucket is listed
 ```
+
+The user matters. `rclone` reads `$HOME/.config/rclone/rclone.conf`, and the backup cron runs as `deploy` (Task 8 step 2) — so a remote configured as root is invisible to it, and the nightly upload fails with `didn't find section in config file` long after anyone is watching.
 
 - [ ] **Step 10: Monitoring**
 
@@ -1081,11 +1129,15 @@ Expected: `migrate` shows `exited (0)`; `caddy`, `web`, `api`, `postgres` are up
 
 - [ ] **Step 2: Install the backup cron**
 
+As the **`deploy` user** — `crontab -e`, not `sudo crontab -e`. Everything on this box runs as `deploy` (step 6), and both the log path and the `rclone` remote are per-user.
+
 ```bash
 crontab -e
-# 17 3 * * * AGE_RECIPIENT=… RCLONE_REMOTE=r2:hearth-backups HC_PING_URL=… /home/deploy/Household/deploy/backup.sh >> /var/log/hearth-backup.log 2>&1
+# 17 3 * * * AGE_RECIPIENT=… RCLONE_REMOTE=r2:hearth-backups HC_PING_URL=… /home/deploy/Household/deploy/backup.sh >> /home/deploy/hearth-backup.log 2>&1
 ./backup.sh    # run it once by hand now; this proves the script, not the schedule
 ```
+
+The log goes under `/home/deploy`, **not `/var/log`**: on Ubuntu 24.04 `/var/log` is `drwxrwxr-x root:syslog` and `deploy` is in neither group, so cron's `/bin/sh` fails on the redirection *before `backup.sh` runs at all* — no dump, no upload, no heartbeat ping. The heartbeat catches it within its grace window, so it is not silent, but it burns the first night and points at the script rather than at permissions.
 
 - [ ] **Step 3: Create the verification file**
 
