@@ -2237,6 +2237,34 @@ route with a missing guard has no second line of defence.
   ships both blank rather than a pre-filled username against an empty
   password, and `deploy/README.md` names the error for whoever hits the trap
   another way.
+- **Caddy does not append to `X-Forwarded-For`; it replaces it.** Putting Caddy
+  in front of nginx was designed on the documented, widely-repeated behaviour
+  that a reverse proxy *appends* its peer to the header, and the whole argument
+  for `real_ip_recursive off` was written on that premise. Measured, Caddy
+  replaces the header outright, preserving a caller's list only for callers
+  listed in `trusted_proxies` — of which none are configured. Two things make
+  this worth remembering, and neither is the directive itself.
+  **First, the shipped configuration was correct under either mechanism**, so
+  nothing was broken and nothing failed: `real_ip_recursive off` takes the
+  *last* `X-Forwarded-For` entry, and both appending and replacing put the true
+  peer there. The defect lived entirely in the reasoning, which is the kind
+  that survives every test and then misleads the next person to change the
+  file — the corrected comment even ruled out a perfectly safe replacement
+  proxy as unusable. By the time it was caught, the false premise had
+  propagated from the design into the plan, into ADR 0002 and into
+  `web/nginx.conf`'s own comments, so removing it took a measurement plus a
+  class sweep across four files rather than one edit.
+  **Second, the mutation test that should have caught it could not.** Flipping
+  `real_ip_recursive` from `off` to `on` leaves the result unchanged, because
+  against a single-address `X-Forwarded-For` the first and last entries are the
+  same value — the two settings only diverge on a header with two or more
+  entries, which this topology never produces. That looks like a passing
+  mutation and is not one. **A mutation that fails to flip the result is a
+  signal to go and check the mechanism, not a pass**: it means the test cannot
+  see the thing the directive controls, so the directive's justification is
+  still unverified. This is the refinement of `proving-tests-can-fail` — a
+  green test proves nothing until you have seen it fail, and a red one proves
+  nothing either until you have checked it went red for the stated reason.
 
 ---
 

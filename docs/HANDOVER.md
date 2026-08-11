@@ -410,18 +410,26 @@ Two ADRs carry the reasoning; read them before changing any of it:
   front for automatic TLS, Postgres on the same box, nightly plain-SQL
   `pg_dump` off-provider, Resend's free plan for mail. Roughly S$10–13/month.
 
-**Nothing has been deployed yet.** Seven things stand between the decision and
-a live install, in this order:
+**Nothing has been deployed yet.** Seven things were listed here originally;
+three are now done and struck below, so **four still stand** between the
+decision and a live install — items 4, 5, 6 and 7, in this order. Item 5 is
+half closed rather than open, and says exactly which half. The struck items
+stay visible on purpose: what has already been settled is as useful to a
+newcomer as what has not.
 
-1. **A production Compose file.** `docker-compose.yml` is development-only:
-   `air` hot reload, bind mounts, Mailpit, Postgres published on the host, the
-   password literally `hearth:hearth`, and no `.env` interpolation anywhere.
-   (`sslmode=disable` is **not** on that list: Postgres stays on the Compose
-   bridge network and is never published, so the connection never crosses a
-   network and requiring TLS would mean issuing certificates for a link that
-   does not leave the machine. An earlier draft of this section listed
-   `sslmode=require` as a production change; the deployment spec's decision 9
-   corrects it.)
+1. ~~**A production Compose file.**~~ **Done.** `deploy/docker-compose.prod.yml`
+   declares the six production services on one private network with a fixed
+   `172.28.0.0/16` subnet, reads every value from `deploy/.env`, and takes the
+   project name `hearth-prod` so it cannot share a volume with the development
+   stack. `deploy/Caddyfile` and `deploy/README.md` ship beside it.
+   (`docker-compose.yml` remains development-only: `air` hot reload, bind
+   mounts, Mailpit, Postgres published on the host, the password literally
+   `hearth:hearth`, and no `.env` interpolation anywhere. `sslmode=disable` is
+   **not** on that list: Postgres stays on the Compose bridge network and is
+   never published, so the connection never crosses a network and requiring TLS
+   would mean issuing certificates for a link that does not leave the machine.
+   An earlier draft of this section listed `sslmode=require` as a production
+   change; the deployment spec's decision 9 corrects it.)
 2. ~~**An image that can administer production.**~~ **Done.** `api/Dockerfile`
    carries a third target, `admin`, on the same distroless base as `prod`,
    holding `goose` and `adminctl`. `docker-compose.prod.yml` runs it as a
@@ -438,7 +446,16 @@ a live install, in this order:
 4. **`APP_BASE_URL` set to the public HTTPS origin.** It is embedded in every
    magic link, invite and sign-up mail; wrong, and every mailed link points at
    `localhost`.
-5. **Backups: the nightly dump, and one restore actually performed and timed.**
+5. **Backups — half done.** Both scripts exist and are real: `deploy/backup.sh`
+   dumps in plain SQL, gzips, encrypts with `age` and uploads off-provider,
+   pinging its heartbeat only after a successful upload; `deploy/restore.sh`
+   reverses it into a database you name, refusing any DSN that looks like the
+   live one. A restore **has** been performed once — on a laptop, into a
+   throwaway container, with the restored row counts matched against the
+   source. What remains is only the part that needs the box: the nightly cron
+   actually running on a schedule, and one restore decrypted with the
+   **escrowed** copy of the key rather than the author's own, since an escrow
+   that has never been used is a hope and not an escrow.
 6. **DNS**: the A record, plus Resend's SPF, DKIM and DMARC records.
 7. **A browser walk against the deployed install**, to the same standard every
    feature here has been held to. First-run is exactly where these walks have
