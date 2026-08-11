@@ -506,12 +506,13 @@ This is the security-critical task in the plan. The failure it prevents is silen
 {$DOMAIN} {
 	encode zstd gzip
 
-	# Caddy APPENDS the real peer address to X-Forwarded-For rather than
-	# replacing the header. That is what makes nginx's default
-	# `real_ip_recursive off` behaviour correct below: nginx takes the LAST
-	# address in the list, which is the one Caddy just appended, so a client
-	# who sends their own X-Forwarded-For only succeeds in prepending a value
-	# nobody reads.
+	# CORRECTED during task 4 — this plan originally said Caddy APPENDS the
+	# real peer to X-Forwarded-For. It does not. Caddy REPLACES the header
+	# with the address it is talking to, preserving a caller's list only when
+	# that caller is listed in trusted_proxies, and none is configured here.
+	# Measured, not assumed: nginx logged $http_x_forwarded_for as
+	# "172.28.0.6" for a request whose client sent "9.9.9.88". The shipped
+	# wording is in deploy/Caddyfile; see task-4-report.md.
 	reverse_proxy web:80
 }
 ```
@@ -598,8 +599,11 @@ Insert into `web/nginx.conf`, immediately after `root /usr/share/nginx/html;`:
     # deploy/docker-compose.prod.yml; it must stay in step with that file.
     # real_ip_recursive is left off (nginx's default, stated here because it is
     # load-bearing rather than incidental): with it off, nginx takes the LAST
-    # address in X-Forwarded-For, which is the one Caddy appends, so a
-    # client-supplied value is prepended and ignored rather than trusted.
+    # address in X-Forwarded-For, which is the one written by the trusted
+    # upstream. CORRECTED during task 4 — that entry is there because Caddy
+    # REPLACES the header, not because it appends to a client's value; the
+    # shipped wording is in web/nginx.conf, and task-4-report.md has the
+    # measurement.
     set_real_ip_from  172.28.0.0/16;
     real_ip_header    X-Forwarded-For;
     real_ip_recursive off;

@@ -132,13 +132,29 @@ directly. Caddy sits in front purely so TLS issuance and renewal are automatic
 for as long as the product runs — a certbot cron is the kind of thing that
 works for six years and then quietly stops.
 
-**That second proxy breaks the per-IP rate limiter unless nginx is told about
-it.** With Caddy in front, the `$remote_addr` nginx sees is *Caddy's* address on
-every request, so the `X-Real-IP` it sets is the same value for every caller and
-`middleware.RealIP` keys the whole world to one bucket (§4). `nginx.conf` needs
-`set_real_ip_from <Caddy's address>` and `real_ip_header X-Forwarded-For` for
-`$remote_addr` to resolve to the real client again. Two lines, mandatory, and
-invisible when wrong — the limiter does not error, it just stops limiting.
+**That second proxy would break the per-IP rate limiter, and nginx is now told
+about it.** With Caddy in front, the `$remote_addr` nginx sees is *Caddy's*
+address on every request, so the `X-Real-IP` it sets would be the same value for
+every caller and `middleware.RealIP` would key the whole world to one bucket
+(§4). `web/nginx.conf` therefore carries `set_real_ip_from 172.28.0.0/16`,
+`real_ip_header X-Forwarded-For` and an explicit `real_ip_recursive off`, which
+resolve `$remote_addr` back to the real client. Invisible when wrong — the
+limiter does not error, it just stops limiting — so it was proven rather than
+assumed: two containers on the compose network get two independent budgets,
+where before the change the second inherited the first's exhausted one.
+
+The trusted range is the **whole `172.28.0.0/16` compose subnet, not Caddy
+alone**, because Docker assigns Caddy's address from that subnet and a `/32`
+would need pinning. It is the same string as the `hearth` network's `subnet:` in
+`deploy/docker-compose.prod.yml`, and the two must move together. That means any
+container on the network can present an `X-Forwarded-For` nginx will believe —
+accepted, because such a container can also reach `api:8080` directly, where
+`middleware.RealIP` has no trusted-proxy list at all, so narrowing the CIDR
+would close one of two equivalent routes. What the boundary actually rests on is
+that internet traffic reaches nginx only through Caddy, which replaces
+`X-Forwarded-For` rather than forwarding a caller's. Putting anything in front
+of *Caddy* is a `trusted_proxies` change in `deploy/Caddyfile`, not a CIDR
+change here.
 
 **The admin image is drawn dashed because it does not exist.** The prod API
 image is `distroless/static-debian12:nonroot` with `ENTRYPOINT ["/app/api"]`:
@@ -1704,7 +1720,7 @@ prefix, which is what made the duplication stop being optional.
 | Mail | Mailpit in development; TLS policy and credentials from config elsewhere |
 | Seeding | `adminctl seed`, refused unless `APP_ENV=development` **and** the database host is local — both checked before the connection opens |
 | Retention | `adminctl prune --older-than=<days>` (default 30, floor 7) deletes consumed/expired `signups` and stale `login_attempts`; `magic_links`, `invites` and `sessions` still grow forever |
-| Rate limiting | Per-address (3/hour) and a global daily ceiling (1000, reset at midnight, not a rolling 24 hours), both counted from `signups` so a restart cannot reset them; per-IP (5/hour) is an in-memory token bucket in the HTTP layer — process-local, spoofable in development, and keyed to the *proxy* rather than the client if a second proxy is put in front of nginx without `set_real_ip_from` (both in §1). The per-IP limit binds before the global one by construction (5 × 24 = 120 ≪ 1000) so one IP alone can never exhaust the global ceiling |
+| Rate limiting | Per-address (3/hour) and a global daily ceiling (1000, reset at midnight, not a rolling 24 hours), both counted from `signups` so a restart cannot reset them; per-IP (5/hour) is an in-memory token bucket in the HTTP layer — process-local, spoofable in development, and keyed to the *proxy* rather than the client if a proxy is put in front of nginx without `set_real_ip_from`; Caddy is in front in production, so `web/nginx.conf` carries that directive over the compose subnet and it is verified, not assumed (both in §1). The per-IP limit binds before the global one by construction (5 × 24 = 120 ≪ 1000) so one IP alone can never exhaust the global ceiling |
 | Health | `/healthz` ignores the database; `/readyz` pings it |
 | Hosting | Nothing deployed yet. Decided: one VPS running the same Compose stack, `docs/adr/0002-first-production-host.md`. The choice follows `docs/adr/0001-optimise-for-exit-cost.md` — hosts are picked for how cheaply we can leave them |
 | TLS | Caddy in front, automatic Let's Encrypt issuance and renewal (§1). Neither `api` nor `web` terminates TLS itself, and both are unusable without something that does — cookies are `Secure` outside development |
