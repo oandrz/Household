@@ -77,6 +77,19 @@ no `goose`, no `adminctl`. As shipped, nobody can run a migration, unlock a
 locked-out household, reset a password or prune retention data in production.
 This must be closed before deploying; see `docs/HANDOVER.md` §5.
 
+> **Closed 2026-08-11.** `api/Dockerfile` gained a third target, `admin`, on the
+> same distroless base as `prod`, carrying `/app/goose`, `/app/adminctl` and
+> `/app/migrations`. The `api` image is unchanged and still has no shell — the
+> tools live in a *second* image rather than being added to the first, so the
+> serving surface grew by nothing. `deploy/docker-compose.prod.yml` wires it
+> twice: as the one-shot `migrate` service that `api` waits on with
+> `service_completed_successfully`, and as a `profiles: [manual]` `admin`
+> service, never started by `up`, for `unlock-household`, `reset-password`,
+> `create-invite` and `prune`. Every command is written out in
+> `deploy/README.md`. The paragraph above stands as the record of why this was
+> treated as a prerequisite rather than a follow-up; it is no longer a
+> description of the current state.
+
 ## Alternatives considered
 
 - **AWS Lightsail** — the same VPS shape for more money. Reasonable if an AWS

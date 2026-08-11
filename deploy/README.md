@@ -98,6 +98,21 @@ migrations are correct by inspection and no test has ever run one. A bad
 migration is a restore from backup, not a rollback — which is why deploys are
 manual and watched.
 
+**If a migration fails, expect the new SPA against the old API.** `api` declares
+`depends_on: migrate` and so refuses to start, keeping the previous container
+serving — that is the guarantee, and it holds. But `web` declares only
+`depends_on: api`, not `depends_on: migrate`, so nginx comes up with the new
+bundle regardless. That is correct behaviour and deliberate: `web` is static
+files that never touch the database, and blocking it would take the whole site
+down over a failure that only affects the API.
+
+What it looks like undiagnosed is a site that loads, looks new, and returns
+stale or failing data from endpoints the new bundle expects — which reads as a
+frontend bug rather than a stopped migration. So when anything looks wrong after
+a deploy, check `docker compose -f docker-compose.prod.yml ps` for `migrate`
+first: `exited (0)` is success, any other exit code is the answer. Roll
+`IMAGE_TAG` back and both halves return to the previous version together.
+
 ## Break-glass
 
 The API image has no shell. These run from the admin image:
