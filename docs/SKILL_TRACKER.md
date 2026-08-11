@@ -1,9 +1,15 @@
-# Hearth — skill tracker
+# Hearth — skill and agent tracker
 
 Project skills live in `.claude/skills/<name>/SKILL.md`. Each one exists because
 a real defect got through in this project, or because a job needed an owner.
 
-Add a row here whenever you add a skill, and say plainly when to reach for it.
+Project agents live in `.claude/agents/<name>.md` and are listed further down.
+The difference matters: a **skill** loads instructions into the session you are
+already in, so it changes how *you* work. An **agent** runs in its own context
+and hands back a result, so it does a job *for* you and its conclusions arrive
+as something to review.
+
+Add a row here whenever you add either, and say plainly when to reach for it.
 
 ---
 
@@ -42,6 +48,20 @@ is the evidence real, or does it only look like evidence?
 **As part of shipping** — `maintaining-system-design`, alongside the tracker and
 learning-log updates. Documentation written afterwards is documentation written
 never.
+
+---
+
+## The agents
+
+| Agent | Use it when | Why it exists |
+|---|---|---|
+| **`hearth-architect`** | Before building something whose shape is not obvious: "how should we build X", "do we need a new service/table/port/library", "which of these two approaches", or when a change is about to cross an architectural boundary. Read-only — it returns a design, never a diff. | The rules in `CLAUDE.md` are strict enough that a generic architect contradicts them, and the expensive mistakes here are structural, not typographical. It refuses by default: no new component unless someone can name what breaks without it, and a port with one implementation and no second caller is the wrong shape. Its answer always ends with what it *deliberately did not build*, which is the record that stops the next person adding it anyway. |
+
+An agent is worth writing when the job needs a fresh context and its output
+should be reviewed rather than trusted. If the job is "remember to do this while
+I work", that is a skill instead.
+
+---
 
 ## What these deliberately do not cover
 
