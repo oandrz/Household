@@ -2222,6 +2222,21 @@ route with a missing guard has no second line of defence.
   running `psql` through `docker run --rm -i --network host postgres:17-alpine`
   instead: the client version always matches the server that produced the
   dump, and the box needs no extra package.
+- `config.Load()` is called before every `adminctl` subcommand runs (and
+  before `cmd/api`'s own startup), so a `.env` with `SMTP_USERNAME` set and
+  `SMTP_PASSWORD` blank — the shape `deploy/.env.example` used to ship —
+  fails every one of `unlock-household`, `reset-password`, `create-invite`
+  and `prune` with `SMTP_USERNAME and SMTP_PASSWORD must both be set, or both
+  left empty`, an error that names neither the lockout nor the command that
+  was actually run. Because `cmd/api/main.go` also calls `config.Load()` at
+  boot, a *running* api proves nothing about a later `admin` invocation: the
+  trap is reachable specifically in the window after a successful boot, when
+  `.env` is edited again — a credential rotation, a partial edit — and
+  `admin` is then run against the now-invalid file, exactly the moment a
+  break-glass command is needed most. Fixed at the source: `.env.example` now
+  ships both blank rather than a pre-filled username against an empty
+  password, and `deploy/README.md` names the error for whoever hits the trap
+  another way.
 
 ---
 

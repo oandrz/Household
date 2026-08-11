@@ -78,8 +78,14 @@ $C run --rm -e GOOSE_DRIVER=postgres -e GOOSE_MIGRATION_DIR=/app/migrations \
   admin /app/goose status
 ```
 
-`--email` is effectively required on `unlock-household` here: its default
-resolves the *seeded* owner, and production is never seeded.
+**`--email` on `unlock-household` and `--inviter-email` on `create-invite` are
+both effectively required here.** Both default to the *seeded* owner
+(`api/cmd/adminctl/main.go:274` and `:301`), and production is never seeded —
+omit either in production and the command fails with `no account for
+"andreas@hearth.family"`, not a helpful error about a missing flag. On
+`create-invite` this is easy to lose: it is the fifth flag on a wrapped line,
+and trimming it under stress still parses, so nothing about the command looks
+wrong until it runs.
 
 `adminctl seed` refuses outside development and refuses a non-local database,
 checked before it opens a connection. It cannot damage this install.
