@@ -2249,11 +2249,13 @@ route with a missing guard has no second line of defence.
   *last* `X-Forwarded-For` entry, and both appending and replacing put the true
   peer there. The defect lived entirely in the reasoning, which is the kind
   that survives every test and then misleads the next person to change the
-  file — the corrected comment even ruled out a perfectly safe replacement
-  proxy as unusable. By the time it was caught, the false premise had
-  propagated from the design into the plan, into ADR 0002 and into
-  `web/nginx.conf`'s own comments, so removing it took a measurement plus a
-  class sweep across four files rather than one edit.
+  file — the pre-fix comment even ruled out a perfectly safe replacement proxy
+  as unusable. By the time it was caught, the false premise had propagated from
+  the design into the plan, into ADR 0002 and into `web/nginx.conf`'s own
+  comments, so removing it took a measurement plus a class sweep — those three
+  sites, with `docs/SYSTEM_DESIGN.md` and `docs/HANDOVER.md` corrected in the
+  same pass for the adjacent error of writing the trusted range as a single
+  address — rather than one edit.
   **Second, the mutation test that should have caught it could not.** Flipping
   `real_ip_recursive` from `off` to `on` leaves the result unchanged, because
   against a single-address `X-Forwarded-For` the first and last entries are the
