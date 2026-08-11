@@ -422,11 +422,12 @@ a live install, in this order:
    does not leave the machine. An earlier draft of this section listed
    `sslmode=require` as a production change; the deployment spec's decision 9
    corrects it.)
-2. **An image that can administer production.** See §5 — the prod image has no
-   shell, no `goose` and no `adminctl`, so as things stand a migration cannot
-   be run and a locked-out household cannot be unlocked. **This is the one open
-   design decision**: a third Dockerfile target carrying both binaries, or a
-   sidecar built from the existing `dev` target.
+2. ~~**An image that can administer production.**~~ **Done.** `api/Dockerfile`
+   carries a third target, `admin`, on the same distroless base as `prod`,
+   holding `goose` and `adminctl`. `docker-compose.prod.yml` runs it as a
+   one-shot `migrate` service ahead of `api`, and as a `profiles: [manual]`
+   `admin` service for `unlock-household`, `reset-password`, `create-invite`
+   and `prune` — every command written down in `deploy/README.md`.
 3. ~~**`set_real_ip_from` in `web/nginx.conf`.**~~ **Done.** `web/nginx.conf`
    carries `set_real_ip_from 172.28.0.0/16`, `real_ip_header X-Forwarded-For`
    and an explicit `real_ip_recursive off`. The trusted range is the whole
@@ -787,19 +788,24 @@ by the same index a name lookup uses):
   walk (§1) cannot exercise the fix either way. The global daily mail ceiling
   (1000/day, reset at midnight, counted from `signups`) is what actually bounds
   the damage in the meantime.
-- **The production image cannot administer itself, and that is a lockout with
-  no key.** `api/Dockerfile`'s prod target is
-  `gcr.io/distroless/static-debian12:nonroot` with `ENTRYPOINT ["/app/api"]` —
-  no shell, no `goose`, no `adminctl`. So in production today: no migration can
-  be applied, no password reset (`make reset-password` is the *only* password
-  recovery path this product has — see the tracker's 🟡 on "Forgot?"), no
-  `create-invite`, no `prune`, and **no `unlock-household`**. Chain that last
-  one out: the lockout is household-wide and uncapped by deliberate decision
-  (above), magic link is the documented way back in, and mail failing is
-  documented as failing *silently*. A customer who locks themselves out on a
-  day the mail relay is unhappy cannot be helped by anyone. **Decide the shape
-  before deploying** — a third Dockerfile target carrying `goose` and
-  `adminctl`, or a sidecar built from the existing `dev` target.
+- ~~**The production image cannot administer itself, and that is a lockout
+  with no key.**~~ **Done.** `api/Dockerfile`'s `prod` target still has no
+  shell, `goose` or `adminctl` — that stays deliberate, so a deployed `api`
+  container carries nothing an intruder could use either. What changed is
+  that it is no longer the only image: a third target, `admin`, on the same
+  distroless base, carries both binaries, and `docker-compose.prod.yml` wires
+  it in as a one-shot `migrate` service plus a `profiles: [manual]` `admin`
+  service. So in production today: migrations run automatically ahead of
+  `api`, and `unlock-household`, `reset-password`, `create-invite` and
+  `prune` are all reachable via `docker compose run --rm admin ...` —
+  documented end to end in `deploy/README.md`. The chain this used to
+  describe (household-wide uncapped lockout, magic link as the only
+  documented way back in, mail failing silently) is unchanged in its own
+  right, but is no longer a dead end: `unlock-household --email` now exists
+  as the second way back in. `make reset-password` remains the *product's*
+  only self-serve-adjacent recovery path in the sense the tracker's 🟡 on
+  "Forgot?" describes — that gap is about the missing UI flow, not about
+  whether an operator can reach the database.
 - **Putting any second proxy in front of nginx silently disables the per-IP
   sign-up limiter.** `web/nginx.conf` overwrites `X-Real-IP` with
   `$remote_addr` and strips `True-Client-IP` precisely so a client cannot spoof
