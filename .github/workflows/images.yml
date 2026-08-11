@@ -1,0 +1,58 @@
+name: images
+
+# Only main builds images. A branch build would push tags nobody deploys and
+# spend the free minutes that make this arrangement free.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      # One job per image so a failure names which image failed, rather than
+      # one job whose log has to be read to find out.
+      matrix:
+        include:
+          - name: hearth-api
+            context: ./api
+            target: prod
+          - name: hearth-admin
+            context: ./api
+            target: admin
+          - name: hearth-web
+            context: ./web
+            target: prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          target: ${{ matrix.target }}
+          push: true
+          # The server is amd64. Building only that platform keeps the job
+          # fast; nothing here ever runs on arm64.
+          platforms: linux/amd64
+          # The SHA tag is the one the Compose file names. :latest exists for
+          # humans reading the registry and must never be referenced by a
+          # deployment -- see the spec's decision 4 on why a moving tag lets a
+          # migration-only change skip its own migration.
+          tags: |
+            ghcr.io/oandrz/${{ matrix.name }}:${{ github.sha }}
+            ghcr.io/oandrz/${{ matrix.name }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
