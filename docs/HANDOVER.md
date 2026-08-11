@@ -427,9 +427,13 @@ a live install, in this order:
    be run and a locked-out household cannot be unlocked. **This is the one open
    design decision**: a third Dockerfile target carrying both binaries, or a
    sidecar built from the existing `dev` target.
-3. **`set_real_ip_from` in `web/nginx.conf`.** Two lines, and mandatory once
-   Caddy sits in front — without them the per-IP sign-up limiter collapses into
-   a single global bucket (§5, and `docs/SYSTEM_DESIGN.md` §1).
+3. ~~**`set_real_ip_from` in `web/nginx.conf`.**~~ **Done.** `web/nginx.conf`
+   carries `set_real_ip_from 172.28.0.0/16`, `real_ip_header X-Forwarded-For`
+   and an explicit `real_ip_recursive off`. The trusted range is the whole
+   compose subnet rather than Caddy alone, and `docs/SYSTEM_DESIGN.md` §1 says
+   why that is accepted. Proven with two containers getting two independent
+   budgets, and forged `X-Forwarded-For` / `X-Real-IP` / `True-Client-IP`
+   headers failing to open a third.
 4. **`APP_BASE_URL` set to the public HTTPS origin.** It is embedded in every
    magic link, invite and sign-up mail; wrong, and every mailed link points at
    `localhost`.
@@ -804,10 +808,14 @@ by the same index a name lookup uses):
   becomes *the proxy's* address on every request, so `middleware.RealIP` keys
   every caller to one value and the per-IP limit becomes one global bucket.
   Per the rate-limit note above, a tripped global ceiling is silent and
-  platform-wide. Fix: `set_real_ip_from <the proxy's address>` plus
-  `real_ip_header X-Forwarded-For` in `nginx.conf`, or terminate TLS inside
-  that same nginx so there is only ever one proxy. `docs/adr/0002` chose Caddy
-  in front, so the two nginx lines are mandatory, not optional.
+  platform-wide. **Configured now, for Caddy**: `set_real_ip_from`,
+  `real_ip_header X-Forwarded-For` and an explicit `real_ip_recursive off` are
+  in `nginx.conf`, trusting the whole `172.28.0.0/16` compose subnet because
+  Docker assigns Caddy's address from it (`docs/SYSTEM_DESIGN.md` §1 covers the
+  trade-off). Anything that *replaces* Caddy as the thing talking to nginx
+  needs its own address or CIDR added there and must write the true peer as
+  the last `X-Forwarded-For` element. Anything put in front of *Caddy* is a
+  different fix: `trusted_proxies` in `deploy/Caddyfile`.
 - **The domain is the most fragile asset here — more fragile than the server.**
   `APP_BASE_URL` is embedded in every magic link and invite; SPF and DKIM bind
   to the domain; the cookie origin is the domain. A dead server is restored in

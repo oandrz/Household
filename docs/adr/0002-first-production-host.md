@@ -50,6 +50,16 @@ lines in `nginx.conf` — `set_real_ip_from <Caddy's address>` and
 `real_ip_header X-Forwarded-For` — and it is mandatory, not optional. See
 `docs/SYSTEM_DESIGN.md` §1.
 
+> **Implemented 2026-08-11.** Three lines, not two: `real_ip_recursive off` is
+> stated explicitly because it is load-bearing. `set_real_ip_from` trusts the
+> whole `172.28.0.0/16` compose subnet rather than a `/32` for Caddy, since
+> Docker assigns Caddy's address from that subnet — `docs/SYSTEM_DESIGN.md` §1
+> records why the wider range is accepted. This ADR also assumed Caddy appends
+> the peer to `X-Forwarded-For`; it replaces the header instead, preserving a
+> caller's list only for callers in `trusted_proxies`, of which none are
+> configured. The mitigation still holds — `off` takes the last entry either
+> way — but the reason differs from the one written above.
+
 **One box is a single point of failure, accepted.** Recovery is: new box, clone
 the repo, restore the dump, `docker compose up`, repoint DNS. This should be
 performed once and timed before it is needed for real.
