@@ -7,6 +7,58 @@ This file is the operations surface only.
 
 Every command below runs from this directory (`~/Household/deploy`) on the box.
 
+## First install
+
+The box sparse-checks out `deploy/` only, so this directory is the whole of
+what a rebuild has to work from. Everything needed to fill in `.env` is
+therefore written here rather than in the deployment plan, which never reaches
+the box.
+
+```bash
+cp .env.example .env
+chmod 600 .env      # it holds the database password and the mail API key
+```
+
+Then fill in every one of these. Nothing else in the template needs changing —
+`APP_ENV`, `PORT`, `SMTP_ADDR` and the three `ARGON2_*` values ship correct.
+
+| Value | What to put there |
+|---|---|
+| `IMAGE_TAG` | The git SHA the `images` workflow built. **Never `latest`** — see step 4 of "Deploying a change" for why |
+| `DOMAIN` | The bare public hostname, e.g. `hearth.example.com`. Caddy requests the certificate for it |
+| `ACME_EMAIL` | Where Let's Encrypt sends expiry warnings |
+| `POSTGRES_PASSWORD` | A freshly generated password, e.g. `openssl rand -base64 24` |
+| `DATABASE_URL` | The **same** password, inside the DSN |
+| `GOOSE_DBSTRING` | The **same** password again, inside the same DSN |
+| `APP_BASE_URL` | `https://<domain>` — the real public origin |
+| `SMTP_FROM` | An address on the domain verified with Resend, e.g. `"Hearth <noreply@hearth.example.com>"` |
+| `SMTP_USERNAME` | Literally `resend` |
+| `SMTP_PASSWORD` | The Resend API key |
+
+**The password appears three times and all three must match.**
+`POSTGRES_PASSWORD` initialises the database; `DATABASE_URL` is how `api`
+connects; `GOOSE_DBSTRING` is how `migrate` connects. A mismatch in the second
+or third fails loudly at boot, which is the good case.
+
+**`SMTP_USERNAME` and `SMTP_PASSWORD` are the pair to get right, and only one
+of the two ways of getting it wrong is loud.** The template ships both blank on
+purpose (`.env.example` says why: a pre-filled username against an empty
+password breaks every `adminctl` command, not just mail).
+
+- Fill **only one** of them and `config.Load()` refuses: `api` exits, the
+  `unless-stopped` policy restart-loops it, `/readyz` 502s. Loud, and the
+  break-glass section below names the error.
+- Leave **both blank** — the template's literal default — and `config.Load()`
+  *accepts* it. `api` boots, `/readyz` is green, nothing restarts, sign-up
+  answers `202`. But `SMTP_TLS_MODE` defaults to `mandatory` with no AUTH, so
+  Resend rejects every send, and the send is fire-and-forget: nothing surfaces
+  in any status, any check or any response. **The install looks completely
+  healthy and mails nothing** — and mail is the only account-recovery path this
+  product has, so nobody can sign in and nobody can be invited.
+
+So after the first `up`, do not treat a green `/readyz` as proof. Sign up once
+through the real form and confirm the mail actually arrives.
+
 ## Deploying a change
 
 1. Merge to `main` and wait for the `images` workflow to go green.
@@ -98,11 +150,22 @@ not just mail-sending ones. Fix `.env`, then retry.
 
 ## Backups
 
-A host cron runs `backup.sh` nightly:
+A host cron runs `backup.sh` nightly. It is the **`deploy` user's** crontab —
+`crontab -e` as `deploy`, not `sudo crontab -e`:
 
 ```cron
-17 3 * * * AGE_RECIPIENT=age1… RCLONE_REMOTE=r2:hearth-backups HC_PING_URL=https://hc-ping.com/… /home/deploy/Household/deploy/backup.sh >> /var/log/hearth-backup.log 2>&1
+17 3 * * * AGE_RECIPIENT=age1… RCLONE_REMOTE=r2:hearth-backups HC_PING_URL=https://hc-ping.com/… /home/deploy/Household/deploy/backup.sh >> /home/deploy/hearth-backup.log 2>&1
 ```
+
+**The log path is under `/home/deploy` deliberately.** On Ubuntu 24.04
+`/var/log` is `drwxrwxr-x root:syslog` and `deploy` is in neither, so a
+redirect into `/var/log` fails in `/bin/sh` *before `backup.sh` is ever
+reached* — no dump, no upload, no ping, and an error that names the redirection
+rather than anything about backups.
+
+**The `deploy` user is also why `rclone config` must be run as `deploy`.**
+`rclone` reads `$HOME/.config/rclone/rclone.conf`; a remote configured as root
+is invisible to a cron running as `deploy`, and fails the same silent way.
 
 A missed night emails you, via the heartbeat. That is the only monitoring the
 backups have, and it is the one that matters: the failure mode is silence.
@@ -151,12 +214,25 @@ explicitly.
 
 ## What is where
 
+Names below are the **resolved** ones — what `docker volume ls` prints and what
+you type. Compose prefixes every resource with the project name, so the
+`hearth-pgdata:` declared in the Compose file is really `hearth-prod_hearth-pgdata`.
+
 | | |
 |---|---|
-| Compose project | `hearth` |
-| Data | Docker volume `hearth-pgdata` |
-| Certificates | Docker volume `caddy-data` |
-| Caddy runtime state (OCSP staples, etc.) | Docker volume `caddy-config` |
+| Compose project | `hearth-prod` |
+| Data | Docker volume `hearth-prod_hearth-pgdata` |
+| Certificates | Docker volume `hearth-prod_caddy-data` |
+| Caddy runtime state (OCSP staples, etc.) | Docker volume `hearth-prod_caddy-config` |
+| Network | `hearth-prod_hearth`, subnet `172.28.0.0/16` (named in `web/nginx.conf`'s `set_real_ip_from`; the two move together) |
 | Secrets | `deploy/.env`, mode 600, gitignored |
 | Registry | `ghcr.io/oandrz/hearth-{api,web,admin}` |
 | Logs | `docker compose -f docker-compose.prod.yml logs -f <service>` |
+| Backup log | `/home/deploy/hearth-backup.log` |
+
+**Why `hearth-prod` and not `hearth`:** the development stack in the repo root
+declares `name: hearth` and its own `hearth-pgdata` volume, so before this
+rename both files resolved to the same volume. The prefix is what makes
+`backup.sh` fail loudly when it is run from the wrong directory instead of
+quietly uploading a development database to the production bucket. The Compose
+file carries the full reasoning at the top.

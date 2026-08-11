@@ -1,4 +1,17 @@
-name: hearth
+# `hearth-prod`, deliberately not `hearth`: the development stack in the repo
+# root declares `name: hearth` and a volume `hearth-pgdata` too, so both files
+# used to resolve to the identical Docker volume `hearth_hearth-pgdata`. The
+# consequence that decides this is not the mixed-up containers -- it is that
+# `backup.sh` run from a developer's checkout would dump the *development*
+# database, encrypt it, upload it to the production bucket under tonight's
+# date and ping the heartbeat green. Every detector reports healthy while the
+# backup holds the wrong data, which is worse than having no backup. Two more
+# follow from the same collision: `down -v` from either directory destroys the
+# other's database, and a prod `POSTGRES_PASSWORD` is silently ignored against
+# an already-initialised dev volume, which then looks like a secret problem
+# rather than a volume problem. Renaming makes every prod resource
+# `hearth-prod_*`, so a wrong-directory command fails loudly instead.
+name: hearth-prod
 
 services:
   # Caddy is the only thing on the public internet. It exists to obtain and
