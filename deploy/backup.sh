@@ -27,9 +27,11 @@ docker compose -f docker-compose.prod.yml exec -T postgres \
   | gzip -9 \
   | age -r "$AGE_RECIPIENT" -o "$tmp/$file"
 
-# A zero-length or absurdly small object means the pipeline failed upstream in
-# a way `set -o pipefail` did not catch. Better to fail loudly than to upload a
-# file that looks like a backup.
+# pipefail already aborts the realistic failures -- bad auth, no container,
+# connection refused. What it does not catch is a stage exiting 0 on
+# truncated input, such as the connection dropping mid-dump: gzip and age both
+# happily produce a small-but-valid file from a short read. Better to fail
+# loudly than to upload a file that looks like a backup.
 size="$(wc -c < "$tmp/$file")"
 if [ "$size" -lt 1024 ]; then
   echo "refusing to upload a ${size}-byte backup" >&2

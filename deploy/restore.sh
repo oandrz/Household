@@ -11,9 +11,25 @@ usage() { echo "usage: restore.sh <file.sql.gz.age> <target-dsn> [age-identity-f
 
 file="$1"; target="$2"; identity="${3:-$HOME/.config/age/hearth.key}"
 
-case "$target" in
-  *@postgres:5432/hearth*) echo "refusing to restore over the live database" >&2; exit 1 ;;
-esac
+# Fail closed rather than blocklist a literal substring: a DSN typed during
+# an incident is exactly the kind of value CLAUDE.md means by "a value you did
+# not construct", and what this guards is a household's whole financial
+# history. So refuse unless the target is positively identifiable as NOT the
+# live one -- database name differs from "hearth", host is not the compose
+# service name "postgres" -- and refuse anything the pattern below cannot even
+# parse, rather than letting an unrecognised shape fall through and proceed.
+if [[ "$target" =~ ^postgres(ql)?://[^@/]*@([^/:?]+)(:[0-9]+)?/([^?]+) ]]; then
+  host="${BASH_REMATCH[2]}"
+  db="${BASH_REMATCH[4]}"
+else
+  host=""
+  db=""
+fi
+
+if [ -z "$host" ] || [ -z "$db" ] || [ "$host" = "postgres" ] || [ "$db" = "hearth" ]; then
+  echo "refusing to restore over the live database" >&2
+  exit 1
+fi
 
 # psql runs inside postgres:17-alpine rather than as a host binary: the box's
 # later provisioning task installs only age, rclone and Docker, no Postgres
