@@ -97,6 +97,24 @@ which for a box with only 22, 80 and 443 open, on a private launch, is fine.
 Adding Cloudflare later is possible and now flagged in `web/nginx.conf` as
 requiring a revisit of `set_real_ip_from`.
 
+> **Correction, 2026-08-11.** "nginx trusts exactly one static address" is not
+> what shipped. `web/nginx.conf` carries `set_real_ip_from 172.28.0.0/16` — the
+> whole Compose subnet, not a `/32` for Caddy — because Docker assigns Caddy's
+> address from that range and a single address would have to be pinned. The
+> accepted consequence is recorded in `docs/SYSTEM_DESIGN.md` §1: any container
+> on that network can present an `X-Forwarded-For` nginx believes, which is
+> tolerable only because such a container can also reach `api:8080` directly,
+> where `middleware.RealIP` has no trusted-proxy list at all.
+>
+> **The decision itself is unaffected, and the correction sharpens rather than
+> weakens it.** The argument against Cloudflare was never really about *one*
+> address versus a range — it is that Caddy's range is a fixed, private,
+> self-assigned `/16` that changes only when this repository changes it,
+> whereas Cloudflare's ranges are public, externally owned, and must be
+> refreshed: stale silently breaks the sign-up limiter, over-broad makes it
+> spoofable again. Read the sentence above as "nginx trusts exactly one
+> statically-configured range it owns".
+
 **8. Production configuration lives in a `deploy/` directory in this repo, and
 the box sparse-checks out only that directory.**
 
@@ -227,6 +245,22 @@ nothing else, supplied once via `docker login ghcr.io` rather than through
 `deploy/.env`. It belongs in the escrow envelope alongside the backup key and
 the Postgres password — without it a rebuilt box cannot pull the images it is
 supposed to run.
+
+> **Correction, 2026-08-11. There is no third secret.** The premise is wrong:
+> `oandrz/Household` is a **public** repository, so the packages GHCR publishes
+> from it are public too. Verified anonymously, with no credentials present:
+> GHCR issues a pull token for `oandrz/hearth-admin` to an unauthenticated
+> caller and the manifest returns `200`, and the image pulls on a machine whose
+> `~/.docker/config.json` holds no `ghcr.io` entry.
+>
+> So the box needs no `docker login` and no token, and the escrow envelope holds
+> **three** items, not four: the age private key, the `POSTGRES_PASSWORD`, and a
+> printed copy of `deploy/README.md`'s restore section. Escrowing a token that
+> grants nothing is worse than leaving it out — it is one more credential to
+> rotate, and it implies a rebuilt box is blocked without it when it is not.
+>
+> This becomes live again the moment the repository is made private. If that
+> happens, restore the paragraph above and add the token back to the envelope.
 
 | Variable | Production value | Notes |
 |---|---|---|

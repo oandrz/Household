@@ -66,6 +66,11 @@ services:
   admin:
     image: ghcr.io/oandrz/hearth-admin:${IMAGE_TAG}
     profiles: [manual]
+    # Stated for the same reason `migrate` states it: both are one-shot, and
+    # the difference between "no policy declared" and "explicitly no restart"
+    # is invisible when reading down the file. A break-glass command that
+    # restart-looped would be its own emergency.
+    restart: "no"
     env_file: [.env]
     depends_on:
       postgres: {condition: service_healthy}

@@ -278,7 +278,7 @@ Expected: the run succeeds, and the three package names are listed.
 docker pull "ghcr.io/oandrz/hearth-admin:$(git rev-parse HEAD)"
 ```
 
-Expected: the pull succeeds. If it 403s, the packages are private and `docker login ghcr.io` with a `read:packages` token is needed — that token is the third secret named in the spec's Configuration section.
+Expected: the pull succeeds, with no `docker login` and no credentials of any kind. `oandrz/Household` is a public repository, so the packages GHCR publishes from it are public too — verified anonymously on 2026-08-11: GHCR issues a pull token to an unauthenticated caller and the manifest returns `200`. If this ever 403s, the repository has been made private; only then is a `read:packages` token needed, and only then does it belong in the escrow envelope. The spec's Configuration section carries the same correction.
 
 ---
 
@@ -425,6 +425,11 @@ services:
   admin:
     image: ghcr.io/oandrz/hearth-admin:${IMAGE_TAG}
     profiles: [manual]
+    # Stated for the same reason `migrate` states it: both are one-shot, and
+    # the difference between "no policy declared" and "explicitly no restart"
+    # is invisible when reading down the file. A break-glass command that
+    # restart-looped would be its own emergency.
+    restart: "no"
     env_file: [.env]
     depends_on:
       postgres: {condition: service_healthy}
@@ -1069,11 +1074,7 @@ Fill in: `IMAGE_TAG` (the SHA CI built), `DOMAIN`, `ACME_EMAIL`, a generated `PO
 
 `SMTP_USERNAME` ships **blank** and must be filled — leaving it out is the one omission here that does not announce itself. Filling only `SMTP_PASSWORD` makes `config.Load()` refuse and `api` restart-loop, which is loud. Leaving *both* blank is accepted by `config.Load()`: `api` boots, `/readyz` is green and sign-up answers `202`, but `SMTP_TLS_MODE` defaults to `mandatory` with no AUTH, Resend rejects every send, and `sendMagicLinkAsync` is fire-and-forget — so the install looks healthy and mails nothing, with mail being the only account-recovery path this product has. `deploy/README.md`'s "First install" section is the copy of this that actually reaches the box, since the box sparse-checks out `deploy/` only and never sees this file.
 
-Then log in to the registry:
-
-```bash
-echo "<github token with read:packages>" | docker login ghcr.io -u oandrz --password-stdin
-```
+**No registry login is needed.** `oandrz/Household` is public, so its GHCR packages are public and `docker compose pull` works anonymously (verified in Task 2). Do not create a `read:packages` token for this — a credential that grants nothing still has to be rotated, and escrowing it implies a rebuilt box is blocked without it when it is not. If the repository is ever made private, this step comes back as `echo "<token>" | docker login ghcr.io -u oandrz --password-stdin`, and the token joins the envelope below.
 
 - [ ] **Step 8: The age key and the escrow envelope**
 
@@ -1084,14 +1085,15 @@ age-keygen -y ~/.config/age/hearth.key    # the public recipient — this goes i
 
 Only the **public** recipient goes on the box. The private key never does: a box that can decrypt its own backups offers an attacker both.
 
-The escrow envelope, given to the trusted second person, contains four things:
+The escrow envelope, given to the trusted second person, contains three things:
 
 1. the age private key
 2. the `POSTGRES_PASSWORD`
-3. the GHCR read token
-4. a printed copy of `deploy/README.md`'s restore section
+3. a printed copy of `deploy/README.md`'s restore section
 
-Without all four, a successor has ciphertext they cannot read or images they cannot pull. This is the concrete answer to the succession gap in `docs/HANDOVER.md` §5.
+Without all three, a successor has ciphertext they cannot read. This is the concrete answer to the succession gap in `docs/HANDOVER.md` §5.
+
+**A GHCR read token was originally listed here as a fourth item and is not needed.** The repository is public, so the images are public and pull anonymously (Task 2, and the spec's Configuration section carries the verification). Add it back only if the repository is ever made private.
 
 - [ ] **Step 9: `rclone` and the bucket**
 
@@ -1181,6 +1183,8 @@ curl -fsS https://<domain>/readyz && echo
 ```
 
 Expected: `readyz` answers without anyone starting anything.
+
+**Give it a minute before reading a failure as one.** `depends_on` is honoured by `docker compose up`, not by the daemon's restart policy — on reboot Docker restarts every `unless-stopped` container in no particular order, so `api` may well start before Postgres is healthy, exit, and be restarted until it connects. That is the designed recovery, not a fault. A `curl` five seconds after boot proving nothing is the expected result; the criterion is that it answers unattended within about a minute.
 
 - [ ] **Step 8: Criterion 12 — the scheduled backup, and a restore with the escrowed key**
 
