@@ -456,10 +456,22 @@ newcomer as what has not.
    actually running on a schedule, and one restore decrypted with the
    **escrowed** copy of the key rather than the author's own, since an escrow
    that has never been used is a hope and not an escrow.
-6. **DNS**: the A record, plus Resend's SPF, DKIM and DMARC records.
+6. ~~**DNS**: the A record, plus Resend's SPF, DKIM and DMARC records.~~
+   **Reduced to the A record**, and it exists: `oink.mywire.org` resolves, TTL
+   120, currently pointed at the owner's own network and repointed at the box
+   when there is one. The SPF/DKIM/DMARC half is **cancelled for now** —
+   `docs/adr/0003-mail-stays-on-the-box.md` records why. Dynu refuses `TXT`
+   records on free third-level hostnames under 30 days old, so DKIM cannot be
+   published, so no hosted relay will verify the domain. Mail runs on Mailpit,
+   on the box, read over an SSH tunnel. Caddy is unaffected: its ACME challenge
+   is HTTP-01 over port 80 and needs no DNS record.
 7. **A browser walk against the deployed install**, to the same standard every
    feature here has been held to. First-run is exactly where these walks have
-   found things before.
+   found things before. **Two of its twelve criteria cannot run under ADR 3**
+   and are deferred rather than passed: criterion 2 (sign-up from a phone on
+   mobile data) and criterion 3 (mail arrives in a Gmail inbox, not spam). Run
+   both the day a real domain lands — criterion 3 in particular, since it is
+   the only thing that tells you whether outbound mail works at all.
 
 **Slice 5 (Overview) is the exception to its own rule, deliberately.** The
 original order put it last because it only aggregates, so building it early

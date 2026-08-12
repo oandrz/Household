@@ -165,6 +165,15 @@ constant to become configurable, with its own test, and a private launch will
 never approach either number. **The condition to revisit it is the first paying
 customer, not a date.**
 
+> **Superseded, 2026-08-12 — there is no Resend account.** This decision and
+> decision 6's mail row both assumed a hosted relay. The first install runs on a
+> free DDNS hostname whose DNS refuses `TXT` records, so DKIM cannot be
+> published and Resend cannot verify the domain at all. Mail runs on Mailpit, on
+> the box, read over an SSH tunnel; see
+> `docs/adr/0003-mail-stays-on-the-box.md` for the alternatives examined and the
+> exit condition. The 100/day mismatch above becomes live again the day a real
+> relay is configured, so it is left standing rather than deleted.
+
 **12. Monitoring is two things and nothing else.** An UptimeRobot free check on
 `/readyz` every five minutes (it pings the database, so it catches a dead
 Postgres rather than merely a live nginx), and a healthchecks.io dead-man's-switch

@@ -1,0 +1,100 @@
+# 3. Mail stays on the box until a real domain exists
+
+**Status:** Accepted — 2026-08-12. Explicitly interim; see "Exit condition".
+
+## Context
+
+The first production install runs on `oink.mywire.org`, a free Dynu DDNS
+hostname. Getting a hosted relay to send from it turned out to be impossible,
+for a reason that is worth writing down because it is not obvious:
+
+Dynu refuses `TXT` records on free, newly created third-level hostnames — *"This
+DNS record type is only available for members, top level domain names and mature
+(registered for more than 30 days) non dynu.com third level domain names."* No
+`TXT` means no DKIM. No DKIM means Resend cannot verify the domain. And since
+Gmail and Yahoo tightened sender requirements in February 2024, with Microsoft
+following in May 2025, unauthenticated mail does not reliably land anywhere.
+
+This matters more here than in most products, because **mail is not a feature of
+this one, it is the entry to it**. `POST /auth/sign-up` answers `202` and mails a
+link; the household does not exist until someone clicks it. Without mail, nobody
+can create an account at all — not a customer, not the owner.
+
+Alternatives examined and rejected:
+
+| Option | Why not |
+|---|---|
+| Supabase Auth's built-in mail | Not a relay — it only sends Supabase Auth's own mail, so our Go service has nowhere to point. Capped at 2 messages/hour per project, best-effort, and refuses any address not on the project team. Supabase's own docs require custom SMTP for production, which needs a domain again |
+| Brevo without domain authentication | Technically sends, but rewrites the sender address to one of its own; Brevo documents this as a stopgap for testing, not production |
+| FreeDNS (afraid.org) | Does allow `TXT` and `MX` on free subdomains, so it would work mechanically. Its parent domains are shared and mostly absent from the Public Suffix List, so the parent's DMARC policy governs, and many carry existing spam reputation |
+| eu.org | The technically correct free answer — a real domain, on the Public Suffix List, full nameserver delegation. Manual volunteer approval takes days to months, so it cannot unblock this week. **Worth applying for in the background** |
+| Buying a domain (~US$11/year) | Not rejected. Deferred — see the exit condition |
+
+## Decision
+
+**Run Mailpit in production and read the inbox by hand.** Sign-up, invites,
+magic links and the lockout recovery path all work exactly as designed; the mail
+simply never leaves the machine.
+
+Mailpit's web UI is bound to `127.0.0.1:8025` on the host, never `0.0.0.0`, and
+is reached through an SSH tunnel:
+
+```bash
+ssh -L 8025:127.0.0.1:8025 deploy@<box>   # then http://localhost:8025
+```
+
+The alternative we refused was faking deliverability — pointing at a relay that
+would send unauthenticated mail into spam folders and calling that done. This
+product's own conventions already refuse that shape twice: Budget spec decision 1
+and Goals decision 4 both rejected a setting that *looks* automatic but is not.
+Mail that looks delivered but isn't is the same dishonesty.
+
+## Consequences
+
+**The install is genuinely two-person.** Nobody outside can sign up or recover an
+account without the owner opening Mailpit and relaying the link by hand. That is
+acceptable for a private soft launch (see the deployment spec's decision 1) and
+unacceptable the moment there is a third user.
+
+**Mailpit's inbox is a complete authentication bypass.** Every magic link in it
+grants full access to an account with no password. Exposing port 8025 publicly
+hands over every account on the install. The loopback binding is a security
+control, not a convenience — `docker-compose.prod.yml` says so at the line.
+
+**TLS is unaffected.** Caddy uses the HTTP-01 challenge over port 80, which needs
+no DNS `TXT` record, so `oink.mywire.org` gets an ordinary browser-trusted
+Let's Encrypt certificate. The DDNS restriction bites only on mail.
+
+**`SMTP_TLS_MODE=none` has to be set explicitly**, because it defaults to
+`mandatory` outside development and Mailpit speaks plain SMTP. That line must be
+deleted when a real relay arrives, or it would downgrade a connection that
+should be encrypted.
+
+**The verification walk changes meaning.** Its criterion 2 (sign-up from a phone
+on mobile data) and criterion 3 (mail arrives in a Gmail inbox, not spam) cannot
+be exercised. They are deferred, not passed, and must be run when a domain
+lands — criterion 3 especially, since it is the one that tells you whether real
+mail works at all.
+
+## Exit condition
+
+**The day a person who is not Andreas or Christine needs to receive an email.**
+Not a date, not a milestone — that event.
+
+The switch is small, which is ADR 1's exit-cost principle paying off in practice:
+four values in `deploy/.env` (`SMTP_ADDR`, `SMTP_USERNAME`, `SMTP_PASSWORD`,
+`SMTP_FROM`), deleting `SMTP_TLS_MODE=none`, and removing the `mailpit` service
+from the Compose file. **No application code changes at all** — the mailer was
+always configuration behind a port, so a hosted relay drops in where Mailpit was.
+
+Changing `APP_BASE_URL` to a new domain at the same time will invalidate existing
+sessions (the cookie origin moves) and break any link already mailed. At two
+users that costs one sign-in each.
+
+## See also
+
+- [ADR 1 — optimise for exit cost](0001-optimise-for-exit-cost.md)
+- [ADR 2 — first production host](0002-first-production-host.md)
+- `docs/superpowers/specs/2026-08-10-hearth-production-deployment-design.md`,
+  whose decisions 6 and 11 assumed Resend and are superseded for as long as this
+  ADR stands.

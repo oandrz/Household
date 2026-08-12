@@ -113,6 +113,46 @@ a deploy, check `docker compose -f docker-compose.prod.yml ps` for `migrate`
 first: `exited (0)` is success, any other exit code is the answer. Roll
 `IMAGE_TAG` back and both halves return to the previous version together.
 
+## Reading mail
+
+Mail does not leave this box. `docs/adr/0003-mail-stays-on-the-box.md` has the
+reasoning; operationally it means every sign-up link, invite and magic link lands
+in Mailpit, and you read it by hand.
+
+Mailpit is bound to loopback, so open a tunnel from your laptop:
+
+```bash
+ssh -L 8025:127.0.0.1:8025 deploy@<box>
+```
+
+Leave that running, then open <http://localhost:8025> in your browser. Newest
+message at the top; click it and click the link inside.
+
+**This inbox is a complete authentication bypass.** Every magic link in it grants
+full access to an account with no password. That is why port 8025 is published as
+`127.0.0.1:8025` and not `8025` — bound to `0.0.0.0` it would hand every account
+on this install to anyone who scans the box. Never "simplify" that prefix away,
+and never put Mailpit behind Caddy.
+
+The API reaches Mailpit at `mailpit:1025` over the Compose network. No SMTP port
+is published.
+
+Faster than the browser, if you just want the newest link:
+
+```bash
+curl -s http://localhost:8025/api/v1/messages?limit=1
+curl -s http://localhost:8025/api/v1/message/<ID>
+```
+
+To send someone else their link — Christine, or anyone you invite — copy it out
+of Mailpit and pass it to them however you normally talk. The link is
+single-use and time-limited, so treat it like a password while it is in transit.
+
+**When a real domain arrives**, four values in `.env` change together
+(`SMTP_ADDR`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`), the
+`SMTP_TLS_MODE=none` line is deleted, and the `mailpit` service comes out of the
+Compose file. No application code changes.
+
 ## Break-glass
 
 The API image has no shell. These run from the admin image:

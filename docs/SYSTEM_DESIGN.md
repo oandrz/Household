@@ -119,23 +119,40 @@ graph TD
         Nginx["web — nginx :80<br/>serves the SPA, proxies /api"]
         API["api — Go service :8080<br/>distroless, no shell"]
         PG[("postgres — volume, not published")]
+        Mailpit["mailpit — mail stops here<br/>UI bound to 127.0.0.1:8025 only"]
         Admin["admin image — built, never run on a box<br/>goose + adminctl, api/Dockerfile target 'admin'"]
     end
 
-    Relay["Resend — SMTP relay"]
+    Operator["Operator's laptop"]
     Backup[("Off-provider dump<br/>nightly pg_dump, plain SQL")]
 
     Browser -->|HTTPS| Caddy
     Caddy -->|"HTTP, one origin"| Nginx
     Nginx -->|"/api/v1, /healthz, /readyz"| API
     API --> PG
-    API -->|"SMTP, TLS mandatory"| Relay
-    Caddy -.->|"ACME"| LE
+    API -->|"SMTP, plaintext, never leaves the host"| Mailpit
+    Operator -.->|"SSH tunnel, port 8025"| Mailpit
+    Caddy -.->|"ACME HTTP-01"| LE
     Admin -.->|"migrations, unlock, prune"| PG
     PG -.-> Backup
 ```
 
-Three things about this shape are not obvious from the boxes.
+Four things about this shape are not obvious from the boxes.
+
+**Mail stops at the box, and that is deliberate rather than unfinished.** There
+is no relay in this diagram because the install runs on a free DDNS hostname
+whose DNS refuses `TXT` records, so DKIM cannot be published and no hosted relay
+will verify the domain. Rather than send unauthenticated mail into spam folders
+and call it delivered, sign-up links, invites and magic links land in Mailpit and
+are read by hand over an SSH tunnel. `docs/adr/0003-mail-stays-on-the-box.md`
+carries the full reasoning and the exit condition — the day a third person needs
+to receive mail.
+
+Two consequences worth carrying: **that inbox is a complete authentication
+bypass**, since every magic link in it grants an account with no password, which
+is why 8025 is published as `127.0.0.1:8025` and never `0.0.0.0`; and TLS is
+untouched by any of it, because Caddy's ACME challenge is HTTP-01 over port 80
+and needs no DNS record at all. The DDNS restriction bites only on mail.
 
 **Caddy exists to renew certificates, not to route.** nginx already does the
 routing, and `web/nginx.conf` carries a security control in its header
@@ -1743,7 +1760,7 @@ prefix, which is what made the duplication stop being optional.
 | Generated SQL | sqlc, from `internal/adapter/postgres/queries/*.sql` — `make sqlc` |
 | Sessions | opaque random token, hashed at rest, 30 days, extended on use, revocable |
 | CSRF | double-submit cookie, compared in constant time, mutating methods only |
-| Mail | Mailpit in development; TLS policy and credentials from config elsewhere |
+| Mail | Mailpit in development **and, for now, in production too** — the first install runs on a free DDNS hostname whose DNS refuses `TXT` records, so DKIM cannot be published and no hosted relay will verify it (`docs/adr/0003-mail-stays-on-the-box.md`). Mail is read by hand over an SSH tunnel; the inbox is an authentication bypass, so 8025 is bound to `127.0.0.1` only. `SMTP_TLS_MODE=none` is set explicitly, since it defaults to `mandatory` outside development and Mailpit speaks plaintext. TLS policy and credentials come from config, so a real relay is four `.env` values and no code |
 | Seeding | `adminctl seed`, refused unless `APP_ENV=development` **and** the database host is local — both checked before the connection opens |
 | Retention | `adminctl prune --older-than=<days>` (default 30, floor 7) deletes consumed/expired `signups` and stale `login_attempts`; `magic_links`, `invites` and `sessions` still grow forever |
 | Rate limiting | Per-address (3/hour) and a global daily ceiling (1000, reset at midnight, not a rolling 24 hours), both counted from `signups` so a restart cannot reset them; per-IP (5/hour) is an in-memory token bucket in the HTTP layer — process-local, spoofable in development, and keyed to the *proxy* rather than the client if a proxy is put in front of nginx without `set_real_ip_from`; Caddy is in front in production, so `web/nginx.conf` carries that directive over the compose subnet and it is verified, not assumed (both in §1). The per-IP limit binds before the global one by construction (5 × 24 = 120 ≪ 1000) so one IP alone can never exhaust the global ceiling |

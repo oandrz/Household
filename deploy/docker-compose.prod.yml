@@ -44,6 +44,10 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       migrate: {condition: service_completed_successfully}
+      # Not a hard dependency -- the send is fire-and-forget, so the API runs
+      # fine without it. Declared so a reboot does not start `api` first and
+      # silently drop the mail from anyone who signs up in that window.
+      mailpit: {condition: service_started}
     networks: [hearth]
 
   # One-shot. `api` will not start until this exits 0, so a failed migration
@@ -74,6 +78,31 @@ services:
     env_file: [.env]
     depends_on:
       postgres: {condition: service_healthy}
+    networks: [hearth]
+
+  # Development's mail catcher, deliberately running in production. See
+  # docs/adr/0003-mail-stays-on-the-box.md: sending real mail needs a domain
+  # whose DNS accepts TXT records, and the free DDNS hostname this install runs
+  # on does not. Rather than fake deliverability, mail stays here and is read by
+  # hand. Sign-up, invites and magic links all work; they simply never leave.
+  #
+  # SECURITY: this inbox holds every magic link, and a magic link is a complete
+  # account takeover for whoever opens it -- no password needed. The port is
+  # therefore bound to 127.0.0.1 on the host, NOT 0.0.0.0, so it is unreachable
+  # from the internet even though 8025 is "published". Read it through an SSH
+  # tunnel from your laptop:
+  #
+  #   ssh -L 8025:127.0.0.1:8025 deploy@<box>   then open http://localhost:8025
+  #
+  # Dropping the `127.0.0.1:` prefix would hand every account on this install to
+  # anyone who portscans the box. Do not "simplify" it.
+  #
+  # No SMTP port is published: `api` reaches it at mailpit:1025 over the compose
+  # network, which never leaves the host.
+  mailpit:
+    image: axllent/mailpit:v1.30.5
+    restart: unless-stopped
+    ports: ["127.0.0.1:8025:8025"]
     networks: [hearth]
 
   postgres:
