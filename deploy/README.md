@@ -19,45 +19,43 @@ cp .env.example .env
 chmod 600 .env      # it holds the database password and the mail API key
 ```
 
-Then fill in every one of these. Nothing else in the template needs changing —
-`APP_ENV`, `PORT`, `SMTP_ADDR` and the three `ARGON2_*` values ship correct.
+Then fill in the values below — and **only** those. Everything else in the
+template already ships correct for this install: `DOMAIN`, `APP_BASE_URL`,
+`APP_ENV`, `PORT`, the three `ARGON2_*` values and the entire `SMTP_*` block are
+right as written and must be left alone.
 
 | Value | What to put there |
 |---|---|
 | `IMAGE_TAG` | The git SHA the `images` workflow built. **Never `latest`** — see step 4 of "Deploying a change" for why |
-| `DOMAIN` | The bare public hostname, e.g. `hearth.example.com`. Caddy requests the certificate for it |
 | `ACME_EMAIL` | Where Let's Encrypt sends expiry warnings |
 | `POSTGRES_PASSWORD` | A freshly generated password, e.g. `openssl rand -base64 24` |
-| `DATABASE_URL` | The **same** password, inside the DSN |
-| `GOOSE_DBSTRING` | The **same** password again, inside the same DSN |
-| `APP_BASE_URL` | `https://<domain>` — the real public origin |
-| `SMTP_FROM` | An address on the domain verified with Resend, e.g. `"Hearth <noreply@hearth.example.com>"` |
-| `SMTP_USERNAME` | Literally `resend` |
-| `SMTP_PASSWORD` | The Resend API key |
+| `DATABASE_URL` and `GOOSE_DBSTRING` | The **same** password inside both DSNs — replace the two `CHANGEME`s |
 
 **The password appears three times and all three must match.**
 `POSTGRES_PASSWORD` initialises the database; `DATABASE_URL` is how `api`
 connects; `GOOSE_DBSTRING` is how `migrate` connects. A mismatch in the second
 or third fails loudly at boot, which is the good case.
 
-**`SMTP_USERNAME` and `SMTP_PASSWORD` are the pair to get right, and only one
-of the two ways of getting it wrong is loud.** The template ships both blank on
-purpose (`.env.example` says why: a pre-filled username against an empty
-password breaks every `adminctl` command, not just mail).
+**Leave `SMTP_USERNAME` and `SMTP_PASSWORD` blank, and leave `SMTP_TLS_MODE=none`
+where it is.** Mail does not leave this box — `docs/adr/0003-mail-stays-on-the-box.md`
+carries the reasoning and "Reading mail" below is how you collect it. Those three
+lines are what aim the mailer at the `mailpit` service, and each has a different
+failure mode:
 
-- Fill **only one** of them and `config.Load()` refuses: `api` exits, the
-  `unless-stopped` policy restart-loops it, `/readyz` 502s. Loud, and the
-  break-glass section below names the error.
-- Leave **both blank** — the template's literal default — and `config.Load()`
-  *accepts* it. `api` boots, `/readyz` is green, nothing restarts, sign-up
-  answers `202`. But `SMTP_TLS_MODE` defaults to `mandatory` with no AUTH, so
-  Resend rejects every send, and the send is fire-and-forget: nothing surfaces
-  in any status, any check or any response. **The install looks completely
-  healthy and mails nothing** — and mail is the only account-recovery path this
-  product has, so nobody can sign in and nobody can be invited.
+- Fill **only one** of `SMTP_USERNAME` / `SMTP_PASSWORD` and `config.Load()`
+  refuses: `api` exits, the `unless-stopped` policy restart-loops it, `/readyz`
+  502s, and **every `adminctl` command breaks with it**, because config loading
+  runs before any subcommand. Loud, and the break-glass section below names the
+  error.
+- Delete `SMTP_TLS_MODE=none` and every send fails **silently**. It defaults to
+  `mandatory` outside development, Mailpit speaks plain SMTP, and the send is
+  fire-and-forget — nothing surfaces in any status, any check or any response.
+  **The install looks completely healthy and mails nothing**, and mail is the
+  only account-recovery path this product has, so nobody can sign in and nobody
+  can be invited.
 
 So after the first `up`, do not treat a green `/readyz` as proof. Sign up once
-through the real form and confirm the mail actually arrives.
+through the real form and confirm the message actually lands in Mailpit.
 
 ## Deploying a change
 

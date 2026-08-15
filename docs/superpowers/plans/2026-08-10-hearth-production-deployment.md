@@ -1049,9 +1049,11 @@ An `A` record for the domain to the box's IPv4. Confirm before continuing — Ca
 dig +short <domain>
 ```
 
-- [ ] **Step 5: Resend**
+- [ ] ~~**Step 5: Resend**~~ — **SUPERSEDED by `docs/adr/0003-mail-stays-on-the-box.md` (2026-08-12). Skip this step entirely.**
 
-Create the account, add the domain, publish the SPF, DKIM and DMARC `TXT` records it gives you, and wait for verification to go green. Create an API key. `SMTP_FROM` must be an address on this domain or Resend rejects the send.
+The install runs on `oink.mywire.org`, a free Dynu DDNS hostname, and Dynu refuses `TXT` records on free third-level hostnames under 30 days old. No `TXT` means no DKIM, no DKIM means Resend cannot verify the domain, and since Gmail and Yahoo tightened sender requirements in February 2024 unauthenticated mail does not reliably land anywhere. Mail therefore runs on Mailpit inside the stack and is read by hand through an SSH tunnel; `deploy/README.md`'s "Reading mail" section is the operational copy. The ADR records the alternatives examined, and its exit condition — the day a person who is not Andreas or Christine needs to receive an email — is when this step comes back.
+
+~~Create the account, add the domain, publish the SPF, DKIM and DMARC `TXT` records it gives you, and wait for verification to go green. Create an API key. `SMTP_FROM` must be an address on this domain or Resend rejects the send.~~
 
 - [ ] **Step 6: The sparse checkout**
 
@@ -1070,9 +1072,9 @@ The source tree is deliberately absent. If `api/` or `web/` appear, the sparse c
 cp .env.example .env && chmod 600 .env
 ```
 
-Fill in: `IMAGE_TAG` (the SHA CI built), `DOMAIN`, `ACME_EMAIL`, a generated `POSTGRES_PASSWORD` (and the same password inside both `DATABASE_URL` and `GOOSE_DBSTRING`), **`SMTP_USERNAME` (literally `resend`)**, `SMTP_PASSWORD` (the Resend API key), and the real `APP_BASE_URL` / `SMTP_FROM`.
+**The mail half of this step is SUPERSEDED by ADR 3, as step 5 is.** Fill in only: `IMAGE_TAG` (the SHA CI built), `ACME_EMAIL`, and a generated `POSTGRES_PASSWORD` — the same password inside both `DATABASE_URL` and `GOOSE_DBSTRING`. `DOMAIN`, `APP_BASE_URL`, `SMTP_ADDR` and `SMTP_FROM` now ship correct in the template and must be left alone; `SMTP_USERNAME` and `SMTP_PASSWORD` stay **blank**, and `SMTP_TLS_MODE=none` stays where it is.
 
-`SMTP_USERNAME` ships **blank** and must be filled — leaving it out is the one omission here that does not announce itself. Filling only `SMTP_PASSWORD` makes `config.Load()` refuse and `api` restart-loop, which is loud. Leaving *both* blank is accepted by `config.Load()`: `api` boots, `/readyz` is green and sign-up answers `202`, but `SMTP_TLS_MODE` defaults to `mandatory` with no AUTH, Resend rejects every send, and `sendMagicLinkAsync` is fire-and-forget — so the install looks healthy and mails nothing, with mail being the only account-recovery path this product has. `deploy/README.md`'s "First install" section is the copy of this that actually reaches the box, since the box sparse-checks out `deploy/` only and never sees this file.
+~~`SMTP_USERNAME` ships blank and must be filled — leaving it out is the one omission here that does not announce itself.~~ That is no longer true: with Mailpit on the compose network there is no AUTH to perform, so both blank is the *correct* configuration. What is still true, and is now the silent failure in its place, is `SMTP_TLS_MODE`: delete that line and it defaults to `mandatory`, Mailpit speaks plain SMTP, every send fails, and `sendMagicLinkAsync` is fire-and-forget — so the install looks healthy and mails nothing, with mail being the only account-recovery path this product has. Filling only one of `SMTP_USERNAME` / `SMTP_PASSWORD` still makes `config.Load()` refuse and `api` restart-loop, which is loud, and breaks every `adminctl` command with it. `deploy/README.md`'s "First install" section is the copy of all this that actually reaches the box, since the box sparse-checks out `deploy/` only and never sees this file.
 
 **No registry login is needed.** `oandrz/Household` is public, so its GHCR packages are public and `docker compose pull` works anonymously (verified in Task 2). Do not create a `read:packages` token for this — a credential that grants nothing still has to be rotated, and escrowing it implies a rebuilt box is blocked without it when it is not. If the repository is ever made private, this step comes back as `echo "<token>" | docker login ghcr.io -u oandrz --password-stdin`, and the token joins the envelope below.
 
@@ -1148,8 +1150,8 @@ Create `docs/superpowers/plans/2026-08-10-hearth-production-verification.md` wit
 - [ ] **Step 4: Criteria 1–6 — it works at all**
 
 1. `https://<domain>` serves with a valid certificate; `http://<domain>` redirects to it
-2. Sign-up completes **from a phone on mobile data** — a real network, not the laptop
-3. That mail arrives in a Gmail **inbox**, not spam
+2. Sign-up completes **from a phone on mobile data** — a real network, not the laptop. **Reduced under ADR 3:** the submission still runs from the phone and must answer `202`, but the link is collected from Mailpit over the SSH tunnel instead of from the phone's inbox. Run it in that form rather than skipping it — criterion 10 depends on the phone having been established as a genuinely separate client, and skipping this leaves that with no basis
+3. ~~That mail arrives in a Gmail **inbox**, not spam~~ — **DEFERRED under ADR 3.** No mail leaves the box, so there is nothing to receive. This is the criterion that tells you whether real mail works at all; it must be run the day a domain lands, and until then it is deferred, **not** passed
 4. The link completes and the household exists
 5. The session cookie is `Secure`, `HttpOnly`, `SameSite=Lax` on the real domain (read it in the browser's devtools, not from the code)
 6. An account, a transaction, a budget, a goal and a bill each save, and every derived figure moves

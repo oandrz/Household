@@ -70,11 +70,22 @@ Let's Encrypt certificate. The DDNS restriction bites only on mail.
 deleted when a real relay arrives, or it would downgrade a connection that
 should be encrypted.
 
-**The verification walk changes meaning.** Its criterion 2 (sign-up from a phone
-on mobile data) and criterion 3 (mail arrives in a Gmail inbox, not spam) cannot
-be exercised. They are deferred, not passed, and must be run when a domain
-lands — criterion 3 especially, since it is the one that tells you whether real
-mail works at all.
+**The verification walk changes meaning.** Criterion 3 (mail arrives in a Gmail
+inbox, not spam) cannot be exercised at all — nothing leaves the box, so there is
+nothing to receive. It is deferred, not passed, and is the criterion that tells
+you whether real mail works, so it must be run the day a domain lands.
+
+Criterion 2 (sign-up from a phone on mobile data) *is* still runnable, in reduced
+form: the submission runs from the phone and must answer `202`, and the link is
+then collected from Mailpit rather than the phone's inbox. **Run it that way
+rather than skipping it.** Criterion 10 — the per-IP limiter keying on the real
+client rather than on Caddy — turns on the phone having been established as a
+genuinely separate client, and criterion 2 is what establishes that. Dropping it
+would quietly remove the basis for the one criterion that proves a security
+control.
+
+*(Corrected 2026-08-15: this consequence originally deferred criterion 2 along
+with criterion 3, which would have left criterion 10 resting on nothing.)*
 
 ## Exit condition
 
