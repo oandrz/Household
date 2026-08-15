@@ -14,3 +14,6 @@ web/dist/
 
 # The real production environment file. Only deploy/.env.example is tracked.
 deploy/.env
+
+# Written by deploy/deploy.sh on the box. Per-install state, not source.
+deploy/.previous-image-tag

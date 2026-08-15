@@ -62,34 +62,47 @@ through the real form and confirm the message actually lands in Mailpit.
 1. Merge to `main` and wait for the `images` workflow to go green.
 2. `ssh box && cd Household/deploy`
 3. `git pull` — only needed if the Compose file, Caddyfile or scripts changed.
-4. Set the new tag:
-
-   ```bash
-   sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=<the git sha>/" .env
+4. ```bash
+   ./deploy.sh <the git sha>
    ```
 
-   **Never `latest`.** A migration-only change produces a byte-identical api
-   image; without a changed tag Compose will not recreate `api`, will not
-   re-evaluate `depends_on: migrate`, and the migration silently will not run.
+That is the whole deploy. The script writes `IMAGE_TAG`, pulls, brings the
+stack up, and then **verifies rather than assumes**: that all three images
+existed before it touched `.env`, that `migrate` exited `0`, that nothing is
+restart-looping, and that `/readyz` answers on the public domain. Any of those
+failing stops it with a message naming the next command to run.
 
-5. ```bash
-   docker compose -f docker-compose.prod.yml pull
-   docker compose -f docker-compose.prod.yml up -d
-   ```
+```bash
+./deploy.sh --current     # what is running right now
+./deploy.sh --rollback    # back to the tag deploy.sh last replaced
+```
 
-   `migrate` runs to completion before `api` starts. If it fails, `api` does
-   not start and the previous container keeps serving.
+**Why a script rather than four commands.** Two of the four failed silently:
 
-6. ```bash
-   curl -fsS "https://$(grep '^DOMAIN=' .env | cut -d= -f2 | tr -d '"')/readyz" && echo
-   docker compose -f docker-compose.prod.yml ps
-   ```
+- `sed -i "s/^IMAGE_TAG=.*/.../" .env` run from the wrong directory edits
+  nothing, prints nothing and exits `0`. The deploy then "succeeds" while
+  serving the old build.
+- `IMAGE_TAG=latest` deploys nothing while looking like it worked. A
+  migration-only change produces a byte-identical `api` image, so Compose does
+  not recreate `api`, does not re-evaluate `depends_on: migrate`, and **the
+  migration does not run** — with every check still green.
 
-   Confirm nothing is restarting.
+Both are refused before anything changes, and `latest` gets its own message
+because the reason is not guessable from the symptom.
+
+The by-hand equivalent is still `sed` the tag, then `docker compose pull`, then
+`docker compose up -d` — worth knowing for the day the script itself is what is
+broken.
 
 ## Rolling back
 
-Set `IMAGE_TAG` to the previous SHA and repeat steps 5–6.
+```bash
+./deploy.sh --rollback
+```
+
+It reads `.previous-image-tag`, which `deploy.sh` writes **before** changing
+anything, so rollback works even if a deploy died partway. To go further back
+than one release, pass the SHA directly: `./deploy.sh <older sha>`.
 
 **This rolls back code only.** It does not undo a migration: the goose `Down`
 migrations are correct by inspection and no test has ever run one. A bad
