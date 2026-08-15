@@ -5,7 +5,7 @@
 **Walked:** 2026-08-15, first deploy.
 
 Twelve criteria from `2026-08-10-hearth-production-deployment.md` Task 8.
-**Nine pass, one is deferred by ADR 3, two are half done, one is outstanding** — see the table,
+**Ten pass, one is deferred by ADR 3, one is half done, one is outstanding** — see the table,
 then the notes for what each outstanding one is waiting on.
 
 | # | Criterion | Result |
@@ -21,7 +21,7 @@ then the notes for what each outstanding one is waiting on.
 | 9 | `goose status` shows all eight migrations | ✅ pass |
 | 10 | Limiter keys on the real client, not on Caddy | ✅ pass — two distinct IPs, independent budgets |
 | 11 | Survives a reboot unattended | ✅ pass — 26 s, nothing touched |
-| 12 | Scheduled backup, and a restore with the escrowed key | 🟡 half — backups run and a restore is proven; the **escrow** half is not |
+| 12 | Scheduled backup, and a restore with the escrowed key | ✅ pass — escrow drill run from the printed key |
 
 ## 1 — TLS ✅
 
@@ -239,16 +239,42 @@ and dates all survived the round trip.
 re-executed under `env -i` with only the `PATH` the crontab sets. It uploaded.
 That is the difference between a schedule that exists and one that works.
 
-**Still open, and this is what keeps criterion 12 at half:**
+**The escrow drill — run 2026-08-15, and this is what closes the criterion.**
 
-1. **The escrow envelope does not exist.** This drill used the owner's own copy
-   of the key. An escrow that has never been decrypted with is a hope, not an
-   escrow. Christine needs the `age` private key, the `POSTGRES_PASSWORD` and
-   the restore section of `deploy/README.md` — and a restore must then be run
-   using *her* copy.
-2. **The schedule has never actually fired.** First scheduled run is 03:17
-   Singapore time; the heartbeat is what will say whether it did.
-3. **No lifecycle rule yet**, so dumps accumulate. Trivial at 8 KB, but it is the
+A one-page recovery envelope was printed for Christine: what Hearth is, when to
+use the page, where every account lives, the `age` private key, and restore
+instructions for whichever technical person she hands it to. The key was written
+into it directly from the file and never echoed to a terminal.
+
+The drill then used **only that paper**. The key was typed out fresh from the
+printout — not copied from the laptop, which would have proved nothing — into a
+separate file, and passed to `restore.sh` as its third argument. That argument
+exists for exactly this.
+
+```
+public half derived from the typed key  == public half of the real key   MATCH
+all 11 tables                           == live production               IDENTICAL
+opening_balance_minor=500000 SGD   amount_minor=12050 SGD
+target_amount_minor=600000         bill amount_minor=5990
+```
+
+**One correction to the plan's envelope contents.** It listed
+`POSTGRES_PASSWORD` as one of three required items. It is not required: the dump
+is plain SQL and restores into a fresh Postgres under any password the operator
+chooses. The old password only matters for operating the *existing* box, which is
+a different situation. The printed sheet says so, so nobody burns time in an
+emergency hunting for a value they do not need.
+
+**The real hierarchy, which the sheet also states:** Hetzner, Cloudflare, Dynu
+and healthchecks.io can all be recovered through the owner's email. **The `age`
+key is the only thing with no reset.** That is why it, and not the account list,
+is the thing worth putting on paper.
+
+**Two smaller items remain, neither blocking:**
+
+1. **The schedule has never actually fired on its own.** First scheduled run is
+   03:17 Singapore time; the heartbeat is what will say whether it did.
+2. **No lifecycle rule yet**, so dumps accumulate. Trivial at 8 KB, but it is the
    only path to eventually exceeding R2's free 10 GB.
 
 ## Notes from walking it

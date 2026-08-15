@@ -15,7 +15,7 @@ in three months or someone new.
 > running the Compose stack behind Caddy. A real household exists on it and was
 > created through the real sign-up form.
 >
-> **Nine of the twelve verification criteria pass**, recorded criterion by
+> **Ten of the twelve verification criteria pass**, recorded criterion by
 > criterion in
 > `docs/superpowers/plans/2026-08-10-hearth-production-verification.md`. Nothing
 > in the product broke during the walk. Criterion 3 is deferred by
@@ -30,13 +30,11 @@ in three months or someone new.
 > figure exactly. The private key is **not on the box**, so a box compromise
 > yields ciphertext.
 >
-> **🟡 The escrow does not exist yet, and that is the remaining risk.** Every
-> restore so far used the owner's own copy of the key. Christine needs the
-> `age` private key (`~/.config/age/hearth.key` on the owner's laptop), the
-> `POSTGRES_PASSWORD` from `deploy/.env`, and the restore section of
-> `deploy/README.md` — and a restore must then be run from *her* copy. An
-> escrow nobody has ever decrypted with is a hope, not an escrow. Until then
-> the household survives losing the box, but not losing the owner.
+> **The escrow is real and tested, since 2026-08-15.** A printed recovery page
+> is held outside this machine. It was proven by typing the key off the paper
+> into a fresh file and restoring from that alone — all eleven tables and every
+> monetary value matched live production. **The household now survives losing
+> the box and losing the owner.**
 >
 > Deploying is `deploy/deploy.sh <git-sha>` on the box, with `--current` and
 > `--rollback`. CI builds SHA-tagged images on every push to `main`; the box
@@ -436,9 +434,10 @@ runbook still instructed the operator to configure a mail relay that ADR 3 had
 already made impossible. All three were found at the order form or on the box,
 none of them by a test.
 
-**The next work is the escrow envelope**, which is the last piece of criterion
-12 and the only thing standing between "survives losing the box" and "survives
-losing the owner". It costs an evening and no code. After that, Marriage.
+**The next work is Marriage.** The deployment is done: ten of twelve criteria
+pass, backups run nightly and the escrow has been exercised. What remains on the
+install is small and listed in §5 — uptime monitoring, two R2 dashboard rules,
+and a first run of `adminctl unlock-household` on a calm day.
 
 **Marriage is the next feature after the deployment** — independent of Money,
 and the first area whose spec starts from a genuinely clean slate rather than
