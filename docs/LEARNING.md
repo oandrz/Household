@@ -994,10 +994,11 @@ something only that guard can produce.
   this pattern exists to make someone re-check in a browser before trusting.
 
 - Mobile-responsive round, Task 8: **`BudgetStatCards.tsx`'s four-card row has
-  been logged twice as a "pre-existing `md:` breakpoint, leave it" item
-  (Task 6/7's report, and this file's own CLAUDE.md) without anyone measuring
-  whether it actually overflows** — because no earlier task had real budget
-  figures to render there. It does, and the cause isn't the `md:` prefix: the
+  been logged twice as a pre-existing `md:` breakpoint to leave alone —
+  Task 6/7's report, and Task 8's own dispatch note, which told this task's
+  implementer to leave the file alone — without anyone measuring whether it
+  actually overflows** — because no earlier task had real budget figures to
+  render there. It does, and the cause isn't the `md:` prefix: the
   *unprefixed* `grid-cols-2` base is too narrow for what the cards actually
   hold. `formatMoney` output like `S$3,790.00` has no space to wrap on, and
   CSS Grid's implicit per-item `min-width: auto` (the same default that made
@@ -1005,11 +1006,13 @@ something only that guard can produce.
   shrinking below that text's ~125–148px min-content width — so the *grid*
   grows past its container instead. Measured at 320px: 60px of page-level
   horizontal scroll, the largest violation found in this task, worse than
-  either defect this task was assigned to fix. Left unfixed here on explicit
-  instruction (the file is named in CLAUDE.md as "leave them; they are logged
-  separately"), but the diagnosis every prior mention carried was wrong, and
-  whoever owns it next should start from "unbounded min-content in a narrow
-  grid cell," not from the breakpoint count.
+  either defect this task was assigned to fix. The dispatch note's "leave it"
+  meant the file's stale `md:` breakpoint, not a floor violation — nobody had
+  measured this one when that note was written, and the spec's 320px floor is
+  binding, which outranks a dispatch note written before the number was
+  known. **Assigned to Task 9**, not left as a standing deferral: whoever
+  picks it up should start from "unbounded min-content in a narrow grid
+  cell," not from the breakpoint count.
 
 **If a behaviour depends on the platform, verify it in the platform.** A real
 browser is what found every frontend defect above, and nothing else could

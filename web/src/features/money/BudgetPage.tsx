@@ -241,7 +241,9 @@ export function BudgetPage() {
           comment describes -- the month picker plus History and Edit budget
           never had room beside the title at 320px. Not caught before this
           task because no browser walk had a real budget (with History and
-          Edit budget both rendering) at a phone width until now. */}
+          Edit budget both rendering) at a phone width until now. flex-wrap
+          only acts once a line overflows its width, so it changes nothing
+          at 1440, where this cluster already fits beside the title. */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-[23px] font-semibold tracking-[-0.02em] text-ink">{BUDGET_COPY.title}</h1>

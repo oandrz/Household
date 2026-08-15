@@ -45,8 +45,11 @@ const LABEL_CLASS =
 // (e.g. "ACCOUNT") were clipped to a 15px sliver. `w-full` forces the same
 // mobile-first stack without that failure: an item demanding the full row
 // can only ever share a line with nothing, so it always wraps alone.
-// `min-w-0` still matters at `sm:w-auto`, where the select's own intrinsic
-// width can still exceed a half-width slot next to another filter.
+// `min-w-0` is kept even though it measures as a no-op at `sm:w-auto` --
+// there is no shared half-width slot at that breakpoint for a select to
+// overflow (widths came back byte-identical with and without the class). It
+// stays because it costs nothing and guards against a future layout that
+// puts these fields in a shared-width slot again.
 const FIELD_CLASS = "flex w-full min-w-0 flex-col gap-1 sm:w-auto";
 
 // value "" is "All" -- the same empty-string-means-unset convention every

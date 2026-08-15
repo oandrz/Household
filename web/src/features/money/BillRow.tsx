@@ -117,7 +117,13 @@ function PaymentRow({
       data-testid="bill-row"
       className="flex flex-col gap-2 border-b border-hairline py-3 last:border-b-0"
     >
-      <div className="flex items-center justify-between gap-3 opacity-65">
+      {/* items-start below sm: the right cluster below stacks up to 3 items
+          (label, amount, Undo) while the left block stays ~24px tall, so
+          items-center would float the date badge and name down to the
+          cluster's midpoint. Converges to sm:items-center once the cluster
+          is back to one line and the two blocks are close enough in height
+          for centring to look right again. */}
+      <div className="flex items-start justify-between gap-3 opacity-65 sm:items-center">
         <div className="flex items-center gap-3">
           <DateBadge nextDue={payment.dueOn} settled={false} overdue={false} />
           <div>
@@ -228,7 +234,7 @@ export function BillRow(props: BillRowProps) {
             }
           : undefined
       }
-      className={`flex items-center justify-between gap-3 border-b border-hairline py-3 last:border-b-0 ${
+      className={`flex items-start justify-between gap-3 border-b border-hairline py-3 last:border-b-0 sm:items-center ${
         clickable ? "cursor-pointer" : ""
       }`}
     >
@@ -247,7 +253,11 @@ export function BillRow(props: BillRowProps) {
       {/* Column below sm, row from sm up -- the Overdue/Autopay pill, amount
           and archive/mark-paid actions were competing with the name block for
           a 343px row; stacked, each item gets the row's full width instead of
-          squeezing into a slice of it. */}
+          squeezing into a slice of it. items-start on the outer row (above)
+          matches: an autopay bill's cluster stacks up to 4 items (pill,
+          amount, Mark paid, Archive) below sm, tall enough that centring
+          against the ~24px name block would float it down; sm:items-center
+          returns once the cluster is one line again. */}
       <div className="flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-3">
         {/* Overdue takes priority over the Autopay pill -- the subtitle
             sentence above already carries the autopay-vs-manual distinction
