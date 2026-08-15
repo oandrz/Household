@@ -5,7 +5,7 @@
 **Walked:** 2026-08-15, first deploy.
 
 Twelve criteria from `2026-08-10-hearth-production-deployment.md` Task 8.
-**Nine pass, one is deferred by ADR 3, one is half done, two are outstanding** — see the table,
+**Nine pass, one is deferred by ADR 3, two are half done, one is outstanding** — see the table,
 then the notes for what each outstanding one is waiting on.
 
 | # | Criterion | Result |
@@ -21,7 +21,7 @@ then the notes for what each outstanding one is waiting on.
 | 9 | `goose status` shows all eight migrations | ✅ pass |
 | 10 | Limiter keys on the real client, not on Caddy | ✅ pass — two distinct IPs, independent budgets |
 | 11 | Survives a reboot unattended | ✅ pass — 26 s, nothing touched |
-| 12 | Scheduled backup, and a restore with the escrowed key | ⬜ outstanding — no backup infrastructure exists yet |
+| 12 | Scheduled backup, and a restore with the escrowed key | 🟡 half — backups run and a restore is proven; the **escrow** half is not |
 
 ## 1 — TLS ✅
 
@@ -205,11 +205,51 @@ production is never seeded.
 **11 has not been run.** Worth doing now rather than later, while losing the
 box costs nothing.
 
-**12 cannot be run at all yet.** No `age` keypair, no bucket, no `rclone`
-remote, no cron, no escrow envelope. **Until `backup.sh` has run once and the
-object has been seen in the bucket, this install has no recovery path of any
-kind.** That is the largest open risk on the box and it is not a walk finding —
-it is unbuilt infrastructure.
+**12 — half closed, 2026-08-15.** The recovery loop is proven end to end and the
+schedule is installed; what has never been exercised is the escrow.
+
+Built and verified:
+
+- An `age` keypair, generated **on the laptop**. The private half was written
+  straight to a file and never printed; only the public recipient is on the box,
+  so a box compromise yields ciphertext and nothing more.
+- A Cloudflare R2 bucket `hearth-backups`, with an **account** API token (not a
+  user token — a user token deactivates with the user, which would silently stop
+  backups at exactly the moment succession matters) scoped to that one bucket.
+- `rclone` upgraded from Ubuntu's four-year-old v1.60.1 to upstream v1.75.0,
+  checksum-verified. **The apt copy was removed deliberately**: `backup.sh` calls
+  `rclone` bare and cron's default `PATH` excludes `/usr/local/bin`, so leaving
+  both would have run the 2022 client from cron while every interactive check
+  showed 1.75. One binary makes a `PATH` mistake fail loudly instead.
+- The cron, with `PATH` set explicitly for that reason and `CRON_TZ=Asia/Singapore`
+  so "3:17am" is not really 11:17am in the household's own timezone.
+- Secrets in a mode-600 env file rather than inline in the crontab: `crontab -l`
+  would otherwise expose the heartbeat URL, and whoever holds that can suppress
+  the alert that says backups have stopped.
+
+**The full loop, with real values.** production Postgres → plain-SQL `pg_dump` →
+gzip → `age` → R2 (8 KB of ciphertext, confirmed as ciphertext by its
+`age-encryption.org/v1` header) → download → decrypt → `psql` restore into a
+throwaway container → **all eleven tables identical to production**, and the
+money itself intact: `opening_balance_minor 500000`, `amount_minor 12050`,
+goal `target_amount_minor 600000`, bill `5990`. Int64 minor units, currencies
+and dates all survived the round trip.
+
+**The cron line was tested as cron will run it**, not merely installed —
+re-executed under `env -i` with only the `PATH` the crontab sets. It uploaded.
+That is the difference between a schedule that exists and one that works.
+
+**Still open, and this is what keeps criterion 12 at half:**
+
+1. **The escrow envelope does not exist.** This drill used the owner's own copy
+   of the key. An escrow that has never been decrypted with is a hope, not an
+   escrow. Christine needs the `age` private key, the `POSTGRES_PASSWORD` and
+   the restore section of `deploy/README.md` — and a restore must then be run
+   using *her* copy.
+2. **The schedule has never actually fired.** First scheduled run is 03:17
+   Singapore time; the heartbeat is what will say whether it did.
+3. **No lifecycle rule yet**, so dumps accumulate. Trivial at 8 KB, but it is the
+   only path to eventually exceeding R2's free 10 GB.
 
 ## Notes from walking it
 

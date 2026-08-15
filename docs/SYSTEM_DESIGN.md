@@ -43,10 +43,12 @@ same-day amendment moving the region to the EU, and
 `docs/superpowers/plans/2026-08-10-hearth-production-verification.md` records
 what was verified on the live box and what was not.
 
-**The one thing still missing is backups.** The scripts exist and the restore
-has been rehearsed, but no key, bucket or schedule exists on the box — so
-losing it loses the household. §8's Backups row is marked 🔴 for that reason,
-and it is unbuilt infrastructure rather than a failing check.
+**Backups run nightly to Cloudflare R2**, `age`-encrypted with a key that is
+deliberately not on the box, and the restore path has been exercised end to end
+against a real backup — all eleven tables and every monetary value came back
+intact. What is still missing is the **escrow**: no second person holds the
+private key, so no restore has ever been performed by anyone but the owner.
+§8's Backups row carries both halves.
 
 ---
 
@@ -145,7 +147,7 @@ graph TD
     end
 
     Operator["Operator's laptop"]
-    Backup[("Off-provider dump<br/>NOT SET UP — no key, bucket or cron")]
+    Backup[("Cloudflare R2 — nightly<br/>age-encrypted, key not on the box")]
 
     Browser -->|HTTPS| Caddy
     Caddy -->|"HTTP, one origin"| Nginx
@@ -1789,7 +1791,7 @@ prefix, which is what made the duplication stop being optional.
 | Hosting | **Live since 2026-08-15** at <https://oink.mywire.org> — one Hetzner CX23 in Falkenstein running `deploy/docker-compose.prod.yml` (project `hearth-prod`, deliberately not the dev stack's `hearth`). `docs/adr/0002-first-production-host.md` carries the choice and its 2026-08-15 amendment: `CPX11` was renamed out of existence and Singapore does not sell the cheap `CX` line, so the region moved to the EU and the household now crosses ~195 ms of ocean — measured from the owner's network, not estimated. Follows `docs/adr/0001-optimise-for-exit-cost.md`: hosts are picked for how cheaply we can leave them |
 | Deploying | `deploy/deploy.sh <git-sha>` — one command, plus `--current` and `--rollback`. CI builds three SHA-tagged images on every push to `main`; **the box never updates itself**, by design (spec decision 3), because rollback is image-only and a bad migration needs a restore rather than a rollback. The script refuses `latest` and refuses a tag absent from the registry **before** it writes `.env`, so a typo cannot leave the file pointing at something unpullable; it records the previous tag before changing anything, so `--rollback` survives a run that dies partway; and it verifies rather than assumes — `migrate` exited `0` (checked with `ps -a`, since Compose hides exited one-shot services), nothing restart-looping, `/readyz` answering on the public domain. Every guard and a full deploy/rollback/redeploy round trip were exercised on the live box on 2026-08-15 |
 | TLS | Caddy in front, automatic Let's Encrypt issuance and renewal (§1). **Issued first try on 2026-08-15** for `oink.mywire.org` and verified from outside (`ssl_verify_result 0`, `http://` → `308`); it survives a reboot from the `caddy-data` volume without re-issuing. Neither `api` nor `web` terminates TLS itself, and both are unusable without something that does — cookies are `Secure` outside development, confirmed on the wire: `HttpOnly; Secure; SameSite=Lax` |
-| Backups | 🔴 **NOT SET UP ON THE BOX. Losing it loses the household.** `deploy/backup.sh` (plain-SQL dump — readable by any future Postgres and by a human — gzip, `age`, off-provider upload, heartbeat only after a successful upload) and `deploy/restore.sh` (the reverse, with a fail-closed guard refusing any DSN that looks like the live database) both exist, and a restore has been performed once on a laptop into a throwaway container with matching row counts. What does not exist **on the live box**: an `age` key, a bucket, an `rclone` remote, the cron, or the escrow envelope. This is the largest open risk on the install and it is unbuilt infrastructure, not a failed check |
+| Backups | **Running nightly since 2026-08-15**, and the recovery loop is proven with real values, not just row counts. `deploy/backup.sh` dumps in **plain SQL** (readable by any future Postgres and by a human), gzips, encrypts with `age` and uploads to Cloudflare R2, pinging a heartbeat only after a successful upload. The private key is **not on the box** — only the public recipient — so a box compromise yields ciphertext. `deploy/restore.sh` is the reverse, with a fail-closed guard refusing any DSN that looks like the live database; a restore from the real R2 object reproduced all eleven tables and every monetary value exactly. The cron was tested as cron runs it (`env -i`, crontab `PATH` only), which matters because cron's default `PATH` excludes `/usr/local/bin` where `rclone` lives. 🟡 **Two gaps remain:** the escrow envelope does not exist, so no restore has ever used a *second* person's copy of the key; and no lifecycle rule prunes old dumps yet |
 | Production administration | **Proven on the live box.** `api/Dockerfile`'s `admin` target puts `goose` and `adminctl` on the same distroless base as `api`, and `deploy/docker-compose.prod.yml` wires it two ways: the one-shot `migrate` service `api` waits on, and a `profiles: [manual]` `admin` service for `unlock-household`, `reset-password`, `create-invite` and `prune`. All eight migrations were applied to the production database by the `migrate` service on first boot and re-applied cleanly across a deploy, a rollback and a redeploy. `goose status` has been run against the live database through the `admin` image. The `adminctl` subcommands remain unexercised in production — every one is written out in `deploy/README.md` |
 
 ---

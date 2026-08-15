@@ -24,12 +24,19 @@ in three months or someone new.
 > criterion 8 (`adminctl unlock-household` against the live database) is simply
 > unrun.
 >
-> **🔴 There are no backups.** The scripts exist and a restore has been
-> rehearsed on a laptop, but the live box has no `age` key, no bucket, no
-> `rclone` remote, no cron and no escrow envelope. **Losing the box loses the
-> household.** This is the single largest open item and it is unbuilt
-> infrastructure, not a failed check. Do this before putting anything in that
-> would hurt to retype.
+> **Backups run nightly to Cloudflare R2**, `age`-encrypted, since 2026-08-15.
+> The whole loop is proven with real values — a backup was pulled back out of
+> R2, decrypted and restored, reproducing all eleven tables and every monetary
+> figure exactly. The private key is **not on the box**, so a box compromise
+> yields ciphertext.
+>
+> **🟡 The escrow does not exist yet, and that is the remaining risk.** Every
+> restore so far used the owner's own copy of the key. Christine needs the
+> `age` private key (`~/.config/age/hearth.key` on the owner's laptop), the
+> `POSTGRES_PASSWORD` from `deploy/.env`, and the restore section of
+> `deploy/README.md` — and a restore must then be run from *her* copy. An
+> escrow nobody has ever decrypted with is a hope, not an escrow. Until then
+> the household survives losing the box, but not losing the owner.
 >
 > Deploying is `deploy/deploy.sh <git-sha>` on the box, with `--current` and
 > `--rollback`. CI builds SHA-tagged images on every push to `main`; the box
@@ -429,9 +436,9 @@ runbook still instructed the operator to configure a mail relay that ADR 3 had
 already made impossible. All three were found at the order form or on the box,
 none of them by a test.
 
-**The next work is backups, and it is not optional.** Everything else on this
-install is verified; nothing is recoverable. See §1's red block and criterion 12
-in the verification file. After that, Marriage.
+**The next work is the escrow envelope**, which is the last piece of criterion
+12 and the only thing standing between "survives losing the box" and "survives
+losing the owner". It costs an evening and no code. After that, Marriage.
 
 **Marriage is the next feature after the deployment** — independent of Money,
 and the first area whose spec starts from a genuinely clean slate rather than
