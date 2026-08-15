@@ -133,7 +133,18 @@ export function Sidebar({ me }: { me: Me }) {
   }
 
   return (
-    <nav className="flex flex-col gap-0.5 overflow-y-auto border-r border-hairline bg-card px-4 py-[22px]">
+    // flex-1: NavDrawer's panel is h-dvh and flex-col below `lg`, and this
+    // <nav> is its only child -- without flex-1 the panel's box is full
+    // height but the nav inside it is only content-height, leaving a gap at
+    // the bottom. Neither the panel nor that gap paints a background, so the
+    // drawer's backdrop shows through it visually, but the panel's own box
+    // still covers the point -- a tap there hits the panel, not the
+    // backdrop, so it looks dismissable and isn't. At `lg` the panel is
+    // `display: contents` (see NavDrawer), so this <nav> is a direct grid
+    // child there instead and stretches to the row's height regardless --
+    // flex-1 has no effect on a grid item and does not change the desktop
+    // column.
+    <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto border-r border-hairline bg-card px-4 py-[22px]">
       {/* The design's sidebar has no separate top bar; this brand row (logo
           square, "Hearth", the ⌘K chip) is the only header it draws, so
           AppShell's "header" is this. The ⌘K chip is static -- no command

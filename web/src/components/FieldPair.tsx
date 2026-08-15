@@ -4,8 +4,9 @@
 //
 // Extracted because this exact grid already appeared at twelve call sites
 // across seven files; a thirteenth would have been a thirteenth place to
-// forget the breakpoint. BudgetStatCards.tsx:60 carries an extra md:grid-cols-4
-// and was correctly left alone.
+// forget the breakpoint. BudgetStatCards.tsx carries an extra md:grid-cols-4
+// and was correctly left alone. (Not cited by line: that reference already
+// went stale once, when the file gained its own comment.)
 import type { ReactNode } from "react";
 
 export function FieldPair({ children }: { children: ReactNode }) {

@@ -1088,6 +1088,45 @@ something only that guard can produce.
   defect the tooling in use cannot reach at any thoroughness, which is a
   different problem than testing harder solves.
 
+- Mobile-responsive round, final review: **a Tailwind utility written
+  immediately before `${` in a template literal is never extracted, in any
+  environment — this is not a jsdom gap, it never reached the generated CSS
+  at all.** `PageContainer.tsx`'s className was built as `` `flex flex-col
+  gap-5 px-4 py-6 sm:px-9 sm:py-8${className ? ... : ""}` `` — `sm:py-8`, the
+  last static token before the interpolation, has no delimiter telling the
+  scanner where the candidate ends, so it was never added to the stylesheet;
+  `sm:px-9`, one token earlier with whitespace on both sides, was. The review
+  measured it in a running browser: a probe element computed `padding-top:
+  0px` for `sm:py-8` against `padding-left: 36px` for `sm:px-9`, same
+  element, same line. All 8 pages using `PageContainer` rendered 24px of
+  desktop vertical padding where the design calls for 32px, and all 477
+  frontend tests stayed green throughout, because none of them reads a
+  computed style. Fixed by hoisting the class string into a `BASE_CLASS`
+  constant so no utility ever sits directly against `${` — the pattern
+  `SELECT_CLASS`/`NAV_ITEM_CLASS`/`FIELD_CLASS`/`LABEL_CLASS` already used
+  correctly elsewhere in this codebase. Confirming it took one step more than
+  usual: editing the source and reloading the already-running dev server left
+  the computed padding at 24px until the `web` container was restarted —
+  itself further proof the class had never been generated, not merely cached
+  stale.
+- Mobile-responsive round, final review: **a flex child with no explicit
+  `flex-grow` stops at content height, and the empty space left in its
+  flex-container parent still intercepts clicks meant for whatever is
+  underneath.** `NavDrawer`'s panel is `h-dvh` (812px at a 375px phone) and
+  `flex-col`; its only child, `Sidebar.tsx`'s `<nav>`, had no `flex-*` class
+  and so sized to its own content — measured 516.75px, leaving 295.25px of
+  the panel's own box empty. Neither the panel nor that empty region paints a
+  background, so the drawer's `bg-black/40` backdrop showed through
+  visually — but `document.elementFromPoint()` in that region returned the
+  panel, not the backdrop, because an element's hit box is its own layout box
+  regardless of what's visually behind it. A tap on 36% of the open drawer's
+  height looked like dismissable backdrop and did nothing. Fixed with
+  `flex-1` on the `<nav>`, which also happened to fix a second, unnoticed
+  consequence: sign-out's real position (317px above the viewport bottom)
+  didn't match decision 7's stated reason for using `dvh` on the drawer at
+  all. No test could have caught either: `getBoundingClientRect()` and
+  `elementFromPoint()` both need real layout, which jsdom does not perform.
+
 **If a behaviour depends on the platform, verify it in the platform.** A real
 browser is what found every frontend defect above, and nothing else could
 have: jsdom has no working `<dialog>`, no CSS cascade and no layout at all, so
