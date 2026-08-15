@@ -11,6 +11,7 @@
 // explicitly, and a native select is what lets a test (and a keyboard user)
 // change either field with one event instead of simulating a row of buttons.
 import { type FormEvent, useState } from "react";
+import { FieldPair } from "../../components/FieldPair";
 import { Modal } from "../../components/Modal";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { apiErrorMessage } from "../auth/copy";
@@ -257,7 +258,7 @@ export function AccountModal({
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <FieldPair>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="account-owner" className="text-xs font-semibold text-label">
               Owner
@@ -296,9 +297,9 @@ export function AccountModal({
               ))}
             </select>
           </div>
-        </div>
+        </FieldPair>
 
-        <div className="grid grid-cols-2 gap-4">
+        <FieldPair>
           <div className="flex flex-col gap-1.5">
             {/* "Starting balance" rather than "Balance": this input writes
                 opening_balance_minor, and once an account has transactions on
@@ -348,7 +349,7 @@ export function AccountModal({
               ))}
             </select>
           </div>
-        </div>
+        </FieldPair>
 
         {balanceError && (
           <p role="alert" className="text-xs leading-snug text-danger">

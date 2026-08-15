@@ -20,6 +20,7 @@
 // is the whole client-side job. Building a second, client-composed message
 // for any one of them would risk it drifting from the server's own wording.
 import { type FormEvent, useState } from "react";
+import { FieldPair } from "../../components/FieldPair";
 import { Modal } from "../../components/Modal";
 import { apiErrorMessage } from "../auth/copy";
 import { BILL_COPY } from "./billCopy";
@@ -99,7 +100,7 @@ export function MarkPaidModal({
   return (
     <Modal open onClose={onClose} title={BILL_COPY.markPaidModalTitle}>
       <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
-        <div className="grid grid-cols-2 gap-4">
+        <FieldPair>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="mark-paid-amount" className="text-xs font-semibold text-label">
               {BILL_COPY.amountLabel}
@@ -128,7 +129,7 @@ export function MarkPaidModal({
               className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
             />
           </div>
-        </div>
+        </FieldPair>
 
         {amountError && (
           <p role="alert" className="text-xs leading-snug text-danger">

@@ -14,6 +14,7 @@
 // and its clearReceivedAmount flag), and that translation is the caller's
 // concern, not this form's.
 import { type FormEvent, useState } from "react";
+import { FieldPair } from "../../components/FieldPair";
 import { Modal } from "../../components/Modal";
 import { apiErrorMessage } from "../auth/copy";
 import { describeAmountError, minorUnitsToInputValue, toMinorUnits } from "./formatMoney";
@@ -330,7 +331,7 @@ export function TransactionModal({
           ))}
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <FieldPair>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="transaction-amount" className="text-xs font-semibold text-label">
               Amount
@@ -359,7 +360,7 @@ export function TransactionModal({
               className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
             />
           </div>
-        </div>
+        </FieldPair>
 
         {amountError && (
           <p role="alert" className="text-xs leading-snug text-danger">
@@ -382,7 +383,7 @@ export function TransactionModal({
         </div>
 
         {kind === "transfer" ? (
-          <div className="grid grid-cols-2 gap-4">
+          <FieldPair>
             <div className="flex flex-col gap-1.5">
               <label htmlFor="transaction-from-account" className="text-xs font-semibold text-label">
                 From account
@@ -419,9 +420,9 @@ export function TransactionModal({
                 ))}
               </select>
             </div>
-          </div>
+          </FieldPair>
         ) : (
-          <div className="grid grid-cols-2 gap-4">
+          <FieldPair>
             <div className="flex flex-col gap-1.5">
               <label htmlFor="transaction-category" className="text-xs font-semibold text-label">
                 Category
@@ -458,7 +459,7 @@ export function TransactionModal({
                 ))}
               </select>
             </div>
-          </div>
+          </FieldPair>
         )}
 
         {kind === "transfer" && (

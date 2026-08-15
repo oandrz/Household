@@ -28,6 +28,7 @@
 // TransactionModal.tsx's own `(categories.data ?? []).filter(...)` already
 // tolerates the identical gap for the identical hook.
 import { type FormEvent, useState } from "react";
+import { FieldPair } from "../../components/FieldPair";
 import { Modal } from "../../components/Modal";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { ApiError } from "../../api/client";
@@ -338,7 +339,7 @@ function BillModalForm({
   return (
     <Modal open onClose={onClose} title={isEditing ? BILL_COPY.editBillModalTitle : BILL_COPY.addBillModalTitle}>
       <form className="flex flex-col gap-4" onSubmit={handleSave}>
-        <div className="grid grid-cols-2 gap-4">
+        <FieldPair>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="bill-modal-name" className="text-xs font-semibold text-label">
               {BILL_COPY.billNameLabel}
@@ -368,7 +369,7 @@ function BillModalForm({
               className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
             />
           </div>
-        </div>
+        </FieldPair>
 
         {amountError && (
           <p role="alert" className="text-xs leading-snug text-danger">
@@ -376,7 +377,7 @@ function BillModalForm({
           </p>
         )}
 
-        <div className="grid grid-cols-2 gap-4">
+        <FieldPair>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="bill-modal-cadence" className="text-xs font-semibold text-label">
               {BILL_COPY.repeatsLabel}
@@ -413,9 +414,9 @@ function BillModalForm({
               </p>
             )}
           </div>
-        </div>
+        </FieldPair>
 
-        <div className="grid grid-cols-2 gap-4">
+        <FieldPair>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="bill-modal-category" className="text-xs font-semibold text-label">
               {BILL_COPY.categoryLabel}
@@ -471,7 +472,7 @@ function BillModalForm({
               ))}
             </select>
           </div>
-        </div>
+        </FieldPair>
 
         <div className="flex flex-col gap-1.5">
           <label htmlFor="bill-modal-paid-by" className="text-xs font-semibold text-label">

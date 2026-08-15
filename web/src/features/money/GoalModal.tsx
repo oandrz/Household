@@ -28,6 +28,7 @@
 //   contributions ledger owns that figure; this form does not offer a
 //   second way to move it.
 import { type FormEvent, useState } from "react";
+import { FieldPair } from "../../components/FieldPair";
 import { Modal } from "../../components/Modal";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { ApiError } from "../../api/client";
@@ -333,7 +334,7 @@ export function GoalModal({
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <FieldPair>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="goal-modal-target-amount" className="text-xs font-semibold text-label">
               Target amount
@@ -378,7 +379,7 @@ export function GoalModal({
               </p>
             )}
           </div>
-        </div>
+        </FieldPair>
 
         {targetError && (
           <p role="alert" className="text-xs leading-snug text-danger">

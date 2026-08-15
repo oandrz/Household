@@ -5,6 +5,7 @@
 // regardless -- this is presentation, not the enforcement.
 import { type FormEvent, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { FieldPair } from "../../components/FieldPair";
 import { Modal } from "../../components/Modal";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { apiFetch } from "../../api/client";
@@ -88,7 +89,7 @@ export function InviteMemberModal({
   return (
     <Modal open={open} onClose={handleClose} title="Invite a family member">
       <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
-        <div className="grid grid-cols-2 gap-4">
+        <FieldPair>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="invite-member-name" className="text-xs font-semibold text-label">
               Name
@@ -117,7 +118,7 @@ export function InviteMemberModal({
               <option value="owner">Parent</option>
             </select>
           </div>
-        </div>
+        </FieldPair>
 
         <div className="flex flex-col gap-1.5">
           <label htmlFor="invite-member-email" className="text-xs font-semibold text-label">

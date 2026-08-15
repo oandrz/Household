@@ -26,6 +26,7 @@
 // that (unlike BudgetHistoryModal) owns its own query instead of receiving
 // already-fetched data as a prop.
 import { type FormEvent, useState } from "react";
+import { FieldPair } from "../../components/FieldPair";
 import { Modal } from "../../components/Modal";
 import { apiErrorMessage } from "../auth/copy";
 import { describeAmountError, formatMoney, toMinorUnits } from "./formatMoney";
@@ -228,7 +229,7 @@ export function GoalContributionsPanel({
   return (
     <Modal open onClose={onClose} title={GOAL_COPY.contributionsTitle(goal.name)}>
       <form className="flex flex-col gap-4" onSubmit={handleAdd}>
-        <div className="grid grid-cols-2 gap-4">
+        <FieldPair>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="contribution-amount" className="text-xs font-semibold text-label">
               Amount
@@ -256,7 +257,7 @@ export function GoalContributionsPanel({
               className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
             />
           </div>
-        </div>
+        </FieldPair>
 
         {amountError && (
           <p role="alert" className="text-xs leading-snug text-danger">
