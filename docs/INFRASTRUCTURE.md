@@ -60,6 +60,32 @@ Regenerate it with the procedure in
 `docs/superpowers/plans/2026-08-10-hearth-production-verification.md`, criterion
 12. **Reprint and re-test it whenever the `age` key changes.**
 
+## The two R2 rules, and why the numbers are not arbitrary
+
+| Rule | Setting | Purpose |
+|---|---|---|
+| Object lifecycle | delete after **90 days** | Keeps the bucket inside the free 10 GB forever |
+| Bucket lock | retention **30 days** | Objects immutable for a month — a compromised box cannot erase backup history |
+
+**30 must stay below 90.** Locks take precedence over lifecycle rules, so a lock
+longer than the expiry would block pruning permanently and leave a bucket that
+can never be emptied. Never set indefinite retention here.
+
+**Why a lock at all:** R2 has no write-without-delete token (Backblaze B2 does —
+that was the main argument for it). The credential on the box therefore *can*
+delete objects, so a server-side lock is the only floor under the backup history.
+
+**Verified on the box on 2026-08-15, not read off the dashboard.** A delete of
+an existing backup was refused (`failed to delete 1 files`, object still
+present) and a fresh `backup.sh` run uploaded normally in the same minute. The
+second half matters as much as the first: a lock that blocked *writes* would
+have killed the nightly cron silently, with a missing heartbeat as the only
+symptom.
+
+This is also why `backup.sh` timestamps objects to the second rather than the
+day — bucket locks refuse overwrites as well as deletes, so two runs on one day
+would collide against a locked object.
+
 ## What runs on a schedule
 
 | When | What | Where |
@@ -91,10 +117,5 @@ an account with no password.
   without the operator relaying a link out of Mailpit by hand. ADR 3's exit
   condition is the day a third person needs an email, and the fix is a ~US$11/year
   domain plus four values in `.env` — no code changes.
-- **No R2 lifecycle rule yet**, so dumps accumulate. Trivial at ~8 KB each, but it
-  is the only path to eventually exceeding the free 10 GB.
-- **No R2 Bucket Lock yet.** The box's token can delete objects; a lock with a
-  retention window shorter than the lifecycle rule would stop a compromised box
-  destroying backup history.
 - **One box, no redundancy** — accepted; see [ADR 2](adr/0002-first-production-host.md).
   An hour of downtime is an inconvenience, not an incident.
