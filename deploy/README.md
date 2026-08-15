@@ -220,6 +220,29 @@ not just mail-sending ones. Fix `.env`, then retry.
 
 ## Backups
 
+**Object naming and the two R2 rules.** Backups are `hearth-<UTC
+timestamp>.sql.gz.age` — timestamped to the second, not just the date, so no
+two runs ever collide. That is a requirement of the bucket lock below, which
+refuses overwrites as well as deletes.
+
+Two rules are configured on the bucket, and their order matters:
+
+| Rule | Setting | Why |
+|---|---|---|
+| Object lifecycle | delete after **90 days** | Keeps the bucket inside R2's free 10 GB forever |
+| Bucket lock | retention **30 days** | Objects are immutable for a month, so a compromised box cannot erase backup history |
+
+**Never set the lock to indefinite retention.** Locks take precedence over
+lifecycle rules, so an indefinite lock would block the 90-day expiry
+permanently and the bucket could never be emptied. 30 < 90 is what lets the two
+coexist.
+
+The lock exists because R2 has no write-without-delete token — the credential
+on the box can delete objects, so the lock is the only server-side floor under
+the backup history.
+
+
+
 A host cron runs `backup.sh` nightly. It is the **`deploy` user's** crontab —
 `crontab -e` as `deploy`, not `sudo crontab -e`:
 
@@ -246,7 +269,10 @@ backups have, and it is the one that matters: the failure mode is silence.
 a target you name, so rehearse it against a throwaway container:
 
 ```bash
-rclone copyto r2:hearth-backups/hearth-2026-08-10.sql.gz.age /tmp/b.age
+# Backups are named hearth-<UTC timestamp>.sql.gz.age and sort chronologically,
+# so this is always the newest one.
+NEWEST=$(rclone lsf r2:hearth-backups | sort | tail -1)
+rclone copyto "r2:hearth-backups/$NEWEST" /tmp/b.age
 
 # A throwaway target to restore into — restore.sh's guard (below) refuses
 # anything that looks like the live database, so this always has to exist first.

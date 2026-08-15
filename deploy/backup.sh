@@ -16,7 +16,19 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-stamp="$(date -u +%Y-%m-%d)"
+# Timestamp to the second, not just the date, so no two runs ever write the
+# same key. That matters because R2 Bucket Lock makes objects immutable for a
+# retention window and refuses OVERWRITES as well as deletes -- with a
+# date-only name, any second run on the same day (a manual backup before a
+# risky change, say) would fail against a locked object. The lock is worth
+# having: the token on this box can delete, so without it a compromised box
+# can erase the backup history.
+#
+# `T%H%M%SZ` rather than %H:%M:%S -- colons are legal in S3 keys but a menace
+# in shells, URLs and on any filesystem the file gets copied to during a
+# restore. The format still sorts lexicographically, so `rclone lsf | sort |
+# tail -1` is the newest backup.
+stamp="$(date -u +%Y-%m-%dT%H%M%SZ)"
 file="hearth-${stamp}.sql.gz.age"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
