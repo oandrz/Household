@@ -1,20 +1,19 @@
 # Hearth nightly backup.
 #
 # PATH is set explicitly because cron's default is /usr/bin:/bin, which does
-# NOT include /usr/local/bin -- where rclone v1.75 lives. Without this line
-# backup.sh dies on "rclone: command not found" at 3am. (The four-year-old apt
-# rclone was removed precisely so that failure is loud rather than a silent
-# downgrade to a 2022 client.)
+# NOT include /usr/local/bin -- where rclone lives. Without this line backup.sh
+# dies on "rclone: command not found". The apt rclone was removed precisely so
+# that failure is loud rather than a silent downgrade to a 2022 client.
 PATH=/usr/local/bin:/usr/bin:/bin
 
-# CRON_TZ makes the schedule below mean what it reads. The box runs UTC, so
-# without this "3:17am" would fire at 11:17am in the household's own timezone --
-# a "nightly" backup running over lunch is the kind of thing nobody notices
-# until they are reading logs during an incident.
-CRON_TZ=Asia/Singapore
-
-# Secrets come from the env file (mode 600) rather than inline here, because a
-# crontab is readable by anyone who can run `crontab -l` as this user and the
-# heartbeat URL is a capability: whoever holds it can suppress the alert that
-# says the backups stopped.
-17 3 * * * set -a; . /home/deploy/hearth-backup.env; set +a; /home/deploy/Household/deploy/backup.sh >> /home/deploy/hearth-backup.log 2>&1
+# 19:17 UTC == 03:17 Asia/Singapore. The conversion is done HERE, by hand,
+# because Ubuntu's cron (vixie 3.0pl1) IGNORES CRON_TZ -- proven on this box on
+# 2026-08-16 by scheduling a probe in Singapore time under CRON_TZ and watching
+# it not fire. An earlier version of this file set CRON_TZ and claimed the
+# schedule read as local time; it did not, and the backup would have run at
+# 11:17 in the morning instead.
+#
+# Singapore observes no daylight saving, so this fixed UTC time always means
+# 03:17 locally. Any timezone that DOES observe DST would drift by an hour
+# twice a year and would need a different approach.
+17 19 * * * set -a; . /home/deploy/hearth-backup.env; set +a; /home/deploy/Household/deploy/backup.sh >> /home/deploy/hearth-backup.log 2>&1

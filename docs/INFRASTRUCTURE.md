@@ -90,10 +90,21 @@ would collide against a locked object.
 
 | When | What | Where |
 |---|---|---|
-| 03:17 Asia/Singapore, nightly | `backup.sh` — dump, gzip, `age`, upload to R2, then ping the heartbeat | `deploy` user's crontab; see `deploy/crontab.example` |
+| **19:17 UTC** nightly (= 03:17 Asia/Singapore) | `backup.sh` — dump, gzip, `age`, upload to R2, then ping the heartbeat | `deploy` user's crontab; see `deploy/crontab.example` |
 | Every 5 minutes | UptimeRobot polls `/readyz` for the keyword `ready` | UptimeRobot |
 | ~Every 60 days | Caddy renews the TLS certificate | Inside the `caddy` container |
 | Never automatically | **Deploys.** The box does not update itself | `deploy/deploy.sh`, run by a human |
+
+**The schedule is written in UTC, deliberately.** Ubuntu's cron (vixie 3.0pl1)
+**ignores `CRON_TZ`** — proven on this box on 2026-08-16 by scheduling a probe
+in Singapore time under `CRON_TZ` and watching it not fire, then repeating it in
+plain UTC and watching it fire. An earlier crontab set `CRON_TZ=Asia/Singapore`
+and carried a comment claiming the schedule read as local time. It did not: the
+backup was really scheduled for 11:17 in the morning, and had not run once.
+
+Singapore observes no daylight saving, so a fixed UTC time always means the same
+local time. **A timezone with DST would drift by an hour twice a year** and would
+need `systemd` timers, which do honour `OnCalendar` with a timezone.
 
 ## Data flows leaving the box
 

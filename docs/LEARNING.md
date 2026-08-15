@@ -2350,6 +2350,23 @@ no test suite can hold.
   product one**; check `form.checkValidity()` and the invalid-field list before
   concluding anything. (The actual cause the third time was simpler still: a
   `required` field left blank. Native validation worked.)
+- **`CRON_TZ` is silently ignored by Ubuntu's cron, and a schedule that never
+  fires looks identical to one that has not come round yet.** The crontab said
+  `CRON_TZ=Asia/Singapore` with `17 3 * * *` and carried a confident comment
+  explaining that this made "3:17am" mean local time. Vixie cron 3.0pl1 does not
+  implement `CRON_TZ`; it treated the line as an ordinary environment assignment
+  and scheduled the job for 03:17 **UTC** — 11:17 in the morning locally. The
+  backup had never run.
+  **Nothing surfaced this.** The heartbeat had been pinged by hand often enough
+  that healthchecks.io looked healthy, the cron daemon was `active`, root's own
+  hourly jobs were firing every hour in the log, and `crontab -l` showed exactly
+  what was intended. The only way to tell was to look for the *absence* of a
+  thing: no object in the bucket with a 03:17 timestamp.
+  **Verifying a schedule needs the schedule, not the script.** The script had
+  been run by hand, and then again under `env -i` with cron's exact `PATH` —
+  both passed, and neither could have caught this. The test that did was
+  scheduling a probe two minutes out under `CRON_TZ` and watching it not fire,
+  then repeating it in plain UTC and watching it fire.
 - **An alarm nobody has fired is not monitoring.** The uptime check was created
   and then deliberately proven by stopping `api` for four minutes and waiting for
   the alert to actually arrive. Same discipline as the escrow drill, and the same
