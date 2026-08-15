@@ -1,6 +1,10 @@
-# 2. First production host — one small VPS in Singapore
+# 2. First production host — one small VPS in the EU
 
-**Status:** Accepted — 2026-08-10
+**Status:** Accepted — 2026-08-10. **Region and machine amended 2026-08-15,
+before the purchase was ever made** — see "Amendment" under Decision. The
+original read "one small VPS in Singapore"; the machine it named cannot be
+bought and the region it chose costs more than the AWS bill this ADR exists to
+escape.
 
 Applies [ADR 1](0001-optimise-for-exit-cost.md) to a concrete purchase. That ADR
 holds for decades; this one is expected to be superseded when the host changes,
@@ -27,18 +31,64 @@ Constraints:
 
 | Piece | Choice | Why |
 |---|---|---|
-| Compute | **Hetzner Cloud CPX11, Singapore region** | Cheapest credible VPS with a SEA region. Runs the whole stack; a household's Postgres is a few MB for years |
+| Compute | ~~**Hetzner Cloud CPX11, Singapore region**~~ → **Hetzner Cloud CX23, Helsinki** (amended 2026-08-15) | Cheapest credible VPS that runs the whole stack; a household's Postgres is a few MB for years. The region and machine both changed at purchase — see the amendment below |
 | TLS | **Caddy in front, as the edge** | Automatic Let's Encrypt issuance *and renewal*, forever, with no certbot cron to rot. `web/nginx.conf` stays exactly as it is |
 | Database | **Postgres in the Compose stack, on the same box** | ADR 1 — plain Postgres we own. Not a managed service, and explicitly not a second provider |
 | Backups | **Nightly `pg_dump` in plain SQL to Backblaze B2 or Cloudflare R2**, plus Hetzner snapshots | The off-provider dump is the real backup; snapshots are for fast recovery. Free at this data size |
 | Mail | ~~**Resend**, free plan~~ **— SUPERSEDED by [ADR 3](0003-mail-stays-on-the-box.md), 2026-08-12.** Mail runs on Mailpit inside the stack and is read by hand | Resend needs a domain whose DNS accepts `TXT` records for DKIM, and this install's free DDNS hostname does not. The configuration surface below was the reason for choosing it and is still the reason the switch back is cheap: `SMTP_ADDR` / `SMTP_USERNAME` / `SMTP_PASSWORD` with no code change, in either direction |
 | Domain | An at-cost registrar (Cloudflare Registrar, or Porkbun), registered long, auto-renew on | See "the domain is the fragile part" below |
 
-Roughly **S$10–13/month** all in, against S$20 today. Prices moved twice in 2026
+Roughly **S$10/month** all in, against S$20 today. Prices moved twice in 2026
 (Hetzner raised in April and again on 15 June) — **confirm the current figure at
-purchase rather than trusting this table.**
+purchase rather than trusting this table.** That instruction is the only reason
+the amendment below happened before the money was spent rather than after.
+
+### Amendment, 2026-08-15 — the region moved to the EU
+
+Two facts found at the order form, neither of them true when this ADR was
+written on 2026-08-10:
+
+**`CPX11` no longer exists.** Hetzner standardised its lines on 15 June 2026 and
+renamed the shared-vCPU tiers. Its nearest successor, `CPX12`, is a *smaller*
+machine — 1 vCPU rather than 2 — so the rename moved specs, not just labels.
+
+**The cheap line is not sold in Singapore.** Singapore offers only `CPX`. The
+`CX` line, which is what makes Hetzner cheap, exists in the EU locations alone.
+This is an availability fact, not a preference that could be argued with.
+
+Priced at the console, both currencies as shown there:
+
+| | Singapore `CPX12` | Helsinki `CX23` |
+|---|---|---|
+| vCPU | 1 | **2** |
+| RAM | 2 GB | **4 GB** |
+| Disk | 40 GB | 40 GB |
+| Traffic | 0.5 TB | **20 TB** |
+| Price | $19.61/mo | **$7.07/mo** |
+
+Singapore was **twice the price of the AWS bill this ADR exists to escape**, for
+half the machine. The Context above lists cost as a hard constraint and region
+as a preference — "South-East Asia *beats* Europe or the US for latency". Beats,
+not requires. The hard constraint is the one that was failing, so the preference
+gave way.
+
+**`CX23`, not `CX33`.** 4 GB is roughly four times what this stack idles at
+(Postgres, a static Go binary, nginx, Caddy, Mailpit). Hetzner's June 2026 terms
+grandfather an existing server's price **unless it is rescaled**, so sizing is
+worth getting right once — but that cuts both ways: buying headroom now costs
+the same as buying it later, and paying for four years of unused RAM to avoid
+one resize is not a saving.
 
 ## Consequences
+
+**Every request from the household now crosses ~170 ms of ocean, accepted.**
+This is the cost of the amendment above and it is not free. It is tolerable here
+for reasons specific to this product: the SPA is static files nginx serves once
+and the browser caches, so only JSON calls pay the round trip; there are two
+users; and nothing in Hearth is latency-sensitive the way a game or a trading
+screen is. **If this ever feels slow in real use, that is data, not noise** —
+record it, because it is the one thing this amendment traded away, and ADR 1's
+whole point is that moving back is a new box, a restored dump and a DNS change.
 
 **Caddy in front of nginx is two proxies, and that breaks the sign-up rate
 limiter unless configured.** `web/nginx.conf` overwrites `X-Real-IP` with

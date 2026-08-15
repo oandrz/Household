@@ -1012,7 +1012,9 @@ No code. This is the manual task, written down so it is repeatable when the box 
 
 - [ ] **Step 1: Create the server**
 
-Hetzner Cloud, **CPX11, Singapore**, Ubuntu 24.04 LTS, SSH key only. Record the IPv4 address.
+Hetzner Cloud, **CX23, Helsinki**, Ubuntu 24.04 LTS, SSH key only. Record the IPv4 address.
+
+**Amended 2026-08-15** from `CPX11, Singapore`: `CPX11` was renamed out of existence in Hetzner's 15 June 2026 standardisation, and the cheap `CX` line is not sold in Singapore at all — Singapore offers only `CPX`, at $19.61/mo for a *smaller* machine than Helsinki's `CX23` at $7.07/mo. ADR 2's amendment carries the full comparison and the ~170 ms latency this trades away.
 
 - [ ] **Step 2: Firewall — 22, 80, 443 and nothing else**
 

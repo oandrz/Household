@@ -114,7 +114,7 @@ graph TD
     Browser["Browser"]
     LE["Let's Encrypt"]
 
-    subgraph host["One VPS (target: Hetzner CPX11, Singapore)"]
+    subgraph host["One VPS (target: Hetzner CX23, Helsinki)"]
         Caddy["caddy :443<br/>terminates TLS, renews certs"]
         Nginx["web — nginx :80<br/>serves the SPA, proxies /api"]
         API["api — Go service :8080<br/>distroless, no shell"]
