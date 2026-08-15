@@ -23,7 +23,7 @@ gets rebuilt.
 
 ### 1. Fixing an instance rarely fixes the class
 
-This happened **fourteen times** — one bullet each below, and the count is the
+This happened **fifteen times** — one bullet each below, and the count is the
 number of bullets, so recount it when you add one (it had already drifted by
 one before the UX-repair round noticed). Almost every time, the fix was
 correct and the sibling kept the bug; two of them are the variant where
@@ -269,6 +269,29 @@ fix in the same branch *created* the sibling.
   and check each one** rather than fixing the axis the report happened to name.
   The port to depend on already existed (`CategoryLookup`) and the repository
   already satisfied it — the omission was never a design constraint.
+
+- **A grep-based inventory finds only the spelling it was written for.** The
+  mobile-responsive plan's own touch-target task built its Step 1 inventory from
+  `grep -rEn 'h-6 w-6|h-7 w-7|py-1\.5'` and fixed every match to a 44px floor —
+  correctly, and the review approved it. But `Sidebar.tsx`'s `NAV_ITEM_CLASS`
+  reads `px-2.5 py-2`, which that pattern cannot match, so all seven of the
+  drawer's own navigation links — the primary touch target of the entire mobile
+  experience — shipped at 36.3px, invisible to the sweep that was supposed to
+  catch exactly this. A follow-up audit measured every control in a real
+  browser instead of grepping for a padding value, and found the same gap
+  repeated at roughly twenty more sites across the app: any control whose class
+  already read `py-2` or `py-2.5` (not `py-1.5`) was equally invisible to the
+  original grep, from `BudgetPage.tsx`'s History/Edit budget buttons to every
+  Cancel/Save footer and every labeled field in `AccountModal.tsx`,
+  `BillModal.tsx`, `GoalModal.tsx` and `TransactionModal.tsx`. **A grep-based
+  inventory is a hypothesis about how the codebase spells the thing you're
+  looking for, not a census of it** — the task's own risk paragraph had already
+  named "nav rows" as a category to check, and the grep dropped it anyway,
+  because grep can only find the string you wrote, never the ones a sibling
+  file wrote differently. The fix that actually closed the gap used the brief's
+  own stated intent instead: drive the page in a real browser and measure
+  `getBoundingClientRect()` on every interactive element, which finds a 36.3px
+  link the same way regardless of which Tailwind class produced it.
 
 **When you fix something, grep for its shape before you close it.** The question
 that finds these is not "is this fixed?" but "where else does this pattern
@@ -971,6 +994,138 @@ something only that guard can produce.
   where most people develop. Second, a design's own numbers are a
   specification: 1204px was in the mockup from the beginning, and the defect
   is simply that nobody transcribed it.
+
+- Mobile-responsive round, before Task 1: **a fixed-width shell made every
+  page look broken, and the whole round exists because of one class.** The
+  symptom was "the UI is not mobile friendly"; measured in a real browser at a
+  375px viewport (360px client area after the scrollbar), `AppShell`'s
+  `grid-cols-[236px_1fr]` gave the sidebar its full 236px unconditionally and
+  left `<main>` **124px** wide — and after the page's own `px-9` gutters, 52px
+  of usable content, where Overview rendered roughly one word per line and its
+  net-worth figure read `S$0.` with the value cut off. With the sidebar hidden
+  by hand and `<main>` given the full 375px, overflow on the Transactions page
+  dropped to **zero** — the ledger's rows were already `flex`-with-two-children
+  and wrapped on their own. The shell was not merely the worst defect on the
+  branch; it was most of the defect (`docs/superpowers/specs/2026-08-15-hearth-mobile-responsive-design.md`,
+  "What is actually broken"). What would have caught it nine slices sooner:
+  opening the app at a phone width once, at any point before this round
+  started.
+
+- Mobile-responsive round, Task 8: **the plan's own prescribed fix broke the
+  thing it was fixing, and only a real browser caught it.** The brief's
+  `TransactionFilters.tsx` fix gave each filter's wrapper `flex-1` (Tailwind's
+  `flex: 1 1 0%`) plus `min-w-0`, reasoning that `min-w-0` was "what actually
+  permits the shrink." It compiled, typechecked, and passed all 477 tests
+  unchanged, because nothing in jsdom lays out a flexbox. In a real browser at
+  320px it did the opposite of the intended fix: a `0%` flex-basis makes
+  flex-wrap's line-breaking treat the item as contributing no size, so the
+  four filters never got their own line — all four crammed onto one shared
+  line and shrank to it, and their labels ("ACCOUNT", "CATEGORY") clipped to
+  a measured 15px sliver instead of the row wrapping cleanly. Replaced with
+  `w-full`/`sm:w-auto` on the wrapper — the same pattern already used on the
+  select inside it — since an item demanding the full row's width can only
+  ever wrap onto a line by itself. The brief's own worked example also didn't
+  hold up: its comment asserts an account nicknamed "Joint everyday account"
+  (23 characters, measured 181px) would overflow the row, but it does not, at
+  either 375 or 320 — the mechanism is real (a 47-character nickname measured
+  326px and did overflow 320's 273px row), the specific number in the comment
+  was not. Comments that assert a measurement are exactly the kind of claim
+  this pattern exists to make someone re-check in a browser before trusting.
+
+- Mobile-responsive round, Task 8: **`BudgetStatCards.tsx`'s four-card row has
+  been logged twice as a pre-existing `md:` breakpoint to leave alone —
+  Task 6/7's report, and Task 8's own dispatch note, which told this task's
+  implementer to leave the file alone — without anyone measuring whether it
+  actually overflows** — because no earlier task had real budget figures to
+  render there. It does, and the cause isn't the `md:` prefix: the
+  *unprefixed* `grid-cols-2` base is too narrow for what the cards actually
+  hold. `formatMoney` output like `S$3,790.00` has no space to wrap on, and
+  CSS Grid's implicit per-item `min-width: auto` (the same default that made
+  a `<select>` unshrinkable in the bullet above) keeps a 90px cell from
+  shrinking below that text's ~125–148px min-content width — so the *grid*
+  grows past its container instead. Measured at 320px: 60px of page-level
+  horizontal scroll, the largest violation found in this task, worse than
+  either defect this task was assigned to fix. The dispatch note's "leave it"
+  meant the file's stale `md:` breakpoint, not a floor violation — nobody had
+  measured this one when that note was written, and the spec's 320px floor is
+  binding, which outranks a dispatch note written before the number was
+  known. **Assigned to Task 9**, not left as a standing deferral: whoever
+  picks it up should start from "unbounded min-content in a narrow grid
+  cell," not from the breakpoint count.
+
+- Mobile-responsive round, Task 10: **jsdom cannot see a breakpoint.** The
+  frontend suite held 47 test files and 477 tests, all green, through every
+  task of this round — an off-canvas drawer, shrinking auth cards, `dvh`
+  sizing, stacking gutters and field pairs, a 44px touch-target floor — on a
+  product that could not be used on a phone at all until the round started.
+  Every layout defect the round found, including both bullets immediately
+  above, was invisible to that suite the entire time it stayed green, because
+  none of them is a claim jsdom's stub layout engine can evaluate. A layout
+  claim needs a browser to check it; a green frontend suite is not evidence
+  about layout, on this branch or any other.
+
+- Mobile-responsive round, Task 4: **`100vh` is a lie on iOS Safari, and
+  nothing in this project's own tooling can be asked to lie back.** Every
+  measurement behind this round's plan was taken in a real browser — headless
+  Chrome, resized narrow — which is correct and was still not enough, because
+  that browser has no address bar to hide and so no way to reproduce the one
+  thing iOS Safari does differently: `100vh` there is the *large* viewport,
+  sized as though the toolbar were already gone, so a full-height box built
+  against it puts its bottom edge under the toolbar the moment a real page
+  loads with the bar still showing. `Modal.tsx`'s own comment on the fix
+  measures the consequence exactly — `AccountModal`'s content at 665px against
+  roughly 650px of visible height on an iPhone, its submit button sitting
+  precisely where a thumb cannot reach it. This was not found by a failing
+  test or a device in hand; it was named in Task 4's own brief before any code
+  changed, from reasoning about what the CSS property means on that engine,
+  because no tool running anywhere in this stack — headless Chrome, jsdom,
+  the browser-automation tools used for every other check in this round — runs
+  WebKit's dynamic toolbar at all. Fixed by moving every full-height rule
+  (`h-screen`/`min-h-screen` → `h-dvh`/`min-h-dvh`) across `Modal.tsx`, every
+  auth screen and the route fallback before the gap could be found any other
+  way. Worth keeping separate from the bullet above: that one is a defect this
+  round's own tooling *could* have caught and initially did not; this one is a
+  defect the tooling in use cannot reach at any thoroughness, which is a
+  different problem than testing harder solves.
+
+- Mobile-responsive round, final review: **a Tailwind utility written
+  immediately before `${` in a template literal is never extracted, in any
+  environment — this is not a jsdom gap, it never reached the generated CSS
+  at all.** `PageContainer.tsx`'s className was built as `` `flex flex-col
+  gap-5 px-4 py-6 sm:px-9 sm:py-8${className ? ... : ""}` `` — `sm:py-8`, the
+  last static token before the interpolation, has no delimiter telling the
+  scanner where the candidate ends, so it was never added to the stylesheet;
+  `sm:px-9`, one token earlier with whitespace on both sides, was. The review
+  measured it in a running browser: a probe element computed `padding-top:
+  0px` for `sm:py-8` against `padding-left: 36px` for `sm:px-9`, same
+  element, same line. All 8 pages using `PageContainer` rendered 24px of
+  desktop vertical padding where the design calls for 32px, and all 477
+  frontend tests stayed green throughout, because none of them reads a
+  computed style. Fixed by hoisting the class string into a `BASE_CLASS`
+  constant so no utility ever sits directly against `${` — the pattern
+  `SELECT_CLASS`/`NAV_ITEM_CLASS`/`FIELD_CLASS`/`LABEL_CLASS` already used
+  correctly elsewhere in this codebase. Confirming it took one step more than
+  usual: editing the source and reloading the already-running dev server left
+  the computed padding at 24px until the `web` container was restarted —
+  itself further proof the class had never been generated, not merely cached
+  stale.
+- Mobile-responsive round, final review: **a flex child with no explicit
+  `flex-grow` stops at content height, and the empty space left in its
+  flex-container parent still intercepts clicks meant for whatever is
+  underneath.** `NavDrawer`'s panel is `h-dvh` (812px at a 375px phone) and
+  `flex-col`; its only child, `Sidebar.tsx`'s `<nav>`, had no `flex-*` class
+  and so sized to its own content — measured 516.75px, leaving 295.25px of
+  the panel's own box empty. Neither the panel nor that empty region paints a
+  background, so the drawer's `bg-black/40` backdrop showed through
+  visually — but `document.elementFromPoint()` in that region returned the
+  panel, not the backdrop, because an element's hit box is its own layout box
+  regardless of what's visually behind it. A tap on 36% of the open drawer's
+  height looked like dismissable backdrop and did nothing. Fixed with
+  `flex-1` on the `<nav>`, which also happened to fix a second, unnoticed
+  consequence: sign-out's real position (317px above the viewport bottom)
+  didn't match decision 7's stated reason for using `dvh` on the drawer at
+  all. No test could have caught either: `getBoundingClientRect()` and
+  `elementFromPoint()` both need real layout, which jsdom does not perform.
 
 **If a behaviour depends on the platform, verify it in the platform.** A real
 browser is what found every frontend defect above, and nothing else could
@@ -2183,6 +2338,52 @@ route with a missing guard has no second line of defence.
   household ticking it on a one-off; that residual gap is written down at
   `SubscriptionsCard.tsx`'s own filter for whoever next reads `isSubscription`
   without this same cadence check.
+
+- **`min-height` does nothing on a plain inline element, and a `<button>`'s
+  own centering is a browser default, not a CSS property you can rely on
+  elsewhere.** The mobile-responsive plan's 44px touch-target floor used
+  `min-h-11` everywhere, and it worked immediately on every `<button>`,
+  `<select>` and `<input>` — those are form controls, and Chrome centers
+  their content vertically inside a taller box by default. The same class on
+  a react-router `Link` (which renders a bare `<a>`, `display: inline` unless
+  something else sets it) does two different wrong things depending on
+  context: as a plain inline element, `min-height` is defined by the CSS box
+  model to have **no effect at all**, so the box never grows; once the link
+  is blockified by being a flex-container's direct child (as every
+  `Sidebar.tsx` nav link is), `min-height` *does* start applying, but nothing
+  centers the text inside the taller box, so it sits pinned to the top with
+  dead space below. The fix needed one more utility than the button case:
+  `inline-flex items-center` alongside `min-h-11`, matching the earlier
+  Kind-pill `<label>` fix that had already found the identical gap for
+  `<label>`, another plain-inline element. `inline-flex` rather than `flex`
+  matters too — a `flex`-declared link that is *not* already a flex child
+  (a back-link sitting in a plain `<div>`, say) stretches to its parent's
+  full width, silently enlarging its own click target into the empty space
+  beside the text; `inline-flex` keeps shrink-to-fit sizing everywhere it
+  isn't already being stretched by a parent, and blockifies to the same
+  `flex` result everywhere it is. **Two different lessons in one class name:
+  check whether the element is one of the small set of form controls that
+  self-center before assuming `min-h-*` alone is enough, and use `inline-`
+  variants for anything that starts out `display: inline` so a fix in one
+  layout context doesn't become a regression in another.**
+- **The same icon-button formula that is safe in an isolated corner can break
+  a row with no slack.** `Modal.tsx`'s close button and `BudgetModal.tsx`'s
+  remove-row button had both already shipped `h-11 w-11 sm:h-7 sm:w-7` with
+  no visible cost — each sits alone, with margin around it. Applying the
+  identical formula to `BudgetPage.tsx`'s `‹`/`›` month-picker glyphs, which
+  share a 375px-wide row with History and Edit budget and had no spare width
+  to begin with, pushed "Edit budget" onto two lines the moment the glyphs
+  grew from ~4px wide to 44px — not a height problem, a width one, and one
+  the phone's own household data (a budget already existing, so both
+  siblings render) was needed to see, since an earlier session with no
+  budget never renders the row tight enough to notice. Caught by
+  screenshotting the change, not by trusting that a formula proven in one
+  spot travels to the next one unmodified. Fixed by taking only the height
+  half of the formula (`h-11`, no `w-11`) for this one pair, leaving the
+  established square for every icon button that has the room for it. **A
+  reusable formula is reusable up to the point a sibling's layout has less
+  slack than the site it was proven on — screenshot the applied change in
+  its own tightest real state before assuming the pattern travelled clean.**
 
 ### Tooling and infrastructure
 

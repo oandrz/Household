@@ -50,7 +50,17 @@ const SPACE_PAGES: Record<string, { label: string; to: string }[]> = {
 // last in the markup -- that shipped as a defect here (grouped Money links
 // never showed the accent). Give each link exactly one color class, chosen
 // by the caller, so there is nothing for the cascade to arbitrate.
-const NAV_ITEM_CLASS = "rounded-lg px-2.5 py-2 text-[13.5px] font-semibold";
+// inline-flex items-center: a react-router Link renders an <a>, which is
+// inline by default and (unlike <button>/<select>/<input>) never centers its
+// own content -- min-h-11 alone would grow the box but leave the text pinned
+// to the top. min-h-[auto] (not min-h-0) restores at `lg`, the same
+// drawer-tied breakpoint the sign-out button below already uses this
+// reasoning for: these links are flex-column children of <nav>'s own
+// overflow-y-auto column, where a flex item's *initial* min-height is auto,
+// not 0 -- min-h-0 would let a link compress below its content once the
+// column itself runs short of room at `lg`, which min-h-[auto] cannot do.
+const NAV_ITEM_CLASS =
+  "inline-flex min-h-11 items-center rounded-lg px-2.5 py-2 text-[13.5px] font-semibold lg:min-h-[auto]";
 
 function SpaceLink({ space }: { space: Space }) {
   const matchRoute = useMatchRoute();
@@ -123,7 +133,18 @@ export function Sidebar({ me }: { me: Me }) {
   }
 
   return (
-    <nav className="flex flex-col gap-0.5 overflow-y-auto border-r border-hairline bg-card px-4 py-[22px]">
+    // flex-1: NavDrawer's panel is h-dvh and flex-col below `lg`, and this
+    // <nav> is its only child -- without flex-1 the panel's box is full
+    // height but the nav inside it is only content-height, leaving a gap at
+    // the bottom. Neither the panel nor that gap paints a background, so the
+    // drawer's backdrop shows through it visually, but the panel's own box
+    // still covers the point -- a tap there hits the panel, not the
+    // backdrop, so it looks dismissable and isn't. At `lg` the panel is
+    // `display: contents` (see NavDrawer), so this <nav> is a direct grid
+    // child there instead and stretches to the row's height regardless --
+    // flex-1 has no effect on a grid item and does not change the desktop
+    // column.
+    <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto border-r border-hairline bg-card px-4 py-[22px]">
       {/* The design's sidebar has no separate top bar; this brand row (logo
           square, "Hearth", the ⌘K chip) is the only header it draws, so
           AppShell's "header" is this. The ⌘K chip is static -- no command
@@ -169,7 +190,11 @@ export function Sidebar({ me }: { me: Me }) {
           aria-label="Sign out"
           onClick={handleSignOut}
           disabled={signOut.isPending}
-          className="grid h-6 w-6 flex-none place-items-center rounded-md text-[13px] text-label disabled:opacity-60"
+          // 44px floor on phones; restores at `lg`, not `sm` -- this button
+          // lives inside the drawer, which switches at `lg`, so a 768px
+          // tablet still driving the touch drawer must not fall back to a
+          // 24px target.
+          className="grid h-11 w-11 flex-none place-items-center rounded-md text-[13px] text-label disabled:opacity-60 lg:h-6 lg:w-6"
         >
           ⏻
         </button>

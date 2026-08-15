@@ -14,6 +14,7 @@
 // and its clearReceivedAmount flag), and that translation is the caller's
 // concern, not this form's.
 import { type FormEvent, useState } from "react";
+import { FieldPair } from "../../components/FieldPair";
 import { Modal } from "../../components/Modal";
 import { apiErrorMessage } from "../auth/copy";
 import { describeAmountError, minorUnitsToInputValue, toMinorUnits } from "./formatMoney";
@@ -319,10 +320,13 @@ export function TransactionModal({
               type="button"
               aria-pressed={kind === k}
               onClick={() => handleKindChange(k)}
+              // min-h-11/sm:min-h-0: TransactionFilters.tsx's own
+              // SELECT_CLASS comment has the measured reason py-2 alone
+              // falls short of the 44px floor on a phone.
               className={
                 kind === k
-                  ? "flex-1 rounded-lg bg-accent py-2 text-center text-[13px] font-semibold text-white"
-                  : "flex-1 rounded-lg border border-hairline py-2 text-center text-[13px] font-semibold text-label"
+                  ? "min-h-11 flex-1 rounded-lg bg-accent py-2 text-center text-[13px] font-semibold text-white sm:min-h-0"
+                  : "min-h-11 flex-1 rounded-lg border border-hairline py-2 text-center text-[13px] font-semibold text-label sm:min-h-0"
               }
             >
               {KIND_LABELS[k]}
@@ -330,7 +334,7 @@ export function TransactionModal({
           ))}
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <FieldPair>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="transaction-amount" className="text-xs font-semibold text-label">
               Amount
@@ -342,7 +346,11 @@ export function TransactionModal({
               required
               value={amountInput}
               onChange={(event) => setAmountInput(event.target.value)}
-              className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+              // min-h-11/sm:min-h-0 on this and every other field below in
+              // this modal: TransactionFilters.tsx's own SELECT_CLASS
+              // comment has the measured reason py-2/py-2.5 alone falls
+              // short of the 44px floor on a phone.
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             />
           </div>
 
@@ -356,10 +364,10 @@ export function TransactionModal({
               required
               value={date}
               onChange={(event) => setDate(event.target.value)}
-              className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             />
           </div>
-        </div>
+        </FieldPair>
 
         {amountError && (
           <p role="alert" className="text-xs leading-snug text-danger">
@@ -377,12 +385,12 @@ export function TransactionModal({
             required
             value={description}
             onChange={(event) => setDescription(event.target.value)}
-            className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
           />
         </div>
 
         {kind === "transfer" ? (
-          <div className="grid grid-cols-2 gap-4">
+          <FieldPair>
             <div className="flex flex-col gap-1.5">
               <label htmlFor="transaction-from-account" className="text-xs font-semibold text-label">
                 From account
@@ -392,7 +400,7 @@ export function TransactionModal({
                 required
                 value={fromAccountId}
                 onChange={(event) => setFromAccountId(event.target.value)}
-                className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+                className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
               >
                 {accounts.map((a) => (
                   <option key={a.id} value={a.id}>
@@ -410,7 +418,7 @@ export function TransactionModal({
                 required
                 value={toAccountId}
                 onChange={(event) => setToAccountId(event.target.value)}
-                className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+                className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
               >
                 {accounts.map((a) => (
                   <option key={a.id} value={a.id}>
@@ -419,9 +427,9 @@ export function TransactionModal({
                 ))}
               </select>
             </div>
-          </div>
+          </FieldPair>
         ) : (
-          <div className="grid grid-cols-2 gap-4">
+          <FieldPair>
             <div className="flex flex-col gap-1.5">
               <label htmlFor="transaction-category" className="text-xs font-semibold text-label">
                 Category
@@ -430,7 +438,7 @@ export function TransactionModal({
                 id="transaction-category"
                 value={categoryId}
                 onChange={(event) => setCategoryId(event.target.value)}
-                className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+                className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
               >
                 <option value="">{TRANSACTIONS_COPY.noCategory}</option>
                 {relevantCategories.map((c) => (
@@ -449,7 +457,7 @@ export function TransactionModal({
                 required
                 value={accountId}
                 onChange={(event) => setAccountId(event.target.value)}
-                className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+                className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
               >
                 {accounts.map((a) => (
                   <option key={a.id} value={a.id}>
@@ -458,7 +466,7 @@ export function TransactionModal({
                 ))}
               </select>
             </div>
-          </div>
+          </FieldPair>
         )}
 
         {kind === "transfer" && (
@@ -476,7 +484,7 @@ export function TransactionModal({
                 setReceivedAmountTouched(true);
                 setReceivedAmountInput(event.target.value);
               }}
-              className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             />
             <p className="text-[11.5px] text-muted">
               {TRANSACTIONS_COPY.amountReceivedHint(toCurrency ?? "")}
@@ -498,7 +506,7 @@ export function TransactionModal({
               id="transaction-paid-by"
               value={paidByMembershipId}
               onChange={(event) => setPaidByMembershipId(event.target.value)}
-              className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             >
               <option value="">Unassigned</option>
               {members.map((m) => (
@@ -525,7 +533,7 @@ export function TransactionModal({
                   <button
                     type="button"
                     onClick={() => setConfirmingDelete(false)}
-                    className="flex-1 rounded-lg border border-hairline py-2 text-center text-[13px] font-semibold text-label"
+                    className="min-h-11 flex-1 rounded-lg border border-hairline py-2 text-center text-[13px] font-semibold text-label sm:min-h-0"
                   >
                     {TRANSACTIONS_COPY.deleteCancelAction}
                   </button>
@@ -533,7 +541,7 @@ export function TransactionModal({
                     type="button"
                     disabled={isDeleting}
                     onClick={handleDelete}
-                    className="flex-1 rounded-lg bg-danger py-2 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                    className="min-h-11 flex-1 rounded-lg bg-danger py-2 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
                   >
                     {TRANSACTIONS_COPY.deleteConfirmAction}
                   </button>
@@ -543,7 +551,7 @@ export function TransactionModal({
               <button
                 type="button"
                 onClick={() => setConfirmingDelete(true)}
-                className="text-[13px] font-semibold text-danger"
+                className="min-h-11 text-[13px] font-semibold text-danger sm:min-h-0"
               >
                 {TRANSACTIONS_COPY.deleteTransaction}
               </button>
@@ -555,14 +563,14 @@ export function TransactionModal({
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label"
+            className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label sm:min-h-0"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={isSubmitting}
-            className="flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            className="min-h-11 flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
           >
             {TRANSACTIONS_COPY.saveTransaction}
           </button>

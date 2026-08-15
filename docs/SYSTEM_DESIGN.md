@@ -1167,12 +1167,43 @@ graph TD
     Me --> Guard{"Authenticated?"}
     Guard -->|no| SignIn["/sign-in"]
     Guard -->|yes| Shell["AppShell"]
-    Shell --> Sidebar["Sidebar renders me.spaces —<br/>already filtered and ordered by the server —<br/>expanding each into its built pages client-side,<br/>and dropping a builtin space that has none"]
+    Shell --> Bar["MobileTopBar — below lg only<br/>(hamburger opens the drawer)"]
+    Shell --> Drawer["NavDrawer — off-canvas below lg,<br/>lg:contents at lg and above"]
+    Drawer --> Sidebar["Sidebar renders me.spaces —<br/>already filtered and ordered by the server —<br/>expanding each into its built pages client-side,<br/>and dropping a builtin space that has none"]
     Shell --> Page["Route content"]
     Page --> Overview["/ Overview — GET /accounts,<br/>GET /budgets/{month} and GET /goals for<br/>an owner only, GET /household/members<br/>via the shared hook"]
     Page --> Settings["Settings panels — their own queries"]
     Settings -->|"on mutation"| Invalidate["invalidate ['me'] and the panel's query,<br/>awaited so the guard spans the refetch"]
 ```
+
+**The shell follows one responsive convention, everywhere: `sm` (640px) is
+where a page's own content reflows — auth cards, page gutters, modal field
+pairs — and `lg` (1024px) is the one breakpoint that changes the *shell*
+itself.** Below `lg`, `Sidebar` sits inside `NavDrawer`, off-canvas and
+reached through `MobileTopBar`'s hamburger; at `lg` and above, the original
+two-column grid (`grid-cols-[236px_1fr]`, unchanged since before this
+project's mobile round) is back, exactly as it was. No third breakpoint is
+introduced for the shell, and a page component never needs to know which of
+the two rendering modes it is in.
+
+**`NavDrawer` is what makes that restoration free, and `lg:contents` is why.**
+At `lg` and above `NavDrawer`'s wrapper carries `lg:contents`, which makes the
+element stop generating a box at all — its `<div>` disappears from layout
+entirely, and `Sidebar` becomes AppShell's grid child directly, precisely as
+if `NavDrawer` were never there. `position` and `transform` — the two
+properties that hold the closed drawer off-canvas below `lg` — have no effect
+on a `display: contents` element, so neither needs an `lg:` counterpart to
+undo it. `visibility` is the one
+exception, and it is why `NavDrawer`'s closed state carries an explicit
+`lg:visible`: unlike `position`/`transform`, `visibility` is an *inherited*
+CSS property, and `display: contents` suppresses the box, not the
+inheritance. Without `lg:visible`, the desktop sidebar — whose drawer is
+normally *closed* — would inherit `invisible` from its own wrapper and render
+as a 236px column nobody can see. The lesson generalises past this one
+component: `display: contents` opts an element out of the properties that
+require a box (layout, backgrounds, hit-testing) but not out of the ones that
+merely inherit, and a `contents` wrapper hiding a normally-open child with
+`visibility` needs the same override.
 
 `/auth/me` returns the user, household, membership, capabilities and visible
 spaces in one response, so the shell renders without a request waterfall. The
@@ -1634,7 +1665,9 @@ web/src/
   features/
     auth/              sign-in, invite, magic-link, sign-up screens and hooks
     shell/             AppShell (sidebar + the 1204px content column every
-                       page renders inside), Sidebar, RequireAuth,
+                       page renders inside), Sidebar, MobileTopBar and
+                       NavDrawer (the below-lg off-canvas nav; lg:contents
+                       restores the desktop grid unchanged), RequireAuth,
                        RequireCapability
     settings/          members, spaces, currency, notifications
     money/             Finances page — net worth, breakdown, accounts and

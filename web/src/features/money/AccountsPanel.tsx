@@ -73,7 +73,15 @@ function AccountRow({
         )}
         {isOwner && (
           <div className="flex items-center gap-2 text-[11px] font-semibold text-accent">
-            <button type="button" aria-label={`Edit ${account.nickname}`} onClick={() => onEdit(account)}>
+            {/* min-h-11/sm:min-h-0 on every button below: TransactionFilters.tsx's
+                own SELECT_CLASS comment has the measured reason a control
+                this small falls short of the 44px floor on a phone. */}
+            <button
+              type="button"
+              aria-label={`Edit ${account.nickname}`}
+              onClick={() => onEdit(account)}
+              className="min-h-11 sm:min-h-0"
+            >
               Edit
             </button>
             {account.archivedAt ? (
@@ -82,7 +90,7 @@ function AccountRow({
                 aria-label={`Restore ${account.nickname}`}
                 disabled={pending}
                 onClick={() => onRestore(account.id)}
-                className="disabled:cursor-not-allowed disabled:opacity-60"
+                className="min-h-11 disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
               >
                 Restore
               </button>
@@ -95,7 +103,7 @@ function AccountRow({
                 aria-label={`Archive ${account.nickname}`}
                 disabled={pending}
                 onClick={() => onArchive(account.id)}
-                className="text-danger disabled:cursor-not-allowed disabled:opacity-60"
+                className="min-h-11 text-danger disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
               >
                 Archive
               </button>
@@ -179,7 +187,7 @@ export function AccountsPanel({
             <button
               type="button"
               onClick={() => setAddOpen(true)}
-              className="text-xs font-semibold text-accent"
+              className="min-h-11 text-xs font-semibold text-accent sm:min-h-0"
             >
               {FINANCES_COPY.addAccount}
             </button>

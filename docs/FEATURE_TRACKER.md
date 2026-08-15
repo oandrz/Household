@@ -13,7 +13,7 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 72 of 102 features built or partly built.
+**Where things stand:** 73 of 103 features built or partly built.
 
 > **In production since 2026-08-15**, at <https://oink.mywire.org>. **No count
 > below changes** — deployment is not a design feature, and this file's totals
@@ -142,17 +142,36 @@ adds two more of its own, under **Goals** below: contributions — add,
 delete, list by source — and archive/restore, neither of which the design's
 mockup draws beyond the cards and the contributions summary themselves.
 
+**The mobile-responsive update, recorded before it.** Every existing screen —
+not a new one — now reflows down to a 320px phone, on the product owner's
+explicit "same UI, layout and structure" constraint. One row is added to
+Navigation shell, the section `AppShell`, `NavDrawer`, `MobileTopBar` and
+`Sidebar` all live under: **Mobile-responsive layout**, at 🟡 rather than ✅.
+The round's own width-matrix walk (Task 10) found one real overflow —
+`BudgetModal`'s category rows, invisible to a document-level check because a
+native `<dialog>` sits outside normal document flow — and fixed it in the
+same task; it also found, and deliberately kept, five touch targets under the
+44px floor and one structural gap, all named in the row's own cell rather
+than glossed over — a 🟡 with no explanation is worse than a ⬜. As with every
+update recorded here, the new total is a fresh
+count of the ✅/🟡/⬜/🚫 symbols in the tables below — the first symbol in each
+row's own cell — not the previous totals adjusted in place: recounting all
+eight sections leaves every column unchanged except Navigation shell's
+Partial, which moves from 0 to 1 for the new row (7/0/1/0 → 7/1/1/0, nine rows
+now, not eight), taking the stated totals from 60/12/28/2 = 102 to
+60/13/28/2 = 103 — one row added, no row moved between states.
+
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
 | Entry & authentication | 10 | 1 | 0 | 0 |
-| Navigation shell | 7 | 0 | 1 | 0 |
+| Navigation shell | 7 | 1 | 1 | 0 |
 | Household settings | 15 | 4 | 2 | 0 |
 | Overview (home) | 4 | 3 | 3 | 0 |
 | Money | 24 | 4 | 7 | 0 |
 | Marriage | 0 | 0 | 13 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **60** | **12** | **28** | **2** |
+| **Total** | **60** | **13** | **28** | **2** |
 
 ---
 
@@ -239,6 +258,7 @@ The full checklist is at the end of `docs/LEARNING.md`.
 | Placeholder pages for unbuilt areas | ✅ | None are left. `/` stopped using it when the interim Overview shipped (M2, before Bills); `/money/$` — the last route still pointing at it — was replaced outright by `/money/bills` when Bills shipped (commit `946630e`), not merely joined by a sibling. The component itself is unreferenced today, kept rather than deleted because Marriage and Family will each want it again the moment either grows a route with no page behind it yet. Marriage's and Family's own placeholders were deleted with their routes in `110ab0a` — a placeholder is honest as the *inside* of a space a household already has, and dishonest as a whole navigation destination offering a page that does not exist |
 | `⌘K` command palette | ⬜ | Shown in the sidebar header; no behaviour behind it |
 | "+ New space" | ✅ | See Household settings below |
+| Mobile-responsive layout | 🟡 | Every existing screen reflows down to 320px, same UI and structure, no redesign: `AppShell`'s sidebar becomes an off-canvas `NavDrawer` (reached through `MobileTopBar`'s hamburger) below `lg` (1024px), restoring the original two-column grid at `lg` and above via `lg:contents`; auth cards, page gutters (`PageContainer`) and modal field pairs (`FieldPair`) reflow at `sm`; full-height boxes (`Modal`, `NavDrawer`, every auth screen) use `dvh` rather than `vh` so iOS Safari's collapsing toolbar cannot hide content under it; interactive controls carry a 44px touch-target floor. Walked at 320/375/414/768/1024/1440 across every authenticated screen, sign-in, sign-up and one modal from each family (`docs/superpowers/plans/2026-08-15-mobile-responsive.md`, Task 10's own width matrix); the walk found one real failure — `BudgetModal`'s category rows overflowed their own dialog box at every width (a native `<dialog>` paints in the top layer, so `document.documentElement`'s check cannot see it; the dialog's own `scrollWidth` vs `clientWidth` can) — and it was fixed in the same task (`min-w-0` on the row's flexible name field, the same unshrinkable-flex-item class already on record for `<select>` and `BudgetStatCards`), not merely logged. Five gaps stayed under the 44px floor, each measured and deliberately left rather than missed: `MembersPanel`'s owner/limited role toggle (24.5px — raising it outgrows the 34px avatar beside it); the 16 `ToggleSwitch` instances across Settings and Money (23px — several sit 6–14px apart, and a larger target would make adjacent switches overlap, worse for hit accuracy than a small one); `BillRow`'s Mark paid/Archive/Restore/Undo controls (16.5px — raising them grows the stacked mobile cluster from ~89px to ~144px against a ~40px left block, and fixing it properly needs a row restructure the spec forbids); `BudgetRolloverCard`'s "Move into goal" link (genuinely inline mid-sentence, so `min-height` does not apply); and `BudgetPage`'s `‹`/`›` month arrows (raised on height only, `h-11` with no `w-11`, because the full square wraps "Edit budget" onto two lines in that row's real state). One structural gap, separate from the floor: `AppShell` leaves `<main>` `inert` if the drawer is open when the viewport is resized past `lg` — hamburger and backdrop are both `lg:hidden` by then, but `<nav>` is a sibling of `<main>`, never inert, and renders normally at `lg` via `lg:contents`, so Escape or any sidebar navigation both clear it; reachable by tablet rotation. Two pre-existing `md:` breakpoints (a third, un-migrated size step) survive in `BudgetStatCards.tsx` and `FinancesPage.tsx`, left alone rather than folded into the two-breakpoint (`sm`/`lg`) convention the rest of the round follows |
 
 ## 3 · Household settings
 

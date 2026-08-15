@@ -67,8 +67,14 @@ export function SetupChecklist({
               {step.done ? "✓ " : ""}
               {step.label}
             </span>
+            {/* inline-flex items-center min-h-11 sm:min-h-0:
+                BudgetCard.tsx's own comment on this identical pattern has
+                the reason. */}
             {!step.done && step.to && (
-              <Link to={step.to} className="text-[12.5px] font-semibold text-accent">
+              <Link
+                to={step.to}
+                className="inline-flex min-h-11 items-center text-[12.5px] font-semibold text-accent sm:min-h-0"
+              >
                 {OVERVIEW_COPY.setupGo}
               </Link>
             )}

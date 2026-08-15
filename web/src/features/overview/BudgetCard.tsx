@@ -23,7 +23,15 @@ export function BudgetCard({ month }: { month: BudgetMonthResponse }) {
       {month.budget === null ? (
         <>
           <p className="mt-1.5 text-[15px] text-ink">{OVERVIEW_COPY.budgetNone}</p>
-          <Link to="/money/budget" className="mt-3 text-[13px] font-semibold text-accent">
+          {/* inline-flex items-center min-h-11 sm:min-h-0: an <a> never
+              centers its own content the way a <button> does --
+              TransactionFilters.tsx's own SELECT_CLASS comment has the
+              measured reason a control this size falls short of the 44px
+              floor on a phone. */}
+          <Link
+            to="/money/budget"
+            className="mt-3 inline-flex min-h-11 items-center text-[13px] font-semibold text-accent sm:min-h-0"
+          >
             {OVERVIEW_COPY.budgetSetUp}
           </Link>
         </>

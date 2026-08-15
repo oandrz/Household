@@ -30,9 +30,32 @@ export type TransactionFilterValues = {
 };
 
 const SELECT_CLASS =
-  "rounded-lg border border-hairline bg-card px-3 py-1.5 text-[12.5px] text-label";
+  // min-h-11 clears the 44px floor on a phone -- measured: py-2.5 alone
+  // (padding scaled from vertical rhythm, not the floor) only reaches 39px
+  // against this text's own line-height, 5px short. sm:min-h-0 lets py-1.5
+  // set the desktop height again at the same breakpoint the wrapper already
+  // switches width at.
+  "w-full min-h-11 rounded-lg border border-hairline bg-card px-3 py-2.5 text-[12.5px] text-label sm:min-h-0 sm:w-auto sm:py-1.5";
 const LABEL_CLASS =
   "text-[10.5px] font-semibold uppercase tracking-wide text-muted";
+// Each filter takes the row's full width on a phone rather than sizing to
+// its widest option -- a long account or category nickname would otherwise
+// widen its select until the row overflowed 320px (measured: a 47-character
+// account nickname alone needs 326px, wider than the 273px a filter row has
+// to work with at that floor). `w-full` on both the wrapper and the select
+// mirror each other rather than using `flex-1` on the wrapper: `flex-1` is
+// Tailwind's `flex: 1 1 0%`, and a `0%` basis makes flex-wrap's line-breaking
+// treat the item as contributing no size, so it never gets a line to itself
+// -- measured, all four fields crammed onto one shared line and their labels
+// (e.g. "ACCOUNT") were clipped to a 15px sliver. `w-full` forces the same
+// mobile-first stack without that failure: an item demanding the full row
+// can only ever share a line with nothing, so it always wraps alone.
+// `min-w-0` is kept even though it measures as a no-op at `sm:w-auto` --
+// there is no shared half-width slot at that breakpoint for a select to
+// overflow (widths came back byte-identical with and without the class). It
+// stays because it costs nothing and guards against a future layout that
+// puts these fields in a shared-width slot again.
+const FIELD_CLASS = "flex w-full min-w-0 flex-col gap-1 sm:w-auto";
 
 // value "" is "All" -- the same empty-string-means-unset convention every
 // other filter here uses, so toQueryString (useTransactions.ts) omits it from
@@ -70,7 +93,10 @@ export function TransactionFilters({
             return (
               <label
                 key={option.value || "all"}
-                className={`cursor-pointer px-3 py-1.5 text-[12.5px] font-semibold has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset ${
+                // min-h-11/sm:min-h-0: same 44px-floor reasoning as
+                // SELECT_CLASS above -- py-2.5 alone measured 5px short of
+                // the floor against this text's own line-height.
+                className={`flex min-h-11 cursor-pointer items-center px-3 py-2.5 text-[12.5px] font-semibold has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset sm:min-h-0 sm:py-1.5 ${
                   // The ring colour has to change with the pill's own
                   // background: `ring-accent` (a dark green) is invisible
                   // inset against the selected pill's `bg-ink`, which is
@@ -110,7 +136,7 @@ export function TransactionFilters({
         </div>
       </fieldset>
 
-      <div className="flex flex-col gap-1">
+      <div className={FIELD_CLASS}>
         <label htmlFor="txn-filter-account" className={LABEL_CLASS}>
           Account
         </label>
@@ -129,7 +155,7 @@ export function TransactionFilters({
         </select>
       </div>
 
-      <div className="flex flex-col gap-1">
+      <div className={FIELD_CLASS}>
         <label htmlFor="txn-filter-category" className={LABEL_CLASS}>
           Category
         </label>
@@ -148,7 +174,7 @@ export function TransactionFilters({
         </select>
       </div>
 
-      <div className="flex flex-col gap-1">
+      <div className={FIELD_CLASS}>
         <label htmlFor="txn-filter-person" className={LABEL_CLASS}>
           Person
         </label>
@@ -167,7 +193,7 @@ export function TransactionFilters({
         </select>
       </div>
 
-      <div className="flex flex-col gap-1">
+      <div className={FIELD_CLASS}>
         <label htmlFor="txn-filter-month" className={LABEL_CLASS}>
           Month
         </label>

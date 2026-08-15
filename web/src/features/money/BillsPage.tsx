@@ -38,6 +38,7 @@ import { Link } from "@tanstack/react-router";
 import { ApiError } from "../../api/client";
 import { useCurrencies } from "../auth/useAuth";
 import { useAccounts } from "./useAccounts";
+import { PageContainer } from "../../components/PageContainer";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { apiErrorMessage } from "../auth/copy";
 import { BillModal } from "./BillModal";
@@ -292,8 +293,15 @@ export function BillsPage() {
     summary.nextDue?.overdue !== true;
 
   return (
-    <div data-testid="bills-page" className="flex flex-col gap-5 px-9 py-8">
-      <div className="flex items-start justify-between gap-4">
+    <PageContainer data-testid="bills-page">
+      {/* flex-wrap: pre-existing 320px violation (predates this branch --
+          confirmed against 31e9d85) -- the archived toggle plus "+ Add bill"
+          never had room beside the title once a real subtitle line and a
+          vertical scrollbar were both present. flex-wrap only changes
+          anything once a line's content overflows its width, so it costs
+          nothing at 1440, where the cluster already fits beside the title
+          and never reaches that condition. */}
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-[23px] font-semibold tracking-[-0.02em] text-ink">{BILL_COPY.title}</h1>
           {summary.billCount > 0 && (
@@ -320,7 +328,10 @@ export function BillsPage() {
               data-testid="bills-add"
               disabled={noAccounts}
               onClick={() => setModalBill("new")}
-              className="rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              // min-h-11/sm:min-h-0: TransactionFilters.tsx's own
+              // SELECT_CLASS comment has the measured reason py-2 alone
+              // falls short of the 44px floor on a phone.
+              className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
             >
               {BILL_COPY.addBill}
             </button>
@@ -356,7 +367,7 @@ export function BillsPage() {
               <Link
                 to="/money"
                 data-testid="bills-add-account"
-                className="rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white"
+                className="inline-flex min-h-11 items-center rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white sm:min-h-0"
               >
                 {BILL_COPY.noAccountsAction}
               </Link>
@@ -371,7 +382,7 @@ export function BillsPage() {
                 type="button"
                 data-testid="bills-create-first"
                 onClick={() => setModalBill("new")}
-                className="rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white"
+                className="min-h-11 rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white sm:min-h-0"
               >
                 {BILL_COPY.createFirstBill}
               </button>
@@ -577,6 +588,6 @@ export function BillsPage() {
           }}
         />
       )}
-    </div>
+    </PageContainer>
   );
 }

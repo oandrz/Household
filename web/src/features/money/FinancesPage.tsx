@@ -9,6 +9,7 @@
 // reason -- the API answers with one point in time, not a series.
 import { useState } from "react";
 import { useMe } from "../auth/useAuth";
+import { PageContainer } from "../../components/PageContainer";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { AccountModal } from "./AccountModal";
 import { AccountsPanel } from "./AccountsPanel";
@@ -66,7 +67,10 @@ function FirstRunPanel({
         <button
           type="button"
           onClick={() => setAddOpen(true)}
-          className="mt-2 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white"
+          // min-h-11/sm:min-h-0: py-2.5 alone measured short of the 44px
+          // floor at this text size -- TransactionFilters.tsx's own
+          // SELECT_CLASS comment has the measured numbers.
+          className="mt-2 min-h-11 rounded-lg bg-accent px-3 py-2.5 text-xs font-semibold text-white sm:min-h-0 sm:py-1.5"
         >
           {FINANCES_COPY.addAccount}
         </button>
@@ -106,7 +110,7 @@ export function FinancesPage() {
   // card in this state, only the accounts they've been given visibility into.
   if (!summary) {
     return (
-      <div className="flex flex-col gap-5 px-9 py-8">
+      <PageContainer>
         <PageHeader />
         <AccountsPanel
           accounts={rows}
@@ -114,7 +118,7 @@ export function FinancesPage() {
           onIncludeArchivedChange={setIncludeArchived}
           emptyMessage={FINANCES_COPY.limitedEmpty}
         />
-      </div>
+      </PageContainer>
     );
   }
 
@@ -129,19 +133,19 @@ export function FinancesPage() {
   // is correct regardless of which position that is.
   if (rows.length === 0) {
     return (
-      <div className="flex flex-col gap-5 px-9 py-8">
+      <PageContainer>
         <PageHeader />
         <FirstRunPanel
           canAdd={isOwner}
           includeArchived={includeArchived}
           onIncludeArchivedChange={setIncludeArchived}
         />
-      </div>
+      </PageContainer>
     );
   }
 
   return (
-    <div className="flex flex-col gap-5 px-9 py-8">
+    <PageContainer>
       <PageHeader />
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <NetWorthCard summary={summary} />
@@ -162,6 +166,6 @@ export function FinancesPage() {
         includeArchived={includeArchived}
         onIncludeArchivedChange={setIncludeArchived}
       />
-    </div>
+    </PageContainer>
   );
 }

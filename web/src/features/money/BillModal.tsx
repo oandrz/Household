@@ -28,6 +28,7 @@
 // TransactionModal.tsx's own `(categories.data ?? []).filter(...)` already
 // tolerates the identical gap for the identical hook.
 import { type FormEvent, useState } from "react";
+import { FieldPair } from "../../components/FieldPair";
 import { Modal } from "../../components/Modal";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { ApiError } from "../../api/client";
@@ -338,7 +339,7 @@ function BillModalForm({
   return (
     <Modal open onClose={onClose} title={isEditing ? BILL_COPY.editBillModalTitle : BILL_COPY.addBillModalTitle}>
       <form className="flex flex-col gap-4" onSubmit={handleSave}>
-        <div className="grid grid-cols-2 gap-4">
+        <FieldPair>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="bill-modal-name" className="text-xs font-semibold text-label">
               {BILL_COPY.billNameLabel}
@@ -350,7 +351,11 @@ function BillModalForm({
               value={name}
               onChange={(event) => setName(event.target.value)}
               placeholder={BILL_COPY.billNamePlaceholder}
-              className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+              // min-h-11/sm:min-h-0 on every field in this modal:
+              // TransactionFilters.tsx's own SELECT_CLASS comment has the
+              // measured reason py-2.5 alone falls short of the 44px floor
+              // on a phone.
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             />
           </div>
 
@@ -365,10 +370,10 @@ function BillModalForm({
               required
               value={amountInput}
               onChange={(event) => setAmountInput(event.target.value)}
-              className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             />
           </div>
-        </div>
+        </FieldPair>
 
         {amountError && (
           <p role="alert" className="text-xs leading-snug text-danger">
@@ -376,7 +381,7 @@ function BillModalForm({
           </p>
         )}
 
-        <div className="grid grid-cols-2 gap-4">
+        <FieldPair>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="bill-modal-cadence" className="text-xs font-semibold text-label">
               {BILL_COPY.repeatsLabel}
@@ -385,7 +390,7 @@ function BillModalForm({
               id="bill-modal-cadence"
               value={cadence}
               onChange={(event) => setCadence(event.target.value as CreateBillBody["cadence"])}
-              className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             >
               {CADENCE_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -405,7 +410,7 @@ function BillModalForm({
               required={nextDueRequired}
               value={nextDueInput}
               onChange={(event) => setNextDueInput(event.target.value)}
-              className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             />
             {nextDueError && (
               <p role="alert" className="text-xs leading-snug text-danger">
@@ -413,9 +418,9 @@ function BillModalForm({
               </p>
             )}
           </div>
-        </div>
+        </FieldPair>
 
-        <div className="grid grid-cols-2 gap-4">
+        <FieldPair>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="bill-modal-category" className="text-xs font-semibold text-label">
               {BILL_COPY.categoryLabel}
@@ -424,7 +429,7 @@ function BillModalForm({
               id="bill-modal-category"
               value={categoryId}
               onChange={(event) => setCategoryId(event.target.value)}
-              className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             >
               <option value="">{BILL_COPY.noCategoryOption}</option>
               {/* Only reachable if the bill's own category has since been
@@ -454,7 +459,7 @@ function BillModalForm({
               required
               value={payFromAccountId}
               onChange={(event) => setPayFromAccountId(event.target.value)}
-              className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             >
               {/* Same reasoning as Category above, for the identical case:
                   the bill's own pay-from account has since been archived.
@@ -471,7 +476,7 @@ function BillModalForm({
               ))}
             </select>
           </div>
-        </div>
+        </FieldPair>
 
         <div className="flex flex-col gap-1.5">
           <label htmlFor="bill-modal-paid-by" className="text-xs font-semibold text-label">
@@ -481,7 +486,7 @@ function BillModalForm({
             id="bill-modal-paid-by"
             value={paidByMembershipId}
             onChange={(event) => setPaidByMembershipId(event.target.value)}
-            className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
           >
             <option value="">{BILL_COPY.unassignedPayer}</option>
             {members.map((m) => (
@@ -522,7 +527,10 @@ function BillModalForm({
                 type="button"
                 disabled={isRestoring}
                 onClick={handleRestore}
-                className="self-start rounded-lg border border-hairline px-3 py-1.5 text-[12.5px] font-semibold text-accent disabled:cursor-not-allowed disabled:opacity-60"
+                // min-h-11/sm:min-h-0: py-2.5 alone measured short of the
+                // 44px floor at this text size -- TransactionFilters.tsx's
+                // own SELECT_CLASS comment has the measured numbers.
+                className="min-h-11 self-start rounded-lg border border-hairline px-3 py-2.5 text-[12.5px] font-semibold text-accent disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:py-1.5"
               >
                 {BILL_COPY.restore}
               </button>
@@ -534,14 +542,14 @@ function BillModalForm({
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label"
+            className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label sm:min-h-0"
           >
             {BILL_COPY.cancelAction}
           </button>
           <button
             type="submit"
             disabled={isSaving}
-            className="flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            className="min-h-11 flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
           >
             {isEditing ? BILL_COPY.saveBillSubmit : BILL_COPY.addBillSubmit}
           </button>

@@ -54,7 +54,11 @@ export function QuickAddMenu({ accounts }: { accounts: Account[] }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white"
+        // min-h-11/sm:min-h-0 on this trigger and every item in the menu
+        // below: TransactionFilters.tsx's own SELECT_CLASS comment has the
+        // measured reason py-2 alone falls short of the 44px floor on a
+        // phone.
+        className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0"
       >
         {OVERVIEW_COPY.quickAdd}
       </button>
@@ -68,7 +72,7 @@ export function QuickAddMenu({ accounts }: { accounts: Account[] }) {
               setOpen(false);
               setTransactionOpen(true);
             }}
-            className="rounded-lg px-2.5 py-2 text-left text-[13px] text-ink disabled:cursor-not-allowed disabled:opacity-60"
+            className="min-h-11 rounded-lg px-2.5 py-2 text-left text-[13px] text-ink disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
           >
             {OVERVIEW_COPY.quickAddTransaction}
           </button>
@@ -86,7 +90,7 @@ export function QuickAddMenu({ accounts }: { accounts: Account[] }) {
               setOpen(false);
               setAccountOpen(true);
             }}
-            className="rounded-lg px-2.5 py-2 text-left text-[13px] text-ink"
+            className="min-h-11 rounded-lg px-2.5 py-2 text-left text-[13px] text-ink sm:min-h-0"
           >
             {OVERVIEW_COPY.quickAddAccount}
           </button>
@@ -98,7 +102,7 @@ export function QuickAddMenu({ accounts }: { accounts: Account[] }) {
               setOpen(false);
               setBillOpen(true);
             }}
-            className="rounded-lg px-2.5 py-2 text-left text-[13px] text-ink disabled:cursor-not-allowed disabled:opacity-60"
+            className="min-h-11 rounded-lg px-2.5 py-2 text-left text-[13px] text-ink disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
           >
             {OVERVIEW_COPY.quickAddBill}
           </button>
@@ -120,7 +124,7 @@ export function QuickAddMenu({ accounts }: { accounts: Account[] }) {
               setOpen(false);
               setGoalOpen(true);
             }}
-            className="rounded-lg px-2.5 py-2 text-left text-[13px] text-ink"
+            className="min-h-11 rounded-lg px-2.5 py-2 text-left text-[13px] text-ink sm:min-h-0"
           >
             {OVERVIEW_COPY.quickAddGoal}
           </button>

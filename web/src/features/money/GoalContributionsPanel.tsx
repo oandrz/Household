@@ -26,6 +26,7 @@
 // that (unlike BudgetHistoryModal) owns its own query instead of receiving
 // already-fetched data as a prop.
 import { type FormEvent, useState } from "react";
+import { FieldPair } from "../../components/FieldPair";
 import { Modal } from "../../components/Modal";
 import { apiErrorMessage } from "../auth/copy";
 import { describeAmountError, formatMoney, toMinorUnits } from "./formatMoney";
@@ -97,7 +98,7 @@ function ContributionRow({
             <button
               type="button"
               onClick={onAskToDelete}
-              className="text-[11.5px] font-semibold text-danger"
+              className="min-h-11 text-[11.5px] font-semibold text-danger sm:min-h-0"
             >
               {GOAL_COPY.deleteContributionTrigger}
             </button>
@@ -111,7 +112,10 @@ function ContributionRow({
             <button
               type="button"
               onClick={onCancelDelete}
-              className="flex-1 rounded-lg border border-hairline py-1.5 text-center text-[12.5px] font-semibold text-label"
+              // min-h-11/sm:min-h-0: py-2.5 alone measured short of the 44px
+              // floor at this text size -- TransactionFilters.tsx's own
+              // SELECT_CLASS comment has the measured numbers.
+              className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[12.5px] font-semibold text-label sm:min-h-0 sm:py-1.5"
             >
               {GOAL_COPY.deleteContributionCancelAction}
             </button>
@@ -119,7 +123,7 @@ function ContributionRow({
               type="button"
               disabled={deleting}
               onClick={onConfirmDelete}
-              className="flex-1 rounded-lg bg-danger py-1.5 text-center text-[12.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              className="min-h-11 flex-1 rounded-lg bg-danger py-2.5 text-center text-[12.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:py-1.5"
             >
               {GOAL_COPY.deleteContributionConfirmAction}
             </button>
@@ -228,7 +232,7 @@ export function GoalContributionsPanel({
   return (
     <Modal open onClose={onClose} title={GOAL_COPY.contributionsTitle(goal.name)}>
       <form className="flex flex-col gap-4" onSubmit={handleAdd}>
-        <div className="grid grid-cols-2 gap-4">
+        <FieldPair>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="contribution-amount" className="text-xs font-semibold text-label">
               Amount
@@ -240,7 +244,10 @@ export function GoalContributionsPanel({
               required
               value={amountInput}
               onChange={(event) => setAmountInput(event.target.value)}
-              className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+              // min-h-11/sm:min-h-0: TransactionFilters.tsx's own
+              // SELECT_CLASS comment has the measured reason py-2.5 alone
+              // falls short of the 44px floor on a phone.
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             />
           </div>
           <div className="flex flex-col gap-1.5">
@@ -253,10 +260,10 @@ export function GoalContributionsPanel({
               required
               value={occurredOn}
               onChange={(event) => setOccurredOn(event.target.value)}
-              className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             />
           </div>
-        </div>
+        </FieldPair>
 
         {amountError && (
           <p role="alert" className="text-xs leading-snug text-danger">
@@ -273,7 +280,7 @@ export function GoalContributionsPanel({
             type="text"
             value={note}
             onChange={(event) => setNote(event.target.value)}
-            className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
           />
         </div>
 
@@ -286,7 +293,7 @@ export function GoalContributionsPanel({
         <button
           type="submit"
           disabled={isAdding}
-          className="rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+          className="min-h-11 rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
         >
           Add
         </button>

@@ -12,6 +12,7 @@
 import { useState } from "react";
 import { ApiError } from "../../api/client";
 import { useCurrencies } from "../auth/useAuth";
+import { PageContainer } from "../../components/PageContainer";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { GoalCard } from "./GoalCard";
 import { GoalContributionsPanel } from "./GoalContributionsPanel";
@@ -126,7 +127,7 @@ export function GoalsPage() {
   const noneArchived = includeArchived && data.goals.length > 0 && data.goals.every((g) => g.archivedAt === null);
 
   return (
-    <div data-testid="goals-page" className="flex flex-col gap-5 px-9 py-8">
+    <PageContainer data-testid="goals-page">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-[23px] font-semibold tracking-[-0.02em] text-ink">{GOAL_COPY.title}</h1>
@@ -158,7 +159,10 @@ export function GoalsPage() {
               type="button"
               data-testid="goals-new"
               onClick={() => setModalGoal("new")}
-              className="rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white"
+              // min-h-11/sm:min-h-0: TransactionFilters.tsx's own
+              // SELECT_CLASS comment has the measured reason py-2 alone
+              // falls short of the 44px floor on a phone.
+              className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0"
             >
               {GOAL_COPY.newGoal}
             </button>
@@ -186,7 +190,7 @@ export function GoalsPage() {
               type="button"
               data-testid="goals-create-first"
               onClick={() => setModalGoal("new")}
-              className="rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white"
+              className="min-h-11 rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white sm:min-h-0"
             >
               {GOAL_COPY.createFirstGoal}
             </button>
@@ -275,6 +279,6 @@ export function GoalsPage() {
           onClose={() => setContributingGoal(null)}
         />
       )}
-    </div>
+    </PageContainer>
   );
 }

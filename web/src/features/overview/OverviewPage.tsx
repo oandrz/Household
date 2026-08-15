@@ -10,6 +10,7 @@
 // /accounts needs the money capability; /budgets/{month} and /goals both
 // need money AND owner.
 import { Link } from "@tanstack/react-router";
+import { PageContainer } from "../../components/PageContainer";
 import { useMe } from "../auth/useAuth";
 import { NetWorthCard } from "../money/NetWorthCard";
 import { currentMonth } from "../money/month";
@@ -40,7 +41,7 @@ export function OverviewPage() {
   const goals = useGoals({ enabled: isOwner });
 
   return (
-    <div className="flex flex-col gap-5 p-10">
+    <PageContainer>
       <div className="flex items-center justify-between">
         <h1 className="font-serif text-2xl">{OVERVIEW_COPY.title}</h1>
         {isOwner && hasMoney && <QuickAddMenu accounts={accounts.data?.accounts ?? []} />}
@@ -71,7 +72,13 @@ export function OverviewPage() {
                   {OVERVIEW_COPY.limitedHeading}
                 </h2>
                 <p className="mt-1.5 text-[13px] text-ink">{OVERVIEW_COPY.limitedNoAmounts}</p>
-                <Link to="/money" className="mt-3 text-[13px] font-semibold text-accent">
+                {/* inline-flex items-center min-h-11 sm:min-h-0:
+                    BudgetCard.tsx's own comment on this identical pattern
+                    has the reason. */}
+                <Link
+                  to="/money"
+                  className="mt-3 inline-flex min-h-11 items-center text-[13px] font-semibold text-accent sm:min-h-0"
+                >
                   {OVERVIEW_COPY.limitedGo}
                 </Link>
               </section>
@@ -114,6 +121,6 @@ export function OverviewPage() {
           )}
         </>
       )}
-    </div>
+    </PageContainer>
   );
 }

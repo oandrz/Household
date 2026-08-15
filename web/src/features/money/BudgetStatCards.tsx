@@ -57,7 +57,17 @@ export function BudgetStatCards({
   spentSoFar: boolean;
 }) {
   return (
-    <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+    // 320px floor violation (measured: the Daily pace card's own value --
+    // e.g. "S$214.95/day" -- laid out at 148px, wider than the 92px of
+    // content width two unprefixed columns leave after this card's own
+    // px-[22px] padding, pushing the document to a 339px scrollWidth). The
+    // base was `grid-cols-2` -- too narrow for a currency figure at the
+    // floor -- not the pre-existing `md:grid-cols-4` (that breakpoint stays;
+    // FieldPair.tsx's own comment on why this file was left out of its
+    // shared two-column pattern is about `md` specifically, not about this
+    // floor). One column at the floor, `sm:grid-cols-2` restoring the
+    // two-up layout once there is room for it, same shape FieldPair.tsx uses.
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
       <StatCard
         testId="budget-stat-budgeted"
         label={BUDGET_COPY.budgeted}

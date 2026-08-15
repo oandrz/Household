@@ -28,6 +28,7 @@
 //   contributions ledger owns that figure; this form does not offer a
 //   second way to move it.
 import { type FormEvent, useState } from "react";
+import { FieldPair } from "../../components/FieldPair";
 import { Modal } from "../../components/Modal";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { ApiError } from "../../api/client";
@@ -329,11 +330,15 @@ export function GoalModal({
             value={name}
             onChange={(event) => setName(event.target.value)}
             placeholder="e.g. Japan 2027, new sofa, rainy-day fund"
-            className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+            // min-h-11/sm:min-h-0 on every field in this modal:
+            // TransactionFilters.tsx's own SELECT_CLASS comment has the
+            // measured reason py-2.5 alone falls short of the 44px floor
+            // on a phone.
+            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <FieldPair>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="goal-modal-target-amount" className="text-xs font-semibold text-label">
               Target amount
@@ -345,7 +350,7 @@ export function GoalModal({
               required
               value={targetAmountInput}
               onChange={(event) => setTargetAmountInput(event.target.value)}
-              className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             />
           </div>
 
@@ -358,7 +363,7 @@ export function GoalModal({
               value={currency}
               disabled={isEditing}
               onChange={(event) => setCurrency(event.target.value)}
-              className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] disabled:cursor-not-allowed disabled:opacity-60"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
             >
               {!currencies.some((c) => c.code === currency) && <option value={currency}>{currency}</option>}
               {currencies.map((c) => (
@@ -378,7 +383,7 @@ export function GoalModal({
               </p>
             )}
           </div>
-        </div>
+        </FieldPair>
 
         {targetError && (
           <p role="alert" className="text-xs leading-snug text-danger">
@@ -402,7 +407,7 @@ export function GoalModal({
             disabled={noTargetDate}
             value={targetMonthInput}
             onChange={(event) => setTargetMonthInput(event.target.value)}
-            className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] disabled:cursor-not-allowed disabled:opacity-60"
+            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
           />
           {targetMonthError && (
             <p role="alert" className="text-xs leading-snug text-danger">
@@ -423,7 +428,7 @@ export function GoalModal({
               required
               value={startingBalanceInput}
               onChange={(event) => setStartingBalanceInput(event.target.value)}
-              className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             />
             {startingBalanceError && (
               <p role="alert" className="text-xs leading-snug text-danger">
@@ -462,7 +467,7 @@ export function GoalModal({
             required
             value={plannedMonthlyInput}
             onChange={(event) => setPlannedMonthlyInput(event.target.value)}
-            className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
           />
           {plannedMonthlyError && (
             <p role="alert" className="text-xs leading-snug text-danger">
@@ -481,7 +486,10 @@ export function GoalModal({
                 type="button"
                 disabled={isRestoring}
                 onClick={handleRestore}
-                className="self-start rounded-lg border border-hairline px-3 py-1.5 text-[12.5px] font-semibold text-accent disabled:cursor-not-allowed disabled:opacity-60"
+                // min-h-11/sm:min-h-0: py-2.5 alone measured short of the
+                // 44px floor at this text size -- TransactionFilters.tsx's
+                // own SELECT_CLASS comment has the measured numbers.
+                className="min-h-11 self-start rounded-lg border border-hairline px-3 py-2.5 text-[12.5px] font-semibold text-accent disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:py-1.5"
               >
                 Restore
               </button>
@@ -493,14 +501,14 @@ export function GoalModal({
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label"
+            className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label sm:min-h-0"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={isSaving}
-            className="flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            className="min-h-11 flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
           >
             {isEditing ? "Save" : "Create goal"}
           </button>

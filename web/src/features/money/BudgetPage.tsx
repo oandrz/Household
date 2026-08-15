@@ -25,6 +25,7 @@ import { useState } from "react";
 import { ApiError } from "../../api/client";
 import { useCurrencies } from "../auth/useAuth";
 import { Modal } from "../../components/Modal";
+import { PageContainer } from "../../components/PageContainer";
 import { BudgetHistoryModal } from "./BudgetHistoryModal";
 import { BudgetModal } from "./BudgetModal";
 import { BUDGET_COPY } from "./budgetCopy";
@@ -235,8 +236,15 @@ export function BudgetPage() {
   }
 
   return (
-    <div className="flex flex-col gap-5 px-9 py-8" data-testid="budget-page">
-      <div className="flex items-start justify-between gap-4">
+    <PageContainer data-testid="budget-page">
+      {/* flex-wrap: the same header-row overflow BillsPage.tsx's own header
+          comment describes -- the month picker plus History and Edit budget
+          never had room beside the title at 320px. Not caught before this
+          task because no browser walk had a real budget (with History and
+          Edit budget both rendering) at a phone width until now. flex-wrap
+          only acts once a line overflows its width, so it changes nothing
+          at 1440, where this cluster already fits beside the title. */}
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-[23px] font-semibold tracking-[-0.02em] text-ink">{BUDGET_COPY.title}</h1>
           {/* Always names the month (spec screen state 4: "the header still
@@ -272,7 +280,17 @@ export function BudgetPage() {
               type="button"
               aria-label="Previous month"
               onClick={() => setMonth((current) => shiftMonth(current, -1))}
-              className="text-muted"
+              // Height only, no width change: this row (month chip, History,
+              // Edit budget) is tight enough at 375px that even a few extra
+              // pixels of width on this glyph pushed "Edit budget" into
+              // wrapping onto two lines -- measured and screenshotted before
+              // settling here. The 44px floor is a height requirement in
+              // this codebase's own examples (sign-out, nav rows, filter
+              // selects are all width-unconstrained text/icons); the width
+              // half of the guideline loses to a visible layout break in a
+              // chip this narrow. Restores at `sm`, matching every other
+              // control on this row.
+              className="grid h-11 place-items-center text-muted sm:h-auto"
             >
               ‹
             </button>
@@ -281,7 +299,7 @@ export function BudgetPage() {
               type="button"
               aria-label="Next month"
               onClick={() => setMonth((current) => shiftMonth(current, 1))}
-              className="text-muted"
+              className="grid h-11 place-items-center text-muted sm:h-auto"
             >
               ›
             </button>
@@ -292,7 +310,11 @@ export function BudgetPage() {
                 type="button"
                 data-testid="budget-history-button"
                 onClick={() => setHistoryOpen(true)}
-                className="rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-muted"
+                // min-h-11/sm:min-h-0 on this and Edit budget beside it:
+                // TransactionFilters.tsx's own SELECT_CLASS comment has the
+                // measured reason py-2 alone falls short of the 44px floor
+                // on a phone.
+                className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-muted sm:min-h-0"
               >
                 {BUDGET_COPY.history}
               </button>
@@ -300,7 +322,7 @@ export function BudgetPage() {
                 type="button"
                 data-testid="budget-edit-button"
                 onClick={openEditBudget}
-                className="rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white"
+                className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0"
               >
                 {BUDGET_COPY.editBudget}
               </button>
@@ -325,7 +347,7 @@ export function BudgetPage() {
               type="button"
               data-testid="budget-create-blank"
               onClick={openBlank}
-              className="rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white"
+              className="min-h-11 rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white sm:min-h-0"
             >
               {BUDGET_COPY.createFirstBudget}
             </button>
@@ -338,7 +360,7 @@ export function BudgetPage() {
               type="button"
               data-testid="budget-start-from-template"
               onClick={openBlank}
-              className="rounded-lg border border-callout-border bg-callout px-5 py-2.5 text-[13px] font-semibold text-accent"
+              className="min-h-11 rounded-lg border border-callout-border bg-callout px-5 py-2.5 text-[13px] font-semibold text-accent sm:min-h-0"
             >
               {BUDGET_COPY.startFromTemplate}
             </button>
@@ -402,7 +424,14 @@ export function BudgetPage() {
             spentSoFar={spentSoFar}
           />
 
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.7fr_1fr]">
+          {/* xl, not the shell's lg: at 1024 this column would be 441px, and
+              BudgetCategoryGrid's own sm:grid-cols-2 (a viewport breakpoint,
+              not a container query) still goes two-up inside it regardless --
+              measured 180px-ish sub-columns where "Kids & school" and its
+              amount both wrapped their own text. BillsPage's identical
+              [1.7fr_1fr] row keeps lg: its left column is a single-column
+              list with nothing to compound with. */}
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.7fr_1fr]">
             <div className="rounded-xl border border-hairline bg-card p-[22px]">
               <div className="mb-[18px] flex items-baseline justify-between">
                 <h2 className="text-sm font-semibold text-ink">{BUDGET_COPY.categories}</h2>
@@ -515,6 +544,6 @@ export function BudgetPage() {
             </p>
           </Modal>
         ))}
-    </div>
+    </PageContainer>
   );
 }
