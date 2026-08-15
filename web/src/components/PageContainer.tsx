@@ -4,8 +4,9 @@
 // readable ledger row and a wrapped one.
 //
 // Extracted rather than repeated because the class string below already
-// existed verbatim at eight call sites. It forwards the rest of its props so
-// pages can keep the `data-testid` their own tests query.
+// existed verbatim at eight call sites; nine total with OverviewPage's
+// licensed p-10 exception. It forwards the rest of its props so pages can
+// keep the `data-testid` their own tests query.
 import type { HTMLAttributes, ReactNode } from "react";
 
 export function PageContainer({
@@ -14,7 +15,7 @@ export function PageContainer({
   ...rest
 }: { children: ReactNode } & HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={`flex flex-col gap-5 px-4 py-6 sm:px-9 sm:py-8 ${className}`} {...rest}>
+    <div className={`flex flex-col gap-5 px-4 py-6 sm:px-9 sm:py-8${className ? ` ${className}` : ""}`} {...rest}>
       {children}
     </div>
   );

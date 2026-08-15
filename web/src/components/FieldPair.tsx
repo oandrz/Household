@@ -2,9 +2,10 @@
 // that measures 343px on a 375px phone, two columns leave each field about
 // 155px -- narrower than the date and amount inputs they usually hold.
 //
-// Extracted because this exact grid already appeared at thirteen call sites
-// across eight modals; a fourteenth would have been a fourteenth place to
-// forget the breakpoint.
+// Extracted because this exact grid already appeared at twelve call sites
+// across seven files; a thirteenth would have been a thirteenth place to
+// forget the breakpoint. BudgetStatCards.tsx:60 carries an extra md:grid-cols-4
+// and was correctly left alone.
 import type { ReactNode } from "react";
 
 export function FieldPair({ children }: { children: ReactNode }) {
