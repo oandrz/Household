@@ -972,6 +972,45 @@ something only that guard can produce.
   specification: 1204px was in the mockup from the beginning, and the defect
   is simply that nobody transcribed it.
 
+- Mobile-responsive round, Task 8: **the plan's own prescribed fix broke the
+  thing it was fixing, and only a real browser caught it.** The brief's
+  `TransactionFilters.tsx` fix gave each filter's wrapper `flex-1` (Tailwind's
+  `flex: 1 1 0%`) plus `min-w-0`, reasoning that `min-w-0` was "what actually
+  permits the shrink." It compiled, typechecked, and passed all 477 tests
+  unchanged, because nothing in jsdom lays out a flexbox. In a real browser at
+  320px it did the opposite of the intended fix: a `0%` flex-basis makes
+  flex-wrap's line-breaking treat the item as contributing no size, so the
+  four filters never got their own line — all four crammed onto one shared
+  line and shrank to it, and their labels ("ACCOUNT", "CATEGORY") clipped to
+  a measured 15px sliver instead of the row wrapping cleanly. Replaced with
+  `w-full`/`sm:w-auto` on the wrapper — the same pattern already used on the
+  select inside it — since an item demanding the full row's width can only
+  ever wrap onto a line by itself. The brief's own worked example also didn't
+  hold up: its comment asserts an account nicknamed "Joint everyday account"
+  (23 characters, measured 181px) would overflow the row, but it does not, at
+  either 375 or 320 — the mechanism is real (a 47-character nickname measured
+  326px and did overflow 320's 273px row), the specific number in the comment
+  was not. Comments that assert a measurement are exactly the kind of claim
+  this pattern exists to make someone re-check in a browser before trusting.
+
+- Mobile-responsive round, Task 8: **`BudgetStatCards.tsx`'s four-card row has
+  been logged twice as a "pre-existing `md:` breakpoint, leave it" item
+  (Task 6/7's report, and this file's own CLAUDE.md) without anyone measuring
+  whether it actually overflows** — because no earlier task had real budget
+  figures to render there. It does, and the cause isn't the `md:` prefix: the
+  *unprefixed* `grid-cols-2` base is too narrow for what the cards actually
+  hold. `formatMoney` output like `S$3,790.00` has no space to wrap on, and
+  CSS Grid's implicit per-item `min-width: auto` (the same default that made
+  a `<select>` unshrinkable in the bullet above) keeps a 90px cell from
+  shrinking below that text's ~125–148px min-content width — so the *grid*
+  grows past its container instead. Measured at 320px: 60px of page-level
+  horizontal scroll, the largest violation found in this task, worse than
+  either defect this task was assigned to fix. Left unfixed here on explicit
+  instruction (the file is named in CLAUDE.md as "leave them; they are logged
+  separately"), but the diagnosis every prior mention carried was wrong, and
+  whoever owns it next should start from "unbounded min-content in a narrow
+  grid cell," not from the breakpoint count.
+
 **If a behaviour depends on the platform, verify it in the platform.** A real
 browser is what found every frontend defect above, and nothing else could
 have: jsdom has no working `<dialog>`, no CSS cascade and no layout at all, so
