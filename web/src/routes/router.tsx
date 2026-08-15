@@ -65,7 +65,7 @@ import { RequireCapability } from "../features/shell/RequireCapability";
 
 const rootRoute = createRootRoute({
   notFoundComponent: () => (
-    <main className="grid min-h-screen place-items-center p-10 text-center">
+    <main className="grid min-h-dvh place-items-center p-10 text-center">
       <p className="text-sm text-muted">Page not found.</p>
     </main>
   ),

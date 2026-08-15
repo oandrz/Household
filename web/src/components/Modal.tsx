@@ -105,7 +105,7 @@ export function Modal({
       {...(!supportsShowModal ? { open: true } : {})}
       tabIndex={-1}
       aria-labelledby={titleId}
-      // w-screen/h-screen matter, not just cosmetically: <dialog>'s default
+      // w-screen/h-dvh matter, not just cosmetically: <dialog>'s default
       // UA sizing is width/height: fit-content, which -- confirmed in a real
       // browser (Chromium), not inferred -- wins over `inset-0` stretching
       // the box to the viewport. Without an explicit full-viewport size, the
@@ -113,7 +113,12 @@ export function Modal({
       // backdrop area at all for a click-outside-to-dismiss to ever land on;
       // getBoundingClientRect() on the dialog and its panel were identical
       // (420x118, both) before this was added.
-      className="m-0 h-screen w-screen max-h-none max-w-none border-none bg-transparent p-0 open:fixed open:inset-0 open:grid open:place-items-center open:bg-black/40"
+      // h-dvh, not h-screen: on iOS Safari `100vh` is the *large* viewport --
+      // the height with the URL bar hidden -- so a dialog sized to it puts its
+      // bottom edge under the browser toolbar. AccountModal's content is 665px
+      // against roughly 650px of visible height on an iPhone, which is its
+      // submit button sitting exactly where the user cannot reach it.
+      className="m-0 h-dvh w-screen max-h-none max-w-none border-none bg-transparent p-0 open:fixed open:inset-0 open:grid open:place-items-center open:bg-black/40"
       onCancel={(event) => {
         // Fired by a real browser when the user presses Escape on a modal
         // dialog. preventDefault stops the platform's own close (which

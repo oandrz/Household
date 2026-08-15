@@ -48,7 +48,7 @@ function SignUpTokenError({ error }: { error: unknown }) {
   }
 
   return (
-    <main className="min-h-screen grid place-items-center bg-canvas p-6 font-sans text-ink">
+    <main className="min-h-dvh grid place-items-center bg-canvas p-6 font-sans text-ink">
       <div className="flex flex-col items-center gap-[22px]">
         <div className="flex items-center gap-2.5">
           <div className="h-[30px] w-[30px] rounded-[9px] bg-accent" />
@@ -311,7 +311,7 @@ export function SignUpCompleteScreen({ token }: { token: string }) {
   }
 
   return (
-    <main className="min-h-screen grid place-items-center bg-canvas p-6 font-sans text-ink">
+    <main className="min-h-dvh grid place-items-center bg-canvas p-6 font-sans text-ink">
       <div className="flex flex-col items-center gap-[22px]">
         <div className="flex items-center gap-2.5">
           <div className="h-[30px] w-[30px] rounded-[9px] bg-accent" />

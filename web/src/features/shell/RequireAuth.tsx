@@ -10,7 +10,7 @@ export function RequireAuth() {
 
   if (me.isPending) {
     return (
-      <main className="grid min-h-screen place-items-center">
+      <main className="grid min-h-dvh place-items-center">
         <p className="text-sm text-muted">Loading…</p>
       </main>
     );
@@ -26,7 +26,7 @@ export function RequireAuth() {
     // suggest re-entering credentials fixes something that isn't a
     // credentials problem.
     return (
-      <main className="grid min-h-screen place-items-center p-10 text-center">
+      <main className="grid min-h-dvh place-items-center p-10 text-center">
         <p className="text-sm text-muted">
           Something went wrong loading your account. Please try again.
         </p>
