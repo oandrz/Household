@@ -210,7 +210,7 @@ A host cron runs `backup.sh` nightly. It is the **`deploy` user's** crontab —
 17 3 * * * AGE_RECIPIENT=age1… RCLONE_REMOTE=r2:hearth-backups HC_PING_URL=https://hc-ping.com/… /home/deploy/Household/deploy/backup.sh >> /home/deploy/hearth-backup.log 2>&1
 ```
 
-**The log path is under `/home/deploy` deliberately.** On Ubuntu 24.04
+**The log path is under `/home/deploy` deliberately.** On current Ubuntu
 `/var/log` is `drwxrwxr-x root:syslog` and `deploy` is in neither, so a
 redirect into `/var/log` fails in `/bin/sh` *before `backup.sh` is ever
 reached* — no dump, no upload, no ping, and an error that names the redirection

@@ -945,7 +945,7 @@ run as that same user, since `rclone` reads `$HOME/.config/rclone/rclone.conf`:
 17 3 * * * AGE_RECIPIENT=age1… RCLONE_REMOTE=r2:hearth-backups HC_PING_URL=https://hc-ping.com/… /home/deploy/Household/deploy/backup.sh >> /home/deploy/hearth-backup.log 2>&1
 ```
 
-The log path is under `/home/deploy`, not `/var/log`: on Ubuntu 24.04
+The log path is under `/home/deploy`, not `/var/log`: on current Ubuntu
 `/var/log` is `drwxrwxr-x root:syslog`, so cron's `/bin/sh` fails on the
 redirection before `backup.sh` runs at all.
 
@@ -1012,7 +1012,9 @@ No code. This is the manual task, written down so it is repeatable when the box 
 
 - [ ] **Step 1: Create the server**
 
-Hetzner Cloud, **CX23, Falkenstein**, Ubuntu 24.04 LTS, SSH key only. Record the IPv4 address.
+Hetzner Cloud, **CX23, Falkenstein**, **Ubuntu 26.04 LTS**, SSH key only. Record the IPv4 address.
+
+**26.04 rather than 24.04 (2026-08-15).** Both are LTS; 26.04 is supported to April 2031 against 24.04's April 2029, which is two fewer forced distro upgrades over this product's intended life. The usual reason to lag an LTS is third-party repositories, so it was checked rather than assumed: `download.docker.com/linux/ubuntu/dists/resolute/` carries all five packages step 3 installs (`docker-ce` 29.7.2, `docker-ce-cli`, `containerd.io`, `docker-buildx-plugin`, `docker-compose-plugin`) with a `Release` file rebuilt the same day as `noble`'s, and `age` and `rclone` are both in 26.04's own archive. The host runs almost nothing outside containers -- Docker, `age`, `rclone`, cron, sshd -- so the distro surface exposed to breakage is unusually small here, which is exactly when taking the newer LTS is cheap.
 
 **Amended 2026-08-15** from `CPX11, Singapore`: `CPX11` was renamed out of existence in Hetzner's 15 June 2026 standardisation, and the cheap `CX` line is not sold in Singapore at all — Singapore offers only `CPX`, at $19.61/mo for a *smaller* machine than Falkenstein's `CX23` at $7.07/mo. Falkenstein rather than Helsinki because latency to Singapore was measured, not assumed. ADR 2's amendment carries the full comparison, the measurements, and the ~195 ms this trades away.
 
@@ -1143,7 +1145,7 @@ crontab -e
 ./backup.sh    # run it once by hand now; this proves the script, not the schedule
 ```
 
-The log goes under `/home/deploy`, **not `/var/log`**: on Ubuntu 24.04 `/var/log` is `drwxrwxr-x root:syslog` and `deploy` is in neither group, so cron's `/bin/sh` fails on the redirection *before `backup.sh` runs at all* — no dump, no upload, no heartbeat ping. The heartbeat catches it within its grace window, so it is not silent, but it burns the first night and points at the script rather than at permissions.
+The log goes under `/home/deploy`, **not `/var/log`**: on current Ubuntu `/var/log` is `drwxrwxr-x root:syslog` and `deploy` is in neither group, so cron's `/bin/sh` fails on the redirection *before `backup.sh` runs at all* — no dump, no upload, no heartbeat ping. The heartbeat catches it within its grace window, so it is not silent, but it burns the first night and points at the script rather than at permissions.
 
 - [ ] **Step 3: Create the verification file**
 
