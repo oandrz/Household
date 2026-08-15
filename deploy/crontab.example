@@ -1,0 +1,20 @@
+# Hearth nightly backup.
+#
+# PATH is set explicitly because cron's default is /usr/bin:/bin, which does
+# NOT include /usr/local/bin -- where rclone v1.75 lives. Without this line
+# backup.sh dies on "rclone: command not found" at 3am. (The four-year-old apt
+# rclone was removed precisely so that failure is loud rather than a silent
+# downgrade to a 2022 client.)
+PATH=/usr/local/bin:/usr/bin:/bin
+
+# CRON_TZ makes the schedule below mean what it reads. The box runs UTC, so
+# without this "3:17am" would fire at 11:17am in the household's own timezone --
+# a "nightly" backup running over lunch is the kind of thing nobody notices
+# until they are reading logs during an incident.
+CRON_TZ=Asia/Singapore
+
+# Secrets come from the env file (mode 600) rather than inline here, because a
+# crontab is readable by anyone who can run `crontab -l` as this user and the
+# heartbeat URL is a capability: whoever holds it can suppress the alert that
+# says the backups stopped.
+17 3 * * * set -a; . /home/deploy/hearth-backup.env; set +a; /home/deploy/Household/deploy/backup.sh >> /home/deploy/hearth-backup.log 2>&1

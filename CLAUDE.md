@@ -20,6 +20,10 @@ React + TypeScript frontend, Postgres, Docker Compose.
   prompted them. **Read the ones touching your area before changing it**, and
   say so explicitly if your work contradicts one rather than silently
   overriding it. Deployment and hosting live here.
+- **`docs/INFRASTRUCTURE.md`** — every external service Hearth depends on, what
+  it costs, where each credential lives and what breaks without it. **Read it
+  before touching anything outside this repository.**
+- `deploy/PROVISION.md` — rebuilding the production box from an empty account.
 - `docs/HANDOVER.md` — current state, what to build next, open items.
 - `docs/GUIDE.md` — how to use the product.
 - `docs/superpowers/specs/` and `docs/superpowers/plans/` — the specs and plans

@@ -3,7 +3,11 @@
 The reasoning lives in `docs/adr/0001-optimise-for-exit-cost.md`,
 `docs/adr/0002-first-production-host.md` and
 `docs/superpowers/specs/2026-08-10-hearth-production-deployment-design.md`.
-This file is the operations surface only.
+This file is the operations surface only — running the box that exists.
+
+- **Rebuilding the box from nothing:** `PROVISION.md`.
+- **Every external service, cost and credential location:**
+  `../docs/INFRASTRUCTURE.md`.
 
 Every command below runs from this directory (`~/Household/deploy`) on the box.
 
