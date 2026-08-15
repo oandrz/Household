@@ -554,7 +554,7 @@ function BudgetModalForm({
               data-testid={`budget-modal-row-${row.categoryId ?? row.key}`}
               className="flex items-center gap-2"
             >
-              <div className="flex flex-1 flex-col gap-1">
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
                 <label htmlFor={`budget-modal-row-name-${row.key}`} className="sr-only">
                   {BUDGET_COPY.categoryName}
                 </label>
@@ -568,6 +568,19 @@ function BudgetModalForm({
                   // row's height -- it aligns the name and cap fields with a
                   // target that was already 44px instead of floating short
                   // inside it.
+                  //
+                  // The wrapper's own min-w-0: a flex item's default
+                  // min-width is `auto`, which resolves to its content's
+                  // min-content width in a row flex container -- for a
+                  // column wrapping a text input, that is the input's own
+                  // unshrinkable intrinsic width (TransactionFilters.tsx's
+                  // FIELD_CLASS documents the identical trap). Without it,
+                  // this row's four cells (name, the w-28 cap field, Archive
+                  // and the w-11 ✕ button) never lose enough combined width
+                  // to fit 375px, and the row scrolled inside the dialog's
+                  // own box -- invisible to a check of
+                  // `document.documentElement`, since a native <dialog>
+                  // paints in the top layer, outside normal document flow.
                   className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] sm:min-h-0"
                 />
                 {(row.archived || row.queuedArchive) && (

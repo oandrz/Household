@@ -270,6 +270,29 @@ fix in the same branch *created* the sibling.
   The port to depend on already existed (`CategoryLookup`) and the repository
   already satisfied it — the omission was never a design constraint.
 
+- **A grep-based inventory finds only the spelling it was written for.** The
+  mobile-responsive plan's own touch-target task built its Step 1 inventory from
+  `grep -rEn 'h-6 w-6|h-7 w-7|py-1\.5'` and fixed every match to a 44px floor —
+  correctly, and the review approved it. But `Sidebar.tsx`'s `NAV_ITEM_CLASS`
+  reads `px-2.5 py-2`, which that pattern cannot match, so all seven of the
+  drawer's own navigation links — the primary touch target of the entire mobile
+  experience — shipped at 36.3px, invisible to the sweep that was supposed to
+  catch exactly this. A follow-up audit measured every control in a real
+  browser instead of grepping for a padding value, and found the same gap
+  repeated at roughly twenty more sites across the app: any control whose class
+  already read `py-2` or `py-2.5` (not `py-1.5`) was equally invisible to the
+  original grep, from `BudgetPage.tsx`'s History/Edit budget buttons to every
+  Cancel/Save footer and every labeled field in `AccountModal.tsx`,
+  `BillModal.tsx`, `GoalModal.tsx` and `TransactionModal.tsx`. **A grep-based
+  inventory is a hypothesis about how the codebase spells the thing you're
+  looking for, not a census of it** — the task's own risk paragraph had already
+  named "nav rows" as a category to check, and the grep dropped it anyway,
+  because grep can only find the string you wrote, never the ones a sibling
+  file wrote differently. The fix that actually closed the gap used the brief's
+  own stated intent instead: drive the page in a real browser and measure
+  `getBoundingClientRect()` on every interactive element, which finds a 36.3px
+  link the same way regardless of which Tailwind class produced it.
+
 **When you fix something, grep for its shape before you close it.** The question
 that finds these is not "is this fixed?" but "where else does this pattern
 appear?" `Truncate` is now that grep for date-and-location bugs specifically —
@@ -297,29 +320,6 @@ fourth caller needed the same data. **A comment saying "this is deliberately a
 copy of that" is a design decision that expires** — at two it is a judgement
 call, at three it is a shared thing nobody owns. Grep for the endpoint before
 writing a hook for it.
-
-**And a grep-based inventory finds only the spelling it was written for.** The
-mobile-responsive plan's own touch-target task built its Step 1 inventory from
-`grep -rEn 'h-6 w-6|h-7 w-7|py-1\.5'` and fixed every match to a 44px floor —
-correctly, and the review approved it. But `Sidebar.tsx`'s `NAV_ITEM_CLASS`
-reads `px-2.5 py-2`, which that pattern cannot match, so all seven of the
-drawer's own navigation links — the primary touch target of the entire mobile
-experience — shipped at 36.3px, invisible to the sweep that was supposed to
-catch exactly this. A follow-up audit measured every control in a real
-browser instead of grepping for a padding value, and found the same gap
-repeated at roughly twenty more sites across the app: any control whose class
-already read `py-2` or `py-2.5` (not `py-1.5`) was equally invisible to the
-original grep, from `BudgetPage.tsx`'s History/Edit budget buttons to every
-Cancel/Save footer and every labeled field in `AccountModal.tsx`,
-`BillModal.tsx`, `GoalModal.tsx` and `TransactionModal.tsx`. **A grep-based
-inventory is a hypothesis about how the codebase spells the thing you're
-looking for, not a census of it** — the task's own risk paragraph had already
-named "nav rows" as a category to check, and the grep dropped it anyway,
-because grep can only find the string you wrote, never the ones a sibling
-file wrote differently. The fix that actually closed the gap used the brief's
-own stated intent instead: drive the page in a real browser and measure
-`getBoundingClientRect()` on every interactive element, which finds a 36.3px
-link the same way regardless of which Tailwind class produced it.
 
 **And when you change what a value *means*, its readers are the class.** The
 compiler will not find them, because nothing about the type changed; only a
@@ -995,6 +995,22 @@ something only that guard can produce.
   specification: 1204px was in the mockup from the beginning, and the defect
   is simply that nobody transcribed it.
 
+- Mobile-responsive round, before Task 1: **a fixed-width shell made every
+  page look broken, and the whole round exists because of one class.** The
+  symptom was "the UI is not mobile friendly"; measured in a real browser at a
+  375px viewport (360px client area after the scrollbar), `AppShell`'s
+  `grid-cols-[236px_1fr]` gave the sidebar its full 236px unconditionally and
+  left `<main>` **124px** wide — and after the page's own `px-9` gutters, 52px
+  of usable content, where Overview rendered roughly one word per line and its
+  net-worth figure read `S$0.` with the value cut off. With the sidebar hidden
+  by hand and `<main>` given the full 375px, overflow on the Transactions page
+  dropped to **zero** — the ledger's rows were already `flex`-with-two-children
+  and wrapped on their own. The shell was not merely the worst defect on the
+  branch; it was most of the defect (`docs/superpowers/specs/2026-08-15-hearth-mobile-responsive-design.md`,
+  "What is actually broken"). What would have caught it nine slices sooner:
+  opening the app at a phone width once, at any point before this round
+  started.
+
 - Mobile-responsive round, Task 8: **the plan's own prescribed fix broke the
   thing it was fixing, and only a real browser caught it.** The brief's
   `TransactionFilters.tsx` fix gave each filter's wrapper `flex-1` (Tailwind's
@@ -1036,6 +1052,41 @@ something only that guard can produce.
   known. **Assigned to Task 9**, not left as a standing deferral: whoever
   picks it up should start from "unbounded min-content in a narrow grid
   cell," not from the breakpoint count.
+
+- Mobile-responsive round, Task 10: **jsdom cannot see a breakpoint.** The
+  frontend suite held 47 test files and 477 tests, all green, through every
+  task of this round — an off-canvas drawer, shrinking auth cards, `dvh`
+  sizing, stacking gutters and field pairs, a 44px touch-target floor — on a
+  product that could not be used on a phone at all until the round started.
+  Every layout defect the round found, including both bullets immediately
+  above, was invisible to that suite the entire time it stayed green, because
+  none of them is a claim jsdom's stub layout engine can evaluate. A layout
+  claim needs a browser to check it; a green frontend suite is not evidence
+  about layout, on this branch or any other.
+
+- Mobile-responsive round, Task 4: **`100vh` is a lie on iOS Safari, and
+  nothing in this project's own tooling can be asked to lie back.** Every
+  measurement behind this round's plan was taken in a real browser — headless
+  Chrome, resized narrow — which is correct and was still not enough, because
+  that browser has no address bar to hide and so no way to reproduce the one
+  thing iOS Safari does differently: `100vh` there is the *large* viewport,
+  sized as though the toolbar were already gone, so a full-height box built
+  against it puts its bottom edge under the toolbar the moment a real page
+  loads with the bar still showing. `Modal.tsx`'s own comment on the fix
+  measures the consequence exactly — `AccountModal`'s content at 665px against
+  roughly 650px of visible height on an iPhone, its submit button sitting
+  precisely where a thumb cannot reach it. This was not found by a failing
+  test or a device in hand; it was named in Task 4's own brief before any code
+  changed, from reasoning about what the CSS property means on that engine,
+  because no tool running anywhere in this stack — headless Chrome, jsdom,
+  the browser-automation tools used for every other check in this round — runs
+  WebKit's dynamic toolbar at all. Fixed by moving every full-height rule
+  (`h-screen`/`min-h-screen` → `h-dvh`/`min-h-dvh`) across `Modal.tsx`, every
+  auth screen and the route fallback before the gap could be found any other
+  way. Worth keeping separate from the bullet above: that one is a defect this
+  round's own tooling *could* have caught and initially did not; this one is a
+  defect the tooling in use cannot reach at any thoroughness, which is a
+  different problem than testing harder solves.
 
 **If a behaviour depends on the platform, verify it in the platform.** A real
 browser is what found every frontend defect above, and nothing else could
