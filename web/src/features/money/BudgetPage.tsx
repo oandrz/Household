@@ -280,7 +280,17 @@ export function BudgetPage() {
               type="button"
               aria-label="Previous month"
               onClick={() => setMonth((current) => shiftMonth(current, -1))}
-              className="text-muted"
+              // Height only, no width change: this row (month chip, History,
+              // Edit budget) is tight enough at 375px that even a few extra
+              // pixels of width on this glyph pushed "Edit budget" into
+              // wrapping onto two lines -- measured and screenshotted before
+              // settling here. The 44px floor is a height requirement in
+              // this codebase's own examples (sign-out, nav rows, filter
+              // selects are all width-unconstrained text/icons); the width
+              // half of the guideline loses to a visible layout break in a
+              // chip this narrow. Restores at `sm`, matching every other
+              // control on this row.
+              className="grid h-11 place-items-center text-muted sm:h-auto"
             >
               ‹
             </button>
@@ -289,7 +299,7 @@ export function BudgetPage() {
               type="button"
               aria-label="Next month"
               onClick={() => setMonth((current) => shiftMonth(current, 1))}
-              className="text-muted"
+              className="grid h-11 place-items-center text-muted sm:h-auto"
             >
               ›
             </button>
@@ -300,7 +310,11 @@ export function BudgetPage() {
                 type="button"
                 data-testid="budget-history-button"
                 onClick={() => setHistoryOpen(true)}
-                className="rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-muted"
+                // min-h-11/sm:min-h-0 on this and Edit budget beside it:
+                // TransactionFilters.tsx's own SELECT_CLASS comment has the
+                // measured reason py-2 alone falls short of the 44px floor
+                // on a phone.
+                className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-muted sm:min-h-0"
               >
                 {BUDGET_COPY.history}
               </button>
@@ -308,7 +322,7 @@ export function BudgetPage() {
                 type="button"
                 data-testid="budget-edit-button"
                 onClick={openEditBudget}
-                className="rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white"
+                className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0"
               >
                 {BUDGET_COPY.editBudget}
               </button>
@@ -333,7 +347,7 @@ export function BudgetPage() {
               type="button"
               data-testid="budget-create-blank"
               onClick={openBlank}
-              className="rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white"
+              className="min-h-11 rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white sm:min-h-0"
             >
               {BUDGET_COPY.createFirstBudget}
             </button>
@@ -346,7 +360,7 @@ export function BudgetPage() {
               type="button"
               data-testid="budget-start-from-template"
               onClick={openBlank}
-              className="rounded-lg border border-callout-border bg-callout px-5 py-2.5 text-[13px] font-semibold text-accent"
+              className="min-h-11 rounded-lg border border-callout-border bg-callout px-5 py-2.5 text-[13px] font-semibold text-accent sm:min-h-0"
             >
               {BUDGET_COPY.startFromTemplate}
             </button>

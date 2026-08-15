@@ -125,7 +125,10 @@ export function NewSpaceModal({
             required
             value={name}
             onChange={(event) => setName(event.target.value)}
-            className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+            // min-h-11/sm:min-h-0: TransactionFilters.tsx's own
+            // SELECT_CLASS comment has the measured reason py-2.5 alone
+            // falls short of the 44px floor on a phone.
+            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
           />
         </div>
 
@@ -182,14 +185,14 @@ export function NewSpaceModal({
           <button
             type="button"
             onClick={handleClose}
-            className="flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label"
+            className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label sm:min-h-0"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={createSpaceMutation.isPending}
-            className="flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            className="min-h-11 flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
           >
             Create space
           </button>

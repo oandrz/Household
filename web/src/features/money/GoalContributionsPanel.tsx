@@ -98,7 +98,7 @@ function ContributionRow({
             <button
               type="button"
               onClick={onAskToDelete}
-              className="text-[11.5px] font-semibold text-danger"
+              className="min-h-11 text-[11.5px] font-semibold text-danger sm:min-h-0"
             >
               {GOAL_COPY.deleteContributionTrigger}
             </button>
@@ -244,7 +244,10 @@ export function GoalContributionsPanel({
               required
               value={amountInput}
               onChange={(event) => setAmountInput(event.target.value)}
-              className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+              // min-h-11/sm:min-h-0: TransactionFilters.tsx's own
+              // SELECT_CLASS comment has the measured reason py-2.5 alone
+              // falls short of the 44px floor on a phone.
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             />
           </div>
           <div className="flex flex-col gap-1.5">
@@ -257,7 +260,7 @@ export function GoalContributionsPanel({
               required
               value={occurredOn}
               onChange={(event) => setOccurredOn(event.target.value)}
-              className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             />
           </div>
         </FieldPair>
@@ -277,7 +280,7 @@ export function GoalContributionsPanel({
             type="text"
             value={note}
             onChange={(event) => setNote(event.target.value)}
-            className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
           />
         </div>
 
@@ -290,7 +293,7 @@ export function GoalContributionsPanel({
         <button
           type="submit"
           disabled={isAdding}
-          className="rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+          className="min-h-11 rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
         >
           Add
         </button>

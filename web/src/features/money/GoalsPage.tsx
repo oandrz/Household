@@ -159,7 +159,10 @@ export function GoalsPage() {
               type="button"
               data-testid="goals-new"
               onClick={() => setModalGoal("new")}
-              className="rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white"
+              // min-h-11/sm:min-h-0: TransactionFilters.tsx's own
+              // SELECT_CLASS comment has the measured reason py-2 alone
+              // falls short of the 44px floor on a phone.
+              className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0"
             >
               {GOAL_COPY.newGoal}
             </button>
@@ -187,7 +190,7 @@ export function GoalsPage() {
               type="button"
               data-testid="goals-create-first"
               onClick={() => setModalGoal("new")}
-              className="rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white"
+              className="min-h-11 rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white sm:min-h-0"
             >
               {GOAL_COPY.createFirstGoal}
             </button>

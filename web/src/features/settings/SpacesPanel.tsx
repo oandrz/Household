@@ -63,7 +63,10 @@ export function SpacesPanel() {
             <button
               type="button"
               onClick={() => setNewSpaceOpen(true)}
-              className="flex items-center gap-2 rounded-lg border border-dashed border-hairline px-3 py-2.5 text-left text-muted"
+              // min-h-11/sm:min-h-0: TransactionFilters.tsx's own
+              // SELECT_CLASS comment has the measured reason py-2.5 alone
+              // falls short of the 44px floor on a phone.
+              className="flex min-h-11 items-center gap-2 rounded-lg border border-dashed border-hairline px-3 py-2.5 text-left text-muted sm:min-h-0"
             >
               + New space (Kids, Home, Travel…)
             </button>

@@ -504,7 +504,11 @@ function BudgetModalForm({
             autoFocus={awaitingIncome}
             value={incomeInput}
             onChange={(event) => handleIncomeChange(event.target.value)}
-            className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+            // min-h-11/sm:min-h-0 on every field in this modal:
+            // TransactionFilters.tsx's own SELECT_CLASS comment has the
+            // measured reason py-2.5 alone falls short of the 44px floor on
+            // a phone.
+            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
           />
         </div>
 
@@ -534,7 +538,7 @@ function BudgetModalForm({
                 <button
                   type="button"
                   onClick={() => addCategoryByName(name)}
-                  className="text-[12.5px] font-semibold text-accent"
+                  className="min-h-11 text-[12.5px] font-semibold text-accent sm:min-h-0"
                 >
                   {BUDGET_COPY.addCategory}
                 </button>
@@ -559,7 +563,12 @@ function BudgetModalForm({
                   type="text"
                   value={row.name}
                   onChange={(event) => renameRow(row.key, event.target.value)}
-                  className="rounded-lg border border-hairline bg-card px-3 py-2 text-[13px]"
+                  // min-h-11/sm:min-h-0: the row's own ✕ button (below) is
+                  // already h-11 on a phone, so this doesn't change the
+                  // row's height -- it aligns the name and cap fields with a
+                  // target that was already 44px instead of floating short
+                  // inside it.
+                  className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] sm:min-h-0"
                 />
                 {(row.archived || row.queuedArchive) && (
                   <span className="text-[11px] text-muted">
@@ -577,13 +586,13 @@ function BudgetModalForm({
                   inputMode="decimal"
                   value={row.capInput}
                   onChange={(event) => capRow(row.key, event.target.value)}
-                  className="rounded-lg border border-hairline bg-card px-3 py-2 text-[13px]"
+                  className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] sm:min-h-0"
                 />
               </div>
               <button
                 type="button"
                 onClick={() => toggleArchiveRow(row.key)}
-                className="text-[11.5px] font-semibold text-label"
+                className="min-h-11 text-[11.5px] font-semibold text-label sm:min-h-0"
               >
                 {row.queuedArchive ? "Unarchive" : BUDGET_COPY.archiveRow}
               </button>
@@ -610,7 +619,7 @@ function BudgetModalForm({
             id="budget-modal-add-select"
             value={addSelectValue}
             onChange={(event) => handleAddSelectChange(event.target.value)}
-            className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
           >
             <option value="">{BUDGET_COPY.chooseACategory}</option>
             {availableToAdd.map((c) => (
@@ -630,12 +639,12 @@ function BudgetModalForm({
                 type="text"
                 value={newCategoryName}
                 onChange={(event) => setNewCategoryName(event.target.value)}
-                className="flex-1 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+                className="min-h-11 flex-1 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
               />
               <button
                 type="button"
                 onClick={handleAddNewCategory}
-                className="rounded-lg border border-hairline px-3.5 py-2.5 text-[13px] font-semibold text-label"
+                className="min-h-11 rounded-lg border border-hairline px-3.5 py-2.5 text-[13px] font-semibold text-label sm:min-h-0"
               >
                 {BUDGET_COPY.addCategory}
               </button>
@@ -658,7 +667,7 @@ function BudgetModalForm({
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label"
+            className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label sm:min-h-0"
           >
             {BUDGET_COPY.cancel}
           </button>
@@ -666,7 +675,7 @@ function BudgetModalForm({
             type="button"
             disabled={isSaving}
             onClick={handleSave}
-            className="flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            className="min-h-11 flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
           >
             {BUDGET_COPY.saveBudget}
           </button>

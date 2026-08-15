@@ -297,7 +297,11 @@ export function MembersPanel() {
           <button
             type="button"
             onClick={() => setInviteOpen(true)}
-            className="text-xs font-semibold text-accent"
+            // min-h-11/sm:min-h-0: a button this size (no padding at all)
+            // falls short of the 44px floor on a phone -- the same gap
+            // TransactionFilters.tsx's own SELECT_CLASS comment measures
+            // for a padded control; here there's no padding to begin with.
+            className="min-h-11 text-xs font-semibold text-accent sm:min-h-0"
           >
             + Invite
           </button>

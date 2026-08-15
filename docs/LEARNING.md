@@ -23,7 +23,7 @@ gets rebuilt.
 
 ### 1. Fixing an instance rarely fixes the class
 
-This happened **fourteen times** — one bullet each below, and the count is the
+This happened **fifteen times** — one bullet each below, and the count is the
 number of bullets, so recount it when you add one (it had already drifted by
 one before the UX-repair round noticed). Almost every time, the fix was
 correct and the sibling kept the bug; two of them are the variant where
@@ -297,6 +297,29 @@ fourth caller needed the same data. **A comment saying "this is deliberately a
 copy of that" is a design decision that expires** — at two it is a judgement
 call, at three it is a shared thing nobody owns. Grep for the endpoint before
 writing a hook for it.
+
+**And a grep-based inventory finds only the spelling it was written for.** The
+mobile-responsive plan's own touch-target task built its Step 1 inventory from
+`grep -rEn 'h-6 w-6|h-7 w-7|py-1\.5'` and fixed every match to a 44px floor —
+correctly, and the review approved it. But `Sidebar.tsx`'s `NAV_ITEM_CLASS`
+reads `px-2.5 py-2`, which that pattern cannot match, so all seven of the
+drawer's own navigation links — the primary touch target of the entire mobile
+experience — shipped at 36.3px, invisible to the sweep that was supposed to
+catch exactly this. A follow-up audit measured every control in a real
+browser instead of grepping for a padding value, and found the same gap
+repeated at roughly twenty more sites across the app: any control whose class
+already read `py-2` or `py-2.5` (not `py-1.5`) was equally invisible to the
+original grep, from `BudgetPage.tsx`'s History/Edit budget buttons to every
+Cancel/Save footer and every labeled field in `AccountModal.tsx`,
+`BillModal.tsx`, `GoalModal.tsx` and `TransactionModal.tsx`. **A grep-based
+inventory is a hypothesis about how the codebase spells the thing you're
+looking for, not a census of it** — the task's own risk paragraph had already
+named "nav rows" as a category to check, and the grep dropped it anyway,
+because grep can only find the string you wrote, never the ones a sibling
+file wrote differently. The fix that actually closed the gap used the brief's
+own stated intent instead: drive the page in a real browser and measure
+`getBoundingClientRect()` on every interactive element, which finds a 36.3px
+link the same way regardless of which Tailwind class produced it.
 
 **And when you change what a value *means*, its readers are the class.** The
 compiler will not find them, because nothing about the type changed; only a
@@ -2225,6 +2248,52 @@ route with a missing guard has no second line of defence.
   household ticking it on a one-off; that residual gap is written down at
   `SubscriptionsCard.tsx`'s own filter for whoever next reads `isSubscription`
   without this same cadence check.
+
+- **`min-height` does nothing on a plain inline element, and a `<button>`'s
+  own centering is a browser default, not a CSS property you can rely on
+  elsewhere.** The mobile-responsive plan's 44px touch-target floor used
+  `min-h-11` everywhere, and it worked immediately on every `<button>`,
+  `<select>` and `<input>` — those are form controls, and Chrome centers
+  their content vertically inside a taller box by default. The same class on
+  a react-router `Link` (which renders a bare `<a>`, `display: inline` unless
+  something else sets it) does two different wrong things depending on
+  context: as a plain inline element, `min-height` is defined by the CSS box
+  model to have **no effect at all**, so the box never grows; once the link
+  is blockified by being a flex-container's direct child (as every
+  `Sidebar.tsx` nav link is), `min-height` *does* start applying, but nothing
+  centers the text inside the taller box, so it sits pinned to the top with
+  dead space below. The fix needed one more utility than the button case:
+  `inline-flex items-center` alongside `min-h-11`, matching the earlier
+  Kind-pill `<label>` fix that had already found the identical gap for
+  `<label>`, another plain-inline element. `inline-flex` rather than `flex`
+  matters too — a `flex`-declared link that is *not* already a flex child
+  (a back-link sitting in a plain `<div>`, say) stretches to its parent's
+  full width, silently enlarging its own click target into the empty space
+  beside the text; `inline-flex` keeps shrink-to-fit sizing everywhere it
+  isn't already being stretched by a parent, and blockifies to the same
+  `flex` result everywhere it is. **Two different lessons in one class name:
+  check whether the element is one of the small set of form controls that
+  self-center before assuming `min-h-*` alone is enough, and use `inline-`
+  variants for anything that starts out `display: inline` so a fix in one
+  layout context doesn't become a regression in another.**
+- **The same icon-button formula that is safe in an isolated corner can break
+  a row with no slack.** `Modal.tsx`'s close button and `BudgetModal.tsx`'s
+  remove-row button had both already shipped `h-11 w-11 sm:h-7 sm:w-7` with
+  no visible cost — each sits alone, with margin around it. Applying the
+  identical formula to `BudgetPage.tsx`'s `‹`/`›` month-picker glyphs, which
+  share a 375px-wide row with History and Edit budget and had no spare width
+  to begin with, pushed "Edit budget" onto two lines the moment the glyphs
+  grew from ~4px wide to 44px — not a height problem, a width one, and one
+  the phone's own household data (a budget already existing, so both
+  siblings render) was needed to see, since an earlier session with no
+  budget never renders the row tight enough to notice. Caught by
+  screenshotting the change, not by trusting that a formula proven in one
+  spot travels to the next one unmodified. Fixed by taking only the height
+  half of the formula (`h-11`, no `w-11`) for this one pair, leaving the
+  established square for every icon button that has the room for it. **A
+  reusable formula is reusable up to the point a sibling's layout has less
+  slack than the site it was proven on — screenshot the applied change in
+  its own tightest real state before assuming the pattern travelled clean.**
 
 ### Tooling and infrastructure
 

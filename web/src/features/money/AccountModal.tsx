@@ -254,7 +254,11 @@ export function AccountModal({
             required
             value={nickname}
             onChange={(event) => setNickname(event.target.value)}
-            className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+            // min-h-11/sm:min-h-0 on every field in this modal:
+            // TransactionFilters.tsx's own SELECT_CLASS comment has the
+            // measured reason py-2.5 alone falls short of the 44px floor
+            // on a phone.
+            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
           />
         </div>
 
@@ -269,7 +273,7 @@ export function AccountModal({
               onChange={(event) =>
                 setOwnerMembershipId(event.target.value === "" ? null : event.target.value)
               }
-              className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             >
               <option value="">Shared</option>
               {members.data?.map((member) => (
@@ -288,7 +292,7 @@ export function AccountModal({
               id="account-type"
               value={type}
               onChange={(event) => setType(event.target.value as AccountType)}
-              className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             >
               {ACCOUNT_TYPES.map((t) => (
                 <option key={t} value={t}>
@@ -324,7 +328,7 @@ export function AccountModal({
                 setBalanceTouched(true);
                 setBalanceInput(event.target.value);
               }}
-              className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             />
           </div>
 
@@ -339,7 +343,7 @@ export function AccountModal({
                 setCurrencyTouched(true);
                 setCurrency(event.target.value);
               }}
-              className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             >
               {currency === "" && <option value="">--</option>}
               {currencies.data?.currencies.map((c) => (
@@ -384,7 +388,7 @@ export function AccountModal({
             required
             value={asOf}
             onChange={(event) => setAsOf(event.target.value)}
-            className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
           />
           <p className="text-[11.5px] leading-snug text-muted">
             The balance at the start of that day — transactions dated that day
@@ -430,14 +434,14 @@ export function AccountModal({
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label"
+            className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label sm:min-h-0"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={mutation.isPending}
-            className="flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            className="min-h-11 flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
           >
             {isEditing ? "Save" : "Add account"}
           </button>

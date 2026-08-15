@@ -109,7 +109,15 @@ export function RecentTransactionsCard() {
         <h2 id="recent-transactions-heading" className="text-xs text-muted">
           {FINANCES_COPY.recentTransactions}
         </h2>
-        <Link to="/money/transactions" className="text-xs font-semibold text-accent">
+        {/* inline-flex items-center min-h-11 sm:min-h-0: a react-router
+            Link renders an <a>, inline by default and (unlike a <button>)
+            never centers its own content -- TransactionFilters.tsx's own
+            SELECT_CLASS comment has the measured reason this size of
+            control falls short of the 44px floor on a phone. */}
+        <Link
+          to="/money/transactions"
+          className="inline-flex min-h-11 items-center text-xs font-semibold text-accent sm:min-h-0"
+        >
           {FINANCES_COPY.seeAll}
         </Link>
       </div>

@@ -112,7 +112,11 @@ export function MarkPaidModal({
               required
               value={amountInput}
               onChange={(event) => setAmountInput(event.target.value)}
-              className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+              // min-h-11/sm:min-h-0 on every field in this modal:
+              // TransactionFilters.tsx's own SELECT_CLASS comment has the
+              // measured reason py-2.5 alone falls short of the 44px floor
+              // on a phone.
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             />
           </div>
 
@@ -126,7 +130,7 @@ export function MarkPaidModal({
               required
               value={paidOn}
               onChange={(event) => setPaidOn(event.target.value)}
-              className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             />
           </div>
         </FieldPair>
@@ -159,14 +163,14 @@ export function MarkPaidModal({
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label"
+            className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label sm:min-h-0"
           >
             {BILL_COPY.cancelAction}
           </button>
           <button
             type="submit"
             disabled={isSaving}
-            className="flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            className="min-h-11 flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
           >
             {BILL_COPY.markPaidSubmit}
           </button>

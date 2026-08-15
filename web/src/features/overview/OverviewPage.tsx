@@ -72,7 +72,13 @@ export function OverviewPage() {
                   {OVERVIEW_COPY.limitedHeading}
                 </h2>
                 <p className="mt-1.5 text-[13px] text-ink">{OVERVIEW_COPY.limitedNoAmounts}</p>
-                <Link to="/money" className="mt-3 text-[13px] font-semibold text-accent">
+                {/* inline-flex items-center min-h-11 sm:min-h-0:
+                    BudgetCard.tsx's own comment on this identical pattern
+                    has the reason. */}
+                <Link
+                  to="/money"
+                  className="mt-3 inline-flex min-h-11 items-center text-[13px] font-semibold text-accent sm:min-h-0"
+                >
                   {OVERVIEW_COPY.limitedGo}
                 </Link>
               </section>

@@ -50,7 +50,17 @@ const SPACE_PAGES: Record<string, { label: string; to: string }[]> = {
 // last in the markup -- that shipped as a defect here (grouped Money links
 // never showed the accent). Give each link exactly one color class, chosen
 // by the caller, so there is nothing for the cascade to arbitrate.
-const NAV_ITEM_CLASS = "rounded-lg px-2.5 py-2 text-[13.5px] font-semibold";
+// inline-flex items-center: a react-router Link renders an <a>, which is
+// inline by default and (unlike <button>/<select>/<input>) never centers its
+// own content -- min-h-11 alone would grow the box but leave the text pinned
+// to the top. min-h-[auto] (not min-h-0) restores at `lg`, the same
+// drawer-tied breakpoint the sign-out button below already uses this
+// reasoning for: these links are flex-column children of <nav>'s own
+// overflow-y-auto column, where a flex item's *initial* min-height is auto,
+// not 0 -- min-h-0 would let a link compress below its content once the
+// column itself runs short of room at `lg`, which min-h-[auto] cannot do.
+const NAV_ITEM_CLASS =
+  "inline-flex min-h-11 items-center rounded-lg px-2.5 py-2 text-[13.5px] font-semibold lg:min-h-[auto]";
 
 function SpaceLink({ space }: { space: Space }) {
   const matchRoute = useMatchRoute();
