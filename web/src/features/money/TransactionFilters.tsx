@@ -30,7 +30,12 @@ export type TransactionFilterValues = {
 };
 
 const SELECT_CLASS =
-  "w-full rounded-lg border border-hairline bg-card px-3 py-1.5 text-[12.5px] text-label sm:w-auto";
+  // min-h-11 clears the 44px floor on a phone -- measured: py-2.5 alone
+  // (padding scaled from vertical rhythm, not the floor) only reaches 39px
+  // against this text's own line-height, 5px short. sm:min-h-0 lets py-1.5
+  // set the desktop height again at the same breakpoint the wrapper already
+  // switches width at.
+  "w-full min-h-11 rounded-lg border border-hairline bg-card px-3 py-2.5 text-[12.5px] text-label sm:min-h-0 sm:w-auto sm:py-1.5";
 const LABEL_CLASS =
   "text-[10.5px] font-semibold uppercase tracking-wide text-muted";
 // Each filter takes the row's full width on a phone rather than sizing to
@@ -88,7 +93,10 @@ export function TransactionFilters({
             return (
               <label
                 key={option.value || "all"}
-                className={`cursor-pointer px-3 py-1.5 text-[12.5px] font-semibold has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset ${
+                // min-h-11/sm:min-h-0: same 44px-floor reasoning as
+                // SELECT_CLASS above -- py-2.5 alone measured 5px short of
+                // the floor against this text's own line-height.
+                className={`flex min-h-11 cursor-pointer items-center px-3 py-2.5 text-[12.5px] font-semibold has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset sm:min-h-0 sm:py-1.5 ${
                   // The ring colour has to change with the pill's own
                   // background: `ring-accent` (a dark green) is invisible
                   // inset against the selected pill's `bg-ink`, which is

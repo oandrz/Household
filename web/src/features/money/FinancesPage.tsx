@@ -67,7 +67,10 @@ function FirstRunPanel({
         <button
           type="button"
           onClick={() => setAddOpen(true)}
-          className="mt-2 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white"
+          // min-h-11/sm:min-h-0: py-2.5 alone measured short of the 44px
+          // floor at this text size -- TransactionFilters.tsx's own
+          // SELECT_CLASS comment has the measured numbers.
+          className="mt-2 min-h-11 rounded-lg bg-accent px-3 py-2.5 text-xs font-semibold text-white sm:min-h-0 sm:py-1.5"
         >
           {FINANCES_COPY.addAccount}
         </button>

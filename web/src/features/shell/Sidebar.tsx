@@ -169,7 +169,11 @@ export function Sidebar({ me }: { me: Me }) {
           aria-label="Sign out"
           onClick={handleSignOut}
           disabled={signOut.isPending}
-          className="grid h-6 w-6 flex-none place-items-center rounded-md text-[13px] text-label disabled:opacity-60"
+          // 44px floor on phones; restores at `lg`, not `sm` -- this button
+          // lives inside the drawer, which switches at `lg`, so a 768px
+          // tablet still driving the touch drawer must not fall back to a
+          // 24px target.
+          className="grid h-11 w-11 flex-none place-items-center rounded-md text-[13px] text-label disabled:opacity-60 lg:h-6 lg:w-6"
         >
           ⏻
         </button>

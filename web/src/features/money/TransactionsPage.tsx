@@ -457,7 +457,10 @@ export function TransactionsPage() {
               <button
                 type="button"
                 onClick={() => setFilters(EMPTY_TRANSACTION_FILTERS)}
-                className="rounded-lg border border-hairline px-3 py-1.5 text-xs font-semibold text-accent"
+                // min-h-11/sm:min-h-0: py-2.5 alone measured short of the
+                // 44px floor at this text size -- TransactionFilters.tsx's
+                // own SELECT_CLASS comment has the measured numbers.
+                className="min-h-11 rounded-lg border border-hairline px-3 py-2.5 text-xs font-semibold text-accent sm:min-h-0 sm:py-1.5"
               >
                 {TRANSACTIONS_COPY.noMatchesAction}
               </button>

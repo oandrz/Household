@@ -148,7 +148,9 @@ export function Modal({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="grid h-7 w-7 flex-none place-items-center rounded-lg bg-canvas text-[13px] text-label"
+            // 44px floor on phones, restoring at `sm`: modals aren't tied to
+            // the shell's `lg` nav switch, so the pointer breakpoint is fine.
+            className="grid h-11 w-11 flex-none place-items-center rounded-lg bg-canvas text-[13px] text-label sm:h-7 sm:w-7"
           >
             ✕
           </button>

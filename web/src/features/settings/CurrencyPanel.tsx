@@ -145,12 +145,15 @@ export function CurrencyPanel() {
                     setCurrencyInput(event.target.value.toUpperCase().slice(0, 3));
                   }}
                   maxLength={3}
-                  className="w-16 rounded-lg border border-hairline px-3 py-1.5 text-center font-semibold uppercase text-ink disabled:cursor-not-allowed disabled:opacity-60"
+                  // min-h-11/sm:min-h-0: py-2.5 alone measured short of the
+                  // 44px floor at this text size -- TransactionFilters.tsx's
+                  // own SELECT_CLASS comment has the measured numbers.
+                  className="min-h-11 w-16 rounded-lg border border-hairline px-3 py-2.5 text-center font-semibold uppercase text-ink disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:py-1.5"
                 />
                 <button
                   type="submit"
                   disabled={!canSaveCurrency}
-                  className="rounded-lg bg-accent px-2.5 py-1.5 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  className="min-h-11 rounded-lg bg-accent px-2.5 py-2.5 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:py-1.5"
                 >
                   Save
                 </button>

@@ -591,7 +591,10 @@ function BudgetModalForm({
                 type="button"
                 aria-label={BUDGET_COPY.removeRow}
                 onClick={() => removeRow(row.key)}
-                className="grid h-7 w-7 flex-none place-items-center rounded-lg bg-canvas text-[12px] text-label"
+                // 44px floor on phones, restoring at `sm`: same reasoning as
+                // Modal.tsx's close button -- this modal isn't tied to the
+                // shell's `lg` nav switch.
+                className="grid h-11 w-11 flex-none place-items-center rounded-lg bg-canvas text-[12px] text-label sm:h-7 sm:w-7"
               >
                 ✕
               </button>
