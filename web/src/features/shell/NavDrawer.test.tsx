@@ -74,4 +74,22 @@ describe("NavDrawer", () => {
     rerender(<Harness open={false} onClose={() => {}} />);
     expect(document.activeElement).toBe(trigger());
   });
+
+  // Task 3 passes an inline arrow (`onClose={() => setNavOpen(false)}`), a
+  // fresh function identity on every render of its parent. If the
+  // focus-management effect depended on that identity, an unrelated parent
+  // re-render while the drawer is open would tear the effect down and set it
+  // back up, yanking focus off whatever the user had tabbed to inside the
+  // drawer and back onto the panel.
+  it("does not move focus when a re-render supplies a new onClose identity", () => {
+    const { rerender } = render(<Harness open onClose={() => {}} />);
+
+    const link = screen.getByRole("link", { name: "Overview" });
+    link.focus();
+    expect(document.activeElement).toBe(link);
+
+    rerender(<Harness open onClose={() => {}} />);
+
+    expect(document.activeElement).toBe(link);
+  });
 });

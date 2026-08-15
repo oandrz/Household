@@ -11,6 +11,17 @@
 // below -- Escape, focus in, focus back -- and NavDrawer.test.tsx covers all
 // three because hand-written versions are exactly what regresses silently.
 //
+// The focus-management effect below is keyed on `[open]` alone, not on
+// `onClose` too. A caller passing an inline arrow (`onClose={() => setNavOpen(false)}`,
+// which is what Task 3 writes) gets a new function identity on every render
+// of its parent -- if that identity were a dependency, any unrelated
+// re-render while the drawer is open would tear the effect down and set it
+// back up, yanking focus from wherever the user had tabbed to back onto the
+// drawer's outer container. `onCloseRef` breaks that link: the keydown
+// handler always reads the *latest* `onClose` through the ref, so the ref
+// can change on every render without the effect -- and the focus move it
+// owns -- ever re-running.
+//
 // `lg:contents` is what guarantees the desktop layout is untouched: at `lg`
 // this wrapper stops generating a box at all, so Sidebar becomes the grid
 // child of AppShell's two-column grid again, precisely as it was before this
@@ -42,6 +53,13 @@ export function NavDrawer({
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+
+  // Kept current on every render, deliberately outside the effect below --
+  // this is what lets that effect ignore `onClose`'s identity entirely.
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!open) return;
@@ -54,7 +72,7 @@ export function NavDrawer({
     panelRef.current?.focus();
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") onCloseRef.current();
     }
     document.addEventListener("keydown", handleKeyDown);
 
@@ -65,7 +83,7 @@ export function NavDrawer({
         previouslyFocused.focus();
       }
     };
-  }, [open, onClose]);
+  }, [open]);
 
   return (
     <>
@@ -73,14 +91,14 @@ export function NavDrawer({
         <div
           data-testid="nav-drawer-backdrop"
           onClick={onClose}
-          className="fixed inset-0 z-30 bg-black/40 lg:hidden"
+          className="fixed inset-0 z-40 bg-black/40 lg:hidden"
         />
       )}
       <div
         ref={panelRef}
         tabIndex={-1}
         data-testid="nav-drawer"
-        className={`fixed left-0 top-0 z-40 flex h-dvh w-[236px] flex-col overflow-y-auto transition-transform lg:contents ${
+        className={`fixed left-0 top-0 z-50 flex h-dvh w-[236px] flex-col overflow-y-auto transition-transform lg:contents ${
           open ? "visible translate-x-0" : "invisible -translate-x-full lg:visible"
         }`}
       >
