@@ -38,6 +38,7 @@ import { Link } from "@tanstack/react-router";
 import { ApiError } from "../../api/client";
 import { useCurrencies } from "../auth/useAuth";
 import { useAccounts } from "./useAccounts";
+import { PageContainer } from "../../components/PageContainer";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { apiErrorMessage } from "../auth/copy";
 import { BillModal } from "./BillModal";
@@ -292,7 +293,7 @@ export function BillsPage() {
     summary.nextDue?.overdue !== true;
 
   return (
-    <div data-testid="bills-page" className="flex flex-col gap-5 px-9 py-8">
+    <PageContainer data-testid="bills-page">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-[23px] font-semibold tracking-[-0.02em] text-ink">{BILL_COPY.title}</h1>
@@ -577,6 +578,6 @@ export function BillsPage() {
           }}
         />
       )}
-    </div>
+    </PageContainer>
   );
 }

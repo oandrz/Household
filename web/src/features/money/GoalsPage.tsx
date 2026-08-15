@@ -12,6 +12,7 @@
 import { useState } from "react";
 import { ApiError } from "../../api/client";
 import { useCurrencies } from "../auth/useAuth";
+import { PageContainer } from "../../components/PageContainer";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { GoalCard } from "./GoalCard";
 import { GoalContributionsPanel } from "./GoalContributionsPanel";
@@ -126,7 +127,7 @@ export function GoalsPage() {
   const noneArchived = includeArchived && data.goals.length > 0 && data.goals.every((g) => g.archivedAt === null);
 
   return (
-    <div data-testid="goals-page" className="flex flex-col gap-5 px-9 py-8">
+    <PageContainer data-testid="goals-page">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-[23px] font-semibold tracking-[-0.02em] text-ink">{GOAL_COPY.title}</h1>
@@ -275,6 +276,6 @@ export function GoalsPage() {
           onClose={() => setContributingGoal(null)}
         />
       )}
-    </div>
+    </PageContainer>
   );
 }

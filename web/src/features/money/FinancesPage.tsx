@@ -9,6 +9,7 @@
 // reason -- the API answers with one point in time, not a series.
 import { useState } from "react";
 import { useMe } from "../auth/useAuth";
+import { PageContainer } from "../../components/PageContainer";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { AccountModal } from "./AccountModal";
 import { AccountsPanel } from "./AccountsPanel";
@@ -106,7 +107,7 @@ export function FinancesPage() {
   // card in this state, only the accounts they've been given visibility into.
   if (!summary) {
     return (
-      <div className="flex flex-col gap-5 px-9 py-8">
+      <PageContainer>
         <PageHeader />
         <AccountsPanel
           accounts={rows}
@@ -114,7 +115,7 @@ export function FinancesPage() {
           onIncludeArchivedChange={setIncludeArchived}
           emptyMessage={FINANCES_COPY.limitedEmpty}
         />
-      </div>
+      </PageContainer>
     );
   }
 
@@ -129,19 +130,19 @@ export function FinancesPage() {
   // is correct regardless of which position that is.
   if (rows.length === 0) {
     return (
-      <div className="flex flex-col gap-5 px-9 py-8">
+      <PageContainer>
         <PageHeader />
         <FirstRunPanel
           canAdd={isOwner}
           includeArchived={includeArchived}
           onIncludeArchivedChange={setIncludeArchived}
         />
-      </div>
+      </PageContainer>
     );
   }
 
   return (
-    <div className="flex flex-col gap-5 px-9 py-8">
+    <PageContainer>
       <PageHeader />
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <NetWorthCard summary={summary} />
@@ -162,6 +163,6 @@ export function FinancesPage() {
         includeArchived={includeArchived}
         onIncludeArchivedChange={setIncludeArchived}
       />
-    </div>
+    </PageContainer>
   );
 }

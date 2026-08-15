@@ -3,6 +3,7 @@
 // region, and Notifications. The fifth, Connected accounts, belongs to a
 // later slice (per the task brief) and is omitted entirely -- not rendered
 // disabled, not stubbed, simply not here yet.
+import { PageContainer } from "../../components/PageContainer";
 import { CurrencyPanel } from "./CurrencyPanel";
 import { MembersPanel } from "./MembersPanel";
 import { NotificationsPanel } from "./NotificationsPanel";
@@ -10,7 +11,7 @@ import { SpacesPanel } from "./SpacesPanel";
 
 export function SettingsPage() {
   return (
-    <div className="flex flex-col gap-5 px-9 py-8">
+    <PageContainer>
       <div>
         <h1 className="text-[23px] font-semibold tracking-[-0.02em] text-ink">
           Settings
@@ -33,6 +34,6 @@ export function SettingsPage() {
       </div>
 
       <NotificationsPanel />
-    </div>
+    </PageContainer>
   );
 }

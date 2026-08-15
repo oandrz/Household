@@ -11,6 +11,7 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { apiFetch, ApiError } from "../../api/client";
+import { PageContainer } from "../../components/PageContainer";
 import { useCurrencies } from "../auth/useAuth";
 import { useHouseholdMembers } from "../settings/useHouseholdMembers";
 import { formatMoney } from "./formatMoney";
@@ -390,7 +391,7 @@ export function TransactionsPage() {
   const groups = groupByDay(rows);
 
   return (
-    <div className="flex flex-col gap-5 px-9 py-8">
+    <PageContainer>
       <div className="flex items-start justify-between gap-4">
         <div>
           <Link to="/money" className="mb-1 inline-block text-xs font-semibold text-accent">
@@ -547,6 +548,6 @@ export function TransactionsPage() {
           members={members}
         />
       )}
-    </div>
+    </PageContainer>
   );
 }

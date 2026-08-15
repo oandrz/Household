@@ -25,6 +25,7 @@ import { useState } from "react";
 import { ApiError } from "../../api/client";
 import { useCurrencies } from "../auth/useAuth";
 import { Modal } from "../../components/Modal";
+import { PageContainer } from "../../components/PageContainer";
 import { BudgetHistoryModal } from "./BudgetHistoryModal";
 import { BudgetModal } from "./BudgetModal";
 import { BUDGET_COPY } from "./budgetCopy";
@@ -235,7 +236,7 @@ export function BudgetPage() {
   }
 
   return (
-    <div className="flex flex-col gap-5 px-9 py-8" data-testid="budget-page">
+    <PageContainer data-testid="budget-page">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-[23px] font-semibold tracking-[-0.02em] text-ink">{BUDGET_COPY.title}</h1>
@@ -515,6 +516,6 @@ export function BudgetPage() {
             </p>
           </Modal>
         ))}
-    </div>
+    </PageContainer>
   );
 }
