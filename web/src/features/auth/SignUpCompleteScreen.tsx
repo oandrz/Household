@@ -49,12 +49,16 @@ function SignUpTokenError({ error }: { error: unknown }) {
 
   return (
     <main className="min-h-dvh grid place-items-center bg-canvas p-6 font-sans text-ink">
-      <div className="flex flex-col items-center gap-[22px]">
+      {/* w-full: main's `place-items-center` leaves this wrapper shrink-to-fit,
+          so the card's `max-w-[428px]` below has no definite containing block
+          to resolve its `w-full` against -- without this, the card silently
+          shrinks to its content's own width (measured 280px) at 1440. */}
+      <div className="w-full flex flex-col items-center gap-[22px]">
         <div className="flex items-center gap-2.5">
           <div className="h-[30px] w-[30px] rounded-[9px] bg-accent" />
           <div className="text-[17px] font-semibold tracking-[-0.01em]">Hearth</div>
         </div>
-        <div className="w-[428px] rounded-2xl border border-hairline bg-card px-8 pb-[26px] pt-[30px] text-center shadow-[var(--shadow-auth-card)]">
+        <div className="w-full max-w-[428px] rounded-2xl border border-hairline bg-card px-8 pb-[26px] pt-[30px] text-center shadow-[var(--shadow-auth-card)]">
           <h1 className="mb-1 mt-0.5 font-serif text-[27px] font-medium tracking-[-0.015em]">
             That link won't work.
           </h1>
@@ -312,13 +316,17 @@ export function SignUpCompleteScreen({ token }: { token: string }) {
 
   return (
     <main className="min-h-dvh grid place-items-center bg-canvas p-6 font-sans text-ink">
-      <div className="flex flex-col items-center gap-[22px]">
+      {/* w-full: main's `place-items-center` leaves this wrapper shrink-to-fit,
+          so the card's `max-w-[428px]` below has no definite containing block
+          to resolve its `w-full` against -- without this, the card silently
+          shrinks to its content's own width (measured 280px) at 1440. */}
+      <div className="w-full flex flex-col items-center gap-[22px]">
         <div className="flex items-center gap-2.5">
           <div className="h-[30px] w-[30px] rounded-[9px] bg-accent" />
           <div className="text-[17px] font-semibold tracking-[-0.01em]">Hearth</div>
         </div>
 
-        <div className="w-[428px] rounded-2xl border border-hairline bg-card px-8 pb-[26px] pt-[30px] shadow-[var(--shadow-auth-card)]">
+        <div className="w-full max-w-[428px] rounded-2xl border border-hairline bg-card px-8 pb-[26px] pt-[30px] shadow-[var(--shadow-auth-card)]">
           {/* A quiet loading line, not a blank card, while the preview is in
               flight -- a blank screen reads as a broken link. */}
           {preview.isPending && (
