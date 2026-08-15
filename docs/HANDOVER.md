@@ -885,7 +885,13 @@ by the same index a name lookup uses):
   describe (household-wide uncapped lockout, magic link as the only
   documented way back in, mail failing silently) is unchanged in its own
   right, but is no longer a dead end: `unlock-household --email` now exists
-  as the second way back in. `make reset-password` remains the *product's*
+  as the second way back in. **Read "exists" narrowly.** The command is built
+  and wired, and the `admin` image has been run against the live database
+  (`goose status`, 2026-08-15) — but `unlock-household` itself has **never been
+  run in production**. It is criterion 8 of the verification walk and that
+  criterion is unrun, so this is a path believed to work, not one shown to.
+  Anyone relying on it during an actual lockout would be trying it for the
+  first time under pressure. Run it once on a calm day. `make reset-password` remains the *product's*
   only self-serve-adjacent recovery path in the sense the tracker's 🟡 on
   "Forgot?" describes — that gap is about the missing UI flow, not about
   whether an operator can reach the database.
