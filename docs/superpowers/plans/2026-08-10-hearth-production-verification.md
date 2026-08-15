@@ -167,8 +167,21 @@ fires before the send rather than after — the budget bounds mail, which is wha
 `signUpRequestsPerIPPerHour`'s comment says it is for.
 
 Criterion 2 ran in ADR 3's reduced form: the submission was made from the phone
-and answered `202`, and the link was left unopened on purpose — completing it
-would have created a second household. Criterion 4 already proved completion.
+and answered `202`.
+
+**Correction, same day:** this section first recorded that the link was left
+unopened on purpose. It was not — the phone completed the flow, and a second
+household `Walkphone` (`walkphone@example.com`, created 08:13:44) exists in the
+production database as a result. That makes criterion 2 a *stronger* pass than
+planned: a full sign-up, completed end to end, from a genuinely separate network
+on a phone. It also means **the first walk of this install left test data in
+production**, which is recorded here rather than quietly deleted, because a
+verification document that describes a tidier run than the one that happened is
+worse than none.
+
+Also left behind: five unconsumed `walk-laptop-N@example.com` signup rows from
+the rate-limit test. Those expire 24 hours after creation and
+`adminctl prune --older-than=…` removes them; they need no manual action.
 
 **Unrelated but worth recording: the box was being scanned within 25 minutes of
 going live.** `205.169.39.55` probed `/api/v1/auth/sign-up` with a Windows
