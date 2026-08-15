@@ -2350,6 +2350,25 @@ no test suite can hold.
   product one**; check `form.checkValidity()` and the invalid-field list before
   concluding anything. (The actual cause the third time was simpler still: a
   `required` field left blank. Native validation worked.)
+- **An alarm nobody has fired is not monitoring.** The uptime check was created
+  and then deliberately proven by stopping `api` for four minutes and waiting for
+  the alert to actually arrive. Same discipline as the escrow drill, and the same
+  reason: the moment you need it is the worst possible moment to discover it was
+  misconfigured. Before causing the outage, schedule an unconditional recovery
+  (`systemd-run --on-active=8min …`) so a dead session cannot leave production
+  down.
+- **The plan asked for two monitors and only one got built.** healthchecks.io
+  answers *did the backup run*; nothing answered *is the site up*. Both were in
+  Task 7 step 10 and the gap survived a twelve-criterion walk, because the walk's
+  criteria never mentioned monitoring — **a checklist only catches what is on
+  it**, and the thing that was skipped was the one nobody had written a criterion
+  for.
+- **The same outage presents two different ways within a minute.** With `api`
+  stopped, nginx first *hangs* (`HTTP 000`, no response) for ~40 seconds while it
+  holds a cached upstream address for the container, then settles into a clean
+  `502`. A visitor at 10 seconds sees a frozen browser; a visitor at 90 seconds
+  sees an error page. Same fault, two symptoms, and they get diagnosed
+  differently — which is how one incident becomes two bug reports.
 - **The record has to describe the run that happened.** This walk's criterion 2
   was written up as "link deliberately left unopened" — and then the phone
   completed the flow, leaving a real test household in the production database.

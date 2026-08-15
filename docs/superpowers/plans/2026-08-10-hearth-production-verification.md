@@ -188,6 +188,42 @@ going live.** `205.169.39.55` probed `/api/v1/auth/sign-up` with a Windows
 Chrome user-agent and got `405`. Nothing was wrong with the response; it is
 noted because it is the concrete answer to "who would bother attacking this".
 
+## Beyond the twelve — the uptime alarm was fired on purpose (2026-08-15)
+
+The twelve criteria do not include "does anyone find out when the site is
+down". They should have: the plan's Task 7 step 10 asked for **two** monitors
+and only healthchecks.io was set up, which answers *did the backup run* and says
+nothing about *is the site up*.
+
+An UptimeRobot keyword monitor now polls `https://oink.mywire.org/readyz` every
+five minutes for the string `ready`. **Keyword rather than plain HTTP**, because
+a plain check passes on any `200`, while `/readyz` is meaningful precisely
+because it pings the database — a future change returning `200` with an error
+body should still trip the alarm.
+
+**Then it was tested by causing a real outage**, on the principle that an
+untested alarm is the same mistake as an untested escrow. `api` was stopped for
+about four minutes; the alert arrived; `api` was started and the site recovered.
+Before stopping anything, a `systemd-run --on-active=8min` unit was scheduled to
+start `api` unconditionally, so a dead session could not leave the site down —
+worth repeating for any deliberate-outage test.
+
+**One finding, worth knowing at 2am.** The outage does not present the same way
+throughout:
+
+```
+t+4s    HTTP 000     <- connections HANG, no response at all
+t+38s   HTTP 000
+t+72s   HTTP 502     <- and a clean 502 from here on
+```
+
+For roughly the first 40 seconds nginx holds its cached upstream address for the
+`api` container and requests hang rather than failing fast; once that resolution
+goes stale it returns a clean `502`. So a visitor in the first window sees a
+spinning browser and a visitor a minute later sees an error page — **the same
+fault, diagnosed two completely different ways**. Not worth fixing for a
+two-person install, but worth recognising rather than chasing as two bugs.
+
 ## What is outstanding, and why
 
 **8 was blocked by the agent's sandbox**, not by the box. To run:
