@@ -294,7 +294,13 @@ export function BillsPage() {
 
   return (
     <PageContainer data-testid="bills-page">
-      <div className="flex items-start justify-between gap-4">
+      {/* flex-wrap: pre-existing 320px violation (predates this branch --
+          confirmed against 31e9d85) -- the archived toggle plus "+ Add bill"
+          never had room beside the title once a real subtitle line and a
+          vertical scrollbar were both present. Wrapping the action cluster
+          onto its own line costs nothing at 1440, where it already has room
+          to sit beside the title. */}
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-[23px] font-semibold tracking-[-0.02em] text-ink">{BILL_COPY.title}</h1>
           {summary.billCount > 0 && (

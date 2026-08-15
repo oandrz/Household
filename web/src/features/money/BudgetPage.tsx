@@ -237,7 +237,12 @@ export function BudgetPage() {
 
   return (
     <PageContainer data-testid="budget-page">
-      <div className="flex items-start justify-between gap-4">
+      {/* flex-wrap: the same header-row overflow BillsPage.tsx's own header
+          comment describes -- the month picker plus History and Edit budget
+          never had room beside the title at 320px. Not caught before this
+          task because no browser walk had a real budget (with History and
+          Edit budget both rendering) at a phone width until now. */}
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-[23px] font-semibold tracking-[-0.02em] text-ink">{BUDGET_COPY.title}</h1>
           {/* Always names the month (spec screen state 4: "the header still
