@@ -31,7 +31,7 @@ Constraints:
 | TLS | **Caddy in front, as the edge** | Automatic Let's Encrypt issuance *and renewal*, forever, with no certbot cron to rot. `web/nginx.conf` stays exactly as it is |
 | Database | **Postgres in the Compose stack, on the same box** | ADR 1 — plain Postgres we own. Not a managed service, and explicitly not a second provider |
 | Backups | **Nightly `pg_dump` in plain SQL to Backblaze B2 or Cloudflare R2**, plus Hetzner snapshots | The off-provider dump is the real backup; snapshots are for fast recovery. Free at this data size |
-| Mail | **Resend**, free plan | 3,000/month, 100/day, one verified domain, SMTP relay. Fits the existing `SMTP_ADDR` / `SMTP_USERNAME` / `SMTP_PASSWORD` configuration surface with no code change |
+| Mail | ~~**Resend**, free plan~~ **— SUPERSEDED by [ADR 3](0003-mail-stays-on-the-box.md), 2026-08-12.** Mail runs on Mailpit inside the stack and is read by hand | Resend needs a domain whose DNS accepts `TXT` records for DKIM, and this install's free DDNS hostname does not. The configuration surface below was the reason for choosing it and is still the reason the switch back is cheap: `SMTP_ADDR` / `SMTP_USERNAME` / `SMTP_PASSWORD` with no code change, in either direction |
 | Domain | An at-cost registrar (Cloudflare Registrar, or Porkbun), registered long, auto-renew on | See "the domain is the fragile part" below |
 
 Roughly **S$10–13/month** all in, against S$20 today. Prices moved twice in 2026
