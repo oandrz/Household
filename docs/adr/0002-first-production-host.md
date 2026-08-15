@@ -31,7 +31,7 @@ Constraints:
 
 | Piece | Choice | Why |
 |---|---|---|
-| Compute | ~~**Hetzner Cloud CPX11, Singapore region**~~ → **Hetzner Cloud CX23, Helsinki** (amended 2026-08-15) | Cheapest credible VPS that runs the whole stack; a household's Postgres is a few MB for years. The region and machine both changed at purchase — see the amendment below |
+| Compute | ~~**Hetzner Cloud CPX11, Singapore region**~~ → **Hetzner Cloud CX23, Falkenstein** (amended 2026-08-15) | Cheapest credible VPS that runs the whole stack; a household's Postgres is a few MB for years. The region and machine both changed at purchase — see the amendment below |
 | TLS | **Caddy in front, as the edge** | Automatic Let's Encrypt issuance *and renewal*, forever, with no certbot cron to rot. `web/nginx.conf` stays exactly as it is |
 | Database | **Postgres in the Compose stack, on the same box** | ADR 1 — plain Postgres we own. Not a managed service, and explicitly not a second provider |
 | Backups | **Nightly `pg_dump` in plain SQL to Backblaze B2 or Cloudflare R2**, plus Hetzner snapshots | The off-provider dump is the real backup; snapshots are for fast recovery. Free at this data size |
@@ -58,7 +58,7 @@ This is an availability fact, not a preference that could be argued with.
 
 Priced at the console, both currencies as shown there:
 
-| | Singapore `CPX12` | Helsinki `CX23` |
+| | Singapore `CPX12` | Falkenstein `CX23` |
 |---|---|---|
 | vCPU | 1 | **2** |
 | RAM | 2 GB | **4 GB** |
@@ -72,6 +72,38 @@ as a preference — "South-East Asia *beats* Europe or the US for latency". Beat
 not requires. The hard constraint is the one that was failing, so the preference
 gave way.
 
+**Falkenstein, not Helsinki — measured, not assumed.** Hetzner's three EU
+locations price the `CX` line identically, so latency to the household is the
+only thing separating them. It was measured from the owner's actual network in
+Singapore against Hetzner's per-location speed-test hosts, twice, at 8 and 20
+packets:
+
+| Location | min | avg | stddev | max |
+|---|---|---|---|---|
+| `fsn1` Falkenstein | 193.8 ms | **195.5 / 196.3 ms** | **2.1 / 1.7** | 199.7 ms |
+| `nbg1` Nuremberg | 191.9 ms | 195.0 / 197.8 ms | 1.8 / 9.8 | 239.8 ms |
+| `hel1` Helsinki | 215.6 ms | 246.0 / 239.6 ms | 28.3 / 29.1 | 307.3 ms |
+
+Helsinki is **~22 ms worse at the floor and ~45 ms worse on average, with
+roughly fifteen times the jitter** — and both runs agree, so this is routing,
+not a transient. The minimum is the honest number here because it is the figure
+least polluted by momentary congestion, and Helsinki's floor is genuinely
+further away.
+
+Falkenstein and Nuremberg are within 1–2 ms of each other, which is noise.
+Falkenstein takes it on stability — the tightest spread in both runs — and
+because it is Hetzner's largest and oldest site, so capacity and feature
+availability are best there over a long horizon. Nuremberg would be an equally
+defensible pick; Helsinki would not.
+
+Reproduce this before assuming it still holds — routes change:
+
+```bash
+for h in fsn1-speed.hetzner.com nbg1-speed.hetzner.com hel1-speed.hetzner.com; do
+  printf "%-28s " "$h"; ping -c 20 -q "$h" | tail -1
+done
+```
+
 **`CX23`, not `CX33`.** 4 GB is roughly four times what this stack idles at
 (Postgres, a static Go binary, nginx, Caddy, Mailpit). Hetzner's June 2026 terms
 grandfather an existing server's price **unless it is rescaled**, so sizing is
@@ -81,14 +113,21 @@ one resize is not a saving.
 
 ## Consequences
 
-**Every request from the household now crosses ~170 ms of ocean, accepted.**
-This is the cost of the amendment above and it is not free. It is tolerable here
-for reasons specific to this product: the SPA is static files nginx serves once
-and the browser caches, so only JSON calls pay the round trip; there are two
-users; and nothing in Hearth is latency-sensitive the way a game or a trading
-screen is. **If this ever feels slow in real use, that is data, not noise** —
-record it, because it is the one thing this amendment traded away, and ADR 1's
-whole point is that moving back is a new box, a restored dump and a DNS change.
+**Every request from the household now crosses ~195 ms of ocean, accepted.**
+That figure is measured from the owner's network, not estimated — see the table
+in the amendment. This is the cost of moving to the EU and it is not free. It is
+tolerable here for reasons specific to this product: the SPA is static files
+nginx serves once and the browser caches, so only JSON calls pay the round trip;
+there are two users; and nothing in Hearth is latency-sensitive the way a game
+or a trading screen is.
+
+**If this ever feels slow in real use, that is data, not noise** — record it. It
+is the one thing this amendment traded away, and ADR 1's whole point is that
+moving back is a new box, a restored dump and a DNS change. Two shapes to reach
+for before moving, in that order, because both are cheaper than a migration: put
+a CDN in front of the static bundle so only the API crosses the ocean, and batch
+or optimistically render the writes that feel worst. Neither has been needed
+yet, and neither should be built speculatively.
 
 **Caddy in front of nginx is two proxies, and that breaks the sign-up rate
 limiter unless configured.** `web/nginx.conf` overwrites `X-Real-IP` with

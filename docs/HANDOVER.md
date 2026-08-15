@@ -406,7 +406,7 @@ Two ADRs carry the reasoning; read them before changing any of it:
   own identity layer are load-bearing properties rather than incidental ones,
   and why Vercel and Supabase were rejected on architecture rather than price.
 - **`docs/adr/0002-first-production-host.md`** — the concrete purchase: a
-  Hetzner CX23 in Helsinki running the existing Compose stack, Caddy in
+  Hetzner CX23 in Falkenstein running the existing Compose stack, Caddy in
   front for automatic TLS, Postgres on the same box, nightly plain-SQL
   `pg_dump` off-provider, Resend's free plan for mail. Roughly S$10–13/month.
 

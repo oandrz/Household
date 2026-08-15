@@ -14,7 +14,7 @@ Two ADRs sit above this document and are not restated here:
   run Hearth for roughly forty years, so hosts are chosen for how cheaply we can
   leave them, not how long they are expected to last.
 - **`docs/adr/0002-first-production-host.md`** — the concrete purchase: one
-  Hetzner CX23 in Helsinki (amended 2026-08-15 from CPX11/Singapore; ADR 2), Caddy for TLS, Postgres in the stack, Mailpit on the box for
+  Hetzner CX23 in Falkenstein (amended 2026-08-15 from CPX11/Singapore; ADR 2), Caddy for TLS, Postgres in the stack, Mailpit on the box for
   mail.
 
 ## Decisions
@@ -193,7 +193,7 @@ there, moving it is its own piece of work and is not in this spec.
 graph TD
     Internet["Internet"]
 
-    subgraph box["One VPS — Hetzner CX23, Helsinki"]
+    subgraph box["One VPS — Hetzner CX23, Falkenstein"]
         Caddy["caddy :443<br/>auto TLS, the only trusted proxy"]
         Nginx["web — nginx :80<br/>SPA + /api, set_real_ip_from caddy"]
         API["api :8080<br/>distroless, no shell"]
