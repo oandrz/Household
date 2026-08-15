@@ -15,6 +15,24 @@ needed them to exist (see "Where things stand" below).
 
 **Where things stand:** 72 of 102 features built or partly built.
 
+> **In production since 2026-08-15**, at <https://oink.mywire.org>. **No count
+> below changes** — deployment is not a design feature, and this file's totals
+> are a measure of the product against `design/Household Dashboard.dc.html`, not
+> of the install. `docs/SYSTEM_DESIGN.md` §8 and `docs/HANDOVER.md` §1 carry the
+> deployment's own state.
+>
+> **One caveat does change how some ✅ rows behave in production, without
+> changing whether they are built.** Under
+> [ADR 3](adr/0003-mail-stays-on-the-box.md) no mail leaves the box, so every
+> feature whose flow runs through an email — sign-up, **inviting a member**,
+> magic-link recovery, notification preferences — works exactly as built but
+> reaches its recipient only if the owner opens Mailpit over an SSH tunnel and
+> passes the link along by hand. Inviting a third person is therefore not
+> self-service on the live install today. The rows stay ✅ because the code is
+> built and verified; the constraint is the host's DNS, and the ADR's exit
+> condition is the day someone who is not Andreas or Christine needs to receive
+> an email.
+
 **The Bills update, recorded before the ones below it — Money's fifth and
 last feature.** Every number below is a fresh count of the ✅/🟡/⬜/🚫 symbols
 in the tables — the first symbol in each row's own cell, whichever comes

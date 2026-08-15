@@ -10,6 +10,37 @@ in three months or someone new.
 
 ## 1. Where things stand
 
+> **Hearth is in production, since 2026-08-15.**
+> <https://oink.mywire.org> — one Hetzner CX23 in Falkenstein, `5.75.239.188`,
+> running the Compose stack behind Caddy. A real household exists on it and was
+> created through the real sign-up form.
+>
+> **Nine of the twelve verification criteria pass**, recorded criterion by
+> criterion in
+> `docs/superpowers/plans/2026-08-10-hearth-production-verification.md`. Nothing
+> in the product broke during the walk. Criterion 3 is deferred by
+> [ADR 3](adr/0003-mail-stays-on-the-box.md) (no mail leaves the box), criterion
+> 7 is half done (magic-link recovery proven, the lockout half not run), and
+> criterion 8 (`adminctl unlock-household` against the live database) is simply
+> unrun.
+>
+> **🔴 There are no backups.** The scripts exist and a restore has been
+> rehearsed on a laptop, but the live box has no `age` key, no bucket, no
+> `rclone` remote, no cron and no escrow envelope. **Losing the box loses the
+> household.** This is the single largest open item and it is unbuilt
+> infrastructure, not a failed check. Do this before putting anything in that
+> would hurt to retype.
+>
+> Deploying is `deploy/deploy.sh <git-sha>` on the box, with `--current` and
+> `--rollback`. CI builds SHA-tagged images on every push to `main`; the box
+> never updates itself, deliberately. `deploy/README.md` is the runbook.
+>
+> Two things measured on the box rather than assumed: a reboot recovers
+> unattended in ~26 s with data, session and certificate intact; and the per-IP
+> sign-up limiter genuinely keys on the real client (laptop `429` while a phone
+> on mobile data was still accepted, with both real addresses in nginx's log
+> rather than Caddy's `172.28.x.x`).
+
 Everything shipped so far is walked end to end in a browser, Bills included
 — its own walk ran 2026-08-10 and passed 15 of 15 (§4). Self-serve
 sign-up's own 15-criterion walk ran on 2026-07-30 — three days after its code
@@ -381,14 +412,26 @@ finding one real defect at criterion 12 and fixing it mid-walk (§1;
 `docs/superpowers/plans/2026-08-01-hearth-goals-verification.md`). Bills' own
 walk ran on 2026-08-10, finding one real defect at criterion 14 and fixing it
 mid-walk (§1; `docs/superpowers/plans/2026-08-09-hearth-bills-verification.md`).
-**The next work is not a feature — it is the first production deployment**
-(decided 2026-08-10, see the subsection below and `docs/adr/`). Money being
-done and walked is what makes that the right order: a stranger can already
-sign up and use the product, so there is something worth deploying, and every
-deployment problem is cheaper to find with zero users than with ten. Marriage
-is thirteen features and several weeks; shipping it into a stack nobody has
-ever run in production only means meeting the same problems later with more
-code on top of them.
+~~**The next work is not a feature — it is the first production deployment**~~
+**Done, 2026-08-15.** The reasoning below held and is worth keeping, because
+it is the argument for doing this kind of work before the next slice rather
+than after: a stranger could already sign up and use the product, so there was
+something worth deploying, and every deployment problem is cheaper to find with
+zero users than with ten. Marriage is thirteen features and several weeks;
+shipping it into a stack nobody had run in production would only have meant
+meeting the same problems later with more code on top of them.
+
+That call paid off immediately. Three things were wrong in ways only a real
+deploy could have shown: the machine the ADR named had been renamed out of
+existence by Hetzner, the region it chose does not sell the cheap instance line
+at all and cost more than the AWS bill the move was meant to escape, and the
+runbook still instructed the operator to configure a mail relay that ADR 3 had
+already made impossible. All three were found at the order form or on the box,
+none of them by a test.
+
+**The next work is backups, and it is not optional.** Everything else on this
+install is verified; nothing is recoverable. See §1's red block and criterion 12
+in the verification file. After that, Marriage.
 
 **Marriage is the next feature after the deployment** — independent of Money,
 and the first area whose spec starts from a genuinely clean slate rather than
@@ -797,8 +840,19 @@ by the same index a name lookup uses):
 
 ### Before this is deployed anywhere real
 
-- **TLS termination in front is mandatory.** Cookies are `Secure` outside
-  development while nginx listens on plain `:80`. Without TLS the browser never
+> **It is deployed now — 2026-08-15.** This list is kept because it is the
+> record of what had to be true first, and because most of it is still live
+> advice for the *next* box. Items proven on the running install are marked
+> below. What is emphatically **not** closed: backups (§1), which were never on
+> this list because the list was about what blocks a deploy, not about what
+> makes one survivable.
+
+- ~~**TLS termination in front is mandatory.**~~ **Satisfied in production.**
+  Caddy terminates TLS and issued for `oink.mywire.org` on the first attempt;
+  verified from outside the box, and the session cookie confirmed on the wire as
+  `HttpOnly; Secure; SameSite=Lax`. The underlying constraint is unchanged and
+  still bites any new environment: cookies are `Secure` outside development
+  while nginx listens on plain `:80`, so without TLS in front the browser never
   returns the session cookie and everything 401s. The API logs a warning at
   startup; `.env.example` and `web/nginx.conf` say so.
 - **SMTP now takes TLS policy and credentials from configuration**, defaulting
@@ -835,7 +889,18 @@ by the same index a name lookup uses):
   only self-serve-adjacent recovery path in the sense the tracker's 🟡 on
   "Forgot?" describes — that gap is about the missing UI flow, not about
   whether an operator can reach the database.
-- **Putting any second proxy in front of nginx silently disables the per-IP
+- ~~**Putting any second proxy in front of nginx silently disables the per-IP
+  sign-up limiter.**~~ **Configured, and now PROVEN on the live box
+  (2026-08-15).** Criterion 10 of the verification walk exhausted the laptop's
+  budget (five `202`s then a `429`) and then had a phone on mobile data accepted
+  in the same window. nginx recorded `43.230.96.126` and `119.234.36.111` — two
+  real client addresses, not Caddy's `172.28.x.x`. Mailpit corroborated
+  independently: five laptop messages and one from the phone, with the sixth
+  laptop request producing no mail at all, so the limiter fires before the send.
+  Everything below stays true as a description of the trap for anything that
+  *replaces* Caddy.
+
+  **Putting any second proxy in front of nginx silently disables the per-IP
   sign-up limiter.** `web/nginx.conf` overwrites `X-Real-IP` with
   `$remote_addr` and strips `True-Client-IP` precisely so a client cannot spoof
   the limiter's key — and that comment assumes nginx is the edge. Put Caddy, a

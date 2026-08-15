@@ -2268,6 +2268,95 @@ route with a missing guard has no second line of defence.
   green test proves nothing until you have seen it fail, and a red one proves
   nothing either until you have checked it went red for the stated reason.
 
+### The first production deployment (2026-08-15)
+
+Nothing in the product broke. Everything below was wrong in a document, in a
+vendor's catalogue, or in an assumption — which is exactly the class of defect
+no test suite can hold.
+
+- **A document describing someone else's product goes stale without any signal,
+  and the only place it gets checked is the moment money changes hands.**
+  ADR 2 named a Hetzner `CPX11` in Singapore. Five days later, at the order
+  form: `CPX11` no longer existed — Hetzner had renamed its shared-vCPU lines on
+  15 June 2026, and the nearest successor `CPX12` is a *smaller* machine, so the
+  rename moved specs and not just labels. Worse, the cheap `CX` line **is not
+  sold in Singapore at all**, so the region the ADR chose cost `$19.61/mo`
+  against Falkenstein's `$7.07` — *more than the AWS bill the whole ADR existed
+  to escape*, for half the machine. The ADR's own instruction, "confirm the
+  current figure at purchase rather than trusting this table", is the only
+  reason this surfaced before the money went out instead of on the first
+  invoice. **Write that instruction into anything that quotes a third party's
+  price, model name or free-tier limit.**
+- **"Equivalent" options were not equivalent, and one ping proved it.** Having
+  moved to the EU, Helsinki looked interchangeable with Falkenstein — same
+  price, same everything. Measured from the owner's actual network: Falkenstein
+  195.5 ms with 2 ms of jitter, Helsinki 246 ms with 29 ms and a 307 ms worst
+  case, consistent across two runs. Latency was the one thing the region change
+  had just traded away, so giving another 45 ms of it away for nothing would
+  have been the single mistake that move could not afford. **When a choice is
+  cheap to measure and the cost of guessing lands on the thing you just
+  sacrificed, measure it** — and record the command, because a number nobody can
+  re-run becomes folklore.
+- **A superseded decision leaves instructions standing in the documents it did
+  not touch.** ADR 3 moved mail onto Mailpit on the box. `deploy/README.md` —
+  the *only* file the box sparse-checks out, and therefore the only one an
+  operator reads while standing on it — still said to verify a domain with
+  Resend, set `SMTP_USERNAME=resend` and paste an API key, for credentials that
+  by then could not exist. Worse than a dead instruction: the same section
+  described leaving `SMTP_USERNAME`/`SMTP_PASSWORD` blank as a silent trap, when
+  under Mailpit blank is the *correct* value — so an operator following the file
+  would have invented credentials to escape a trap that had become the intended
+  configuration. **When an ADR supersedes something, grep for the decision it
+  replaced and fix every instruction, starting with whichever file the person
+  doing the work actually has in front of them.** This is pattern 1 again:
+  fixing the instance (writing ADR 3) did not fix the class.
+- **"SSH key only" in a provider's console did not mean password auth was off.**
+  Hetzner's Ubuntu image ships `PasswordAuthentication yes` via a cloud-init
+  drop-in; attaching a key at creation only stops them mailing you a root
+  password. `sshd -T` said so plainly and nothing else would have. The fix has
+  its own trap: sshd takes the **first** value it sees and Ubuntu includes
+  `sshd_config.d/*.conf` at the top, so the override has to sort ahead of
+  `50-cloud-init.conf` — the `00-` prefix is load-bearing, not tidiness. Verified
+  in both directions: key auth still works, password auth returns
+  `Permission denied (publickey)`.
+- **`docker compose ps` hides exited one-shot services, so the check that
+  matters most is the one that silently passes.** `migrate` is the gate between
+  a deploy and a corrupted-looking install: if it fails, `api` refuses to start
+  and keeps serving the old container, but `web` depends only on `api`, so nginx
+  comes up with the **new** bundle regardless — which presents as a frontend bug,
+  not a stopped migration. Any automated check for it must use `ps -a`.
+  `deploy/deploy.sh` does, and that is the single most valuable line in it.
+- **A reboot is not a small deploy.** `depends_on:
+  service_completed_successfully` is honoured by `docker compose up`, **not** by
+  the daemon's restart policy. On reboot every `unless-stopped` container comes
+  back in no particular order and `api` starts with no migration gate in front
+  of it. Harmless with migrations already applied; not harmless on a box that
+  reboots holding an image whose migrations never ran.
+- **Two of the four hand-typed deploy commands failed silently**, which is why
+  they became a script rather than a list. `sed -i "s/^IMAGE_TAG=.*/.../" .env`
+  run from the wrong directory edits nothing, prints nothing and exits `0` — the
+  deploy "succeeds" while serving the old build. And `IMAGE_TAG=latest` deploys
+  nothing at all while every check stays green, because a migration-only change
+  produces a byte-identical `api` image, so Compose does not recreate `api`, does
+  not re-evaluate `depends_on: migrate`, and the migration does not run.
+  `deploy.sh` refuses both **before** touching `.env`, and checks the registry
+  first so a typo cannot leave the file pointing at an unpullable tag.
+- **The walk's own tooling produced a false defect.** Setting `input.value` from
+  a script is invisible to React's state, so the goals form correctly refused to
+  submit and fired no network request at all — the values were in the DOM and the
+  form still knew it was empty. Read as a product bug for two rounds. The fix is
+  the native setter plus a bubbling `input` event. **A form that refuses to
+  submit and sends nothing is more likely to be a harness problem than a
+  product one**; check `form.checkValidity()` and the invalid-field list before
+  concluding anything. (The actual cause the third time was simpler still: a
+  `required` field left blank. Native validation worked.)
+- **The record has to describe the run that happened.** This walk's criterion 2
+  was written up as "link deliberately left unopened" — and then the phone
+  completed the flow, leaving a real test household in the production database.
+  Corrected in place rather than deleting the row and leaving the sentence
+  standing. **A verification document describing a tidier run than the real one
+  is worse than no document, because it is believed.**
+
 ---
 
 ## Before you call something done

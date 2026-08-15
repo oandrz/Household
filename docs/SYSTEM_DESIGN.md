@@ -35,14 +35,18 @@ removed the two unbuilt spaces from the navigation along with their four
 routes, and rewrote copy; where either round changed the shape of something
 drawn here, the change is recorded at that diagram (§7 in particular).
 
-**Nothing is deployed anywhere — but the deployment is written.** Everything
-above runs only in development, under `docker compose`, and no box has been
-bought. §1 carries a second diagram of the production topology chosen in
-`docs/adr/0002-first-production-host.md`. Every container in it now exists as
-real, reviewable configuration in `deploy/` and `api/Dockerfile`, so that
-diagram describes something built rather than something imagined; what it does
-not yet describe is anything *running*. Read "not deployed" there as exactly
-that, never as "not built". It is labelled as such at the diagram.
+**This is deployed.** Hearth has run at <https://oink.mywire.org> since
+2026-08-15, on one Hetzner CX23 in Falkenstein, serving a real household. §1
+carries the production topology; it is a drawing of something running, not a
+plan. `docs/adr/0002-first-production-host.md` records the host choice and its
+same-day amendment moving the region to the EU, and
+`docs/superpowers/plans/2026-08-10-hearth-production-verification.md` records
+what was verified on the live box and what was not.
+
+**The one thing still missing is backups.** The scripts exist and the restore
+has been rehearsed, but no key, bucket or schedule exists on the box — so
+losing it loses the household. §8's Backups row is marked 🔴 for that reason,
+and it is unbuilt infrastructure rather than a failing check.
 
 ---
 
@@ -93,38 +97,55 @@ sign-up per-IP rate limiter's key (§4). Development has no nginx service at
 all — Vite proxies `/api` straight to `api:8080` with no header rewriting — so
 the per-IP limiter is fully spoofable there; see `docs/HANDOVER.md`.
 
-### The production topology — built, not yet deployed
+### The production topology — running since 2026-08-15
 
-**Read the two words apart.** As of 2026-08-11 nothing runs on any box, and no
-box has been bought. But every piece drawn below now *exists in this
-repository*: `deploy/docker-compose.prod.yml` declares all six services,
-`deploy/Caddyfile` the TLS site, `api/Dockerfile`'s `admin` target the
-administration tools, `.github/workflows/images.yml` builds and pushes the
-three images, and `deploy/backup.sh` / `deploy/restore.sh` the backup pair. So
-this diagram is no longer a sketch of an intention — it is an accurate drawing
-of a stack that has never been started on hardware.
+**This is a drawing of something that runs.** Hearth is live at
+<https://oink.mywire.org> on a Hetzner CX23 in Falkenstein, serving a real
+household from a browser-walked install. Nine of the twelve verification
+criteria pass; `docs/superpowers/plans/2026-08-10-hearth-production-verification.md`
+records each one, including what it was checked against rather than assumed
+from.
 
-That distinction is the one that matters when reading the rest of this section:
-where something below says "not deployed", it means exactly that and not "not
-written". `docs/adr/0002-first-production-host.md` carries why this shape was
-chosen; `deploy/README.md` is the runbook for standing it up.
+Two properties of this box were measured on it, not inferred, and both are
+worth carrying:
+
+- **A reboot recovers unattended in about 26 seconds**, with the data, the
+  signed-in session and the TLS certificate all intact. The certificate
+  survives because it lives in the `caddy-data` volume; re-issuing on every
+  boot would spend Let's Encrypt's per-hostname budget for nothing.
+- **`migrate` does not re-run on reboot, and `api` starts anyway.**
+  `depends_on: service_completed_successfully` is honoured by
+  `docker compose up`, **not** by the daemon's restart policy. Harmless with
+  migrations already applied, and the reason a deploy must go through
+  `deploy/deploy.sh` rather than a reboot.
+
+One thing here is genuinely not built rather than merely undeployed: **there
+are no backups**. `deploy/backup.sh` and `deploy/restore.sh` exist and the
+restore has been rehearsed on a laptop, but no `age` key, bucket, `rclone`
+remote or cron exists on this box. The `Backup` node below is drawn because the
+script targets it, not because anything has been written there. Until that
+changes, losing the box loses the household.
+
+`docs/adr/0002-first-production-host.md` carries why this shape was chosen and
+why the region moved to the EU; `deploy/README.md` is the runbook for operating
+it.
 
 ```mermaid
 graph TD
     Browser["Browser"]
     LE["Let's Encrypt"]
 
-    subgraph host["One VPS (target: Hetzner CX23, Falkenstein)"]
+    subgraph host["One VPS — Hetzner CX23, Falkenstein, live"]
         Caddy["caddy :443<br/>terminates TLS, renews certs"]
         Nginx["web — nginx :80<br/>serves the SPA, proxies /api"]
         API["api — Go service :8080<br/>distroless, no shell"]
         PG[("postgres — volume, not published")]
         Mailpit["mailpit — mail stops here<br/>UI bound to 127.0.0.1:8025 only"]
-        Admin["admin image — built, never run on a box<br/>goose + adminctl, api/Dockerfile target 'admin'"]
+        Admin["admin image — runs on the box<br/>goose + adminctl, api/Dockerfile target 'admin'"]
     end
 
     Operator["Operator's laptop"]
-    Backup[("Off-provider dump<br/>nightly pg_dump, plain SQL")]
+    Backup[("Off-provider dump<br/>NOT SET UP — no key, bucket or cron")]
 
     Browser -->|HTTPS| Caddy
     Caddy -->|"HTTP, one origin"| Nginx
@@ -1765,10 +1786,11 @@ prefix, which is what made the duplication stop being optional.
 | Retention | `adminctl prune --older-than=<days>` (default 30, floor 7) deletes consumed/expired `signups` and stale `login_attempts`; `magic_links`, `invites` and `sessions` still grow forever |
 | Rate limiting | Per-address (3/hour) and a global daily ceiling (1000, reset at midnight, not a rolling 24 hours), both counted from `signups` so a restart cannot reset them; per-IP (5/hour) is an in-memory token bucket in the HTTP layer — process-local, spoofable in development, and keyed to the *proxy* rather than the client if a proxy is put in front of nginx without `set_real_ip_from`; Caddy is in front in production, so `web/nginx.conf` carries that directive over the compose subnet and it is verified, not assumed (both in §1). The per-IP limit binds before the global one by construction (5 × 24 = 120 ≪ 1000) so one IP alone can never exhaust the global ceiling |
 | Health | `/healthz` ignores the database; `/readyz` pings it |
-| Hosting | **Built, not deployed.** No box has been bought and nothing runs anywhere; but `deploy/docker-compose.prod.yml` (project `hearth-prod`, deliberately not the dev stack's `hearth`), `deploy/Caddyfile` and `deploy/README.md` all exist, and CI pushes SHA-tagged images. Decided: one VPS running the same Compose stack, `docs/adr/0002-first-production-host.md`, following `docs/adr/0001-optimise-for-exit-cost.md` — hosts are picked for how cheaply we can leave them |
-| TLS | Caddy in front, automatic Let's Encrypt issuance and renewal (§1). Neither `api` nor `web` terminates TLS itself, and both are unusable without something that does — cookies are `Secure` outside development |
-| Backups | **Written and rehearsed, not scheduled.** `deploy/backup.sh` dumps in **plain SQL** (readable by any future Postgres, and by a human), gzips, encrypts with `age` and uploads off-provider, then pings a heartbeat only after a successful upload. `deploy/restore.sh` is the reverse, with a fail-closed guard refusing any DSN that looks like the live database. A restore **has** now been performed once — on a laptop, into a throwaway container, with matching row counts. What has never happened is a run on a schedule, on a box, decrypted with the **escrowed** copy of the key; an escrow that has never been used is a hope, not an escrow |
-| Production administration | **Built, never run on a box.** `api/Dockerfile`'s `admin` target puts `goose` and `adminctl` on the same distroless base as `api`, and `deploy/docker-compose.prod.yml` wires it two ways: the one-shot `migrate` service `api` waits on, and a `profiles: [manual]` `admin` service for `unlock-household`, `reset-password`, `create-invite` and `prune`. So a deployed install **can** migrate, reset a password and unlock a household — every command is in `deploy/README.md`. Unproven only in that no migration has yet been applied to a production database (§1) |
+| Hosting | **Live since 2026-08-15** at <https://oink.mywire.org> — one Hetzner CX23 in Falkenstein running `deploy/docker-compose.prod.yml` (project `hearth-prod`, deliberately not the dev stack's `hearth`). `docs/adr/0002-first-production-host.md` carries the choice and its 2026-08-15 amendment: `CPX11` was renamed out of existence and Singapore does not sell the cheap `CX` line, so the region moved to the EU and the household now crosses ~195 ms of ocean — measured from the owner's network, not estimated. Follows `docs/adr/0001-optimise-for-exit-cost.md`: hosts are picked for how cheaply we can leave them |
+| Deploying | `deploy/deploy.sh <git-sha>` — one command, plus `--current` and `--rollback`. CI builds three SHA-tagged images on every push to `main`; **the box never updates itself**, by design (spec decision 3), because rollback is image-only and a bad migration needs a restore rather than a rollback. The script refuses `latest` and refuses a tag absent from the registry **before** it writes `.env`, so a typo cannot leave the file pointing at something unpullable; it records the previous tag before changing anything, so `--rollback` survives a run that dies partway; and it verifies rather than assumes — `migrate` exited `0` (checked with `ps -a`, since Compose hides exited one-shot services), nothing restart-looping, `/readyz` answering on the public domain. Every guard and a full deploy/rollback/redeploy round trip were exercised on the live box on 2026-08-15 |
+| TLS | Caddy in front, automatic Let's Encrypt issuance and renewal (§1). **Issued first try on 2026-08-15** for `oink.mywire.org` and verified from outside (`ssl_verify_result 0`, `http://` → `308`); it survives a reboot from the `caddy-data` volume without re-issuing. Neither `api` nor `web` terminates TLS itself, and both are unusable without something that does — cookies are `Secure` outside development, confirmed on the wire: `HttpOnly; Secure; SameSite=Lax` |
+| Backups | 🔴 **NOT SET UP ON THE BOX. Losing it loses the household.** `deploy/backup.sh` (plain-SQL dump — readable by any future Postgres and by a human — gzip, `age`, off-provider upload, heartbeat only after a successful upload) and `deploy/restore.sh` (the reverse, with a fail-closed guard refusing any DSN that looks like the live database) both exist, and a restore has been performed once on a laptop into a throwaway container with matching row counts. What does not exist **on the live box**: an `age` key, a bucket, an `rclone` remote, the cron, or the escrow envelope. This is the largest open risk on the install and it is unbuilt infrastructure, not a failed check |
+| Production administration | **Proven on the live box.** `api/Dockerfile`'s `admin` target puts `goose` and `adminctl` on the same distroless base as `api`, and `deploy/docker-compose.prod.yml` wires it two ways: the one-shot `migrate` service `api` waits on, and a `profiles: [manual]` `admin` service for `unlock-household`, `reset-password`, `create-invite` and `prune`. All eight migrations were applied to the production database by the `migrate` service on first boot and re-applied cleanly across a deploy, a rollback and a redeploy. `goose status` has been run against the live database through the `admin` image. The `adminctl` subcommands remain unexercised in production — every one is written out in `deploy/README.md` |
 
 ---
 
