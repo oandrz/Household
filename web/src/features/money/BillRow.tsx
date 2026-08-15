@@ -125,7 +125,10 @@ function PaymentRow({
             <div className="text-[11.5px] text-muted">{BILL_COPY.paymentSubtitle(payment.autopay)}</div>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        {/* Column below sm, row from sm up -- the amount and Undo were
+            competing with the name block for a 343px row; stacked, each item
+            gets the row's full width instead of squeezing into a slice of it. */}
+        <div className="flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-3">
           <span className="text-[11px] font-semibold text-accent">{BILL_COPY.paidLabel}</span>
           <span className="w-20 text-right text-[13.5px] font-semibold text-ink">
             {formatMoney(payment.amountMinor, payment.currency, symbolFor(payment.currency))}
@@ -241,7 +244,11 @@ export function BillRow(props: BillRowProps) {
           <div className="text-[11.5px] text-muted">{subtitle}</div>
         </div>
       </div>
-      <div className="flex items-center gap-3">
+      {/* Column below sm, row from sm up -- the Overdue/Autopay pill, amount
+          and archive/mark-paid actions were competing with the name block for
+          a 343px row; stacked, each item gets the row's full width instead of
+          squeezing into a slice of it. */}
+      <div className="flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-3">
         {/* Overdue takes priority over the Autopay pill -- the subtitle
             sentence above already carries the autopay-vs-manual distinction
             for an overdue row, so the pill's own job here is just "this

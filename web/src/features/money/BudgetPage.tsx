@@ -403,7 +403,14 @@ export function BudgetPage() {
             spentSoFar={spentSoFar}
           />
 
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.7fr_1fr]">
+          {/* xl, not the shell's lg: at 1024 this column would be 441px, and
+              BudgetCategoryGrid's own sm:grid-cols-2 (a viewport breakpoint,
+              not a container query) still goes two-up inside it regardless --
+              measured 180px-ish sub-columns where "Kids & school" and its
+              amount both wrapped their own text. BillsPage's identical
+              [1.7fr_1fr] row keeps lg: its left column is a single-column
+              list with nothing to compound with. */}
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.7fr_1fr]">
             <div className="rounded-xl border border-hairline bg-card p-[22px]">
               <div className="mb-[18px] flex items-baseline justify-between">
                 <h2 className="text-sm font-semibold text-ink">{BUDGET_COPY.categories}</h2>
