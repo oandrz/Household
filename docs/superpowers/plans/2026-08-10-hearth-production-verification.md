@@ -5,13 +5,13 @@
 **Walked:** 2026-08-15, first deploy.
 
 Twelve criteria from `2026-08-10-hearth-production-deployment.md` Task 8.
-**Six pass, one is deferred by ADR 3, five are outstanding** — see the table,
+**Nine pass, one is deferred by ADR 3, one is half done, two are outstanding** — see the table,
 then the notes for what each outstanding one is waiting on.
 
 | # | Criterion | Result |
 |---|---|---|
 | 1 | TLS valid, HTTP redirects | ✅ pass |
-| 2 | Sign-up from a phone on mobile data | ⬜ outstanding — needs the owner's phone |
+| 2 | Sign-up from a phone on mobile data | ✅ pass — reduced form, per ADR 3 |
 | 3 | Mail arrives in a Gmail inbox | 🚫 deferred — ADR 3, no mail leaves the box |
 | 4 | Link completes, household exists | ✅ pass |
 | 5 | Session cookie flags on the real domain | ✅ pass |
@@ -19,7 +19,7 @@ then the notes for what each outstanding one is waiting on.
 | 7 | Lockout after three wrong passwords; magic link recovers | 🟡 half — recovery proven, lockout not run |
 | 8 | `adminctl unlock-household` against the live database | ⬜ outstanding — blocked by the agent's own sandbox |
 | 9 | `goose status` shows all eight migrations | ✅ pass |
-| 10 | Limiter keys on the real client, not on Caddy | ⬜ outstanding — needs the phone from criterion 2 |
+| 10 | Limiter keys on the real client, not on Caddy | ✅ pass — two distinct IPs, independent budgets |
 | 11 | Survives a reboot unattended | ✅ pass — 26 s, nothing touched |
 | 12 | Scheduled backup, and a restore with the escrowed key | ⬜ outstanding — no backup infrastructure exists yet |
 
@@ -132,14 +132,50 @@ applied — but it means a reboot is not a substitute for a deploy, and a box th
 reboots with an image whose migrations have not run would start `api` against an
 older schema. Deploys must go through `up`, which the runbook already requires.
 
-## What is outstanding, and why
+## 2 and 10 — the real-client-IP control ✅
 
-**2 and 10 need a phone on mobile data.** Criterion 10 proves that
-`set_real_ip_from` recovers the true client address rather than keying every
-caller to Caddy's — it is only provable by contrasting two genuinely different
-networks, so it cannot be faked from the laptop. This is the criterion that
-verifies a security control; ADR 3 was corrected on 2026-08-15 specifically to
-stop criterion 2 being deferred and leaving this one with no basis.
+These two are one experiment. Criterion 10 is only provable by contrasting two
+genuinely separate networks, and criterion 2 is what establishes the second one
+— which is why ADR 3 was corrected on 2026-08-15 to stop deferring it.
+
+Method: restart `api` to clear the in-memory bucket, exhaust the laptop's budget
+deliberately, then have the phone submit **on mobile data with wifi off**.
+
+```
+laptop  request 1..5 -> 202
+laptop  request 6    -> 429     <- limit is 5/hour (router.go:34)
+phone   request 1    -> 202     <- accepted while the laptop is locked out
+```
+
+The status codes are an inference. The evidence is what nginx recorded:
+
+```
+43.230.96.126    202 x5, 429 x1     the laptop
+119.234.36.111   202                the phone, mobile data
+205.169.39.55    405                an unrelated scanner
+```
+
+**Real client addresses, not Caddy's `172.28.x.x`.** That is the whole control:
+`set_real_ip_from 172.28.0.0/16` + `real_ip_header X-Forwarded-For` +
+`real_ip_recursive off` are recovering the true caller, so the per-IP limiter
+gives each client its own budget instead of collapsing every visitor on earth
+into one shared bucket of five sign-ups an hour.
+
+Mailpit corroborates independently: **five laptop messages and one phone
+message**. The sixth laptop request produced no mail at all, so the limiter
+fires before the send rather than after — the budget bounds mail, which is what
+`signUpRequestsPerIPPerHour`'s comment says it is for.
+
+Criterion 2 ran in ADR 3's reduced form: the submission was made from the phone
+and answered `202`, and the link was left unopened on purpose — completing it
+would have created a second household. Criterion 4 already proved completion.
+
+**Unrelated but worth recording: the box was being scanned within 25 minutes of
+going live.** `205.169.39.55` probed `/api/v1/auth/sign-up` with a Windows
+Chrome user-agent and got `405`. Nothing was wrong with the response; it is
+noted because it is the concrete answer to "who would bother attacking this".
+
+## What is outstanding, and why
 
 **8 was blocked by the agent's sandbox**, not by the box. To run:
 
