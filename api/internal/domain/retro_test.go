@@ -2,6 +2,7 @@ package domain_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -84,5 +85,31 @@ func TestFirstSentenceTruncatesToSixtyRunes(t *testing.T) {
 	got := domain.FirstSentence("a very long note with no terminator that runs well past the sixty character budget we allow")
 	if n := utf8.RuneCountInString(got); n != 60 {
 		t.Fatalf("truncated length = %d runes, want 60 including the ellipsis", n)
+	}
+}
+
+// Every fixture above is pure ASCII, where slicing bytes and slicing runes agree --
+// a regression to byte-slicing (trimmed[:firstSentenceMax-1]) would split a
+// multi-byte character in half and still pass every one of them. CJK characters are
+// three bytes each in UTF-8, so this is the smallest input that actually exercises
+// the boundary FirstSentence's own comment claims to protect.
+func TestFirstSentenceCutsOnARuneBoundary(t *testing.T) {
+	// 110 runes, no '.', '!' or '?' -- long enough that truncation fires.
+	note := strings.Repeat("春の話し合いは長かった", 10)
+
+	got := domain.FirstSentence(note)
+
+	if !utf8.ValidString(got) {
+		t.Fatalf("FirstSentence(%q) produced invalid UTF-8: %q", note, got)
+	}
+	if n := utf8.RuneCountInString(got); n != 60 {
+		t.Fatalf("truncated length = %d runes, want 60 including the ellipsis", n)
+	}
+	// The boundary itself: a byte-sliced version would end in a replacement
+	// character or a truncated sequence, not the clean 59-rune prefix.
+	runes := []rune(note)
+	want := string(runes[:59]) + "…"
+	if got != want {
+		t.Fatalf("FirstSentence(%q) = %q, want %q", note, got, want)
 	}
 }
