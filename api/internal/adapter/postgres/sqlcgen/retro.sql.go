@@ -11,6 +11,86 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addRetroAction = `-- name: AddRetroAction :one
+INSERT INTO retro_actions (retro_id, body, carried_from)
+SELECT r.id, $1, $2
+FROM retros r
+WHERE r.id = $3 AND r.household_id = $4
+RETURNING id, retro_id, body, done_at, carried_from
+`
+
+type AddRetroActionParams struct {
+	Body        string
+	CarriedFrom pgtype.UUID
+	ID          pgtype.UUID
+	HouseholdID pgtype.UUID
+}
+
+type AddRetroActionRow struct {
+	ID          pgtype.UUID
+	RetroID     pgtype.UUID
+	Body        string
+	DoneAt      pgtype.Timestamptz
+	CarriedFrom pgtype.UUID
+}
+
+// AddRetroAction writes one action. retro_actions carries no household_id of
+// its own (00009_retros.sql's own comment), so the INSERT...SELECT...FROM
+// retros WHERE household_id = $4 is the scoping clause, not a plain INSERT
+// with a bare retro_id: a retro_id that belongs to another household, or
+// does not exist at all, matches zero rows, and :one then reports
+// pgx.ErrNoRows -- which translate maps to domain.ErrNotFound, the same
+// "another household's row is indistinguishable from a missing one"
+// convention GetRetroByMonth already follows.
+func (q *Queries) AddRetroAction(ctx context.Context, arg AddRetroActionParams) (AddRetroActionRow, error) {
+	row := q.db.QueryRow(ctx, addRetroAction,
+		arg.Body,
+		arg.CarriedFrom,
+		arg.ID,
+		arg.HouseholdID,
+	)
+	var i AddRetroActionRow
+	err := row.Scan(
+		&i.ID,
+		&i.RetroID,
+		&i.Body,
+		&i.DoneAt,
+		&i.CarriedFrom,
+	)
+	return i, err
+}
+
+const addRetroActionAssignee = `-- name: AddRetroActionAssignee :execrows
+INSERT INTO retro_action_assignees (action_id, membership_id)
+SELECT $1, m.id
+FROM memberships m
+WHERE m.id = $2 AND m.household_id = $3
+`
+
+type AddRetroActionAssigneeParams struct {
+	ActionID    pgtype.UUID
+	ID          pgtype.UUID
+	HouseholdID pgtype.UUID
+}
+
+// AddRetroActionAssignee inserts one owner, scoped through memberships the
+// same way AddRetroAction scopes through retros: the SELECT's WHERE
+// requires the membership to belong to household_id, so an id that is not a
+// membership AT ALL and an id that IS a membership but of a DIFFERENT
+// household both match zero rows. :execrows lets RetroActionRepo.Add see
+// that zero and fail the whole transaction
+// (usecase.RetroActionRepository.Add's own doc comment) rather than
+// trusting retro_action_assignees.membership_id's foreign key alone, which
+// only proves the id exists SOMEWHERE in memberships -- not that it belongs
+// to this household.
+func (q *Queries) AddRetroActionAssignee(ctx context.Context, arg AddRetroActionAssigneeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, addRetroActionAssignee, arg.ActionID, arg.ID, arg.HouseholdID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const completeRetro = `-- name: CompleteRetro :one
 UPDATE retros
 SET completed_at = coalesce(completed_at, $3), updated_at = now()
@@ -123,6 +203,30 @@ func (q *Queries) DeleteDraftRetro(ctx context.Context, arg DeleteDraftRetroPara
 	return result.RowsAffected(), nil
 }
 
+const deleteRetroAction = `-- name: DeleteRetroAction :execrows
+DELETE FROM retro_actions a
+USING retros r
+WHERE a.id = $2 AND a.retro_id = r.id AND r.household_id = $1
+`
+
+type DeleteRetroActionParams struct {
+	HouseholdID pgtype.UUID
+	ID          pgtype.UUID
+}
+
+// DeleteRetroAction hard-deletes one action, scoped through retros the same
+// way SetRetroActionDone is -- carried_from's ON DELETE SET NULL
+// (00009_retros.sql) means this can never orphan a later carried action.
+// :execrows is what lets RetroActionRepo.Remove refuse a zero-row match
+// instead of reporting success for nothing.
+func (q *Queries) DeleteRetroAction(ctx context.Context, arg DeleteRetroActionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteRetroAction, arg.HouseholdID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getRetroByMonth = `-- name: GetRetroByMonth :one
 SELECT id, month, mood, went_well, was_hard, notes, completed_at, version
 FROM retros
@@ -163,6 +267,129 @@ func (q *Queries) GetRetroByMonth(ctx context.Context, arg GetRetroByMonthParams
 		&i.Version,
 	)
 	return i, err
+}
+
+const listOpenActionsInMonth = `-- name: ListOpenActionsInMonth :many
+SELECT a.id, a.retro_id, a.body, a.done_at, a.carried_from,
+       COALESCE(array_agg(asg.membership_id) FILTER (WHERE asg.membership_id IS NOT NULL), '{}')::uuid[] AS assignee_ids
+FROM retro_actions a
+JOIN retros r ON r.id = a.retro_id
+LEFT JOIN retro_action_assignees asg ON asg.action_id = a.id
+WHERE r.household_id = $1 AND r.month = $2 AND a.done_at IS NULL
+GROUP BY a.id, a.retro_id, a.body, a.done_at, a.carried_from
+ORDER BY a.created_at, a.id
+`
+
+type ListOpenActionsInMonthParams struct {
+	HouseholdID pgtype.UUID
+	Month       pgtype.Date
+}
+
+type ListOpenActionsInMonthRow struct {
+	ID          pgtype.UUID
+	RetroID     pgtype.UUID
+	Body        string
+	DoneAt      pgtype.Timestamptz
+	CarriedFrom pgtype.UUID
+	AssigneeIds []pgtype.UUID
+}
+
+// ListOpenActionsInMonth is OpenInMonth's whole implementation: that
+// month's actions with done_at IS NULL, scoped to household_id through the
+// same retros join every query above uses. The caller is responsible for
+// month already being the first of the calendar month, midnight UTC --
+// OpenInMonth's own doc comment on RetroActionRepository -- this query does
+// not renormalise it.
+// Same GROUP BY / ORDER BY shape as ListRetroActions above, and the same
+// reason a.created_at needs no entry in the GROUP BY list.
+func (q *Queries) ListOpenActionsInMonth(ctx context.Context, arg ListOpenActionsInMonthParams) ([]ListOpenActionsInMonthRow, error) {
+	rows, err := q.db.Query(ctx, listOpenActionsInMonth, arg.HouseholdID, arg.Month)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOpenActionsInMonthRow
+	for rows.Next() {
+		var i ListOpenActionsInMonthRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RetroID,
+			&i.Body,
+			&i.DoneAt,
+			&i.CarriedFrom,
+			&i.AssigneeIds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRetroActions = `-- name: ListRetroActions :many
+SELECT a.id, a.retro_id, a.body, a.done_at, a.carried_from,
+       COALESCE(array_agg(asg.membership_id) FILTER (WHERE asg.membership_id IS NOT NULL), '{}')::uuid[] AS assignee_ids
+FROM retro_actions a
+JOIN retros r ON r.id = a.retro_id
+LEFT JOIN retro_action_assignees asg ON asg.action_id = a.id
+WHERE r.household_id = $1 AND a.retro_id = $2
+GROUP BY a.id, a.retro_id, a.body, a.done_at, a.carried_from
+ORDER BY a.created_at, a.id
+`
+
+type ListRetroActionsParams struct {
+	HouseholdID pgtype.UUID
+	RetroID     pgtype.UUID
+}
+
+type ListRetroActionsRow struct {
+	ID          pgtype.UUID
+	RetroID     pgtype.UUID
+	Body        string
+	DoneAt      pgtype.Timestamptz
+	CarriedFrom pgtype.UUID
+	AssigneeIds []pgtype.UUID
+}
+
+// ListRetroActions is ForRetro's whole implementation: one row per action,
+// each carrying its assignees folded into one array by a household-scoped
+// LEFT JOIN + array_agg rather than a second query, and ORDER BY
+// a.created_at, a.id because retro_actions carries no position column
+// (00009_retros.sql's own comment) -- insertion order IS the order. The
+// FILTER clause is what keeps an action with no assignees at '{}' rather
+// than array_agg's default of a one-element array holding a single NULL.
+// a.created_at is not in this list -- legal, not an oversight: a.id is
+// (retro_actions' PRIMARY KEY), and grouping by a table's primary key lets
+// Postgres treat every other column that is functionally dependent on it,
+// created_at included, as already grouped. ORDER BY below is free to use it.
+func (q *Queries) ListRetroActions(ctx context.Context, arg ListRetroActionsParams) ([]ListRetroActionsRow, error) {
+	rows, err := q.db.Query(ctx, listRetroActions, arg.HouseholdID, arg.RetroID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRetroActionsRow
+	for rows.Next() {
+		var i ListRetroActionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RetroID,
+			&i.Body,
+			&i.DoneAt,
+			&i.CarriedFrom,
+			&i.AssigneeIds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listRetros = `-- name: ListRetros :many
@@ -219,6 +446,35 @@ func (q *Queries) ListRetros(ctx context.Context, householdID pgtype.UUID) ([]Li
 		return nil, err
 	}
 	return items, nil
+}
+
+const setRetroActionDone = `-- name: SetRetroActionDone :execrows
+UPDATE retro_actions a
+SET done_at = $3
+FROM retros r
+WHERE a.id = $2 AND a.retro_id = r.id AND r.household_id = $1
+`
+
+type SetRetroActionDoneParams struct {
+	HouseholdID pgtype.UUID
+	ID          pgtype.UUID
+	DoneAt      pgtype.Timestamptz
+}
+
+// SetRetroActionDone ticks or unticks one action. done_at is passed straight
+// through rather than branched in SQL: SetDone's own contract (clear the
+// stamp on done=false, never record a "not done" time -- the port's own doc
+// comment) is decided in Go, this query only ever sets the column to
+// whatever it is given. UPDATE...FROM retros is the scoping clause, the
+// same reason ListRetroActions joins through retros. :execrows lets
+// RetroActionRepo.SetDone see a zero-row match and refuse to call it
+// success -- the SetBillNextDue defect, docs/LEARNING.md.
+func (q *Queries) SetRetroActionDone(ctx context.Context, arg SetRetroActionDoneParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setRetroActionDone, arg.HouseholdID, arg.ID, arg.DoneAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateRetro = `-- name: UpdateRetro :one
