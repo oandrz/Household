@@ -33,6 +33,26 @@ needed them to exist (see "Where things stand" below).
 > condition is the day someone who is not Andreas or Christine needs to receive
 > an email.
 
+**The notifications correction, 2026-08-16 — four rows were ✅ for something no
+household can actually receive.** All four `Notifications — …` rows in Household
+settings move ✅ → 🟡, each with its gap named. The preferences are real end to
+end — column, repository, `GET`/`PATCH`, the Settings panel, tests — but
+`usecase.Mailer` has exactly three methods (magic link, invite, sign-up), no
+caller anywhere reads `notification_preferences` in order to send anything, and
+nothing in this codebase runs on a clock: the only cron that exists is the box's
+nightly backup. The design's own copy promises delivery rather than a switch —
+"Bill due reminders (3 days before)". This is the same shape as the Goals
+archive row (see `docs/LEARNING.md` pattern 15): every layer built, and the thing
+the row is named after still impossible for a household to experience. Found
+while answering "what's next" for Marriage, whose own retro reminder is one of
+the four. **Nothing was built or unbuilt here — only the record corrected.**
+Recounting Household settings by this file's own rule (the first symbol in each
+row's own cell) gives 11/8/2 where it read 15/4/2, taking the totals from
+60/13/28/2 = 103 to 56/17/28/2 = 103 — no row added or removed, four moved from
+Built to Partial. "73 of 103 built or partly built" is unchanged, which is the
+point: a 🟡 and a ✅ count the same there, and that is exactly how four rows
+stayed wrong without moving any headline number.
+
 **The Bills update, recorded before the ones below it — Money's fifth and
 last feature.** Every number below is a fresh count of the ✅/🟡/⬜/🚫 symbols
 in the tables — the first symbol in each row's own cell, whichever comes
@@ -165,13 +185,13 @@ now, not eight), taking the stated totals from 60/12/28/2 = 102 to
 |---|---|---|---|---|
 | Entry & authentication | 10 | 1 | 0 | 0 |
 | Navigation shell | 7 | 1 | 1 | 0 |
-| Household settings | 15 | 4 | 2 | 0 |
+| Household settings | 11 | 8 | 2 | 0 |
 | Overview (home) | 4 | 3 | 3 | 0 |
 | Money | 24 | 4 | 7 | 0 |
 | Marriage | 0 | 0 | 13 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **60** | **13** | **28** | **2** |
+| **Total** | **56** | **17** | **28** | **2** |
 
 ---
 
@@ -279,10 +299,10 @@ The full checklist is at the end of `docs/LEARNING.md`.
 | Currency and region — show second currency | ✅ | The toggle only — whether the second currency is shown. What it *is* is the row below |
 | Currency and region — choose the second currency | 🟡 | No control exists to pick *what* the second currency is. A household that enables the toggle cannot choose what to compare against. Self-serve sign-up sets a household's second currency equal to its primary and leaves the toggle off, which makes this gap reachable by any stranger who signs up, not only Andreas & Christine |
 | Currency and region — FX rate | 🟡 | The mode is stored and editable, but the rate itself is a fixed table. A live provider drops in behind the existing port |
-| Notifications — bill due reminders | ✅ | |
-| Notifications — overspend alerts | ✅ | |
-| Notifications — monthly retro reminder | ✅ | |
-| Notifications — weekly family digest | ✅ | |
+| Notifications — bill due reminders | 🟡 | The preference is stored, served and editable end to end; **nothing sends the reminder.** `usecase.Mailer` has three methods — magic link, invite, sign-up — and no caller reads `notification_preferences` to mail anything. Nothing in this codebase runs on a clock either: the only cron anywhere is the box's nightly backup. The design's own copy promises delivery, not a switch — "Bill due reminders (3 days before)" |
+| Notifications — overspend alerts | 🟡 | Same gap as the row above: stored and editable, never sent |
+| Notifications — monthly retro reminder | 🟡 | Same gap, plus it has nothing to remind anyone *of* yet — Marriage's retros are unbuilt (section 6) |
+| Notifications — weekly family digest | 🟡 | Same gap: stored and editable, never sent |
 | Retention pruning (`adminctl prune`) | ✅ | No UI — `cmd/adminctl prune --older-than=<days>` deletes consumed/expired `signups` and stale `login_attempts` past the cutoff. Refuses anything under a seven-day floor so it can never reach inside `domain.LockoutPolicy.Window` and clear a lockout that is still live |
 | Connected accounts | ⬜ | Belongs with Money. Note that automatic bank sync is not available to an app like this — see Money below |
 

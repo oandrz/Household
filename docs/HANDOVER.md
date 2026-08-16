@@ -451,8 +451,16 @@ none of them by a test.
 
 **The next work is Marriage.** The deployment is done: ten of twelve criteria
 pass, backups run nightly and the escrow has been exercised. What remains on the
-install is small and listed in §5 — uptime monitoring, two R2 dashboard rules,
-and a first run of `adminctl unlock-household` on a calm day.
+install is now **one item**: a first run of `adminctl unlock-household` on a calm
+day (criterion 8 — unrun because the agent's sandbox blocked the SSH, not
+because of the box; the exact command is in
+`docs/superpowers/plans/2026-08-10-hearth-production-verification.md` under
+"What is outstanding"). The other two this line used to name are closed and were
+closed after it was written: uptime monitoring exists and its alarm was fired on
+purpose (`315eb7e`), and both R2 dashboard rules — the 30-day Bucket Lock and
+the 90-day lifecycle expiry — were verified by exercising them from the box, not
+merely configured (`22a3105`). Criterion 7's lockout half is still unrun too;
+criterion 3 stays deferred under [ADR 3](adr/0003-mail-stays-on-the-box.md).
 
 **Marriage is the next feature after the deployment** — independent of Money,
 and the first area whose spec starts from a genuinely clean slate rather than
@@ -822,6 +830,16 @@ blocking:**
   deliberately"). **The follow-up is its own later spec**, written once real
   households have goals to point contributions at — there is no scheduling
   infrastructure anywhere else in the product to build it on top of yet.
+  **That same missing scheduler is why four Settings rows moved ✅ → 🟡 on
+  2026-08-16**: bill due reminders, overspend alerts, the monthly retro
+  reminder and the weekly family digest are all stored, served and editable,
+  and none of them is ever sent — `usecase.Mailer` has three methods (magic
+  link, invite, sign-up) and no caller reads `notification_preferences` to mail
+  anything. The design's copy promises delivery ("Bill due reminders (3 days
+  before)"), so the toggles are a promise the product does not keep. Whoever
+  writes the scheduler spec should cover both — automatic contributions and
+  rollover, and these four — since they are one missing piece, not two.
+  `docs/LEARNING.md` pattern 15 carries the finding.
 - **Automatic month-end rollover does not exist; only the manual button
   does.** The design's "Roll unspent into savings" toggle implies money
   moves by itself at midnight on the 1st; Goals decision 4 refused that

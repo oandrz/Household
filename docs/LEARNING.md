@@ -1588,6 +1588,42 @@ here can see that; the re-walk pressed Enter in a real browser and checked
 no modal opened. "Add contribution" carries the same pair for the same
 reason, and its comment is where this was learned the first time.
 
+**Second instance, 2026-08-16 — the four notification rows.** Same shape,
+found by reading rather than walking, while answering "what's next" for
+Marriage. `Notifications — bill due reminders`, `— overspend alerts`,
+`— monthly retro reminder` and `— weekly family digest` were all ✅. Everything
+under them is real: the `notification_preferences` table, the repository, `GET`
+and `PATCH /household/notifications`, `NotificationsPanel.tsx`, tests on all of
+it. **Nothing sends any of them.** `usecase.Mailer` has exactly three methods —
+`SendMagicLink`, `SendInvite`, `SendSignupLink`/`SendSignupForExistingAccount` —
+no caller anywhere reads a household's preferences in order to mail something,
+and nothing in this codebase runs on a clock at all (the only cron in the
+project is the box's nightly backup). The design's copy is a delivery promise,
+not a switch: "Bill due reminders (3 days before)".
+
+What is new here, beyond confirming the pattern:
+
+- **A toggle is a plausible-looking terminus.** Goals' gap was a missing
+  button — an absence, visible the moment someone looked for it. This one is
+  a present, working, satisfying control: it moves, it persists, it survives a
+  reload. Nothing about the screen suggests the far end is missing, which is
+  why four rows sat wrong for weeks while every walk passed.
+- **The mechanical check generalises.** For Goals it was "for each mutation a
+  hook returns, grep for a caller outside the hook". The same question asked of
+  a *stored preference* is: grep for a reader of that column outside the code
+  that writes and returns it. Four columns, no readers. Thirty seconds again.
+- **The headline number hid it.** The tracker's "73 of 103 built or partly
+  built" counts ✅ and 🟡 identically, so correcting four rows moved no summary
+  figure at all. A count that treats "done" and "partly done" as one bucket
+  cannot report this class of error.
+
+Corrected in `docs/FEATURE_TRACKER.md` to 🟡 with the gap named on each row
+(Household settings 15/4/2 → 11/8/2, totals 60/13/28/2 → 56/17/28/2, no row
+added or removed). Deliberately **not** fixed in code: building this product's
+first scheduler is a spec of its own, and Budget decision 1, Goals decision 4
+and Bills decision 3 have each already refused to invent one inside a feature
+that merely wanted it.
+
 ---
 
 ## Catalogue by area
