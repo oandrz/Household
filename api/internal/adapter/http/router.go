@@ -55,6 +55,7 @@ type Deps struct {
 	Budgets      *usecase.BudgetService
 	Goals        *usecase.GoalService
 	Bills        *usecase.BillService
+	Retros       *usecase.RetroService
 	Users        usecase.UserRepository
 	Memberships  usecase.MembershipRepository
 	Sessions     usecase.SessionRepository
@@ -286,6 +287,22 @@ func NewRouter(deps Deps) http.Handler {
 					w.Post("/bills/{id}/pay", handleMarkBillPaid(deps))
 					w.Delete("/bills/{id}/payments/{paymentId}", handleUndoBillPayment(deps))
 				})
+			})
+
+			// Marriage is parents-only, and its capability is refused to
+			// limited members in the domain (domain.ErrLimitedCannotHoldMarriage)
+			// -- so requireOwner is redundant here TODAY. It is stacked anyway,
+			// for the reason the money group's own comment above already gives
+			// (the txn group's requireCapability/requireOwner pairing): a route
+			// leaning on an invariant enforced in another layer for another
+			// reason opens silently the day that invariant is relaxed, with no
+			// failing test to catch it.
+			g.Group(func(m chi.Router) {
+				m.Use(requireCapability(domain.CapMarriage))
+				m.Use(requireOwner)
+
+				m.Get("/retros", handleListRetros(deps))
+				m.Get("/retros/{month}", handleGetRetro(deps))
 			})
 		})
 	})
