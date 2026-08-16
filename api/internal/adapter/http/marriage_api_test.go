@@ -34,7 +34,16 @@ func TestMarriageRoutesRequireMarriageAndOwner(t *testing.T) {
 		wantOwner    int
 	}{
 		{http.MethodGet, "/api/v1/retros", http.StatusOK},
-		{http.MethodGet, "/api/v1/retros/2026-07", http.StatusNotFound},
+		// 2001-01, not any month near "today": TestRetroWireShapeWithRealDataMatchesTheBrief
+		// seeds a real retro for the household's startable month (today's
+		// previous month on a fresh household), and this route-walk's own
+		// household is a separate newTestEnv/container each run -- but a
+		// fixed near-today literal here would silently start meaning
+		// something else the day any fixture shares a household, the same
+		// "looks exhaustive, isn't" failure shape this task's mutation check
+		// exists to catch elsewhere. 2001-01 (TestGetRetroForAnEmptyMonthIs404's
+		// own literal) can never collide with a startable month.
+		{http.MethodGet, "/api/v1/retros/2001-01", http.StatusNotFound},
 	}
 
 	for _, route := range routes {
