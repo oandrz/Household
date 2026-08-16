@@ -54,8 +54,11 @@ func TestAddActionWithABadAssigneeWritesNothingAtAll(t *testing.T) {
 		Body:                  "phone-free dinners",
 		AssigneeMembershipIDs: []string{uuid.NewString()}, // not a membership
 	})
-	if err == nil {
-		t.Fatal("Add accepted an assignee that is not a membership")
+	// errors.Is against the domain sentinel, not just "err != nil": a raw
+	// pgx driver error would satisfy err != nil too, and this package's own
+	// Liskov rule (CLAUDE.md) is that no such error is allowed to escape it.
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound (Add accepted an assignee that is not a membership)", err)
 	}
 
 	got, err := actions.ForRetro(ctx, householdID, retro.ID)
@@ -350,8 +353,13 @@ func TestAddActionRefusesAnAssigneeFromAnotherHousehold(t *testing.T) {
 		Body:                  "not this household's owner",
 		AssigneeMembershipIDs: []string{outsider},
 	})
-	if err == nil {
-		t.Fatal("Add accepted an assignee that is a membership of a different household")
+	// errors.Is against the domain sentinel, not just "err != nil" -- a raw
+	// pgx driver error leaking out of Add would satisfy err != nil too, and
+	// this package's own Liskov rule is that no such error is allowed to
+	// escape it (CLAUDE.md: "a missing row becomes domain.ErrNotFound at
+	// that boundary, never pgx.ErrNoRows further up").
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound (Add accepted an assignee that is a membership of a different household)", err)
 	}
 
 	got, err := actions.ForRetro(ctx, householdID, retro.ID)
@@ -393,8 +401,10 @@ func TestAddActionRefusesACarriedFromFromAnotherHousehold(t *testing.T) {
 		Body:        "carried from someone else's action",
 		CarriedFrom: otherAction.ID,
 	})
-	if err == nil {
-		t.Fatal("Add accepted a carried_from id belonging to a different household")
+	// errors.Is against the domain sentinel, not just "err != nil" -- same
+	// reason as the assignee-scoping test above.
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound (Add accepted a carried_from id belonging to a different household)", err)
 	}
 
 	got, err := actions.ForRetro(ctx, householdID, retro.ID)
@@ -438,6 +448,43 @@ func TestAddActionCarriedFromWithinTheSameHouseholdSucceeds(t *testing.T) {
 	}
 	if carried.CarriedFrom != original.ID {
 		t.Fatalf("CarriedFrom = %q, want %q", carried.CarriedFrom, original.ID)
+	}
+}
+
+// A CarriedFrom that does not even parse as a UUID must be refused, not
+// silently stored as NULL. nullableUUID/uuid swallow a Scan error into the
+// zero pgtype.UUID{} -- the same value a genuinely absent CarriedFrom
+// produces -- so without a check before the transaction opens, this
+// malformed value would take AddRetroAction's "$2 IS NULL" branch and the
+// action would be written with carried_from NULL, its provenance quietly
+// dropped instead of refused. "" (not carried) is the legitimate case this
+// must not disturb -- TestAddActionKeepsBothAssignees and friends exercise
+// that path with no CarriedFrom set at all.
+func TestAddActionRefusesAMalformedCarriedFrom(t *testing.T) {
+	ctx := context.Background()
+	actions, retros, householdID := newRetroActionRepo(t)
+
+	retro, err := retros.Create(ctx, householdID, jul2026())
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	_, err = actions.Add(ctx, usecase.RetroActionInput{
+		HouseholdID: householdID,
+		RetroID:     retro.ID,
+		Body:        "carried from nonsense",
+		CarriedFrom: "not-a-uuid",
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound (Add accepted a CarriedFrom that does not parse)", err)
+	}
+
+	got, err := actions.ForRetro(ctx, householdID, retro.ID)
+	if err != nil {
+		t.Fatalf("ForRetro: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("%d actions survived a malformed CarriedFrom, want 0", len(got))
 	}
 }
 

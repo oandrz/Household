@@ -48,6 +48,21 @@ func NewRetroActionRepo(db *DB) *RetroActionRepo {
 // handles the repeat, not just that Go silently swallowed it before ever
 // asking the database.
 func (r *RetroActionRepo) Add(ctx context.Context, in usecase.RetroActionInput) (usecase.RetroActionRecord, error) {
+	// CarriedFrom is the one id on this port that can arrive from outside
+	// this package unvalidated -- Task 8's carry-over control posts it from
+	// a request body, unlike every other id here, which this package's own
+	// prior reads produced. nullableUUID/uuid below turn a malformed value
+	// into SQL NULL, and AddRetroAction's own "$2 IS NULL OR ..." clause
+	// cannot then tell that apart from a genuinely absent carried_from --
+	// both take the same branch. "" (not carried) must keep working; a
+	// non-empty value that does not parse must not silently become "not
+	// carried" instead of the error it actually is. domain.ErrNotFound is
+	// the honest answer: a carried-from action that cannot even be parsed
+	// is not an action this household has.
+	if in.CarriedFrom != "" && !uuidLooksValid(in.CarriedFrom) {
+		return usecase.RetroActionRecord{}, domain.ErrNotFound
+	}
+
 	var result usecase.RetroActionRecord
 	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		q := r.q.WithTx(tx)
