@@ -875,6 +875,23 @@ person to ask whether the test could ever have gone red in the first place.
   mutation: forcing `enabled: true` left `toBeEmptyDOMElement()` passing and
   only the `fetchMock.mock.calls` assertion went red.
 
+- Mobile-responsive round: **a gate that runs before the change it exists to
+  catch cannot fail on it, however good the gate is.** Every slice of that
+  round was supposed to end with a 1440px desktop-parity screenshot compared
+  against a pre-change baseline, precisely so an unlicensed desktop movement
+  could not ship. One did anyway — `PageContainer` dropped eight pages from
+  32px to 24px of vertical padding — and it survived to the *final*
+  whole-branch review. The reason is visible only in file timestamps: the
+  per-page parity diffs were written at 19:13, and the commit that moved the
+  padding landed at 19:58. The gate had run, passed, and been reported as
+  passing, forty-five minutes before the change existed. Nobody skipped a
+  step and nobody lied; the artefact simply described an earlier tree than
+  the one being claimed for. **A verification artefact is evidence about the
+  tree it was produced from, and nothing else** — so a gate is only a gate if
+  something ties it to the commit it certifies. Timestamps, a recorded SHA,
+  or regenerating it as the last act before the commit; assertion alone is
+  not enough, and "the parity check passed" was true and useless at once.
+
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
 a different reason than the one you meant to prove, that is not yet proof
@@ -1126,6 +1143,23 @@ something only that guard can produce.
   didn't match decision 7's stated reason for using `dvh` on the drawer at
   all. No test could have caught either: `getBoundingClientRect()` and
   `elementFromPoint()` both need real layout, which jsdom does not perform.
+
+- Mobile-responsive round, Task 10: **the width matrix's own check could not
+  see the thing it was checking, for one whole class of screen.** The walk's
+  rule was `document.documentElement.scrollWidth <= clientWidth` at six widths
+  across every page, and it came back clean — while `BudgetModal`'s category
+  rows were overflowing horizontally the entire time. A native `<dialog>`
+  paints in the **top layer**, outside normal document flow, so nothing
+  happening inside it moves the document's own scroll width: the document
+  reports 375/375 while the dialog's own box scrolls. The row's flexible name
+  field needed `min-w-0` — the same unshrinkable-flex-item trap already on
+  record twice in this file, for `<select>` and for `BudgetStatCards` — but
+  the point worth keeping is not the fix, it is that **a check inherits the
+  blind spots of whatever it measures**. Any sweep for overflow needs a
+  second measurement per modal (`dialog.scrollWidth` vs `dialog.clientWidth`,
+  and the panel inside it), because the first one is structurally incapable
+  of failing there. Six modals were re-measured that way afterwards; only
+  this one was broken, which is exactly why nobody would have gone looking.
 
 **If a behaviour depends on the platform, verify it in the platform.** A real
 browser is what found every frontend defect above, and nothing else could

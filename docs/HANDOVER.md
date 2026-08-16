@@ -267,6 +267,21 @@ Two screens the design marks "· not built" are deliberately absent: the **kids
 view** and **custom space pages**. That is the design's own scoping, not an
 omission.
 
+**Every screen now works on a phone, as of 2026-08-16.** Before that round the
+app was not merely cramped on mobile but unusable: `AppShell`'s fixed 236px
+sidebar left `<main>` 124px wide at a 375px viewport, and `/sign-in` scrolled
+sideways on a card with no max-width. Nothing was redesigned — the product
+owner's constraint was "same UI, layout and structure" — so the sidebar became
+an off-canvas drawer below `lg` (1024px) and everything else reflows at `sm`
+(640px). Walked at 320/375/414/768/1024/1440 across every authenticated screen,
+sign-in, sign-up and one modal from each family, with zero horizontal overflow
+at any width; 1440 still measures 236 + 1204 exactly. The design file has no
+mobile artwork to build against — it is a 1440px canvas with zero media
+queries — so every mobile layout is invention, named as such in
+`docs/superpowers/specs/2026-08-15-hearth-mobile-responsive-design.md`. Known
+gaps are in §5 below, and the feature tracker's row is 🟡, not ✅, because of
+them.
+
 ---
 
 ## 2. Running it
@@ -654,6 +669,35 @@ five features running.
 
 `docs/superpowers/plans/2026-07-26-hearth-follow-ups.md` is the full list, with
 the reasoning for each. The headlines:
+
+### Mobile: eight things measured and deliberately left
+
+None of these blocks use of the product on a phone; each was measured, and each
+was left for a reason worth reading before "fixing" it.
+
+- **Four touch targets stay under the 44px floor.** `MembersPanel`'s role
+  toggle (24.5px — raising it outgrows the 34px avatar beside it); the sixteen
+  `ToggleSwitch` instances (23px — dense usages sit 6–14px apart, so larger
+  targets would overlap each other, which is worse for hit accuracy than a
+  small one); `BillRow`'s Mark paid / Archive / Restore / Undo (16.5px —
+  raising them grows the stacked mobile cluster from ~89px to ~144px against a
+  ~40px left block, and doing it properly needs the row restructure the spec
+  forbids); and `BudgetRolloverCard`'s "Move into goal", which is genuinely
+  inline mid-sentence so `min-height` does not apply to it at all.
+- **`BudgetPage`'s `‹`/`›` month arrows were raised on height only** (`h-11`,
+  no `w-11`) because the full square wraps "Edit budget" onto two lines in that
+  row's real state. The restored desktop arrow is 3.94 × 19.5px — a
+  pre-existing small target this round declined to widen, not one it created.
+- **`<main>` stays `inert` if the viewport crosses `lg` while the drawer is
+  open** — the hamburger and backdrop are both `lg:hidden` by then. Recovery is
+  Escape *or* any sidebar click (`<nav>` is a sibling of `<main>` and never
+  inert). Reachable by tablet rotation; fixing it properly means reintroducing
+  the JS viewport-watching `NavDrawer`'s design comment deliberately avoids.
+- **Two pre-existing `md:` breakpoints survive** in `BudgetStatCards.tsx` and
+  `FinancesPage.tsx`, against the two-breakpoint (`sm`/`lg`) convention the
+  rest of the app follows.
+- **`NewSpaceModal`'s pill row stays `grid-cols-2` unconditionally.** Measured
+  at 320px with no overflow; it holds two short pills.
 
 ### Decisions, not defects — do not "fix" these without a conversation
 

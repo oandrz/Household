@@ -1186,6 +1186,18 @@ project's mobile round) is back, exactly as it was. No third breakpoint is
 introduced for the shell, and a page component never needs to know which of
 the two rendering modes it is in.
 
+**One more rule holds codebase-wide, and it is easy to undo by habit: every
+full-height box is sized in `dvh`, never `vh`.** On iOS Safari `100vh` is the
+*large* viewport — the height as though the URL bar were already hidden — so a
+box built against it puts its bottom edge underneath the toolbar on first
+paint. That is not a cosmetic margin: `AccountModal`'s content measures 665px
+against roughly 650px of visible height on an iPhone, which puts its submit
+button exactly where a thumb cannot reach. All fourteen viewport-height rules
+in `web/src` — `Modal`, `NavDrawer`, `AppShell`, `RequireAuth`, the route
+fallback and every auth screen — use `dvh`/`min-h-dvh` for that reason, and
+nothing in this stack's tooling (headless Chrome, jsdom) reproduces the
+toolbar, so a `vh` that creeps back in will not be caught by any test here.
+
 **`NavDrawer` is what makes that restoration free, and `lg:contents` is why.**
 At `lg` and above `NavDrawer`'s wrapper carries `lg:contents`, which makes the
 element stop generating a box at all — its `<div>` disappears from layout
