@@ -9,6 +9,7 @@ import { useState } from "react";
 import { ApiError } from "../../api/client";
 import { PageContainer } from "../../components/PageContainer";
 import { MoodChart } from "./MoodChart";
+import { RetroDetail } from "./RetroDetail";
 import { RetroHistoryList } from "./RetroHistoryList";
 import { RETRO_COPY, doneSinceClause, monthNameOnly } from "./retroCopy";
 import { useRetros } from "./useRetros";
@@ -22,10 +23,8 @@ export function RetrosPage() {
   // first-run panel), which share this same handler.
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
-  // Which month's row is highlighted in the history list. Task 12 will read
-  // this to decide which month's detail to fetch and render in the mount
-  // point below; today it only drives RetroHistoryList's own selected
-  // styling, since there is nothing yet on the right to react to it.
+  // Which month's row is highlighted in the history list, and which month
+  // RetroDetail (below) fetches and renders on the right.
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
 
   // useRetros' own startRetro already invalidates both the list and the
@@ -181,13 +180,16 @@ export function RetrosPage() {
             </div>
           </div>
 
-          {/* Task 12's own mount point for a selected retro's detail (went
-              well / was hard / actions / notes) -- needs useRetro(month) for
-              a specific month, which this page does not call; picking which
-              month is Task 11's own history-list interaction, so there is
-              nothing to select from yet. */}
+          {/* selectedMonth comes from RetroHistoryList's own onSelect
+              (Task 11) -- nothing here fetches by month itself.
+              RetroDetail.tsx owns its own useRetro(month) call and the tick;
+              this mount point only decides whether a month is picked yet. */}
           <div data-testid="retro-detail-mount" className="rounded-xl border border-hairline bg-card p-6">
-            <p className="text-[13px] text-muted">{RETRO_COPY.detailPlaceholder}</p>
+            {selectedMonth ? (
+              <RetroDetail month={selectedMonth} />
+            ) : (
+              <p className="text-[13px] text-muted">{RETRO_COPY.detailPlaceholder}</p>
+            )}
           </div>
         </div>
       )}

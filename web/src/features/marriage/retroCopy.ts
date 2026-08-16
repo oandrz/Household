@@ -70,6 +70,33 @@ export const RETRO_COPY = {
   // placeholder shown in the mount point until a retro is selected there.
   detailPlaceholder: "Select a retro to see its detail.",
 
+  // RetroDetail.tsx's own load-error copy -- distinct from loadError below,
+  // which is GET /retros' (the history list's) own failure copy. A reader
+  // selecting a month whose detail 500s must not be told "your retros"
+  // failed to load when the list beside it is sitting there, loaded fine.
+  detailLoadError: "Couldn't load this retro.",
+
+  wentWellHeading: "What went well",
+  wasHardHeading: "What was hard",
+  notesHeading: "Notes",
+
+  // "Actions for July" over a June retro's own action list -- the design's
+  // own heading (dc.html): actions decided in a retro are carried out the
+  // month AFTER it, not the retro's own month.
+  actionsHeading: (monthName: string) => `Actions for ${monthName}`,
+
+  // An action's own provenance line, rendered only when RetroAction.carriedFrom
+  // is non-"" (retroActionSchema's own comment). See previousMonthName below
+  // for why this is always resolvable from the retro's own month rather than
+  // needing the carried-from id resolved.
+  carriedFrom: (monthName: string) => `Carried from ${monthName}`,
+
+  moodLabel: (mood: number) => `mood ${mood}/5`,
+
+  // RetroDetail.tsx's own per-row tick failure -- a network error or a
+  // household mid-offline moment must not look like the click did nothing.
+  tickError: "Couldn't update that action. Try again.",
+
   loadError: "Couldn't load your retros.",
   // GET /retros is marriage-AND-owner gated (router.go's own comment on the
   // group: requireOwner is stacked even though a limited member can never
@@ -126,6 +153,59 @@ export function sinceLabel(since: string): string {
 export function monthShortLabel(month: string): string {
   const [year, monthNum] = month.split("-").map(Number);
   return new Date(year, monthNum - 1, 2).toLocaleDateString("en-US", { month: "short" });
+}
+
+// "2026-07" -> "June" -- the calendar month immediately before the given
+// one. RetroDetail.tsx's own "Carried from June" label uses this rather than
+// resolving RetroAction.carriedFrom itself: that field is the id of the
+// SOURCE ACTION on the wire (RetroActionInput's own doc comment in
+// ports.go, "the id of last month's action when this one was carried"), an
+// opaque UUID with no month in it at all. Resolvable anyway, because the
+// design's own decision 4 ("Only the immediately previous month is
+// offered") guarantees a carried action's source is always this retro's own
+// month minus one -- there is no other month it could ever be, TODAY:
+// RetroService.Month (api/internal/usecase/retro.go) computes the ONLY
+// candidate list a client can ever carry from as
+// `OpenInMonth(month.AddDate(0, -1, 0))`, exactly one calendar month back,
+// and no code path in this codebase yet calls addAction with a non-""
+// carriedFrom at all (Task 13's Start/Edit modal, which will, does not
+// exist yet).
+//
+// This is a real trust boundary, not a proven one: AddRetroAction's own SQL
+// (retro_action_repo.go) checks only that carriedFrom resolves to an action
+// belonging to a retro of THIS HOUSEHOLD, never that it belongs to the
+// immediately previous month -- confirmed live by inserting a carried_from
+// six months back in the dev database, which rendered a plausible but wrong
+// "Carried from July" instead of the true source month. Nothing on the wire
+// (retroActionDTO) names which month a carriedFrom id actually belongs to,
+// so this frontend has no way to verify the assumption from data alone --
+// only RetroService.Month's own offer-restriction keeps it true. Whoever
+// builds the carry-over control (Task 13) MUST only ever pass a carriedFrom
+// value taken from this retro's own `carryOver` list (RetroDetailResponse's
+// sibling field, already exactly that one-month-back set) -- passing
+// anything else breaks this label silently, not loudly.
+export function previousMonthName(month: string): string {
+  const [year, monthNum] = month.split("-").map(Number);
+  return new Date(year, monthNum - 2, 2).toLocaleDateString("en-US", { month: "long" });
+}
+
+// "2026-06" -> "July" -- the design's own "Actions for July" heading over a
+// June retro's action list (dc.html): what a retro decides gets done the
+// month AFTER the retro, not during it.
+export function nextMonthName(month: string): string {
+  const [year, monthNum] = month.split("-").map(Number);
+  return new Date(year, monthNum, 2).toLocaleDateString("en-US", { month: "long" });
+}
+
+// "2026-06-28T21:18:52+08:00" -> "Jun 28" -- the detail header's own
+// completion date. Unlike every month-only helper above, this takes a real
+// timestamp (retroDTO.CompletedAt is a *time.Time, task-7-report.md's own
+// sample carries a full offset) straight into `new Date`, with none of
+// monthNameOnly's UTC-midnight caution: that trap is specific to a bare
+// "YYYY-MM-DD" being parsed as UTC midnight, which a full timestamp with its
+// own offset never is.
+export function completedDateLabel(completedAt: string): string {
+  return new Date(completedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 // The header subtitle's second clause, composed here rather than inline in

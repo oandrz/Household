@@ -207,7 +207,8 @@ describe("RetrosPage", () => {
 
   // State 3: normal -- history, chart and detail mount points. History and
   // the mood chart are real components as of task 11 (RetroHistoryList,
-  // MoodChart); the detail mount point is still Task 12's own stand-in.
+  // MoodChart); selecting a row's own RetroDetail render is proven by the
+  // separate test below, once a month is actually clicked.
   it("renders history, mood-chart and detail mount points for a household with real history", async () => {
     renderPage(
       retrosFixture({
@@ -241,6 +242,56 @@ describe("RetrosPage", () => {
     const chartMount = screen.getByTestId("retro-mood-chart-mount");
     expect(within(chartMount).getByRole("img")).toBeInTheDocument();
     expect(screen.getByTestId("retro-detail-mount")).toBeInTheDocument();
+  });
+
+  // Pins the wiring itself, not just RetroDetail.tsx's own component test
+  // (RetroDetail.test.tsx). docs/LEARNING.md pattern 15 -- MoodChart's own
+  // <MoodChart .../> render line could have been deleted with the whole
+  // suite staying green, because nothing asserted content MoodChart itself
+  // produces from *inside* RetrosPage's mount point. This clicks a real row
+  // and asserts something RetroDetail itself renders (its own heading)
+  // inside retro-detail-mount, so deleting `<RetroDetail month=.../>` from
+  // RetrosPage.tsx turns this test red, not just RetroDetail.test.tsx's own
+  // (which never mounts RetrosPage at all).
+  it("selecting a history row renders that month's real detail in the mount point", async () => {
+    renderPage(
+      retrosFixture({
+        retros: [summaryFixture({ id: "retro-june", month: "2026-06", finished: true })],
+        mood: [],
+        doneCount: 1,
+        since: "2026-06",
+        startMonth: "2026-07",
+      }),
+      {
+        "GET /api/v1/retros/2026-06": {
+          status: 200,
+          body: {
+            retro: {
+              id: "retro-june",
+              month: "2026-06",
+              mood: 4,
+              wentWell: "",
+              wasHard: "",
+              notes: "",
+              completedAt: null,
+              version: 1,
+              actions: [],
+            },
+            carryOver: [],
+          },
+        },
+        "GET /api/v1/household/members": { status: 200, body: [] },
+      },
+    );
+
+    fireEvent.click(await screen.findByTestId("retro-row-2026-06"));
+
+    const mount = screen.getByTestId("retro-detail-mount");
+    expect(await within(mount).findByTestId("retro-detail-heading")).toHaveTextContent("June 2026 retro");
+    // The Task-10-era placeholder must be gone once a real detail is
+    // showing -- both on screen at once would mean the mount point renders
+    // both branches rather than choosing between them.
+    expect(within(mount).queryByText("Select a retro to see its detail.")).not.toBeInTheDocument();
   });
 
   // The Goals-archive dead end (docs/LEARNING.md pattern 15): a button
