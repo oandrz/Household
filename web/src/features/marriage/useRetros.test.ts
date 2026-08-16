@@ -446,3 +446,65 @@ describe("useRetro", () => {
     expect(result.current.data).toBeUndefined();
   });
 });
+
+// This is the gap a coordinator review caught after the first pass of this
+// task looked done: useRetro(month) caches a 404 for "no retro yet" the
+// same as any other response, and startRetro's own invalidation must reach
+// that specific month's own retroQueryKey, not just the history list's --
+// otherwise a tab that already has the startable month's detail screen
+// mounted keeps serving the cached miss straight through the click that
+// creates the retro. Needs both hooks mounted against the SAME QueryClient
+// (unlike every test above, which only ever needs one hook at a time), so
+// this gets its own describe block and its own render helper rather than
+// reusing renderUseRetro/renderUseRetros.
+describe("useRetro and useRetros sharing a cache", () => {
+  it("startRetro refetches a month's detail query that had already cached the not-yet-started 404", async () => {
+    const startedMonth = "2026-08";
+    const createdRetro = retroFixture({
+      id: "0d6a6f42-6f0e-4c3e-9d8a-1a2b3c4d5e6f",
+      month: startedMonth,
+      mood: null,
+      wentWell: "",
+      wasHard: "",
+      notes: "",
+      completedAt: null,
+      version: 1,
+      actions: [],
+    });
+
+    stubFetchRoutes({
+      "GET /api/v1/retros": { status: 200, body: retrosListResponse },
+      "GET /api/v1/retros/2026-08": [
+        { status: 404, body: { error: { code: "NOT_FOUND", message: "That could not be found." } } },
+        { status: 200, body: { retro: createdRetro, carryOver: [] } },
+      ],
+      "POST /api/v1/retros": { status: 201, body: { retro: createdRetro } },
+    });
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(
+      () => ({ retro: useRetro(startedMonth), retros: useRetros() }),
+      {
+        wrapper: ({ children }) => createElement(QueryClientProvider, { client: queryClient }, children),
+      },
+    );
+
+    // The month's own detail query resolves the "not started yet" 404
+    // first -- the exact cached-miss state the gap left stuck forever.
+    await waitFor(() => expect(result.current.retro.loading).toBe(false));
+    expect(result.current.retro.error).not.toBeNull();
+    expect(result.current.retro.data).toBeUndefined();
+
+    await waitFor(() => expect(result.current.retros.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.retros.startRetro();
+    });
+
+    // startRetro's own invalidation must reach retroQueryKey(startedMonth),
+    // not just the list -- otherwise this tab would go on showing "not
+    // started" for the very month it just started.
+    await waitFor(() => expect(result.current.retro.data?.retro.month).toBe(startedMonth));
+    expect(result.current.retro.error).toBeNull();
+  });
+});

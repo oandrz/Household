@@ -3,15 +3,16 @@
 // not useGoals.ts's include-archived union shape: a retro detail is
 // addressed by which month it belongs to, never toggled by a flag. Every
 // write below awaits both this hook's own key and the history list's key
-// (useRetros.ts's retroListQueryKey) before resolving -- a save, finish,
-// discard or action write moves the list's own mood point, actionCount,
-// quote and finished flag too, not just this screen, and CurrencyPanel /
-// NotificationsPanel are on the follow-up list for exactly the
-// non-awaited version of that.
+// (retroListQueryKey) before resolving -- a save, finish, discard or action
+// write moves the list's own mood point, actionCount, quote and finished
+// flag too, not just this screen, and CurrencyPanel / NotificationsPanel
+// are on the follow-up list for exactly the non-awaited version of that.
+// Both query keys live in retroQueryKeys.ts, not here or in useRetros.ts --
+// see that file's own header comment for why.
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { ApiError, apiFetch } from "../../api/client";
-import { retroListQueryKey } from "./useRetros";
+import { retroListQueryKey, retroQueryKey } from "./retroQueryKeys";
 import {
   retroActionResponseSchema,
   retroActionTickResponseSchema,
@@ -20,10 +21,6 @@ import {
   type RetroAction,
   type RetroDetailResponse,
 } from "./retroSchemas";
-
-export function retroQueryKey(month: string) {
-  return ["retro", month] as const;
-}
 
 async function fetchRetro(month: string): Promise<RetroDetailResponse> {
   const body = await apiFetch<unknown>(`/api/v1/retros/${encodeURIComponent(month)}`);
