@@ -139,11 +139,15 @@ describe("the real route tree", () => {
 
   // Pins router.tsx's header comment: rootRoute's notFoundComponent sits
   // above authenticatedRoute/shellRoute in this tree, so a deleted space's
-  // URL (task 2 removed /marriage) falls through to it rather than
-  // redirecting anywhere -- unlike every route still in the tree, which
-  // either mounts or bounces to /sign-in or /. No session is stubbed at
-  // all here, deliberately: if RequireAuth ran for this path the way it
-  // does for every real route, an unauthenticated visit would redirect to
+  // URL with genuinely no route anywhere in the tree falls through to it
+  // rather than redirecting anywhere -- unlike every route still in the
+  // tree, which either mounts or bounces to /sign-in or /. Task 10 gave
+  // Marriage's own "/marriage" a real matching route (marriageGuardRoute),
+  // so it no longer demonstrates this -- /family/calendar does instead:
+  // Family's own placeholder was deleted in the same commit as Marriage's
+  // (110ab0a) and nothing has rebuilt it. No session is stubbed at all
+  // here, deliberately: if RequireAuth ran for this path the way it does
+  // for every real route, an unauthenticated visit would redirect to
   // /sign-in and this test would time out waiting for a pathname that never
   // arrives. That it doesn't redirect is exactly the second consequence the
   // comment calls out, and the one most likely to surprise someone who
@@ -151,10 +155,10 @@ describe("the real route tree", () => {
   it("leaves a deleted space's URL on the not-found page instead of redirecting", async () => {
     stubFetchRoutes({ "GET /api/v1/auth/me": NO_SESSION });
 
-    const { router } = renderApp("/marriage");
+    const { router } = renderApp("/family/calendar");
 
     expect(await screen.findByText("Page not found.")).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/marriage");
+    expect(router.state.location.pathname).toBe("/family/calendar");
   });
 
   // Task 17: /money/transactions has to sit under moneyGuardRoute, not hung
@@ -466,6 +470,56 @@ describe("the real route tree", () => {
 
     expect(await screen.findByTestId("bills-page")).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/money/bills");
+  });
+
+  // Task 10: Marriage's own route came back in the same change as its
+  // SPACE_PAGES entry and RequireCapability guard (router.tsx's own header
+  // comment on why splitting them across tasks isn't safe) -- a member
+  // without the marriage capability must never reach the Retros screen, the
+  // same reasoning every /money/* redirect test above pins for money.
+  it("redirects a member without the marriage capability away from /marriage/retros", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": {
+        status: 200,
+        body: meFixture({
+          membership: {
+            id: "membership-2",
+            householdId: "household-1",
+            userId: "user-2",
+            role: "limited",
+            capabilities: ["calendar", "chores"],
+          },
+          capabilities: ["calendar", "chores"],
+        }),
+      },
+    });
+
+    const { router } = renderApp("/marriage/retros");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Overview" }),
+    ).toBeInTheDocument();
+  });
+
+  // The positive counterpart the redirect test above needs -- and the one
+  // that actually proves marriageRetrosRoute exists and mounts the real
+  // RetrosPage, not a 404: before Step 3 of task-10-brief.md added it,
+  // "/marriage/retros" fell straight through to rootRoute's
+  // notFoundComponent (router.tsx's own header comment, pre-task-10 version).
+  it("mounts the Retros page at /marriage/retros for a caller who has the marriage capability", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      "GET /api/v1/retros": {
+        status: 200,
+        body: { retros: [], mood: [], doneCount: 0, since: null, startMonth: "2026-08" },
+      },
+    });
+
+    const { router } = renderApp("/marriage/retros");
+
+    expect(await screen.findByTestId("retros-page")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/marriage/retros");
   });
 
   // Fix round 5, Finding 1 (critical): this is the exact reproduction the

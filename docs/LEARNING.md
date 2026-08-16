@@ -233,7 +233,7 @@ fix in the same branch *created* the sibling.
   naming "the whole group" in one file is not the same as every reader of
   that group having read it** — `router.go`'s own sentence was true and
   specific the entire time; nothing made the three frontend pages built
-  against it go and act on it.
+  against it go and act on it. **RetrosPage.tsx (task 10, `docs/superpowers/sdd/2026-08-16-hearth-retros/`) is the first page since that sweep built against this exact guard from a blank file, and it was given the branch on day one rather than found missing it later** — `GET /retros` is marriage-AND-owner gated the identical shape (`router.go`'s own comment on the group: `requireOwner` is stacked even though a limited member can never hold `CapMarriage` today, precisely so the frontend guard is not leaning on an invariant enforced only one layer down), so the brief named `GoalsPage.tsx`'s branch as the shape to mirror exactly and required the same mutation check (collapse the 403 branch into the generic one, confirm the owner-only test alone goes red and the 500 test stays green) before calling it done. Evidence for this pattern's own point either way: a class of bug recurring three times is what got this written down as a thing to check for on the *next* page, not just the next fix.
 
 - **A fix created the very sibling it was meant to close — inside the same
   branch.** Bills' Task 10 added an archived-account refusal to
@@ -2066,6 +2066,27 @@ route with a missing guard has no second line of defence.
   reconstructs it and is what a router-walk test must read instead. Would have
   failed against a *correct* implementation — verified against the router's
   own source, not assumed from the property's name.
+- Adding a capability-guard route with only a nested child and no index route
+  (task 10's `marriageGuardRoute`, one child: `retros`) does not make the bare
+  parent path 404 the way it did before the route existed. Before task 10,
+  `/marriage` fell through to `rootRoute`'s own `notFoundComponent` with
+  `RequireAuth` never running at all, because nothing in the tree matched it.
+  Once `marriageGuardRoute` exists (path `"marriage"`, nested under
+  `shellRoute`), TanStack Router matches it as a real route for the bare path
+  too — `RequireAuth` and `RequireCapability` both run, an unauthenticated
+  visitor is bounced to `/sign-in` same as any real route, but an
+  authenticated one who clears the guard sees `AppShell`'s sidebar with a
+  *blank content area*, not a 404 and not the child page. Found empirically
+  (a probe test, not a docs read) after a pre-existing router test asserting
+  "`/marriage` renders Page not found" started failing for the wrong reason —
+  it looked like the redirect assertion was broken, but the actual cause was
+  that `/marriage` had quietly become a real, matched route. `moneyGuardRoute`
+  never shows this because it has an index child (`moneyIndexRoute`, path
+  `"/"`) that gives the bare parent path a real page — a route with children
+  but no index is the shape that produces the blank-shell case. Check for an
+  index route (or accept the blank content area explicitly, as task 10 did
+  for Marriage — see `docs/FEATURE_TRACKER.md` section 6) whenever a new
+  guard route's first child is not itself the parent's own landing page.
 - A task brief's own `formatMoney` code butted every currency symbol directly
   against the digits (`Rp85,400,000`), contradicting the same brief's own IDR
   test (`Rp 85,400,000`) — neither could have been right as given. Fixed with

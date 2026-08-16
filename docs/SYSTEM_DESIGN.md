@@ -23,17 +23,27 @@ clamping a stored anchor day rather than the date itself (§5), and whose
 "mark paid" writes a real expense transaction into `transactions` — the one
 place in Money something outside Transactions writes its ledger — so Budget,
 Spending by person and net worth all move the moment a bill is settled.
-All of Marriage and Family are not built; see `docs/FEATURE_TRACKER.md`.
+Marriage's backend (Retros' three rules, its repository and its read/write
+routes) is built and its frontend has a route, a sidebar entry and a page
+shell (`RetrosPage.tsx`) with its five screen states, but the screen itself
+is not: the real history list, the twelve-month mood chart and a selected
+month's detail are still unbuilt, each with a labelled mount point inside
+`RetrosPage.tsx` (§7) rather than a component of its own, and Vision & goals
+and Agreements have not been started at all. Family is not built. See
+`docs/FEATURE_TRACKER.md` section 6 for exactly which of Marriage's rows are
+done.
 Overview is **partly** built: `/` carries an interim page composed of four of
 the design's eight cards Money can now supply, plus a setup checklist and a
-quick-create menu, and it grows into the designed Overview as Marriage and
-Family arrive rather than being replaced (§7). It adds no endpoint, no table
-and no port — it is composition over what Accounts, Transactions, Budget,
-Goals and Bills already expose. The UX-repair round of 2026-07-31 that
-preceded it shipped no feature at all — it bounded the page container,
-removed the two unbuilt spaces from the navigation along with their four
-routes, and rewrote copy; where either round changed the shape of something
-drawn here, the change is recorded at that diagram (§7 in particular).
+quick-create menu, and it grows into the designed Overview as the rest of
+Marriage and Family arrive rather than being replaced (§7). It adds no
+endpoint, no table and no port — it is composition over what Accounts,
+Transactions, Budget, Goals and Bills already expose. The UX-repair round of
+2026-07-31 that preceded it shipped no feature at all — it bounded the page
+container, removed the two unbuilt spaces from the navigation along with
+their four routes, and rewrote copy; Marriage's route, guard and sidebar
+entry came back together in the same change that built `RetrosPage.tsx`
+(§4, §7) — where any of these rounds changed the shape of something drawn
+here, the change is recorded at that diagram (§7 in particular).
 
 **This is deployed.** Hearth has run at <https://oink.mywire.org> since
 2026-08-15, on one Hetzner CX23 in Falkenstein, serving a real household. §1
@@ -358,9 +368,11 @@ graph TD
     Session --> Cap{"Capability-gated<br/>route group?"}
     Cap -->|"accounts: money"| RequireCap["requireCapability(money)<br/>403 unless the caller's membership has it"]
     Cap -->|"transactions, categories,<br/>budgets, goals, bills: money AND owner —<br/>reads included"| RequireCapTxn["requireCapability(money)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
+    Cap -->|"retros: marriage AND owner —<br/>reads included"| RequireCapRetro["requireCapability(marriage)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
     Cap -->|"no — most routes"| Safe{"GET or HEAD?"}
     RequireCap --> Safe
     RequireCapTxn --> Safe
+    RequireCapRetro --> Safe
     Safe -->|yes| Handler
     Safe -->|no| CSRF["requireCSRF<br/>double-submit, constant-time compare"]
 
@@ -396,22 +408,32 @@ every route depending on it would open silently. One extra middleware call is
 the cheaper price. (This is unrelated to the frontend's own `RequireCapability`
 component, §7 — a presentation guard that, at the time accounts shipped,
 already existed for the `/money` and `/marriage` placeholders; this is the
-first time the *server* enforces one. `/marriage` has had no route since
-`110ab0a`, so today `RequireCapability` guards only `/money`'s subtree, and
-the server-side gate below is the enforcement either way.)
+first time the *server* enforces one. `/marriage`'s route was deleted in
+`110ab0a` and came back in task 10 as `/marriage/retros`, so
+`RequireCapability` today guards both `/money`'s subtree and
+`/marriage/retros`, and the server-side gate below is the enforcement either
+way regardless of which routes the frontend happens to offer.)
 
-**Transactions, categories, budgets, goals and bills are the routes where
-`requireOwner` gates a `GET`.** Every other owner-gated route in this table
-only reaches `requireOwner` after the `CSRF` check, which by construction
-means never on a read. This group instead runs `requireCapability(money)`
-then `requireOwner` before the GET/HEAD branch even exists, so a limited
-member is refused the ledger — and the budget, goals and bills screens —
-themselves, not merely their writes. This is deliberate, not copied from
+**Transactions, categories, budgets, goals, bills and retros are the routes
+where `requireOwner` gates a `GET`.** Every other owner-gated route in this
+table only reaches `requireOwner` after the `CSRF` check, which by
+construction means never on a read. These groups instead run
+`requireCapability` (`money` for the first five, `marriage` for retros) then
+`requireOwner` before the GET/HEAD branch even exists, so a limited member is
+refused the ledger — and the budget, goals, bills and retros screens —
+themselves, not merely their writes. `requireOwner` on retros is redundant
+today, the identical reasoning the money group's own paragraph above gives:
+`domain.ErrLimitedCannotHoldMarriage` already refuses a limited member the
+`marriage` capability one layer down, so "a limited member holding it anyway"
+is not a representable state — but the route does not lean on that alone,
+for the same reason accounts' four write routes don't lean on
+`ValidateMembershipChange` alone. This is deliberate, not copied from
 accounts by mistake: a limited member's accounts view already renders names
 with every amount blank (§5); applied to a ledger, a budget screen, a goal
-card or a bill row, that is nothing but figures — a table whose every figure
-would be blank, next to a "Spent this month" that has to be absent rather
-than shown as zero, a page of caps and pace with nothing left to show, a card
+card, a bill row or a retro, that is nothing but figures or private
+conversation — a table whose every figure would be blank, next to a "Spent
+this month" that has to be absent rather than shown as zero, a page of caps
+and pace with nothing left to show, a card
 whose whole point is a progress ring and a dollar figure, or a due date with
 an amount beside it — the page would read as broken rather than merely
 restricted. So for a limited member the `money` capability on Transactions,
@@ -1221,9 +1243,11 @@ merely inherit, and a `contents` wrapper hiding a normally-open child with
 spaces in one response, so the shell renders without a request waterfall. The
 sidebar never filters or re-sorts `me.spaces` client-side — duplicating that
 rule is how the two drift. It does expand each space into its built pages: a
-client-side map (`SPACE_PAGES` in `Sidebar.tsx`) turns a space with several
-shipped pages into the design's uppercase group label plus one link per page
-— Money renders as "MONEY" over Finances, Transactions and Budget.
+client-side map (`SPACE_PAGES` in `Sidebar.tsx`) turns a space with built
+pages into the design's uppercase group label plus one link per page, one
+page or several alike — Money renders as "MONEY" over Finances,
+Transactions, Budget, Goals and Bills; Marriage renders as "MARRIAGE" over
+its one page, Retros.
 
 **Overview fetches nothing of its own.** Its five requests are the ones
 Accounts, Budget, Goals, Bills and Settings already make, through the same
@@ -1247,23 +1271,33 @@ which reads the *local* calendar — the two screens must agree on which month
 "this month" is, and the API container's own clock is UTC.
 
 **A builtin space the map does not name renders nothing at all.** Since
-`110ab0a`, Marriage and Family are exactly that: both had a single
-"destination" whose whole content was the sentence "Arriving in slice N", the
-team's own planning vocabulary shown to a customer, so the pages and their
-four routes were deleted and their `SPACE_PAGES` entries with them. The rule
-keys off `isBuiltin`, **not** off the absence of a pages entry — a *custom*
-space created through "+ New space" has no map entry either and must keep
+`110ab0a`, Family is exactly that: it had a single "destination" whose whole
+content was the sentence "Arriving in slice N", the team's own planning
+vocabulary shown to a customer, so the page and its route were deleted and
+its `SPACE_PAGES` entry with them. Marriage was in the identical state from
+`110ab0a` until task 10, when its own route, guard and `SPACE_PAGES` entry
+(one page, Retros) all came back together — splitting them across tasks
+would have left a route nobody could reach or a sidebar link to a 404, the
+same reasoning `110ab0a` itself gives for deleting all three of a space's
+pieces together rather than leaving one behind. The rule keys off
+`isBuiltin`, **not** off the absence of a pages entry — a *custom* space
+created through "+ New space" has no map entry either and must keep
 appearing, because a household that just made a space needs to see that it
 exists. So there are three cases, not two: a space with built pages → the
-group label plus one link per page, whether it has one shipped page or
-several (no space is in that state today — Marriage and Family were, until
-`110ab0a` — so there is no separate single-link rendering to special-case); a
-custom space → its name as plain text, since it has no route to link to; a
-*builtin* space with no built page → nothing rendered. The map, not the
+group label plus one link per page, whether it has one shipped page (Marriage
+today) or several (Money); a custom space → its name as plain text, since it
+has no route to link to; a *builtin* space with no built page (Family) →
+nothing rendered. Marriage's return is what first exercised the
+group-label-plus-one-link shape for a real space — the single-link rendering
+branch that used to special-case exactly one page had already been deleted
+as unreachable once every remaining builtin space had two or more (Money),
+so nothing in `SpaceLink` needed to change; the general branch already
+handled `pages.length === 1` the same as `length > 1`. The map, not the
 server payload, decides how many links a space produces; the server payload
 still decides which spaces are *visible to this member* at all and in what
-order, and Settings' own Spaces panel still lists Marriage and Family,
-because the spaces themselves are untouched — only their navigation is gone.
+order, and Settings' own Spaces panel lists Marriage and Family regardless of
+either one's navigation state, because the spaces themselves — unlike their
+navigation — were never touched.
 
 ---
 
@@ -1707,15 +1741,28 @@ web/src/
                        track; and the next bill, reading the same useBills
                        hook /money/bills itself uses), a setup checklist,
                        and the "+ Add" quick-create menu
+    marriage/          RetrosPage — header (title, subtitle, done-count
+                       clause, privacy badge, start-retro button), the
+                       five screen states (first-run, a draft in progress,
+                       normal, owner-only, load failure), and three
+                       labelled mount points a later task fills in:
+                       retro-history (the real history list and mood
+                       chart), retro-detail-mount (a selected month's
+                       full detail), and the Start/Edit retro modal, none
+                       of which exist yet. useRetros/useRetro read and
+                       write /retros; retroQueryKeys.ts holds both hooks'
+                       cache keys so either can invalidate the other's
+                       without a circular import. Mounted at
+                       /marriage/retros
     placeholder/       named stand-ins for unbuilt areas, and only for areas
                        a household can already reach. Empty of callers as of
                        this feature: / stopped using it when the interim
                        Overview shipped, and Bills' own route was the last
                        one still pointing at it (moneySplatRoute). The
                        component is unreferenced dead code today, kept
-                       rather than deleted because Marriage and Family will
-                       want it again the moment either grows a route with
-                       no page behind it yet — see `docs/FEATURE_TRACKER.md`
+                       rather than deleted because Family will want it
+                       again the moment it grows a route with no page
+                       behind it yet — see `docs/FEATURE_TRACKER.md`
   routes/router.tsx        the route tree; its header comment is the route
                            list, kept beside the code it describes
   routes/publicRoutes.ts   the one list of pre-auth routes and API prefixes;
@@ -1743,6 +1790,20 @@ form — an uppercase "MONEY" label over Finances (`/money`), Transactions
 (`/money/transactions`), Budget (`/money/budget`), Goals (`/money/goals`)
 and Bills (`/money/bills`) — via the `SPACE_PAGES` map in `Sidebar.tsx` (see
 "What the frontend loads" above).
+
+**`/marriage/retros` is Marriage's own return to the app** (task 10),
+mirroring the shape every capability-gated `/money/*` route already takes:
+`marriageGuardRoute` (`RequireCapability cap="marriage"`) nested under
+`shellRoute`, with `retros` as its one child. Unlike `moneyGuardRoute`,
+`marriageGuardRoute` has no index route — nothing in the design links to
+bare `/marriage`, so a caller who types it anyway now matches a real route
+(unlike before task 10) and sees the sidebar with a blank content area,
+neither a page nor a 404 (`docs/LEARNING.md`'s frontend section has the full
+mechanism). `SPACE_PAGES.marriage` renders the identical grouped
+label-plus-links shape Money uses, with one link (Retros) — the
+single-link branch that shape used to have a separate code path for was
+already deleted as unreachable before Marriage needed it again, so no
+rendering logic changed, only the map entry.
 
 **`/` is a real page, and it is the only one with no capability guard above
 it.** Every other screen sits behind `RequireAuth` *and* `RequireCapability`,
@@ -1780,21 +1841,28 @@ not the four an onboarding flow suggests: an emailed invite writes only to the
 users, so a pending invite is not a row there and an "invite your partner" step
 could only tick once the partner accepted.
 
-**`/marriage`, `/marriage/$` and `/family/calendar` are gone** (`110ab0a`),
-with the placeholders they rendered. Those URLs now fall through to
-`rootRoute`'s `notFoundComponent`. Two consequences follow from *where* that
-component sits, and `router.tsx`'s header comment records both because
-neither is visible from the route list alone. `rootRoute` sits **above** the
-pathless `RequireAuth`/`AppShell` pair rather than below it, so the 404
-renders shell-less — no sidebar, and today no link home, which makes
-`/marriage` a dead end rather than a route that offers a way out. And
+**`/marriage`, `/marriage/$` and `/family/calendar` were deleted together**
+in `110ab0a`, with the placeholders they rendered, because a navigation row
+whose only content was "Arriving in slice N" reads as broken. Task 10
+restored `/marriage` in the shape of `/marriage/retros`, alongside its
+`SPACE_PAGES` entry and its `RequireCapability` guard, all in the same
+change — splitting them across tasks would have left a route nobody could
+reach or a sidebar link to a 404. `/family/calendar` is still gone; nothing
+has rebuilt Family yet, so that URL still falls through to `rootRoute`'s
+`notFoundComponent` exactly as `/marriage` used to. Two consequences follow
+from *where* that component sits, and `router.tsx`'s header comment records
+both because neither is visible from the route list alone. `rootRoute` sits
+**above** the pathless `RequireAuth`/`AppShell` pair rather than below it, so
+the 404 renders shell-less — no sidebar, and today no link home, which makes
+`/family/calendar` a dead end rather than a route that offers a way out. And
 `RequireAuth` never runs for it, so a signed-out visitor following an old
-`/marriage` bookmark gets bare "Page not found." text instead of the sign-in
-screen every real route bounces them to. Both are accepted for now: these are
-links to a feature that does not exist, not routes anything should point at.
-Both stop being acceptable the moment `notFoundComponent` grows real content
-or a route moves relative to `authenticatedRoute`, so `router.test.tsx` pins
-the fall-through rather than leaving it to be rediscovered.
+`/family/calendar` bookmark gets bare "Page not found." text instead of the
+sign-in screen every real route bounces them to. Both are accepted for now:
+this is a link to a feature that does not exist, not a route anything should
+point at. Both stop being acceptable the moment `notFoundComponent` grows
+real content or a route moves relative to `authenticatedRoute`, so
+`router.test.tsx` pins the fall-through rather than leaving it to be
+rediscovered.
 
 **Every page renders inside a 1204px column**, centred by `AppShell` — the
 design's own content width (a 1440px canvas less the 236px sidebar), not a
@@ -1808,9 +1876,10 @@ browser (`docs/superpowers/plans/2026-07-31-hearth-ux-repair-verification.md`).
 
 **Route guards are presentation, not security.** The server enforces
 independently; `RequireAuth` and `RequireCapability` exist so the UI does not
-render something the user will be refused. The `/marriage` fall-through above
-is the same rule read from the other side: a URL with no route gets no guard
-either, and it is the server that would refuse the data regardless.
+render something the user will be refused. The `/family/calendar`
+fall-through above is the same rule read from the other side: a URL with no
+route gets no guard either, and it is the server that would refuse the data
+regardless.
 
 `publicRoutes.ts` replaces two hand-maintained lists that used to live in
 `api/client.ts` and `api/unauthorizedRedirect.ts`, with nothing tying either to

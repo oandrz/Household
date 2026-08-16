@@ -17,20 +17,22 @@ import { useSignOut } from "../auth/useAuth";
 
 // One entry per built page of each space, in the design's order. A space
 // present here renders as the design's uppercase group label plus a link
-// per page (the 5a sidebar) -- including a space with only one page. No
-// entry has exactly one page today (money has five), so the bare-link
-// branch that used to render that case was deleted as unreachable rather
-// than kept waiting for a space that would use it. Marriage and Family were
-// the last spaces in that state; they lost their entries in task 2.
+// per page (the 5a sidebar) -- including a space with only one page (Task 10
+// gave Marriage its own single-page turn: money had five pages by the time
+// the bare-link branch that used to render a one-page space specially was
+// deleted as unreachable, but that deletion did not remove the *ability* to
+// render one page this way -- the group-label-plus-links branch below
+// already handles `pages.length === 1` identically to `length > 1`, so
+// Marriage needed no code change here, only this entry).
 //
 // A *builtin* space missing from this map has no built pages at all and
 // renders nothing -- the same rule this map already applies one level down
 // ("a page joins it once its route exists, not before, because a permanent
-// grey 'soon' row reads as broken"). Marriage and Family were both
-// rows whose only content was the sentence "Arriving in slice N"; they come
-// back here when their pages do. A *custom* space -- one a household made
-// with "+ New space" -- is missing from this map permanently and by design,
-// so it still renders, as plain text.
+// grey 'soon' row reads as broken"). Family is still in that state: its own
+// "Arriving in slice N" row was deleted in `110ab0a` and nothing has
+// rebuilt it yet. A *custom* space -- one a household made with "+ New
+// space" -- is missing from this map permanently and by design, so it still
+// renders, as plain text.
 const SPACE_PAGES: Record<string, { label: string; to: string }[]> = {
   money: [
     { label: "Finances", to: "/money" },
@@ -39,6 +41,12 @@ const SPACE_PAGES: Record<string, { label: string; to: string }[]> = {
     { label: "Goals", to: "/money/goals" },
     { label: "Bills", to: "/money/bills" },
   ],
+  // Task 10 -- Retros is the first of Marriage's three pages
+  // (docs/FEATURE_TRACKER.md section 6: Vision & goals and Agreements are
+  // still ⬜). This is the entry `110ab0a` deleted alongside `/marriage`'s
+  // own route and guard; all three came back together (see router.tsx's own
+  // header comment on why splitting them across tasks isn't safe).
+  marriage: [{ label: "Retros", to: "/marriage/retros" }],
 };
 
 // Layout only -- no color here. `text-ink`/`text-accent`/`text-muted` are

@@ -1,5 +1,6 @@
 // Behaviours from the task-19 brief, updated by task 2 (Marriage and Family
-// lost their SPACE_PAGES entries -- see Sidebar.tsx):
+// lost their SPACE_PAGES entries -- see Sidebar.tsx) and by task 10, which
+// gave Marriage its own entry back (Retros):
 // 1. A space present in `me.spaces` renders only if it has a SPACE_PAGES
 //    entry, or is a custom (non-builtin) space -- the sidebar must render
 //    from the payload, not a hard-coded list.
@@ -93,15 +94,46 @@ function meFixture(spaces: Space[]): Me {
 
 describe("Sidebar", () => {
   it("renders no row for a builtin space whose pages are not built yet", async () => {
+    // Family only -- Marriage got its own SPACE_PAGES entry back in task 10
+    // (see the tests below), so it can no longer stand in for "a builtin
+    // space with nothing built yet." Family is the only one left in that
+    // state (docs/FEATURE_TRACKER.md section 7).
     renderWithRouter(
-      <Sidebar me={meFixture([moneySpace, marriageSpace, familySpace])} />,
+      <Sidebar me={meFixture([moneySpace, familySpace])} />,
     );
 
     // Money's own group renders, so the sidebar did mount -- without this the
     // assertions below would pass on an empty render.
     expect(await screen.findByText("Finances")).toBeInTheDocument();
-    expect(screen.queryByText("Marriage")).toBeNull();
     expect(screen.queryByText("Family")).toBeNull();
+  });
+
+  // Task 10: Marriage's own SPACE_PAGES entry, restored alongside its route
+  // and RequireCapability guard (router.tsx's own header comment on why all
+  // three land together). Renders as a group label plus one link, the same
+  // shape Money takes with several -- SpaceLink's grouped branch already
+  // handles `pages.length === 1` identically to `length > 1` (SPACE_PAGES's
+  // own comment), so this needed no new rendering logic, only the entry.
+  it("renders a Marriage group with a Retros link for a member holding the capability", async () => {
+    renderWithRouter(<Sidebar me={meFixture([marriageSpace])} />);
+
+    expect(await screen.findByTestId("sidebar-space-label")).toHaveTextContent("Marriage");
+    const retros = screen.getByRole("link", { name: "Retros" });
+    expect(retros).toHaveAttribute("href", "/marriage/retros");
+  });
+
+  // The server -- not this component -- decides who sees Marriage at all:
+  // VisibleSpaces filters `me.spaces` by capability before it ever reaches
+  // the sidebar (this file's own header comment, point 1), so a member
+  // without the capability simply never has marriageSpace in their array.
+  // This pins that the sidebar renders nothing for a space it was never
+  // given, rather than performing a second, redundant capability check of
+  // its own that could disagree with the server's.
+  it("renders no Marriage entry for a member without the capability", async () => {
+    renderWithRouter(<Sidebar me={meFixture([familySpace])} />);
+
+    expect(screen.queryByText("Marriage")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Retros" })).not.toBeInTheDocument();
   });
 
   it("still renders a space the household created, which has no built pages either", async () => {

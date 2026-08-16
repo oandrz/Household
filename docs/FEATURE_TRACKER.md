@@ -271,11 +271,11 @@ The full checklist is at the end of `docs/LEARNING.md`.
 | Feature | State | Notes |
 |---|---|---|
 | Sidebar grouped into spaces | ✅ | Which spaces appear, and in what order — rendered from the server's own filtered, ordered list, never re-sorted or re-filtered client-side. Grouping a space's own pages under its label is the row below |
-| Sidebar's design 5a form — a space with several built pages renders as an uppercase group label plus one link per page | ✅ | `SPACE_PAGES` map in `Sidebar.tsx`; a space with one built page still renders as a single link. Money took this form once Transactions shipped a second page (Finances, Transactions). Marriage and Family render nothing at all since `110ab0a`: the sidebar shows a builtin space only when `SPACE_PAGES` names at least one built page for it, and both spaces lost their entry along with their four routes (see sections 6 and 7 below). A *custom* space from "+ New space" still renders as a single link — the rule keys off `isBuiltin`, not off the absence of a pages entry. Active state is computed per link via `useMatchRoute`, not `Link`'s `activeProps` — `activeProps` merges its class onto the base class rather than replacing it, which shipped an active link with both an ink and an accent color class present at once and the accent never winning the cascade (`docs/LEARNING.md` pattern 3) |
+| Sidebar's design 5a form — a space with several built pages renders as an uppercase group label plus one link per page | ✅ | `SPACE_PAGES` map in `Sidebar.tsx`; a space with one built page renders the identical group-label-plus-link shape, not a bare single link (the earlier single-link branch was deleted as unreachable once every remaining builtin space had two or more pages — task 10 exercised that generality for the first time when Marriage's own one-page entry (Retros) came back needing no new rendering code). Money took the grouped form once Transactions shipped a second page; Family still renders nothing at all, since the sidebar shows a builtin space only when `SPACE_PAGES` names at least one built page for it and Family's own entry has not come back since `110ab0a` (see section 7 below). A *custom* space from "+ New space" still renders as a single link — the rule keys off `isBuiltin`, not off the absence of a pages entry. Active state is computed per link via `useMatchRoute`, not `Link`'s `activeProps` — `activeProps` merges its class onto the base class rather than replacing it, which shipped an active link with both an ink and an accent color class present at once and the accent never winning the cascade (`docs/LEARNING.md` pattern 3) |
 | Space visibility per member | ✅ | Money is capability-gated, Marriage is parents-only, Family is for everyone |
 | Household footer with members and plan | ✅ | "Free plan" is static text, as specified |
 | Modal primitive | ✅ | Native `<dialog>`; backdrop dismissal, Escape, focus trap. Slices 2–4 build on it |
-| Placeholder pages for unbuilt areas | ✅ | None are left. `/` stopped using it when the interim Overview shipped (M2, before Bills); `/money/$` — the last route still pointing at it — was replaced outright by `/money/bills` when Bills shipped (commit `946630e`), not merely joined by a sibling. The component itself is unreferenced today, kept rather than deleted because Marriage and Family will each want it again the moment either grows a route with no page behind it yet. Marriage's and Family's own placeholders were deleted with their routes in `110ab0a` — a placeholder is honest as the *inside* of a space a household already has, and dishonest as a whole navigation destination offering a page that does not exist |
+| Placeholder pages for unbuilt areas | ✅ | None are left. `/` stopped using it when the interim Overview shipped (M2, before Bills); `/money/$` — the last route still pointing at it — was replaced outright by `/money/bills` when Bills shipped (commit `946630e`), not merely joined by a sibling. The component itself is unreferenced today, kept rather than deleted because Family will want it again the moment it grows a route with no page behind it yet (Marriage no longer needs it — task 10 replaced its placeholder with the real `RetrosPage`, not a stand-in). Marriage's and Family's own placeholders were both deleted with their routes in `110ab0a` — a placeholder is honest as the *inside* of a space a household already has, and dishonest as a whole navigation destination offering a page that does not exist |
 | `⌘K` command palette | ⬜ | Shown in the sidebar header; no behaviour behind it |
 | "+ New space" | ✅ | See Household settings below |
 | Mobile-responsive layout | 🟡 | Every existing screen reflows down to 320px, same UI and structure, no redesign: `AppShell`'s sidebar becomes an off-canvas `NavDrawer` (reached through `MobileTopBar`'s hamburger) below `lg` (1024px), restoring the original two-column grid at `lg` and above via `lg:contents`; auth cards, page gutters (`PageContainer`) and modal field pairs (`FieldPair`) reflow at `sm`; full-height boxes (`Modal`, `NavDrawer`, every auth screen) use `dvh` rather than `vh` so iOS Safari's collapsing toolbar cannot hide content under it; interactive controls carry a 44px touch-target floor. Walked at 320/375/414/768/1024/1440 across every authenticated screen, sign-in, sign-up and one modal from each family (`docs/superpowers/plans/2026-08-15-mobile-responsive.md`, Task 10's own width matrix); the walk found one real failure — `BudgetModal`'s category rows overflowed their own dialog box at every width (a native `<dialog>` paints in the top layer, so `document.documentElement`'s check cannot see it; the dialog's own `scrollWidth` vs `clientWidth` can) — and it was fixed in the same task (`min-w-0` on the row's flexible name field, the same unshrinkable-flex-item class already on record for `<select>` and `BudgetStatCards`), not merely logged. Five gaps stayed under the 44px floor, each measured and deliberately left rather than missed: `MembersPanel`'s owner/limited role toggle (24.5px — raising it outgrows the 34px avatar beside it); the 16 `ToggleSwitch` instances across Settings and Money (23px — several sit 6–14px apart, and a larger target would make adjacent switches overlap, worse for hit accuracy than a small one); `BillRow`'s Mark paid/Archive/Restore/Undo controls (16.5px — raising them grows the stacked mobile cluster from ~89px to ~144px against a ~40px left block, and fixing it properly needs a row restructure the spec forbids); `BudgetRolloverCard`'s "Move into goal" link (genuinely inline mid-sentence, so `min-height` does not apply); and `BudgetPage`'s `‹`/`›` month arrows (raised on height only, `h-11` with no `w-11`, because the full square wraps "Edit budget" onto two lines in that row's real state). One structural gap, separate from the floor: `AppShell` leaves `<main>` `inert` if the drawer is open when the viewport is resized past `lg` — hamburger and backdrop are both `lg:hidden` by then, but `<nav>` is a sibling of `<main>`, never inert, and renders normally at `lg` via `lg:contents`, so Escape or any sidebar navigation both clear it; reachable by tablet rotation. Two pre-existing `md:` breakpoints (a third, un-migrated size step) survive in `BudgetStatCards.tsx` and `FinancesPage.tsx`, left alone rather than folded into the two-breakpoint (`sm`/`lg`) convention the rest of the round follows |
@@ -693,22 +693,33 @@ with no decision recorded first.
 
 ## 6 · Marriage
 
-Nothing started. Parents-only throughout.
+Parents-only throughout. Reachable again as of task 10: `/marriage/retros`
+exists, guarded by `RequireCapability cap="marriage"`, with its own
+`SPACE_PAGES` entry in `Sidebar.tsx` and a real page (`RetrosPage.tsx`) behind
+it — the route, the sidebar entry and the page all landed in the same change,
+`110ab0a`'s own condition for adding any of the three back (splitting them
+across tasks would leave a route with no way to reach it, or a sidebar link
+to a route that 404s). None of the four feature rows below are finished yet,
+though: `RetrosPage.tsx` is the screen's shell and its five states (loading,
+first-run, a draft in progress, owner-only, load failure) — the real history
+list, the twelve-month mood chart, a selected month's full detail and the
+Start/Edit retro modal are Tasks 11–13, and each has its own labelled mount
+point (`retro-history`, `retro-mood-chart-mount`, `retro-detail-mount`) inside
+`RetrosPage.tsx` today rather than a component of its own.
 
-**Marriage has no routes any more, and no sidebar entry.** `110ab0a` deleted
-`/marriage` and `/marriage/$` along with the placeholder page they rendered,
-because a navigation row whose only content was the sentence "Arriving in
-slice 3" reads as a broken product rather than an honest one. Nothing about
-the *feature* changed — every row below is still ⬜, and removing a
-placeholder from the navigation does not make an unbuilt space less unbuilt.
-What it changes is the shape of the first task that builds it: add the route
-back in `router.tsx`, add the `SPACE_PAGES` entry in `Sidebar.tsx` in the
-same change, and re-add `RequireCapability cap="marriage"` on the route —
-Marriage is capability-gated and its guard went with its route. Settings
-still lists Marriage as a space, because the space itself still exists in
-`domain.BuiltinSpaces` and in the database; it simply has nowhere to link to
-yet. Debugging a "missing sidebar link" without this note is the failure mode
-it exists to prevent.
+**`110ab0a` deleted `/marriage` and `/marriage/$` along with the placeholder
+page they rendered**, because a navigation row whose only content was the
+sentence "Arriving in slice 3" reads as a broken product rather than an
+honest one — worth keeping on record here since it explains why Marriage had
+no route at all between that commit and task 10, not because the feature
+regressed. One known minor gap task 10 left rather than fixing speculatively:
+`marriageGuardRoute` has one child (`retros`) and no index route, so a caller
+who types bare `/marriage` by hand now matches a real route (unlike before,
+when it 404'd) and sees the sidebar shell with a blank content area instead
+of a page — nothing in the design links to bare `/marriage`, so this is
+low-priority, but the next task to give Marriage a second page should
+consider whether an index route (redirecting to Retros, or a real Marriage
+landing page) belongs with it.
 
 | Feature | State |
 |---|---|
