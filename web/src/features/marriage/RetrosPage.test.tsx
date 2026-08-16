@@ -9,7 +9,7 @@
 // docs/LEARNING.md pattern 1's own entry), which is why both get their own
 // two-test pair here exactly as GoalsPage.test.tsx does, plus the mutation
 // check in this task's own report.
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
@@ -205,10 +205,9 @@ describe("RetrosPage", () => {
     expect(screen.queryByTestId("retros-create-first")).not.toBeInTheDocument();
   });
 
-  // State 3: normal -- history, chart and detail mount points. The
-  // components themselves are Tasks 11-12; this pins that this task's own
-  // stand-ins for them are actually present, at the testids those tasks will
-  // mount against.
+  // State 3: normal -- history, chart and detail mount points. History and
+  // the mood chart are real components as of task 11 (RetroHistoryList,
+  // MoodChart); the detail mount point is still Task 12's own stand-in.
   it("renders history, mood-chart and detail mount points for a household with real history", async () => {
     renderPage(
       retrosFixture({
@@ -231,7 +230,16 @@ describe("RetrosPage", () => {
     expect(row).toHaveTextContent("Mood 4/5");
     expect(row).toHaveTextContent("3 actions");
     expect(row).toHaveTextContent("best month this year");
-    expect(screen.getByTestId("retro-mood-chart-mount")).toBeInTheDocument();
+    // Asserts something MoodChart itself renders *inside* the mount point,
+    // not merely that the (Task-10-era) wrapper div is present -- a wrapper
+    // div survives with or without a <MoodChart .../> line inside it, which
+    // is exactly the Goals-archive shape (docs/LEARNING.md pattern 15):
+    // every layer built, a passing component test, and nothing here proving
+    // the page actually calls it. The fixture's own `mood` entry above has a
+    // real point, so the chart renders its `role="img"` svg, not the empty
+    // state.
+    const chartMount = screen.getByTestId("retro-mood-chart-mount");
+    expect(within(chartMount).getByRole("img")).toBeInTheDocument();
     expect(screen.getByTestId("retro-detail-mount")).toBeInTheDocument();
   });
 

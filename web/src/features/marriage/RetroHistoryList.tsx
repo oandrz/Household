@@ -70,11 +70,11 @@ function RetroHistoryRow({
       // this file's own disclosure test), and getByTestId requires a unique
       // match -- a shared testid across every finished row would break the
       // moment two of them exist together, which is the ordinary case, not
-      // an edge one. `data-variant` below keeps the role distinction the
-      // old testid carried, for a query that wants it without needing the
-      // month.
+      // an edge one. No separate role-only testid alongside it: add one only
+      // once a test actually needs to query the row-type distinction without
+      // the month, the same "extend when the need arrives" rule
+      // `CLAUDE.md`'s `BankSyncProvider` note gives for a port.
       data-testid={`retro-row-${summary.month}`}
-      data-variant={summary.finished ? "summary" : "draft"}
       onClick={() => onSelect(summary.month)}
       aria-pressed={selected}
       // min-h-11/sm:min-h-0: TransactionFilters.tsx's own SELECT_CLASS
