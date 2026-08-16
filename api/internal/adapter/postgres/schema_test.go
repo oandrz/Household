@@ -922,6 +922,34 @@ func TestBillsSchema(t *testing.T) {
 	})
 }
 
+// TestRetroSchema pins the three columns later tasks depend on being NULLable
+// or not. mood and completed_at must be nullable -- a draft with no emoji
+// picked yet has no mood, and a draft has no completion time. version must be
+// NOT NULL with a default, because every update path reads it.
+func TestRetroSchema(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+
+	var moodNullable, completedNullable, versionNullable string
+	err := db.Pool().QueryRow(ctx, `
+		SELECT
+			max(CASE WHEN column_name = 'mood'         THEN is_nullable END),
+			max(CASE WHEN column_name = 'completed_at' THEN is_nullable END),
+			max(CASE WHEN column_name = 'version'      THEN is_nullable END)
+		FROM information_schema.columns
+		WHERE table_name = 'retros'
+	`).Scan(&moodNullable, &completedNullable, &versionNullable)
+	if err != nil {
+		t.Fatalf("query columns: %v", err)
+	}
+	if moodNullable != "YES" || completedNullable != "YES" {
+		t.Fatalf("mood=%s completed_at=%s, want both YES", moodNullable, completedNullable)
+	}
+	if versionNullable != "NO" {
+		t.Fatalf("version nullable = %s, want NO", versionNullable)
+	}
+}
+
 // seedHouseholdAndAccount inserts the minimum household and account bills'
 // two required foreign keys need (household_id and pay_from_account_id), for
 // tests that only care about valid IDs and have no other requirement on
