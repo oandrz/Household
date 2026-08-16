@@ -333,6 +333,33 @@ func TestRetroSaveRefusesAStaleVersion(t *testing.T) {
 	}
 }
 
+// A caller-supplied Month that is not exactly midnight-on-the-first must
+// still match the retro a repository stores at its own normalised value --
+// the write-side twin of TestRetroMonthNormalisesANonMidnightArgument
+// (Task 3, read side). Without Save normalising u.Month, this would come
+// back domain.ErrNotFound: the version-match check in
+// retroRepoDouble.Update never even runs, because the row lookup itself
+// (id + household + month) fails first on the dirty timestamp -- the exact
+// failure shape the coordinator's fix-round note describes as "closest to
+// the worst available": a legitimate save reads back as "the retro is
+// gone" rather than as any kind of conflict.
+func TestRetroSaveNormalisesANonMidnightMonth(t *testing.T) {
+	retros := newRetroRepoDouble()
+	r := retros.seed(aug2026(), 0, "", false) // stored clean, per the port's own convention
+	svc := usecase.NewRetroService(retros, newRetroActionRepoDouble())
+
+	dirty := aug2026().Add(9 * time.Hour) // 9am, not midnight -- an unnormalised caller
+	got, err := svc.Save(context.Background(), usecase.RetroUpdate{
+		HouseholdID: "hh", RetroID: r.ID, Month: dirty, Notes: "typed while dirty", Version: r.Version,
+	})
+	if err != nil {
+		t.Fatalf("Save(Month=%v): %v, want the retro stored at %v to be found and updated", dirty, err, aug2026())
+	}
+	if got.Version != r.Version+1 {
+		t.Fatalf("version = %d, want %d (the save should have gone through)", got.Version, r.Version+1)
+	}
+}
+
 // Ticking an action must not bump the retro's version: one partner ticking
 // all month cannot be allowed to invalidate the other's open editor.
 func TestTickingAnActionLeavesTheRetroVersionAlone(t *testing.T) {

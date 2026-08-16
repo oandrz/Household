@@ -248,6 +248,17 @@ func (s *RetroService) retroExists(ctx context.Context, householdID string, mont
 // back). Mood nil clears the mood, which a household can legitimately do,
 // so it is only checked when a value is actually present.
 //
+// u.Month is normalised with startOfMonth here, not left to the caller.
+// RetroUpdate.Month's own doc comment says the repository never normalises
+// and "the caller normalises" -- RetroService IS that caller, the same way
+// List and Month (Task 3) normalise before comparing against or looking up
+// a stored value. Skipping this would be the worst-shaped failure available
+// here: RetroRepository.Update matches a row on id + household + month
+// together, so an un-normalised month would silently miss the match and
+// come back domain.ErrNotFound -- telling an editor their retro vanished
+// when in fact it is sitting one PATCH away, correctly versioned, under the
+// midnight-UTC month a caller merely forgot to round to.
+//
 // The three text fields are trimmed; Version passes straight through
 // unmodified. The version comparison itself is deliberately NOT done here:
 // RetroRepository.Update's own guarded UPDATE is the only place that can
@@ -261,6 +272,7 @@ func (s *RetroService) Save(ctx context.Context, u RetroUpdate) (RetroRecord, er
 		}
 	}
 
+	u.Month = startOfMonth(u.Month)
 	u.WentWell = strings.TrimSpace(u.WentWell)
 	u.WasHard = strings.TrimSpace(u.WasHard)
 	u.Notes = strings.TrimSpace(u.Notes)
