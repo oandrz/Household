@@ -113,6 +113,44 @@ describe("RetrosPage", () => {
     );
   });
 
+  // doneSinceClause (retroCopy.ts) checks `doneCount <= 0` and `!since`
+  // separately -- every other fixture in this file that carries
+  // `doneCount: 0` also carries `since: null`, which means the `!since` half
+  // alone would keep every other test green even with the `doneCount <= 0`
+  // half deleted. retroSummarySchema/retrosResponseSchema don't tie the two
+  // fields together (a schema-legal response can carry doneCount: 0 with a
+  // real since, if the service ever miscounts), so this fixture supplies
+  // exactly that pair -- the one case that discriminates the two halves of
+  // the guard. The design is explicit that the phrase is omitted entirely
+  // rather than shown as "0 done" (task-10-brief.md), so this asserts the
+  // subtitle's exact text, not merely that a substring is present.
+  it("omits the done-count clause when doneCount is 0, even if since is present", async () => {
+    renderPage(
+      retrosFixture({
+        retros: [],
+        doneCount: 0,
+        since: "2026-06",
+        startMonth: "2026-08",
+      }),
+    );
+
+    const subtitle = await screen.findByTestId("retros-subtitle");
+    expect(subtitle.textContent).toBe("Monthly check-in, just the two of us");
+  });
+
+  // The header renders on every state but owner-only/load-error, and
+  // nothing above asserts either the title or the privacy badge -- both
+  // could be deleted and every other test in this file would stay green.
+  // The badge in particular carries the page's only statement that this
+  // space is private; it is the one element on the page that had no
+  // data-testid until this test needed one.
+  it("renders the page title and the privacy badge", async () => {
+    renderPage(retrosFixture({ retros: [], doneCount: 0, since: null, startMonth: "2026-08" }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Marriage retros" })).toBeInTheDocument();
+    expect(screen.getByTestId("retros-privacy-badge")).toHaveTextContent("Private — parents only");
+  });
+
   // State 4: not an owner. The interim Overview's one real defect was a page
   // that rendered nothing at all for exactly this member (docs/LEARNING.md
   // pattern 2) -- every unit test passed because each one asserted the

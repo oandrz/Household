@@ -100,7 +100,10 @@ export function RetrosPage() {
               static badge). The 44px floor (CLAUDE.md) applies to
               interactive controls only, so this stays whatever height its
               own padding gives it. */}
-          <span className="inline-flex items-center rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] text-muted">
+          <span
+            data-testid="retros-privacy-badge"
+            className="inline-flex items-center rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] text-muted"
+          >
             {RETRO_COPY.privacyBadge}
           </span>
           {startLabel && (

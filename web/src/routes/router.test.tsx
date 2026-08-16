@@ -522,6 +522,36 @@ describe("the real route tree", () => {
     expect(router.state.location.pathname).toBe("/marriage/retros");
   });
 
+  // Bare "/marriage" has no index route -- only "retros" is a child of
+  // marriageGuardRoute, unlike moneyGuardRoute, which has moneyIndexRoute
+  // (path "/") giving bare "/money" a real page. That asymmetry is accepted,
+  // not a defect: nothing in the design links to bare "/marriage" (the
+  // sidebar goes straight to "/marriage/retros"), so there is no real
+  // caller for an index route to serve yet. What this test pins is that the
+  // *shape* of that acceptance doesn't drift silently -- before task 10,
+  // "/marriage" fell all the way through to rootRoute's notFoundComponent
+  // (shell-less, RequireAuth never running); today marriageGuardRoute is a
+  // real route, so RequireAuth and RequireCapability both run as normal and
+  // AppShell renders, but there is no child route left to fill the content
+  // area. A caller who clears the guard sees the sidebar with nothing
+  // beside it -- neither a page nor "Page not found." -- confirmed
+  // empirically with a throwaway probe before this test was written, the
+  // same way the money group's own index-route precedent above was read
+  // from the code rather than assumed.
+  it("renders the shell with a blank content area for bare /marriage today, not a 404", async () => {
+    stubFetchRoutes({ "GET /api/v1/auth/me": { status: 200, body: meFixture() } });
+
+    const { router } = renderApp("/marriage");
+
+    // The sidebar itself is the proof AppShell mounted -- RequireAuth
+    // cleared and RequireCapability("marriage") passed (meFixture's default
+    // membership holds it).
+    expect(await screen.findByRole("link", { name: "Overview" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/marriage");
+    expect(screen.queryByText("Page not found.")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("retros-page")).not.toBeInTheDocument();
+  });
+
   // Fix round 5, Finding 1 (critical): this is the exact reproduction the
   // coordinator's reviewer used -- /invite/tok with GET /api/v1/auth/me
   // returning 401 (a genuine, signed-out invitee -- Christine from `make
