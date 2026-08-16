@@ -253,11 +253,16 @@ func (s *RetroService) retroExists(ctx context.Context, householdID string, mont
 // and "the caller normalises" -- RetroService IS that caller, the same way
 // List and Month (Task 3) normalise before comparing against or looking up
 // a stored value. Skipping this would be the worst-shaped failure available
-// here: RetroRepository.Update matches a row on id + household + month
-// together, so an un-normalised month would silently miss the match and
-// come back domain.ErrNotFound -- telling an editor their retro vanished
-// when in fact it is sitting one PATCH away, correctly versioned, under the
-// midnight-UTC month a caller merely forgot to round to.
+// here: the guarded UPDATE itself matches on household + id + version, never
+// month -- but when that UPDATE matches zero rows, RetroRepository.Update's
+// own recheck (ByMonth) DOES match on household + month, to tell "this retro
+// is gone" apart from "the version moved." An un-normalised month would not
+// stop a real write from landing, but it WOULD make that recheck miss the
+// very row whose version just failed to match, misreporting a live conflict
+// (domain.ErrRetroChanged: reload, your partner saved first) as
+// domain.ErrNotFound -- telling an editor their retro vanished when in fact
+// it is sitting one PATCH away, correctly versioned, under the midnight-UTC
+// month a caller merely forgot to round to.
 //
 // The three text fields are trimmed; Version passes straight through
 // unmodified. The version comparison itself is deliberately NOT done here:

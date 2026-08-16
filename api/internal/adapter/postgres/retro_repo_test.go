@@ -217,7 +217,11 @@ func TestRetroListOrdersNewestMonthFirstWithActionCounts(t *testing.T) {
 // Complete is idempotent: finishing an already finished retro keeps the
 // FIRST completion timestamp, the same COALESCE shape GoalRepository's
 // SetArchived already uses, rather than moving it forward to whatever
-// timestamp the second call happens to carry.
+// timestamp the second call happens to carry. Both calls are checked
+// against the actual `at` each one passed -- not just against each other --
+// because comparing only second against first would pass just as happily
+// against coalesce(completed_at, now()) silently ignoring the caller's `at`
+// altogether, which is not what the port promises.
 func TestRetroCompleteTwiceKeepsTheFirstTimestamp(t *testing.T) {
 	ctx := context.Background()
 	repo, _, householdID := newRetroRepo(t)
@@ -227,16 +231,131 @@ func TestRetroCompleteTwiceKeepsTheFirstTimestamp(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	first, err := repo.Complete(ctx, householdID, retro.ID, time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC))
+	aug1 := time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC)
+	first, err := repo.Complete(ctx, householdID, retro.ID, aug1)
 	if err != nil {
 		t.Fatalf("first Complete: %v", err)
 	}
+	if first.CompletedAt == nil || !first.CompletedAt.Equal(aug1) {
+		t.Fatalf("first CompletedAt = %v, want %v", first.CompletedAt, aug1)
+	}
 
-	second, err := repo.Complete(ctx, householdID, retro.ID, time.Date(2026, 8, 2, 9, 0, 0, 0, time.UTC))
+	aug2 := time.Date(2026, 8, 2, 9, 0, 0, 0, time.UTC)
+	second, err := repo.Complete(ctx, householdID, retro.ID, aug2)
 	if err != nil {
 		t.Fatalf("second Complete: %v", err)
 	}
-	if !second.CompletedAt.Equal(*first.CompletedAt) {
-		t.Fatalf("CompletedAt = %v, want %v (the first stamp)", second.CompletedAt, first.CompletedAt)
+	if second.CompletedAt == nil || !second.CompletedAt.Equal(aug1) {
+		t.Fatalf("second CompletedAt = %v, want %v (the first stamp, not %v)", second.CompletedAt, aug1, aug2)
+	}
+}
+
+// A version outside int32's range must never be silently truncated into a
+// value that happens to match the real one. retros.version is a Postgres
+// `integer`, and int32(4294967297) == 1 -- so without versionParam's guard,
+// this exact draft (created at version 1, never saved by anyone) would be
+// overwritten by a client sending a version number nobody legitimately
+// arrived at.
+func TestRetroUpdateWithOutOfInt32RangeVersionIsRefused(t *testing.T) {
+	ctx := context.Background()
+	repo, _, householdID := newRetroRepo(t)
+
+	draft, err := repo.Create(ctx, householdID, jul2026())
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	_, err = repo.Update(ctx, usecase.RetroUpdate{
+		HouseholdID: householdID, RetroID: draft.ID, Month: jul2026(), Notes: "hijacked", Version: 4294967297,
+	})
+	if !errors.Is(err, domain.ErrRetroChanged) {
+		t.Fatalf("err = %v, want ErrRetroChanged", err)
+	}
+
+	after, err := repo.ByMonth(ctx, householdID, jul2026())
+	if err != nil {
+		t.Fatalf("ByMonth: %v", err)
+	}
+	if after.Notes != "" {
+		t.Fatalf("notes = %q -- the truncated-version write landed anyway", after.Notes)
+	}
+}
+
+// Another household must not be able to edit this one's retro. An id alone
+// is not enough proof of ownership -- UpdateRetro's WHERE also requires
+// household_id, and this is the test that would catch its absence: without
+// that clause, any household holding (or guessing) a retro id could
+// overwrite another household's month.
+func TestRetroUpdateIsScopedToItsHousehold(t *testing.T) {
+	ctx := context.Background()
+	repo, db, householdID := newRetroRepo(t)
+	other := seedSecondHousehold(t, db)
+
+	retro, err := repo.Create(ctx, householdID, jul2026())
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	_, err = repo.Update(ctx, usecase.RetroUpdate{
+		HouseholdID: other, RetroID: retro.ID, Month: jul2026(), Notes: "stolen", Version: retro.Version,
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound -- another household has no retro this month, so this must read as gone, not as a conflict", err)
+	}
+
+	after, err := repo.ByMonth(ctx, householdID, jul2026())
+	if err != nil {
+		t.Fatalf("ByMonth: %v", err)
+	}
+	if after.Notes != "" || after.Version != retro.Version {
+		t.Fatalf("notes = %q, version = %d -- another household's write landed", after.Notes, after.Version)
+	}
+}
+
+// Another household must not be able to finish this one's retro.
+func TestRetroCompleteIsScopedToItsHousehold(t *testing.T) {
+	ctx := context.Background()
+	repo, db, householdID := newRetroRepo(t)
+	other := seedSecondHousehold(t, db)
+
+	retro, err := repo.Create(ctx, householdID, jul2026())
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if _, err := repo.Complete(ctx, other, retro.ID, time.Now().UTC()); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+
+	after, err := repo.ByMonth(ctx, householdID, jul2026())
+	if err != nil {
+		t.Fatalf("ByMonth: %v", err)
+	}
+	if after.CompletedAt != nil {
+		t.Fatalf("CompletedAt = %v, want nil -- another household finished this draft", after.CompletedAt)
+	}
+}
+
+// Another household must not be able to delete this one's draft. This is
+// the one of the three household-scoping tests mutation-checked by hand
+// (task-5-report.md): removing household_id from DeleteDraftRetro's WHERE
+// clause turns this red, because the delete then succeeds instead of
+// reporting ErrNotFound.
+func TestRetroDeleteDraftIsScopedToItsHousehold(t *testing.T) {
+	ctx := context.Background()
+	repo, db, householdID := newRetroRepo(t)
+	other := seedSecondHousehold(t, db)
+
+	retro, err := repo.Create(ctx, householdID, jul2026())
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := repo.DeleteDraft(ctx, other, retro.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+
+	if _, err := repo.ByMonth(ctx, householdID, jul2026()); err != nil {
+		t.Fatalf("another household deleted this draft: %v", err)
 	}
 }

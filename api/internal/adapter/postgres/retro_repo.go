@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -77,6 +78,17 @@ func (r *RetroRepo) Update(ctx context.Context, u usecase.RetroUpdate) (usecase.
 	if err != nil {
 		return usecase.RetroRecord{}, err
 	}
+	version, ok := versionParam(u.Version)
+	if !ok {
+		// A version outside int32's range can never legitimately be the
+		// stored one -- the column is a Postgres `integer`, so every real
+		// value already fits. Refusing here, without sending the value to
+		// Postgres at all, is what stops int32(u.Version) from silently
+		// wrapping into a small number that happens to match: the same
+		// answer a real stale version already produces, given honestly
+		// instead of by accidental truncation.
+		return usecase.RetroRecord{}, domain.ErrRetroChanged
+	}
 	row, err := r.q.UpdateRetro(ctx, sqlcgen.UpdateRetroParams{
 		HouseholdID: uuid(u.HouseholdID),
 		ID:          uuid(u.RetroID),
@@ -84,13 +96,25 @@ func (r *RetroRepo) Update(ctx context.Context, u usecase.RetroUpdate) (usecase.
 		WentWell:    u.WentWell,
 		WasHard:     u.WasHard,
 		Notes:       u.Notes,
-		Version:     int32(u.Version),
+		Version:     version,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		if _, missing := r.ByMonth(ctx, u.HouseholdID, u.Month); errors.Is(missing, domain.ErrNotFound) {
+		_, missing := r.ByMonth(ctx, u.HouseholdID, u.Month)
+		switch {
+		case errors.Is(missing, domain.ErrNotFound):
 			return usecase.RetroRecord{}, domain.ErrNotFound
+		case missing != nil:
+			// The recheck itself failed for a reason that has nothing to do
+			// with concurrency -- e.g. toRetroRecord's own retroMood
+			// refusing a stored value outside 1..5. Reporting that to the
+			// editor as "your partner saved first" would hide a genuine data
+			// fault behind a conflict message nobody would ever think to
+			// look at twice. missing is already translate()d by ByMonth, so
+			// it is returned as-is rather than re-wrapped.
+			return usecase.RetroRecord{}, missing
+		default:
+			return usecase.RetroRecord{}, domain.ErrRetroChanged
 		}
-		return usecase.RetroRecord{}, domain.ErrRetroChanged
 	}
 	if err != nil {
 		return usecase.RetroRecord{}, translate(err, "update retro")
@@ -128,6 +152,26 @@ func (r *RetroRepo) DeleteDraft(ctx context.Context, householdID, retroID string
 		return domain.ErrNotFound
 	}
 	return nil
+}
+
+// versionParam converts the port's int Version into the wire int32,
+// reporting ok=false rather than truncating when the value does not fit.
+// u.Version arrives from a request body via RetroService.Save with no
+// bounds check between there and here (Save's own doc comment: the version
+// comparison is deliberately left entirely to this repository), and
+// int32(u.Version) alone would silently wrap -- int32(4294967297) == 1, so a
+// client sending that value would match a real draft sitting at version 1
+// and overwrite whatever a partner had just saved, which is exactly the
+// loss the version column exists to prevent. This is the request-derived
+// counterpart to moodParam below: CLAUDE.md's "fail closed on values you
+// did not construct" applies to both, and goal_repo.go's own RowLimit cast
+// (clampContributionLimit, called before int32()) is the precedent for
+// guarding a cast rather than trusting it.
+func versionParam(v int) (int32, bool) {
+	if v < 0 || v > math.MaxInt32 {
+		return 0, false
+	}
+	return int32(v), true
 }
 
 // moodParam converts the port's *int into the wire *int16, validating a
