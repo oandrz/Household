@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	httpadapter "github.com/andreasoentoro/hearth/api/internal/adapter/http"
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
@@ -441,5 +442,303 @@ func TestRetroWireShapeWithRealDataMatchesTheBrief(t *testing.T) {
 	}
 	if moodPoints != 1 {
 		t.Fatalf("mood chart has %d non-null points, want exactly 1", moodPoints)
+	}
+}
+
+// --- Task 8: marriage write routes and the 409 the screen can explain ------
+
+// retroWriteBody mirrors retroWriteResponse (retro_handlers.go) field for
+// field, the same "local body struct in the _test package" shape
+// retroDetailBody above already uses for retroResponse -- this file cannot
+// import the unexported type directly.
+type retroWriteBody struct {
+	Retro struct {
+		ID      string `json:"id"`
+		Month   string `json:"month"`
+		Version int    `json:"version"`
+	} `json:"retro"`
+}
+
+// mustStartRetro is test setup, not an assertion in itself: it POSTs /retros
+// as whichever caller is passed in and fails the test immediately if that
+// didn't succeed, so a broken start surfaces at the setup line rather than
+// as a confusing failure in whichever test goes on to use the month, id or
+// version it returns -- mustCreateAccount's own shape (api_test.go), applied
+// to retros.
+func mustStartRetro(t *testing.T, env *testEnv, session, csrf *http.Cookie) retroWriteBody {
+	t.Helper()
+	rec := env.authed(t, http.MethodPost, "/api/v1/retros", nil, session, csrf)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("start retro: status = %d, want 201 (body = %s)", rec.Code, rec.Body.String())
+	}
+	var body retroWriteBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode start-retro response: %v (body = %s)", err, rec.Body.String())
+	}
+	return body
+}
+
+// TestMarriageWriteRoutesRequireCSRF walks every mutating retro route with no
+// CSRF token at all, and with one that does not match the cookie --
+// TestTransactionWriteRoutesRequireCSRF's own shape (transactions_api_test.go),
+// applied here for the identical two reasons its own comment gives:
+// requireOwner sits ahead of requireCSRF in this group and answers the same
+// 403, so a bare status check would stay green even with `m.Use(requireCSRF)`
+// deleted from the marriage write sub-group in router.go; the CODE, not just
+// the status, is what actually proves which guard refused. All seven writes
+// are walked, not the five the task brief's own sketch named -- the tick and
+// delete routes under /actions/{id} are exactly as mutating as the other
+// five and deserve the identical proof.
+//
+// Every {id} below is a well-formed but non-existent UUID, and every {month}
+// a plausible literal that names no real retro -- CSRF is checked before any
+// lookup runs, so neither has to resolve to a real row for this test to be
+// valid, the same reasoning TestTransactionWriteRoutesRequireCSRF's own
+// zeroUUID relies on. That is also why hardcoding a month is safe only here:
+// contrast TestPatchRetroWithAStaleVersionIs409RetroChanged below, which
+// reads its month off a real created retro because its own handler runs
+// past the CSRF gate and needs a row that actually exists.
+func TestMarriageWriteRoutesRequireCSRF(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	zeroUUID := "00000000-0000-0000-0000-000000000000"
+	routes := []struct{ method, path string }{
+		{http.MethodPost, "/api/v1/retros"},
+		{http.MethodPatch, "/api/v1/retros/2026-07"},
+		{http.MethodPost, "/api/v1/retros/2026-07/complete"},
+		{http.MethodDelete, "/api/v1/retros/2026-07"},
+		{http.MethodPost, "/api/v1/retros/2026-07/actions"},
+		{http.MethodPatch, "/api/v1/retros/2026-07/actions/" + zeroUUID},
+		{http.MethodDelete, "/api/v1/retros/2026-07/actions/" + zeroUUID},
+	}
+
+	for _, route := range routes {
+		t.Run(route.method+" "+route.path, func(t *testing.T) {
+			// No X-CSRF-Token header at all.
+			req := httptest.NewRequest(route.method, route.path, nil)
+			req.AddCookie(session)
+			req.AddCookie(csrf)
+			rec := httptest.NewRecorder()
+			env.router.ServeHTTP(rec, req)
+			assertErrorResponse(t, rec, http.StatusForbidden, "CSRF_INVALID")
+
+			// Header present, but not the cookie's value.
+			req2 := httptest.NewRequest(route.method, route.path, nil)
+			req2.AddCookie(session)
+			req2.AddCookie(csrf)
+			req2.Header.Set("X-CSRF-Token", "definitely-the-wrong-value")
+			rec2 := httptest.NewRecorder()
+			env.router.ServeHTTP(rec2, req2)
+			assertErrorResponse(t, rec2, http.StatusForbidden, "CSRF_INVALID")
+		})
+	}
+}
+
+// TestPatchRetroWithAStaleVersionIs409RetroChanged is the conflict the whole
+// version column exists for, answered as a 409 with a code the frontend can
+// branch on -- not a 500, and not a silent merge.
+func TestPatchRetroWithAStaleVersionIs409RetroChanged(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	created := mustStartRetro(t, env, session, csrf)
+
+	path := "/api/v1/retros/" + created.Retro.Month
+	body := map[string]any{"mood": 4, "wentWell": "mine", "wasHard": "", "notes": "", "version": created.Retro.Version}
+
+	rec := env.authed(t, http.MethodPatch, path, body, session, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("first save: status = %d, want 200 (body = %s)", rec.Code, rec.Body.String())
+	}
+
+	// Same (now stale) version again -- as if the other partner had already
+	// saved and this tab never reloaded.
+	rec = env.authed(t, http.MethodPatch, path, body, session, csrf)
+	assertErrorResponse(t, rec, http.StatusConflict, "RETRO_CHANGED")
+}
+
+// TestPostRetroThirdTimeIsNothingToStart pins domain.ErrRetroNothingToStart's
+// mapping. domain.StartableMonth never offers a month that already has a
+// retro (spec decision 5), so a fresh household's first two POSTs each claim
+// one of its two free candidate months and both succeed -- the double-click
+// race TestStartRetroRaceIs409RetroExists below pins is NOT reachable by two
+// sequential POSTs, only by two Create calls racing the SAME free month,
+// which no sequential HTTP test can construct. It takes a third POST, once
+// both candidates are taken, to reach domain.ErrRetroNothingToStart at all.
+func TestPostRetroThirdTimeIsNothingToStart(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	mustStartRetro(t, env, session, csrf)
+	mustStartRetro(t, env, session, csrf)
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/retros", nil, session, csrf)
+	assertErrorResponse(t, rec, http.StatusConflict, "RETRO_NOTHING_TO_START")
+}
+
+// alwaysExistsRetroRepo simulates the one race Start is actually exposed to:
+// two partners tapping "Start retro" at the same instant, both passing the
+// pre-check (ByMonth finds nothing yet for either candidate month) before
+// only one of the two concurrent Create calls can win the underlying UNIQUE
+// (household_id, month) constraint. No sequential HTTP call can build this
+// state -- domain.StartableMonth always hands a fresh household its two free
+// months in turn, one per POST (TestPostRetroThirdTimeIsNothingToStart above
+// pins the two-already-taken case instead) -- so this is a
+// usecase.RetroRepository double standing in for the concurrent write
+// itself, the same seam membershipDouble above uses for a state no real
+// write path can produce.
+type alwaysExistsRetroRepo struct{}
+
+func (alwaysExistsRetroRepo) Create(context.Context, string, time.Time) (usecase.RetroRecord, error) {
+	return usecase.RetroRecord{}, domain.ErrAlreadyExists
+}
+
+func (alwaysExistsRetroRepo) ByMonth(context.Context, string, time.Time) (usecase.RetroRecord, error) {
+	// Start's own pre-check (retroExists, usecase/retro.go) must see "no
+	// retro yet" for both candidate months, or it would resolve straight to
+	// domain.ErrRetroNothingToStart before Create is ever called --
+	// ErrNotFound is what retroExists reads as "free."
+	return usecase.RetroRecord{}, domain.ErrNotFound
+}
+
+func (alwaysExistsRetroRepo) List(context.Context, string) ([]usecase.RetroSummary, error) {
+	return nil, nil
+}
+
+func (alwaysExistsRetroRepo) Update(context.Context, usecase.RetroUpdate) (usecase.RetroRecord, error) {
+	return usecase.RetroRecord{}, domain.ErrNotFound
+}
+
+func (alwaysExistsRetroRepo) Complete(context.Context, string, string, time.Time) (usecase.RetroRecord, error) {
+	return usecase.RetroRecord{}, domain.ErrNotFound
+}
+
+func (alwaysExistsRetroRepo) DeleteDraft(context.Context, string, string) error {
+	return domain.ErrNotFound
+}
+
+// TestStartRetroRaceIs409RetroExists pins the race the task brief calls out
+// by name: a prior task's review flagged that RetroService.Start returning
+// domain.ErrAlreadyExists was undocumented and could plausibly fall through
+// to a 500. It must answer 409 RETRO_EXISTS instead -- see
+// alwaysExistsRetroRepo's own comment for why a repository double, rather
+// than two real requests, is what it takes to build the state at all.
+func TestStartRetroRaceIs409RetroExists(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	// A router built on a copy of env.deps with only Retros swapped -- the
+	// same shape env.routerWithMemberships uses for Memberships, applied to
+	// the one other port a test in this file needs to substitute.
+	d := env.deps
+	d.Retros = usecase.NewRetroService(alwaysExistsRetroRepo{}, nil)
+	router := httpadapter.NewRouter(d)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/retros", nil)
+	req.AddCookie(session)
+	req.AddCookie(csrf)
+	req.Header.Set("X-CSRF-Token", csrf.Value)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	assertErrorResponse(t, rec, http.StatusConflict, "RETRO_EXISTS")
+}
+
+// TestDeleteAFinishedRetroIs404 pins that a finished retro cannot be
+// deleted, and that the refusal is the same 404 a missing one gets -- the
+// state on offer is "there is no draft here," not "that retro is finished."
+func TestDeleteAFinishedRetroIs404(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	created := mustStartRetro(t, env, session, csrf)
+
+	path := "/api/v1/retros/" + created.Retro.Month
+	rec := env.authed(t, http.MethodPost, path+"/complete", nil, session, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("complete: status = %d, want 200 (body = %s)", rec.Code, rec.Body.String())
+	}
+
+	rec = env.authed(t, http.MethodDelete, path, nil, session, csrf)
+	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
+}
+
+// assertParseableJSONBody is TestEveryRetroWriteAnswersJSONExceptDelete's own
+// check, matching what apiFetch (web/src/lib/apiFetch.ts) actually does on
+// an ok response: parse the body as JSON, and throw if that fails. It does
+// not check the status is 2xx on its own -- every caller below already knows
+// which status it expects and checks that explicitly where it matters -- so
+// this pins only the "carries a parseable body" half of the contract every
+// non-204 write route promises.
+func assertParseableJSONBody(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response is not parseable JSON: %v (status = %d, body = %s)", err, rec.Code, rec.Body.String())
+	}
+}
+
+// TestEveryRetroWriteAnswersJSONExceptDelete is 204's own boundary: every
+// write in this group answers a parseable JSON body except DELETE, which
+// answers 204 with none -- apiFetch throws on an ok response it cannot
+// parse, so this is not a stylistic nicety, it is what keeps the frontend
+// from breaking on its own success path. The status is what actually pins
+// the DELETE half: a 200 with an empty body looks identical to 204 by eye
+// but breaks apiFetch just the same, so this checks the status exactly, not
+// merely that the body happens to be empty.
+func TestEveryRetroWriteAnswersJSONExceptDelete(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	created := mustStartRetro(t, env, session, csrf)
+	path := "/api/v1/retros/" + created.Retro.Month
+
+	// PATCH /retros/{month}
+	assertParseableJSONBody(t, env.authed(t, http.MethodPatch, path,
+		map[string]any{"mood": 3, "wentWell": "", "wasHard": "", "notes": "", "version": created.Retro.Version},
+		session, csrf))
+
+	// POST /retros/{month}/actions
+	actionRec := env.authed(t, http.MethodPost, path+"/actions", map[string]any{"body": "Do a thing"}, session, csrf)
+	assertParseableJSONBody(t, actionRec)
+	var action struct {
+		Action struct {
+			ID string `json:"id"`
+		} `json:"action"`
+	}
+	if err := json.Unmarshal(actionRec.Body.Bytes(), &action); err != nil {
+		t.Fatalf("decode add-action response: %v (body = %s)", err, actionRec.Body.String())
+	}
+
+	// PATCH /retros/{month}/actions/{id}
+	assertParseableJSONBody(t, env.authed(t, http.MethodPatch, path+"/actions/"+action.Action.ID,
+		map[string]any{"done": true}, session, csrf))
+
+	// DELETE /retros/{month}/actions/{id} -- the one write that must NOT
+	// carry a body.
+	rec := env.authed(t, http.MethodDelete, path+"/actions/"+action.Action.ID, nil, session, csrf)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete action: status = %d, want 204 (body = %s)", rec.Code, rec.Body.String())
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("delete action: body = %q, want empty", rec.Body.String())
+	}
+
+	// POST /retros/{month}/complete
+	assertParseableJSONBody(t, env.authed(t, http.MethodPost, path+"/complete", nil, session, csrf))
+
+	// POST /retros -- the first retro is now finished and cannot be
+	// restarted, but this household still has one free candidate month
+	// (domain.StartableMonth), so a second POST both proves POST /retros'
+	// own 201 carries a body and gives DELETE /retros/{month} below a draft
+	// that still exists to discard.
+	second := mustStartRetro(t, env, session, csrf) // mustStartRetro already asserts 201 + a decodable body
+
+	// DELETE /retros/{month}
+	rec = env.authed(t, http.MethodDelete, "/api/v1/retros/"+second.Retro.Month, nil, session, csrf)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete draft: status = %d, want 204 (body = %s)", rec.Code, rec.Body.String())
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("delete draft: body = %q, want empty", rec.Body.String())
 	}
 }

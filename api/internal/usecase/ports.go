@@ -819,9 +819,12 @@ type RetroUpdate struct {
 	// Month is the retro's own month, carried so the repository can tell a
 	// retro that no longer exists (ErrNotFound) from one whose version moved
 	// under the editor (ErrRetroChanged) after a zero-row UPDATE. The HTTP
-	// layer already has it in the URL. Always the first of the month,
-	// midnight UTC -- RetroRecord.Month's own convention; the caller
-	// normalises before setting this field, never the repository.
+	// layer reads {month} from the URL, but passes it through un-normalised
+	// -- RetroService.Save is the caller that normalises it (with
+	// startOfMonth) before ever setting this field, the same way it already
+	// normalises before comparing in List and Month. Always the first of the
+	// month, midnight UTC by the time it reaches here -- RetroRecord.Month's
+	// own convention; the repository does not normalise it either.
 	Month    time.Time
 	Mood     *int
 	WentWell string
