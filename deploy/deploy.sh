@@ -3,8 +3,15 @@
 # Deploy one build to this box -- or refuse, for a reason you can read.
 #
 #   ./deploy.sh <git-sha>     deploy that build
+#   ./deploy.sh --latest      deploy whatever is newest on origin/main
 #   ./deploy.sh --current     print what is running right now
 #   ./deploy.sh --rollback    go back to the tag this script last replaced
+#
+# --latest is a convenience, not a different mode: it resolves origin/main to a
+# real commit SHA and then deploys that SHA like any other. `.env` still records
+# the exact commit, so --rollback still works and --current still tells you
+# precisely what is live. That is the whole reason IMAGE_TAG is never the string
+# `latest` -- see the refusal below.
 #
 # This replaces four commands typed by hand, two of which fail quietly:
 #
@@ -58,9 +65,21 @@ if [ "${1:-}" = "--rollback" ]; then
   [ -s "$PREVIOUS_TAG_FILE" ] || fail "no $PREVIOUS_TAG_FILE -- nothing to roll back to"
   SHA="$(cat "$PREVIOUS_TAG_FILE")"
   echo "Rolling back to $SHA"
+elif [ "${1:-}" = "--latest" ]; then
+  # Resolve, do not guess. The checkout on this box is sparse but is still a
+  # real clone, so origin/main is authoritative about what "latest" means.
+  git fetch --quiet origin main || fail "could not reach origin to resolve --latest"
+  SHA="$(git rev-parse origin/main)"
+  echo "origin/main is $SHA"
+  echo "  $(git log -1 --format='%s' "$SHA")"
+  if [ "$SHA" = "$(grep '^IMAGE_TAG=' .env | cut -d= -f2-)" ]; then
+    echo
+    echo "Already running that commit. Nothing to do."
+    exit 0
+  fi
 else
   SHA="${1:-}"
-  [ -n "$SHA" ] || fail "usage: ./deploy.sh <git-sha> | --current | --rollback"
+  [ -n "$SHA" ] || fail "usage: ./deploy.sh <git-sha> | --latest | --current | --rollback"
 fi
 
 # `latest` gets its own message because the reason is not obvious and the

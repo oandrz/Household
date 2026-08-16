@@ -77,9 +77,23 @@ restart-looping, and that `/readyz` answers on the public domain. Any of those
 failing stops it with a message naming the next command to run.
 
 ```bash
+./deploy.sh --latest      # deploy whatever is newest on origin/main
 ./deploy.sh --current     # what is running right now
 ./deploy.sh --rollback    # back to the tag deploy.sh last replaced
 ```
+
+**`--latest` is a convenience, not a second mode.** It resolves `origin/main` to
+a real commit SHA and deploys *that*, so `.env` still records the exact commit —
+`--rollback` still works and `--current` still names precisely what is live. It
+exits early and does nothing if that commit is already running.
+
+**Why the tag is a SHA and never the string `latest`.** A change that only
+touches SQL produces a byte-identical `api` image. Without a changed tag Compose
+sees nothing new, does not recreate `api`, does not re-evaluate
+`depends_on: migrate`, and **the migration silently does not run** — while
+`/readyz` stays green. New code expectations against an old schema, with no
+signal. The SHA is also what makes rollback and "what is running?" answerable at
+all.
 
 **Why a script rather than four commands.** Two of the four failed silently:
 
