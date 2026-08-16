@@ -2,6 +2,8 @@ package usecase
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"time"
 
 	"github.com/andreasoentoro/hearth/api/internal/domain"
@@ -193,4 +195,121 @@ func (s *RetroService) Month(ctx context.Context, householdID string, month time
 	}
 
 	return RetroView{Retro: retro, Actions: actions, CarryOver: carryOver}, nil
+}
+
+// Start creates a new draft for the month domain.StartableMonth chooses from
+// the household's own retros -- the earlier of {previous month, current
+// month} that has none yet. It never falls back to "today's month anyway"
+// when neither candidate is free: a stale tab left open across a month
+// boundary would otherwise be able to file a retro against a month the
+// button never actually offered it. Both candidates already having a retro
+// is domain.ErrRetroNothingToStart, not a silently invented third month.
+func (s *RetroService) Start(ctx context.Context, householdID string, today time.Time) (RetroRecord, error) {
+	current := startOfMonth(today)
+	previous := current.AddDate(0, -1, 0)
+
+	currentExists, err := s.retroExists(ctx, householdID, current)
+	if err != nil {
+		return RetroRecord{}, err
+	}
+	previousExists, err := s.retroExists(ctx, householdID, previous)
+	if err != nil {
+		return RetroRecord{}, err
+	}
+
+	month, ok := domain.StartableMonth(today, currentExists, previousExists)
+	if !ok {
+		return RetroRecord{}, domain.ErrRetroNothingToStart
+	}
+	return s.retros.Create(ctx, householdID, month)
+}
+
+// retroExists answers whether householdID already has a retro for month by
+// asking ByMonth and translating its domain.ErrNotFound into false: "no
+// retro yet" is the expected half of this question, not a failure to
+// propagate. Any other error is returned untouched -- a real infrastructure
+// failure must not be read as "this month is free."
+func (s *RetroService) retroExists(ctx context.Context, householdID string, month time.Time) (bool, error) {
+	_, err := s.retros.ByMonth(ctx, householdID, month)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, domain.ErrNotFound):
+		return false, nil
+	default:
+		return false, err
+	}
+}
+
+// Save validates the mood BEFORE the repository is ever called -- an
+// impossible mood must produce zero writes, not a write the repository then
+// has to refuse (TestRetroSaveRefusesAnImpossibleMood reads the double's
+// write count to prove exactly that ordering, not just that an error came
+// back). Mood nil clears the mood, which a household can legitimately do,
+// so it is only checked when a value is actually present.
+//
+// The three text fields are trimmed; Version passes straight through
+// unmodified. The version comparison itself is deliberately NOT done here:
+// RetroRepository.Update's own guarded UPDATE is the only place that can
+// compare against the stored value atomically, and re-checking it in this
+// layer first would open exactly the read-then-write race that guard exists
+// to close.
+func (s *RetroService) Save(ctx context.Context, u RetroUpdate) (RetroRecord, error) {
+	if u.Mood != nil {
+		if _, err := domain.ParseMood(*u.Mood); err != nil {
+			return RetroRecord{}, err
+		}
+	}
+
+	u.WentWell = strings.TrimSpace(u.WentWell)
+	u.WasHard = strings.TrimSpace(u.WasHard)
+	u.Notes = strings.TrimSpace(u.Notes)
+
+	return s.retros.Update(ctx, u)
+}
+
+// Finish stamps the retro complete. RetroRepository.Complete is itself
+// idempotent -- finishing an already-finished retro keeps the FIRST
+// timestamp rather than moving it forward -- so a double-submit or a retry
+// after a dropped response is harmless and needs no guard here.
+func (s *RetroService) Finish(ctx context.Context, householdID, retroID string, at time.Time) (RetroRecord, error) {
+	return s.retros.Complete(ctx, householdID, retroID, at)
+}
+
+// DiscardDraft removes a retro that has not been finished. The refusal for a
+// finished retro lives in RetroRepository.DeleteDraft's own WHERE ...
+// completed_at IS NULL -- domain.ErrNotFound passes through untouched here,
+// never re-checked with a service-level `if`, so there is exactly one place
+// that decides whether a retro is still a draft (the same reasoning
+// DeleteDraft's own doc comment gives for putting the condition in SQL
+// rather than in a check-then-delete).
+func (s *RetroService) DiscardDraft(ctx context.Context, householdID, retroID string) error {
+	return s.retros.DeleteDraft(ctx, householdID, retroID)
+}
+
+// AddAction refuses a blank body with domain.ErrRetroActionBodyRequired --
+// the design's own control is "+ Add an action & assign it to one of you",
+// and a blank row on the retro detail would be indistinguishable from a
+// rendering bug -- and stores the trimmed body.
+func (s *RetroService) AddAction(ctx context.Context, in RetroActionInput) (RetroActionRecord, error) {
+	in.Body = strings.TrimSpace(in.Body)
+	if in.Body == "" {
+		return RetroActionRecord{}, domain.ErrRetroActionBodyRequired
+	}
+	return s.actions.Add(ctx, in)
+}
+
+// SetActionDone ticks or unticks one action. It touches only
+// RetroActionRepository, never RetroRepository: an action's own done state
+// must not bump the retro's version, or one partner ticking every action
+// this month would invalidate the other's already-open editor tab for no
+// reason connected to what they are editing.
+func (s *RetroService) SetActionDone(ctx context.Context, householdID, actionID string, done bool, at time.Time) error {
+	return s.actions.SetDone(ctx, householdID, actionID, done, at)
+}
+
+// RemoveAction deletes one action. RetroActionRepository.Remove's own
+// domain.ErrNotFound on a zero-row match passes through untouched.
+func (s *RetroService) RemoveAction(ctx context.Context, householdID, actionID string) error {
+	return s.actions.Remove(ctx, householdID, actionID)
 }

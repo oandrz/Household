@@ -2,9 +2,11 @@ package usecase_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/andreasoentoro/hearth/api/internal/domain"
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
@@ -236,5 +238,144 @@ func TestRetroListStartMonthAcrossAllFourStates(t *testing.T) {
 				t.Fatalf("StartMonth = %v, want %v", view.StartMonth, c.want)
 			}
 		})
+	}
+}
+
+// Start files the retro against the month the button offered, not against
+// today: a couple doing July's retro on 2 August means July (decision 5).
+func TestRetroStartUsesTheStartableMonth(t *testing.T) {
+	retros := newRetroRepoDouble()
+	svc := usecase.NewRetroService(retros, newRetroActionRepoDouble())
+
+	got, err := svc.Start(context.Background(), "hh", time.Date(2026, 8, 2, 21, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if !got.Month.Equal(jul2026()) {
+		t.Fatalf("month = %v, want July -- the missed month, not today's", got.Month)
+	}
+}
+
+// Both months already have a retro: there is nothing to start, and the
+// service says so rather than inventing a third month.
+//
+// Asserted with errors.Is against domain.ErrRetroNothingToStart rather than
+// a bare err == nil check -- the brief's own version of this test only
+// checked non-nil, which a completely unrelated error (a repository outage,
+// say) would also satisfy. The sentinel is what lets Task 8's HTTP layer
+// map this specific refusal to 409 without also mapping every other failure
+// Start could produce to the same status.
+func TestRetroStartRefusesWhenBothMonthsExist(t *testing.T) {
+	retros := newRetroRepoDouble()
+	retros.seed(jul2026(), 4, "", true)
+	retros.seed(aug2026(), 0, "", false)
+	svc := usecase.NewRetroService(retros, newRetroActionRepoDouble())
+
+	_, err := svc.Start(context.Background(), "hh", time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC))
+	if !errors.Is(err, domain.ErrRetroNothingToStart) {
+		t.Fatalf("err = %v, want ErrRetroNothingToStart", err)
+	}
+}
+
+// A mood arriving from a request body is validated, not trusted.
+//
+// Month is set here too, for the same reason given on
+// TestRetroSaveRefusesAStaleVersion above -- and it matters more here than
+// it looks: without it, the mutation check in Step 5 (deleting the
+// domain.ParseMood call) makes retros.Update fail with domain.ErrNotFound
+// for an unrelated reason (the zero-value Month never matches the seeded
+// row), which would go red for the wrong cause and hide whether the mood
+// check itself is doing any work at all. With Month set, the mutated code
+// actually reaches the repository and writes, so this test proves what it
+// claims to.
+func TestRetroSaveRefusesAnImpossibleMood(t *testing.T) {
+	retros := newRetroRepoDouble()
+	r := retros.seed(aug2026(), 0, "", false)
+	svc := usecase.NewRetroService(retros, newRetroActionRepoDouble())
+
+	seven := 7
+	_, err := svc.Save(context.Background(), usecase.RetroUpdate{
+		HouseholdID: "hh", RetroID: r.ID, Month: aug2026(), Mood: &seven, Version: r.Version,
+	})
+	if !errors.Is(err, domain.ErrInvalidMood) {
+		t.Fatalf("err = %v, want ErrInvalidMood", err)
+	}
+	if retros.writes != 0 {
+		t.Fatalf("%d writes reached the repository, want 0", retros.writes)
+	}
+}
+
+// The version guard: the other partner saved while this one was typing.
+//
+// Month is set on both RetroUpdate literals here, unlike the brief's own
+// version of this test. retroRepoDouble.Update (Task 3) matches a row on
+// id + household + month together -- RetroUpdate.Month's own doc comment in
+// ports.go explains why -- so a RetroUpdate with a zero-value Month can
+// never match the row retros.seed created at aug2026(), and even the FIRST
+// save would come back domain.ErrNotFound instead of succeeding. Filed as a
+// brief defect and fixed here rather than left broken, per the task's own
+// instruction to follow the code when the two disagree.
+func TestRetroSaveRefusesAStaleVersion(t *testing.T) {
+	retros := newRetroRepoDouble()
+	r := retros.seed(aug2026(), 0, "", false)
+	svc := usecase.NewRetroService(retros, newRetroActionRepoDouble())
+
+	if _, err := svc.Save(context.Background(), usecase.RetroUpdate{
+		HouseholdID: "hh", RetroID: r.ID, Month: aug2026(), Notes: "mine", Version: r.Version,
+	}); err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+	_, err := svc.Save(context.Background(), usecase.RetroUpdate{
+		HouseholdID: "hh", RetroID: r.ID, Month: aug2026(), Notes: "theirs", Version: r.Version,
+	})
+	if !errors.Is(err, domain.ErrRetroChanged) {
+		t.Fatalf("err = %v, want ErrRetroChanged", err)
+	}
+}
+
+// Ticking an action must not bump the retro's version: one partner ticking
+// all month cannot be allowed to invalidate the other's open editor.
+func TestTickingAnActionLeavesTheRetroVersionAlone(t *testing.T) {
+	retros := newRetroRepoDouble()
+	r := retros.seed(aug2026(), 0, "", false)
+	actions := newRetroActionRepoDouble()
+	svc := usecase.NewRetroService(retros, actions)
+
+	action, err := svc.AddAction(context.Background(), usecase.RetroActionInput{
+		HouseholdID: "hh", RetroID: r.ID, Body: "book the getaway",
+	})
+	if err != nil {
+		t.Fatalf("AddAction: %v", err)
+	}
+	if err := svc.SetActionDone(context.Background(), "hh", action.ID, true, time.Now()); err != nil {
+		t.Fatalf("SetActionDone: %v", err)
+	}
+
+	after, err := retros.ByMonth(context.Background(), "hh", aug2026())
+	if err != nil {
+		t.Fatalf("ByMonth: %v", err)
+	}
+	if after.Version != r.Version {
+		t.Fatalf("version moved from %d to %d", r.Version, after.Version)
+	}
+}
+
+// An action with no body is refused: the design's own control is "+ Add an
+// action & assign it to one of you", and a blank row on the retro detail is
+// indistinguishable from a rendering bug.
+//
+// Asserted with errors.Is against domain.ErrRetroActionBodyRequired rather
+// than a bare err == nil check, the same strengthening as
+// TestRetroStartRefusesWhenBothMonthsExist above and for the same reason.
+func TestAddActionRefusesAnEmptyBody(t *testing.T) {
+	retros := newRetroRepoDouble()
+	r := retros.seed(aug2026(), 0, "", false)
+	svc := usecase.NewRetroService(retros, newRetroActionRepoDouble())
+
+	_, err := svc.AddAction(context.Background(), usecase.RetroActionInput{
+		HouseholdID: "hh", RetroID: r.ID, Body: "   ",
+	})
+	if !errors.Is(err, domain.ErrRetroActionBodyRequired) {
+		t.Fatalf("err = %v, want ErrRetroActionBodyRequired", err)
 	}
 }

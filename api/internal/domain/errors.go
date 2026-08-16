@@ -143,4 +143,16 @@ var (
 	// typing. The write is refused, never merged: silently overwriting the
 	// other person's paragraph is the failure this guard exists to prevent.
 	ErrRetroChanged = errors.New("this retro changed while you were editing it")
+
+	// ErrRetroNothingToStart is returned when both candidate months -- the
+	// current one and the previous one -- already have a retro, so there is
+	// nothing left for "Start retro" to create (domain.StartableMonth's own
+	// `ok == false` case). The HTTP layer maps this to 409 (Task 8).
+	ErrRetroNothingToStart = errors.New("both candidate months already have a retro")
+
+	// ErrRetroActionBodyRequired is returned when an action's body is empty
+	// or whitespace-only. A blank row on the retro detail is indistinguishable
+	// from a rendering bug, which is why it is refused rather than trimmed to
+	// empty and saved.
+	ErrRetroActionBodyRequired = errors.New("a retro action needs a body")
 )
