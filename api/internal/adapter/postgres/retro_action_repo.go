@@ -35,6 +35,18 @@ func NewRetroActionRepo(db *DB) *RetroActionRepo {
 // zero here and returning an error is what rolls the action insert back
 // too: without it, AddRetroActionAssignee's own zero-row failure would be
 // silently ignored and the action would survive with a missing owner.
+// AddRetroAction gives carried_from the identical treatment -- see that
+// query's own comment.
+//
+// The loop below deliberately does NOT dedupe in.AssigneeMembershipIDs
+// before calling AddRetroActionAssignee once per id, including a literal
+// repeat: picking the same person twice in the modal is a redundant
+// selection, not a state conflict, and AddRetroActionAssignee's own ON
+// CONFLICT DO UPDATE is what turns that repeat into a harmless no-op
+// instead of a 23505. Deduping here in Go first would make that SQL clause
+// unreachable and untestable -- this method's own test proves the SQL
+// handles the repeat, not just that Go silently swallowed it before ever
+// asking the database.
 func (r *RetroActionRepo) Add(ctx context.Context, in usecase.RetroActionInput) (usecase.RetroActionRecord, error) {
 	var result usecase.RetroActionRecord
 	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
@@ -69,24 +81,40 @@ func (r *RetroActionRepo) Add(ctx context.Context, in usecase.RetroActionInput) 
 			}
 		}
 
-		// len(...) == 0 -> nil, matching assigneeIDs' own normalisation
-		// below: without this, a caller passing AssigneeMembershipIDs: []string{}
-		// (as opposed to leaving it nil) would get that exact empty-but-
-		// non-nil slice echoed back from Add, while ForRetro and OpenInMonth
-		// would both report the identical action as nil -- one shape from
-		// the write path, a different one from every read path for the same
-		// row.
-		assignees := in.AssigneeMembershipIDs
-		if len(assignees) == 0 {
-			assignees = nil
-		}
-		result = toRetroActionRecord(row.ID, row.RetroID, row.Body, row.DoneAt, row.CarriedFrom, assignees)
+		// dedupeIDs here, not on the loop above: the loop must see every
+		// input id, repeats included, so a repeat actually reaches
+		// AddRetroActionAssignee and exercises its ON CONFLICT clause. This
+		// is purely about the shape of what Add returns -- matching what
+		// ForRetro/OpenInMonth would read back, since the table's own
+		// PRIMARY KEY (action_id, membership_id) makes a duplicate row
+		// impossible to store regardless of what this method echoes.
+		result = toRetroActionRecord(row.ID, row.RetroID, row.Body, row.DoneAt, row.CarriedFrom, dedupeIDs(in.AssigneeMembershipIDs))
 		return nil
 	})
 	if err != nil {
 		return usecase.RetroActionRecord{}, err
 	}
 	return result, nil
+}
+
+// dedupeIDs keeps the first occurrence of each id and drops the rest,
+// returning nil (not a zero-length slice) for no input -- the same nil-for-
+// empty convention assigneeIDs below uses, so Add's returned record and
+// ForRetro/OpenInMonth's never disagree on an unassigned action's shape.
+func dedupeIDs(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
 }
 
 // ForRetro returns one retro's actions, insertion order, each carrying the

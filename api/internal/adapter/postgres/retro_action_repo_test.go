@@ -109,6 +109,44 @@ func TestAddActionKeepsBothAssignees(t *testing.T) {
 	}
 }
 
+// Picking the same person twice in the modal is a redundant selection, not
+// a state conflict: Add must succeed and store exactly one assignee row,
+// not answer 409 for input that costs nothing to accept.
+func TestAddActionWithADuplicateAssigneeSucceedsWithOneRow(t *testing.T) {
+	ctx := context.Background()
+	actions, retros, db, householdID := newRetroActionFixture(t)
+
+	retro, err := retros.Create(ctx, householdID, jul2026())
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	alex := insertTestMembership(t, db, householdID, "Alex")
+
+	added, err := actions.Add(ctx, usecase.RetroActionInput{
+		HouseholdID:           householdID,
+		RetroID:               retro.ID,
+		Body:                  "picking the same person twice",
+		AssigneeMembershipIDs: []string{alex, alex},
+	})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if len(added.AssigneeMembershipIDs) != 1 {
+		t.Fatalf("Add returned %d assignees, want 1 (deduped)", len(added.AssigneeMembershipIDs))
+	}
+
+	got, err := actions.ForRetro(ctx, householdID, retro.ID)
+	if err != nil {
+		t.Fatalf("ForRetro: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1", len(got))
+	}
+	if len(got[0].AssigneeMembershipIDs) != 1 {
+		t.Fatalf("stored assignees = %v, want exactly one row for %s", got[0].AssigneeMembershipIDs, alex)
+	}
+}
+
 // OpenInMonth is the carry-over offer: that month, unticked only.
 func TestOpenInMonthReturnsOnlyThatMonthsUntickedActions(t *testing.T) {
 	ctx := context.Background()
@@ -322,6 +360,84 @@ func TestAddActionRefusesAnAssigneeFromAnotherHousehold(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("%d actions survived the cross-household assignee, want 0", len(got))
+	}
+}
+
+// carried_from gets the identical treatment: retro_actions.carried_from's
+// foreign key only proves the id exists SOMEWHERE in retro_actions, not
+// that it belongs to this household, so an id naming another household's
+// action must be refused exactly like a bad assignee -- the whole write
+// failing, no orphan action left behind.
+func TestAddActionRefusesACarriedFromFromAnotherHousehold(t *testing.T) {
+	ctx := context.Background()
+	actions, retros, db, householdID := newRetroActionFixture(t)
+	other := seedSecondHousehold(t, db)
+
+	otherRetro, err := retros.Create(ctx, other, jul2026())
+	if err != nil {
+		t.Fatalf("create in other household: %v", err)
+	}
+	otherAction, err := actions.Add(ctx, usecase.RetroActionInput{HouseholdID: other, RetroID: otherRetro.ID, Body: "not yours to carry from"})
+	if err != nil {
+		t.Fatalf("add in other household: %v", err)
+	}
+
+	retro, err := retros.Create(ctx, householdID, jul2026())
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	_, err = actions.Add(ctx, usecase.RetroActionInput{
+		HouseholdID: householdID,
+		RetroID:     retro.ID,
+		Body:        "carried from someone else's action",
+		CarriedFrom: otherAction.ID,
+	})
+	if err == nil {
+		t.Fatal("Add accepted a carried_from id belonging to a different household")
+	}
+
+	got, err := actions.ForRetro(ctx, householdID, retro.ID)
+	if err != nil {
+		t.Fatalf("ForRetro: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("%d actions survived the cross-household carried_from, want 0", len(got))
+	}
+}
+
+// The happy path the test above must not have broken: carrying an action
+// forward within the SAME household still succeeds and the new row records
+// the original action's id.
+func TestAddActionCarriedFromWithinTheSameHouseholdSucceeds(t *testing.T) {
+	ctx := context.Background()
+	actions, retros, householdID := newRetroActionRepo(t)
+
+	julyRetro, err := retros.Create(ctx, householdID, jul2026())
+	if err != nil {
+		t.Fatalf("create july retro: %v", err)
+	}
+	original, err := actions.Add(ctx, usecase.RetroActionInput{HouseholdID: householdID, RetroID: julyRetro.ID, Body: "book the getaway"})
+	if err != nil {
+		t.Fatalf("add original: %v", err)
+	}
+
+	august := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	augustRetro, err := retros.Create(ctx, householdID, august)
+	if err != nil {
+		t.Fatalf("create august retro: %v", err)
+	}
+	carried, err := actions.Add(ctx, usecase.RetroActionInput{
+		HouseholdID: householdID,
+		RetroID:     augustRetro.ID,
+		Body:        "book the getaway",
+		CarriedFrom: original.ID,
+	})
+	if err != nil {
+		t.Fatalf("add carried: %v", err)
+	}
+	if carried.CarriedFrom != original.ID {
+		t.Fatalf("CarriedFrom = %q, want %q", carried.CarriedFrom, original.ID)
 	}
 }
 

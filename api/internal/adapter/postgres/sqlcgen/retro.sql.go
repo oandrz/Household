@@ -15,7 +15,10 @@ const addRetroAction = `-- name: AddRetroAction :one
 INSERT INTO retro_actions (retro_id, body, carried_from)
 SELECT r.id, $1, $2
 FROM retros r
+LEFT JOIN retro_actions ca ON ca.id = $2
+LEFT JOIN retros cr ON cr.id = ca.retro_id
 WHERE r.id = $3 AND r.household_id = $4
+  AND ($2 IS NULL OR cr.household_id = $4)
 RETURNING id, retro_id, body, done_at, carried_from
 `
 
@@ -42,6 +45,19 @@ type AddRetroActionRow struct {
 // pgx.ErrNoRows -- which translate maps to domain.ErrNotFound, the same
 // "another household's row is indistinguishable from a missing one"
 // convention GetRetroByMonth already follows.
+//
+// carried_from ($2) gets the identical treatment, not just the FK
+// retro_actions.carried_from already declares: retro_actions ca / retros cr
+// LEFT JOIN in the action $2 names, and the WHERE's ($2 IS NULL OR
+// cr.household_id = $4) requires that when $2 is given, it resolves to an
+// action belonging to a retro of THIS household -- the same "fail closed on
+// a value you did not construct" rule AddRetroActionAssignee below applies
+// to membership ids. Without this, the FK alone would happily let a
+// carried_from name another household's action, since a foreign key only
+// proves the id exists somewhere in retro_actions, never that it belongs to
+// the caller's household. $2 IS NULL short-circuits the check for a
+// non-carried action (most of them): the LEFT JOINs then produce no match,
+// cr.household_id is NULL, and the OR's first branch is what keeps the row.
 func (q *Queries) AddRetroAction(ctx context.Context, arg AddRetroActionParams) (AddRetroActionRow, error) {
 	row := q.db.QueryRow(ctx, addRetroAction,
 		arg.Body,
@@ -65,6 +81,7 @@ INSERT INTO retro_action_assignees (action_id, membership_id)
 SELECT $1, m.id
 FROM memberships m
 WHERE m.id = $2 AND m.household_id = $3
+ON CONFLICT (action_id, membership_id) DO UPDATE SET membership_id = excluded.membership_id
 `
 
 type AddRetroActionAssigneeParams struct {
@@ -83,6 +100,22 @@ type AddRetroActionAssigneeParams struct {
 // trusting retro_action_assignees.membership_id's foreign key alone, which
 // only proves the id exists SOMEWHERE in memberships -- not that it belongs
 // to this household.
+//
+// ON CONFLICT (action_id, membership_id) DO UPDATE, not DO NOTHING:
+// RetroActionRepo.Add calls this once per id in AssigneeMembershipIDs
+// WITHOUT deduping first, on purpose -- picking the same person twice in the
+// modal is a redundant selection, not a state conflict, and this clause is
+// what turns that literal repeat into a harmless no-op. But the household-
+// membership rejection above and "the repeat succeeded" both still need
+// :execrows's row count to mean something. DO NOTHING would return 0 rows
+// affected on a duplicate pair exactly the same way a bad household match
+// does, making the two indistinguishable to the Go caller; DO UPDATE SET
+// membership_id = excluded.membership_id changes nothing about the stored
+// row but Postgres still counts it as one row affected, so a genuine
+// rejection (0 rows) stays distinguishable from an accepted, already-
+// present pair (1 row). The PRIMARY KEY (action_id, membership_id) is what
+// actually guarantees the row can never be duplicated in the table; this
+// clause only stops that guarantee from surfacing as a raw 23505.
 func (q *Queries) AddRetroActionAssignee(ctx context.Context, arg AddRetroActionAssigneeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, addRetroActionAssignee, arg.ActionID, arg.ID, arg.HouseholdID)
 	if err != nil {
