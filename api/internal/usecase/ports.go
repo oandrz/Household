@@ -771,12 +771,12 @@ type RetroRecord struct {
 
 // RetroSummary is one row of the history list: the stored retro plus the
 // action count the row displays. Quote is the exception to "what the
-// repository can supply": it is derived from Notes (domain.FirstSentence,
-// per the spec's formulas table, "History row") and filled in by
-// RetroService.List, never by a query -- this struct carries the field so
-// Tasks 4-8 have one name for the row rather than a repository type plus a
-// service-only wrapper around it, but a RetroRepository.List implementation
-// must leave it as "".
+// repository can supply": RetroService.List always overwrites it with
+// domain.FirstSentence(Retro.Notes) (per the spec's formulas table, "History
+// row"), unconditionally, so a RetroRepository.List implementation has no
+// reason to populate it -- whatever it puts there is discarded, not merged.
+// This struct carries the field anyway so Tasks 4-8 have one name for the
+// row rather than a repository type plus a service-only wrapper around it.
 type RetroSummary struct {
 	Retro       RetroRecord
 	ActionCount int
