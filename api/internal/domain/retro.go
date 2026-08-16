@@ -48,14 +48,10 @@ func StartableMonth(today time.Time, currentExists, previousExists bool) (time.T
 }
 
 // firstSentenceMax is the fallback budget for notes that never terminate a
-// sentence, counted with the trailing ellipsis included. The design doc
-// (docs/superpowers/specs/2026-08-16-hearth-retros-design.md:278) specifies
-// "the first 60 characters with an ellipsis", but this task's own test data
-// (retro_test.go's long-note case) only passes with 62 here -- a two-
-// character gap between the plan's spec and its own test fixture, flagged in
-// task-2-report.md for the controller to reconcile rather than resolved
-// unilaterally by editing the verbatim test.
-const firstSentenceMax = 62
+// sentence, counted with the trailing ellipsis included: 60 characters is
+// what fits the design's history row beside the mood and the action count
+// without wrapping (docs/superpowers/specs/2026-08-16-hearth-retros-design.md:278).
+const firstSentenceMax = 60
 
 // FirstSentence is the quoted line in a history row: the design renders
 // `June 2026 · Mood 4/5 · 3 actions · "best month this year"`, and June's
