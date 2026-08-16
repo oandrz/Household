@@ -219,7 +219,6 @@ CREATE TABLE retro_actions (
     body         text        NOT NULL,
     done_at      timestamptz,
     carried_from uuid        REFERENCES retro_actions(id) ON DELETE SET NULL,
-    position     integer     NOT NULL,
     created_at   timestamptz NOT NULL DEFAULT now()
 );
 
@@ -254,6 +253,16 @@ comment at the line a future editor would change:
 - **A draft can be deleted; a finished retro cannot.** The delete is scoped
   `WHERE completed_at IS NULL` in SQL — see the API section for why that is not a
   service-level `if`.
+- **Actions carry no `position` column, and order by `created_at, id`.** An
+  explicit ordering integer needs a writer, and the only safe writer is
+  `max(position) + 1` computed inside the insert — which two partners adding an
+  action at the same moment can still collide on, since nothing else in this
+  feature serialises that path (the `version` guard covers the retro's text, not
+  its actions). Since the design draws no reordering control anywhere, the column
+  would exist only to create that race. Insertion order is the order, with `id`
+  as a stable tiebreak for two inserts landing in the same microsecond. **Adding
+  drag-to-reorder later means adding the column then**, with a rule for writing
+  it — not inheriting one that was never assigned a writer.
 
 ## The formulas, pinned
 
@@ -319,6 +328,15 @@ type RetroActionRepository interface {
     OpenInMonth(ctx, householdID, month) ([]RetroAction, error)
 }
 ```
+
+**`List` is deliberately unbounded, and that is a decision rather than an
+oversight.** Every other list surface here that could grow was given a bound —
+transactions took keyset paging, budget history takes `?months=6`. Retros grows
+twelve rows a year, so a decade of use is 120 rows and one query. The design's
+"Show 2025 (7 more) ↓" is a **disclosure over data the page already has**, not a
+second request: the history renders the current year expanded and older years
+collapsed behind that control. Nobody should add paging to this endpoint without
+first finding a household the flat list actually hurts.
 
 **`DeleteDraft` puts `completed_at IS NULL` in the `WHERE` clause, not in a
 service `if`.** A check-then-delete can race, and — more importantly here — a
@@ -474,12 +492,24 @@ round**:
 - **`docs/SYSTEM_DESIGN.md`** — a new Marriage section: the tables, the route
   group and its guards, and the retro flow. Use the `maintaining-system-design`
   skill.
-- **`docs/FEATURE_TRACKER.md`** — four Marriage rows ⬜ → ✅ (retro history with
-  mood, the 12-month mood chart, the single retro view, the start-retro modal);
-  Overview's "Next retro card with carried-over actions" ⬜ → ✅; one new row for
-  deleting a draft, which the design never draws; and a note on the retro
-  duration the design draws and this feature does not build. Recount the summary
-  table by counting symbols, never by adjusting the previous totals — that has
-  produced wrong numbers here before.
+- **`docs/FEATURE_TRACKER.md`** — checked against the section 6 table as it
+  stands, which holds thirteen ⬜ rows, four of them this feature's:
+
+  | Row | After |
+  |---|---|
+  | Retro history with mood | ✅ |
+  | Mood chart over 12 months | ✅ |
+  | Single retro view — went well, was hard, actions, notes | ✅ — the actions list belongs to this row by its own name, so it gets no separate row |
+  | Start retro (modal) with mood, money check-in and actions | ✅, with a note that the design's "45 min" duration is drawn and not built (decision 8) |
+
+  Plus two new rows the design's own mockup never draws, the shape Goals'
+  contributions and Accounts' archive/restore rows already take — **carry an
+  unfinished action into the next retro** and **delete a draft retro** — and
+  Overview's "Next retro card with carried-over actions" ⬜ → ✅. The nine
+  remaining Marriage rows stay ⬜; they are Vision's and Agreements'.
+
+  Recount the summary table by counting symbols, never by adjusting the previous
+  totals — that has produced wrong numbers in this file before, in both
+  directions at once.
 - **`docs/LEARNING.md`** — what this round taught, added to an existing pattern
   where one fits rather than starting a new section.
