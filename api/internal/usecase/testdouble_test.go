@@ -2895,16 +2895,36 @@ type retroRepoDouble struct {
 	// writes counts every call that mutates a row -- Create, Update,
 	// Complete, DeleteDraft -- the same role userDouble.count and
 	// sessionDouble.count play for their own repositories. Task 3's own
-	// tests never touch it (List and Month write nothing); it is added now
-	// because Task 4's save/finish/discard-draft tests need a way to assert
-	// nothing was written on a refused call, and this is where the double
-	// they will reuse already lives.
+	// tests never touch it (List and Month write nothing). It exists for
+	// Task 4's TestRetroSaveRefusesAnImpossibleMood, which reads
+	// retros.writes after a refused Save to prove the refusal happened
+	// before any repository call, not just that Save returned an error --
+	// the same "no partial write" question this codebase's guarding-partial-
+	// writes concern asks everywhere else.
 	writes int
+
+	// actions, when wired via setActions, is the RetroActionRepository
+	// double List reads ActionCount from -- the mutual reference
+	// goalDouble.budgets/fakeBudgetRepo.setGoals already establishes for a
+	// different pair of doubles, for the identical reason: one double
+	// supplies a figure a real repository would only know via a SQL join.
+	// nil is fine for a test that never calls setActions; List then reports
+	// ActionCount 0 for every row, which is what every Task 3 test that
+	// doesn't wire this already expects.
+	actions *retroActionRepoDouble
 }
 
 func newRetroRepoDouble() *retroRepoDouble {
 	return &retroRepoDouble{rows: map[string]*retroRow{}}
 }
+
+// setActions completes the mutual reference List needs to compute
+// ActionCount, and Add (on the other double) needs to resolve which month
+// an action's retro belongs to -- see retroActionRepoDouble.setRetros for
+// the reverse direction. Call both setters when a test needs the two
+// doubles to agree with each other; neither is required when a test only
+// exercises one repository's own port in isolation.
+func (d *retroRepoDouble) setActions(a *retroActionRepoDouble) { d.actions = a }
 
 // seed inserts a retro directly, bypassing Create, for a test that wants one
 // to already exist. mood == 0 means "nobody has picked one" (RetroRecord.Mood
@@ -2972,16 +2992,28 @@ func (d *retroRepoDouble) ByMonth(_ context.Context, householdID string, month t
 
 // List returns every retro for householdID, newest month first -- the
 // port's own ordering contract, which RetroService.List relies on rather
-// than re-sorting. ActionCount is always 0: nothing in this package wires a
-// retroRepoDouble to a retroActionRepoDouble's rows, and no test here reads
-// it -- a real adapter's join is what actually supplies this figure.
+// than re-sorting. ActionCount is computed from the wired actions double
+// (see setActions) when one is set -- the double's own stand-in for the
+// real repository's join against retro_actions -- and 0 when none is
+// wired, which is every Task 3 test that doesn't call setActions: this
+// double must not hardcode the figure regardless, since the port's own
+// doc comment ("each carrying its own action count") is a real part of
+// the contract, not decoration a double is free to skip.
 func (d *retroRepoDouble) List(_ context.Context, householdID string) ([]usecase.RetroSummary, error) {
 	var out []usecase.RetroSummary
 	for _, row := range d.rows {
 		if row.HouseholdID != householdID {
 			continue
 		}
-		out = append(out, usecase.RetroSummary{Retro: row.RetroRecord})
+		summary := usecase.RetroSummary{Retro: row.RetroRecord}
+		if d.actions != nil {
+			for _, a := range d.actions.rows {
+				if a.HouseholdID == householdID && a.RetroID == row.ID {
+					summary.ActionCount++
+				}
+			}
+		}
+		out = append(out, summary)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Retro.Month.After(out[j].Retro.Month) })
 	return out, nil
@@ -3066,20 +3098,40 @@ type retroActionRow struct {
 type retroActionRepoDouble struct {
 	rows map[string]*retroActionRow
 	n    int
+
+	// retros, when wired via setRetros, is the RetroRepository double Add
+	// reads a retro's own month from, so an action created through Add (as
+	// opposed to seedOpen, which is told the month directly) can still
+	// surface through OpenInMonth. See retroRepoDouble.setActions for the
+	// reverse direction and why this is the same mutual-reference pattern
+	// goalDouble/fakeBudgetRepo already use. nil is fine for a test that
+	// never calls setRetros; Add then leaves Month at its zero value, and
+	// such an action is findable only through ForRetro, never OpenInMonth.
+	retros *retroRepoDouble
 }
 
 func newRetroActionRepoDouble() *retroActionRepoDouble {
 	return &retroActionRepoDouble{rows: map[string]*retroActionRow{}}
 }
 
-// seedOpen inserts an open (unticked) action against month, for the
-// "Still open from July" fixture OpenInMonth answers. Household "hh",
-// matching retroRepoDouble.seed's own fixed household -- see that method's
-// comment for why.
-func (d *retroActionRepoDouble) seedOpen(month time.Time, body string) usecase.RetroActionRecord {
+// setRetros completes the mutual reference Add needs -- see this struct's
+// own retros field comment.
+func (d *retroActionRepoDouble) setRetros(r *retroRepoDouble) { d.retros = r }
+
+// seedOpen inserts an open (unticked) action for retroID, against month,
+// for the "Still open from July" fixture OpenInMonth answers -- and for
+// ForRetro, since a real row always belongs to a real retro. retroID is a
+// caller-supplied parameter, not left empty: a double that let RetroID
+// default to "" would make ForRetro(ctx, hh, someRetroID) return nothing
+// for a seeded action regardless of which retro a test meant it for, which
+// is exactly the gap a Month implementation that never called ForRetro at
+// all could hide behind (code review finding, Task 3 fix round). Household
+// "hh", matching retroRepoDouble.seed's own fixed household -- see that
+// method's comment for why.
+func (d *retroActionRepoDouble) seedOpen(retroID string, month time.Time, body string) usecase.RetroActionRecord {
 	d.n++
 	row := &retroActionRow{
-		RetroActionRecord: usecase.RetroActionRecord{ID: fmt.Sprintf("action-%d", d.n), Body: body},
+		RetroActionRecord: usecase.RetroActionRecord{ID: fmt.Sprintf("action-%d", d.n), RetroID: retroID, Body: body},
 		HouseholdID:       "hh",
 		Month:             month,
 	}
@@ -3087,13 +3139,12 @@ func (d *retroActionRepoDouble) seedOpen(month time.Time, body string) usecase.R
 	return row.RetroActionRecord
 }
 
-// Add writes one action. It does not resolve which month the action's own
-// retro belongs to (RetroActionInput carries a RetroID, not a month, and
-// this double is never wired to a retroRepoDouble to look one up) -- an
-// action added this way therefore never appears in OpenInMonth, only
-// through ForRetro. Task 3's tests reach OpenInMonth exclusively through
-// seedOpen, which sets Month directly, so this gap is Task 4's to close if
-// a later test needs Add and OpenInMonth to agree.
+// Add writes one action. RetroActionInput carries a RetroID but no month
+// (an action has no month column of its own -- only its retro does), so
+// Month is resolved through the wired retros double when one is set (see
+// setRetros); without one, Month stays the zero value and the action is
+// findable only through ForRetro, never OpenInMonth -- the same documented
+// limitation this double's retros field comment states.
 func (d *retroActionRepoDouble) Add(_ context.Context, in usecase.RetroActionInput) (usecase.RetroActionRecord, error) {
 	d.n++
 	row := &retroActionRow{
@@ -3105,6 +3156,11 @@ func (d *retroActionRepoDouble) Add(_ context.Context, in usecase.RetroActionInp
 			AssigneeMembershipIDs: in.AssigneeMembershipIDs,
 		},
 		HouseholdID: in.HouseholdID,
+	}
+	if d.retros != nil {
+		if retro, ok := d.retros.rows[in.RetroID]; ok {
+			row.Month = retro.Month
+		}
 	}
 	d.rows[row.ID] = row
 	return row.RetroActionRecord, nil

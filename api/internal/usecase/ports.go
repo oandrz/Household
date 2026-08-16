@@ -759,7 +759,13 @@ type PaymentWrite struct {
 // picked an emoji yet" is a real state and 0 is not a mood; CompletedAt is a
 // pointer for the same reason -- nil IS the draft concept.
 type RetroRecord struct {
-	ID          string
+	ID string
+	// Month is always the first of the calendar month, midnight UTC -- the
+	// same normalised convention budgets.month and
+	// TransactionRepository.MonthTotals's own month parameter use. A
+	// repository must store and return it that way; a caller comparing two
+	// Month values (RetroService does, for the mood chart and the startable
+	// month) may rely on that rather than re-normalising itself.
 	Month       time.Time
 	Mood        *int
 	WentWell    string
@@ -813,7 +819,9 @@ type RetroUpdate struct {
 	// Month is the retro's own month, carried so the repository can tell a
 	// retro that no longer exists (ErrNotFound) from one whose version moved
 	// under the editor (ErrRetroChanged) after a zero-row UPDATE. The HTTP
-	// layer already has it in the URL.
+	// layer already has it in the URL. Always the first of the month,
+	// midnight UTC -- RetroRecord.Month's own convention; the caller
+	// normalises before setting this field, never the repository.
 	Month    time.Time
 	Mood     *int
 	WentWell string
@@ -829,10 +837,14 @@ type RetroRepository interface {
 	// Create writes an empty draft for the month and returns it. A month that
 	// already has a retro surfaces as domain.ErrAlreadyExists -- the UNIQUE
 	// (household_id, month) constraint, translated, never a raw pgx error.
-	// This is also what makes a double-clicked button harmless.
+	// This is also what makes a double-clicked button harmless. month must
+	// already be the first of the calendar month, midnight UTC -- the caller
+	// (RetroService) normalises before calling; this method does not.
 	Create(ctx context.Context, householdID string, month time.Time) (RetroRecord, error)
 	// ByMonth reports domain.ErrNotFound when the month has no retro, which
-	// the page reads as "not started" rather than as an error.
+	// the page reads as "not started" rather than as an error. month must
+	// already be normalised the same way Create's own parameter is -- see
+	// that method's comment.
 	ByMonth(ctx context.Context, householdID string, month time.Time) (RetroRecord, error)
 	// List returns every retro, newest month first, each carrying its own
 	// action count. Deliberately unbounded: a household writes twelve rows a
@@ -846,7 +858,8 @@ type RetroRepository interface {
 	// domain.ErrRetroChanged and writes nothing -- the other partner saved
 	// while this one was typing, and merging the two would silently lose one
 	// of them. The returned record carries the NEW version, so a caller never
-	// has to guess what to send next.
+	// has to guess what to send next. u.Month must already be normalised --
+	// see its own doc comment on RetroUpdate.
 	Update(ctx context.Context, u RetroUpdate) (RetroRecord, error)
 	// Complete stamps completed_at with at. Idempotent: completing an already
 	// finished retro leaves the original timestamp and is not an error, the
@@ -882,7 +895,10 @@ type RetroActionRepository interface {
 	// OpenInMonth returns that month's unticked actions -- the "Still open
 	// from July" offer. The caller passes the immediately previous month
 	// only: a household that skipped four months must not be handed an
-	// unbounded backlog on the night it comes back (spec decision 4).
+	// unbounded backlog on the night it comes back (spec decision 4). month
+	// must already be the first of the calendar month, midnight UTC --
+	// RetroRecord.Month's own convention; the caller normalises, not this
+	// method.
 	OpenInMonth(ctx context.Context, householdID string, month time.Time) ([]RetroActionRecord, error)
 }
 

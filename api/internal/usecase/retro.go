@@ -95,7 +95,13 @@ func (s *RetroService) List(ctx context.Context, householdID string, today time.
 		summary.Quote = domain.FirstSentence(rec.Retro.Notes)
 		summaries = append(summaries, summary)
 
-		month := rec.Retro.Month
+		// Normalise before any comparison -- budget.go's startOfMonth is the
+		// house convention (budget.go:638's own comment; BudgetService.Month
+		// applies it before comparing for the identical reason). A repository
+		// value that is not exactly midnight-on-the-first would otherwise
+		// silently miss every Equal/Before check below, on both List's
+		// finished-month bookkeeping and the mood chart's map key.
+		month := startOfMonth(rec.Retro.Month)
 		if month.Equal(current) {
 			currentExists = true
 		}
@@ -161,6 +167,15 @@ func (s *RetroService) List(ctx context.Context, householdID string, today time.
 // missing retro as "not started," not as an error, and this method does not
 // obscure that by wrapping it.
 func (s *RetroService) Month(ctx context.Context, householdID string, month time.Time) (RetroView, error) {
+	// Normalise once, at the top, and use the normalised value for every
+	// call below -- both ByMonth's lookup and the carry-over month it feeds
+	// into. Normalising only for the carry-over computation (as an earlier
+	// version of this method did) while passing the raw, possibly
+	// mid-month `month` straight to ByMonth would look up the right retro
+	// by luck whenever a caller already normalises, and the wrong one
+	// (domain.ErrNotFound) the moment one does not.
+	month = startOfMonth(month)
+
 	retro, err := s.retros.ByMonth(ctx, householdID, month)
 	if err != nil {
 		return RetroView{}, err
@@ -171,7 +186,7 @@ func (s *RetroService) Month(ctx context.Context, householdID string, month time
 		return RetroView{}, err
 	}
 
-	previous := startOfMonth(month).AddDate(0, -1, 0)
+	previous := month.AddDate(0, -1, 0)
 	carryOver, err := s.actions.OpenInMonth(ctx, householdID, previous)
 	if err != nil {
 		return RetroView{}, err
