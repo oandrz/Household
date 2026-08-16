@@ -557,6 +557,55 @@ func TestPatchRetroWithAStaleVersionIs409RetroChanged(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusConflict, "RETRO_CHANGED")
 }
 
+// TestPatchRetroReturnsTheIncrementedVersion pins the round-trip the brief's
+// own "PATCH returns the retro including its new version" requirement
+// exists for. Nothing else in this file reads `version` back out of a PATCH
+// response at all: swapping handleSaveRetro's `updated` (Save's own return
+// value) for the pre-write `view.Retro` at retro_handlers.go:307 would leave
+// the status, TestPatchRetroWithAStaleVersionIs409RetroChanged and every
+// JSON-parseability check in this file green, while a client trusting this
+// field would send the stale version right back and get a spurious 409
+// RETRO_CHANGED on every second save -- the single most confusing failure
+// this feature could ship, since nothing about the save itself would have
+// been wrong. The second PATCH below is what actually proves the round-trip
+// rather than merely computing the expected number: it sends exactly the
+// version the first response returned and requires that to succeed, which
+// is precisely what a stale echo would break.
+func TestPatchRetroReturnsTheIncrementedVersion(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	created := mustStartRetro(t, env, session, csrf)
+	path := "/api/v1/retros/" + created.Retro.Month
+
+	rec := env.authed(t, http.MethodPatch, path,
+		map[string]any{"mood": 4, "wentWell": "first", "wasHard": "", "notes": "", "version": created.Retro.Version},
+		session, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("first save: status = %d, want 200 (body = %s)", rec.Code, rec.Body.String())
+	}
+	var first retroWriteBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &first); err != nil {
+		t.Fatalf("decode first save response: %v (body = %s)", err, rec.Body.String())
+	}
+	if first.Retro.Version != created.Retro.Version+1 {
+		t.Fatalf("version = %d, want %d (exactly one higher than what was sent)",
+			first.Retro.Version, created.Retro.Version+1)
+	}
+
+	// Send exactly the version the response above just returned. If the
+	// handler had echoed a stale (pre-write) version instead, this would
+	// fail with 409 RETRO_CHANGED even though nothing actually conflicted --
+	// which is the concrete, frontend-visible symptom this test exists to
+	// catch.
+	rec = env.authed(t, http.MethodPatch, path,
+		map[string]any{"mood": 3, "wentWell": "second", "wasHard": "", "notes": "", "version": first.Retro.Version},
+		session, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("second save using the version the first response returned: status = %d, want 200 (body = %s)",
+			rec.Code, rec.Body.String())
+	}
+}
+
 // TestPostRetroThirdTimeIsNothingToStart pins domain.ErrRetroNothingToStart's
 // mapping. domain.StartableMonth never offers a month that already has a
 // retro (spec decision 5), so a fresh household's first two POSTs each claim
@@ -662,15 +711,54 @@ func TestDeleteAFinishedRetroIs404(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
 }
 
+// TestPatchRetroWithAnOutOfRangeMoodIs400InvalidMood pins domain.ErrInvalidMood's
+// mapping over HTTP -- a row the task brief's own error table names, and
+// nothing in this file before this test ever sent a mood outside 1..5
+// through the route: a wrong status or a typo'd code string here would ship
+// silently, and the frontend branches on this exact code.
+func TestPatchRetroWithAnOutOfRangeMoodIs400InvalidMood(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	created := mustStartRetro(t, env, session, csrf)
+
+	path := "/api/v1/retros/" + created.Retro.Month
+	rec := env.authed(t, http.MethodPatch, path,
+		map[string]any{"mood": 7, "wentWell": "", "wasHard": "", "notes": "", "version": created.Retro.Version},
+		session, csrf)
+	assertErrorResponse(t, rec, http.StatusBadRequest, "INVALID_MOOD")
+}
+
+// TestAddRetroActionWithABlankBodyIs400 pins domain.ErrRetroActionBodyRequired's
+// mapping over HTTP -- the brief's error table's other 400 row, likewise
+// never exercised through the route before this test. A whitespace-only
+// body, not a literal empty string, so this also proves AddAction's own
+// trim-before-check ordering (RetroService.AddAction's doc comment) reaches
+// the same refusal, not just the empty-string case.
+func TestAddRetroActionWithABlankBodyIs400(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	created := mustStartRetro(t, env, session, csrf)
+
+	path := "/api/v1/retros/" + created.Retro.Month
+	rec := env.authed(t, http.MethodPost, path+"/actions", map[string]any{"body": "   "}, session, csrf)
+	assertErrorResponse(t, rec, http.StatusBadRequest, "RETRO_ACTION_BODY_REQUIRED")
+}
+
 // assertParseableJSONBody is TestEveryRetroWriteAnswersJSONExceptDelete's own
-// check, matching what apiFetch (web/src/lib/apiFetch.ts) actually does on
-// an ok response: parse the body as JSON, and throw if that fails. It does
-// not check the status is 2xx on its own -- every caller below already knows
-// which status it expects and checks that explicitly where it matters -- so
-// this pins only the "carries a parseable body" half of the contract every
-// non-204 write route promises.
-func assertParseableJSONBody(t *testing.T, rec *httptest.ResponseRecorder) {
+// check: the status is exactly wantStatus, AND the body parses as JSON --
+// matching what apiFetch (web/src/lib/apiFetch.ts) actually does on an ok
+// response. Both halves are load-bearing, checked here rather than left to
+// each call site: a handler that resolved the wrong {id} (a broken
+// chi.URLParam key, say) still answers a *parseable* JSON body -- it is just
+// MapDomainError's own 4xx error envelope instead of the success shape the
+// route is supposed to return. Checking parseability alone would call that
+// a pass; checking the status here is what actually proves the write
+// succeeded, not merely that whatever came back could be decoded.
+func assertParseableJSONBody(t *testing.T, rec *httptest.ResponseRecorder, wantStatus int) {
 	t.Helper()
+	if rec.Code != wantStatus {
+		t.Fatalf("status = %d, want %d (body = %s)", rec.Code, wantStatus, rec.Body.String())
+	}
 	var body map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("response is not parseable JSON: %v (status = %d, body = %s)", err, rec.Code, rec.Body.String())
@@ -678,13 +766,16 @@ func assertParseableJSONBody(t *testing.T, rec *httptest.ResponseRecorder) {
 }
 
 // TestEveryRetroWriteAnswersJSONExceptDelete is 204's own boundary: every
-// write in this group answers a parseable JSON body except DELETE, which
-// answers 204 with none -- apiFetch throws on an ok response it cannot
-// parse, so this is not a stylistic nicety, it is what keeps the frontend
-// from breaking on its own success path. The status is what actually pins
-// the DELETE half: a 200 with an empty body looks identical to 204 by eye
-// but breaks apiFetch just the same, so this checks the status exactly, not
-// merely that the body happens to be empty.
+// write in this group answers its OWN expected 2xx with a parseable JSON
+// body except DELETE, which answers 204 with none -- apiFetch throws on an
+// ok response it cannot parse, so this is not a stylistic nicety, it is what
+// keeps the frontend from breaking on its own success path. The status is
+// checked at every step, not just the shape of what came back: a route that
+// resolved the wrong id would still answer a parseable JSON body (
+// MapDomainError's own 4xx envelope), so parseability alone cannot tell a
+// real success from a failure that merely decodes -- assertParseableJSONBody
+// checks both, and the tick step additionally decodes doneAt to prove the
+// write actually happened, not just that *a* 200 came back.
 func TestEveryRetroWriteAnswersJSONExceptDelete(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -695,11 +786,11 @@ func TestEveryRetroWriteAnswersJSONExceptDelete(t *testing.T) {
 	// PATCH /retros/{month}
 	assertParseableJSONBody(t, env.authed(t, http.MethodPatch, path,
 		map[string]any{"mood": 3, "wentWell": "", "wasHard": "", "notes": "", "version": created.Retro.Version},
-		session, csrf))
+		session, csrf), http.StatusOK)
 
 	// POST /retros/{month}/actions
 	actionRec := env.authed(t, http.MethodPost, path+"/actions", map[string]any{"body": "Do a thing"}, session, csrf)
-	assertParseableJSONBody(t, actionRec)
+	assertParseableJSONBody(t, actionRec, http.StatusCreated)
 	var action struct {
 		Action struct {
 			ID string `json:"id"`
@@ -709,9 +800,26 @@ func TestEveryRetroWriteAnswersJSONExceptDelete(t *testing.T) {
 		t.Fatalf("decode add-action response: %v (body = %s)", err, actionRec.Body.String())
 	}
 
-	// PATCH /retros/{month}/actions/{id}
-	assertParseableJSONBody(t, env.authed(t, http.MethodPatch, path+"/actions/"+action.Action.ID,
-		map[string]any{"done": true}, session, csrf))
+	// PATCH /retros/{month}/actions/{id} -- the JSON-and-status check alone
+	// cannot tell "the tick actually landed" from "the id lookup silently
+	// resolved to nothing and MapDomainError's own error envelope happened
+	// to parse", so decode the body and require doneAt to actually be set.
+	tickRec := env.authed(t, http.MethodPatch, path+"/actions/"+action.Action.ID,
+		map[string]any{"done": true}, session, csrf)
+	assertParseableJSONBody(t, tickRec, http.StatusOK)
+	var tick struct {
+		ID     string     `json:"id"`
+		DoneAt *time.Time `json:"doneAt"`
+	}
+	if err := json.Unmarshal(tickRec.Body.Bytes(), &tick); err != nil {
+		t.Fatalf("decode tick response: %v (body = %s)", err, tickRec.Body.String())
+	}
+	if tick.ID != action.Action.ID {
+		t.Fatalf("tick id = %q, want %q", tick.ID, action.Action.ID)
+	}
+	if tick.DoneAt == nil {
+		t.Fatal("doneAt = null, want a timestamp -- done:true was sent")
+	}
 
 	// DELETE /retros/{month}/actions/{id} -- the one write that must NOT
 	// carry a body.
@@ -724,7 +832,7 @@ func TestEveryRetroWriteAnswersJSONExceptDelete(t *testing.T) {
 	}
 
 	// POST /retros/{month}/complete
-	assertParseableJSONBody(t, env.authed(t, http.MethodPost, path+"/complete", nil, session, csrf))
+	assertParseableJSONBody(t, env.authed(t, http.MethodPost, path+"/complete", nil, session, csrf), http.StatusOK)
 
 	// POST /retros -- the first retro is now finished and cannot be
 	// restarted, but this household still has one free candidate month
