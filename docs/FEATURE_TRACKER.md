@@ -188,10 +188,10 @@ now, not eight), taking the stated totals from 60/12/28/2 = 102 to
 | Household settings | 11 | 8 | 2 | 0 |
 | Overview (home) | 4 | 3 | 3 | 0 |
 | Money | 24 | 4 | 7 | 0 |
-| Marriage | 0 | 0 | 13 | 0 |
+| Marriage | 2 | 0 | 11 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **56** | **17** | **28** | **2** |
+| **Total** | **58** | **17** | **26** | **2** |
 
 ---
 
@@ -699,13 +699,14 @@ exists, guarded by `RequireCapability cap="marriage"`, with its own
 it — the route, the sidebar entry and the page all landed in the same change,
 `110ab0a`'s own condition for adding any of the three back (splitting them
 across tasks would leave a route with no way to reach it, or a sidebar link
-to a route that 404s). None of the four feature rows below are finished yet,
-though: `RetrosPage.tsx` is the screen's shell and its five states (loading,
-first-run, a draft in progress, owner-only, load failure) — the real history
-list, the twelve-month mood chart, a selected month's full detail and the
-Start/Edit retro modal are Tasks 11–13, and each has its own labelled mount
-point (`retro-history`, `retro-mood-chart-mount`, `retro-detail-mount`) inside
-`RetrosPage.tsx` today rather than a component of its own.
+to a route that 404s). Two of the four feature rows below are finished as of
+task 11: `RetrosPage.tsx`'s history-list mount point now holds a real
+`RetroHistoryList`, and its chart mount point a real `MoodChart`, both reading
+straight off the one `GET /retros` fetch the page already makes. A selected
+month's full detail and the Start/Edit retro modal remain Tasks 12–13, each
+with its own labelled mount point (`retro-detail-mount` today; the Start
+button already writes real drafts) inside `RetrosPage.tsx` rather than a
+component of its own.
 
 **`110ab0a` deleted `/marriage` and `/marriage/$` along with the placeholder
 page they rendered**, because a navigation row whose only content was the
@@ -723,8 +724,8 @@ landing page) belongs with it.
 
 | Feature | State |
 |---|---|
-| Retro history with mood | ⬜ |
-| Mood chart over 12 months | ⬜ |
+| Retro history with mood | ✅ |
+| Mood chart over 12 months | ✅ |
 | Single retro view — went well, was hard, actions, notes | ⬜ |
 | Start retro (modal) with mood, money check-in and actions | ⬜ |
 | Vision — yearly theme | ⬜ |
@@ -736,6 +737,20 @@ landing page) belongs with it.
 | Propose a change — add, edit, remove (modal) | ⬜ |
 | New agreement section (modal) | ⬜ |
 | Version history (modal) | ⬜ |
+
+**The first two rows landed in task 11**, both reading off the one `GET
+/retros` fetch `RetrosPage.tsx` already makes — neither adds a request of its
+own. `RetroHistoryList.tsx` groups by year, current year expanded, older
+years collapsed behind the design's own "Show 2025 (7 more)" disclosure; each
+row renders only the clauses its retro actually has, mood, action count and
+quote each independently omitted rather than shown as "0" or empty quotes
+(task 10's own stand-in got the action-count guard wrong — `docs/LEARNING.md`
+pattern 2 has that entry). `MoodChart.tsx` is inline SVG, no charting
+dependency: a month with no finished retro, or a finished one with no mood,
+breaks the line rather than drawing a zero, verified in a real browser
+against three simultaneous gap sources at once (a month with no retro row at
+all, a finished retro with `mood: null`, and the current month's own
+in-progress draft).
 
 Agreements are the unusual one: every change goes through **propose → both
 sign**, and history is preserved so a removed agreement can still be seen and

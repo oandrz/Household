@@ -39,12 +39,33 @@ export const RETRO_COPY = {
   createFirstRetro: "Start your first retro",
 
   historyTitle: "History",
-  // The draft's own row label (retro-draft-row) -- a retro with
-  // finished: false is still being written, so its row shows this instead of
-  // the mood/action/quote line a finished retro's row shows.
+  // The draft's own row label (RetroHistoryList.tsx's own RetroHistoryRow)
+  // -- a retro with finished: false is still being written, so its row
+  // shows this instead of the mood/action/quote line a finished retro's row
+  // shows.
   draftInProgress: "In progress",
 
+  // RetroHistoryList.tsx's own disclosure over a collapsed year -- the
+  // design's own literal text ("Show 2025 (7 more) ↓"). Rendered from data
+  // the page already holds (GET /retros is deliberately unbounded, per the
+  // design doc's "List is deliberately unbounded" section), never a second
+  // fetch.
+  showOlderYear: (year: string, count: number) => `Show ${year} (${count} more) ↓`,
+
   moodChartTitle: "Mood over 12 months",
+  // MoodChart.tsx's own empty state -- shown when every point in the
+  // twelve-month series is a gap (nobody has finished a retro with a mood
+  // yet). A chart with zero drawable points is not "an empty chart", it is
+  // no chart at all; this replaces it rather than rendering an axis with
+  // nothing on it.
+  moodChartEmpty: "Not enough retros yet to chart a mood trend.",
+  // The chart's own aria-label -- a line drawing is invisible to a screen
+  // reader, so this names the range and how many of those months actually
+  // carry a mood. Never claims a gap is "0" (moodPointDTO's own comment:
+  // null is a gap, never 0) -- it says how many months were *tracked*,
+  // not what an untracked month's value was.
+  moodChartLabel: (fromLabel: string, toLabel: string, trackedCount: number, totalCount: number) =>
+    `Mood from ${fromLabel} to ${toLabel}, ${trackedCount} of ${totalCount} months tracked`,
   // RetroHistoryList/RetroDetailPanel arrive in Tasks 11-12 -- this is the
   // placeholder shown in the mount point until a retro is selected there.
   detailPlaceholder: "Select a retro to see its detail.",
@@ -95,6 +116,16 @@ export function monthYearLabel(month: string): string {
 export function sinceLabel(since: string): string {
   const [year, monthNum] = since.split("-").map(Number);
   return new Date(year, monthNum - 1, 2).toLocaleDateString("en-US", { month: "short", year: "numeric" });
+}
+
+// "2026-06" -> "Jun" -- MoodChart.tsx's own x-axis label, short with no
+// year (the chart's own aria-label already states the range, so 320px of
+// plot width doesn't have to repeat it on every third tick). A fourth month
+// shape on this one screen, genuinely distinct from the three above: short
+// like sinceLabel, but no year like monthNameOnly.
+export function monthShortLabel(month: string): string {
+  const [year, monthNum] = month.split("-").map(Number);
+  return new Date(year, monthNum - 1, 2).toLocaleDateString("en-US", { month: "short" });
 }
 
 // The header subtitle's second clause, composed here rather than inline in

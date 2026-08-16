@@ -24,14 +24,13 @@ clamping a stored anchor day rather than the date itself (§5), and whose
 place in Money something outside Transactions writes its ledger — so Budget,
 Spending by person and net worth all move the moment a bill is settled.
 Marriage's backend (Retros' three rules, its repository and its read/write
-routes) is built and its frontend has a route, a sidebar entry and a page
-shell (`RetrosPage.tsx`) with its five screen states, but the screen itself
-is not: the real history list, the twelve-month mood chart and a selected
-month's detail are still unbuilt, each with a labelled mount point inside
-`RetrosPage.tsx` (§7) rather than a component of its own, and Vision & goals
-and Agreements have not been started at all. Family is not built. See
-`docs/FEATURE_TRACKER.md` section 6 for exactly which of Marriage's rows are
-done.
+routes) is built, and its frontend now has a route, a sidebar entry, a page
+shell (`RetrosPage.tsx`) with its five screen states, a real history list and
+a real twelve-month mood chart (task 11) — a selected month's detail is still
+a labelled mount point inside `RetrosPage.tsx` (§7) rather than a component
+of its own, and Vision & goals and Agreements have not been started at all.
+Family is not built. See `docs/FEATURE_TRACKER.md` section 6 for exactly
+which of Marriage's rows are done.
 Overview is **partly** built: `/` carries an interim page composed of four of
 the design's eight cards Money can now supply, plus a setup checklist and a
 quick-create menu, and it grows into the designed Overview as the rest of
@@ -1744,16 +1743,22 @@ web/src/
     marriage/          RetrosPage — header (title, subtitle, done-count
                        clause, privacy badge, start-retro button), the
                        five screen states (first-run, a draft in progress,
-                       normal, owner-only, load failure), and three
-                       labelled mount points a later task fills in:
-                       retro-history (the real history list and mood
-                       chart), retro-detail-mount (a selected month's
-                       full detail), and the Start/Edit retro modal, none
-                       of which exist yet. useRetros/useRetro read and
-                       write /retros; retroQueryKeys.ts holds both hooks'
-                       cache keys so either can invalidate the other's
-                       without a circular import. Mounted at
-                       /marriage/retros
+                       normal, owner-only, load failure), and its mount
+                       points. retro-history now holds real components
+                       (task 11): RetroHistoryList (rows grouped by year,
+                       current year expanded, older years behind the
+                       design's "Show 2025 (7 more)" disclosure over data
+                       the one GET /retros fetch already returned, never
+                       a second request) and MoodChart (twelve points as
+                       inline SVG, no charting dependency -- a month with
+                       no finished retro, or a finished one with no mood,
+                       breaks the line rather than drawing a zero).
+                       retro-detail-mount (a selected month's full detail)
+                       and the Start/Edit retro modal remain later tasks.
+                       useRetros/useRetro read and write /retros;
+                       retroQueryKeys.ts holds both hooks' cache keys so
+                       either can invalidate the other's without a
+                       circular import. Mounted at /marriage/retros
     placeholder/       named stand-ins for unbuilt areas, and only for areas
                        a household can already reach. Empty of callers as of
                        this feature: / stopped using it when the interim

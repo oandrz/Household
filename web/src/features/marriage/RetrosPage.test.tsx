@@ -78,7 +78,11 @@ describe("RetrosPage", () => {
       }),
     );
 
-    const draftRow = await screen.findByTestId("retro-draft-row");
+    // retro-row-2026-08: RetroHistoryList.tsx's own per-month testid (Task
+    // 11) -- the generic retro-draft-row/retro-summary-row pair Task 10's
+    // stand-in used couldn't stay unique once a real list can hold many rows
+    // for the same year (RetroHistoryList.test.tsx's own disclosure test).
+    const draftRow = await screen.findByTestId("retro-row-2026-08");
     expect(draftRow).toHaveTextContent("In progress");
     // The design's own row label carries the year ("August 2026", not
     // "August") -- 13+ months of history repeats month names across years,
@@ -89,7 +93,11 @@ describe("RetrosPage", () => {
     // here) instead of the server's own doneCount (0) -- a draft must never
     // read as done just because it is the only row in the array.
     expect(screen.queryByText(/1 done/)).not.toBeInTheDocument();
-    expect(screen.queryByTestId("retro-summary-row")).not.toBeInTheDocument();
+    // A draft's row never shows the finished clauses -- there is no separate
+    // "summary row" element to tell it apart from any more; the row's own
+    // content is the only signal.
+    expect(draftRow).not.toHaveTextContent("Mood");
+    expect(draftRow).not.toHaveTextContent("action");
   });
 
   // The done-count clause's own literal text, from a fixture where it
@@ -192,7 +200,7 @@ describe("RetrosPage", () => {
       }),
     );
 
-    await screen.findByTestId("retro-summary-row");
+    await screen.findByTestId("retro-row-2026-06");
     expect(screen.queryByTestId("retros-start")).not.toBeInTheDocument();
     expect(screen.queryByTestId("retros-create-first")).not.toBeInTheDocument();
   });
@@ -214,7 +222,7 @@ describe("RetrosPage", () => {
       }),
     );
 
-    const row = await screen.findByTestId("retro-summary-row");
+    const row = await screen.findByTestId("retro-row-2026-06");
     // The design's own row label carries the year (`dc.html`: "June 2026",
     // "May 2026", ...) -- 13+ months of history repeats month names across
     // years, and this row is real behaviour this task ships, not a Task-11
@@ -274,6 +282,6 @@ describe("RetrosPage", () => {
     fireEvent.click(await screen.findByTestId("retros-start"));
 
     await waitFor(() => expect(posted).toBe(true));
-    expect(await screen.findByTestId("retro-draft-row")).toHaveTextContent("In progress");
+    expect(await screen.findByTestId("retro-row-2026-08")).toHaveTextContent("In progress");
   });
 });

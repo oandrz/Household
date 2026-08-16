@@ -8,7 +8,9 @@
 import { useState } from "react";
 import { ApiError } from "../../api/client";
 import { PageContainer } from "../../components/PageContainer";
-import { RETRO_COPY, doneSinceClause, monthNameOnly, monthYearLabel } from "./retroCopy";
+import { MoodChart } from "./MoodChart";
+import { RetroHistoryList } from "./RetroHistoryList";
+import { RETRO_COPY, doneSinceClause, monthNameOnly } from "./retroCopy";
 import { useRetros } from "./useRetros";
 
 export function RetrosPage() {
@@ -20,6 +22,11 @@ export function RetrosPage() {
   // first-run panel), which share this same handler.
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  // Which month's row is highlighted in the history list. Task 12 will read
+  // this to decide which month's detail to fetch and render in the mount
+  // point below; today it only drives RetroHistoryList's own selected
+  // styling, since there is nothing yet on the right to react to it.
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
 
   // useRetros' own startRetro already invalidates both the list and the
   // created month's own detail query (retroQueryKeys.ts's header comment),
@@ -164,56 +171,13 @@ export function RetrosPage() {
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[340px_1fr]">
           <div data-testid="retro-history" className="rounded-xl border border-hairline bg-card p-[22px]">
             <h2 className="mb-4 text-sm font-semibold text-ink">{RETRO_COPY.historyTitle}</h2>
-            {/* Task 11 replaces this list with the real RetroHistoryList --
-                the draft's own row (below) is real behaviour this task must
-                ship (state 2 of the brief); everything else here is the
-                minimal stand-in for that later component, not a finished
-                design. Server order preserved, never re-sorted or filtered
-                (Sidebar.tsx's own rule, for the identical reason: the server
-                has already ordered these). Neither row is clickable yet --
-                Task 12 wires history selection into the detail mount below;
-                a non-interactive row needs no 44px floor (CLAUDE.md's floor
-                applies to interactive controls). */}
-            <div className="flex flex-col gap-1">
-              {data.retros.map((summary) =>
-                summary.finished ? (
-                  <div
-                    key={summary.id}
-                    data-testid="retro-summary-row"
-                    className="rounded-lg px-3 py-2 text-[13.5px]"
-                  >
-                    <div className="font-semibold text-ink">{monthYearLabel(summary.month)}</div>
-                    <div className="mt-0.5 text-[11.5px] text-muted">
-                      {[
-                        summary.mood !== null ? `Mood ${summary.mood}/5` : null,
-                        `${summary.actionCount} action${summary.actionCount === 1 ? "" : "s"}`,
-                        summary.quote ? `"${summary.quote}"` : null,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </div>
-                  </div>
-                ) : (
-                  <div
-                    key={summary.id}
-                    data-testid="retro-draft-row"
-                    className="rounded-lg bg-callout px-3 py-2 text-[13.5px]"
-                  >
-                    <div className="font-semibold text-ink">{monthYearLabel(summary.month)}</div>
-                    <div className="mt-0.5 text-[11.5px] font-semibold text-accent">
-                      {RETRO_COPY.draftInProgress}
-                    </div>
-                  </div>
-                ),
-              )}
-            </div>
-            {/* Task 11's own mount point for the twelve-month mood chart --
-                data.mood is already fetched by useRetros.ts and sits unused
-                here on purpose, so that task wires the real chart against
-                data this page already has rather than adding a second
-                fetch. */}
+            <RetroHistoryList summaries={data.retros} onSelect={setSelectedMonth} selectedMonth={selectedMonth} />
+            {/* data.mood is already fetched by useRetros.ts -- MoodChart
+                renders straight off it, no second fetch (this mount point's
+                own Task-10 comment, now made real). */}
             <div data-testid="retro-mood-chart-mount" className="mt-4 border-t border-hairline pt-4">
-              <h3 className="text-xs text-muted">{RETRO_COPY.moodChartTitle}</h3>
+              <h3 className="mb-2 text-xs text-muted">{RETRO_COPY.moodChartTitle}</h3>
+              <MoodChart points={data.mood} />
             </div>
           </div>
 

@@ -892,6 +892,22 @@ person to ask whether the test could ever have gone red in the first place.
   or regenerating it as the last act before the commit; assertion alone is
   not enough, and "the parity check passed" was true and useless at once.
 
+- Retros' history-row stand-in (Task 10, `RetrosPage.tsx`) rendered its action
+  clause unconditionally: `` `${summary.actionCount} action${...}` `` with no
+  guard, so a finished retro nobody added an action to would have shown "0
+  actions" — the exact defect family the design's own row spec forbids ("never
+  renders `0 actions`"), sitting right next to a mood clause and a quote clause
+  that *were* correctly guarded a few lines above it. Every test that touched
+  this row used `actionCount: 3`; nothing ever supplied 0, so the gap shipped
+  and stayed green through a full lint-and-test pass. Caught while building
+  Task 11's `RetroHistoryList` and porting the row markup out of the stand-in,
+  not by a failing test — the same way pattern 1's sibling defects are usually
+  found, by rereading code a later task has to touch anyway rather than by the
+  original suite noticing. Fixed by guarding on `actionCount > 0`, matching
+  the quote clause's own `summary.quote ? ... : null` shape, with a test
+  (`RetroHistoryList.test.tsx`) that supplies `actionCount: 0` specifically to
+  make sure the gap cannot reopen unnoticed.
+
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
 a different reason than the one you meant to prove, that is not yet proof
