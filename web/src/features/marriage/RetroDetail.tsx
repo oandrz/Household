@@ -110,6 +110,16 @@ export function RetroDetail({ month }: { month: string }) {
   const wentWellLines = splitBullets(record.wentWell);
   const wasHardLines = splitBullets(record.wasHard);
   const notesLines = record.notes.trim();
+  // A fresh draft carries neither a completion date nor a mood yet -- joined
+  // together this is "", and an empty `<p>` is the same "renders as broken,
+  // not as absent" shape this screen already guards against everywhere else
+  // (BulletCard above, the actions block, the notes card below).
+  const metaLine = [
+    record.completedAt ? completedDateLabel(record.completedAt) : null,
+    record.mood !== null ? RETRO_COPY.moodLabel(record.mood) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <div className="flex flex-col gap-4">
@@ -117,11 +127,11 @@ export function RetroDetail({ month }: { month: string }) {
         <h2 data-testid="retro-detail-heading" className="text-[16px] font-semibold tracking-[-0.01em] text-ink">
           {monthYearLabel(record.month)} retro
         </h2>
-        <p className="text-xs text-muted">
-          {[record.completedAt ? completedDateLabel(record.completedAt) : null, record.mood !== null ? RETRO_COPY.moodLabel(record.mood) : null]
-            .filter(Boolean)
-            .join(" · ")}
-        </p>
+        {metaLine !== "" && (
+          <p data-testid="retro-detail-meta" className="text-xs text-muted">
+            {metaLine}
+          </p>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -165,7 +175,7 @@ export function RetroDetail({ month }: { month: string }) {
       )}
 
       {notesLines !== "" && (
-        <div className="rounded-[10px] border border-hairline bg-canvas p-3.5">
+        <div data-testid="retro-notes" className="rounded-[10px] border border-hairline bg-canvas p-3.5">
           <div className="mb-1.5 text-xs font-semibold text-muted">{RETRO_COPY.notesHeading}</div>
           <p className="text-[13px] leading-relaxed text-ink">{record.notes}</p>
         </div>

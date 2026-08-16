@@ -56,6 +56,15 @@ export type SaveRetroBody = Partial<{
 // and carriedFrom are both optional here (Task 8's own note: "omit or
 // []/\"\""), filled in as [] / "" below before the request goes out so the
 // wire body always matches the shape retroActionSchema itself requires back.
+//
+// Whoever builds the carry-over control (Task 13/14): `carriedFrom` here
+// MUST only ever be an id taken from this retro's own `carryOver` list
+// (RetroDetailResponse's sibling field) -- never a freehand or historical
+// action id. RetroDetail's own "Carried from {month}" label (retroCopy.ts's
+// `previousMonthName`) infers the source month from this retro's own month
+// minus one, because the backend does not return which month a carriedFrom
+// id actually belongs to; passing anything but that list's own ids breaks
+// the label silently, not loudly. Full reasoning is on `previousMonthName`.
 export type AddRetroActionBody = {
   body: string;
   assigneeMembershipIds?: string[];

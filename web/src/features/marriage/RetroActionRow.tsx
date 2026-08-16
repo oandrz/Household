@@ -38,27 +38,18 @@ export function RetroActionRow({
       className="flex items-center justify-between gap-3 rounded-[10px] border border-hairline px-3.5 py-2.5"
     >
       <div className="flex min-w-0 flex-col">
-        {/* The label uses `flex` only to get `items-center` (vertically
-            centering the checkbox against the text) -- it does NOT reach
-            into the row's remaining width the way docs/LEARNING.md's own
-            min-height-on-inline entry warns a bare `flex` element can. That
-            entry's mechanism does not apply here: this label is already a
-            flex ITEM of the row above, and a flex item's own `display`
-            value (inline-flex or flex, no difference once it's an item) is
-            blockified by its parent's layout regardless -- what actually
-            keeps this label from growing into the assignee circles' space
-            is the OUTER row below being `justify-between` with neither
-            child given `flex-grow`, so both size to their own content and
-            the free space becomes the gap between them, not extra width on
-            either side.
-            min-h-11 on the label is the 44px touch-target floor (CLAUDE.md)
-            on the one genuinely interactive control here -- native
-            `<label for>` click-delegation gives the 18x18px checkbox a
-            44px-tall tappable strip without visually enlarging the glyph
-            itself, dropping to the design's own tighter spacing at sm and
-            up (min-h-11/sm:min-h-0, the same pattern every other control on
-            this screen uses). See this task's own report for why the glyph
-            stays 18px rather than growing to 44px outright. */}
+        {/* `flex` here is only for `items-center` (checkbox against text) --
+            it does not stretch into the assignee circles' space, since the
+            OUTER row below is `justify-between` with neither child given
+            `flex-grow`.
+            min-h-11 is the 44px touch-target floor (CLAUDE.md) on the one
+            genuinely interactive control here -- native `<label for>`
+            click-delegation gives the 18x18px checkbox a 44px-tall tappable
+            strip without visually enlarging the glyph itself, dropping to
+            the design's own tighter spacing at sm and up (min-h-11/
+            sm:min-h-0, the same pattern every other control on this screen
+            uses). See task-12-report.md for why the glyph stays 18px rather
+            than growing to 44px outright. */}
         <label htmlFor={checkboxId} className="flex min-h-11 cursor-pointer items-center gap-2.5 sm:min-h-0">
           <input
             id={checkboxId}
@@ -89,7 +80,12 @@ export function RetroActionRow({
           failing closed on a value this screen did not itself construct,
           the same rule CLAUDE.md states for a value from a database column
           or a request. */}
-      <div className="flex flex-none gap-1.5">
+      {/* Its own testid so a test can assert the container holds nothing at
+          all (`toBeEmptyDOMElement()`) rather than merely that no element
+          carries a `title` -- a placeholder circle with no `title` would
+          pass the latter check while still being exactly the thing the
+          brief forbids. */}
+      <div data-testid={`retro-action-assignees-${action.id}`} className="flex flex-none gap-1.5">
         {action.assigneeMembershipIds.map((membershipId) => {
           const member = members.find((m) => m.id === membershipId);
           if (!member) return null;

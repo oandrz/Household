@@ -112,22 +112,31 @@ describe("RetroDetail", () => {
     const row = await screen.findByTestId("retro-action-a1");
     expect(within(row).getByTitle("Andreas")).toHaveTextContent("A");
     expect(within(row).getByTitle("Christine")).toHaveTextContent("C");
+    // Exactly two children in the assignee container -- not merely "two
+    // elements with a title", the same distinction the empty case below
+    // exists to make.
+    expect(screen.getByTestId("retro-action-assignees-a1").children).toHaveLength(2);
   });
 
   // task-12-brief.md's own design-details paragraph: "none at all when
-  // there are none (not a placeholder circle)". An action with an empty
-  // assigneeMembershipIds must render zero avatar spans, not a dashed
-  // placeholder circle standing in for "nobody yet".
+  // there are none (not a placeholder circle)". Asserted against the
+  // assignee container's own child count, not against `title` presence --
+  // a dashed placeholder circle with no `title` attribute would pass a
+  // `queryAllByTitle` check while still being exactly the thing the brief
+  // forbids. `toBeEmptyDOMElement()` catches ANY rendered content here,
+  // titled or not.
   it("renders no initial at all for an action nobody is assigned to", async () => {
     renderDetail(retroFixture({ actions: [actionFixture({ assigneeMembershipIds: [] })] }));
 
-    const row = await screen.findByTestId("retro-action-a1");
-    expect(within(row).queryAllByTitle(/./)).toHaveLength(0);
+    await screen.findByTestId("retro-action-a1");
+    expect(screen.getByTestId("retro-action-assignees-a1")).toBeEmptyDOMElement();
   });
 
   // A membership id on the action that no longer matches a real member (the
   // household removed that person after the action was assigned) fails
-  // closed -- it is skipped, not rendered as a blank or broken circle.
+  // closed -- it is skipped, not rendered as a blank or broken circle. The
+  // container's own child count (not a title-based count) is what proves
+  // "skipped" rather than "rendered untitled" for the unmatched id.
   it("skips an assignee id no current member matches, rather than rendering a broken circle", async () => {
     renderDetail(
       retroFixture({ actions: [actionFixture({ assigneeMembershipIds: ["m-a", "m-gone"] })] }),
@@ -135,7 +144,7 @@ describe("RetroDetail", () => {
 
     const row = await screen.findByTestId("retro-action-a1");
     expect(within(row).getByTitle("Andreas")).toBeInTheDocument();
-    expect(within(row).queryAllByTitle(/./)).toHaveLength(1);
+    expect(screen.getByTestId("retro-action-assignees-a1").children).toHaveLength(1);
   });
 
   // Ticking is a PATCH to the action, and it must not send the retro's
@@ -222,15 +231,33 @@ describe("RetroDetail", () => {
     expect(row).not.toHaveTextContent(/Carried from/);
   });
 
+  // Both halves assert the SAME element (retro-notes) so deleting either the
+  // heading or the body text alone still turns one of these red -- the
+  // review's own finding: asserting the heading in one test and the body in
+  // the other left each free to delete without the suite noticing.
   it("shows the notes card only when notes are present", async () => {
     renderDetail(retroFixture({ notes: "Best month this year." }));
-    expect(await screen.findByText("Best month this year.")).toBeInTheDocument();
+    // Literal strings, not RETRO_COPY's own exports -- RetrosPage.test.tsx's
+    // own header comment: importing the copy module here would make this
+    // assertion tautological against a typo in that same module.
+    const notes = await screen.findByTestId("retro-notes");
+    expect(notes).toHaveTextContent("Notes");
+    expect(notes).toHaveTextContent("Best month this year.");
   });
 
   it("renders no notes card when notes are blank", async () => {
     renderDetail(retroFixture({ notes: "" }));
     await screen.findByTestId("retro-detail-heading");
-    expect(screen.queryByText("Notes")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("retro-notes")).not.toBeInTheDocument();
+  });
+
+  // A fresh draft (no completion date, no mood yet) renders no meta line at
+  // all -- never an empty `<p>` sitting next to the heading.
+  it("renders no meta line for a draft with neither a completion date nor a mood", async () => {
+    renderDetail(retroFixture({ completedAt: null, mood: null }));
+
+    await screen.findByTestId("retro-detail-heading");
+    expect(screen.queryByTestId("retro-detail-meta")).not.toBeInTheDocument();
   });
 
   it("a failed load shows the detail-specific error, not the history list's own copy", async () => {
