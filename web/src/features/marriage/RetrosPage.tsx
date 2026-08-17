@@ -227,8 +227,27 @@ export function RetrosPage() {
       {/* Conditional mount, not a declarative `open` prop -- Modal.tsx's own
           header comment on why the two never mix. Renders for both entry
           points above: handleStart's own setEditingMonth once a draft
-          exists, and the Edit button once a month is selected. */}
-      {editingMonth && <RetroModal month={editingMonth} onClose={() => setEditingMonth(null)} />}
+          exists, and the Edit button once a month is selected.
+
+          `onDiscarded` clears `selectedMonth` too, not just `editingMonth` --
+          a real browser walk against Discard draft found the gap this
+          closes: without it, RetroDetail.tsx below stays pointed at the
+          just-deleted month and renders "Couldn't load this retro." the
+          instant the modal closes, right after a delete that actually
+          succeeded. Checked against `editingMonth` (not cleared
+          unconditionally) because `selectedMonth` and `editingMonth` are
+          always the same month on every path that opens this modal
+          (handleStart sets both together; Edit sets `editingMonth` FROM
+          `selectedMonth`), so this is defensive rather than load-bearing --
+          but a wrong assumption here would silently clear a selection
+          Discard was never asked to touch. */}
+      {editingMonth && (
+        <RetroModal
+          month={editingMonth}
+          onClose={() => setEditingMonth(null)}
+          onDiscarded={() => setSelectedMonth((current) => (current === editingMonth ? null : current))}
+        />
+      )}
     </PageContainer>
   );
 }

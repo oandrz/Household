@@ -224,6 +224,32 @@ export const RETRO_COPY = {
   assignToMember: (displayName: string) => `Assign to ${displayName}`,
   addActionError: "Couldn't add that action. Try again.",
 
+  // Discard draft: docs/LEARNING.md pattern 15's fourth instance in this
+  // feature -- DeleteDraft, DELETE /retros/{month} and useRetro.discardDraft
+  // were all real and tested (design spec decision 2, "a draft can be
+  // deleted; a finished retro cannot") with no component anywhere calling
+  // any of it. Shown only for a draft (completedAt === null); a finished
+  // retro offers nothing, because the server refuses one and an offer that
+  // always fails is worse than no offer. Confirmed in the page, never
+  // window.confirm -- TransactionModal.tsx's own delete flow is the
+  // precedent this mirrors exactly, trigger/body/confirm/cancel each their
+  // own key the same way transactionCopy.ts's four delete strings are.
+  discardDraftTrigger: "Discard draft",
+  discardDraftConfirmBody: "This draft will be permanently deleted. This can't be undone.",
+  discardDraftConfirmAction: "Yes, discard it",
+  discardDraftCancelAction: "Keep it",
+  // Only reachable through a genuine race (the other partner finishes this
+  // same retro in another tab between this modal loading and Discard being
+  // clicked) -- the trigger's own completedAt gate makes the ordinary path
+  // unreachable. retro_handlers.go's own handleDiscardRetro comment: the
+  // server answers the same generic 404 "That could not be found." a
+  // genuinely missing retro gets, deliberately not the design spec's own
+  // error-table wording ("That retro is finished and cannot be deleted") --
+  // "there is no draft here" reads the same either way, on purpose, so this
+  // fallback is for the non-ApiError case only (apiErrorMessage's own
+  // contract: a real ApiError's message wins over this).
+  discardDraftError: "Couldn't delete this draft. Try again.",
+
   saveDraft: "Save draft",
   finishRetro: "Finish retro",
 

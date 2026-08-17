@@ -570,4 +570,51 @@ describe("RetroModal", () => {
     expect(screen.getByRole("button", { name: "Assign to Andreas" })).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByRole("button", { name: "Assign to Christine" })).toHaveAttribute("aria-pressed", "false");
   });
+
+  // Discard draft (design decision 2: "a draft can be deleted; a finished
+  // retro cannot") -- docs/LEARNING.md pattern 15's fourth instance in this
+  // feature: DeleteDraft, DELETE /retros/{month} and useRetro.discardDraft
+  // were all real and tested with no component anywhere calling any of it.
+  // A finished retro must offer nothing, because the server refuses the
+  // delete and an offer that always fails is worse than no offer -- this
+  // also doubles as the wiring pin for the presence half below (deleting
+  // the discard block's render line from RetroModal.tsx turns this test
+  // red the same way it turns the finished-retro test's absence claim
+  // vacuously true instead of proving anything).
+  it("shows no discard control for a finished retro", async () => {
+    renderModal(retroFixture({ completedAt: "2026-07-28T21:18:52+08:00" }));
+
+    // Positive control first (docs/LEARNING.md pattern 2): prove the modal
+    // actually finished rendering before asserting an absence.
+    expect(await screen.findByLabelText(/What went well/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Discard draft" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("retro-discard-draft")).not.toBeInTheDocument();
+  });
+
+  it("shows the discard control for a draft", async () => {
+    renderModal(retroFixture({ completedAt: null }));
+
+    expect(await screen.findByRole("button", { name: "Discard draft" })).toBeInTheDocument();
+  });
+
+  // Never window.confirm -- this codebase's own established convention,
+  // TransactionModal.test.tsx's own identical test ("confirms deletion in
+  // the page, never with a native confirm dialog") is the precedent this
+  // mirrors exactly, down to the confirm-spy assertion.
+  it("confirms discarding in the page, never with a native confirm dialog, and posts DELETE", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm");
+    const stub = renderModal(retroFixture({ completedAt: null }), {
+      "DELETE /api/v1/retros/2026-07": { status: 204, body: undefined },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Discard draft" }));
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(stub.called("DELETE /api/v1/retros/2026-07")).toBe(false);
+    expect(screen.getByText(/permanently deleted/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Yes, discard it" }));
+
+    await waitFor(() => expect(stub.called("DELETE /api/v1/retros/2026-07")).toBe(true));
+    expect(stub.onClose).toHaveBeenCalled();
+  });
 });

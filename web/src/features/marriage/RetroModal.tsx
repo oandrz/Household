@@ -37,7 +37,25 @@ import { useHouseholdMembers } from "../settings/useHouseholdMembers";
 import { useRetro, type SaveRetroBody } from "./useRetro";
 import type { RetroAction } from "./retroSchemas";
 
-export function RetroModal({ month, onClose }: { month: string; onClose: () => void }) {
+export function RetroModal({
+  month,
+  onClose,
+  onDiscarded,
+}: {
+  month: string;
+  onClose: () => void;
+  // Fired only on a successful discard, before `onClose` -- a real browser
+  // walk against this exact flow found the gap this closes: RetrosPage.tsx's
+  // own `selectedMonth` is a SEPARATE piece of state from this modal's
+  // `month`/`onClose`, and closing the modal alone leaves RetroDetail.tsx
+  // behind it still pointed at a month whose retro no longer exists, which
+  // renders as a visible "Couldn't load this retro." error the instant this
+  // modal closes on an otherwise successful delete. Optional so every
+  // existing call site (Save draft, Finish retro, and every RetroModal.test.tsx
+  // render that only ever passes `onClose`) is unaffected -- only the
+  // discard path has anything to tell the page.
+  onDiscarded?: () => void;
+}) {
   const retro = useRetro(month);
   // The same members query RetroDetail.tsx/RetroActionRow.tsx already share
   // for assignee initials (useHouseholdMembers.ts's own header comment: one
@@ -109,6 +127,15 @@ export function RetroModal({ month, onClose }: { month: string; onClose: () => v
   const [newActionAssigneeIds, setNewActionAssigneeIds] = useState<Set<string>>(new Set());
   const [isAddingAction, setIsAddingAction] = useState(false);
   const [addActionError, setAddActionError] = useState<string | null>(null);
+
+  // Discard draft's own local state -- TransactionModal.tsx's own
+  // confirmingDelete/isDeleting pair, the same shape (one item to delete,
+  // not a list, so a single boolean rather than GoalContributionsPanel.tsx's
+  // per-row `confirmingId`/`deletingId`). Confirmation happens in the page,
+  // never `window.confirm` -- this codebase's own established convention.
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  const [isDiscarding, setIsDiscarding] = useState(false);
+  const [discardError, setDiscardError] = useState<string | null>(null);
 
   useEffect(() => {
     if (retro.data && !initialized) {
@@ -255,6 +282,33 @@ export function RetroModal({ month, onClose }: { month: string; onClose: () => v
       setAddActionError(apiErrorMessage(err, RETRO_COPY.addActionError));
     } finally {
       setIsAddingAction(false);
+    }
+  }
+
+  // Deletes the retro outright -- only ever reachable while it is still a
+  // draft (the trigger button's own `completedAt === null` gate below), but
+  // checked against `actionsDisabled` too, the same explicit-invariant
+  // reason handleFinish/handleCarryOver/handleAddAction each repeat it: once
+  // `hadConflict` latches, nothing in this modal should still be writing
+  // against a retro this tab's own understanding of may already be stale.
+  // TransactionModal.tsx's own `handleDelete` is the precedent this mirrors:
+  // clear any prior error, mark in flight, await the mutation, close on
+  // success, and collapse BOTH `isDiscarding` and `confirmingDiscard` back
+  // to their resting state in `finally` regardless of outcome -- a failed
+  // delete should not leave the confirm/cancel pair stuck open forever.
+  async function handleDiscardDraft() {
+    if (actionsDisabled) return;
+    setDiscardError(null);
+    setIsDiscarding(true);
+    try {
+      await retro.discardDraft();
+      onDiscarded?.();
+      onClose();
+    } catch (err) {
+      setDiscardError(apiErrorMessage(err, RETRO_COPY.discardDraftError));
+    } finally {
+      setIsDiscarding(false);
+      setConfirmingDiscard(false);
     }
   }
 
@@ -529,6 +583,60 @@ export function RetroModal({ month, onClose }: { month: string; onClose: () => v
             <p role="alert" className="text-xs leading-snug text-danger">
               {saveError}
             </p>
+          )}
+
+          {/* Discard draft (design decision 2: "a draft can be deleted; a
+              finished retro cannot"). Rendered only for a draft
+              (`completedAt === null`) -- a finished retro offers nothing,
+              because the server refuses the delete (retro_handlers.go's own
+              `WHERE completed_at IS NULL`) and an offer that always fails is
+              worse than no offer. TransactionModal.tsx's own delete flow is
+              the shape this mirrors: confirmation happens in this page, not
+              `window.confirm`, and its own bordered box sits apart from
+              Save draft/Finish retro below so no one reaches for it by
+              accident. `data-testid` pins this block's own wiring the same
+              way retro-add-action does -- an assertion that finds it, or
+              the trigger/confirm controls inside it, would go red if this
+              block's render were ever deleted from the modal. */}
+          {retro.data.retro.completedAt === null && (
+            <div data-testid="retro-discard-draft" className="rounded-[10px] border border-hairline p-3">
+              {confirmingDiscard ? (
+                <div className="flex flex-col gap-2.5">
+                  <p className="text-[12.5px] text-ink">{RETRO_COPY.discardDraftConfirmBody}</p>
+                  <div className="flex gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingDiscard(false)}
+                      className="min-h-11 flex-1 rounded-lg border border-hairline py-2 text-center text-[13px] font-semibold text-label sm:min-h-0"
+                    >
+                      {RETRO_COPY.discardDraftCancelAction}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isDiscarding || actionsDisabled}
+                      onClick={() => void handleDiscardDraft()}
+                      className="min-h-11 flex-1 rounded-lg bg-danger py-2 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
+                    >
+                      {RETRO_COPY.discardDraftConfirmAction}
+                    </button>
+                  </div>
+                  {discardError && (
+                    <p role="alert" className="text-xs leading-snug text-danger">
+                      {discardError}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  disabled={actionsDisabled}
+                  onClick={() => setConfirmingDiscard(true)}
+                  className="min-h-11 text-[13px] font-semibold text-danger disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
+                >
+                  {RETRO_COPY.discardDraftTrigger}
+                </button>
+              )}
+            </div>
           )}
 
           <div className="mt-1 flex gap-2.5">

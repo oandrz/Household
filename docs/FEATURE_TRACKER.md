@@ -248,6 +248,36 @@ totals from 59/17/25/2 = 103 to **62/18/23/2 = 105** — two rows added, three
 moved from Not started (two to Built, one to Partial). The "Where things
 stand" headline (Built + Partial) moves from 76 of 103 to **80 of 105**.
 
+**Delete a draft retro, 2026-08-17 — the row this same reconciliation had
+just named 🟡 moves to ✅.** The gap was real when written: `useRetro.ts`
+exposed `discardDraft`, backed by a real migration, a mutation-checked
+`RetroRepository.DeleteDraft` (`WHERE completed_at IS NULL`), `DELETE
+/retros/{month}` and the hook's own passing test, but no component called
+any of it — `docs/LEARNING.md` pattern 15's fourth instance in this one
+feature. `RetroModal.tsx` now offers a "Discard draft" control, shown only
+while `completedAt` is null (a finished retro offers nothing, since the
+server refuses one and an offer that always fails is worse than no offer),
+confirmed in the page rather than with `window.confirm`
+(`TransactionModal.tsx`'s own delete flow is the precedent this mirrors),
+and `RetrosPage.tsx` reacts to a successful discard on both counts a
+household would notice: the draft leaves the history list and the Start
+button returns. A real browser walk against this exact flow found one more
+thing the round's own plan had not named — closing the modal alone left the
+page's `selectedMonth` still pointed at the just-deleted retro, so
+`RetroDetail.tsx` rendered "Couldn't load this retro." the instant a delete
+that had actually succeeded finished; fixed in the same round with a new
+`onDiscarded` callback, not deferred. `removeAction`
+(`DELETE /retros/{month}/actions/{id}`) has the identical shape — a real
+endpoint, no caller — and stays deliberately unbuilt: no mockup draws a
+delete control on an action and no task's brief ever named one, so building
+it now would be invention, not the spec's own ask; `docs/LEARNING.md`
+already records this as a decision, not an oversight. Recounting by this
+file's own rule leaves every area unchanged except Marriage, which moves
+from 5/1/9/0 to **6/0/9/0** (still 15 rows, one moved from Partial to
+Built), taking the stated totals from 62/18/23/2 = 105 to
+**63/17/23/2 = 105** — row count unchanged, Built + Partial still **80 of
+105** (a Partial becoming Built moves neither side of that sum).
+
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
 | Entry & authentication | 10 | 1 | 0 | 0 |
@@ -255,10 +285,10 @@ stand" headline (Built + Partial) moves from 76 of 103 to **80 of 105**.
 | Household settings | 11 | 8 | 2 | 0 |
 | Overview (home) | 5 | 3 | 2 | 0 |
 | Money | 24 | 4 | 7 | 0 |
-| Marriage | 5 | 1 | 9 | 0 |
+| Marriage | 6 | 0 | 9 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **62** | **18** | **23** | **2** |
+| **Total** | **63** | **17** | **23** | **2** |
 
 ---
 
@@ -822,7 +852,7 @@ landing page) belongs with it.
 | Single retro view — went well, was hard, actions, notes | ✅ |
 | Start retro (modal) with mood, money check-in and actions | ✅ *(the design's own "45 min" duration is drawn, not built — spec decision 8)* |
 | Carry an unfinished action into the next retro (no mockup — see below) | ✅ |
-| Delete a draft retro (no mockup — see below) | 🟡 *(the backend and the hook are real — `DeleteDraft`, `DELETE /retros/{month}`, `useRetro.discardDraft` — but no component calls it; a household can abandon a draft and nothing in the UI can remove it)* |
+| Delete a draft retro (no mockup — see below) | ✅ |
 | Vision — yearly theme | ⬜ |
 | Vision — pillars with measures | ⬜ |
 | Vision — longer-horizon milestones | ⬜ |
@@ -855,12 +885,19 @@ actions posts a fresh `addAction` with `carried_from` pointing at the
 original, July's own row untouched and still unticked; only the immediately
 previous month is ever offered, and the label "Carried from {month}" is true
 for every path the product can produce, since the offer only ever lists
-`OpenInMonth`'s own server-side answer. **Delete a draft retro** is the one
-row on this page that is not simply true: `docs/FEATURE_TRACKER.md`'s own
-rule is that a row describes what a household can *do*, and this is
-`docs/LEARNING.md` pattern 15's shape a third and fourth time in the same
-feature — every layer below the screen is real, and the screen never asks
-for it.
+`OpenInMonth`'s own server-side answer. **Delete a draft retro** was, as of
+this same round's own first pass, the one row on this page that was not
+simply true — `docs/LEARNING.md` pattern 15's shape a fourth time in the
+same feature, every layer below the screen real and the screen never asking
+for it — and moved to ✅ in the round's own fix pass: `RetroModal.tsx` now
+offers a "Discard draft" control, shown only for a draft (`completedAt ===
+null`; a finished retro offers nothing, since the server refuses one and
+an offer that always fails is worse than no offer), confirmed in the page
+rather than with `window.confirm`. `removeAction`
+(`DELETE /retros/{month}/actions/{id}`) has the identical shape and stays
+deliberately unbuilt — no mockup draws a delete control on an action and no
+task's brief ever named one, so this is a decision, recorded in
+`docs/LEARNING.md`, not an oversight left for the next reader to rediscover.
 
 Agreements are the unusual one: every change goes through **propose → both
 sign**, and history is preserved so a removed agreement can still be seen and

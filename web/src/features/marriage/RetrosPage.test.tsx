@@ -481,4 +481,83 @@ describe("RetrosPage", () => {
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("heading", { level: 2, name: "June 2026 retro" })).toBeInTheDocument();
   });
+
+  // Discard draft (design decision 2, docs/LEARNING.md pattern 15's fourth
+  // instance in this feature): DeleteDraft/DELETE /retros/{month}/
+  // useRetro.discardDraft were all real and tested with no component
+  // anywhere calling any of it. This is the page-level half of closing that
+  // gap -- RetroModal.test.tsx's own suite proves the modal posts the
+  // DELETE and closes itself; this proves the REST of the page reacts to
+  // it too: the draft row leaves the history list and the Start button
+  // (which only renders when `startMonth` is non-null) comes back, the same
+  // "clicking Start" test's own before/after GET /retros refetch shape.
+  it("discarding a draft removes it from the history and restores the Start button", async () => {
+    const draftRetro: Retro = {
+      id: "retro-draft",
+      month: "2026-08",
+      mood: null,
+      wentWell: "",
+      wasHard: "",
+      notes: "",
+      completedAt: null,
+      version: 1,
+      actions: [],
+    };
+    // A second, unrelated finished retro stays present in both `before` and
+    // `after` -- discarding August must not empty the list entirely, or the
+    // page renders its own "no retros yet" branch instead of the two-column
+    // grid RetroDetail lives in, which is exactly the branch this test needs
+    // to stay in to prove `selectedMonth` actually cleared.
+    const july = summaryFixture({ id: "retro-july", month: "2026-07", finished: true });
+    // August already has a draft, so no Start button shows yet (startMonth
+    // null, the same guard "hides the start button when both months already
+    // have a retro" pins) -- discarding it is what frees the month back up.
+    const before = retrosFixture({
+      retros: [summaryFixture({ id: "retro-draft", month: "2026-08", finished: false, mood: null, quote: "" }), july],
+      doneCount: 1,
+      since: "2026-07",
+      startMonth: null,
+    });
+    const after = retrosFixture({ retros: [july], doneCount: 1, since: "2026-07", startMonth: "2026-08" });
+
+    renderPage(before, {
+      "GET /api/v1/retros": [
+        { status: 200, body: before },
+        { status: 200, body: after },
+      ],
+      "GET /api/v1/retros/2026-08": { status: 200, body: { retro: draftRetro, carryOver: [] } },
+      "GET /api/v1/budgets/2026-08": { status: 200, body: NO_BUDGET_FOR("2026-08") },
+      [`GET /api/v1/budgets/${previousMonth("2026-08")}`]: {
+        status: 200,
+        body: NO_BUDGET_FOR(previousMonth("2026-08")),
+      },
+      "GET /api/v1/goals": { status: 200, body: EMPTY_GOALS },
+      "GET /api/v1/household/members": { status: 200, body: [] },
+      "DELETE /api/v1/retros/2026-08": { status: 204, body: undefined },
+    });
+
+    fireEvent.click(await screen.findByTestId("retro-row-2026-08"));
+    fireEvent.click(await screen.findByTestId("retro-edit"));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Discard draft" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Yes, discard it" }));
+
+    // The modal closes on success (RetroModal.tsx's own handleDiscardDraft),
+    // the list refetches (afterWrite's own retroListQueryKey invalidation),
+    // and both halves of "the page reflects the retro being gone" hold: the
+    // row is gone, and the Start button -- absent before, since August
+    // already had this draft -- is back.
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("retro-row-2026-08")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("retros-start")).toBeInTheDocument();
+    // A real browser walk against this exact flow found the gap this pins:
+    // closing the modal alone left `selectedMonth` still pointed at August,
+    // and RetroDetail.tsx (still mounted in the detail panel) refetched a
+    // month that no longer exists, rendering "Couldn't load this retro."
+    // right after a delete that had actually succeeded. `onDiscarded`
+    // (RetroModal.tsx) clears the selection too, so the panel falls back to
+    // its own placeholder instead.
+    expect(screen.queryByTestId("retro-detail-load-error")).not.toBeInTheDocument();
+    expect(screen.getByText("Select a retro to see its detail.")).toBeInTheDocument();
+  });
 });
