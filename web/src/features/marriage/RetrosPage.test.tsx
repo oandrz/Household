@@ -39,6 +39,48 @@ function retrosFixture(overrides: Partial<RetrosResponse> = {}): RetrosResponse 
   };
 }
 
+// RetroModal.tsx (Task 13) mounts MoneyCheckInPanel (Task 14) the moment it
+// opens, which fetches both of these unconditionally -- both tests below
+// that open the modal need them registered, or stubFetchRoutes throws
+// before any capture runs (Task 13's own finding, restated in Task 14's
+// brief). Neither test cares what the money panel shows, so both bodies are
+// the empty state -- RetroModal.test.tsx/MoneyCheckInPanel.test.tsx own the
+// populated-figures assertions.
+const NO_BUDGET_FOR = (month: string) => ({
+  currency: "SGD",
+  month,
+  budget: null,
+  categories: [],
+  budgetedMinor: 0,
+  spentMinor: 0,
+  remainingMinor: 0,
+  percentUsed: 0,
+  percentOk: false,
+  daysLeft: 0,
+  dailyPaceMinor: 0,
+  dailyPaceOk: false,
+  byPerson: [],
+  excludedNoRate: 0,
+  overCount: 0,
+  rolledOverAt: null,
+  rolloverGoalId: null,
+  rolloverAmountMinor: null,
+});
+
+const EMPTY_GOALS = {
+  currency: "SGD",
+  goals: [],
+  summary: {
+    plannedMonthlyTotalMinor: 0,
+    actualThisMonthMinor: 0,
+    onTrackCount: 0,
+    datedCount: 0,
+    noDateCount: 0,
+    excludedNoRate: 0,
+    nextGoal: null,
+  },
+};
+
 function renderPage(
   response: RetrosResponse,
   extraRoutes: Record<string, RouteResponse | RouteResponse[]> = {},
@@ -340,6 +382,8 @@ describe("RetrosPage", () => {
       // immediately (Task 13) -- this is that modal's own GET, not a second
       // fetch of the row above.
       "GET /api/v1/retros/2026-08": { status: 200, body: { retro: createdRetroFixture, carryOver: [] } },
+      "GET /api/v1/budgets/2026-08": { status: 200, body: NO_BUDGET_FOR("2026-08") },
+      "GET /api/v1/goals": { status: 200, body: EMPTY_GOALS },
     });
 
     fireEvent.click(await screen.findByTestId("retros-start"));
@@ -392,6 +436,8 @@ describe("RetrosPage", () => {
           },
         },
         "GET /api/v1/household/members": { status: 200, body: [] },
+        "GET /api/v1/budgets/2026-06": { status: 200, body: NO_BUDGET_FOR("2026-06") },
+        "GET /api/v1/goals": { status: 200, body: EMPTY_GOALS },
       },
     );
 

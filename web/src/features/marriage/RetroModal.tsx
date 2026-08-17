@@ -1,11 +1,23 @@
 // The Start/Edit retro modal (design/Household Dashboard.dc.html's
 // `modalRetro` panel): the mood picker, the two textareas, the money
-// check-in and actions block (both Task 14's own job -- this task only
-// reserves their mount points in the design's order), and Save draft /
-// Finish retro. Built on `components/Modal` the same way every other
-// feature modal is (GoalModal.tsx's own shape is the closest precedent:
-// this component calls `useRetro(month)` itself rather than taking a
-// mutation as a prop, because nothing upstream has already resolved one).
+// check-in panel and the carry-over offer, and Save draft / Finish retro.
+// Built on `components/Modal` the same way every other feature modal is
+// (GoalModal.tsx's own shape is the closest precedent: this component calls
+// `useRetro(month)` itself rather than taking a mutation as a prop, because
+// nothing upstream has already resolved one).
+//
+// Task 13's own comment on the (now filled) actions mount point anticipated
+// a generic "+ Add an action & assign it to one of you" composer here too
+// (dc.html's own markup draws one, under "Actions for next month"). Task
+// 14's brief tests only the carry-over offer -- no test anywhere in this
+// plan drives a freeform composer, and no task from 1-16 builds one
+// elsewhere either (RetroDetail.tsx, Task 12, ticks existing actions but
+// adds no new ones). Built only what Task 14's own tests ask for rather than
+// growing UI with nothing testing it; Task 17's browser-walk criterion 7
+// ("Add two actions, assign one to each partner and one to both") has
+// nothing to exercise yet -- flagged in this task's own report for whoever
+// runs that walk, per its own Step 3 ("fix what the walk finds, in this
+// task").
 //
 // `notes` is a real field here even though dc.html's modal never draws a
 // third textarea for it -- `saveRetroRequest`/`retroDTO` both carry `notes`
@@ -23,8 +35,10 @@ import { ApiError } from "../../api/client";
 import { apiErrorMessage } from "../auth/copy";
 import { Modal } from "../../components/Modal";
 import { FieldPair } from "../../components/FieldPair";
-import { RETRO_COPY, monthYearLabel } from "./retroCopy";
+import { MoneyCheckInPanel } from "./MoneyCheckInPanel";
+import { RETRO_COPY, monthYearLabel, previousMonthName } from "./retroCopy";
 import { useRetro, type SaveRetroBody } from "./useRetro";
+import type { RetroAction } from "./retroSchemas";
 
 export function RetroModal({ month, onClose }: { month: string; onClose: () => void }) {
   const retro = useRetro(month);
@@ -62,6 +76,23 @@ export function RetroModal({ month, onClose }: { month: string; onClose: () => v
   // way back to writable is closing the modal and reopening it, which is a
   // fresh mount that seeds these fields from a fresh fetch.
   const [hadConflict, setHadConflict] = useState(false);
+
+  // Which of `carryOver`'s own action ids this mount has already posted a
+  // carry for -- purely a local, per-mount safeguard against a double click,
+  // NOT something the server tracks. Confirmed by reading the query behind
+  // OpenInMonth (retro.sql's own ListOpenActionsInMonth): it excludes an
+  // action only once ITS OWN done_at is set, and carrying one never touches
+  // July's own row (design decision 4: "July's own row is untouched and
+  // stays unticked") -- there is no server-side de-dup, and no unique
+  // constraint on carried_from either (migrations/00009_retros.sql), so the
+  // same July action would be offered again forever without this. A fresh
+  // mount (closing and reopening this modal) starts this set empty again,
+  // same as `hadConflict`'s own "fresh mount, fresh everything" contract --
+  // the offer reappearing after a reload is the accepted, honest behaviour,
+  // not a bug this is trying to hide.
+  const [carriedIds, setCarriedIds] = useState<Set<string>>(new Set());
+  const [carryingId, setCarryingId] = useState<string | null>(null);
+  const [carryError, setCarryError] = useState<string | null>(null);
 
   useEffect(() => {
     if (retro.data && !initialized) {
@@ -142,12 +173,52 @@ export function RetroModal({ month, onClose }: { month: string; onClose: () => v
     }
   }
 
+  // Carries one of last month's still-open actions onto THIS retro. `action`
+  // is always an element of `retro.data.carryOver` -- never a freehand id --
+  // because the only caller is the map below, which only ever hands this
+  // function an entry from that same list. useRetro.ts's own
+  // AddRetroActionBody doc comment names this exact trust boundary: passing
+  // anything else would silently break RetroActionRow's "Carried from
+  // {month}" label, which infers the source month by calendar arithmetic
+  // rather than reading it off the wire (retroActionDTO carries no month for
+  // a carried-from id at all).
+  //
+  // Checked against `actionsDisabled` up front, the same explicit-invariant
+  // reason `handleFinish` checks it rather than leaning on the button's own
+  // `disabled` attribute alone -- once `hadConflict` latches, nothing in
+  // this modal should still be writing against a retro this tab's own
+  // understanding of may already be stale.
+  async function handleCarryOver(action: RetroAction) {
+    if (actionsDisabled) return;
+    setCarryError(null);
+    setCarryingId(action.id);
+    try {
+      await retro.addAction({ body: action.body, carriedFrom: action.id });
+      setCarriedIds((prev) => new Set(prev).add(action.id));
+    } catch (err) {
+      setCarryError(apiErrorMessage(err, RETRO_COPY.carryOverError));
+    } finally {
+      setCarryingId(null);
+    }
+  }
+
   // Disables both actions below for two different reasons: a write already
   // in flight (transient), or `hadConflict` (permanent for this mount --
   // enabling them again on the strength of `retro.conflict` alone, which
   // clears on any successful refetch including one this modal never asked
   // for, is the exact gap the latch exists to close; see its own comment).
   const actionsDisabled = isSaving || isFinishing || hadConflict;
+
+  // Computed once here, outside the loading/error ternary below, so `?.`/`??`
+  // do the "not loaded yet" handling rather than a type-narrowing dance
+  // inside JSX. Filtered by `carriedIds` BEFORE the "is there anything to
+  // show" check further down -- gating that check on the server's own
+  // unfiltered `carryOver.length` instead would leave the "Still open from
+  // July" heading on screen with an empty list under it once every row in
+  // this mount has been carried, the exact "heading with nothing under it"
+  // shape this screen's own BulletCard/actions-list guards elsewhere all
+  // refuse to render.
+  const openCarryOver = retro.data?.carryOver.filter((action) => !carriedIds.has(action.id)) ?? [];
 
   return (
     <Modal open onClose={onClose} title={`${monthYearLabel(month)} retro`}>
@@ -257,14 +328,49 @@ export function RetroModal({ month, onClose }: { month: string; onClose: () => v
             />
           </div>
 
-          {/* Task 14 mounts <MoneyCheckInPanel month={month} /> here, and the
-              "Still open from {month}" carry-over offer plus "+ Add an
-              action" control below it -- this task only reserves the two
-              mount points, in the design's own order (title, mood,
-              wentWell/wasHard, notes, money check-in, actions,
-              Save/Finish). */}
-          <div data-testid="retro-modal-money-mount" />
-          <div data-testid="retro-modal-actions-mount" />
+          <div data-testid="retro-modal-money-mount">
+            <MoneyCheckInPanel month={month} />
+          </div>
+
+          {/* The carry-over offer (design decision 4): last month's still-
+              open actions, one row each, offered only while there is
+              something left to offer -- an empty `openCarryOver` renders
+              nothing at all here, not an empty heading over a blank list
+              (the same "no placeholder for an absence" rule the rest of
+              this screen already follows). */}
+          <div data-testid="retro-modal-actions-mount" className="flex flex-col gap-2">
+            {openCarryOver.length > 0 && (
+              <>
+                <h3 className="text-xs font-semibold text-label">
+                  {RETRO_COPY.carryOverHeading(previousMonthName(month))}
+                </h3>
+                <div className="flex flex-col gap-2">
+                  {openCarryOver.map((action) => (
+                    <div
+                      key={action.id}
+                      className="flex items-center justify-between gap-3 rounded-[10px] border border-hairline px-3.5 py-2.5"
+                    >
+                      <span className="text-[13px] text-ink">{action.body}</span>
+                      <button
+                        type="button"
+                        aria-label={RETRO_COPY.carryOverButton(action.body)}
+                        disabled={actionsDisabled || carryingId === action.id}
+                        onClick={() => void handleCarryOver(action)}
+                        className="min-h-11 flex-none rounded-lg border border-hairline px-3 text-[12px] font-semibold text-accent disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:py-1.5"
+                      >
+                        {RETRO_COPY.carryOverButtonLabel}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                {carryError && (
+                  <p role="alert" className="text-xs leading-snug text-danger">
+                    {carryError}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
 
           {/* Renders from `hadConflict`, the local one-way latch, NOT
               `retro.conflict` -- see hadConflict's own comment on why a

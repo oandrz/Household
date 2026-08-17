@@ -146,6 +146,54 @@ export const RETRO_COPY = {
   // own header comment on why the field exists here despite that.
   notesPlaceholder: "Anything else worth remembering for next time…",
 
+  // MoneyCheckInPanel.tsx (Task 14) below. "Budget"/"Goals today" are fixed
+  // labels, not functions -- the clause after the colon is composed from
+  // BUDGET_COPY/GOAL_COPY's own strings (Budget's and Goals' own specs
+  // already pin that wording; this panel renders it, it does not invent a
+  // third phrasing for the same figure). "Goals today" carries the
+  // "today" the design spec's decision 3 requires explicitly: budget is the
+  // retro's own month (useBudget(month)), goals are today's live standing
+  // (useGoals(), no month argument at all -- a goal's progress is a
+  // contributions ledger against a target date, not a monthly bucket), and
+  // the panel must say which is which rather than let two differently-scoped
+  // numbers sit side by side looking like they describe the same moment.
+  moneyCheckInHeading: "10-min money check-in",
+  budgetLabel: "Budget",
+  goalsTodayLabel: "Goals today",
+  // Shown instead of "N of M on track"/"N with no date" when a household has
+  // no live goals at all yet (datedCount and noDateCount both 0) -- the same
+  // "no placeholder for an absence" rule this file's doneSinceClause/
+  // MoodChart's own empty copy already follow, so this panel never renders a
+  // colon with nothing meaningful after it.
+  checkInNoGoalsYet: "No goals to check on yet.",
+  // The panel's own fetch failure -- useBudget(month)/useGoals() are both
+  // owner-gated on the server (budgetCopy.ts's/goalCopy.ts's own
+  // ownerOnlyBody comments), and a household owner who holds marriage but
+  // not money capability reaches this exact 403 the moment the modal opens.
+  // Shown inline, never blocking Save/Finish -- the check-in is a prompt for
+  // a conversation, not a gate on writing the retro itself.
+  checkInLoadError: "Couldn't load this month's numbers.",
+
+  // The carry-over offer (design spec decision 4): last month's still-open
+  // actions, offered by name, one click each. previousMonthName below is the
+  // same calendar-arithmetic helper RetroActionRow.tsx's own "Carried from"
+  // label already uses -- see that helper's own comment for the trust
+  // boundary this offer's own list has to respect (only ever an id taken
+  // from useRetro(month)'s own `carryOver` field).
+  carryOverHeading: (monthName: string) => `Still open from ${monthName}`,
+  // The button's own accessible name (aria-label, not visible text -- see
+  // RetroModal.tsx's own comment on why): naming the specific action is what
+  // lets a screen reader tell two "Carry over" buttons in the same list
+  // apart, the identical reason moodOptions' own `label` above exists
+  // alongside a purely decorative emoji glyph.
+  carryOverButton: (body: string) => `Carry over ${body}`,
+  // The button's own visible text -- short, since the row beside it already
+  // shows the action's full body; carryOverButton above is what a screen
+  // reader announces instead of this repeated three times with nothing to
+  // tell them apart.
+  carryOverButtonLabel: "Carry over",
+  carryOverError: "Couldn't carry that action forward. Try again.",
+
   saveDraft: "Save draft",
   finishRetro: "Finish retro",
 
