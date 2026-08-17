@@ -1,12 +1,12 @@
 # Retros — verification walkthrough
 
-**Result: 15 of 15 pass.** No product defect was found; three criteria (2,
+**Result: 15 of 15 pass.** No product defect was found. Three criteria (2,
 10, 13) were met by a path the product's own client-side guards or missing
 controls made necessary rather than the criterion's most literal reading,
-each named as such where it happens; two more (the same 13, plus a re-check
-of 2) turned up real divergences between the design spec's own prose and
-what ships, investigated and judged not to need a code change during this
-task — see "Findings, not defects" below.
+each named as such inline; two of those three (2 and 13) also turned up a
+real divergence between the design spec's own prose and what ships,
+investigated and judged not to need a code change during this task — see
+"Findings, not defects" below.
 
 Run 2026-08-18 (host clock ~06:00–07:30 +08; the API container is UTC, where
 it was ~22:00–23:30 on 2026-08-17 — the same instant, a different
@@ -174,8 +174,8 @@ precisely, and one change here was never reversed.
 returns 14 distinct hashes across 14 files — no accidental duplicate this
 walk (`05a`–`05e`, the five keyboard-focus states, are the pair criterion 5's
 own instructions call out by name: two identical hashes there would mean the
-change did not land, and none are). Criteria **1, 2, 4, 6, 8 and 12's own
-"Still open from July" half** carry no image of their own — each is asserted
+change did not land, and none are). Criteria **1, 2, 4, 6 and 8** carry no
+image of their own — each is asserted
 directly from a DOM read or a wire response quoted verbatim in its own row
 above, which is the evidence this walk's instructions call for; screenshots
 are the record, not the evidence. Two screenshots from the previous, unfinished
