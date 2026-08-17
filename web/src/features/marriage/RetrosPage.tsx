@@ -2,15 +2,16 @@
 // badge, start button), the five states from the task-10 brief, and the
 // mount points Tasks 11-13 fill in -- history list and mood chart on the
 // left, a selected month's detail on the right, and the Start/Edit retro
-// modal (Task 13) opening from this same handler once it exists. Composition
-// only, the GoalsPage.tsx/BillsPage.tsx convention: fetch orchestration
-// lives in useRetros.ts, and no apiFetch call belongs here.
+// modal (Task 13, now wired in). Composition only, the GoalsPage.tsx/
+// BillsPage.tsx convention: fetch orchestration lives in useRetros.ts, and
+// no apiFetch call belongs here.
 import { useState } from "react";
 import { ApiError } from "../../api/client";
 import { PageContainer } from "../../components/PageContainer";
 import { MoodChart } from "./MoodChart";
 import { RetroDetail } from "./RetroDetail";
 import { RetroHistoryList } from "./RetroHistoryList";
+import { RetroModal } from "./RetroModal";
 import { RETRO_COPY, doneSinceClause, monthNameOnly } from "./retroCopy";
 import { useRetros } from "./useRetros";
 
@@ -26,17 +27,31 @@ export function RetrosPage() {
   // Which month's row is highlighted in the history list, and which month
   // RetroDetail (below) fetches and renders on the right.
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+  // Which month's Start/Edit modal is open, if any -- a separate slot from
+  // selectedMonth (GoalsPage.tsx's own modalGoal/contributingGoal split):
+  // selecting a history row and editing it are two different actions that
+  // can disagree about which month they're pointed at (Edit always targets
+  // whatever is selected, but closing the modal must never clear the
+  // selection underneath it).
+  const [editingMonth, setEditingMonth] = useState<string | null>(null);
 
   // useRetros' own startRetro already invalidates both the list and the
   // created month's own detail query (retroQueryKeys.ts's header comment),
   // so the new draft appears in History below with no extra call this page
-  // has to make. Task 13's modal will eventually open from this same
-  // handler once a draft exists to edit; today it only creates the draft.
+  // has to make. Opens straight into editing once the draft exists --
+  // dc.html's own flow (clicking Start opens modalRetro immediately, not a
+  // second click to find the new row in the list first) -- and selects the
+  // same month in the history list so the detail panel behind the modal
+  // already agrees with it once the modal closes.
   function handleStart() {
     setStarting(true);
     setStartError(null);
     retros
       .startRetro()
+      .then((created) => {
+        setSelectedMonth(created.month);
+        setEditingMonth(created.month);
+      })
       .catch((err: unknown) => {
         setStartError(err instanceof ApiError ? err.message : RETRO_COPY.startError);
       })
@@ -183,16 +198,37 @@ export function RetrosPage() {
           {/* selectedMonth comes from RetroHistoryList's own onSelect
               (Task 11) -- nothing here fetches by month itself.
               RetroDetail.tsx owns its own useRetro(month) call and the tick;
-              this mount point only decides whether a month is picked yet. */}
+              this mount point only decides whether a month is picked yet.
+              Edit lives here rather than inside RetroDetail.tsx (which this
+              task does not modify) -- it opens the same modal the Start
+              button does, targeting whichever month is currently selected. */}
           <div data-testid="retro-detail-mount" className="rounded-xl border border-hairline bg-card p-6">
             {selectedMonth ? (
-              <RetroDetail month={selectedMonth} />
+              <>
+                <div className="mb-3 flex justify-end">
+                  <button
+                    type="button"
+                    data-testid="retro-edit"
+                    onClick={() => setEditingMonth(selectedMonth)}
+                    className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[12.5px] font-semibold text-accent sm:min-h-0"
+                  >
+                    {RETRO_COPY.editRetro}
+                  </button>
+                </div>
+                <RetroDetail month={selectedMonth} />
+              </>
             ) : (
               <p className="text-[13px] text-muted">{RETRO_COPY.detailPlaceholder}</p>
             )}
           </div>
         </div>
       )}
+
+      {/* Conditional mount, not a declarative `open` prop -- Modal.tsx's own
+          header comment on why the two never mix. Renders for both entry
+          points above: handleStart's own setEditingMonth once a draft
+          exists, and the Edit button once a month is selected. */}
+      {editingMonth && <RetroModal month={editingMonth} onClose={() => setEditingMonth(null)} />}
     </PageContainer>
   );
 }

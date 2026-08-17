@@ -336,11 +336,72 @@ describe("RetrosPage", () => {
           posted = true;
         },
       },
+      // handleStart's own onSuccess opens RetroModal(created.month)
+      // immediately (Task 13) -- this is that modal's own GET, not a second
+      // fetch of the row above.
+      "GET /api/v1/retros/2026-08": { status: 200, body: { retro: createdRetroFixture, carryOver: [] } },
     });
 
     fireEvent.click(await screen.findByTestId("retros-start"));
 
     await waitFor(() => expect(posted).toBe(true));
     expect(await screen.findByTestId("retro-row-2026-08")).toHaveTextContent("In progress");
+    // Pins RetroModal's own wiring (docs/LEARNING.md pattern 15, the same
+    // reasoning the row assertion above already carries for the list): this
+    // asserts something the modal itself renders once open, not merely that
+    // startRetro's own network call happened. Deleting the
+    // `<RetroModal .../>` render line from RetrosPage.tsx must turn this
+    // red, not just RetroModal.test.tsx's own suite (which never mounts
+    // RetrosPage at all). Scoped inside the dialog: handleStart also selects
+    // the new month, so RetroDetail behind the modal renders its own
+    // "August 2026 retro" heading at the same time -- an unscoped query
+    // would match both and throw on the ambiguity, which is not what this
+    // assertion is about.
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("heading", { level: 2, name: "August 2026 retro" })).toBeInTheDocument();
+  });
+
+  // Edit reopens the same modal against whichever month is currently
+  // selected -- the other entry point RetroModal.tsx's own header comment
+  // names (Start's own onSuccess is the first, covered above).
+  it("clicking Edit on a selected retro opens its modal", async () => {
+    renderPage(
+      retrosFixture({
+        retros: [summaryFixture({ id: "retro-june", month: "2026-06", finished: true })],
+        mood: [],
+        doneCount: 1,
+        since: "2026-06",
+        startMonth: "2026-07",
+      }),
+      {
+        "GET /api/v1/retros/2026-06": {
+          status: 200,
+          body: {
+            retro: {
+              id: "retro-june",
+              month: "2026-06",
+              mood: 4,
+              wentWell: "",
+              wasHard: "",
+              notes: "",
+              completedAt: null,
+              version: 1,
+              actions: [],
+            },
+            carryOver: [],
+          },
+        },
+        "GET /api/v1/household/members": { status: 200, body: [] },
+      },
+    );
+
+    fireEvent.click(await screen.findByTestId("retro-row-2026-06"));
+    fireEvent.click(await screen.findByTestId("retro-edit"));
+
+    // Scoped inside the dialog for the same reason as the Start test above
+    // -- RetroDetail's own "June 2026 retro" heading is already on screen
+    // behind the modal.
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("heading", { level: 2, name: "June 2026 retro" })).toBeInTheDocument();
   });
 });

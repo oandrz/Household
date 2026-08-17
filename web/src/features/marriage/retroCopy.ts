@@ -111,6 +111,68 @@ export const RETRO_COPY = {
     "Retros are visible to the household owner. Ask them if you'd like to see where things stand.",
 
   startError: "Couldn't start a retro. Try again.",
+
+  // RetroModal.tsx (Task 13) below. Distinct string from privacyBadge above
+  // -- the page header and the modal show genuinely different copy at the
+  // design's own two spots (dc.html: "🔒 Private — parents only" on the
+  // header badge, "🔒 Private — just the two of you" under the modal's
+  // title), the same "two real shapes, not one reused" reasoning
+  // monthNameOnly/monthYearLabel already give for this file's month helpers.
+  modalPrivacyBadge: "🔒 Private — just the two of you",
+
+  // The mood radio group's own legend (dc.html's modal: "How was this
+  // month, overall?"), and the five options themselves in the order the
+  // mockup draws them, worst to best -- retroDTO.Mood/domain.ParseMood's own
+  // 1..5 scale, so option N's value is literally N. `label` is each radio's
+  // own accessible name (aria-label): the emoji alone means nothing to a
+  // screen reader, and the tile's visible glyph is the emoji, not this text.
+  moodQuestion: "How was this month, overall?",
+  moodOptions: [
+    { value: 1, emoji: "😞", label: "Terrible" },
+    { value: 2, emoji: "😕", label: "Not great" },
+    { value: 3, emoji: "😐", label: "Okay" },
+    { value: 4, emoji: "🙂", label: "Good" },
+    { value: 5, emoji: "😄", label: "Great" },
+  ] as const,
+
+  // The two textareas' own placeholders, copied verbatim from dc.html's
+  // modal ("One line per win… (each of you adds their own)" /
+  // "Be honest, be kind…") -- wentWellHeading/wasHardHeading above are
+  // reused as-is for these fields' visible labels, since RetroDetail.tsx
+  // already names the same two concepts with the same two words.
+  wentWellPlaceholder: "One line per win… (each of you adds their own)",
+  wasHardPlaceholder: "Be honest, be kind…",
+  // Notes has no placeholder in the mockup at all -- see RetroModal.tsx's
+  // own header comment on why the field exists here despite that.
+  notesPlaceholder: "Anything else worth remembering for next time…",
+
+  saveDraft: "Save draft",
+  finishRetro: "Finish retro",
+
+  // The version-conflict banner (spec's "Error handling" table: a stale
+  // PATCH answers 409 RETRO_CHANGED, and the screen "Never a merge, never a
+  // red failure alert"). Names what happened and what to do, not a generic
+  // failure -- and says explicitly that nothing typed was lost, which is the
+  // entire reason this is refused rather than silently merged (decision 6).
+  //
+  // No "Reload" action here on purpose -- an earlier draft of this modal had
+  // one, and a real browser walk against a real 409 showed exactly why it
+  // was wrong: `retro.reload()` clears `useRetro`'s own `conflict` flag
+  // (task-9-report.md's own contract, "clears on any successful refetch")
+  // without touching this modal's local fields, so the banner would
+  // disappear while the textareas still held the pre-conflict text: the very
+  // next Save would then PATCH that stale text over whatever the partner
+  // just wrote, with the new version attached and no error -- last write
+  // wins, the exact shape decision 6 in the design spec rejects by name.
+  // Closing this modal and reopening it is the only safe way to see the
+  // partner's version, because that is a fresh mount: a new useRetro(month)
+  // call, a fresh fetch, and a fresh seed of every field from it.
+  conflictBanner:
+    "Someone else saved this retro while you were editing. Nothing you typed here has been lost — but Save and Finish are turned off until you close this retro and reopen it to see their version.",
+
+  modalSaveError: "Couldn't save this retro. Try again.",
+
+  editRetro: "Edit",
 } as const;
 
 // "2026-07" -> "July" -- anchored on day 2, matching goalCopy.ts's own
