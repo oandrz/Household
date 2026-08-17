@@ -24,7 +24,7 @@
 // component to sit in.
 import { Link } from "@tanstack/react-router";
 import { currentMonth } from "../money/month";
-import { monthNameOnly } from "../marriage/retroCopy";
+import { monthNameOnly, nextMonthName } from "../marriage/retroCopy";
 import { useRetros } from "../marriage/useRetros";
 import { OVERVIEW_COPY } from "./copy";
 
@@ -79,7 +79,9 @@ export function NextRetroCard() {
               honest count it does have instead of a per-action list this
               response does not carry. Omitted at zero, never "0 actions". */}
           {current.actionCount > 0 && (
-            <p className="mt-1 text-[11.5px] text-muted">{OVERVIEW_COPY.nextRetroActions(current.actionCount)}</p>
+            <p className="mt-1 text-[11.5px] text-muted">
+              {OVERVIEW_COPY.nextRetroActions(current.actionCount, nextMonthName(current.month))}
+            </p>
           )}
         </>
       ) : (

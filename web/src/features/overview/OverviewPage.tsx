@@ -29,13 +29,23 @@ export function OverviewPage() {
   const me = useMe();
   const isOwner = me.data?.membership.role === "owner";
   const hasMoney = me.data?.capabilities.includes("money") ?? false;
-  // Independent of hasMoney above -- a member can hold either capability
-  // without the other (domain.ErrLimitedCannotHoldMarriage only rules out a
-  // LIMITED member holding marriage, it says nothing about money). Read
-  // straight off capabilities, not membership.role: GET /retros is also
-  // requireOwner (router.go), but that invariant already guarantees a
-  // limited member can never reach this true, so checking the capability
-  // alone is sufficient without a second, redundant isOwner check here.
+  // Read straight off capabilities, not membership.role: GET /retros is
+  // also requireOwner (router.go), but validateCapabilitiesForRole
+  // (domain/identity.go) already guarantees that -- an OWNER must hold
+  // EVERY capability (AllCapabilities(), which includes money), and a
+  // LIMITED member can never hold marriage at all (ErrLimitedCannotHoldMarriage,
+  // backed by the owners_hold_all_capabilities/limited_members_have_no_marriage
+  // CHECK constraints in 00002_identity.sql, so this is not merely a
+  // convention the application layer could drift from). So hasMarriage is
+  // true only when hasMoney is too, for every membership this database can
+  // actually contain -- checking the capability alone is sufficient, with
+  // no second, redundant isOwner check needed here.
+  //
+  // hasMarriage is still evaluated independently of hasMoney below, though
+  // (this card is mounted outside the `!hasMoney` branch, not folded into
+  // its `else`) -- deliberately not leaning on the invariant above to keep
+  // the card visible. A future loosening of validateCapabilitiesForRole
+  // must not silently hide this card behind the no-money panel.
   const hasMarriage = me.data?.capabilities.includes("marriage") ?? false;
 
   const accounts = useAccounts(false);
@@ -132,8 +142,10 @@ export function OverviewPage() {
       )}
 
       {/* Gated on hasMarriage, not nested inside the !hasMoney branch above
-          -- the two capabilities are independent, so a member can hold
-          marriage without money (or the reverse). This is also the ENTIRE
+          -- deliberately not relying on hasMarriage's own comment (every
+          real owner holds money too) to keep this card reachable; see that
+          comment for why the states are coupled today but this placement
+          does not depend on it staying that way. This is also the ENTIRE
           gate: NextRetroCard.tsx is only ever mounted here, and only calls
           useRetros() once mounted, so a member without marriage never fires
           GET /retros at all (that component's own header comment has the

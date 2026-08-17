@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
 import { currentMonth } from "../money/month";
-import { monthNameOnly } from "../marriage/retroCopy";
+import { monthNameOnly, nextMonthName } from "../marriage/retroCopy";
 import type { RetroSummary, RetrosResponse } from "../marriage/retroSchemas";
 import { OVERVIEW_COPY } from "./copy";
 import { NextRetroCard } from "./NextRetroCard";
@@ -55,7 +55,7 @@ describe("NextRetroCard", () => {
     const card = await screen.findByTestId("next-retro-card");
     expect(card).toHaveTextContent(`${monthNameOnly(MONTH)} retro`);
     expect(card).toHaveTextContent(OVERVIEW_COPY.nextRetroInProgress);
-    expect(card).toHaveTextContent(OVERVIEW_COPY.nextRetroActions(2));
+    expect(card).toHaveTextContent(OVERVIEW_COPY.nextRetroActions(2, nextMonthName(MONTH)));
   });
 
   // Distinct from the draft above: a finished retro has nothing left to
@@ -67,7 +67,7 @@ describe("NextRetroCard", () => {
     renderCard(retrosFixture({ retros: [summaryFixture({ month: MONTH, finished: true, actionCount: 1 })] }));
 
     const card = await screen.findByTestId("next-retro-card");
-    expect(card).toHaveTextContent(OVERVIEW_COPY.nextRetroActions(1));
+    expect(card).toHaveTextContent(OVERVIEW_COPY.nextRetroActions(1, nextMonthName(MONTH)));
     expect(card).not.toHaveTextContent(OVERVIEW_COPY.nextRetroInProgress);
   });
 
@@ -79,7 +79,11 @@ describe("NextRetroCard", () => {
     renderCard(retrosFixture({ retros: [summaryFixture({ month: MONTH, finished: true, actionCount: 0 })] }));
 
     const card = await screen.findByTestId("next-retro-card");
-    expect(card).not.toHaveTextContent(/0 action/);
+    // Word-boundary before the digit, not a bare substring match -- "10
+    // actions" contains "0 action" as a plain substring, which would make
+    // this assertion fail for the wrong reason the day this fixture's
+    // actionCount is ever bumped to a real two-digit count.
+    expect(card).not.toHaveTextContent(/\b0 actions?\b/);
   });
 
   it("prompts to start when the current month has no retro yet, linking to the Retros screen", async () => {

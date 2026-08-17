@@ -119,7 +119,15 @@ export const OVERVIEW_COPY = {
   // header comment for why it does not make one. Omitted entirely at zero,
   // the same "never a bare count of nothing" rule nextBillCaughtUp/
   // goalsNone above already follow.
-  nextRetroActions: (count: number) => `${count} action${count === 1 ? "" : "s"}`,
+  //
+  // monthName names WHEN these actions are carried out, not the retro's own
+  // month -- retroCopy.ts's own actionsHeading ("Actions for July" over a
+  // June retro) states the same design rule this restates: what a retro
+  // decides gets done the month AFTER it. A bare "2 actions" on this card
+  // would read as "2 things to do right now," which is wrong for a retro
+  // that is still a draft.
+  nextRetroActions: (count: number, monthName: string) =>
+    `${count} action${count === 1 ? "" : "s"} for ${monthName}`,
   nextRetroNone: "No retro yet this month",
   // Mirrors RETRO_COPY.startRetro's own "Start X retro" wording -- same
   // local-duplicate trade-off as nextRetroInProgress above.
