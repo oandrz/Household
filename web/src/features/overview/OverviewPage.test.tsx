@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
 import { currentMonth } from "../money/month";
+import type { RetrosResponse } from "../marriage/retroSchemas";
 import { OVERVIEW_COPY } from "./copy";
 import { OverviewPage } from "./OverviewPage";
 
@@ -165,6 +166,39 @@ function billsBody(summaryOverrides: Record<string, unknown> = {}) {
   };
 }
 
+// A retros response with no retros at all and nothing startable
+// (retrosResponseSchema's own shape) -- the default for every owner-role
+// test below that doesn't care about NextRetroCard's own figures
+// (NextRetroCard.test.tsx covers those in isolation). meBody()'s own default
+// capabilities list includes "marriage", so every owner-role test in this
+// file needs this route registered even when it never asserts on the card
+// itself -- stubFetchRoutes throws on an unregistered request, the same
+// reason billsBody()'s own comment above gives for NextBillCard.
+function retrosBody(overrides: Partial<RetrosResponse> = {}): RetrosResponse {
+  return {
+    retros: [],
+    mood: [],
+    doneCount: 0,
+    since: null,
+    startMonth: null,
+    ...overrides,
+  };
+}
+
+// A retros response that WOULD render NextRetroCard's own content if the
+// query behind it were ever allowed to fire -- used only by the two
+// marriage-gate tests below, which need to tell "the gate correctly kept
+// the request from firing" apart from "the request fired, errored, and the
+// card's own null-on-no-data render happened to swallow it" (the exact trap
+// this task's own brief names: an unregistered route's throw, or a
+// component's own catch, can make an absence assertion pass for the wrong
+// reason). A route registered with real, renderable data closes that gap --
+// removing the gate in the mutation check below makes the card's own
+// content actually appear, not merely "no card, for some reason or other."
+function renderableRetrosBody(): RetrosResponse {
+  return retrosBody({ retros: [{ id: "retro-1", month: MONTH, mood: null, actionCount: 1, quote: "", finished: false }] });
+}
+
 // `routes` accepts a single response or an ordered list per route (the same
 // union GoalModal.test.tsx's own `renderModal` widens `extraRoutes` to) --
 // this task's own "refetches goals after it saves" test needs a route that
@@ -222,6 +256,7 @@ describe("OverviewPage", () => {
           [goalStub()],
         ),
       },
+      "GET /api/v1/retros": { status: 200, body: retrosBody() },
     });
 
     expect(await screen.findByText("S$12,480.00")).toBeInTheDocument();
@@ -358,6 +393,7 @@ describe("OverviewPage", () => {
       },
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
       "GET /api/v1/bills": { status: 200, body: billsBody() },
+      "GET /api/v1/retros": { status: 200, body: retrosBody() },
     });
 
     const link = await screen.findByRole("link", { name: /set a budget/i });
@@ -374,6 +410,7 @@ describe("OverviewPage", () => {
       },
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
       "GET /api/v1/bills": { status: 200, body: billsBody() },
+      "GET /api/v1/retros": { status: 200, body: retrosBody() },
     });
 
     expect(await screen.findByText("Finish setting up")).toBeInTheDocument();
@@ -401,6 +438,7 @@ describe("OverviewPage", () => {
       [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
       "GET /api/v1/bills": { status: 200, body: billsBody() },
+      "GET /api/v1/retros": { status: 200, body: retrosBody() },
     });
 
     // Waiting on the budget card, not merely on the heading: the checklist's
@@ -438,6 +476,7 @@ describe("OverviewPage", () => {
       [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
       "GET /api/v1/bills": { status: 200, body: billsBody() },
+      "GET /api/v1/retros": { status: 200, body: retrosBody() },
     });
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -481,6 +520,7 @@ describe("OverviewPage", () => {
       [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
       "GET /api/v1/bills": { status: 200, body: billsBody() },
+      "GET /api/v1/retros": { status: 200, body: retrosBody() },
     });
 
     fireEvent.click(await screen.findByRole("button", { name: "+ Add" }));
@@ -507,6 +547,7 @@ describe("OverviewPage", () => {
       [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
       "GET /api/v1/bills": { status: 200, body: billsBody() },
+      "GET /api/v1/retros": { status: 200, body: retrosBody() },
     });
 
     fireEvent.click(await screen.findByRole("button", { name: "+ Add" }));
@@ -559,6 +600,7 @@ describe("OverviewPage", () => {
           categoriesRequested = true;
         },
       },
+      "GET /api/v1/retros": { status: 200, body: retrosBody() },
     });
 
     fireEvent.click(await screen.findByRole("button", { name: "+ Add" }));
@@ -613,6 +655,7 @@ describe("OverviewPage", () => {
           },
         },
       },
+      "GET /api/v1/retros": { status: 200, body: retrosBody() },
     });
 
     expect(await screen.findByText(OVERVIEW_COPY.goalsNone)).toBeInTheDocument();
@@ -693,6 +736,7 @@ describe("OverviewPage", () => {
           },
         },
       },
+      "GET /api/v1/retros": { status: 200, body: retrosBody() },
     });
 
     expect(await screen.findByText(OVERVIEW_COPY.nextBillNone)).toBeInTheDocument();
@@ -725,9 +769,78 @@ describe("OverviewPage", () => {
       [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
       "GET /api/v1/bills": { status: 200, body: billsBody() },
+      "GET /api/v1/retros": { status: 200, body: retrosBody() },
     });
 
     fireEvent.click(await screen.findByRole("button", { name: "+ Add" }));
     expect(screen.getByRole("button", { name: "Bill" })).toBeEnabled();
+  });
+
+  // Overview is the one page every member reaches, so NextRetroCard's own
+  // ABSENCE for a member without marriage needs a positive test -- an
+  // absence assertion alone holds perfectly over a blank page, which is
+  // exactly how the interim Overview shipped a limited member a page
+  // containing only the word "Overview" (docs/LEARNING.md pattern 2, and
+  // the "explains the missing figures" test above, which this test's own
+  // positive assertion is modelled on for the identical reason).
+  //
+  // "GET /api/v1/retros" is registered with real, renderable data
+  // (renderableRetrosBody, not an empty one) on purpose: if OverviewPage's
+  // own `hasMarriage &&` gate were ever deleted, this member's browser
+  // would show the card's real content, not merely "no card" for some
+  // unrelated reason (an errored, unregistered request that NextRetroCard's
+  // own `if (!retros.data) return null` swallows into an identical-looking
+  // absence). See the mutation check below.
+  it("renders nothing for a member without the marriage capability, and the rest of the page still renders", async () => {
+    renderOverview({
+      "GET /api/v1/auth/me": {
+        status: 200,
+        body: meBody({ capabilities: ["money"] }),
+      },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [], summary: summaryBody(1248000) } },
+      [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
+      "GET /api/v1/goals": { status: 200, body: goalsBody() },
+      "GET /api/v1/bills": { status: 200, body: billsBody() },
+      "GET /api/v1/retros": { status: 200, body: renderableRetrosBody() },
+    });
+
+    // The rest of the page is alive -- an owner with money still gets their
+    // real net worth figure.
+    expect(await screen.findByText("S$12,480.00")).toBeInTheDocument();
+    expect(screen.queryByTestId("next-retro-card")).not.toBeInTheDocument();
+  });
+
+  // The sibling proof the gate test above cannot give on its own: not just
+  // that the card is missing, but that the browser never even asked. A
+  // member without marriage whose GET /retros somehow fired anyway would
+  // cost a doomed 403 (or, as here, a wasted 200) on every single visit to
+  // this page -- the app's most-visited screen. Registered (not left
+  // unregistered) and tracked with `capture`, per this task's own global
+  // instruction: an unregistered route's throw can be swallowed by
+  // TanStack Query's error path or a component's own catch with the suite
+  // staying green, so this asserts the request directly rather than
+  // leaning on that throw.
+  it("makes no request for a member who cannot see retros", async () => {
+    let retrosRequested = false;
+    renderOverview({
+      "GET /api/v1/auth/me": {
+        status: 200,
+        body: meBody({ capabilities: ["money"] }),
+      },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [], summary: summaryBody(0) } },
+      [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
+      "GET /api/v1/goals": { status: 200, body: goalsBody() },
+      "GET /api/v1/bills": { status: 200, body: billsBody() },
+      "GET /api/v1/retros": {
+        status: 200,
+        body: renderableRetrosBody(),
+        capture: () => {
+          retrosRequested = true;
+        },
+      },
+    });
+
+    await screen.findByText("Overview");
+    expect(retrosRequested).toBe(false);
   });
 });

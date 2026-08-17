@@ -99,5 +99,37 @@ export const OVERVIEW_COPY = {
   // dependency that shape follows disappeared for goals with decision 6
   // (contributions move no real money), so this entry is never disabled.
   quickAddGoal: "Savings goal",
+
+  // NextRetroCard.tsx. Short strings duplicated locally rather than
+  // importing RETRO_COPY (features/marriage/retroCopy.ts) -- the same
+  // GoalsCard.tsx/GOAL_COPY trade-off stated above: a few one-liners here,
+  // not a coupling from Overview's copy module to Marriage's.
+  nextRetroHeading: "Next retro",
+  // "August retro" -- monthName comes from marriage/retroCopy.ts's own
+  // monthNameOnly, imported directly (a pure formatting function, not a
+  // copy string, the same distinction NextBillCard.tsx draws by importing
+  // money/billCopy.ts's monthDayLabel directly instead of duplicating it).
+  nextRetroTitle: (monthName: string) => `${monthName} retro`,
+  nextRetroInProgress: "In progress",
+  // actionCount is retroSummarySchema's own field -- the retro's TOTAL
+  // action count, not filtered to open ones (retro.sql's own action_count:
+  // "SELECT count(*) FROM retro_actions", no done_at filter). This card
+  // cannot show which of them are still open without a second request
+  // (GET /retros/{month}, useRetro(month)) -- see NextRetroCard.tsx's own
+  // header comment for why it does not make one. Omitted entirely at zero,
+  // the same "never a bare count of nothing" rule nextBillCaughtUp/
+  // goalsNone above already follow.
+  nextRetroActions: (count: number) => `${count} action${count === 1 ? "" : "s"}`,
+  nextRetroNone: "No retro yet this month",
+  // Mirrors RETRO_COPY.startRetro's own "Start X retro" wording -- same
+  // local-duplicate trade-off as nextRetroInProgress above.
+  nextRetroStart: (monthName: string) => `Start ${monthName} retro`,
+  // startMonth is nullable (both candidate months already have a retro is
+  // the ordinary reason, but retrosResponseSchema also allows it to be null
+  // with no current-month retro either -- a shape this schema permits even
+  // though RetroService.List should never actually produce it). This is
+  // the fail-closed fallback for that state: a plain way in, never a
+  // "Start null retro" string built from a month that was not there.
+  nextRetroGo: "Go to Retros",
 } as const;
 

@@ -21,6 +21,7 @@ import { BudgetCard } from "./BudgetCard";
 import { OVERVIEW_COPY } from "./copy";
 import { GoalsCard } from "./GoalsCard";
 import { NextBillCard } from "./NextBillCard";
+import { NextRetroCard } from "./NextRetroCard";
 import { QuickAddMenu } from "./QuickAddMenu";
 import { SetupChecklist } from "./SetupChecklist";
 
@@ -28,6 +29,14 @@ export function OverviewPage() {
   const me = useMe();
   const isOwner = me.data?.membership.role === "owner";
   const hasMoney = me.data?.capabilities.includes("money") ?? false;
+  // Independent of hasMoney above -- a member can hold either capability
+  // without the other (domain.ErrLimitedCannotHoldMarriage only rules out a
+  // LIMITED member holding marriage, it says nothing about money). Read
+  // straight off capabilities, not membership.role: GET /retros is also
+  // requireOwner (router.go), but that invariant already guarantees a
+  // limited member can never reach this true, so checking the capability
+  // alone is sufficient without a second, redundant isOwner check here.
+  const hasMarriage = me.data?.capabilities.includes("marriage") ?? false;
 
   const accounts = useAccounts(false);
   // Only an owner may read a budget at all, so a limited member must not even
@@ -121,6 +130,18 @@ export function OverviewPage() {
           )}
         </>
       )}
+
+      {/* Gated on hasMarriage, not nested inside the !hasMoney branch above
+          -- the two capabilities are independent, so a member can hold
+          marriage without money (or the reverse). This is also the ENTIRE
+          gate: NextRetroCard.tsx is only ever mounted here, and only calls
+          useRetros() once mounted, so a member without marriage never fires
+          GET /retros at all (that component's own header comment has the
+          full reasoning for why it needs no `enabled` prop the way
+          NextBillCard does). Full width rather than a grid cell, the same
+          placement SetupChecklist above uses and for the same reason: this
+          is not one of the four money cards the grid above was sized for. */}
+      {hasMarriage && <NextRetroCard />}
     </PageContainer>
   );
 }
