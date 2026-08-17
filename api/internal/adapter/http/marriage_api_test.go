@@ -454,6 +454,72 @@ func TestRetroWireShapeWithRealDataMatchesTheBrief(t *testing.T) {
 	}
 }
 
+// TestRetroListActionCountAndOpenActionCountDisagreeOverHTTP is a dedicated
+// test rather than a third action added to
+// TestRetroWireShapeWithRealDataMatchesTheBrief above: that test's
+// GET /retros/{month} assertions (detail.Retro.Actions[0], its id, its
+// carriedFrom, its assignees) all assume exactly one action, and this test's
+// whole point needs at least two. Kept separate rather than bent to fit.
+//
+// That other test's own single, never-ticked action leaves ActionCount and
+// OpenActionCount both 1 -- equal by construction, so a regression at
+// retro_handlers.go's toRetroSummaryDTO that reads the wrong source field
+// (`OpenActionCount: s.ActionCount`, one struct-field's worth of mistake)
+// would still decode as 1 there and pass unnoticed. This test seeds two
+// actions and ticks one before the request, so the two counts on the wire
+// MUST disagree for the assertions below to hold either way.
+func TestRetroListActionCountAndOpenActionCountDisagreeOverHTTP(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+	today := time.Now().UTC()
+
+	created, err := env.deps.Retros.Start(ctx, env.householdID, today)
+	if err != nil {
+		t.Fatalf("start retro: %v", err)
+	}
+
+	kept, err := env.deps.Retros.AddAction(ctx, usecase.RetroActionInput{
+		HouseholdID: env.householdID,
+		RetroID:     created.ID,
+		Body:        "Book date night",
+	})
+	if err != nil {
+		t.Fatalf("add action 1: %v", err)
+	}
+	if _, err := env.deps.Retros.AddAction(ctx, usecase.RetroActionInput{
+		HouseholdID: env.householdID,
+		RetroID:     created.ID,
+		Body:        "Plan the September trip",
+	}); err != nil {
+		t.Fatalf("add action 2: %v", err)
+	}
+	if err := env.deps.Retros.SetActionDone(ctx, env.householdID, kept.ID, true, today); err != nil {
+		t.Fatalf("tick action 1: %v", err)
+	}
+
+	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	listRec := env.authedGet(t, "/api/v1/retros", session)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("GET /retros: status = %d, body = %s", listRec.Code, listRec.Body.String())
+	}
+	t.Logf("GET /api/v1/retros body: %s", listRec.Body.String())
+
+	var list retrosListWithDataBody
+	if err := json.Unmarshal(listRec.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode retros list: %v (body = %s)", err, listRec.Body.String())
+	}
+	if len(list.Retros) != 1 {
+		t.Fatalf("retros has %d entries, want 1", len(list.Retros))
+	}
+	summary := list.Retros[0]
+	if summary.ActionCount != 2 {
+		t.Fatalf("actionCount = %d, want 2 (both actions, ticked or not)", summary.ActionCount)
+	}
+	if summary.OpenActionCount != 1 {
+		t.Fatalf("openActionCount = %d, want 1 (only the untouched action) -- got the total instead?", summary.OpenActionCount)
+	}
+}
+
 // --- Task 8: marriage write routes and the 409 the screen can explain ------
 
 // retroWriteBody mirrors retroWriteResponse (retro_handlers.go) field for
