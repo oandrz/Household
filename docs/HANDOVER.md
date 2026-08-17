@@ -111,7 +111,7 @@ test driving the three transactions write routes without a CSRF token.
 | 2 — Money | **Accounts**: manual entry, net worth, assets/liabilities breakdown, archive and restore — **done, browser walk 15/15**. **Transactions**: ledger, categories, filters, keyset paging, month-to-date spend — **done, browser walk 15/15**. **Budget**: envelope per category with pace, empty state and templates, Edit-budget modal with category create/rename/archive, History modal and month picker — **done, browser walk 15/15** (2026-07-31, two defects found at criterion 9 and fixed mid-walk; see `docs/superpowers/plans/2026-07-30-hearth-budget-verification.md`). **Goals**: savings targets whose progress is a contributions ledger (not an account balance), the New/Edit goal modal, contributions add/delete/list by source, the Monthly contributions card, and Budget's own manual rollover into a goal — **done, browser walk 15/15** (2026-08-01, one defect found at criterion 12 and fixed mid-walk: archive and restore shipped with no way to *archive* — every layer existed and no screen called `useGoals.archiveGoal`, so "Show archived" and every Restore button led out of a state no household could enter, `82453ff`; see `docs/superpowers/plans/2026-08-01-hearth-goals-verification.md` and `docs/LEARNING.md` pattern 15). **Bills**: recurring bills on a one-off/monthly/quarterly/yearly cadence, Mark paid writing a real expense transaction and its undo reversing all three writes, archive and restore, a subscriptions rollup — **done, browser walk 15/15** (2026-08-10, one defect found at criterion 14 and swept for the class rather than fixed as one instance: `BillsPage.tsx` answered a limited member's routine "not the owner" 403 with the same red alert a genuine server failure gets, where sibling `GoalsPage.tsx` already distinguishes the two — and the identical gap turned out to be sitting in `BudgetPage.tsx` and `TransactionsPage.tsx` too, fixed the same walk; see `docs/superpowers/plans/2026-08-09-hearth-bills-verification.md` and `docs/LEARNING.md` pattern 1). Accounts, Transactions, Budget, Goals, Bills all built and walked; **slice 2 (Money) is done** | **Done** |
 | 3 — Marriage | Retros, Vision, Agreements | **Retros**: code-complete and reviewed clean across fifteen code tasks, `docs/FEATURE_TRACKER.md`'s Marriage rows updated — **its own browser walk has not run yet** (Task 17). Vision and Agreements: not started |
 | 4 — Family | Calendar | Not started — its own dependency on Bills (bill dates on the month grid) is now satisfied |
-| 5 — Overview | Read-only aggregation across 2–4 | **Interim page built** (2026-08-01, grown 2026-08-10, 2026-08-16) — `/` carries five of the eight cards Money and Marriage can supply (net worth, this month's budget, goals on track, the next bill due, and — added by Retros — the next retro with its open action count), a setup checklist and a four-entry "+ Add" (Transaction, Account, Savings goal, Bill). The M2 walk on the first two cards and the two-entry menu ran **14 of 14**, one real defect found and fixed mid-walk; the goals card and its menu entry were covered by Goals' own walk at its criterion 11 (2026-08-01); the next-bill card by Bills' own Task 18 walk. **The next-retro card is new since and has not been walked** — Retros' own Task 17 walk covers it, the same way Bills' and Goals' walks covered their own Overview additions. The remaining two cards (Vision check-in strip, "This week" agenda) need Vision and Family; the page grows into the designed one rather than being replaced |
+| 5 — Overview | Read-only aggregation across 2–4 | **Interim page built** (2026-08-01, grown 2026-08-10, 2026-08-16) — `/` carries five of the design's **seven** cards (counted off `design/Household Dashboard.dc.html`'s own Overview screen — the money row of four, Marriage's "Next retro", "This week" and "Vision 2026"; its header "+ Add" is a button, not a card) that Money and Marriage can supply (net worth, this month's budget, goals on track, the next bill due, and — added by Retros — the next retro with its open action count), a setup checklist and a four-entry "+ Add" (Transaction, Account, Savings goal, Bill). The M2 walk on the first two cards and the two-entry menu ran **14 of 14**, one real defect found and fixed mid-walk; the goals card and its menu entry were covered by Goals' own walk at its criterion 11 (2026-08-01); the next-bill card by Bills' own Task 18 walk. **The next-retro card is new since and has not been walked** — Retros' own Task 17 walk covers it, the same way Bills' and Goals' walks covered their own Overview additions. The remaining two cards (Vision check-in strip, "This week" agenda) need Vision and Family; the page grows into the designed one rather than being replaced |
 
 Self-serve sign-up carries no slice number on purpose: it was specified and
 built between slices 1 and 2, ahead of Money (see "What to do next" below for
@@ -576,12 +576,18 @@ newcomer as what has not.
 original order put it last because it only aggregates, so building it early
 means stubbing everything it reads. That still holds for the *designed*
 Overview. What shipped on 2026-08-01, and grew twice since, is an interim
-page built strictly on what already exists — two of the eight cards at
-first, a third (goals on track) the same day once Goals shipped, a fourth
-(next bill due) on 2026-08-10 once Bills did — no stubs, no invented
-figures, taken early because `/` was showing every household "Arriving in
-slice 5" on every visit, established households included. The remaining
-three cards still wait on Marriage and Family, and the same route and the
+page built strictly on what already exists — two of the design's **seven**
+cards at first (recounted directly off the mockup while correcting this
+paragraph: the money row of four, Marriage's "Next retro", "This week" and
+"Vision 2026" — the header's own "+ Add" button is not a card, and the
+figure this paragraph carried before named eight), a third (goals on track)
+the same day once Goals shipped, a fourth (next bill due) on 2026-08-10 once
+Bills did, and a fifth (the next retro, with its own open action count) on
+2026-08-16 once Retros did — no stubs, no invented figures, taken early
+because `/` was showing every household "Arriving in slice 5" on every
+visit, established households included. The remaining two cards (Vision
+check-in strip, "This week" agenda) still wait on Vision and Family, and the
+same route and the
 same component grow into them.
 
 Each slice gets its own spec → plan → implementation cycle, the same way these

@@ -243,10 +243,15 @@ retro card with carried-over actions" was already ✅ and already correct — no
 change. Recounting by this file's own rule (the first symbol in each row's
 own cell, across all eight section tables, never the previous totals
 adjusted by delta) leaves every area unchanged except Marriage, which moves
-from 2/0/11/0 (13 rows) to 5/1/9/0 (15 rows, two added), taking the stated
-totals from 59/17/25/2 = 103 to **62/18/23/2 = 105** — two rows added, three
-moved from Not started (two to Built, one to Partial). The "Where things
-stand" headline (Built + Partial) moves from 76 of 103 to **80 of 105**.
+from 2/0/11/0 (13 rows) to 5/1/9/0 (15 rows) — **two** existing rows move
+Not started → Built (the single retro view, the start-retro modal; Not
+started drops from 11 to 9, exactly those two, not three), and **two** new
+rows are added: one direct to Built (carry an unfinished action forward)
+and one direct to Partial (delete a draft retro, still gapped at this
+point) — the Partial column's own +1 is a new row landing there, not a
+second state transition out of Not started. Totals move from 59/17/25/2 =
+103 to **62/18/23/2 = 105**. The "Where things stand" headline (Built +
+Partial) moves from 76 of 103 to **80 of 105**.
 
 **Delete a draft retro, 2026-08-17 — the row this same reconciliation had
 just named 🟡 moves to ✅.** The gap was real when written: `useRetro.ts`
@@ -398,7 +403,7 @@ The full checklist is at the end of `docs/LEARNING.md`.
 | Currency and region — FX rate | 🟡 | The mode is stored and editable, but the rate itself is a fixed table. A live provider drops in behind the existing port |
 | Notifications — bill due reminders | 🟡 | The preference is stored, served and editable end to end; **nothing sends the reminder.** `usecase.Mailer` has three methods — magic link, invite, sign-up — and no caller reads `notification_preferences` to mail anything. Nothing in this codebase runs on a clock either: the only cron anywhere is the box's nightly backup. The design's own copy promises delivery, not a switch — "Bill due reminders (3 days before)" |
 | Notifications — overspend alerts | 🟡 | Same gap as the row above: stored and editable, never sent |
-| Notifications — monthly retro reminder | 🟡 | Same gap, plus it has nothing to remind anyone *of* yet — Marriage's retros are unbuilt (section 6) |
+| Notifications — monthly retro reminder | 🟡 | Same gap as the two rows above: stored and editable, never sent. Retros itself is built now (section 6), so this row has something real to remind a household of — the gap is only that nothing in this codebase runs on a clock |
 | Notifications — weekly family digest | 🟡 | Same gap: stored and editable, never sent |
 | Retention pruning (`adminctl prune`) | ✅ | No UI — `cmd/adminctl prune --older-than=<days>` deletes consumed/expired `signups` and stale `login_attempts` past the cutoff. Refuses anything under a seven-day floor so it can never reach inside `domain.LockoutPolicy.Window` and clear a lockout that is still live |
 | Connected accounts | ⬜ | Belongs with Money. Note that automatic bank sync is not available to an app like this — see Money below |
@@ -406,7 +411,10 @@ The full checklist is at the end of `docs/LEARNING.md`.
 ## 4 · Overview (home)
 
 `/` is a real page as of the interim Overview (M2), and now carries five of
-the design's eight cards — three from Money (net worth, budget, goals),
+the design's **seven** cards (counted directly off `design/Household
+Dashboard.dc.html`'s own Overview screen — the money row of four, the
+Marriage "Next retro" card, "This week" and "Vision 2026"; the header's own
+"+ Add" button is not a card) — three from Money (net worth, budget, goals),
 one more from Bills (next bill) and one from Marriage (next retro) — plus a
 setup checklist and a limited-member panel the design does not draw. The
 remaining two cards (Vision check-in strip, "This week" agenda) need Vision

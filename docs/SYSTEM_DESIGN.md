@@ -39,7 +39,9 @@ to before its tracker row could read ✅. Vision and Agreements have not been
 started. Family is not built. See `docs/FEATURE_TRACKER.md` section 6 for
 exactly which of Marriage's rows are done.
 Overview is **partly** built: `/` carries an interim page composed of five of
-the design's eight cards Money and Marriage can now supply, plus a setup
+the design's seven cards (the money row of four, Marriage's "Next retro",
+"This week" and "Vision 2026" — the header's own "+ Add" button is not a
+card) that Money and Marriage can now supply, plus a setup
 checklist and a quick-create menu, and it grows into the designed Overview as
 the rest of Marriage and Family arrive rather than being replaced (§7). It adds no
 endpoint, no table and no port — it is composition over what Accounts,
@@ -1682,12 +1684,23 @@ Notes that are not obvious from the shapes:
 - **Only hashes are stored** — passwords, session tokens, magic-link tokens,
   invite tokens and sign-up tokens. A raw token exists in memory and in an
   email, never in a column.
-- **Every household-scoped table carries `household_id`**, so scoping is
-  structural. Repository methods take it as their first argument after the
-  context. `magic_links` and `signups` are the exceptions: a magic link
-  identifies a user, not a membership, so it scopes through `user_id`
-  instead; a sign-up identifies a verified address with no user or
-  household behind it yet, so it has neither.
+- **Every household-scoped table carries `household_id`, with two shapes of
+  exception.** Repository methods take it as their first argument after the
+  context wherever it is present. `magic_links` and `signups` carry neither:
+  a magic link identifies a user, not a membership, so it scopes through
+  `user_id` instead; a sign-up identifies a verified address with no user or
+  household behind it yet. Separately, three tables carry **no**
+  `household_id` at all because each is reached only through a parent that
+  already has one, and scoping is a join rather than a filter:
+  `budget_lines` (`budget_id` → `budgets.household_id`), `retro_actions`
+  (`retro_id` → `retros.household_id`) and `retro_action_assignees`
+  (`action_id` → `retro_actions` → `retros.household_id`, two joins deep).
+  `goal_contributions` and `bill_payments` look like the same shape —
+  each has a parent id too — but take the *opposite*, more defensive one:
+  both carry their own `household_id` despite the parent join already
+  existing, because that foreign key alone carries no database-level
+  guarantee the parent belongs to the caller's household (their own notes
+  below say why).
 - **`login_attempts` allows both foreign keys to be null**, so an attempt against
   an unknown address is recorded without revealing whether it exists.
 - **`signups` has no `user_id`**, unlike `magic_links`. There is no user yet —
@@ -1927,7 +1940,7 @@ web/src/
                        at /money/bills (replacing moneySplatRoute, the
                        last route that ever used it)
     overview/          the interim Overview at / — five of the design's
-                       eight cards Money and Marriage can supply (net worth,
+                       seven cards Money and Marriage can supply (net worth,
                        reusing money/NetWorthCard; this month's budget;
                        goals on track; the next bill, reading the same
                        useBills hook /money/bills itself uses; and the next
