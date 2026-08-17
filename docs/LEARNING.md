@@ -908,6 +908,29 @@ person to ask whether the test could ever have gone red in the first place.
   (`RetroHistoryList.test.tsx`) that supplies `actionCount: 0` specifically to
   make sure the gap cannot reopen unnoticed.
 
+- **The silent-absorption class, three instances in one feature.**
+  `stubFetchRoutes` throws on an unregistered route *before* any capture
+  runs, and across three separate Retros tasks that throw was then swallowed
+  rather than surfaced, leaving the suite green each time. First (Task 13):
+  `TestSaveDraftLeavesItADraft`'s whole claim — that Save never also
+  finishes the retro — could not fail, because the `complete` route was
+  never registered: a `handleSaveDraft` that also called `finishRetro` would
+  throw on the unregistered POST, and `RetroModal`'s own `.catch` swallowed
+  it before the test's capture spy ever saw a call. Second (Task 14): a
+  previous-month budget route with no registered stub was found only by
+  tracing `useBudget`'s *second* query — the one `MoneyCheckInPanel` also
+  fires — not the obvious first one. Third, same task: `useHouseholdMembers`
+  fires unconditionally the moment `RetroModal` mounts, was unregistered in
+  every one of that component's tests, and TanStack Query turned the thrown
+  fetch into `members.error` with zero visible failure — the same shape as
+  the first instance, a query boundary absorbing the throw instead of a
+  component's own `catch`. **The fix is the same in all three: when a
+  test's whole claim is that a call was *not* made, register the route
+  anyway.** An unregistered route makes a wrongful call indistinguishable
+  from a suite that never wired the fixture in the first place; a registered
+  one lets the wrongful call actually get recorded, which is the only way
+  the assertion means what it says.
+
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
 a different reason than the one you meant to prove, that is not yet proof
@@ -1176,6 +1199,29 @@ something only that guard can produce.
   and the panel inside it), because the first one is structurally incapable
   of failing there. Six modals were re-measured that way afterwards; only
   this one was broken, which is exactly why nobody would have gone looking.
+
+- Retros, Task 13: **a UI-layer last-write-wins, after the whole backend was
+  built to prevent it.** Decision 6 refuses a stale save at the database with
+  a `version` guard, specifically so two partners typing into one draft can
+  never silently overwrite each other. The conflict banner's own Reload
+  button undid that protection one layer up: clicking it cleared
+  `useRetro`'s `conflict` flag and re-fetched the retro, but never re-seeded
+  the modal's own local `mood`/`wentWell`/`wasHard`/`notes` state from the
+  fresh data — so the fields on screen stayed exactly as the first partner
+  had left them, and the next Save sent that stale text back carrying the
+  *new* version number, overwriting the partner's just-written paragraph
+  with no mismatch left to catch it, because the version had just been
+  refreshed to match. No unit test would have found this: every existing
+  conflict test asserted the banner appeared and Save/Finish were disabled,
+  never that a *subsequent* successful save carried the reloaded data. Found
+  in a real browser, opening the same draft in two sessions and typing into
+  both. Fixed inside the one-way `hadConflict` latch this task already
+  ruled for: Reload no longer re-enables editing at all — the typed text
+  stays on screen to be copied by hand, and the person has to close and
+  reopen the modal to get a genuinely fresh, correctly-seeded editor. **A
+  concurrency guard built at the database only protects the request that
+  reaches it — a UI control offering to "recover" from the guard's own
+  refusal needs the same scrutiny as the write path itself.**
 
 **If a behaviour depends on the platform, verify it in the platform.** A real
 browser is what found every frontend defect above, and nothing else could
@@ -1640,6 +1686,53 @@ first scheduler is a spec of its own, and Budget decision 1, Goals decision 4
 and Bills decision 3 have each already refused to invent one inside a feature
 that merely wanted it.
 
+**Third instance, 2026-08-16 — the "+ Add an action" composer, and this time
+the gap was in the plan, not in any implementation.** The design's modal
+draws "+ Add an action & assign it to one of you" as its own control,
+`POST /retros/{month}/actions` existed from Task 8, and
+`RetroActionRepository.Add` from Task 6 — every layer was real, the same
+shape as the two instances above. What was missing was a piece neither of
+those two had to name: **no task in the plan ever assigned the composer to
+anyone.** Task 14 built the carry-over control, which also calls
+`POST /retros/{month}/actions` (with `carriedFrom` set) — so by the time
+Task 14 landed, that endpoint had a caller, its tests passed, and nothing
+about the running suite suggested anything was missing. A household could
+carry an old action into the new month and could never write a brand-new
+one; the modal's own free-standing composer simply did not exist. Found by
+the Task 14 implementer itself, reading the design's mockup against what the
+task actually built, not by review or a walk. Ruled in-round rather than
+deferred: Task 14 already owned the modal's actions block, and the
+alternative was shipping a feature whose central control — the one the
+design names first — did nothing. **The mechanical check from the two
+instances above still applies, but it would have found nothing here**,
+because `addAction` did have a caller — just not the one the design
+promised. What this instance adds to the pattern: a plan can give one route
+two different UI purposes and never notice that neither task actually built
+the plainer of the two, because the endpoint's test coverage looks identical
+either way.
+
+**Fourth instance, 2026-08-17, found while writing this very tracker
+correction — the round that documents the third instance turns out to
+contain a fourth nobody had noticed.** `useRetro.ts` exposes `discardDraft`,
+backed by a real migration, a mutation-checked `RetroRepository.DeleteDraft`
+(`WHERE completed_at IS NULL`), `DELETE /retros/{month}`, and the hook's own
+passing test. Task 16's brief, written from the plan, said to mark "Delete a
+draft retro" ✅ alongside the carry-over row. Running the mechanical check
+first — `grep -rl discardDraft web/src/features/marriage/`, excluding the
+hook and its own test file — returned nothing: no component calls it,
+anywhere. The same grep against every other mutation `useRetro.ts` and
+`useRetros.ts` expose found a second, unpromised instance in the same file:
+`removeAction` (`DELETE /retros/{month}/actions/{id}`) has no caller either,
+though no design mockup or task brief ever named a "delete an action"
+control, so there is no tracker row for it to falsify. `docs/FEATURE_TRACKER.md`
+records "Delete a draft retro" as 🟡, not the ✅ the brief asked for — CLAUDE.md's
+"do not mark anything ✅ that you cannot point at working code for" outranks a
+brief's row-by-row instruction, the same way it outranked the plan for the
+third instance above. **A docs task that reconciles a tracker is exactly the
+moment this pattern re-checks itself for free**: the mechanical grep costs
+thirty seconds per hook and was already due, since nobody had run it since
+Task 9 built the hook two tasks before the composer gap even opened.
+
 ---
 
 ## Catalogue by area
@@ -1899,6 +1992,27 @@ that merely wanted it.
   whether the transaction under test ever got something to roll back before
   its forced failure fired** — a hang there is a leaked connection, not a
   flake to retry.
+- Marriage/Retros, Task 7: **a third gate nobody had named, found only
+  because a mutation test needed to build state that turned out to be
+  unbuildable.** The guard's mutation test wanted to prove
+  `requireCapability(marriage)` stacked on `requireOwner` really does refuse
+  a limited member holding marriage — the brief's own instruction was to
+  build that state at the repository level, matching how every earlier
+  money-group guard test in this codebase constructs its fixture. It cannot
+  be built that way here: `membership_repo.go` carries a database `CHECK`
+  constraint, `limited_members_have_no_marriage`, that refuses the insert
+  outright, deliberately, and undocumented anywhere the plan's own author had
+  read before writing the brief. The state the test needed to construct — a
+  limited member who somehow holds `marriage` — is one the schema itself
+  makes impossible to create, which is stronger than any guard code above it
+  could be, and stronger than the plan expected. Fixed by building the
+  fixture with a `MembershipRepository` double instead of a real insert, the
+  only way to represent a state the database refuses to store; the two
+  application-layer guards (`requireCapability`, `requireOwner`) are still
+  proven independently against it. **A defence can be real and still
+  invisible to the plan that assumes it isn't there** — the CHECK constraint
+  was doing its job the entire time, silently, and the only reason it
+  surfaced at all was a test that needed to defeat it and could not.
 
 ### HTTP layer
 
@@ -2517,6 +2631,23 @@ route with a missing guard has no second line of defence.
   different questions, that is a sign the field is doing two jobs — add the
   second number at the layer that can compute it correctly, rather than
   reusing the first number and hoping the difference never matters.**
+  **The same discipline was applied at three layers here and missed at a
+  fourth on the first pass.** The Postgres test disagreed the two counts on
+  purpose; the frontend test disagreed them on purpose; but the HTTP
+  wire-shape test that proves the field actually reaches the wire — added in
+  the same task, to catch exactly the kind of hand-transcribed-JSON gap
+  Task 7 had already found for itself — seeded a single, never-ticked
+  action, so `actionCount == openActionCount` at that one seam and a
+  regression writing `OpenActionCount: s.ActionCount` (the total, under the
+  open field's name) would have passed it. Review named the missing case
+  precisely; the fix round added a dedicated test with two actions, one
+  ticked, and proved the gap was real rather than theoretical by running the
+  same regression against both — the new test went red, the old one, with
+  its coincidental fixture, stayed green throughout. **A rule this codebase
+  already knows ("make the fixture disagree") has to be re-applied at every
+  layer a value crosses, not assumed to travel with the value** — a fixture
+  chosen for one layer's convenience can accidentally satisfy a neighbouring
+  layer's whole reason for existing.
 
 ### Tooling and infrastructure
 

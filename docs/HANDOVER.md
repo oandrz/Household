@@ -109,9 +109,9 @@ test driving the three transactions write routes without a CSRF token.
 | 1 — Household & identity | Sign-in, magic link, invite acceptance, lockout, members, roles, capabilities, spaces, Settings | **Done** |
 | — Self-serve sign-up | Sign-up, household provisioning, an ISO 4217 currency allowlist and list endpoint, `adminctl prune`, a per-IP rate limiter | **Done, browser walk 15/15** (2026-07-30) |
 | 2 — Money | **Accounts**: manual entry, net worth, assets/liabilities breakdown, archive and restore — **done, browser walk 15/15**. **Transactions**: ledger, categories, filters, keyset paging, month-to-date spend — **done, browser walk 15/15**. **Budget**: envelope per category with pace, empty state and templates, Edit-budget modal with category create/rename/archive, History modal and month picker — **done, browser walk 15/15** (2026-07-31, two defects found at criterion 9 and fixed mid-walk; see `docs/superpowers/plans/2026-07-30-hearth-budget-verification.md`). **Goals**: savings targets whose progress is a contributions ledger (not an account balance), the New/Edit goal modal, contributions add/delete/list by source, the Monthly contributions card, and Budget's own manual rollover into a goal — **done, browser walk 15/15** (2026-08-01, one defect found at criterion 12 and fixed mid-walk: archive and restore shipped with no way to *archive* — every layer existed and no screen called `useGoals.archiveGoal`, so "Show archived" and every Restore button led out of a state no household could enter, `82453ff`; see `docs/superpowers/plans/2026-08-01-hearth-goals-verification.md` and `docs/LEARNING.md` pattern 15). **Bills**: recurring bills on a one-off/monthly/quarterly/yearly cadence, Mark paid writing a real expense transaction and its undo reversing all three writes, archive and restore, a subscriptions rollup — **done, browser walk 15/15** (2026-08-10, one defect found at criterion 14 and swept for the class rather than fixed as one instance: `BillsPage.tsx` answered a limited member's routine "not the owner" 403 with the same red alert a genuine server failure gets, where sibling `GoalsPage.tsx` already distinguishes the two — and the identical gap turned out to be sitting in `BudgetPage.tsx` and `TransactionsPage.tsx` too, fixed the same walk; see `docs/superpowers/plans/2026-08-09-hearth-bills-verification.md` and `docs/LEARNING.md` pattern 1). Accounts, Transactions, Budget, Goals, Bills all built and walked; **slice 2 (Money) is done** | **Done** |
-| 3 — Marriage | Retros, Vision, Agreements | Not started |
+| 3 — Marriage | Retros, Vision, Agreements | **Retros**: code-complete and reviewed clean across fifteen code tasks, `docs/FEATURE_TRACKER.md`'s Marriage rows updated — **its own browser walk has not run yet** (Task 17). Vision and Agreements: not started |
 | 4 — Family | Calendar | Not started — its own dependency on Bills (bill dates on the month grid) is now satisfied |
-| 5 — Overview | Read-only aggregation across 2–4 | **Interim page built** (2026-08-01, grown 2026-08-10) — `/` carries four of the eight cards Money can supply (net worth, this month's budget, goals on track, and — added by Bills — the next bill due), a setup checklist and a four-entry "+ Add" (Transaction, Account, Savings goal, Bill). The M2 walk on the first two cards and the two-entry menu ran **14 of 14**, one real defect found and fixed mid-walk; the goals card and its menu entry were covered by Goals' own walk at its criterion 11 (2026-08-01). **The next-bill card and its quick-add entry are new since and have not been walked** — Bills' own Task 18 walk covers them, the same way Goals' walk covered its own Overview additions. The other three cards need Marriage and Family; the page grows into the designed one rather than being replaced |
+| 5 — Overview | Read-only aggregation across 2–4 | **Interim page built** (2026-08-01, grown 2026-08-10, 2026-08-16) — `/` carries five of the eight cards Money and Marriage can supply (net worth, this month's budget, goals on track, the next bill due, and — added by Retros — the next retro with its open action count), a setup checklist and a four-entry "+ Add" (Transaction, Account, Savings goal, Bill). The M2 walk on the first two cards and the two-entry menu ran **14 of 14**, one real defect found and fixed mid-walk; the goals card and its menu entry were covered by Goals' own walk at its criterion 11 (2026-08-01); the next-bill card by Bills' own Task 18 walk. **The next-retro card is new since and has not been walked** — Retros' own Task 17 walk covers it, the same way Bills' and Goals' walks covered their own Overview additions. The remaining two cards (Vision check-in strip, "This week" agenda) need Vision and Family; the page grows into the designed one rather than being replaced |
 
 Self-serve sign-up carries no slice number on purpose: it was specified and
 built between slices 1 and 2, ahead of Money (see "What to do next" below for
@@ -449,23 +449,50 @@ runbook still instructed the operator to configure a mail relay that ADR 3 had
 already made impossible. All three were found at the order form or on the box,
 none of them by a test.
 
-**The next work is Marriage.** The deployment is done: ten of twelve criteria
-pass, backups run nightly and the escrow has been exercised. What remains on the
-install is now **one item**: a first run of `adminctl unlock-household` on a calm
-day (criterion 8 — unrun because the agent's sandbox blocked the SSH, not
-because of the box; the exact command is in
-`docs/superpowers/plans/2026-08-10-hearth-production-verification.md` under
-"What is outstanding"). The other two this line used to name are closed and were
-closed after it was written: uptime monitoring exists and its alarm was fired on
-purpose (`315eb7e`), and both R2 dashboard rules — the 30-day Bucket Lock and
-the 90-day lifecycle expiry — were verified by exercising them from the box, not
-merely configured (`22a3105`). Criterion 7's lockout half is still unrun too;
-criterion 3 stays deferred under [ADR 3](adr/0003-mail-stays-on-the-box.md).
+**Marriage's first feature, Retros, is code-complete.** Fifteen code tasks
+deep, every one reviewed clean including fix rounds (a sixteenth task wrote
+the documents this section is part of; a seventeenth is the walk below),
+`docs/FEATURE_TRACKER.md`'s
+Marriage rows brought current in the same round as this document
+(2026-08-17): retro history with mood, the twelve-month mood chart, the
+single retro view (went well, was hard, actions, notes) and the Start/Edit
+modal (mood, the ten-minute money check-in, the action composer and the
+carry-over offer) are all ✅; carrying an unfinished action forward is ✅; and
+one new gap surfaced correcting the tracker rather than hiding behind it —
+deleting a draft retro has a real backend and hook and **no screen that calls
+it**, `docs/LEARNING.md` pattern 15's shape a third and fourth time in this
+one feature, so that row is 🟡, not ✅. **What Retros still needs before it
+can be called done is its own fifteen-criterion browser walk (Task 17)** —
+unrun as of this document — the same bar every Money feature was held to.
 
-**Marriage is the next feature after the deployment** — independent of Money,
-and the first area whose spec starts from a genuinely clean slate rather than
-inheriting anything from this section (below). Money is still the largest area
-and still the design's centre of gravity.
+**The next work after Retros' walk is Vision, then Agreements.** That was
+always the order (spec: "Retros first because it is the smallest complete
+loop... Agreements last because propose → both sign... carries a product
+question that deserves its own conversation"). **Agreements must settle one
+question before its spec can be written: what "both sign" means in a
+household with one owner.** `domain.ValidateMembershipChange` refuses
+`CapMarriage` to a limited member, so the signing set for any agreement is
+exactly the household's owners — and self-serve sign-up provisions exactly
+one owner per household, with a partner arriving later, if at all, only
+through an accepted invite. A design that requires two signatures has
+nothing to compare the first one against until a second owner exists; ask
+before Agreements' spec is written, not while it is being built, what the
+screen shows a one-owner household in the meantime.
+
+Once Retros' walk closes it out, the production deployment remains the other
+settled item: ten of twelve criteria pass, backups run nightly and the
+escrow has been exercised. What remains on the install is now **one item**:
+a first run of `adminctl unlock-household` on a calm day (criterion 8 —
+unrun because the agent's sandbox blocked the SSH, not because of the box;
+the exact command is in
+`docs/superpowers/plans/2026-08-10-hearth-production-verification.md` under
+"What is outstanding"). The other two this line used to name are closed and
+were closed after it was written: uptime monitoring exists and its alarm was
+fired on purpose (`315eb7e`), and both R2 dashboard rules — the 30-day
+Bucket Lock and the 90-day lifecycle expiry — were verified by exercising
+them from the box, not merely configured (`22a3105`). Criterion 7's lockout
+half is still unrun too; criterion 3 stays deferred under
+[ADR 3](adr/0003-mail-stays-on-the-box.md).
 
 ### Deploying to production — the decision and what it still needs
 
@@ -622,19 +649,26 @@ shows anywhere in Money:
    and the subscriptions monthly/annual totals, all pinned in Bills' own
    formula table (`docs/superpowers/specs/2026-08-09-hearth-bills-design.md`).
 
-**Marriage is the next feature, and — unlike every feature above — it does
-not inherit a clean slate from this section.** Money closed all three items
-above across five features in a row; Marriage is a different domain (mood,
-retros, agreements, none of it money), so items 1 and 2 do not transfer as
-written — Marriage will need its own capability-gating shape decided (it is
-already `marriage`-gated at the space level, per `domain.BuiltinSpaces`, but
-nothing in Marriage has a route yet to apply it to) and carries no monetary
-figures to keep `int64`-honest. What *does* transfer is the discipline
-behind item 3: an implementer who invents Marriage's own derived figures —
-mood trends, agreement version diffs, whatever Vision's "on track" turns out
-to mean — without a decision recorded first in Marriage's own spec is
-building on sand, the same warning this section has now enforced across
-five features running.
+**Marriage does not inherit a clean slate from this section, and Retros is
+what settled item 1's shape for the whole area.** Money closed all three
+items above across five features in a row; Marriage is a different domain
+(mood, retros, agreements, none of it money), so items 1 and 2 did not
+transfer as written. Item 1 is now decided, not still open: `/marriage/retros`
+is gated `requireCapability(marriage)` stacked on `requireOwner` (spec
+decision 11 — redundant with `domain.ValidateMembershipChange` today, kept
+so the route does not lean on an invariant enforced only one layer down),
+the identical shape the money group already used, and `docs/SYSTEM_DESIGN.md`
+§4 carries the reasoning. Vision and Agreements inherit that shape directly —
+neither needs its own capability-gating decision, only its own route added
+to the same guarded group. Item 2 still does not transfer: Marriage carries
+no monetary figures to keep `int64`-honest. What *does* transfer is the
+discipline behind item 3, and Retros already exercised it once (every figure
+on the Retros screen is pinned in its own spec's formula table before any of
+it was built): an implementer who invents Vision's or Agreements' own
+derived figures — mood trends, agreement version diffs, whatever Vision's
+"on track" turns out to mean — without a decision recorded first in that
+feature's own spec is building on sand, the same warning this section has
+now enforced across six features running.
 
 ### The seams slice 2 will use
 

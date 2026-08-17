@@ -13,7 +13,7 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 76 of 103 features built or partly built.
+**Where things stand:** 80 of 105 features built or partly built.
 
 > **In production since 2026-08-15**, at <https://oink.mywire.org>. **No count
 > below changes** — deployment is not a design feature, and this file's totals
@@ -208,6 +208,46 @@ With this update's own +1 Built, the honest figure is 59 + 17 = **76**, not
 the 74 a delta off the stale 73 would have given -- corrected directly
 rather than compounding the error a third time.
 
+**The Retros reconciliation, 2026-08-17 — Marriage and Overview brought into
+one true state, after two tasks nudged rows piecemeal.** Tasks 11 and 15 each
+ticked what they had just shipped without touching the rows a sibling task
+had already shipped and left unticked, so the file was internally consistent
+but not true: the single retro view and the start-retro modal sat at ⬜
+though both shipped in Tasks 12 and 13, and two features the design's mockup
+never draws — carrying an action forward, deleting a draft — had no row at
+all. Fixed in one pass rather than another nudge. **Two rows move ⬜ → ✅**:
+"Single retro view — went well, was hard, actions, notes" (the actions list
+is this row's own name, so it carries no separate row) and "Start retro
+(modal) with mood, money check-in and actions," the latter noting the
+design's "45 min" duration is drawn and not built (spec decision 8). **Two
+rows are added, the shape Accounts' archive/restore and Goals' contributions
+rows already take**: "Carry an unfinished action into the next retro" (✅ —
+`RetroModal`'s carry-over control posts a real `addAction` for every action
+the server offers under "Still open from July") and "Delete a draft retro,"
+which lands at 🟡 rather than the ✅ the round set out to write. The backend
+is real end to end — the migration, `RetroRepository.DeleteDraft` (`WHERE
+completed_at IS NULL`, mutation-checked in Task 5), `DELETE /retros/{month}`
+and `useRetro.discardDraft` (with its own passing test) — but **no
+component anywhere calls it**: `grep -rl discardDraft web/src/features/marriage/`
+returns only `useRetro.ts` and its own test file. That is the same "built and
+tested at every layer, reachable from none of them" shape `docs/LEARNING.md`
+pattern 15 already carries twice, found here by running the pattern's own
+mechanical check (grep every hook mutation for a caller outside the hook and
+its own tests) against `useRetro.ts` before writing the row rather than
+trusting the round's own plan, which asked for ✅. The same check on
+`removeAction` — the port's `DELETE /retros/{month}/actions/{id}`, no mockup
+ever draws it and no task's brief ever assigned it a caller either — turns
+up the identical shape with no tracker row to correct, since none was ever
+promised; recorded in `docs/LEARNING.md` rather than here. Overview's "Next
+retro card with carried-over actions" was already ✅ and already correct — no
+change. Recounting by this file's own rule (the first symbol in each row's
+own cell, across all eight section tables, never the previous totals
+adjusted by delta) leaves every area unchanged except Marriage, which moves
+from 2/0/11/0 (13 rows) to 5/1/9/0 (15 rows, two added), taking the stated
+totals from 59/17/25/2 = 103 to **62/18/23/2 = 105** — two rows added, three
+moved from Not started (two to Built, one to Partial). The "Where things
+stand" headline (Built + Partial) moves from 76 of 103 to **80 of 105**.
+
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
 | Entry & authentication | 10 | 1 | 0 | 0 |
@@ -215,10 +255,10 @@ rather than compounding the error a third time.
 | Household settings | 11 | 8 | 2 | 0 |
 | Overview (home) | 5 | 3 | 2 | 0 |
 | Money | 24 | 4 | 7 | 0 |
-| Marriage | 2 | 0 | 11 | 0 |
+| Marriage | 5 | 1 | 9 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **59** | **17** | **25** | **2** |
+| **Total** | **62** | **18** | **23** | **2** |
 
 ---
 
@@ -335,11 +375,14 @@ The full checklist is at the end of `docs/LEARNING.md`.
 
 ## 4 · Overview (home)
 
-`/` is a real page as of the interim Overview (M2), and now carries three of
-the design's eight cards that Money can supply, plus a setup checklist the
-design does not draw. The remaining five cards need Bills, Marriage and
-Family, none of which exist — so this section stays mostly ⬜, and the page
-grows into the designed Overview rather than being replaced.
+`/` is a real page as of the interim Overview (M2), and now carries five of
+the design's eight cards — three from Money (net worth, budget, goals),
+one more from Bills (next bill) and one from Marriage (next retro) — plus a
+setup checklist and a limited-member panel the design does not draw. The
+remaining two cards (Vision check-in strip, "This week" agenda) need Vision
+and Family, neither of which exist yet — so this section is no longer
+mostly ⬜, and the page grows into the designed Overview rather than being
+replaced.
 
 | Feature | State |
 |---|---|
@@ -354,9 +397,13 @@ grows into the designed Overview rather than being replaced.
 | Setup checklist (no mockup — see below) | ✅ |
 | Limited-member "amounts are hidden" panel (no mockup — see below) | ✅ |
 
-The "+ Add" menu offers Transaction, Account, Bill, Savings goal, Calendar event
-and Marriage retro — so its remaining three entries (Bill, Calendar event,
-Marriage retro) depend on Bills, Family and Marriage existing first.
+The "+ Add" menu offers Transaction, Account, Bill, Savings goal, Calendar
+event and Marriage retro — four of six are live (see the row above). Neither
+remaining entry is still blocked on a missing space the way both once were:
+`/marriage/retros` exists now, the same way `/money/bills` existed before its
+own menu entry was wired in, so a Marriage retro entry is buildable today
+without waiting on anything else. Calendar event is the one still waiting —
+on Family.
 
 Two rows above have no mockup of their own. The **setup checklist** is three
 steps derived from data the page already fetched (create your household, add an
@@ -721,19 +768,38 @@ with no decision recorded first.
 ## 6 · Marriage
 
 Parents-only throughout. Reachable again as of task 10: `/marriage/retros`
-exists, guarded by `RequireCapability cap="marriage"`, with its own
-`SPACE_PAGES` entry in `Sidebar.tsx` and a real page (`RetrosPage.tsx`) behind
-it — the route, the sidebar entry and the page all landed in the same change,
-`110ab0a`'s own condition for adding any of the three back (splitting them
-across tasks would leave a route with no way to reach it, or a sidebar link
-to a route that 404s). Two of the four feature rows below are finished as of
-task 11: `RetrosPage.tsx`'s history-list mount point now holds a real
-`RetroHistoryList`, and its chart mount point a real `MoodChart`, both reading
-straight off the one `GET /retros` fetch the page already makes. A selected
-month's full detail and the Start/Edit retro modal remain Tasks 12–13, each
-with its own labelled mount point (`retro-detail-mount` today; the Start
-button already writes real drafts) inside `RetrosPage.tsx` rather than a
-component of its own.
+exists, guarded by `requireCapability(marriage)` stacked on `requireOwner`
+(spec decision 11 — redundant with `domain.ValidateMembershipChange` today,
+kept so the route does not lean on an invariant enforced only one layer
+down), with its own `SPACE_PAGES` entry in `Sidebar.tsx` and a real page
+(`RetrosPage.tsx`) behind it — the route, the sidebar entry and the page all
+landed in the same change, `110ab0a`'s own condition for adding any of the
+three back (splitting them across tasks would leave a route with no way to
+reach it, or a sidebar link to a route that 404s).
+
+**Retros is now whole, its own last two rows shipped in Tasks 12–14.**
+`RetroDetail.tsx` (Task 12) is the selected month's full detail — went well
+and was hard as the design's own one-bullet-per-line cards, notes, and the
+actions list with each row's real, keyboard-focusable checkbox (not an
+`sr-only` stand-in — `docs/LEARNING.md` pattern 3 is the reason given in the
+component's own header comment) and per-assignee initial circles. The tick
+writes through `useRetro`'s `setActionDone`, which sends `{ done }` alone and
+never the retro's own `version`, precisely so one partner ticking an action
+any time in the month can never collide with the other's open editor
+(decision 6). `RetroModal.tsx` (Task 13) is the Start/Edit modal — mood,
+the two textareas, `MoneyCheckInPanel`'s live budget-and-goals read (decision
+3, stored nowhere), and a "+ Add an action" composer plus a "Still open from
+July" carry-over offer (Task 14; the composer closed a plan gap — see
+`docs/LEARNING.md` pattern 15's third instance) — reachable through the
+`retro-detail-mount` `RetrosPage.tsx` names. Each task drove its own change
+in a real browser before calling it done — Task 12's own Tab-only keyboard
+walk over the action row's real checkbox, Task 13's walk, which is what
+*found* the last-write-wins conflict defect `docs/LEARNING.md` pattern 3
+records, and its reviewer independently clearing the mood picker's focus
+ring — but **the feature's own fifteen-criterion walk (Task 17) has not run
+yet**, the same bar every Money feature was held to before its rows could
+read plain ✅. It confirms or corrects the rows above the way Bills' walk
+did for Bills.
 
 **`110ab0a` deleted `/marriage` and `/marriage/$` along with the placeholder
 page they rendered**, because a navigation row whose only content was the
@@ -753,8 +819,10 @@ landing page) belongs with it.
 |---|---|
 | Retro history with mood | ✅ |
 | Mood chart over 12 months | ✅ |
-| Single retro view — went well, was hard, actions, notes | ⬜ |
-| Start retro (modal) with mood, money check-in and actions | ⬜ |
+| Single retro view — went well, was hard, actions, notes | ✅ |
+| Start retro (modal) with mood, money check-in and actions | ✅ *(the design's own "45 min" duration is drawn, not built — spec decision 8)* |
+| Carry an unfinished action into the next retro (no mockup — see below) | ✅ |
+| Delete a draft retro (no mockup — see below) | 🟡 *(the backend and the hook are real — `DeleteDraft`, `DELETE /retros/{month}`, `useRetro.discardDraft` — but no component calls it; a household can abandon a draft and nothing in the UI can remove it)* |
 | Vision — yearly theme | ⬜ |
 | Vision — pillars with measures | ⬜ |
 | Vision — longer-horizon milestones | ⬜ |
@@ -778,6 +846,21 @@ breaks the line rather than drawing a zero, verified in a real browser
 against three simultaneous gap sources at once (a month with no retro row at
 all, a finished retro with `mood: null`, and the current month's own
 in-progress draft).
+
+**Two rows here have no mockup of their own**, the same shape Accounts'
+archive/restore and Goals' contributions rows already take. **Carry an
+unfinished action into the next retro** is `RetroModal`'s "Still open from
+July" offer (decision 4): clicking one of the previous month's unticked
+actions posts a fresh `addAction` with `carried_from` pointing at the
+original, July's own row untouched and still unticked; only the immediately
+previous month is ever offered, and the label "Carried from {month}" is true
+for every path the product can produce, since the offer only ever lists
+`OpenInMonth`'s own server-side answer. **Delete a draft retro** is the one
+row on this page that is not simply true: `docs/FEATURE_TRACKER.md`'s own
+rule is that a row describes what a household can *do*, and this is
+`docs/LEARNING.md` pattern 15's shape a third and fourth time in the same
+feature — every layer below the screen is real, and the screen never asks
+for it.
 
 Agreements are the unusual one: every change goes through **propose → both
 sign**, and history is preserved so a removed agreement can still be seen and

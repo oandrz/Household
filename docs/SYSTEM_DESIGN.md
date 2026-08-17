@@ -23,18 +23,25 @@ clamping a stored anchor day rather than the date itself (§5), and whose
 "mark paid" writes a real expense transaction into `transactions` — the one
 place in Money something outside Transactions writes its ledger — so Budget,
 Spending by person and net worth all move the moment a bill is settled.
-Marriage's backend (Retros' three rules, its repository and its read/write
-routes) is built, and its frontend now has a route, a sidebar entry, a page
-shell (`RetrosPage.tsx`) with its five screen states, a real history list and
-a real twelve-month mood chart (task 11) — a selected month's detail is still
-a labelled mount point inside `RetrosPage.tsx` (§7) rather than a component
-of its own, and Vision & goals and Agreements have not been started at all.
-Family is not built. See `docs/FEATURE_TRACKER.md` section 6 for exactly
-which of Marriage's rows are done.
-Overview is **partly** built: `/` carries an interim page composed of four of
-the design's eight cards Money can now supply, plus a setup checklist and a
-quick-create menu, and it grows into the designed Overview as the rest of
-Marriage and Family arrive rather than being replaced (§7). It adds no
+Marriage's first feature, Retros, is code-complete and reviewed: its three
+tables and their relationships (§6), its route group and both guards (§4),
+and its frontend — `RetrosPage.tsx`'s five screen states, a real history
+list and twelve-month mood chart (task 11), the selected month's full detail
+(`RetroDetail.tsx`, task 12) and the Start/Edit modal (`RetroModal.tsx`,
+tasks 13–14: mood, the two textareas, a live budget-and-goals check-in, an
+action composer and a "carry an unfinished action forward" offer) — are all
+built (§5, §7). One gap: a draft retro's delete route and its frontend hook
+both exist with no screen that calls either, the same "built at every layer,
+reachable from none of them" shape `docs/LEARNING.md` pattern 15 already
+carries twice. **What Retros still needs is its own browser walk** (Task
+17) — unrun as of this document, the same bar every Money feature was held
+to before its tracker row could read ✅. Vision and Agreements have not been
+started. Family is not built. See `docs/FEATURE_TRACKER.md` section 6 for
+exactly which of Marriage's rows are done.
+Overview is **partly** built: `/` carries an interim page composed of five of
+the design's eight cards Money and Marriage can now supply, plus a setup
+checklist and a quick-create menu, and it grows into the designed Overview as
+the rest of Marriage and Family arrive rather than being replaced (§7). It adds no
 endpoint, no table and no port — it is composition over what Accounts,
 Transactions, Budget, Goals and Bills already expose. The UX-repair round of
 2026-07-31 that preceded it shipped no feature at all — it bounded the page
@@ -330,6 +337,8 @@ points inward, which is why every service is testable against in-memory doubles.
 | `GoalRepository` | `adapter/postgres` | Fifteenth. `List`/`Get` return each goal's stored fields plus the one figure only SQL can cheaply supply — the summed `contributed` — leaving percent, status and required-monthly to `domain.` arithmetic in the service; `Create` writes the goal and, when a starting balance is given, its opening contribution in one transaction, so a goal with a missing opening contribution cannot exist; `DeleteContribution` clears a rolled-over month's stamp in the same transaction as the delete when the row being removed is that month's rollover (§5). The port's own doc comment carries a warning no other repository needs: `goal_contributions.household_id` has no database-level constraint tying it to its own `goal_id`'s household, so every method that reads or writes a contribution filters by `household_id` **and** `goal_id` together, never by contribution id alone |
 | `BillRepository` | `adapter/postgres` | Sixteenth. `List`'s `includeArchived` is the same UNION-not-filter-swap contract as `AccountRepository`/`GoalRepository`. `RecordPayment` writes the expense (`transactions`), the payment (`bill_payments`) and the advanced `next_due` in one transaction — a bill left advanced with no payment, or a payment with no expense, is not a state this port can produce; `UndoPayment` reverses all three the same way, refusing any payment that is not the bill's most recent with `*domain.BillPaymentNotLatestError`. `MonthTotals` cannot come from `bills` alone — a bill already paid this month has `next_due` in the *next* one — so it unions `bill_payments` (by `due_on`) with still-unpaid live bills (by `next_due`); the two halves filter archived bills differently on purpose (§5). `bill_payments.household_id` carries the same unenforced-by-the-database warning as `goal_contributions`: every method filters by `household_id` **and** `bill_id` together, never by payment id alone (§6) |
 | `AccountLookup`, `CategoryLookup` | `adapter/postgres` (`*AccountRepo` and `*CategoryRepo` already satisfy them) | Narrower ports `TransactionService` depends on instead of the full repositories above — interface segregation: it needs an account's currency and household, and whether a category id belongs to this household and what kind it is, never `List` or `EnsureSeeded`. `BillService.MarkPaid` depends on this same `AccountLookup`, for the same reason and to the same effect: the pay-from account's currency, not a value Bills stores of its own (§5). `BillService.Create`/`Update` depend on the same `CategoryLookup` too: a bill's category is copied onto the real expense `MarkPaid` writes, so it has to satisfy the ledger's own rule — this household's, and an expense category — or the spend lands in Budget's `Spent` and in no category row at all |
+| `RetroRepository` | `adapter/postgres` | Seventeenth. `Create` answers `ErrAlreadyExists` on the `UNIQUE(household_id, month)` clash; `Update` takes the caller-normalised month and version it loaded, and tells "the retro is gone" (`ErrNotFound`, from a recheck read) from "someone saved first" (`ErrRetroChanged`, from a zero-row `UPDATE ... WHERE version = $n`) apart — never merges (§5); `Complete` is idempotent on the caller's own `at`; `DeleteDraft` puts `WHERE completed_at IS NULL` in the SQL itself, not a service `if`, so a zero-row match on a finished retro is `ErrNotFound`, not a silent no-op (`docs/LEARNING.md`'s Bills `SetBillNextDue` entry is the same defect shape this port was built to avoid) |
+| `RetroActionRepository` | `adapter/postgres` | Eighteenth. `Add` writes the action and its assignees in one transaction, so a bad assignee id leaves no orphan action; `carriedFrom` is validated through a join back to `retros` requiring the same household before it is trusted, and a malformed id is refused rather than silently read as SQL NULL (`docs/LEARNING.md`) — "fail closed on values you did not construct" applied to a field the client supplies directly. `OpenInMonth` backs both the modal's "Still open from July" offer and Overview's `openActionCount` |
 | `PasswordHasher`, `TokenGenerator` | `adapter/crypto` | argon2id with cost from config; tokens are random, stored hashed |
 | `Mailer` | `adapter/mail` | SMTP; TLS policy and credentials from config |
 | `Clock` | `adapter/clock` | So lockout windows and expiry are deterministic in tests |
@@ -508,6 +517,14 @@ to a real address and so are not on that path.
 | POST | `/bills/{id}/archive`, `/bills/{id}/restore` | session · money · owner · CSRF |
 | POST | `/bills/{id}/pay` | session · money · owner · CSRF — writes the payment, the expense and the advanced due date in one transaction (§5) |
 | DELETE | `/bills/{id}/payments/{paymentId}` | session · money · owner · CSRF — reverses all three |
+| GET | `/retros`, `/retros/{month}` | session · marriage · owner — owner gates the read, same reasoning as the money-group reads above |
+| POST | `/retros` | session · marriage · owner · CSRF |
+| PATCH | `/retros/{month}` | session · marriage · owner · CSRF |
+| POST | `/retros/{month}/complete` | session · marriage · owner · CSRF |
+| DELETE | `/retros/{month}` | session · marriage · owner · CSRF — draft only; `WHERE completed_at IS NULL` sits in the SQL itself, not a service `if` (§5) |
+| POST | `/retros/{month}/actions` | session · marriage · owner · CSRF |
+| PATCH | `/retros/{month}/actions/{id}` | session · marriage · owner · CSRF — the tick; deliberately does not touch the retro's own `version` (§5) |
+| DELETE | `/retros/{month}/actions/{id}` | session · marriage · owner · CSRF |
 | GET | `/healthz`, `/readyz` | none — outside `/api/v1` |
 
 Three test matrices walk the live router and assert this: every non-public
@@ -561,6 +578,19 @@ for all seven `/bills` routes, asserting an exact expected status per route
 rather than "not 401/403", the same discipline Transactions' own matrix
 established (above) after a looser assertion once let a nil-dependency panic
 recover into a `500` indistinguishable from a correctly-enforced guard.
+
+**Retros joins as its own `marriage_api_test.go`, the same one-file-per-feature
+split**, walking every route against no session, a limited member, an owner
+without CSRF, and an owner with it. Its guard test needed something none of
+the money-group matrices did: a limited member who holds `marriage` cannot be
+built by inserting a row, because `membership_repo.go` carries a database
+`CHECK` constraint, `limited_members_have_no_marriage`, that refuses the
+insert outright. The state the test needs to construct is one the schema
+itself makes impossible to create, so the fixture is built against a
+`MembershipRepository` double instead of a real insert — the only way to
+represent a state the database will not store — with the two application-layer
+guards (`requireCapability`, `requireOwner`) still proven independently
+through it (`docs/LEARNING.md`).
 
 ---
 
@@ -1180,6 +1210,106 @@ bill autopaying with no named person makes that the common case, not the
 exception, so the grouping now emits an explicit `Unattributed` row rather
 than silently under-counting the month's spend.
 
+### Retros — one shared draft, a version guard that a tick deliberately bypasses
+
+```mermaid
+sequenceDiagram
+    participant B1 as Browser (Andreas)
+    participant B2 as Browser (Christine)
+    participant H as Handler
+    participant Svc as RetroService
+    participant RRepo as RetroRepository
+    participant ARepo as RetroActionRepository
+    participant DB as Postgres
+
+    B1->>H: POST /api/v1/retros
+    H->>Svc: Start(householdID, today)
+    Svc->>Svc: StartableMonth -- earlier of {prev, current}<br/>with no retro row (domain, pure)
+    Svc->>RRepo: Create(householdID, month)
+    RRepo->>DB: INSERT retros (version=1) -- ErrAlreadyExists<br/>on the UNIQUE(household_id, month) clash
+
+    B1->>H: PATCH /api/v1/retros/{month} { mood, wentWell, wasHard,<br/>notes, version: 1 }
+    H->>Svc: Save(RetroUpdate{..., Month, Version: 1})
+    Svc->>RRepo: Update(u)
+    RRepo->>DB: UPDATE retros SET ..., version = version + 1<br/>WHERE id = $1 AND version = 1
+    RRepo-->>Svc: RetroRecord{version: 2}
+    Svc-->>B1: 200 { ..., version: 2 }
+
+    B2->>H: PATCH /api/v1/retros/{month} { ..., version: 1 }
+    Note over B2,H: Christine's tab still holds the version<br/>it loaded the retro at
+    H->>Svc: Save(RetroUpdate{..., Version: 1})
+    Svc->>RRepo: Update(u)
+    RRepo->>DB: UPDATE ... WHERE version = 1 -- 0 rows,<br/>the row is now at version 2
+    RRepo->>DB: ByMonth recheck -- row exists, so this is a<br/>stale write, not a deleted retro
+    RRepo-->>Svc: ErrRetroChanged
+    Svc-->>B2: 409 "Christine changed this while<br/>you were typing -- reload to see it"
+
+    B1->>H: PATCH /api/v1/retros/{month}/actions/{id} { done: true }
+    Note over H,ARepo: The tick never reads or writes retros.version --<br/>a different table, so it can never collide<br/>with the text above
+    H->>Svc: SetActionDone(householdID, actionID, true, now)
+    Svc->>ARepo: SetDone(householdID, actionID, true)
+    ARepo->>DB: UPDATE retro_actions SET done_at = now()<br/>WHERE id = $1
+
+    B1->>H: POST /api/v1/retros/{nextMonth}
+    H->>Svc: Start(householdID, today)
+    Svc->>RRepo: Create(householdID, nextMonth)
+    B1->>H: GET /api/v1/retros/{nextMonth}
+    H->>Svc: Month(householdID, nextMonth)
+    Svc->>ARepo: OpenInMonth(householdID, previousMonth)
+    ARepo-->>Svc: this month's own unticked actions
+    Svc-->>B1: 200 { ..., carryOver: [...] } -- "Still open from July"
+    B1->>H: POST /api/v1/retros/{nextMonth}/actions<br/>{ body, carriedFrom: july's own action id }
+    H->>Svc: AddAction(in)
+    Svc->>ARepo: Add(in) -- action + assignees, one transaction
+    Note over ARepo,DB: July's own row is untouched and stays<br/>unticked (decision 4) -- carriedFrom is<br/>provenance only, ON DELETE SET NULL
+```
+
+**The `version` guard exists because a retro is one shared draft with no
+per-line ownership** (decision 1) — either partner can open it and type into
+the same two textareas, so two browsers editing at once is the normal case,
+not an edge one. `retros.version` increments on every successful `Update`,
+and a save sends back the version it loaded; a mismatch means someone else's
+save landed first, and the repository refuses the write rather than merging
+the two drafts or silently letting the second save win (decision 6). The
+copy the household sees — "Christine changed this while you were typing —
+reload to see it" — never claims the partner's text was lost, because it
+was not: `Update` writes nothing on a stale version, so the only thing that
+needs recovering is the *other* browser's own unsent paragraph, which is
+still sitting in its own textarea. `RetroRepository.Update`'s own doc
+comment (`ports.go`) is where a future editor would look to change this, and
+it says why the check has to be a single `WHERE id = $1 AND version = $2`
+rather than a read-then-compare: a check-then-write can itself race, the
+same class of bug `docs/LEARNING.md`'s database catalogue already carries for
+Bills' `SetBillNextDue`.
+
+**Ticking an action deliberately never touches `retros.version`, and that is
+not an oversight — it is the reason the guard can exist at all without
+making the screen unusable.** `retro_actions.done_at` lives in its own table;
+`SetActionDone` writes only that row. Actions get ticked all month long,
+well after retro night, by whichever partner does the thing first — if
+ticking bumped the same `version` the text guard reads, then the household's
+normal use of the actions list (one box ticked most days) would collide with
+the other partner's next attempt to edit a stray line in the notes, and every
+such collision would show the "reload" banner for a save that touched
+nothing the other person cared about. Splitting the two into different
+tables is what lets "two people editing shared prose" and "two people ticking
+independent boxes" have different concurrency rules, without either one
+degrading the other. This is why `RetroActionRepository` is its own port
+(§3) rather than a second set of methods on `RetroRepository` — the two
+tables are guarded by two genuinely different rules, not by convention.
+
+**Carrying an action forward writes a new row; it never moves the old one.**
+`OpenInMonth` reads the *immediately previous* month's unticked actions only
+(decision 4 — a household that skipped four months is not handed an
+unbounded backlog the night they come back), and `AddAction` with
+`carriedFrom` set inserts a fresh `retro_actions` row on the new month with
+`carried_from` pointing at the original; the original stays exactly as it
+was, still unticked, still on July's own retro. Nothing here is a move or an
+update — carrying an action is structurally the same write as adding a brand
+new one, with one extra foreign key naming where it came from
+(`ON DELETE SET NULL`, so deleting July's own row can never take August's
+copy of it down too).
+
 ### What the frontend loads
 
 ```mermaid
@@ -1248,18 +1378,22 @@ page or several alike — Money renders as "MONEY" over Finances,
 Transactions, Budget, Goals and Bills; Marriage renders as "MARRIAGE" over
 its one page, Retros.
 
-**Overview fetches nothing of its own.** Its five requests are the ones
-Accounts, Budget, Goals, Bills and Settings already make, through the same
-hooks and the same cache keys, so a figure on the front door cannot disagree
-with the same figure on the screen it links to — the browser walk checks
-exactly that (net worth on `/` against net worth on `/money`). `useGoals` is
-the same hook `GoalsPage` itself calls, so the "X of Y on track" figure on
-Overview's Goals card and the same count on `/money/goals` share one cache
-entry rather than risking two independent reads of `GET /goals` disagreeing;
-`NextBillCard` reuses `useBills` the identical way, against `/money/bills`'s
-own cache entry, and gained no query of its own — the `enabled` option
-`useBills` grew for exactly this reuse (Task 11) predates `NextBillCard` by
-several tasks. One of those hooks is new
+**Overview fetches nothing of its own.** Its six requests are the ones
+Accounts, Budget, Goals, Bills, Retros and Settings already make, through the
+same hooks and the same cache keys, so a figure on the front door cannot
+disagree with the same figure on the screen it links to — the browser walk
+checks exactly that (net worth on `/` against net worth on `/money`).
+`useGoals` is the same hook `GoalsPage` itself calls, so the "X of Y on
+track" figure on Overview's Goals card and the same count on `/money/goals`
+share one cache entry rather than risking two independent reads of `GET
+/goals` disagreeing; `NextBillCard` reuses `useBills` the identical way,
+against `/money/bills`'s own cache entry, and gained no query of its own —
+the `enabled` option `useBills` grew for exactly this reuse (Task 11)
+predates `NextBillCard` by several tasks. `NextRetroCard` reuses `useRetros`
+the same way again, against `/marriage/retros`'s own cache entry, reading
+`openActionCount` rather than `actionCount` — the two disagree the moment a
+retro's actions are partly ticked, and `docs/LEARNING.md` carries the gap
+between them as its own entry. One of those hooks is new
 only in the sense that it stopped being three: `useHouseholdMembers` was
 declared privately and identically in `AccountModal`, `TransactionsPage` and
 `MembersPanel`, all against `["household", "members"]`, sharing one cache
@@ -1332,6 +1466,10 @@ erDiagram
     bills ||--o{ bill_payments : has
     households ||--o{ bill_payments : scopes
     transactions ||--o| bill_payments : "the expense it wrote (nullable, SET NULL)"
+    households ||--o{ retros : has
+    retros ||--o{ retro_actions : has
+    retro_actions ||--o{ retro_action_assignees : has
+    memberships ||--o{ retro_action_assignees : "assigned to (CASCADE)"
     users ||--o{ memberships : holds
     users ||--o{ sessions : owns
     users ||--o{ magic_links : owns
@@ -1511,6 +1649,31 @@ erDiagram
         bigint amount_minor "CHECK > 0 — may differ from the bill's own amount_minor"
         uuid transaction_id FK "nullable — ON DELETE SET NULL"
         timestamptz created_at
+    }
+    retros {
+        uuid id PK
+        uuid household_id FK
+        date month "first of the month — UNIQUE(household_id, month)"
+        smallint mood "CHECK 1-5, nullable — nullable and never 0 (a draft nobody rated)"
+        text went_well "NOT NULL, defaults to empty"
+        text was_hard "NOT NULL, defaults to empty"
+        text notes "NOT NULL, defaults to empty"
+        timestamptz completed_at "nullable — NULL is the whole draft concept, no status column"
+        integer version "NOT NULL DEFAULT 1 — the concurrency guard, §5"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    retro_actions {
+        uuid id PK
+        uuid retro_id FK
+        text body "NOT NULL"
+        timestamptz done_at "nullable — the tick, never touches retros.version"
+        uuid carried_from FK "nullable — ON DELETE SET NULL, provenance only"
+        timestamptz created_at "ordering is created_at, id — no position column, see the notes below"
+    }
+    retro_action_assignees {
+        uuid action_id PK "also FK to retro_actions — composite PK with membership_id, ON DELETE CASCADE"
+        uuid membership_id PK "also FK to memberships — ON DELETE CASCADE"
     }
 ```
 
@@ -1696,6 +1859,35 @@ Notes that are not obvious from the shapes:
   /bills/{id}/payments/{paymentId}` is the undo flow (§5), not a generic
   delete, and it always reverses the payment's own three writes rather than
   removing the row alone.
+- **`retro_actions` has no `position` column, and that is a decision, not an
+  oversight.** An explicit ordering integer needs a writer, and the only safe
+  one is `max(position) + 1` computed inside the insert — which two partners
+  adding an action in the same moment can still collide on, since nothing
+  else in this feature serialises that path (`retros.version` covers the
+  retro's text, not its actions). The design draws no reordering control
+  anywhere, so the column would exist only to create that race. Insertion
+  order is the order, `ORDER BY created_at, id`, with `id` as a stable
+  tiebreak for two inserts landing in the same microsecond. Adding
+  drag-to-reorder later means adding the column *then*, with a rule for
+  writing it, not inheriting one that was never assigned a writer.
+- **`carried_from` is provenance, not a move, and `ON DELETE SET NULL` is
+  why.** Carrying an action forward (§5) inserts a new row on the new
+  month's retro with `carried_from` pointing at the original; deleting
+  July's own row must never delete August's copy of it, so the reference is
+  nullable and clears rather than cascades. A malformed id reaching this
+  column from a request body is refused at the repository, not silently
+  read as SQL NULL — the one field on this table a client supplies directly,
+  and `docs/LEARNING.md` carries the instance where that distinction
+  mattered.
+- **`retro_action_assignees` is a join table, not two boolean columns.** The
+  design draws exactly `A` and `C` against an action, but nothing in this
+  product caps a household at two owners — the invite modal offers "Parent"
+  freely, and last-owner protection only guarantees at least one. Two
+  columns would encode a limit that does not exist; a join table does not.
+  `membership_id`, not a user id, for the same reason
+  `transactions.paid_by_membership_id` is a membership id — a removed member
+  behaves the way removed members already behave everywhere else in this
+  schema.
 
 ---
 
@@ -1734,31 +1926,46 @@ web/src/
                        and its undo, and the Subscriptions panel, mounted
                        at /money/bills (replacing moneySplatRoute, the
                        last route that ever used it)
-    overview/          the interim Overview at / — four of the design's
-                       eight cards Money can supply (net worth, reusing
-                       money/NetWorthCard; this month's budget; goals on
-                       track; and the next bill, reading the same useBills
-                       hook /money/bills itself uses), a setup checklist,
-                       and the "+ Add" quick-create menu
-    marriage/          RetrosPage — header (title, subtitle, done-count
+    overview/          the interim Overview at / — five of the design's
+                       eight cards Money and Marriage can supply (net worth,
+                       reusing money/NetWorthCard; this month's budget;
+                       goals on track; the next bill, reading the same
+                       useBills hook /money/bills itself uses; and the next
+                       retro, reading the same useRetros hook /marriage/retros
+                       itself uses, beneath it the retro's own openActionCount
+                       -- the design's "carried-over actions" figure, §5), a
+                       setup checklist, and the "+ Add" quick-create menu
+    marriage/          RetrosPage -- header (title, subtitle, done-count
                        clause, privacy badge, start-retro button), the
                        five screen states (first-run, a draft in progress,
                        normal, owner-only, load failure), and its mount
-                       points. retro-history now holds real components
-                       (task 11): RetroHistoryList (rows grouped by year,
-                       current year expanded, older years behind the
-                       design's "Show 2025 (7 more)" disclosure over data
-                       the one GET /retros fetch already returned, never
-                       a second request) and MoodChart (twelve points as
-                       inline SVG, no charting dependency -- a month with
+                       points. retro-history holds RetroHistoryList (rows
+                       grouped by year, current year expanded, older years
+                       behind the design's "Show 2025 (7 more)" disclosure
+                       over data the one GET /retros fetch already returned,
+                       never a second request) and MoodChart (twelve points
+                       as inline SVG, no charting dependency -- a month with
                        no finished retro, or a finished one with no mood,
                        breaks the line rather than drawing a zero).
-                       retro-detail-mount (a selected month's full detail)
-                       and the Start/Edit retro modal remain later tasks.
-                       useRetros/useRetro read and write /retros;
+                       retro-detail-mount holds RetroDetail (went well, was
+                       hard, the actions list with a real, keyboard-focusable
+                       checkbox per row and per-assignee initials -- the
+                       tick writes through useRetro's setActionDone, never
+                       the retro's own version, §5 -- and notes) once a
+                       month is selected, and the Start/Edit modal
+                       (RetroModal -- mood, the two textareas,
+                       MoneyCheckInPanel's live budget-and-goals read
+                       (decision 3, stored nowhere), a "+ Add an action"
+                       composer, and the "Still open from July" carry-over
+                       offer). useRetros/useRetro read and write /retros;
                        retroQueryKeys.ts holds both hooks' cache keys so
                        either can invalidate the other's without a
-                       circular import. Mounted at /marriage/retros
+                       circular import. useRetro also exposes discardDraft
+                       (DELETE /retros/{month}) and removeAction (DELETE
+                       /retros/{month}/actions/{id}) -- both real, tested,
+                       and, as of this document, not called by any
+                       component (docs/LEARNING.md pattern 15). Mounted at
+                       /marriage/retros
     placeholder/       named stand-ins for unbuilt areas, and only for areas
                        a household can already reach. Empty of callers as of
                        this feature: / stopped using it when the interim
