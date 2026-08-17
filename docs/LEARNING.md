@@ -1725,10 +1725,13 @@ anywhere. The same grep against every other mutation `useRetro.ts` and
 `removeAction` (`DELETE /retros/{month}/actions/{id}`) has no caller either,
 though no design mockup or task brief ever named a "delete an action"
 control, so there is no tracker row for it to falsify. `docs/FEATURE_TRACKER.md`
-records "Delete a draft retro" as 🟡, not the ✅ the brief asked for — CLAUDE.md's
+recorded "Delete a draft retro" as 🟡, not the ✅ the brief asked for — CLAUDE.md's
 "do not mark anything ✅ that you cannot point at working code for" outranks a
 brief's row-by-row instruction, the same way it outranked the plan for the
-third instance above. **A docs task that reconciles a tracker is exactly the
+third instance above. **Closed the same round**: `RetroModal.tsx` was given a
+Discard-draft control in `4d719b8`, `discardDraft` now has a real caller, and
+the row reads ✅. `removeAction` stays uncalled — deliberately, since no
+mockup or brief ever named the control it would back. **A docs task that reconciles a tracker is exactly the
 moment this pattern re-checks itself for free**: the mechanical grep costs
 thirty seconds per hook and was already due, since nobody had run it since
 Task 9 built the hook two tasks before the composer gap even opened.

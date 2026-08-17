@@ -23,21 +23,27 @@ clamping a stored anchor day rather than the date itself (§5), and whose
 "mark paid" writes a real expense transaction into `transactions` — the one
 place in Money something outside Transactions writes its ledger — so Budget,
 Spending by person and net worth all move the moment a bill is settled.
-Marriage's first feature, Retros, is code-complete and reviewed: its three
-tables and their relationships (§6), its route group and both guards (§4),
-and its frontend — `RetrosPage.tsx`'s five screen states, a real history
-list and twelve-month mood chart (task 11), the selected month's full detail
-(`RetroDetail.tsx`, task 12) and the Start/Edit modal (`RetroModal.tsx`,
+Marriage's first feature, Retros, is code-complete, reviewed and now walked:
+its three tables and their relationships (§6), its route group and both
+guards (§4), and its frontend — `RetrosPage.tsx`'s five screen states, a real
+history list and twelve-month mood chart (task 11), the selected month's full
+detail (`RetroDetail.tsx`, task 12) and the Start/Edit modal (`RetroModal.tsx`,
 tasks 13–14: mood, the two textareas, a live budget-and-goals check-in, an
 action composer and a "carry an unfinished action forward" offer) — are all
-built (§5, §7). One gap: a draft retro's delete route and its frontend hook
-both exist with no screen that calls either, the same "built at every layer,
-reachable from none of them" shape `docs/LEARNING.md` pattern 15 already
-carries twice. **What Retros still needs is its own browser walk** (Task
-17) — unrun as of this document, the same bar every Money feature was held
-to before its tracker row could read ✅. Vision and Agreements have not been
-started. Family is not built. See `docs/FEATURE_TRACKER.md` section 6 for
-exactly which of Marriage's rows are done.
+built (§5, §7). The gap this paragraph used to name — a draft retro's delete
+route and its frontend hook with no screen calling either — closed in the
+same round `RetroModal.tsx` was given a Discard-draft control (`4d719b8`);
+`removeAction` (deleting a single action) is the one write `useRetro` still
+exposes with no caller, and stays that way deliberately — no mockup or task
+brief ever asked for it (`docs/LEARNING.md` pattern 15). **Retros' own
+fifteen-criterion browser walk (Task 17) has run and passed, 15 of 15**
+(2026-08-18), the same bar every Money feature was held to before its
+tracker row could read ✅, recorded in
+`docs/superpowers/plans/2026-08-16-hearth-retros-verification.md`. Vision and
+Agreements have not been started. Family is not built. See
+`docs/FEATURE_TRACKER.md` section 6 for exactly which of Marriage's rows are
+done, including the two deliberate divergences from the design spec's own
+prose the walk found and left as shipped.
 Overview is **partly** built: `/` carries an interim page composed of five of
 the design's seven cards (the money row of four, Marriage's "Next retro",
 "This week" and "Vision 2026" — the header's own "+ Add" button is not a
@@ -1952,7 +1958,14 @@ web/src/
                        clause, privacy badge, start-retro button), the
                        five screen states (first-run, a draft in progress,
                        normal, owner-only, load failure), and its mount
-                       points. retro-history holds RetroHistoryList (rows
+                       points. The owner-only state is unreachable live:
+                       RequireCapability redirects a limited member to /
+                       before this page ever mounts, and the
+                       limited_members_have_no_marriage CHECK means anyone
+                       who does pass that guard is already an owner --
+                       kept as defence in depth, not dead code (router.go's
+                       own comment on the group, lines 292-299).
+                       retro-history holds RetroHistoryList (rows
                        grouped by year, current year expanded, older years
                        behind the design's "Show 2025 (7 more)" disclosure
                        over data the one GET /retros fetch already returned,
@@ -1974,10 +1987,13 @@ web/src/
                        retroQueryKeys.ts holds both hooks' cache keys so
                        either can invalidate the other's without a
                        circular import. useRetro also exposes discardDraft
-                       (DELETE /retros/{month}) and removeAction (DELETE
-                       /retros/{month}/actions/{id}) -- both real, tested,
+                       (DELETE /retros/{month}), now called by RetroModal's
+                       own Discard-draft control, and removeAction (DELETE
+                       /retros/{month}/actions/{id}), still real, tested,
                        and, as of this document, not called by any
-                       component (docs/LEARNING.md pattern 15). Mounted at
+                       component -- deliberately, since no mockup or task
+                       brief ever asked for deleting a single action
+                       (docs/LEARNING.md pattern 15). Mounted at
                        /marriage/retros
     placeholder/       named stand-ins for unbuilt areas, and only for areas
                        a household can already reach. Empty of callers as of

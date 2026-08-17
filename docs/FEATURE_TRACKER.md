@@ -834,10 +834,36 @@ in a real browser before calling it done — Task 12's own Tab-only keyboard
 walk over the action row's real checkbox, Task 13's walk, which is what
 *found* the last-write-wins conflict defect `docs/LEARNING.md` pattern 3
 records, and its reviewer independently clearing the mood picker's focus
-ring — but **the feature's own fifteen-criterion walk (Task 17) has not run
-yet**, the same bar every Money feature was held to before its rows could
-read plain ✅. It confirms or corrects the rows above the way Bills' walk
-did for Bills.
+ring — and **the feature's own fifteen-criterion browser walk (Task 17) has
+now run and passed, 15 of 15** (2026-08-18), the same bar every Money
+feature was held to before its rows could read plain ✅ — confirming the
+rows above, three of them (criteria 2, 10 and 13) by an interpreted path
+named in the record rather than the criterion's most literal reading, the
+same way Bills' walk did for Bills, recorded in
+`docs/superpowers/plans/2026-08-16-hearth-retros-verification.md`.
+
+**No product defect needed a code fix. Two divergences from the design
+spec's own prose came out of it, both judged, after review, not to need
+one.** **A finished retro's delete is refused with a generic `404`,
+`"That could not be found."`, not the design spec's own named copy**
+("That retro is finished and cannot be deleted") — the refusal itself is
+real and correctly wired (`RetroRepository.DeleteDraft`'s `WHERE
+completed_at IS NULL` answers the identical `ErrNotFound` a genuinely
+missing retro gets, on purpose, so "there is no draft here" reads the same
+either way — `retro_handlers.go:351-360`'s own comment explains why). And
+**a limited member who types `/marriage/retros` never actually reaches
+`RetrosPage.tsx`'s own owner-only branch** — `RequireCapability.tsx`
+redirects them to `/` before the page ever mounts, and since a limited
+member can never hold `marriage` at all — `limited_members_have_no_marriage`,
+a database `CHECK` constraint, `docs/LEARNING.md`'s Task 7 entry — anyone
+who *does* pass that guard is already an owner, so the branch is
+unreachable through the app today. Both stay shipped as built: the branch
+is defence in depth, not dead code (`router.go:292-299`'s own comment on
+the group), and the delete refusal's own contract (`ports.go`) would need a
+new domain error to carry the distinction the spec's copy wants — a
+cross-layer change on the strength of a walk's own disagreement with a
+decision the code already explains, not a three-line fix. The same shape
+Bills' own walk accepted for its own third member state, Noor.
 
 **`110ab0a` deleted `/marriage` and `/marriage/$` along with the placeholder
 page they rendered**, because a navigation row whose only content was the

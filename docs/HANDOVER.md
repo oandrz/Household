@@ -109,9 +109,9 @@ test driving the three transactions write routes without a CSRF token.
 | 1 — Household & identity | Sign-in, magic link, invite acceptance, lockout, members, roles, capabilities, spaces, Settings | **Done** |
 | — Self-serve sign-up | Sign-up, household provisioning, an ISO 4217 currency allowlist and list endpoint, `adminctl prune`, a per-IP rate limiter | **Done, browser walk 15/15** (2026-07-30) |
 | 2 — Money | **Accounts**: manual entry, net worth, assets/liabilities breakdown, archive and restore — **done, browser walk 15/15**. **Transactions**: ledger, categories, filters, keyset paging, month-to-date spend — **done, browser walk 15/15**. **Budget**: envelope per category with pace, empty state and templates, Edit-budget modal with category create/rename/archive, History modal and month picker — **done, browser walk 15/15** (2026-07-31, two defects found at criterion 9 and fixed mid-walk; see `docs/superpowers/plans/2026-07-30-hearth-budget-verification.md`). **Goals**: savings targets whose progress is a contributions ledger (not an account balance), the New/Edit goal modal, contributions add/delete/list by source, the Monthly contributions card, and Budget's own manual rollover into a goal — **done, browser walk 15/15** (2026-08-01, one defect found at criterion 12 and fixed mid-walk: archive and restore shipped with no way to *archive* — every layer existed and no screen called `useGoals.archiveGoal`, so "Show archived" and every Restore button led out of a state no household could enter, `82453ff`; see `docs/superpowers/plans/2026-08-01-hearth-goals-verification.md` and `docs/LEARNING.md` pattern 15). **Bills**: recurring bills on a one-off/monthly/quarterly/yearly cadence, Mark paid writing a real expense transaction and its undo reversing all three writes, archive and restore, a subscriptions rollup — **done, browser walk 15/15** (2026-08-10, one defect found at criterion 14 and swept for the class rather than fixed as one instance: `BillsPage.tsx` answered a limited member's routine "not the owner" 403 with the same red alert a genuine server failure gets, where sibling `GoalsPage.tsx` already distinguishes the two — and the identical gap turned out to be sitting in `BudgetPage.tsx` and `TransactionsPage.tsx` too, fixed the same walk; see `docs/superpowers/plans/2026-08-09-hearth-bills-verification.md` and `docs/LEARNING.md` pattern 1). Accounts, Transactions, Budget, Goals, Bills all built and walked; **slice 2 (Money) is done** | **Done** |
-| 3 — Marriage | Retros, Vision, Agreements | **Retros**: code-complete and reviewed clean across fifteen code tasks, `docs/FEATURE_TRACKER.md`'s Marriage rows updated — **its own browser walk has not run yet** (Task 17). Vision and Agreements: not started |
+| 3 — Marriage | Retros, Vision, Agreements | **Retros**: code-complete and reviewed clean across fifteen code tasks, `docs/FEATURE_TRACKER.md`'s Marriage rows updated — **its own browser walk has run and passed, 15 of 15** (2026-08-18, Task 17), recorded in `docs/superpowers/plans/2026-08-16-hearth-retros-verification.md`. Vision and Agreements: not started |
 | 4 — Family | Calendar | Not started — its own dependency on Bills (bill dates on the month grid) is now satisfied |
-| 5 — Overview | Read-only aggregation across 2–4 | **Interim page built** (2026-08-01, grown 2026-08-10, 2026-08-16) — `/` carries five of the design's **seven** cards (counted off `design/Household Dashboard.dc.html`'s own Overview screen — the money row of four, Marriage's "Next retro", "This week" and "Vision 2026"; its header "+ Add" is a button, not a card) that Money and Marriage can supply (net worth, this month's budget, goals on track, the next bill due, and — added by Retros — the next retro with its open action count), a setup checklist and a four-entry "+ Add" (Transaction, Account, Savings goal, Bill). The M2 walk on the first two cards and the two-entry menu ran **14 of 14**, one real defect found and fixed mid-walk; the goals card and its menu entry were covered by Goals' own walk at its criterion 11 (2026-08-01); the next-bill card by Bills' own Task 18 walk. **The next-retro card is new since and has not been walked** — Retros' own Task 17 walk covers it, the same way Bills' and Goals' walks covered their own Overview additions. The remaining two cards (Vision check-in strip, "This week" agenda) need Vision and Family; the page grows into the designed one rather than being replaced |
+| 5 — Overview | Read-only aggregation across 2–4 | **Interim page built** (2026-08-01, grown 2026-08-10, 2026-08-16) — `/` carries five of the design's **seven** cards (counted off `design/Household Dashboard.dc.html`'s own Overview screen — the money row of four, Marriage's "Next retro", "This week" and "Vision 2026"; its header "+ Add" is a button, not a card) that Money and Marriage can supply (net worth, this month's budget, goals on track, the next bill due, and — added by Retros — the next retro with its open action count), a setup checklist and a four-entry "+ Add" (Transaction, Account, Savings goal, Bill). The M2 walk on the first two cards and the two-entry menu ran **14 of 14**, one real defect found and fixed mid-walk; the goals card and its menu entry were covered by Goals' own walk at its criterion 11 (2026-08-01); the next-bill card by Bills' own Task 18 walk. **The next-retro card is new since and has now been checked for overflow, not for content** — Retros' own Task 17 walk (2026-08-18, 15/15) verified it at all four widths (criterion 15: 305/305, 360/360, 768/768, 1440/1440, no overflow), but unlike Goals' criterion 11 and Bills' Task 18 walk, no criterion in Task 17 exercised the card's own figures — `openActionCount` was already pinned by its own fix and test beforehand, not by this walk. The remaining two cards (Vision check-in strip, "This week" agenda) need Vision and Family; the page grows into the designed one rather than being replaced |
 
 Self-serve sign-up carries no slice number on purpose: it was specified and
 built between slices 1 and 2, ahead of Money (see "What to do next" below for
@@ -449,24 +449,27 @@ runbook still instructed the operator to configure a mail relay that ADR 3 had
 already made impossible. All three were found at the order form or on the box,
 none of them by a test.
 
-**Marriage's first feature, Retros, is code-complete.** Fifteen code tasks
-deep, every one reviewed clean including fix rounds (a sixteenth task wrote
-the documents this section is part of; a seventeenth is the walk below),
-`docs/FEATURE_TRACKER.md`'s
+**Marriage's first feature, Retros, is code-complete, reviewed and now
+walked.** Fifteen code tasks deep, every one reviewed clean including fix
+rounds (a sixteenth task wrote the documents this section is part of; a
+seventeenth ran the walk below), `docs/FEATURE_TRACKER.md`'s
 Marriage rows brought current in the same round as this document
 (2026-08-17): retro history with mood, the twelve-month mood chart, the
 single retro view (went well, was hard, actions, notes) and the Start/Edit
 modal (mood, the ten-minute money check-in, the action composer and the
 carry-over offer) are all ✅; carrying an unfinished action forward is ✅; and
-one new gap surfaced correcting the tracker rather than hiding behind it —
-deleting a draft retro has a real backend and hook and **no screen that calls
-it**, `docs/LEARNING.md` pattern 15's shape a third and fourth time in this
-one feature, so that row is 🟡, not ✅. **What Retros still needs before it
-can be called done is its own fifteen-criterion browser walk (Task 17)** —
-unrun as of this document — the same bar every Money feature was held to.
+deleting a draft retro — a real gap this section once named, a backend and
+hook with **no screen that called either** — is ✅ too, closed the same round
+`RetroModal.tsx` was given a Discard-draft control (`4d719b8`). **Retros' own
+fifteen-criterion browser walk (Task 17) has now run and passed, 15 of 15**
+(2026-08-18), the same bar every Money feature was held to, recorded in
+`docs/superpowers/plans/2026-08-16-hearth-retros-verification.md`. No product
+defect needed a code fix; two deliberate divergences from the design spec's
+own prose came out of it and are recorded in `docs/FEATURE_TRACKER.md`'s
+Marriage section rather than repeated here.
 
-**The next work after Retros' walk is Vision, then Agreements.** That was
-always the order (spec: "Retros first because it is the smallest complete
+**With Retros' walk passed, the next work is Vision, then Agreements.** That
+was always the order (spec: "Retros first because it is the smallest complete
 loop... Agreements last because propose → both sign... carries a product
 question that deserves its own conversation"). **Agreements must settle one
 question before its spec can be written: what "both sign" means in a
