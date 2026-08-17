@@ -84,6 +84,12 @@ func TestRetroMoodSeriesIsTwelveMonthsWithGaps(t *testing.T) {
 // the two retros wired to a real actions double, rather than left as an
 // unverified pass-through (code review finding, Task 3 fix round: a double
 // that hardcodes ActionCount to 0 contradicts the port it claims to satisfy).
+//
+// July's two actions are deliberately left in DIFFERENT done states --
+// "keep the budget review" ticked, "plan the September trip" still open --
+// so ActionCount (2) and OpenActionCount (1) disagree, the same "make the
+// two numbers differ or the test can't tell which one a bug read" shape
+// the Overview card's own frontend test uses.
 func TestRetroSummaryQuoteIsDerivedFromNotes(t *testing.T) {
 	retros := newRetroRepoDouble()
 	jul := retros.seed(jul2026(), 4, "Best month this year. Agreed to keep the budget review.", true)
@@ -91,9 +97,12 @@ func TestRetroSummaryQuoteIsDerivedFromNotes(t *testing.T) {
 
 	actions := newRetroActionRepoDouble()
 	retros.setActions(actions)
-	actions.seedOpen(jul.ID, jul2026(), "keep the budget review")
+	kept := actions.seedOpen(jul.ID, jul2026(), "keep the budget review")
 	actions.seedOpen(jul.ID, jul2026(), "plan the September trip")
 	actions.seedOpen(jun.ID, jun2026(), "call the accountant")
+	if err := actions.SetDone(context.Background(), "hh", kept.ID, true, jul2026()); err != nil {
+		t.Fatalf("SetDone: %v", err)
+	}
 
 	svc := usecase.NewRetroService(retros, actions)
 	view, err := svc.List(context.Background(), "hh", time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC))
@@ -112,6 +121,12 @@ func TestRetroSummaryQuoteIsDerivedFromNotes(t *testing.T) {
 	}
 	if got := view.Summaries[1].ActionCount; got != 1 {
 		t.Fatalf("June's ActionCount = %d, want 1", got)
+	}
+	if got := view.Summaries[0].OpenActionCount; got != 1 {
+		t.Fatalf("July's OpenActionCount = %d, want 1 (one of its two actions is ticked)", got)
+	}
+	if got := view.Summaries[1].OpenActionCount; got != 1 {
+		t.Fatalf("June's OpenActionCount = %d, want 1 (its one action is still open)", got)
 	}
 }
 

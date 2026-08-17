@@ -23,9 +23,15 @@ WHERE household_id = $1 AND month = $2;
 -- once, and a LEFT JOIN would need the same GROUP BY every other column
 -- goal.sql's ListGoalsWithTotals already carries for the identical reason.
 -- Deliberately unbounded -- List's own doc comment on RetroRepository.
+--
+-- open_action_count is the same shape subquery with one more predicate,
+-- done_at IS NULL, not a second round trip -- Overview's "Next retro" card
+-- (spec's formulas table) needs the OPEN count, and action_count alone
+-- overstates outstanding work the moment even one action gets ticked.
 -- name: ListRetros :many
 SELECT r.id, r.month, r.mood, r.went_well, r.was_hard, r.notes, r.completed_at, r.version,
-       (SELECT count(*) FROM retro_actions a WHERE a.retro_id = r.id) AS action_count
+       (SELECT count(*) FROM retro_actions a WHERE a.retro_id = r.id) AS action_count,
+       (SELECT count(*) FROM retro_actions a WHERE a.retro_id = r.id AND a.done_at IS NULL) AS open_action_count
 FROM retros r
 WHERE r.household_id = $1
 ORDER BY r.month DESC;

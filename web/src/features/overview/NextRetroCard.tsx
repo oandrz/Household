@@ -74,13 +74,15 @@ export function NextRetroCard() {
             <p className="mt-1 text-[11.5px] font-semibold text-accent">{OVERVIEW_COPY.nextRetroInProgress}</p>
           )}
           {/* The design's "carried from June retro" section under Next
-              retro -- this card cannot show WHICH actions are still open
-              (nextRetroActions' own comment explains why), so it shows the
-              honest count it does have instead of a per-action list this
-              response does not carry. Omitted at zero, never "0 actions". */}
-          {current.actionCount > 0 && (
+              retro -- this card still cannot show WHICH actions are open, a
+              per-action list that only exists behind a second request
+              (nextRetroActions' own comment explains why), but it shows the
+              OPEN count, not the total: retroSummarySchema.openActionCount,
+              never actionCount, or a fully-ticked retro would still read as
+              outstanding work here. Omitted at zero, never "0 actions". */}
+          {current.openActionCount > 0 && (
             <p className="mt-1 text-[11.5px] text-muted">
-              {OVERVIEW_COPY.nextRetroActions(current.actionCount, nextMonthName(current.month))}
+              {OVERVIEW_COPY.nextRetroActions(current.openActionCount, nextMonthName(current.month))}
             </p>
           )}
         </>

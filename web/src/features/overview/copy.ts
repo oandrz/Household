@@ -111,14 +111,16 @@ export const OVERVIEW_COPY = {
   // money/billCopy.ts's monthDayLabel directly instead of duplicating it).
   nextRetroTitle: (monthName: string) => `${monthName} retro`,
   nextRetroInProgress: "In progress",
-  // actionCount is retroSummarySchema's own field -- the retro's TOTAL
-  // action count, not filtered to open ones (retro.sql's own action_count:
-  // "SELECT count(*) FROM retro_actions", no done_at filter). This card
-  // cannot show which of them are still open without a second request
-  // (GET /retros/{month}, useRetro(month)) -- see NextRetroCard.tsx's own
-  // header comment for why it does not make one. Omitted entirely at zero,
-  // the same "never a bare count of nothing" rule nextBillCaughtUp/
-  // goalsNone above already follow.
+  // openActionCount is retroSummarySchema's own field -- the retro's OPEN
+  // action count, count(*) WHERE done_at IS NULL (retro.sql's own
+  // open_action_count subquery), not the total actionCount also carries.
+  // This card still cannot show WHICH of them are open, a per-action list
+  // that only exists behind a second request (GET /retros/{month},
+  // useRetro(month)) -- see NextRetroCard.tsx's own header comment for why
+  // it does not make one -- but the COUNT it shows is honestly the open
+  // one now, not the total. Omitted entirely at zero, the same "never a
+  // bare count of nothing" rule nextBillCaughtUp/goalsNone above already
+  // follow.
   //
   // monthName names WHEN these actions are carried out, not the retro's own
   // month -- retroCopy.ts's own actionsHeading ("Actions for July" over a

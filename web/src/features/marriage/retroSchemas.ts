@@ -66,11 +66,22 @@ export type Retro = z.infer<typeof retroSchema>;
 // worth a first sentence yet (RetroService.List's own derivation can
 // legitimately be empty) -- required here for the same "no defaulting a
 // missing key" reason assigneeMembershipIds is required above.
+//
+// openActionCount is a required number, not optional with a default: the
+// server always sends it (retroSummaryDTO's own struct has no omitempty),
+// and a default here would hide a real contract break -- an old server
+// build, or a hand-rolled test fixture missing the key -- behind a silent
+// 0 rather than the parse failure that is supposed to catch it. actionCount
+// is the retro's TOTAL action count (RetroHistoryList's own "K actions,
+// ticked or not"); openActionCount is the subset still unticked -- Overview's
+// NextRetroCard reads openActionCount, never actionCount, or a fully-ticked
+// retro would still read as outstanding work on the home page.
 export const retroSummarySchema = z.object({
   id: z.string(),
   month: z.string(),
   mood: moodSchema,
   actionCount: z.number().int(),
+  openActionCount: z.number().int(),
   quote: z.string(),
   finished: z.boolean(),
 });

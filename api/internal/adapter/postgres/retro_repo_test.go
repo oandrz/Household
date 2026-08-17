@@ -214,6 +214,51 @@ func TestRetroListOrdersNewestMonthFirstWithActionCounts(t *testing.T) {
 	}
 }
 
+// ActionCount and OpenActionCount must disagree the moment even one action
+// is ticked -- this is the gap Overview's "Next retro" card shipped with
+// (task-15-report.md): the card read ActionCount, so a fully-ticked retro
+// still claimed outstanding work on the home page. Three actions, two
+// ticked, is enough to prove the open subquery filters on done_at rather
+// than repeating the total's count(*).
+func TestRetroListReportsOpenActionCountSeparatelyFromTheTotal(t *testing.T) {
+	ctx := context.Background()
+	retros, db, householdID := newRetroRepo(t)
+	actions := postgres.NewRetroActionRepo(db)
+
+	retro, err := retros.Create(ctx, householdID, jul2026())
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	var ids []string
+	for _, body := range []string{"phone-free dinners", "call the accountant", "plan the September trip"} {
+		a, err := actions.Add(ctx, usecase.RetroActionInput{HouseholdID: householdID, RetroID: retro.ID, Body: body})
+		if err != nil {
+			t.Fatalf("Add(%q): %v", body, err)
+		}
+		ids = append(ids, a.ID)
+	}
+	for _, id := range ids[:2] {
+		if err := actions.SetDone(ctx, householdID, id, true, time.Now().UTC()); err != nil {
+			t.Fatalf("SetDone(%s): %v", id, err)
+		}
+	}
+
+	summaries, err := retros.List(ctx, householdID)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("len(summaries) = %d, want 1", len(summaries))
+	}
+	if got := summaries[0].ActionCount; got != 3 {
+		t.Fatalf("ActionCount = %d, want 3 (ticked actions still count toward the total)", got)
+	}
+	if got := summaries[0].OpenActionCount; got != 1 {
+		t.Fatalf("OpenActionCount = %d, want 1 (only the unticked action)", got)
+	}
+}
+
 // Complete is idempotent: finishing an already finished retro keeps the
 // FIRST completion timestamp, the same COALESCE shape GoalRepository's
 // SetArchived already uses, rather than moving it forward to whatever

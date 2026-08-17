@@ -23,6 +23,7 @@ function summaryFixture(overrides: Partial<RetroSummary> = {}): RetroSummary {
     month: MONTH,
     mood: null,
     actionCount: 0,
+    openActionCount: 0,
     quote: "",
     finished: false,
     ...overrides,
@@ -49,13 +50,21 @@ function renderCard(retrosResponse: RetrosResponse, extraRoutes: Record<string, 
 }
 
 describe("NextRetroCard", () => {
-  it("shows the current month's draft retro and its own action count", async () => {
-    renderCard(retrosFixture({ retros: [summaryFixture({ month: MONTH, finished: false, actionCount: 2 })] }));
+  // actionCount (3) and openActionCount (2) are deliberately DIFFERENT
+  // numbers here -- a fixture where they agree would pass just as happily
+  // against an implementation that reads the wrong field. Asserting on "2",
+  // and refusing to also match "3 actions", is what actually pins
+  // openActionCount as the one rendered.
+  it("shows the current month's draft retro and its OPEN action count, not the total", async () => {
+    renderCard(
+      retrosFixture({ retros: [summaryFixture({ month: MONTH, finished: false, actionCount: 3, openActionCount: 2 })] }),
+    );
 
     const card = await screen.findByTestId("next-retro-card");
     expect(card).toHaveTextContent(`${monthNameOnly(MONTH)} retro`);
     expect(card).toHaveTextContent(OVERVIEW_COPY.nextRetroInProgress);
     expect(card).toHaveTextContent(OVERVIEW_COPY.nextRetroActions(2, nextMonthName(MONTH)));
+    expect(card).not.toHaveTextContent(OVERVIEW_COPY.nextRetroActions(3, nextMonthName(MONTH)));
   });
 
   // Distinct from the draft above: a finished retro has nothing left to
@@ -64,7 +73,9 @@ describe("NextRetroCard", () => {
   // 'is there a row'" rule RetroHistoryList.tsx's own draftInProgress
   // guards.
   it("does not call a finished current-month retro in progress", async () => {
-    renderCard(retrosFixture({ retros: [summaryFixture({ month: MONTH, finished: true, actionCount: 1 })] }));
+    renderCard(
+      retrosFixture({ retros: [summaryFixture({ month: MONTH, finished: true, actionCount: 1, openActionCount: 1 })] }),
+    );
 
     const card = await screen.findByTestId("next-retro-card");
     expect(card).toHaveTextContent(OVERVIEW_COPY.nextRetroActions(1, nextMonthName(MONTH)));
@@ -76,7 +87,9 @@ describe("NextRetroCard", () => {
   // precedent this card follows too: omit the clause outright, never print
   // a zero.
   it("never prints a zero action count", async () => {
-    renderCard(retrosFixture({ retros: [summaryFixture({ month: MONTH, finished: true, actionCount: 0 })] }));
+    renderCard(
+      retrosFixture({ retros: [summaryFixture({ month: MONTH, finished: true, actionCount: 0, openActionCount: 0 })] }),
+    );
 
     const card = await screen.findByTestId("next-retro-card");
     // Word-boundary before the digit, not a bare substring match -- "10
@@ -84,6 +97,19 @@ describe("NextRetroCard", () => {
     // this assertion fail for the wrong reason the day this fixture's
     // actionCount is ever bumped to a real two-digit count.
     expect(card).not.toHaveTextContent(/\b0 actions?\b/);
+  });
+
+  // The case a `> 0` guard reading the WRONG field would miss: every action
+  // is ticked (openActionCount 0) but the retro still has a nonzero total.
+  // A guard on actionCount would show "3 actions" here; the card must show
+  // nothing at all, the same way a genuinely empty retro does above.
+  it("prints nothing when every action is done, even though the total is nonzero", async () => {
+    renderCard(
+      retrosFixture({ retros: [summaryFixture({ month: MONTH, finished: false, actionCount: 3, openActionCount: 0 })] }),
+    );
+
+    const card = await screen.findByTestId("next-retro-card");
+    expect(card).not.toHaveTextContent(/\bactions?\b/);
   });
 
   it("prompts to start when the current month has no retro yet, linking to the Retros screen", async () => {

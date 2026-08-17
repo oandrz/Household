@@ -776,7 +776,7 @@ type RetroRecord struct {
 }
 
 // RetroSummary is one row of the history list: the stored retro plus the
-// action count the row displays. Quote is the exception to "what the
+// action counts the row displays. Quote is the exception to "what the
 // repository can supply": RetroService.List always overwrites it with
 // domain.FirstSentence(Retro.Notes) (per the spec's formulas table, "History
 // row"), unconditionally, so a RetroRepository.List implementation has no
@@ -784,9 +784,21 @@ type RetroRecord struct {
 // This struct carries the field anyway so Tasks 4-8 have one name for the
 // row rather than a repository type plus a service-only wrapper around it.
 type RetroSummary struct {
-	Retro       RetroRecord
+	Retro RetroRecord
+	// ActionCount is every action the retro has ever recorded, ticked or
+	// not -- the History row's own "K actions" figure (spec's formulas
+	// table: "K counts all of that retro's actions, ticked or not").
 	ActionCount int
-	Quote       string
+	// OpenActionCount is the subset of ActionCount still undone --
+	// count(*) WHERE done_at IS NULL, the same predicate SetActionDone's
+	// own done=false branch clears. Overview's "Next retro" card reads
+	// THIS field, never ActionCount: a retro whose three actions are all
+	// ticked has ActionCount 3 but OpenActionCount 0, and the card exists
+	// to answer "is there anything still outstanding," not "how many
+	// actions were ever written down." Ticking an action leaves this
+	// number; it never rejoins it.
+	OpenActionCount int
+	Quote           string
 }
 
 // RetroActionInput is what Add receives. AssigneeMembershipIDs may be empty
@@ -850,11 +862,12 @@ type RetroRepository interface {
 	// that method's comment.
 	ByMonth(ctx context.Context, householdID string, month time.Time) (RetroRecord, error)
 	// List returns every retro, newest month first, each carrying its own
-	// action count. Deliberately unbounded: a household writes twelve rows a
-	// year, so a decade is 120 rows and one query, and the design's
-	// "Show 2025 (7 more)" is a disclosure over data the page already holds,
-	// not a second request. Do not add paging without a household the flat
-	// list actually hurts.
+	// action count AND open action count (RetroSummary's own doc comment
+	// says which is which). Deliberately unbounded: a household writes
+	// twelve rows a year, so a decade is 120 rows and one query, and the
+	// design's "Show 2025 (7 more)" is a disclosure over data the page
+	// already holds, not a second request. Do not add paging without a
+	// household the flat list actually hurts.
 	List(ctx context.Context, householdID string) ([]RetroSummary, error)
 	// Update replaces mood and the three text columns, and bumps version, but
 	// ONLY when the stored version equals u.Version. A mismatch returns

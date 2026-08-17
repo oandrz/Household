@@ -2992,13 +2992,17 @@ func (d *retroRepoDouble) ByMonth(_ context.Context, householdID string, month t
 
 // List returns every retro for householdID, newest month first -- the
 // port's own ordering contract, which RetroService.List relies on rather
-// than re-sorting. ActionCount is computed from the wired actions double
-// (see setActions) when one is set -- the double's own stand-in for the
-// real repository's join against retro_actions -- and 0 when none is
-// wired, which is every Task 3 test that doesn't call setActions: this
-// double must not hardcode the figure regardless, since the port's own
-// doc comment ("each carrying its own action count") is a real part of
-// the contract, not decoration a double is free to skip.
+// than re-sorting. ActionCount and OpenActionCount are both computed from
+// the wired actions double (see setActions) when one is set -- the
+// double's own stand-in for the real repository's two correlated
+// subqueries against retro_actions -- and 0 when none is wired, which is
+// every Task 3 test that doesn't call setActions: this double must not
+// hardcode either figure regardless, since the port's own doc comment
+// ("each carrying its own action count AND open action count") is a real
+// part of the contract, not decoration a double is free to skip -- the
+// same finding that already applies to ActionCount above (see this
+// comment's own history) would apply again to OpenActionCount if it were
+// left at its zero value.
 func (d *retroRepoDouble) List(_ context.Context, householdID string) ([]usecase.RetroSummary, error) {
 	var out []usecase.RetroSummary
 	for _, row := range d.rows {
@@ -3010,6 +3014,9 @@ func (d *retroRepoDouble) List(_ context.Context, householdID string) ([]usecase
 			for _, a := range d.actions.rows {
 				if a.HouseholdID == householdID && a.RetroID == row.ID {
 					summary.ActionCount++
+					if a.DoneAt == nil {
+						summary.OpenActionCount++
+					}
 				}
 			}
 		}

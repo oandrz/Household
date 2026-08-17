@@ -2491,6 +2491,32 @@ route with a missing guard has no second line of defence.
   reusable formula is reusable up to the point a sibling's layout has less
   slack than the site it was proven on — screenshot the applied change in
   its own tightest real state before assuming the pattern travelled clean.**
+- **A summary row's only count is not automatically the count a second
+  caller needs.** `GET /retros`' `actionCount` was built for
+  `RetroHistoryList` (spec: "K counts all of that retro's actions, ticked or
+  not"), and it is the only number `retro.sql`'s `ListRetros` computed.
+  Overview's `NextRetroCard` (Task 15) needed a different question answered
+  — "is there anything still outstanding" — and read `actionCount` anyway,
+  because it was the only field on the wire: a retro whose three actions
+  were all ticked still showed "3 actions" on the home page, permanently.
+  Task 15's own report named the gap explicitly rather than hiding it, which
+  is what let it get closed later instead of forgotten. The fix was not a
+  frontend filter (the list response carries no per-action detail to filter)
+  but a second correlated subquery next to the first —
+  `(SELECT count(*) ... WHERE done_at IS NULL) AS open_action_count` — carried
+  through `RetroSummary`, `retroSummaryDTO` and the zod schema as
+  `openActionCount`, a sibling field rather than a replacement, since
+  `RetroHistoryList`'s own total is still correct for what it shows.
+  Mutation-checked by making the new subquery ignore `done_at`: the Postgres
+  test (three actions, two ticked, asserting `actionCount == 3` and
+  `openActionCount == 1`) went red for exactly that reason. The frontend test
+  needed a fixture where the two numbers actively disagree — `actionCount:
+  3, openActionCount: 0` — to catch a `> 0` guard that was still reading the
+  total; a fixture where they happened to match would have passed against
+  that exact bug. **When two call sites read the same summary field for two
+  different questions, that is a sign the field is doing two jobs — add the
+  second number at the layer that can compute it correctly, rather than
+  reusing the first number and hoping the difference never matters.**
 
 ### Tooling and infrastructure
 
@@ -2575,6 +2601,33 @@ route with a missing guard has no second line of defence.
   still unverified. This is the refinement of `proving-tests-can-fail` — a
   green test proves nothing until you have seen it fail, and a red one proves
   nothing either until you have checked it went red for the stated reason.
+- **On this host, a bind-mounted source change does not reliably reach
+  either dev-mode watcher, and `docker exec … cat` proves nothing about
+  what the dev server is actually serving.** Verifying the retro
+  open-action-count fix in a real browser (`NextRetroCard` reading
+  `openActionCount`), the Overview page kept rendering only four cards —
+  no fifth "Next retro" card, and `GET /api/v1/retros` never once appeared
+  in `performance.getEntriesByType('resource')` after a clean reload, even
+  though `me.data?.capabilities` genuinely included `marriage`. `docker
+  exec hearth-api-1 cat .../retro_handlers.go` and the same for
+  `hearth-web-1`'s `OverviewPage.tsx` both showed the current, correct
+  file — the bind mount (`./api:/src`, `./web:/app`) was faithfully
+  reflecting host edits. The discriminating check was fetching the module
+  straight from the running dev server, bypassing the browser cache
+  (`fetch('/src/features/overview/OverviewPage.tsx', {cache: 'reload'})`):
+  it returned content with no mention of `NextRetroCard` or `hasMarriage`
+  at all — Vite's own transform cache was stale. `air`'s container log told
+  the same story from the other side: no `building...` line since the
+  previous day, despite every watched file having a fresh mtime inside the
+  container. Both `air` (backend) and Vite's own watcher (frontend) rely on
+  filesystem-change notifications (inotify) that this host's bind mount
+  does not reliably deliver — a known class of gap for virtiofs/gRPC-FUSE
+  volume drivers, not anything about this feature's code. **A container
+  having the right file on disk is not evidence its dev server has picked
+  it up; when a live-reloading dev process goes quiet in its own log for
+  longer than a save-and-check cycle should take, restart it
+  (`docker compose restart api web`) before spending more time doubting the
+  code.**
 
 ### The first production deployment (2026-08-15)
 

@@ -276,12 +276,13 @@ type retroDetailBody struct {
 }
 
 type retroSummaryBody struct {
-	ID          string `json:"id"`
-	Month       string `json:"month"`
-	Mood        *int   `json:"mood"`
-	ActionCount int    `json:"actionCount"`
-	Quote       string `json:"quote"`
-	Finished    bool   `json:"finished"`
+	ID              string `json:"id"`
+	Month           string `json:"month"`
+	Mood            *int   `json:"mood"`
+	ActionCount     int    `json:"actionCount"`
+	OpenActionCount int    `json:"openActionCount"`
+	Quote           string `json:"quote"`
+	Finished        bool   `json:"finished"`
 }
 
 type retrosListWithDataBody struct {
@@ -423,6 +424,14 @@ func TestRetroWireShapeWithRealDataMatchesTheBrief(t *testing.T) {
 	}
 	if summary.ActionCount != 1 {
 		t.Fatalf("actionCount = %d, want 1", summary.ActionCount)
+	}
+	// The one action on this retro was never ticked (asserted above:
+	// detail.Retro.Actions[0].DoneAt == nil), so the open count equals the
+	// total here -- this is what proves the wire actually carries the key
+	// "openActionCount" (Task 9's zod schema mirrors this name exactly), not
+	// just that the Go struct compiles.
+	if summary.OpenActionCount != 1 {
+		t.Fatalf("openActionCount = %d, want 1", summary.OpenActionCount)
 	}
 	wantQuote := "We finally fixed the grocery budget."
 	if summary.Quote != wantQuote {

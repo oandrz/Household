@@ -34,6 +34,7 @@ const retrosListResponse = {
       month: "2026-07",
       mood: 4,
       actionCount: 1,
+      openActionCount: 0,
       quote: "We finally fixed the grocery budget.",
       finished: true,
     },

@@ -22,6 +22,11 @@ function summaryFixture(overrides: Partial<RetroSummary> = {}): RetroSummary {
     month: "2026-06",
     mood: 4,
     actionCount: 3,
+    // Not asserted on anywhere in this file -- present only because
+    // retroSummarySchema requires it on the wire (RetroHistoryList.test.tsx's
+    // own fixture comment has the reason this component reads actionCount,
+    // not this field).
+    openActionCount: 1,
     quote: "best month this year",
     finished: true,
     ...overrides,

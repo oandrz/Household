@@ -63,7 +63,11 @@ func (r *RetroRepo) List(ctx context.Context, householdID string) ([]usecase.Ret
 		// RetroService.List always overwrites it with
 		// domain.FirstSentence(Retro.Notes) unconditionally, so populating it
 		// here would be work discarded by every caller that exists.
-		out = append(out, usecase.RetroSummary{Retro: rec, ActionCount: int(row.ActionCount)})
+		out = append(out, usecase.RetroSummary{
+			Retro:           rec,
+			ActionCount:     int(row.ActionCount),
+			OpenActionCount: int(row.OpenActionCount),
+		})
 	}
 	return out, nil
 }

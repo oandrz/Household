@@ -52,14 +52,19 @@ type retroDTO struct {
 
 // retroSummaryDTO is one row of the Retros history list. Quote already
 // carries RetroService.List's derived "first sentence of Notes" figure --
-// this DTO does not recompute it.
+// this DTO does not recompute it. ActionCount is the retro's total;
+// OpenActionCount is the subset still unticked (usecase.RetroSummary's own
+// doc comment says which caller reads which) -- Overview's "Next retro"
+// card reads OpenActionCount, RetroHistoryList reads ActionCount, and both
+// numbers travel on every row so neither caller needs a second request.
 type retroSummaryDTO struct {
-	ID          string `json:"id"`
-	Month       string `json:"month"`
-	Mood        *int   `json:"mood"`
-	ActionCount int    `json:"actionCount"`
-	Quote       string `json:"quote"` // "" renders no quotation marks at all
-	Finished    bool   `json:"finished"`
+	ID              string `json:"id"`
+	Month           string `json:"month"`
+	Mood            *int   `json:"mood"`
+	ActionCount     int    `json:"actionCount"`
+	OpenActionCount int    `json:"openActionCount"`
+	Quote           string `json:"quote"` // "" renders no quotation marks at all
+	Finished        bool   `json:"finished"`
 }
 
 // moodPointDTO is one point on the twelve-month mood chart. Mood is nil for
@@ -504,12 +509,13 @@ func toRetroDTO(rec usecase.RetroRecord, actions []usecase.RetroActionRecord) re
 
 func toRetroSummaryDTO(s usecase.RetroSummary) retroSummaryDTO {
 	return retroSummaryDTO{
-		ID:          s.Retro.ID,
-		Month:       s.Retro.Month.Format(monthLayout),
-		Mood:        s.Retro.Mood,
-		ActionCount: s.ActionCount,
-		Quote:       s.Quote,
-		Finished:    s.Retro.CompletedAt != nil,
+		ID:              s.Retro.ID,
+		Month:           s.Retro.Month.Format(monthLayout),
+		Mood:            s.Retro.Mood,
+		ActionCount:     s.ActionCount,
+		OpenActionCount: s.OpenActionCount,
+		Quote:           s.Quote,
+		Finished:        s.Retro.CompletedAt != nil,
 	}
 }
 

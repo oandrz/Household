@@ -13,7 +13,7 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 73 of 103 features built or partly built.
+**Where things stand:** 76 of 103 features built or partly built.
 
 > **In production since 2026-08-15**, at <https://oink.mywire.org>. **No count
 > below changes** — deployment is not a design feature, and this file's totals
@@ -181,17 +181,44 @@ Partial, which moves from 0 to 1 for the new row (7/0/1/0 → 7/1/1/0, nine rows
 now, not eight), taking the stated totals from 60/12/28/2 = 102 to
 60/13/28/2 = 103 — one row added, no row moved between states.
 
+**The retro open-action-count fix.** Overview's "Next retro card with
+carried-over actions" moves ⬜ → ✅ (Task 15 had shipped it at 🟡 in its
+own report, but this file's row had never been updated to reflect that --
+it still read ⬜). The gap was real either way: the card read
+`actionCount`, the retro's total, so a retro whose every action was
+already ticked still claimed outstanding work on the home page.
+`GET /retros` now carries `openActionCount` alongside `actionCount` on
+every row -- a correlated `done_at IS NULL` subquery through
+`RetroSummary`, `retroSummaryDTO` and the zod schema -- and the card reads
+that instead; `RetroHistoryList`'s own history row is untouched, since the
+spec's formulas table is explicit that its own "K actions" figure counts
+the total, ticked or not. No other row changes. Recounting by this file's
+own rule (the first symbol in each row's own cell) takes Overview from
+4/3/3/0 to 5/3/2/0 and the totals from 58/17/26/2 = 103 to
+59/17/25/2 = 103 — no row added or removed, one row moved from Not started
+to Built.
+
+This also caught the top-line "Where things stand" figure sitting wrong
+before this edit touched anything: it read "73 of 103", but the table it
+is supposed to summarise (Built + Partial) already gave 58 + 17 = 75, not
+73 -- two rows' worth of drift the Bills and Goals updates left behind
+without correcting the headline they were adjusting by delta rather than
+recounting (the same failure mode this file names for itself twice above).
+With this update's own +1 Built, the honest figure is 59 + 17 = **76**, not
+the 74 a delta off the stale 73 would have given -- corrected directly
+rather than compounding the error a third time.
+
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
 | Entry & authentication | 10 | 1 | 0 | 0 |
 | Navigation shell | 7 | 1 | 1 | 0 |
 | Household settings | 11 | 8 | 2 | 0 |
-| Overview (home) | 4 | 3 | 3 | 0 |
+| Overview (home) | 5 | 3 | 2 | 0 |
 | Money | 24 | 4 | 7 | 0 |
 | Marriage | 2 | 0 | 11 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **58** | **17** | **26** | **2** |
+| **Total** | **59** | **17** | **25** | **2** |
 
 ---
 
@@ -320,7 +347,7 @@ grows into the designed Overview rather than being replaced.
 | July budget card — percentage used | 🟡 — percentage used plus the two figures behind it, and a "Set a budget" link when the household has never budgeted. No sparkline. Owner-only: `GET /budgets/{month}` is `requireCapability(money)` **and** `requireOwner` |
 | Next bill card | ✅ — the next-due bill's name, amount and due date (or the overdue/autopay state in its place), reading `useBills`, the same hook and cache entry `/money/bills` itself uses |
 | Goals on track card | ✅ — the real `X of Y on track` figure and the next dated goal beneath it, reading `useGoals`, the same hook and cache entry `/money/goals` itself uses |
-| Next retro card with carried-over actions | ⬜ |
+| Next retro card with carried-over actions | ✅ — shows the current month's retro (draft or finished), or the startable month as a prompt, plus its OPEN action count beneath. `GET /retros` carries both `actionCount` (the total) and `openActionCount` per row; the card reads the latter, the design's own "carried-over actions" figure. Shipped 🟡 first (Task 15, reading the total instead, which overstated outstanding work on a fully-ticked retro) — closed end to end (SQL subquery through the zod schema), leaving `RetroHistoryList`'s own "K actions, ticked or not" row reading the total it is supposed to |
 | Vision check-in strip | ⬜ |
 | "This week" agenda | ⬜ |
 | "+ Add" quick-create menu | 🟡 — four of six entries now live: Transaction, Account, Savings goal and Bill. Transaction and Bill are both disabled with their reason until an account exists — a bill needs a pay-from account the same way an expense needs a from-account; Savings goal has no such precondition (Goals decision 6 — there is no funding-source account to require). Calendar event and Marriage retro still join it in the change that builds each |

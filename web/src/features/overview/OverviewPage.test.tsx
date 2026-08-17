@@ -196,7 +196,9 @@ function retrosBody(overrides: Partial<RetrosResponse> = {}): RetrosResponse {
 // removing the gate in the mutation check below makes the card's own
 // content actually appear, not merely "no card, for some reason or other."
 function renderableRetrosBody(): RetrosResponse {
-  return retrosBody({ retros: [{ id: "retro-1", month: MONTH, mood: null, actionCount: 1, quote: "", finished: false }] });
+  return retrosBody({
+    retros: [{ id: "retro-1", month: MONTH, mood: null, actionCount: 1, openActionCount: 1, quote: "", finished: false }],
+  });
 }
 
 // `routes` accepts a single response or an ordered list per route (the same

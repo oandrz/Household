@@ -20,6 +20,11 @@ function summaryFixture(overrides: Partial<RetroSummary> = {}): RetroSummary {
     month: "2026-06",
     mood: 4,
     actionCount: 3,
+    // openActionCount is not read by this component -- RetroHistoryList
+    // renders the TOTAL (spec's formulas table: "K counts all of that
+    // retro's actions, ticked or not"), unlike Overview's NextRetroCard --
+    // present here only because retroSummarySchema requires it on the wire.
+    openActionCount: 1,
     quote: "best month this year",
     finished: true,
     ...overrides,
