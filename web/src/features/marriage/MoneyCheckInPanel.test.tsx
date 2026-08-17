@@ -149,6 +149,27 @@ describe("MoneyCheckInPanel", () => {
     expect(screen.getByTestId("checkin-budget")).toHaveTextContent(/No budget set/i);
   });
 
+  // Review finding: `percentOk` is false in TWO different situations
+  // (domain.PercentUsed's own doc comment) -- no budget row at all, and a
+  // real budget row whose every category cap is zero. BudgetPage.tsx gates
+  // its own empty state on `budget === null` alone, so a household that
+  // creates a budget and then removes every cap still sees BudgetPage's
+  // populated screen. This is that second, previously-uncovered state: the
+  // panel must not claim "No budget set" for a month Budget itself says has
+  // one -- the exact "two screens disagree" shape the no-recomputation rule
+  // exists to prevent.
+  it("says a budget is set with no caps yet, not that no budget is set, when percentOk is false but budget exists", async () => {
+    renderPanel({
+      budget: budgetFixture({ percentOk: false, percentUsed: 0, budgetedMinor: 0, dailyPaceOk: false }),
+      goals: goalsFixture({ onTrackCount: 0, datedCount: 0 }),
+    });
+
+    const budgetLine = await screen.findByTestId("checkin-budget");
+    expect(budgetLine).not.toHaveTextContent("0%");
+    expect(budgetLine).not.toHaveTextContent(/No budget set/i);
+    expect(budgetLine).toHaveTextContent(/No caps set/i);
+  });
+
   // GoalsPage.tsx's own formulas-table rule (datedCount === 0 hides "N of M
   // on track" rather than rendering "0 of 0") applies here too -- a
   // household with no live goals at all yet gets an honest "nothing to check

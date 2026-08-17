@@ -561,7 +561,13 @@ describe("RetroModal", () => {
     expect(posted.assigneeMembershipIds).toHaveLength(2);
 
     // The composer clears itself after a successful add -- ready for a
-    // second action without reopening anything.
+    // second action without reopening anything. Both halves of "clears
+    // itself" are pinned, not just the body: deleting
+    // `setNewActionAssigneeIds(new Set())` alone would leave this suite
+    // green on the body-only assertion while the NEXT action silently
+    // inherited this one's assignees (review finding).
     expect(await screen.findByPlaceholderText(RETRO_ADD_ACTION_PLACEHOLDER)).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Assign to Andreas" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Assign to Christine" })).toHaveAttribute("aria-pressed", "false");
   });
 });

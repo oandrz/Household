@@ -166,6 +166,18 @@ export const RETRO_COPY = {
   // MoodChart's own empty copy already follow, so this panel never renders a
   // colon with nothing meaningful after it.
   checkInNoGoalsYet: "No goals to check on yet.",
+  // Review finding: `b.percentOk` is false in two DIFFERENT situations
+  // (domain.PercentUsed's own doc comment) -- no budget row at all, and a
+  // real budget row whose every category cap is zero. BudgetPage.tsx:334
+  // gates its own empty state on `data.budget === null` alone, so a
+  // household that creates a budget and then removes every cap still sees
+  // BudgetPage's populated screen (History, Edit budget, the row itself
+  // proving "a budget is set"). This panel must not show "No budget set"
+  // for that same household -- that is the exact "two screens disagree"
+  // shape the no-recomputation rule exists to prevent. This is the second
+  // case's own copy: a budget exists, there is just nothing capped to
+  // report a percentage against.
+  checkInNoCapsYet: (monthName: string) => `No caps set for ${monthName} yet`,
   // The panel's own fetch failure -- useBudget(month)/useGoals() are both
   // owner-gated on the server (budgetCopy.ts's/goalCopy.ts's own
   // ownerOnlyBody comments), and a household owner who holds marriage but

@@ -468,7 +468,21 @@ export function RetroModal({ month, onClose }: { month: string; onClose: () => v
                       aria-pressed={selected}
                       disabled={actionsDisabled}
                       onClick={() => toggleAssignee(owner.id)}
-                      className={`flex h-11 w-11 flex-none items-center justify-center rounded-full border text-[13px] font-semibold disabled:cursor-not-allowed disabled:opacity-60 sm:h-[26px] sm:w-[26px] ${
+                      // Review finding: a hard `sm:h-[26px] sm:w-[26px]`
+                      // clamp shrank this below the 44px floor on every
+                      // viewport >=640px, including desktop, and was never
+                      // measured or named as an exception -- the only
+                      // `sm:h-[Npx]` on an interactive element anywhere in
+                      // features/marriage, features/money or components.
+                      // `min-h-11 ... sm:min-h-0` is the house pattern every
+                      // other control here uses (RetroActionRow.tsx's own
+                      // checkbox label, every button in this file): it
+                      // removes the floor rather than clamping below it, so
+                      // padding decides the size at `sm` the same way it
+                      // does everywhere else. `aspect-square` keeps this
+                      // circular at both sizes without a second, separate
+                      // width utility to keep in sync with the height one.
+                      className={`flex aspect-square min-h-11 flex-none items-center justify-center rounded-full border p-1.5 text-[13px] font-semibold disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 ${
                         selected ? "border-accent bg-callout text-accent" : "border-hairline text-label"
                       }`}
                     >

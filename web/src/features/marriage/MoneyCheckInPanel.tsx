@@ -47,28 +47,37 @@ export function MoneyCheckInPanel({ month }: { month: string }) {
   }
 
   const b = budget.data;
-  // domain.PercentUsed's own doc comment: "ok=false when nothing is
-  // budgeted" -- true whether this month never got a budget row at all
-  // (`budget: null`, BudgetPage's own empty state) or a budget exists with
-  // every category cap at zero. Either way there is nothing to report a
-  // percentage against, so this line reuses Budget's own "no budget set"
-  // headline rather than rendering 0%, which is not what "nothing tracked"
-  // means and is exactly the zero-render shape this feature has already
-  // shipped four times (Tasks 10-12's own "0 done"/"0 actions"/empty meta/
-  // empty notes defects).
-  const budgetClause = b.percentOk
-    ? [
-        BUDGET_COPY.percentUsed(b.percentUsed),
-        // dailyPaceOk gates the whole "on pace to save" figure the same way
-        // BudgetStatCards.tsx's own fourth card is gated -- server-computed,
-        // hidden when Remaining <= 0 or the viewed month isn't current, so
-        // this reads the flag rather than re-deriving "is this worth saying"
-        // from remainingMinor itself.
-        b.dailyPaceOk ? BUDGET_COPY.onPaceToSave(formatMoney(b.remainingMinor, b.currency)) : null,
-      ]
-        .filter((part): part is string => part !== null)
-        .join(" · ")
-    : BUDGET_COPY.emptyHeadline(monthNameOnly(b.month));
+  // Review finding: `b.percentOk` is NOT the right gate for "no budget set"
+  // -- domain.PercentUsed's own doc comment says ok=false covers TWO
+  // different situations (no budget row at all, and a real budget row with
+  // every category cap at zero), but BudgetPage.tsx:334 gates its own empty
+  // state on `data.budget === null` alone. A household that creates a
+  // budget and then removes every cap still has a real budget row
+  // (BudgetPage's own populated screen -- History, Edit budget -- proves
+  // it), so gating on `percentOk` here would show "No budget set" for a
+  // household Budget itself says has one: exactly the "two screens
+  // disagree" shape the no-recomputation rule exists to prevent. Mirrors
+  // BudgetPage's own gate exactly, then treats "budget exists, nothing
+  // capped" as its own honest third state rather than folding it into
+  // either the true empty state or a 0% that "nothing tracked" never means
+  // (this feature has already shipped four zero-render defects, Tasks
+  // 10-12's own "0 done"/"0 actions"/empty meta/empty notes).
+  const budgetClause =
+    b.budget === null
+      ? BUDGET_COPY.emptyHeadline(monthNameOnly(b.month))
+      : b.percentOk
+        ? [
+            BUDGET_COPY.percentUsed(b.percentUsed),
+            // dailyPaceOk gates the whole "on pace to save" figure the same
+            // way BudgetStatCards.tsx's own fourth card is gated --
+            // server-computed, hidden when Remaining <= 0 or the viewed
+            // month isn't current, so this reads the flag rather than
+            // re-deriving "is this worth saying" from remainingMinor itself.
+            b.dailyPaceOk ? BUDGET_COPY.onPaceToSave(formatMoney(b.remainingMinor, b.currency)) : null,
+          ]
+            .filter((part): part is string => part !== null)
+            .join(" · ")
+        : RETRO_COPY.checkInNoCapsYet(monthNameOnly(b.month));
 
   const summary = goals.data.summary;
   // The formulas table's own rule (GoalsPage.tsx's identical guard):
