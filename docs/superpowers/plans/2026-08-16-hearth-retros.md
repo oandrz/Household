@@ -260,12 +260,23 @@ func TestFirstSentence(t *testing.T) {
 		{"Did we really do that?! Yes.", "Did we really do that?"},
 		{"", ""},
 		{"no terminator at all here", "no terminator at all here"},
-		{"a very long note with no terminator that runs well past the sixty character budget we allow", "a very long note with no terminator that runs well past the s…"},
+		{"a very long note with no terminator that runs well past the sixty character budget we allow", "a very long note with no terminator that runs well past the…"},
 	}
 	for _, c := range cases {
 		if got := domain.FirstSentence(c.in); got != c.want {
 			t.Fatalf("FirstSentence(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// The long-note case is the only one with a length rule, and the literal above
+// was hand-counted wrong once already (it shipped two characters long in the
+// first draft of this plan). Assert the rule itself, so the next slip fails on
+// intent rather than on somebody's arithmetic.
+func TestFirstSentenceTruncatesToSixtyRunes(t *testing.T) {
+	got := domain.FirstSentence("a very long note with no terminator that runs well past the sixty character budget we allow")
+	if n := utf8.RuneCountInString(got); n != 60 {
+		t.Fatalf("truncated length = %d runes, want 60 including the ellipsis", n)
 	}
 }
 ```

@@ -525,8 +525,15 @@ export function RetroModal({
                 // means by it. handleAddAction re-checks the same conditions
                 // the Add button's `disabled` carries (blank body, conflict
                 // latch), so this cannot do anything the button would refuse.
+                // `isAddingAction` is checked here and nowhere else in
+                // handleAddAction: the Add button gets it through its own
+                // `disabled`, but a key repeat does not, so without it a fast
+                // double-press posts the action twice while the first request
+                // is still in flight. A duplicate matters more here than it
+                // sounds -- there is no delete-action control (deliberately;
+                // the design draws none), so the household cannot remove one.
                 onKeyDown={(event) => {
-                  if (event.key !== "Enter") return;
+                  if (event.key !== "Enter" || isAddingAction) return;
                   event.preventDefault();
                   void handleAddAction();
                 }}
