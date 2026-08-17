@@ -518,6 +518,96 @@ describe("RetroModal", () => {
   // The composer's headline behaviour: a new action, assigned to both
   // owners, posted with no carriedFrom -- that field belongs to the
   // carry-over path alone (useRetro.ts's own AddRetroActionBody comment).
+  // Enter is the gesture someone typing an action actually makes, and it used
+  // to finish the retro instead: Finish was the form's only type="submit", so
+  // it was the browser's default button and implicit submission reached it
+  // from anywhere in the form -- including this input and the mood radios.
+  // The typed body was discarded and the retro was finished, which nothing
+  // undoes (Discard is draft-only, the server refuses DELETE on a finished
+  // retro, there is no un-complete route). Found by the final whole-branch
+  // review, which no single task's review could have seen: one task made
+  // Finish the submit button, a later one put a text input in the same form.
+  //
+  // fireEvent.click never presses a key, which is why nothing caught it --
+  // the same blind spot docs/LEARNING.md pattern 3 records for the Kind
+  // filter's sr-only radios.
+  it("Enter in the composer adds the action and never finishes the retro", async () => {
+    const stub = renderModal(
+      retroFixture(),
+      {
+        "GET /api/v1/household/members": { status: 200, body: MEMBERS },
+        "POST /api/v1/retros/2026-07/actions": {
+          status: 201,
+          body: { action: actionFixture({ id: "new-action-2", body: "Book the sitter" }) },
+        },
+        // Registered so a wrongful finish is RECORDED rather than thrown:
+        // stubFetchRoutes throws on an unregistered route before any capture
+        // runs, and handleFinish's own catch would swallow that, leaving this
+        // test green against the very bug it exists to catch. This feature
+        // learned that three separate times.
+        "PATCH /api/v1/retros/2026-07": { status: 200, body: { retro: retroFixture() } },
+        "POST /api/v1/retros/2026-07/complete": {
+          status: 200,
+          body: { retro: retroFixture({ completedAt: "2026-07-31T10:00:00Z" }) },
+        },
+      },
+      [],
+    );
+
+    const input = await screen.findByPlaceholderText(RETRO_ADD_ACTION_PLACEHOLDER);
+    fireEvent.change(input, { target: { value: "Book the sitter" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    await waitFor(() =>
+      expect(stub.bodyOf("POST /api/v1/retros/2026-07/actions")).toMatchObject({
+        body: "Book the sitter",
+      }),
+    );
+    expect(stub.called("POST /api/v1/retros/2026-07/complete")).toBe(false);
+    expect(stub.called("PATCH /api/v1/retros/2026-07")).toBe(false);
+  });
+
+  // The other half of the same defect is the mood picker, which is inside the
+  // same form: arrowing to a mood and pressing Enter finished the retro too.
+  //
+  // This test asserts the STRUCTURE rather than simulating the keystroke, and
+  // that is deliberate. jsdom does not implement implicit form submission --
+  // fireEvent.keyDown on a text input never produces a submit event, so a
+  // keystroke test here passes whether or not the defect is present. That was
+  // verified, not assumed: written the obvious way first, this test stayed
+  // green with `type="submit"` restored on Finish. Only a real browser shows
+  // the behaviour, and that is precisely why this belongs in the walk AND in
+  // a structural assertion here.
+  //
+  // Two things pin it. No default button means Enter has nothing to submit to
+  // from anywhere in the form; and the form's own submit handler must reach no
+  // write even when a submit event is dispatched directly.
+  it("the form has no default button, so Enter cannot reach a state transition", async () => {
+    const stub = renderModal(
+      retroFixture(),
+      {
+        "GET /api/v1/household/members": { status: 200, body: MEMBERS },
+        "PATCH /api/v1/retros/2026-07": { status: 200, body: { retro: retroFixture() } },
+        "POST /api/v1/retros/2026-07/complete": {
+          status: 200,
+          body: { retro: retroFixture({ completedAt: "2026-07-31T10:00:00Z" }) },
+        },
+      },
+      [],
+    );
+
+    await screen.findByRole("button", { name: "Finish retro" });
+    const form = document.querySelector("form");
+    expect(form).not.toBeNull();
+    expect(form?.querySelectorAll('button[type="submit"], button:not([type])')).toHaveLength(0);
+
+    fireEvent.submit(form as HTMLFormElement);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Finish retro" })).toBeEnabled());
+    expect(stub.called("POST /api/v1/retros/2026-07/complete")).toBe(false);
+    expect(stub.called("PATCH /api/v1/retros/2026-07")).toBe(false);
+  });
+
   // Toggling both owners before Add is what actually exercises Task 17's
   // browser-walk criterion 7 ("assign one to each partner and one to
   // both") for the first time anywhere in this codebase.

@@ -272,7 +272,7 @@ export const RETRO_COPY = {
   // partner's version, because that is a fresh mount: a new useRetro(month)
   // call, a fresh fetch, and a fresh seed of every field from it.
   conflictBanner:
-    "Someone else saved this retro while you were editing. Nothing you typed here has been lost — but Save and Finish are turned off until you close this retro and reopen it to see their version.",
+    "Someone else saved this retro while you were editing. Nothing you typed here has been lost — but this retro's controls are turned off until you close it and reopen it to see their version.",
 
   modalSaveError: "Couldn't save this retro. Try again.",
 
@@ -333,9 +333,9 @@ export function monthShortLabel(month: string): string {
 // RetroService.Month (api/internal/usecase/retro.go) computes the ONLY
 // candidate list a client can ever carry from as
 // `OpenInMonth(month.AddDate(0, -1, 0))`, exactly one calendar month back,
-// and no code path in this codebase yet calls addAction with a non-""
-// carriedFrom at all (Task 13's Start/Edit modal, which will, does not
-// exist yet).
+// and the ONE code path that calls addAction with a non-"" carriedFrom --
+// RetroModal's handleCarryOver -- passes only ids taken from that same
+// server-supplied carryOver list, never one the client composed.
 //
 // This is a real trust boundary, not a proven one: AddRetroAction's own SQL
 // (retro_action_repo.go) checks only that carriedFrom resolves to an action

@@ -106,9 +106,19 @@ function invalidateAfterRetroWrite(queryClient: QueryClient, month: string) {
 // dataUpdatedAt comparison also collapses a fetching->idle transition
 // before any effect gets to observe it.
 //
-// Task 13's modal reads `conflict` instead of a generic error to show
-// "someone else saved this retro while you were editing" rather than a red
-// failure alert.
+// NOTHING IN THE APP READS `conflict` OR CALLS `reload()`. This comment used
+// to say the modal reads `conflict` to render its banner; it does not. The
+// modal decides a conflict itself (`err.code === "RETRO_CHANGED"`) and drives
+// a one-way `hadConflict` latch, because a two-way flag is what made the
+// removed Reload control dangerous: clearing it re-enabled Save with stale
+// local fields attached to a fresh version, which is last-write-wins — the
+// exact loss the version guard exists to prevent, and a browser walk caught it
+// (see retroCopy.ts's conflictBanner comment).
+//
+// So `conflict` and `reload` are kept only because their derivation is tested
+// and documents the shape; adding a caller is NOT safe on its own. Any UI that
+// clears a conflict must also re-seed the editor from the server's version
+// first, or it reintroduces that defect.
 export function useRetro(month: string) {
   const queryClient = useQueryClient();
   const [conflictAt, setConflictAt] = useState<number | null>(null);

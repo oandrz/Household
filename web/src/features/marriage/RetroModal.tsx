@@ -26,7 +26,7 @@
 // through the UI. Placed after wentWell/wasHard, before the money check-in
 // mount point -- the same order SaveRetroBody's own fields are declared in
 // useRetro.ts, since the mockup gives no order of its own to follow.
-import { type FormEvent, useEffect, useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { ApiError } from "../../api/client";
 import { apiErrorMessage } from "../auth/copy";
 import { Modal } from "../../components/Modal";
@@ -190,16 +190,19 @@ export function RetroModal({
   // only then send the currently-typed text, discarding it: a finish that
   // "completes then saves" throws away the very thing the household just
   // spent ten minutes writing.
-  async function handleFinish(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    // The submit button carries `disabled={actionsDisabled}`, which already
-    // blocks both a click and a browser's own implicit-submit-on-Enter (a
-    // disabled default button is excluded from implicit form submission per
-    // spec) -- but that makes "never finish while disabled" incidental to
-    // HTML's own button rules rather than something this function enforces
-    // itself. Explicit here so the invariant holds even if a future caller
-    // ever invokes handleFinish some other way (a keyboard shortcut, a test
-    // calling the handler directly) that does not go through the button.
+  // Finish is invoked from its button's onClick, NOT as the form's submit
+  // handler, and the button is deliberately `type="button"`. It used to be the
+  // form's only `type="submit"`, which made it the browser's default button --
+  // so pressing Enter anywhere in the form finished the retro. That was
+  // harmless while the form held no text input, and became a real defect the
+  // moment the add-action composer arrived: a household typed an action,
+  // pressed Enter, and the retro was saved, finished and closed with the typed
+  // body discarded. Nothing undoes that -- Discard is gated on a draft, the
+  // server refuses DELETE on a finished retro, and there is no un-complete
+  // route -- so finishing must never be something a stray keystroke can reach.
+  async function handleFinish() {
+    // Explicit rather than leaning on the button's own `disabled`, so the
+    // invariant holds for any future caller that does not go through it.
     if (actionsDisabled) return;
     setSaveError(null);
     setIsFinishing(true);
@@ -349,7 +352,18 @@ export function RetroModal({
           {RETRO_COPY.detailLoadError}
         </p>
       ) : !retro.data ? null : (
-        <form className="flex flex-col gap-4" onSubmit={handleFinish}>
+        <form
+          className="flex flex-col gap-4"
+          onSubmit={(event) => {
+            // The form submits nothing. A form with a single text input
+            // implicitly submits on Enter, and every control in here is a
+            // state transition -- finishing a retro cannot be undone, so no
+            // keystroke may reach it by accident. The composer handles Enter
+            // itself (see its own onKeyDown) because adding the action is what
+            // the person meant; everywhere else Enter does nothing at all.
+            event.preventDefault();
+          }}
+        >
           <div>
             <h3 id={moodLegendId} className="mb-2.5 text-xs font-semibold text-label">
               {RETRO_COPY.moodQuestion}
@@ -507,6 +521,15 @@ export function RetroModal({
                 type="text"
                 value={newActionBody}
                 onChange={(event) => setNewActionBody(event.target.value)}
+                // Enter adds the action, which is what someone typing one
+                // means by it. handleAddAction re-checks the same conditions
+                // the Add button's `disabled` carries (blank body, conflict
+                // latch), so this cannot do anything the button would refuse.
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return;
+                  event.preventDefault();
+                  void handleAddAction();
+                }}
                 placeholder={RETRO_COPY.addActionPlaceholder}
                 disabled={actionsDisabled}
                 className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13px] sm:min-h-0"
@@ -648,9 +671,14 @@ export function RetroModal({
             >
               {RETRO_COPY.saveDraft}
             </button>
+            {/* type="button", not "submit" -- see handleFinish's comment. As
+                the form's default button it was reachable by Enter from
+                anywhere in the form, including the composer and the mood
+                picker, and finishing a retro cannot be undone. */}
             <button
-              type="submit"
+              type="button"
               disabled={actionsDisabled}
+              onClick={() => void handleFinish()}
               className="min-h-11 flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
             >
               {RETRO_COPY.finishRetro}
