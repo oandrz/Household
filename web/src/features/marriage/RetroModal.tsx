@@ -118,6 +118,15 @@ export function RetroModal({ month, onClose }: { month: string; onClose: () => v
   // spent ten minutes writing.
   async function handleFinish(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // The submit button carries `disabled={actionsDisabled}`, which already
+    // blocks both a click and a browser's own implicit-submit-on-Enter (a
+    // disabled default button is excluded from implicit form submission per
+    // spec) -- but that makes "never finish while disabled" incidental to
+    // HTML's own button rules rather than something this function enforces
+    // itself. Explicit here so the invariant holds even if a future caller
+    // ever invokes handleFinish some other way (a keyboard shortcut, a test
+    // calling the handler directly) that does not go through the button.
+    if (actionsDisabled) return;
     setSaveError(null);
     setIsFinishing(true);
     try {

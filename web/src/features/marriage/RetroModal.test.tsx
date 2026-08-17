@@ -121,15 +121,38 @@ describe("RetroModal", () => {
     expect(within(group).getAllByRole("radio")).toHaveLength(5);
   });
 
-  // Save draft writes without finishing -- the complete endpoint is never
-  // even registered here, so a component that called it anyway would throw
-  // inside stubFetchRoutes' own "no stub registered" guard, not just fail
-  // this assertion quietly.
-  it("Save draft sends the text and leaves the retro a draft", async () => {
+  // Save draft writes without finishing, and closes the modal.
+  //
+  // The complete route is registered here, not omitted -- an earlier
+  // version of this test left it unregistered on the theory that a
+  // wrongful call would throw and fail loudly. That theory was wrong:
+  // stubFetchRoutes throws inside its own fetch mock BEFORE any route's
+  // `capture` ever runs (fetchStub.ts's own "no stub registered" guard),
+  // and that throw lands in handleSaveDraft's own try/catch
+  // (RetroModal.tsx), which sets `saveError` and swallows it -- a
+  // handleSaveDraft that wrongly called finishRetro() too would still pass
+  // both the PATCH assertion and a `.called(...)` read off an unregistered
+  // route, because an unregistered route's key can never reach `instrument`'s
+  // own `order` array at all, whether or not the component tried to call
+  // it. Registering the route with a normal 200 means a wrongful call is
+  // actually recorded, which is what makes `.called(...)` below a real
+  // assertion instead of one that can never fail. See this task's own
+  // report for the mutation that proves it.
+  it("Save draft sends the text, leaves the retro a draft, and closes the modal", async () => {
     const stub = renderModal(retroFixture({ version: 2 }), {
       "PATCH /api/v1/retros/2026-07": {
         status: 200,
         body: { retro: retroFixture({ version: 3, wentWell: "Two date nights" }) },
+      },
+      "POST /api/v1/retros/2026-07/complete": {
+        status: 200,
+        body: {
+          retro: retroFixture({
+            version: 3,
+            wentWell: "Two date nights",
+            completedAt: "2026-07-28T21:18:52+08:00",
+          }),
+        },
       },
     });
 
@@ -144,6 +167,7 @@ describe("RetroModal", () => {
       }),
     );
     expect(stub.called("POST /api/v1/retros/2026-07/complete")).toBe(false);
+    expect(stub.onClose).toHaveBeenCalled();
   });
 
   // Finish saves first, then completes -- in that order, so a finish can
@@ -176,6 +200,10 @@ describe("RetroModal", () => {
     expect(stub.orderOf("PATCH /api/v1/retros/2026-07")).toBeLessThan(
       stub.orderOf("POST /api/v1/retros/2026-07/complete"),
     );
+    // Same gap the Save draft test above just closed for its own success
+    // path -- nothing previously checked that a successful Finish actually
+    // closes the modal, only that the two network calls happened in order.
+    expect(stub.onClose).toHaveBeenCalled();
   });
 
   // The conflict, in the modal, with copy that tells the person what
