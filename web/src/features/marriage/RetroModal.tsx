@@ -1,23 +1,19 @@
 // The Start/Edit retro modal (design/Household Dashboard.dc.html's
 // `modalRetro` panel): the mood picker, the two textareas, the money
-// check-in panel and the carry-over offer, and Save draft / Finish retro.
-// Built on `components/Modal` the same way every other feature modal is
-// (GoalModal.tsx's own shape is the closest precedent: this component calls
-// `useRetro(month)` itself rather than taking a mutation as a prop, because
-// nothing upstream has already resolved one).
+// check-in panel, the carry-over offer, the add-action composer, and Save
+// draft / Finish retro. Built on `components/Modal` the same way every
+// other feature modal is (GoalModal.tsx's own shape is the closest
+// precedent: this component calls `useRetro(month)` itself rather than
+// taking a mutation as a prop, because nothing upstream has already
+// resolved one).
 //
-// Task 13's own comment on the (now filled) actions mount point anticipated
-// a generic "+ Add an action & assign it to one of you" composer here too
-// (dc.html's own markup draws one, under "Actions for next month"). Task
-// 14's brief tests only the carry-over offer -- no test anywhere in this
-// plan drives a freeform composer, and no task from 1-16 builds one
-// elsewhere either (RetroDetail.tsx, Task 12, ticks existing actions but
-// adds no new ones). Built only what Task 14's own tests ask for rather than
-// growing UI with nothing testing it; Task 17's browser-walk criterion 7
-// ("Add two actions, assign one to each partner and one to both") has
-// nothing to exercise yet -- flagged in this task's own report for whoever
-// runs that walk, per its own Step 3 ("fix what the walk finds, in this
-// task").
+// The composer is a fix-round addition, not part of Task 14's own tests:
+// this modal shipped with the carry-over offer as its actions block's only
+// caller of `addAction`, which meant a household could carry last month's
+// unfinished action forward but never write a brand-new one -- the exact
+// shape docs/LEARNING.md pattern 15 names (a feature fully built and tested
+// one layer down with no screen that can reach it). Fixed here rather than
+// left for Task 17's browser walk to rediscover.
 //
 // `notes` is a real field here even though dc.html's modal never draws a
 // third textarea for it -- `saveRetroRequest`/`retroDTO` both carry `notes`
@@ -37,11 +33,20 @@ import { Modal } from "../../components/Modal";
 import { FieldPair } from "../../components/FieldPair";
 import { MoneyCheckInPanel } from "./MoneyCheckInPanel";
 import { RETRO_COPY, monthYearLabel, previousMonthName } from "./retroCopy";
+import { useHouseholdMembers } from "../settings/useHouseholdMembers";
 import { useRetro, type SaveRetroBody } from "./useRetro";
 import type { RetroAction } from "./retroSchemas";
 
 export function RetroModal({ month, onClose }: { month: string; onClose: () => void }) {
   const retro = useRetro(month);
+  // The same members query RetroDetail.tsx/RetroActionRow.tsx already share
+  // for assignee initials (useHouseholdMembers.ts's own header comment: one
+  // cache entry, not a fourth private copy) -- not a second fetch of its
+  // own. Filtered to owners only: marriage is an owner-only capability
+  // (CLAUDE.md's own note, "a limited member can never hold CapMarriage
+  // today"), so a retro action's assignee is always one of the two parents,
+  // never a child membership.
+  const members = useHouseholdMembers();
 
   // Local, editable copies of the four writable fields. Seeded from the
   // server's own loaded record exactly once (the `initialized` guard below)
@@ -93,6 +98,17 @@ export function RetroModal({ month, onClose }: { month: string; onClose: () => v
   const [carriedIds, setCarriedIds] = useState<Set<string>>(new Set());
   const [carryingId, setCarryingId] = useState<string | null>(null);
   const [carryError, setCarryError] = useState<string | null>(null);
+
+  // The add-action composer's own local state -- a brand-new action, never
+  // a carry (see handleAddAction's own comment on why `carriedFrom` is never
+  // sent here). Reset to blank after a successful post so the household can
+  // add a second action right away without reopening anything -- the exact
+  // flow Task 17's browser-walk criterion 7 exercises ("Add two actions,
+  // assign one to each partner and one to both").
+  const [newActionBody, setNewActionBody] = useState("");
+  const [newActionAssigneeIds, setNewActionAssigneeIds] = useState<Set<string>>(new Set());
+  const [isAddingAction, setIsAddingAction] = useState(false);
+  const [addActionError, setAddActionError] = useState<string | null>(null);
 
   useEffect(() => {
     if (retro.data && !initialized) {
@@ -202,12 +218,60 @@ export function RetroModal({ month, onClose }: { month: string; onClose: () => v
     }
   }
 
+  function toggleAssignee(memberId: string) {
+    setNewActionAssigneeIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(memberId)) {
+        next.delete(memberId);
+      } else {
+        next.add(memberId);
+      }
+      return next;
+    });
+  }
+
+  // Posts a brand-new action -- deliberately no `carriedFrom` at all, not
+  // even `""`: useRetro.ts's own AddRetroActionBody defaults an omitted
+  // `carriedFrom` to `""` on the wire itself, so this function has nothing
+  // to pass either way, and never should. `carriedFrom` is handleCarryOver's
+  // field alone (its own comment states the trust boundary: only ever an id
+  // taken from `retro.data.carryOver`), and a composer that also set it
+  // would be exactly the freehand-id risk that comment warns against.
+  //
+  // The Add control's own `disabled` already keeps this unreachable with a
+  // blank body (see the button below), but the check is repeated here for
+  // the same reason handleFinish repeats `actionsDisabled` -- an invariant
+  // this function owns, not one left incidental to a button's own attribute.
+  async function handleAddAction() {
+    const body = newActionBody.trim();
+    if (body === "" || actionsDisabled) return;
+    setAddActionError(null);
+    setIsAddingAction(true);
+    try {
+      await retro.addAction({ body, assigneeMembershipIds: Array.from(newActionAssigneeIds) });
+      setNewActionBody("");
+      setNewActionAssigneeIds(new Set());
+    } catch (err) {
+      setAddActionError(apiErrorMessage(err, RETRO_COPY.addActionError));
+    } finally {
+      setIsAddingAction(false);
+    }
+  }
+
   // Disables both actions below for two different reasons: a write already
   // in flight (transient), or `hadConflict` (permanent for this mount --
   // enabling them again on the strength of `retro.conflict` alone, which
   // clears on any successful refetch including one this modal never asked
   // for, is the exact gap the latch exists to close; see its own comment).
   const actionsDisabled = isSaving || isFinishing || hadConflict;
+
+  // The household's owners, in the order useHouseholdMembers itself returns
+  // them -- filtered here rather than a second fetch (useHouseholdMembers.ts's
+  // own header comment: the point of that hook is one shared cache entry).
+  // `member.role` is a plain string on the wire (memberSchema's own
+  // `z.string()`, not an enum) -- "owner" is the same literal
+  // AccountModal.tsx/MembersPanel.tsx already filter and compare against.
+  const owners = (members.data ?? []).filter((member) => member.role === "owner");
 
   // Computed once here, outside the loading/error ternary below, so `?.`/`??`
   // do the "not loaded yet" handling rather than a type-narrowing dance
@@ -370,6 +434,63 @@ export function RetroModal({ month, onClose }: { month: string; onClose: () => v
                 )}
               </>
             )}
+
+            {/* The add-action composer -- a body input, one toggle per
+                household owner (none, one or both may be selected; RetroActionRow.tsx's
+                own rule already renders zero assignees as no initials rather
+                than a placeholder, so nothing here forces a choice), and an
+                Add control. `data-testid` pins this block's own wiring: an
+                assertion that finds this testid, or the input/Add button
+                inside it, would go red if this block's render were ever
+                deleted from the modal -- the same "prove the parent still
+                renders the child" shape Tasks 11-13 each had to add after
+                review. */}
+            <div
+              data-testid="retro-add-action"
+              className="flex flex-col gap-2 rounded-[10px] border border-dashed border-hairline p-3.5"
+            >
+              <input
+                type="text"
+                value={newActionBody}
+                onChange={(event) => setNewActionBody(event.target.value)}
+                placeholder={RETRO_COPY.addActionPlaceholder}
+                disabled={actionsDisabled}
+                className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13px] sm:min-h-0"
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                {owners.map((owner) => {
+                  const selected = newActionAssigneeIds.has(owner.id);
+                  return (
+                    <button
+                      key={owner.id}
+                      type="button"
+                      aria-label={RETRO_COPY.assignToMember(owner.user.displayName)}
+                      aria-pressed={selected}
+                      disabled={actionsDisabled}
+                      onClick={() => toggleAssignee(owner.id)}
+                      className={`flex h-11 w-11 flex-none items-center justify-center rounded-full border text-[13px] font-semibold disabled:cursor-not-allowed disabled:opacity-60 sm:h-[26px] sm:w-[26px] ${
+                        selected ? "border-accent bg-callout text-accent" : "border-hairline text-label"
+                      }`}
+                    >
+                      {owner.user.avatarInitial}
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  disabled={actionsDisabled || isAddingAction || newActionBody.trim() === ""}
+                  onClick={() => void handleAddAction()}
+                  className="min-h-11 ml-auto flex-none rounded-lg bg-accent px-4 text-[12px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:py-1.5"
+                >
+                  {RETRO_COPY.addAction}
+                </button>
+              </div>
+              {addActionError && (
+                <p role="alert" className="text-xs leading-snug text-danger">
+                  {addActionError}
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Renders from `hadConflict`, the local one-way latch, NOT

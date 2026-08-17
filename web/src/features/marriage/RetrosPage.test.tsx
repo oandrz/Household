@@ -401,6 +401,9 @@ describe("RetrosPage", () => {
         body: NO_BUDGET_FOR(previousMonth("2026-08")),
       },
       "GET /api/v1/goals": { status: 200, body: EMPTY_GOALS },
+      // RetroModal's add-action composer (fix round) calls
+      // useHouseholdMembers() unconditionally on mount too.
+      "GET /api/v1/household/members": { status: 200, body: [] },
     });
 
     fireEvent.click(await screen.findByTestId("retros-start"));

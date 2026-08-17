@@ -46,6 +46,31 @@ function retroFixture(overrides: Partial<Retro> = {}): Retro {
   };
 }
 
+// The composer's own placeholder, asserted as a literal rather than
+// imported from retroCopy.ts -- this file's own convention throughout
+// (importing the copy module would make an assertion tautological against
+// a typo in that same module, GoalsPage.test.tsx's own stated reason).
+const RETRO_ADD_ACTION_PLACEHOLDER = "+ Add an action & assign it to one of you";
+
+// RetroDetail.test.tsx's own MEMBERS fixture, verbatim -- the add-action
+// composer (fix round) reads the same `useHouseholdMembers` cache entry
+// that file's assignee-initial tests already exercise, so the same two
+// owners (Andreas, Christine) are the right sample data here too.
+const MEMBERS = [
+  {
+    id: "m-a",
+    user: { id: "u-a", email: "andreas@hearth.family", displayName: "Andreas", avatarInitial: "A" },
+    role: "owner",
+    capabilities: ["marriage"],
+  },
+  {
+    id: "m-c",
+    user: { id: "u-c", email: "christine@hearth.family", displayName: "Christine", avatarInitial: "C" },
+    role: "owner",
+    capabilities: ["marriage"],
+  },
+];
+
 // RetroDetail.test.tsx's own actionFixture shape.
 function actionFixture(overrides: Partial<RetroAction> = {}): RetroAction {
   return {
@@ -179,6 +204,16 @@ function renderModal(retro: Retro, extraRoutes: Record<string, RouteEntry> = {},
       body: { ...NO_BUDGET, month: previousMonth(retro.month) },
     },
     "GET /api/v1/goals": { status: 200, body: EMPTY_GOALS },
+    // The add-action composer (fix round) calls useHouseholdMembers()
+    // unconditionally on mount, the same as the two money routes above --
+    // confirmed by a throwaway instrumented test before this fix (the call
+    // fires and, left unregistered, throws inside stubFetchRoutes, silently
+    // absorbed into `members.error` with no visible test failure, since the
+    // composer already handles "no members yet" by rendering zero owner
+    // toggles rather than crashing). Defaulted to no members so a test that
+    // doesn't care still gets a real response; `extraRoutes` overrides it
+    // for the tests that assign someone.
+    "GET /api/v1/household/members": { status: 200, body: [] },
     ...extraRoutes,
   });
   const onClose = vi.fn();
@@ -314,6 +349,7 @@ describe("RetroModal", () => {
       // `previousMonth`'s own comment above renderModal.
       "GET /api/v1/budgets/2026-06": { status: 200, body: { ...NO_BUDGET, month: "2026-06" } },
       "GET /api/v1/goals": { status: 200, body: EMPTY_GOALS },
+      "GET /api/v1/household/members": { status: 200, body: [] },
       "PATCH /api/v1/retros/2026-07": {
         status: 409,
         body: { error: { code: "RETRO_CHANGED", message: "Someone else saved this retro." } },
@@ -409,7 +445,11 @@ describe("RetroModal", () => {
 
     expect(await screen.findByLabelText(/What went well/)).toBeInTheDocument();
     expect(screen.queryByText(/Still open from/)).not.toBeInTheDocument();
-    expect(screen.getByTestId("retro-modal-actions-mount")).toBeEmptyDOMElement();
+    // The actions mount is no longer empty (the add-action composer -- a
+    // fix-round addition -- always renders there); this pins the narrower,
+    // still-true claim the test's own name makes: no carry-over ROW for a
+    // month with nothing open, not that the mount has no content at all.
+    expect(screen.queryByRole("button", { name: /Carry over/ })).not.toBeInTheDocument();
   });
 
   // Pins MoneyCheckInPanel's own wiring inside this modal (docs/LEARNING.md
@@ -433,5 +473,95 @@ describe("RetroModal", () => {
 
     expect(await screen.findByTestId("checkin-budget")).toHaveTextContent("66% used");
     expect(screen.getByTestId("checkin-goals")).toHaveTextContent("4 of 4 on track");
+  });
+
+  // Pins the composer's own wiring inside this modal, the same reasoning as
+  // the money-panel test above: deleting the add-action block's render line
+  // from RetroModal.tsx must turn this red, not just prove the module
+  // compiles. `retro-add-action` is that block's own testid.
+  it("renders the add-action composer inside the modal", async () => {
+    renderModal(retroFixture());
+
+    expect(await screen.findByTestId("retro-add-action")).toBeInTheDocument();
+    expect(within(screen.getByTestId("retro-add-action")).getByRole("button", { name: "Add" })).toBeInTheDocument();
+  });
+
+  // A blank body cannot be posted at all -- the server refuses one with
+  // RETRO_ACTION_BODY_REQUIRED, but the screen already knows better than to
+  // ask: the Add control disables itself rather than round-tripping to find
+  // out. The POST route is registered anyway (Task 13's own finding,
+  // restated in this task's brief): an unregistered route a wrongful click
+  // would call throws inside stubFetchRoutes BEFORE any capture runs, so
+  // leaving it out would make `.called(...)` below unable to ever fail.
+  it("a blank body cannot submit", async () => {
+    const stub = renderModal(retroFixture(), {
+      "POST /api/v1/retros/2026-07/actions": {
+        status: 201,
+        body: { action: actionFixture({ id: "should-not-exist" }) },
+      },
+    });
+
+    const addButton = await screen.findByRole("button", { name: "Add" });
+    expect(addButton).toBeDisabled();
+
+    // Whitespace-only is not a body either -- the same rule the server's
+    // own trim-then-refuse applies (retro_action_repo.go's own comment,
+    // task-4's brief: "AddAction refuses a blank body ... and trims the
+    // body").
+    const input = screen.getByPlaceholderText(RETRO_ADD_ACTION_PLACEHOLDER);
+    fireEvent.change(input, { target: { value: "   " } });
+    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+
+    expect(stub.called("POST /api/v1/retros/2026-07/actions")).toBe(false);
+  });
+
+  // The composer's headline behaviour: a new action, assigned to both
+  // owners, posted with no carriedFrom -- that field belongs to the
+  // carry-over path alone (useRetro.ts's own AddRetroActionBody comment).
+  // Toggling both owners before Add is what actually exercises Task 17's
+  // browser-walk criterion 7 ("assign one to each partner and one to
+  // both") for the first time anywhere in this codebase.
+  it("adding an action with both owners assigned posts the right body, and no carriedFrom", async () => {
+    const stub = renderModal(
+      retroFixture(),
+      {
+        "GET /api/v1/household/members": { status: 200, body: MEMBERS },
+        "POST /api/v1/retros/2026-07/actions": {
+          status: 201,
+          body: {
+            action: actionFixture({
+              id: "new-action-1",
+              body: "Plan a date night",
+              assigneeMembershipIds: ["m-a", "m-c"],
+            }),
+          },
+        },
+      },
+      [],
+    );
+
+    const input = await screen.findByPlaceholderText(RETRO_ADD_ACTION_PLACEHOLDER);
+    fireEvent.change(input, { target: { value: "Plan a date night" } });
+    fireEvent.click(screen.getByRole("button", { name: "Assign to Andreas" }));
+    fireEvent.click(screen.getByRole("button", { name: "Assign to Christine" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    await waitFor(() =>
+      expect(stub.bodyOf("POST /api/v1/retros/2026-07/actions")).toMatchObject({
+        body: "Plan a date night",
+        assigneeMembershipIds: expect.arrayContaining(["m-a", "m-c"]),
+        // Never a real id and never omitted -- useRetro.ts's own addAction
+        // defaults an absent carriedFrom to "" on the wire, and this
+        // composer never passes one at all, so the request always carries
+        // this exact empty-string sentinel, distinguishing it from a carry.
+        carriedFrom: "",
+      }),
+    );
+    const posted = stub.bodyOf("POST /api/v1/retros/2026-07/actions") as { assigneeMembershipIds: string[] };
+    expect(posted.assigneeMembershipIds).toHaveLength(2);
+
+    // The composer clears itself after a successful add -- ready for a
+    // second action without reopening anything.
+    expect(await screen.findByPlaceholderText(RETRO_ADD_ACTION_PLACEHOLDER)).toHaveValue("");
   });
 });

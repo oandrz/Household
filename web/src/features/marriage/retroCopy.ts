@@ -194,6 +194,24 @@ export const RETRO_COPY = {
   carryOverButtonLabel: "Carry over",
   carryOverError: "Couldn't carry that action forward. Try again.",
 
+  // The add-action composer: dc.html's own dashed placeholder box reads
+  // "+ Add an action & assign it to one of you" -- reused verbatim as the
+  // text input's own placeholder (Task 13's own precedent for lifting a
+  // mockup's literal string onto a real form control, e.g.
+  // wentWellPlaceholder). "Add" is short on purpose: the input beside it is
+  // where the actual content lives, the same reasoning carryOverButtonLabel
+  // gives for its own short visible text.
+  addActionPlaceholder: "+ Add an action & assign it to one of you",
+  addAction: "Add",
+  // Each owner's own toggle button in the assignee row carries this as its
+  // `aria-label` -- the avatarInitial glyph alone ("A") is not a name to a
+  // screen reader, the same reason moodOptions' own `label` exists beside a
+  // decorative emoji. Takes the member's own displayName rather than
+  // composing one here (CLAUDE.md: "do not parse names" -- this reads
+  // exactly what useHouseholdMembers already resolved, nothing derived).
+  assignToMember: (displayName: string) => `Assign to ${displayName}`,
+  addActionError: "Couldn't add that action. Try again.",
+
   saveDraft: "Save draft",
   finishRetro: "Finish retro",
 
