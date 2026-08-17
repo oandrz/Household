@@ -78,12 +78,29 @@ function goalsFixture(summaryOverrides: Partial<GoalsResponse["summary"]> = {}):
   };
 }
 
+// useBudget.ts's own second query: it fetches the PREVIOUS month too,
+// enabled only while the current month's own `budget` resolves to null
+// (BudgetPage's "Import last month" card, which this panel never renders --
+// but the hook fires the request regardless of who's calling it). Every
+// no-budget test below therefore needs this route registered too, or
+// stubFetchRoutes throws inside that second query -- caught internally by
+// TanStack Query as that query's own isolated error (MoneyCheckInPanel never
+// reads `prevMonthHasBudget`, so nothing here would visibly fail without
+// this), but an unregistered route a component genuinely calls is exactly
+// what this codebase's own convention says to register, not lean on being
+// silently absorbed (Task 13's own "an unregistered route throws before any
+// capture runs" finding). Registered unconditionally in renderPanel's own
+// defaults rather than per-test: harmless when the current month has a real
+// budget (the query stays disabled and this stub is simply never hit).
+const PREV_MONTH = "2026-06";
+
 function renderPanel(
   { budget, goals }: { budget: BudgetMonthResponse | null; goals: GoalsResponse },
   extraRoutes: Record<string, RouteResponse | RouteResponse[]> = {},
 ) {
   const fetchMock = stubFetchRoutes({
     [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budget ?? NO_BUDGET },
+    [`GET /api/v1/budgets/${PREV_MONTH}`]: { status: 200, body: { ...NO_BUDGET, month: PREV_MONTH } },
     "GET /api/v1/goals": { status: 200, body: goals },
     ...extraRoutes,
   });

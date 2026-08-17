@@ -99,6 +99,21 @@ const EMPTY_GOALS: GoalsResponse = {
   },
 };
 
+// useBudget.ts's own second, previous-month query: it fires whenever the
+// CURRENT month's `budget` resolves to null (BudgetPage's "Import last
+// month" card, which this modal never renders -- but the hook fires the
+// request regardless of caller). Every test below renders this modal with
+// the NO_BUDGET default (`budget: null`), so every one of them enables that
+// second query too and needs its own route registered, or stubFetchRoutes
+// throws before any capture runs (Task 13's own finding). Mirrors
+// useBudget.ts's own `previousMonth` helper exactly -- (year, monthNum - 2,
+// 1), not reused from there since that file must not depend on a test file.
+function previousMonth(month: string): string {
+  const [year, monthNum] = month.split("-").map(Number);
+  const shifted = new Date(year, monthNum - 2, 1);
+  return `${shifted.getFullYear()}-${String(shifted.getMonth() + 1).padStart(2, "0")}`;
+}
+
 type RouteEntry = RouteResponse | RouteResponse[];
 
 // Wraps stubFetchRoutes so a test can ask, after the render, whether a
@@ -154,6 +169,15 @@ function renderModal(retro: Retro, extraRoutes: Record<string, RouteEntry> = {},
     // schema-valid response; `extraRoutes` below can override either key for
     // a test that does care (this file's own wiring-pin test does).
     [`GET /api/v1/budgets/${retro.month}`]: { status: 200, body: NO_BUDGET },
+    // NO_BUDGET's own `budget: null` enables useBudget.ts's second,
+    // previous-month query (see this file's own `previousMonth` comment) --
+    // registered unconditionally so it resolves harmlessly rather than
+    // throwing; a test that gives the current month a real budget (the
+    // wiring-pin test) never triggers it at all.
+    [`GET /api/v1/budgets/${previousMonth(retro.month)}`]: {
+      status: 200,
+      body: { ...NO_BUDGET, month: previousMonth(retro.month) },
+    },
     "GET /api/v1/goals": { status: 200, body: EMPTY_GOALS },
     ...extraRoutes,
   });
@@ -286,6 +310,9 @@ describe("RetroModal", () => {
     const stub = stubFetchRoutes({
       "GET /api/v1/retros/2026-07": { status: 200, body: { retro: retroFixture({ version: 2 }), carryOver: [] } },
       "GET /api/v1/budgets/2026-07": { status: 200, body: NO_BUDGET },
+      // NO_BUDGET enables useBudget.ts's own previous-month query too -- see
+      // `previousMonth`'s own comment above renderModal.
+      "GET /api/v1/budgets/2026-06": { status: 200, body: { ...NO_BUDGET, month: "2026-06" } },
       "GET /api/v1/goals": { status: 200, body: EMPTY_GOALS },
       "PATCH /api/v1/retros/2026-07": {
         status: 409,

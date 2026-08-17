@@ -67,6 +67,17 @@ const NO_BUDGET_FOR = (month: string) => ({
   rolloverAmountMinor: null,
 });
 
+// useBudget.ts's own second, previous-month query: it fires whenever the
+// CURRENT month's `budget` resolves to null, which NO_BUDGET_FOR always
+// does -- both tests below need this month's route registered too, or
+// stubFetchRoutes throws before any capture runs. Mirrors useBudget.ts's
+// own `previousMonth` helper exactly.
+function previousMonth(month: string): string {
+  const [year, monthNum] = month.split("-").map(Number);
+  const shifted = new Date(year, monthNum - 2, 1);
+  return `${shifted.getFullYear()}-${String(shifted.getMonth() + 1).padStart(2, "0")}`;
+}
+
 const EMPTY_GOALS = {
   currency: "SGD",
   goals: [],
@@ -383,6 +394,12 @@ describe("RetrosPage", () => {
       // fetch of the row above.
       "GET /api/v1/retros/2026-08": { status: 200, body: { retro: createdRetroFixture, carryOver: [] } },
       "GET /api/v1/budgets/2026-08": { status: 200, body: NO_BUDGET_FOR("2026-08") },
+      // NO_BUDGET_FOR's own `budget: null` enables useBudget.ts's second,
+      // previous-month query -- see `previousMonth`'s own comment above.
+      [`GET /api/v1/budgets/${previousMonth("2026-08")}`]: {
+        status: 200,
+        body: NO_BUDGET_FOR(previousMonth("2026-08")),
+      },
       "GET /api/v1/goals": { status: 200, body: EMPTY_GOALS },
     });
 
@@ -437,6 +454,12 @@ describe("RetrosPage", () => {
         },
         "GET /api/v1/household/members": { status: 200, body: [] },
         "GET /api/v1/budgets/2026-06": { status: 200, body: NO_BUDGET_FOR("2026-06") },
+        // NO_BUDGET_FOR's own `budget: null` enables useBudget.ts's second,
+        // previous-month query -- see `previousMonth`'s own comment above.
+        [`GET /api/v1/budgets/${previousMonth("2026-06")}`]: {
+          status: 200,
+          body: NO_BUDGET_FOR(previousMonth("2026-06")),
+        },
         "GET /api/v1/goals": { status: 200, body: EMPTY_GOALS },
       },
     );
