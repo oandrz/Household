@@ -54,11 +54,25 @@ function RetroHistoryRow({
   selected: boolean;
   onSelect: (month: string) => void;
 }) {
-  // A draft's background always reads as "in progress" regardless of
-  // selection (there is nothing else on a draft row to distinguish
-  // selection against); a selected finished row gets its own tint so a
-  // reader can tell which month the detail panel (Task 12) is showing.
-  const background = !summary.finished ? "bg-callout" : selected ? "bg-accent/10" : "";
+  // Two independent channels, deliberately: the BACKGROUND says what the
+  // retro is (a draft is tinted "in progress"), the BORDER says which month
+  // the detail panel is showing.
+  //
+  // They used to share the background, and a household reported the result:
+  // with August in progress and July clicked, the highlight still read as
+  // August. The draft was tinted unconditionally so it looked selected
+  // forever, a selected finished row only added a second and weaker tint
+  // beside it, and a selected draft was pixel-identical to an unselected one
+  // -- clicking it changed nothing anyone could see. `aria-pressed` was
+  // right the whole time, which is why no test and no browser walk caught
+  // it: the semantics were correct and only the picture lied.
+  //
+  // border-accent for selection is NewSpaceModal.tsx's own pattern for a
+  // selectable card whose background already means something else. The
+  // transparent border on every other row keeps the width reserved, so
+  // selecting one does not shift the list by a pixel.
+  const background = summary.finished ? "" : "bg-callout";
+  const border = selected ? "border-accent" : "border-transparent";
 
   return (
     <button
@@ -83,7 +97,7 @@ function RetroHistoryRow({
       // they carry onSelect -- Task 10's stand-in correctly noted no floor
       // applied to a row nothing could be clicked into yet; that is no
       // longer true once this component replaces it.
-      className={`min-h-11 w-full rounded-lg px-3 py-2 text-left text-[13.5px] sm:min-h-0 ${background}`}
+      className={`min-h-11 w-full rounded-lg border px-3 py-2 text-left text-[13.5px] sm:min-h-0 ${background} ${border}`}
     >
       <div className="font-semibold text-ink">{monthYearLabel(summary.month)}</div>
       {summary.finished ? (

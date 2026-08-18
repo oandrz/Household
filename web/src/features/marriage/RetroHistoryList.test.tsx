@@ -146,3 +146,49 @@ describe("RetroHistoryList", () => {
     expect(onSelect).toHaveBeenCalledWith("2026-05");
   });
 });
+
+// Reported from real use: with August in progress and July clicked, the
+// highlight still read as August. The cause was not the selection state --
+// aria-pressed was correct throughout -- but that "in progress" and
+// "selected" both painted the BACKGROUND. A draft was tinted unconditionally,
+// so it looked selected forever, a selected finished row only added a second,
+// weaker tint beside it, and a selected draft was indistinguishable from an
+// unselected one.
+//
+// Selection lives on the border now, the channel NewSpaceModal.tsx already
+// uses for exactly this (border-accent while bg-callout carries other
+// meaning). These tests assert the two channels stay independent: status is
+// the background, selection is the border, and each row type can show either
+// without borrowing the other's.
+describe("selection is visible independently of a row's status", () => {
+  const draft = summaryFixture({ id: "retro-aug", month: "2026-08", finished: false, mood: null, quote: "" });
+  const finished = summaryFixture({ id: "retro-jul", month: "2026-07", finished: true });
+
+  it("marks the clicked finished month selected and leaves the draft unselected", () => {
+    render(<RetroHistoryList summaries={[draft, finished]} onSelect={() => {}} selectedMonth="2026-07" />);
+
+    const july = screen.getByTestId("retro-row-2026-07");
+    const august = screen.getByTestId("retro-row-2026-08");
+
+    expect(july.className).toContain("border-accent");
+    expect(august.className).not.toContain("border-accent");
+    // The draft keeps its own status tint while NOT selected -- the two
+    // channels are independent, not alternatives.
+    expect(august.className).toContain("bg-callout");
+  });
+
+  it("shows a selected draft as selected, which its status tint alone never could", () => {
+    const { rerender } = render(
+      <RetroHistoryList summaries={[draft, finished]} onSelect={() => {}} selectedMonth="2026-07" />,
+    );
+    const unselectedDraft = screen.getByTestId("retro-row-2026-08").className;
+
+    rerender(<RetroHistoryList summaries={[draft, finished]} onSelect={() => {}} selectedMonth="2026-08" />);
+    const selectedDraft = screen.getByTestId("retro-row-2026-08").className;
+
+    // The exact defect: these two were identical, so clicking the draft
+    // changed nothing a person could see.
+    expect(selectedDraft).not.toEqual(unselectedDraft);
+    expect(selectedDraft).toContain("border-accent");
+  });
+});
