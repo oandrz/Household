@@ -165,6 +165,34 @@ type NotificationPreference struct {
 	WeeklyDigest    bool
 }
 
+type Retro struct {
+	ID          pgtype.UUID
+	HouseholdID pgtype.UUID
+	Month       pgtype.Date
+	Mood        *int16
+	WentWell    string
+	WasHard     string
+	Notes       string
+	CompletedAt pgtype.Timestamptz
+	Version     int32
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+type RetroAction struct {
+	ID          pgtype.UUID
+	RetroID     pgtype.UUID
+	Body        string
+	DoneAt      pgtype.Timestamptz
+	CarriedFrom pgtype.UUID
+	CreatedAt   pgtype.Timestamptz
+}
+
+type RetroActionAssignee struct {
+	ActionID     pgtype.UUID
+	MembershipID pgtype.UUID
+}
+
 type Session struct {
 	ID          pgtype.UUID
 	TokenHash   []byte

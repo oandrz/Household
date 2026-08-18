@@ -132,6 +132,31 @@ type testEnv struct {
 	moneyLimitedPassword string
 
 	signupMailer *signupMailer
+
+	// deps is the exact Deps every route in env.router was built from, kept
+	// so a test can build a second router sharing everything except one
+	// swapped-out dependency -- see routerWithMemberships below, the one
+	// caller that needs this today.
+	deps httpadapter.Deps
+}
+
+// routerWithMemberships builds a second router sharing every dependency
+// env.router has except Memberships, which is swapped for m. It exists for
+// TestMarriageRouteRejectsALimitedMemberHoldingMarriage: requireSession
+// resolves scope.Membership through deps.Memberships.ByUser
+// (middleware_session.go), and that is the one seam this codebase's own
+// "every service is testable against in-memory doubles" convention
+// (CLAUDE.md) lets a test substitute to construct a caller identity no real
+// write path can produce -- see that test's own comment for why three
+// independent layers (domain.NewMembership, usecase.MemberService, and
+// Postgres' own limited_members_have_no_marriage CHECK constraint) all
+// refuse to let a real request build this state. A router built fresh per
+// call, serving one request in one test, is why swapping the whole port
+// unconditionally is safe here: nothing else ever sees it.
+func (env *testEnv) routerWithMemberships(m usecase.MembershipRepository) http.Handler {
+	d := env.deps
+	d.Memberships = m
+	return httpadapter.NewRouter(d)
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -260,8 +285,9 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 		Accounts:   accountRepo,
 		Categories: categoryRepo,
 	})
+	retroSvc := usecase.NewRetroService(postgres.NewRetroRepo(db), postgres.NewRetroActionRepo(db))
 
-	router := httpadapter.NewRouter(httpadapter.Deps{
+	deps := httpadapter.Deps{
 		Pinger:       db,
 		Auth:         authSvc,
 		Invites:      inviteSvc,
@@ -274,15 +300,17 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 		Budgets:      budgetSvc,
 		Goals:        goalSvc,
 		Bills:        billSvc,
+		Retros:       retroSvc,
 		Users:        users,
 		Memberships:  memberships,
 		Sessions:     sessions,
 		Tokens:       tokens,
 		Clock:        clk,
 		Secure:       false,
-	})
+	}
+	router := httpadapter.NewRouter(deps)
 
-	env := &testEnv{router: router, signupMailer: sigMailer}
+	env := &testEnv{router: router, deps: deps, signupMailer: sigMailer}
 
 	ctx := context.Background()
 	h, err := households.Create(ctx, domain.Household{

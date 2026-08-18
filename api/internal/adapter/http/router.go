@@ -55,6 +55,7 @@ type Deps struct {
 	Budgets      *usecase.BudgetService
 	Goals        *usecase.GoalService
 	Bills        *usecase.BillService
+	Retros       *usecase.RetroService
 	Users        usecase.UserRepository
 	Memberships  usecase.MembershipRepository
 	Sessions     usecase.SessionRepository
@@ -285,6 +286,40 @@ func NewRouter(deps Deps) http.Handler {
 					// (BillRepository.UndoPayment's own comment).
 					w.Post("/bills/{id}/pay", handleMarkBillPaid(deps))
 					w.Delete("/bills/{id}/payments/{paymentId}", handleUndoBillPayment(deps))
+				})
+			})
+
+			// Marriage is parents-only, and its capability is refused to
+			// limited members in the domain (domain.ErrLimitedCannotHoldMarriage)
+			// -- so requireOwner is redundant here TODAY. It is stacked anyway,
+			// for the reason the money group's own comment above already gives
+			// (the txn group's requireCapability/requireOwner pairing): a route
+			// leaning on an invariant enforced in another layer for another
+			// reason opens silently the day that invariant is relaxed, with no
+			// failing test to catch it.
+			g.Group(func(m chi.Router) {
+				m.Use(requireCapability(domain.CapMarriage))
+				m.Use(requireOwner)
+
+				m.Get("/retros", handleListRetros(deps))
+				m.Get("/retros/{month}", handleGetRetro(deps))
+
+				// Every write joins its own CSRF sub-group, the same shape
+				// this file already uses for goals and bills above: the two
+				// reads stay outside it because requireCSRF only ever
+				// applies to a mutating request.
+				m.Group(func(w chi.Router) {
+					w.Use(requireCSRF)
+					w.Post("/retros", handleStartRetro(deps))
+					w.Patch("/retros/{month}", handleSaveRetro(deps))
+					// Complete is its own route, not a field on PATCH: if
+					// finishing were patchable, saving a typo could finish
+					// the retro as a side effect of an ordinary save.
+					w.Post("/retros/{month}/complete", handleCompleteRetro(deps))
+					w.Delete("/retros/{month}", handleDiscardRetro(deps))
+					w.Post("/retros/{month}/actions", handleAddRetroAction(deps))
+					w.Patch("/retros/{month}/actions/{id}", handleSetRetroActionDone(deps))
+					w.Delete("/retros/{month}/actions/{id}", handleRemoveRetroAction(deps))
 				})
 			})
 		})

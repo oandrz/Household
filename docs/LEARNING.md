@@ -233,7 +233,7 @@ fix in the same branch *created* the sibling.
   naming "the whole group" in one file is not the same as every reader of
   that group having read it** — `router.go`'s own sentence was true and
   specific the entire time; nothing made the three frontend pages built
-  against it go and act on it.
+  against it go and act on it. **RetrosPage.tsx (task 10, `docs/superpowers/sdd/2026-08-16-hearth-retros/`) is the first page since that sweep built against this exact guard from a blank file, and it was given the branch on day one rather than found missing it later** — `GET /retros` is marriage-AND-owner gated the identical shape (`router.go`'s own comment on the group: `requireOwner` is stacked even though a limited member can never hold `CapMarriage` today, precisely so the frontend guard is not leaning on an invariant enforced only one layer down), so the brief named `GoalsPage.tsx`'s branch as the shape to mirror exactly and required the same mutation check (collapse the 403 branch into the generic one, confirm the owner-only test alone goes red and the 500 test stays green) before calling it done. Evidence for this pattern's own point either way: a class of bug recurring three times is what got this written down as a thing to check for on the *next* page, not just the next fix.
 
 - **A fix created the very sibling it was meant to close — inside the same
   branch.** Bills' Task 10 added an archived-account refusal to
@@ -892,6 +892,45 @@ person to ask whether the test could ever have gone red in the first place.
   or regenerating it as the last act before the commit; assertion alone is
   not enough, and "the parity check passed" was true and useless at once.
 
+- Retros' history-row stand-in (Task 10, `RetrosPage.tsx`) rendered its action
+  clause unconditionally: `` `${summary.actionCount} action${...}` `` with no
+  guard, so a finished retro nobody added an action to would have shown "0
+  actions" — the exact defect family the design's own row spec forbids ("never
+  renders `0 actions`"), sitting right next to a mood clause and a quote clause
+  that *were* correctly guarded a few lines above it. Every test that touched
+  this row used `actionCount: 3`; nothing ever supplied 0, so the gap shipped
+  and stayed green through a full lint-and-test pass. Caught while building
+  Task 11's `RetroHistoryList` and porting the row markup out of the stand-in,
+  not by a failing test — the same way pattern 1's sibling defects are usually
+  found, by rereading code a later task has to touch anyway rather than by the
+  original suite noticing. Fixed by guarding on `actionCount > 0`, matching
+  the quote clause's own `summary.quote ? ... : null` shape, with a test
+  (`RetroHistoryList.test.tsx`) that supplies `actionCount: 0` specifically to
+  make sure the gap cannot reopen unnoticed.
+
+- **The silent-absorption class, three instances in one feature.**
+  `stubFetchRoutes` throws on an unregistered route *before* any capture
+  runs, and across three separate Retros tasks that throw was then swallowed
+  rather than surfaced, leaving the suite green each time. First (Task 13):
+  `TestSaveDraftLeavesItADraft`'s whole claim — that Save never also
+  finishes the retro — could not fail, because the `complete` route was
+  never registered: a `handleSaveDraft` that also called `finishRetro` would
+  throw on the unregistered POST, and `RetroModal`'s own `.catch` swallowed
+  it before the test's capture spy ever saw a call. Second (Task 14): a
+  previous-month budget route with no registered stub was found only by
+  tracing `useBudget`'s *second* query — the one `MoneyCheckInPanel` also
+  fires — not the obvious first one. Third, same task: `useHouseholdMembers`
+  fires unconditionally the moment `RetroModal` mounts, was unregistered in
+  every one of that component's tests, and TanStack Query turned the thrown
+  fetch into `members.error` with zero visible failure — the same shape as
+  the first instance, a query boundary absorbing the throw instead of a
+  component's own `catch`. **The fix is the same in all three: when a
+  test's whole claim is that a call was *not* made, register the route
+  anyway.** An unregistered route makes a wrongful call indistinguishable
+  from a suite that never wired the fixture in the first place; a registered
+  one lets the wrongful call actually get recorded, which is the only way
+  the assertion means what it says.
+
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
 a different reason than the one you meant to prove, that is not yet proof
@@ -1160,6 +1199,29 @@ something only that guard can produce.
   and the panel inside it), because the first one is structurally incapable
   of failing there. Six modals were re-measured that way afterwards; only
   this one was broken, which is exactly why nobody would have gone looking.
+
+- Retros, Task 13: **a UI-layer last-write-wins, after the whole backend was
+  built to prevent it.** Decision 6 refuses a stale save at the database with
+  a `version` guard, specifically so two partners typing into one draft can
+  never silently overwrite each other. The conflict banner's own Reload
+  button undid that protection one layer up: clicking it cleared
+  `useRetro`'s `conflict` flag and re-fetched the retro, but never re-seeded
+  the modal's own local `mood`/`wentWell`/`wasHard`/`notes` state from the
+  fresh data — so the fields on screen stayed exactly as the first partner
+  had left them, and the next Save sent that stale text back carrying the
+  *new* version number, overwriting the partner's just-written paragraph
+  with no mismatch left to catch it, because the version had just been
+  refreshed to match. No unit test would have found this: every existing
+  conflict test asserted the banner appeared and Save/Finish were disabled,
+  never that a *subsequent* successful save carried the reloaded data. Found
+  in a real browser, opening the same draft in two sessions and typing into
+  both. Fixed inside the one-way `hadConflict` latch this task already
+  ruled for: Reload no longer re-enables editing at all — the typed text
+  stays on screen to be copied by hand, and the person has to close and
+  reopen the modal to get a genuinely fresh, correctly-seeded editor. **A
+  concurrency guard built at the database only protects the request that
+  reaches it — a UI control offering to "recover" from the guard's own
+  refusal needs the same scrutiny as the write path itself.**
 
 **If a behaviour depends on the platform, verify it in the platform.** A real
 browser is what found every frontend defect above, and nothing else could
@@ -1588,6 +1650,92 @@ here can see that; the re-walk pressed Enter in a real browser and checked
 no modal opened. "Add contribution" carries the same pair for the same
 reason, and its comment is where this was learned the first time.
 
+**Second instance, 2026-08-16 — the four notification rows.** Same shape,
+found by reading rather than walking, while answering "what's next" for
+Marriage. `Notifications — bill due reminders`, `— overspend alerts`,
+`— monthly retro reminder` and `— weekly family digest` were all ✅. Everything
+under them is real: the `notification_preferences` table, the repository, `GET`
+and `PATCH /household/notifications`, `NotificationsPanel.tsx`, tests on all of
+it. **Nothing sends any of them.** `usecase.Mailer` has exactly three methods —
+`SendMagicLink`, `SendInvite`, `SendSignupLink`/`SendSignupForExistingAccount` —
+no caller anywhere reads a household's preferences in order to mail something,
+and nothing in this codebase runs on a clock at all (the only cron in the
+project is the box's nightly backup). The design's copy is a delivery promise,
+not a switch: "Bill due reminders (3 days before)".
+
+What is new here, beyond confirming the pattern:
+
+- **A toggle is a plausible-looking terminus.** Goals' gap was a missing
+  button — an absence, visible the moment someone looked for it. This one is
+  a present, working, satisfying control: it moves, it persists, it survives a
+  reload. Nothing about the screen suggests the far end is missing, which is
+  why four rows sat wrong for weeks while every walk passed.
+- **The mechanical check generalises.** For Goals it was "for each mutation a
+  hook returns, grep for a caller outside the hook". The same question asked of
+  a *stored preference* is: grep for a reader of that column outside the code
+  that writes and returns it. Four columns, no readers. Thirty seconds again.
+- **The headline number hid it.** The tracker's "73 of 103 built or partly
+  built" counts ✅ and 🟡 identically, so correcting four rows moved no summary
+  figure at all. A count that treats "done" and "partly done" as one bucket
+  cannot report this class of error.
+
+Corrected in `docs/FEATURE_TRACKER.md` to 🟡 with the gap named on each row
+(Household settings 15/4/2 → 11/8/2, totals 60/13/28/2 → 56/17/28/2, no row
+added or removed). Deliberately **not** fixed in code: building this product's
+first scheduler is a spec of its own, and Budget decision 1, Goals decision 4
+and Bills decision 3 have each already refused to invent one inside a feature
+that merely wanted it.
+
+**Third instance, 2026-08-16 — the "+ Add an action" composer, and this time
+the gap was in the plan, not in any implementation.** The design's modal
+draws "+ Add an action & assign it to one of you" as its own control,
+`POST /retros/{month}/actions` existed from Task 8, and
+`RetroActionRepository.Add` from Task 6 — every layer was real, the same
+shape as the two instances above. What was missing was a piece neither of
+those two had to name: **no task in the plan ever assigned the composer to
+anyone.** Task 14 built the carry-over control, which also calls
+`POST /retros/{month}/actions` (with `carriedFrom` set) — so by the time
+Task 14 landed, that endpoint had a caller, its tests passed, and nothing
+about the running suite suggested anything was missing. A household could
+carry an old action into the new month and could never write a brand-new
+one; the modal's own free-standing composer simply did not exist. Found by
+the Task 14 implementer itself, reading the design's mockup against what the
+task actually built, not by review or a walk. Ruled in-round rather than
+deferred: Task 14 already owned the modal's actions block, and the
+alternative was shipping a feature whose central control — the one the
+design names first — did nothing. **The mechanical check from the two
+instances above still applies, but it would have found nothing here**,
+because `addAction` did have a caller — just not the one the design
+promised. What this instance adds to the pattern: a plan can give one route
+two different UI purposes and never notice that neither task actually built
+the plainer of the two, because the endpoint's test coverage looks identical
+either way.
+
+**Fourth instance, 2026-08-17, found while writing this very tracker
+correction — the round that documents the third instance turns out to
+contain a fourth nobody had noticed.** `useRetro.ts` exposes `discardDraft`,
+backed by a real migration, a mutation-checked `RetroRepository.DeleteDraft`
+(`WHERE completed_at IS NULL`), `DELETE /retros/{month}`, and the hook's own
+passing test. Task 16's brief, written from the plan, said to mark "Delete a
+draft retro" ✅ alongside the carry-over row. Running the mechanical check
+first — `grep -rl discardDraft web/src/features/marriage/`, excluding the
+hook and its own test file — returned nothing: no component calls it,
+anywhere. The same grep against every other mutation `useRetro.ts` and
+`useRetros.ts` expose found a second, unpromised instance in the same file:
+`removeAction` (`DELETE /retros/{month}/actions/{id}`) has no caller either,
+though no design mockup or task brief ever named a "delete an action"
+control, so there is no tracker row for it to falsify. `docs/FEATURE_TRACKER.md`
+recorded "Delete a draft retro" as 🟡, not the ✅ the brief asked for — CLAUDE.md's
+"do not mark anything ✅ that you cannot point at working code for" outranks a
+brief's row-by-row instruction, the same way it outranked the plan for the
+third instance above. **Closed the same round**: `RetroModal.tsx` was given a
+Discard-draft control in `4d719b8`, `discardDraft` now has a real caller, and
+the row reads ✅. `removeAction` stays uncalled — deliberately, since no
+mockup or brief ever named the control it would back. **A docs task that reconciles a tracker is exactly the
+moment this pattern re-checks itself for free**: the mechanical grep costs
+thirty seconds per hook and was already due, since nobody had run it since
+Task 9 built the hook two tasks before the composer gap even opened.
+
 ---
 
 ## Catalogue by area
@@ -1847,6 +1995,27 @@ reason, and its comment is where this was learned the first time.
   whether the transaction under test ever got something to roll back before
   its forced failure fired** — a hang there is a leaked connection, not a
   flake to retry.
+- Marriage/Retros, Task 7: **a third gate nobody had named, found only
+  because a mutation test needed to build state that turned out to be
+  unbuildable.** The guard's mutation test wanted to prove
+  `requireCapability(marriage)` stacked on `requireOwner` really does refuse
+  a limited member holding marriage — the brief's own instruction was to
+  build that state at the repository level, matching how every earlier
+  money-group guard test in this codebase constructs its fixture. It cannot
+  be built that way here: `membership_repo.go` carries a database `CHECK`
+  constraint, `limited_members_have_no_marriage`, that refuses the insert
+  outright, deliberately, and undocumented anywhere the plan's own author had
+  read before writing the brief. The state the test needed to construct — a
+  limited member who somehow holds `marriage` — is one the schema itself
+  makes impossible to create, which is stronger than any guard code above it
+  could be, and stronger than the plan expected. Fixed by building the
+  fixture with a `MembershipRepository` double instead of a real insert, the
+  only way to represent a state the database refuses to store; the two
+  application-layer guards (`requireCapability`, `requireOwner`) are still
+  proven independently against it. **A defence can be real and still
+  invisible to the plan that assumes it isn't there** — the CHECK constraint
+  was doing its job the entire time, silently, and the only reason it
+  surfaced at all was a test that needed to defeat it and could not.
 
 ### HTTP layer
 
@@ -2030,6 +2199,27 @@ route with a missing guard has no second line of defence.
   reconstructs it and is what a router-walk test must read instead. Would have
   failed against a *correct* implementation — verified against the router's
   own source, not assumed from the property's name.
+- Adding a capability-guard route with only a nested child and no index route
+  (task 10's `marriageGuardRoute`, one child: `retros`) does not make the bare
+  parent path 404 the way it did before the route existed. Before task 10,
+  `/marriage` fell through to `rootRoute`'s own `notFoundComponent` with
+  `RequireAuth` never running at all, because nothing in the tree matched it.
+  Once `marriageGuardRoute` exists (path `"marriage"`, nested under
+  `shellRoute`), TanStack Router matches it as a real route for the bare path
+  too — `RequireAuth` and `RequireCapability` both run, an unauthenticated
+  visitor is bounced to `/sign-in` same as any real route, but an
+  authenticated one who clears the guard sees `AppShell`'s sidebar with a
+  *blank content area*, not a 404 and not the child page. Found empirically
+  (a probe test, not a docs read) after a pre-existing router test asserting
+  "`/marriage` renders Page not found" started failing for the wrong reason —
+  it looked like the redirect assertion was broken, but the actual cause was
+  that `/marriage` had quietly become a real, matched route. `moneyGuardRoute`
+  never shows this because it has an index child (`moneyIndexRoute`, path
+  `"/"`) that gives the bare parent path a real page — a route with children
+  but no index is the shape that produces the blank-shell case. Check for an
+  index route (or accept the blank content area explicitly, as task 10 did
+  for Marriage — see `docs/FEATURE_TRACKER.md` section 6) whenever a new
+  guard route's first child is not itself the parent's own landing page.
 - A task brief's own `formatMoney` code butted every currency symbol directly
   against the digits (`Rp85,400,000`), contradicting the same brief's own IDR
   test (`Rp 85,400,000`) — neither could have been right as given. Fixed with
@@ -2418,6 +2608,49 @@ route with a missing guard has no second line of defence.
   reusable formula is reusable up to the point a sibling's layout has less
   slack than the site it was proven on — screenshot the applied change in
   its own tightest real state before assuming the pattern travelled clean.**
+- **A summary row's only count is not automatically the count a second
+  caller needs.** `GET /retros`' `actionCount` was built for
+  `RetroHistoryList` (spec: "K counts all of that retro's actions, ticked or
+  not"), and it is the only number `retro.sql`'s `ListRetros` computed.
+  Overview's `NextRetroCard` (Task 15) needed a different question answered
+  — "is there anything still outstanding" — and read `actionCount` anyway,
+  because it was the only field on the wire: a retro whose three actions
+  were all ticked still showed "3 actions" on the home page, permanently.
+  Task 15's own report named the gap explicitly rather than hiding it, which
+  is what let it get closed later instead of forgotten. The fix was not a
+  frontend filter (the list response carries no per-action detail to filter)
+  but a second correlated subquery next to the first —
+  `(SELECT count(*) ... WHERE done_at IS NULL) AS open_action_count` — carried
+  through `RetroSummary`, `retroSummaryDTO` and the zod schema as
+  `openActionCount`, a sibling field rather than a replacement, since
+  `RetroHistoryList`'s own total is still correct for what it shows.
+  Mutation-checked by making the new subquery ignore `done_at`: the Postgres
+  test (three actions, two ticked, asserting `actionCount == 3` and
+  `openActionCount == 1`) went red for exactly that reason. The frontend test
+  needed a fixture where the two numbers actively disagree — `actionCount:
+  3, openActionCount: 0` — to catch a `> 0` guard that was still reading the
+  total; a fixture where they happened to match would have passed against
+  that exact bug. **When two call sites read the same summary field for two
+  different questions, that is a sign the field is doing two jobs — add the
+  second number at the layer that can compute it correctly, rather than
+  reusing the first number and hoping the difference never matters.**
+  **The same discipline was applied at three layers here and missed at a
+  fourth on the first pass.** The Postgres test disagreed the two counts on
+  purpose; the frontend test disagreed them on purpose; but the HTTP
+  wire-shape test that proves the field actually reaches the wire — added in
+  the same task, to catch exactly the kind of hand-transcribed-JSON gap
+  Task 7 had already found for itself — seeded a single, never-ticked
+  action, so `actionCount == openActionCount` at that one seam and a
+  regression writing `OpenActionCount: s.ActionCount` (the total, under the
+  open field's name) would have passed it. Review named the missing case
+  precisely; the fix round added a dedicated test with two actions, one
+  ticked, and proved the gap was real rather than theoretical by running the
+  same regression against both — the new test went red, the old one, with
+  its coincidental fixture, stayed green throughout. **A rule this codebase
+  already knows ("make the fixture disagree") has to be re-applied at every
+  layer a value crosses, not assumed to travel with the value** — a fixture
+  chosen for one layer's convenience can accidentally satisfy a neighbouring
+  layer's whole reason for existing.
 
 ### Tooling and infrastructure
 
@@ -2502,6 +2735,33 @@ route with a missing guard has no second line of defence.
   still unverified. This is the refinement of `proving-tests-can-fail` — a
   green test proves nothing until you have seen it fail, and a red one proves
   nothing either until you have checked it went red for the stated reason.
+- **On this host, a bind-mounted source change does not reliably reach
+  either dev-mode watcher, and `docker exec … cat` proves nothing about
+  what the dev server is actually serving.** Verifying the retro
+  open-action-count fix in a real browser (`NextRetroCard` reading
+  `openActionCount`), the Overview page kept rendering only four cards —
+  no fifth "Next retro" card, and `GET /api/v1/retros` never once appeared
+  in `performance.getEntriesByType('resource')` after a clean reload, even
+  though `me.data?.capabilities` genuinely included `marriage`. `docker
+  exec hearth-api-1 cat .../retro_handlers.go` and the same for
+  `hearth-web-1`'s `OverviewPage.tsx` both showed the current, correct
+  file — the bind mount (`./api:/src`, `./web:/app`) was faithfully
+  reflecting host edits. The discriminating check was fetching the module
+  straight from the running dev server, bypassing the browser cache
+  (`fetch('/src/features/overview/OverviewPage.tsx', {cache: 'reload'})`):
+  it returned content with no mention of `NextRetroCard` or `hasMarriage`
+  at all — Vite's own transform cache was stale. `air`'s container log told
+  the same story from the other side: no `building...` line since the
+  previous day, despite every watched file having a fresh mtime inside the
+  container. Both `air` (backend) and Vite's own watcher (frontend) rely on
+  filesystem-change notifications (inotify) that this host's bind mount
+  does not reliably deliver — a known class of gap for virtiofs/gRPC-FUSE
+  volume drivers, not anything about this feature's code. **A container
+  having the right file on disk is not evidence its dev server has picked
+  it up; when a live-reloading dev process goes quiet in its own log for
+  longer than a save-and-check cycle should take, restart it
+  (`docker compose restart api web`) before spending more time doubting the
+  code.**
 
 ### The first production deployment (2026-08-15)
 

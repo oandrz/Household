@@ -84,6 +84,8 @@ func run() error {
 	budgetRepo := postgres.NewBudgetRepo(db)
 	goalRepo := postgres.NewGoalRepo(db)
 	billRepo := postgres.NewBillRepo(db)
+	retroRepo := postgres.NewRetroRepo(db)
+	retroActionRepo := postgres.NewRetroActionRepo(db)
 
 	hasher := crypto.NewArgon2Hasher(cfg.Argon2Time, cfg.Argon2MemoryKiB, cfg.Argon2Threads)
 	tokens := crypto.NewTokenGenerator()
@@ -191,6 +193,7 @@ func run() error {
 		// hand-entered one (BillDeps' own comment).
 		Categories: categoryRepo,
 	})
+	retroSvc := usecase.NewRetroService(retroRepo, retroActionRepo)
 
 	srv := &http.Server{
 		Addr: fmt.Sprintf(":%d", cfg.Port),
@@ -207,6 +210,7 @@ func run() error {
 			Budgets:      budgetSvc,
 			Goals:        goalSvc,
 			Bills:        billSvc,
+			Retros:       retroSvc,
 			Users:        users,
 			Memberships:  memberships,
 			Sessions:     sessions,

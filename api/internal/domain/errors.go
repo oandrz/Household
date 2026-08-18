@@ -131,4 +131,28 @@ var (
 	// a different currency would silently reinterpret every past figure.
 	// Added in Task 6 (see task-6-report.md).
 	ErrBillCurrencyImmutable = errors.New("a bill's currency cannot be changed")
+
+	// ErrInvalidMood is returned when a mood outside 1..5 arrives from a
+	// request body or a database column. Nothing defaults an invalid mood to
+	// a valid one: a retro with no mood is a real state (NULL), and silently
+	// rounding 7 to 5 would invent a feeling nobody recorded.
+	ErrInvalidMood = errors.New("a mood must be between 1 and 5")
+
+	// ErrRetroChanged is returned when a retro update carries a version older
+	// than the stored one -- the other partner saved while this one was
+	// typing. The write is refused, never merged: silently overwriting the
+	// other person's paragraph is the failure this guard exists to prevent.
+	ErrRetroChanged = errors.New("this retro changed while you were editing it")
+
+	// ErrRetroNothingToStart is returned when both candidate months -- the
+	// current one and the previous one -- already have a retro, so there is
+	// nothing left for "Start retro" to create (domain.StartableMonth's own
+	// `ok == false` case). The HTTP layer maps this to 409 (Task 8).
+	ErrRetroNothingToStart = errors.New("both candidate months already have a retro")
+
+	// ErrRetroActionBodyRequired is returned when an action's body is empty
+	// or whitespace-only. A blank row on the retro detail is indistinguishable
+	// from a rendering bug, which is why it is refused rather than trimmed to
+	// empty and saved.
+	ErrRetroActionBodyRequired = errors.New("a retro action needs a body")
 )

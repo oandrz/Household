@@ -88,6 +88,11 @@ export DOCKER_HOST=unix:///Volumes/Oink_Machine/.colima/default/docker.sock
 export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
 ```
 
+`go` itself is not on `PATH` in a bare shell on this machine either — it lives
+at `/Volumes/Oink_Machine/.local/opt/go-v1.24.2/bin`. Add it before running
+`go` directly, or any `make` target (`make lint`, `make test`) that shells out
+to it.
+
 ## How code here is written
 
 These are requirements, not preferences. A feature that works but nobody can

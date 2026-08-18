@@ -12,12 +12,15 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
-// maxRequestBodyBytes bounds every JSON body this API accepts. It is one
-// constant used everywhere, rather than a per-handler value, so the limit
-// cannot silently drift from one route to another. 1 KiB is generous for
-// every request shape in this file: the largest legitimate body (a member
-// invite, or a full household update) is a few hundred bytes of field names
-// and short strings.
+// maxRequestBodyBytes bounds every JSON body this API accepts, except the
+// two routes named on decodeJSONBodyLimit's own doc comment below, which
+// carry a legitimately larger shape and call decodeJSONBodyLimit directly
+// with their own constant instead. It is one constant used everywhere else,
+// rather than a per-handler value, so the limit cannot silently drift from
+// one route to another. 1 KiB is generous for every other request shape in
+// this file: the largest legitimate body (a member invite, or a full
+// household update) is a few hundred bytes of field names and short
+// strings.
 const maxRequestBodyBytes = 1024
 
 // decodeJSONBody reads r.Body bounded to maxRequestBodyBytes and decodes it
@@ -40,15 +43,23 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, dest any) bool {
 	return decodeJSONBodyLimit(w, r, dest, maxRequestBodyBytes)
 }
 
-// decodeJSONBodyLimit is decodeJSONBody's general form, for the one route
-// whose legitimate body does not fit maxRequestBodyBytes' "a few hundred
-// bytes" assumption: PUT /budgets/{month} always carries the household's
-// entire category list as budget lines (full-replace, never a patch -- see
-// BudgetRepository.Upsert's own doc comment), and that list's length is not
-// bounded by this codebase (Task 10 adds category creation with no cap).
-// budget_handlers.go's maxBudgetRequestBodyBytes is the caller that needs
-// this; every other route keeps using the tighter default via
-// decodeJSONBody above.
+// decodeJSONBodyLimit is decodeJSONBody's general form, for the routes whose
+// legitimate body does not fit maxRequestBodyBytes' "a few hundred bytes"
+// assumption:
+//
+//   - PUT /budgets/{month} always carries the household's entire category
+//     list as budget lines (full-replace, never a patch -- see
+//     BudgetRepository.Upsert's own doc comment), and that list's length is
+//     not bounded by this codebase (Task 10 adds category creation with no
+//     cap). budget_handlers.go's maxBudgetRequestBodyBytes is the caller
+//     that needs this.
+//   - PATCH /retros/{month} carries three free-text fields (went well / was
+//     hard / notes) this feature deliberately never caps (RetroUpdate's own
+//     doc comment in ports.go). retro_handlers.go's
+//     maxRetroRequestBodyBytes is the caller that needs this.
+//
+// Every other route keeps using the tighter default via decodeJSONBody
+// above.
 func decodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, dest any, maxBytes int64) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 	if err := json.NewDecoder(r.Body).Decode(dest); err != nil {
@@ -292,6 +303,27 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 		// is the fallback for whenever that lookup itself cannot complete.
 		WriteError(w, http.StatusUnprocessableEntity, "BILL_CURRENCY_IMMUTABLE",
 			"A bill's currency cannot be changed after it is created.", nil)
+	// --- Retros (Task 8) --------------------------------------------------
+	case errors.Is(err, domain.ErrRetroChanged):
+		WriteError(w, http.StatusConflict, "RETRO_CHANGED",
+			"Someone else saved this retro while you were editing it. Reload to see their changes.", nil)
+	case errors.Is(err, domain.ErrRetroNothingToStart):
+		// Deliberately its own code, not RETRO_EXISTS: the two conflicts have
+		// different causes and want different copy. RETRO_EXISTS
+		// (handleStartRetro's own case, ahead of MapDomainError -- see its
+		// comment) is the race of two concurrent Create calls for the SAME
+		// free month; this is the calm case of both candidate months already
+		// being taken, which the Start-retro button should not even be able
+		// to reach (it would not be rendered -- RetrosView.StartMonth would
+		// already be nil), so it needs its own message rather than
+		// "someone already started it," which would be actively wrong here.
+		WriteError(w, http.StatusConflict, "RETRO_NOTHING_TO_START",
+			"Both this month and last month already have a retro.", nil)
+	case errors.Is(err, domain.ErrInvalidMood):
+		WriteError(w, http.StatusBadRequest, "INVALID_MOOD", "That is not a mood we can record.", nil)
+	case errors.Is(err, domain.ErrRetroActionBodyRequired):
+		WriteError(w, http.StatusBadRequest, "RETRO_ACTION_BODY_REQUIRED",
+			"Give this action some text before saving it.", nil)
 	// domain.ErrUnknownContributionSource has no case here, deliberately: it
 	// means a goal_contributions row holds a source value this code never
 	// wrote (ParseContributionSource's own doc comment), which is a real

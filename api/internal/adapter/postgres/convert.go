@@ -63,6 +63,26 @@ func nullableUUID(id *string) pgtype.UUID {
 	return uuid(*id)
 }
 
+// uuidLooksValid reports whether id parses as a UUID, without the silent
+// fall-through to the zero value uuid() and nullableUUID() both use. Their
+// own doc comments' reasoning -- "a parse failure here can only mean a
+// caller passed a malformed id, and the resulting query simply matches no
+// row" -- holds for every ordinary equality comparison (a malformed id just
+// fails to match, same as a real id from another household), but breaks for
+// a column compared with "$n IS NULL OR ...": there, a parse failure and a
+// genuinely absent value both produce the identical zero pgtype.UUID{}, so
+// the query cannot tell "malformed" apart from "legitimately not set" --
+// only a caller that checks before the id ever reaches SQL can. Every id in
+// this repository is either compared this second way (retro_actions.
+// carried_from, via AddRetroAction's own comment) or originates from a row
+// this package already produced (every other id) — this exists for the
+// first case, where the id can instead arrive from a request body a caller
+// outside this package constructed.
+func uuidLooksValid(id string) bool {
+	var u pgtype.UUID
+	return u.Scan(id) == nil
+}
+
 func uuidToString(u pgtype.UUID) string { return u.String() }
 
 func timestamptz(t time.Time) pgtype.Timestamptz {
@@ -227,4 +247,6 @@ var (
 	_ usecase.BudgetRepository       = (*BudgetRepo)(nil)
 	_ usecase.GoalRepository         = (*GoalRepo)(nil)
 	_ usecase.BillRepository         = (*BillRepo)(nil)
+	_ usecase.RetroRepository        = (*RetroRepo)(nil)
+	_ usecase.RetroActionRepository  = (*RetroActionRepo)(nil)
 )

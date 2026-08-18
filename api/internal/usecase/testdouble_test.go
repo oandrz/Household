@@ -2861,3 +2861,378 @@ func (r *fakeBillRepo) MonthTotals(_ context.Context, householdID string, month 
 // var _ usecase.BillRepository = (*fakeBillRepo)(nil) below is load-bearing,
 // not decoration -- see goalDouble's own identical assertion for why.
 var _ usecase.BillRepository = (*fakeBillRepo)(nil)
+
+// --- RetroRepository ---------------------------------------------------
+
+// retroRow is one retro as the double stores it: RetroRecord plus the
+// household scope, which RetroRecord itself has no field for (the same
+// split goalDouble's own map -- keyed data, HouseholdID read off the
+// embedded domain.Goal -- draws for a different reason; RetroRecord embeds
+// no domain type to carry it, so the row keeps it alongside instead).
+type retroRow struct {
+	usecase.RetroRecord
+	HouseholdID string
+}
+
+// retroRepoDouble is the in-memory RetroRepository every RetroService test
+// runs against -- Task 3's own List/Month tests, and Task 4's write-path
+// tests reusing this same double. It implements every method the port
+// declares, including the ones Task 3's tests never call (Create, Update,
+// Complete, DeleteDraft): a double that only satisfies the methods its own
+// author happened to test is not honouring the port's whole contract
+// (Liskov, CLAUDE.md), and Task 4 needs the rest of this double to already
+// behave correctly when it arrives.
+//
+// Every seeded and created row lives under householdID "hh" -- the brief's
+// own test fixtures never pass a household id into seed, so this is the one
+// value every test in this package actually uses; List/ByMonth/etc still
+// filter on it explicitly, the same as a real repository would for any
+// other household id.
+type retroRepoDouble struct {
+	rows map[string]*retroRow // keyed by id
+	n    int
+
+	// writes counts every call that mutates a row -- Create, Update,
+	// Complete, DeleteDraft -- the same role userDouble.count and
+	// sessionDouble.count play for their own repositories. Task 3's own
+	// tests never touch it (List and Month write nothing). It exists for
+	// Task 4's TestRetroSaveRefusesAnImpossibleMood, which reads
+	// retros.writes after a refused Save to prove the refusal happened
+	// before any repository call, not just that Save returned an error --
+	// the same "no partial write" question this codebase's guarding-partial-
+	// writes concern asks everywhere else.
+	writes int
+
+	// actions, when wired via setActions, is the RetroActionRepository
+	// double List reads ActionCount from -- the mutual reference
+	// goalDouble.budgets/fakeBudgetRepo.setGoals already establishes for a
+	// different pair of doubles, for the identical reason: one double
+	// supplies a figure a real repository would only know via a SQL join.
+	// nil is fine for a test that never calls setActions; List then reports
+	// ActionCount 0 for every row, which is what every Task 3 test that
+	// doesn't wire this already expects.
+	actions *retroActionRepoDouble
+}
+
+func newRetroRepoDouble() *retroRepoDouble {
+	return &retroRepoDouble{rows: map[string]*retroRow{}}
+}
+
+// setActions completes the mutual reference List needs to compute
+// ActionCount, and Add (on the other double) needs to resolve which month
+// an action's retro belongs to -- see retroActionRepoDouble.setRetros for
+// the reverse direction. Call both setters when a test needs the two
+// doubles to agree with each other; neither is required when a test only
+// exercises one repository's own port in isolation.
+func (d *retroRepoDouble) setActions(a *retroActionRepoDouble) { d.actions = a }
+
+// seed inserts a retro directly, bypassing Create, for a test that wants one
+// to already exist. mood == 0 means "nobody has picked one" (RetroRecord.Mood
+// is a pointer for exactly this reason -- 0 is not a mood); any other value
+// is stored as that mood, draft or finished alike, so a test can seed a
+// draft that already carries a mood (decision 2's own scenario: a mood is
+// picked before the rest of the retro is finished). finished stamps
+// CompletedAt at the retro's own month -- an arbitrary but deterministic
+// instant; no test in this package reads it -- and leaves a draft's
+// CompletedAt nil, the same state Create leaves behind.
+func (d *retroRepoDouble) seed(month time.Time, mood int, notes string, finished bool) usecase.RetroRecord {
+	d.n++
+	row := &retroRow{
+		RetroRecord: usecase.RetroRecord{
+			ID:      fmt.Sprintf("retro-%d", d.n),
+			Month:   month,
+			Notes:   notes,
+			Version: 1,
+		},
+		HouseholdID: "hh",
+	}
+	if mood != 0 {
+		m := mood
+		row.Mood = &m
+	}
+	if finished {
+		at := month
+		row.CompletedAt = &at
+	}
+	d.rows[row.ID] = row
+	return row.RetroRecord
+}
+
+// Create mirrors the real Create's own UNIQUE (household_id, month)
+// constraint: a second Create for a month that already has a row reports
+// domain.ErrAlreadyExists rather than overwriting it, which is what makes a
+// double-clicked "Start retro" button harmless in the real adapter too.
+func (d *retroRepoDouble) Create(_ context.Context, householdID string, month time.Time) (usecase.RetroRecord, error) {
+	for _, row := range d.rows {
+		if row.HouseholdID == householdID && row.Month.Equal(month) {
+			return usecase.RetroRecord{}, domain.ErrAlreadyExists
+		}
+	}
+	d.n++
+	d.writes++
+	row := &retroRow{
+		RetroRecord: usecase.RetroRecord{ID: fmt.Sprintf("retro-%d", d.n), Month: month, Version: 1},
+		HouseholdID: householdID,
+	}
+	d.rows[row.ID] = row
+	return row.RetroRecord, nil
+}
+
+// ByMonth reports domain.ErrNotFound when the month has no retro -- the
+// port's own contract, and the distinction RetroService.Month relies on to
+// tell "not started" apart from a real failure.
+func (d *retroRepoDouble) ByMonth(_ context.Context, householdID string, month time.Time) (usecase.RetroRecord, error) {
+	for _, row := range d.rows {
+		if row.HouseholdID == householdID && row.Month.Equal(month) {
+			return row.RetroRecord, nil
+		}
+	}
+	return usecase.RetroRecord{}, domain.ErrNotFound
+}
+
+// List returns every retro for householdID, newest month first -- the
+// port's own ordering contract, which RetroService.List relies on rather
+// than re-sorting. ActionCount and OpenActionCount are both computed from
+// the wired actions double (see setActions) when one is set -- the
+// double's own stand-in for the real repository's two correlated
+// subqueries against retro_actions -- and 0 when none is wired, which is
+// every Task 3 test that doesn't call setActions: this double must not
+// hardcode either figure regardless, since the port's own doc comment
+// ("each carrying its own action count AND open action count") is a real
+// part of the contract, not decoration a double is free to skip -- the
+// same finding that already applies to ActionCount above (see this
+// comment's own history) would apply again to OpenActionCount if it were
+// left at its zero value.
+func (d *retroRepoDouble) List(_ context.Context, householdID string) ([]usecase.RetroSummary, error) {
+	var out []usecase.RetroSummary
+	for _, row := range d.rows {
+		if row.HouseholdID != householdID {
+			continue
+		}
+		summary := usecase.RetroSummary{Retro: row.RetroRecord}
+		if d.actions != nil {
+			for _, a := range d.actions.rows {
+				if a.HouseholdID == householdID && a.RetroID == row.ID {
+					summary.ActionCount++
+					if a.DoneAt == nil {
+						summary.OpenActionCount++
+					}
+				}
+			}
+		}
+		out = append(out, summary)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Retro.Month.After(out[j].Retro.Month) })
+	return out, nil
+}
+
+// Update mirrors the real repository's guarded UPDATE: a row is matched by
+// id, household AND month (RetroUpdate.Month's own doc comment explains
+// why -- a zero-row match on id+household alone cannot tell "no such retro"
+// apart from "the version moved," so the real adapter re-reads ByMonth to
+// decide, reproduced here by keying the match on Month directly). A version
+// that no longer matches the stored one reports domain.ErrRetroChanged and
+// writes nothing; the returned record always carries the NEW version.
+func (d *retroRepoDouble) Update(_ context.Context, u usecase.RetroUpdate) (usecase.RetroRecord, error) {
+	row, ok := d.rows[u.RetroID]
+	if !ok || row.HouseholdID != u.HouseholdID || !row.Month.Equal(u.Month) {
+		return usecase.RetroRecord{}, domain.ErrNotFound
+	}
+	if row.Version != u.Version {
+		return usecase.RetroRecord{}, domain.ErrRetroChanged
+	}
+	d.writes++
+	row.Mood = u.Mood
+	row.WentWell = u.WentWell
+	row.WasHard = u.WasHard
+	row.Notes = u.Notes
+	row.Version++
+	return row.RetroRecord, nil
+}
+
+// Complete stamps CompletedAt with at, idempotently: completing an
+// already-finished retro leaves the FIRST stamp rather than moving it
+// forward, the same idempotence goalDouble.SetArchived gives archiving.
+func (d *retroRepoDouble) Complete(_ context.Context, householdID, retroID string, at time.Time) (usecase.RetroRecord, error) {
+	row, ok := d.rows[retroID]
+	if !ok || row.HouseholdID != householdID {
+		return usecase.RetroRecord{}, domain.ErrNotFound
+	}
+	d.writes++
+	if row.CompletedAt == nil {
+		stamp := at
+		row.CompletedAt = &stamp
+	}
+	return row.RetroRecord, nil
+}
+
+// DeleteDraft mirrors the real repository's WHERE ... AND completed_at IS
+// NULL: a finished retro's zero-row match reports domain.ErrNotFound, the
+// same as a retro that never existed -- deleting a draft is not this
+// double's job to allow just because the id and household matched.
+func (d *retroRepoDouble) DeleteDraft(_ context.Context, householdID, retroID string) error {
+	row, ok := d.rows[retroID]
+	if !ok || row.HouseholdID != householdID || row.CompletedAt != nil {
+		return domain.ErrNotFound
+	}
+	d.writes++
+	delete(d.rows, retroID)
+	return nil
+}
+
+// var _ usecase.RetroRepository = (*retroRepoDouble)(nil) below is
+// load-bearing, not decoration -- see goalDouble's own identical assertion
+// for why.
+var _ usecase.RetroRepository = (*retroRepoDouble)(nil)
+
+// --- RetroActionRepository ----------------------------------------------
+
+// retroActionRow is one action as the double stores it: RetroActionRecord
+// plus the household scope and the month it belongs to. RetroActionRecord
+// itself carries neither -- only RetroID -- so a real repository answers
+// OpenInMonth by joining retro_actions back to retros for the month; this
+// double keeps that joined fact on the row directly rather than reaching
+// into a retroRepoDouble it is not guaranteed to share a test with.
+type retroActionRow struct {
+	usecase.RetroActionRecord
+	HouseholdID string
+	Month       time.Time
+}
+
+// retroActionRepoDouble is the in-memory RetroActionRepository every
+// RetroService test runs against, implementing every port method for the
+// same Liskov reason retroRepoDouble does.
+type retroActionRepoDouble struct {
+	rows map[string]*retroActionRow
+	n    int
+
+	// retros, when wired via setRetros, is the RetroRepository double Add
+	// reads a retro's own month from, so an action created through Add (as
+	// opposed to seedOpen, which is told the month directly) can still
+	// surface through OpenInMonth. See retroRepoDouble.setActions for the
+	// reverse direction and why this is the same mutual-reference pattern
+	// goalDouble/fakeBudgetRepo already use. nil is fine for a test that
+	// never calls setRetros; Add then leaves Month at its zero value, and
+	// such an action is findable only through ForRetro, never OpenInMonth.
+	retros *retroRepoDouble
+}
+
+func newRetroActionRepoDouble() *retroActionRepoDouble {
+	return &retroActionRepoDouble{rows: map[string]*retroActionRow{}}
+}
+
+// setRetros completes the mutual reference Add needs -- see this struct's
+// own retros field comment.
+func (d *retroActionRepoDouble) setRetros(r *retroRepoDouble) { d.retros = r }
+
+// seedOpen inserts an open (unticked) action for retroID, against month,
+// for the "Still open from July" fixture OpenInMonth answers -- and for
+// ForRetro, since a real row always belongs to a real retro. retroID is a
+// caller-supplied parameter, not left empty: a double that let RetroID
+// default to "" would make ForRetro(ctx, hh, someRetroID) return nothing
+// for a seeded action regardless of which retro a test meant it for, which
+// is exactly the gap a Month implementation that never called ForRetro at
+// all could hide behind (code review finding, Task 3 fix round). Household
+// "hh", matching retroRepoDouble.seed's own fixed household -- see that
+// method's comment for why.
+func (d *retroActionRepoDouble) seedOpen(retroID string, month time.Time, body string) usecase.RetroActionRecord {
+	d.n++
+	row := &retroActionRow{
+		RetroActionRecord: usecase.RetroActionRecord{ID: fmt.Sprintf("action-%d", d.n), RetroID: retroID, Body: body},
+		HouseholdID:       "hh",
+		Month:             month,
+	}
+	d.rows[row.ID] = row
+	return row.RetroActionRecord
+}
+
+// Add writes one action. RetroActionInput carries a RetroID but no month
+// (an action has no month column of its own -- only its retro does), so
+// Month is resolved through the wired retros double when one is set (see
+// setRetros); without one, Month stays the zero value and the action is
+// findable only through ForRetro, never OpenInMonth -- the same documented
+// limitation this double's retros field comment states.
+func (d *retroActionRepoDouble) Add(_ context.Context, in usecase.RetroActionInput) (usecase.RetroActionRecord, error) {
+	d.n++
+	row := &retroActionRow{
+		RetroActionRecord: usecase.RetroActionRecord{
+			ID:                    fmt.Sprintf("action-%d", d.n),
+			RetroID:               in.RetroID,
+			Body:                  in.Body,
+			CarriedFrom:           in.CarriedFrom,
+			AssigneeMembershipIDs: in.AssigneeMembershipIDs,
+		},
+		HouseholdID: in.HouseholdID,
+	}
+	if d.retros != nil {
+		if retro, ok := d.retros.rows[in.RetroID]; ok {
+			row.Month = retro.Month
+		}
+	}
+	d.rows[row.ID] = row
+	return row.RetroActionRecord, nil
+}
+
+// ForRetro returns a retro's actions in insertion order -- map iteration
+// order is not that, so this sorts by id, which encodes creation order for
+// every row this double ever produces (both seedOpen and Add assign
+// "action-N" with N increasing).
+func (d *retroActionRepoDouble) ForRetro(_ context.Context, householdID, retroID string) ([]usecase.RetroActionRecord, error) {
+	var out []usecase.RetroActionRecord
+	for _, row := range d.rows {
+		if row.HouseholdID == householdID && row.RetroID == retroID {
+			out = append(out, row.RetroActionRecord)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+// SetDone ticks or unticks, clearing DoneAt on done=false rather than
+// stamping a "not done" time -- the port's own contract -- and reports
+// domain.ErrNotFound on a zero-row match.
+func (d *retroActionRepoDouble) SetDone(_ context.Context, householdID, actionID string, done bool, at time.Time) error {
+	row, ok := d.rows[actionID]
+	if !ok || row.HouseholdID != householdID {
+		return domain.ErrNotFound
+	}
+	if done {
+		stamp := at
+		row.DoneAt = &stamp
+	} else {
+		row.DoneAt = nil
+	}
+	return nil
+}
+
+// Remove hard-deletes an action, reporting domain.ErrNotFound on a zero-row
+// match -- the same convention TransactionRepository.Delete and
+// GoalRepository.DeleteContribution use for their own unqualified deletes.
+func (d *retroActionRepoDouble) Remove(_ context.Context, householdID, actionID string) error {
+	row, ok := d.rows[actionID]
+	if !ok || row.HouseholdID != householdID {
+		return domain.ErrNotFound
+	}
+	delete(d.rows, actionID)
+	return nil
+}
+
+// OpenInMonth returns month's unticked actions -- the "Still open from
+// July" offer -- scoped to exactly that month, never a range: a household
+// that skipped months must not be handed an unbounded backlog (spec
+// decision 4).
+func (d *retroActionRepoDouble) OpenInMonth(_ context.Context, householdID string, month time.Time) ([]usecase.RetroActionRecord, error) {
+	var out []usecase.RetroActionRecord
+	for _, row := range d.rows {
+		if row.HouseholdID == householdID && row.Month.Equal(month) && row.DoneAt == nil {
+			out = append(out, row.RetroActionRecord)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+// var _ usecase.RetroActionRepository = (*retroActionRepoDouble)(nil) below
+// is load-bearing, not decoration -- see goalDouble's own identical
+// assertion for why.
+var _ usecase.RetroActionRepository = (*retroActionRepoDouble)(nil)

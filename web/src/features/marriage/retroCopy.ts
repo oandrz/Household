@@ -1,0 +1,387 @@
+// Copy for the Retros screen, in a plain .ts module for the same reason
+// goalCopy.ts/budgetCopy.ts/billCopy.ts are -- eslint's
+// react-refresh/only-export-components rule never has to think about a file
+// that mixes components with other exports, and every user-facing string
+// lives in exactly one place.
+//
+// Not in Task 10's brief file list (only RetrosPage.tsx/.test.tsx,
+// router.tsx, Sidebar.tsx and its test are named) -- split out anyway,
+// matching every one of its four siblings above, none of which keep their
+// copy inline in the page component either.
+import type { RetrosResponse } from "./retroSchemas";
+
+export const RETRO_COPY = {
+  title: "Marriage retros",
+  subtitle: "Monthly check-in, just the two of us",
+
+  // "12 done since Aug 2025" -- the design's own line (dc.html's is_retros
+  // screen), rendered only when doneCount > 0 (RetrosPage.tsx's own guard);
+  // never "0 done".
+  doneSince: (doneCount: number, sinceLabel: string) => `${doneCount} done since ${sinceLabel}`,
+
+  privacyBadge: "🔒 Private — parents only",
+
+  // The design's own "Start July retro" -- month name only, no year (this
+  // month is always within a year of today, so the year adds nothing a
+  // reader needs). startMonth null means both candidate months already have
+  // a retro -- RetrosPage.tsx renders no button at all in that case, so this
+  // is never called with a null month.
+  startRetro: (monthName: string) => `Start ${monthName} retro`,
+
+  emptyHeadline: "No retros yet",
+  emptyBody:
+    "A monthly check-in for just the two of you -- what went well, what was hard, and what to try next.",
+  // Distinct copy from the header's own startRetro() button above, both of
+  // which render together the first time a household has zero retros and a
+  // startable month -- BillsPage.tsx's own "+ Add bill"/"Create your first
+  // bill" precedent: identical text on two buttons on the same screen is two
+  // elements answering to one accessible name.
+  createFirstRetro: "Start your first retro",
+
+  historyTitle: "History",
+  // The draft's own row label (RetroHistoryList.tsx's own RetroHistoryRow)
+  // -- a retro with finished: false is still being written, so its row
+  // shows this instead of the mood/action/quote line a finished retro's row
+  // shows.
+  draftInProgress: "In progress",
+
+  // RetroHistoryList.tsx's own disclosure over a collapsed year -- the
+  // design's own literal text ("Show 2025 (7 more) ↓"). Rendered from data
+  // the page already holds (GET /retros is deliberately unbounded, per the
+  // design doc's "List is deliberately unbounded" section), never a second
+  // fetch.
+  showOlderYear: (year: string, count: number) => `Show ${year} (${count} more) ↓`,
+
+  moodChartTitle: "Mood over 12 months",
+  // MoodChart.tsx's own empty state -- shown when every point in the
+  // twelve-month series is a gap (nobody has finished a retro with a mood
+  // yet). A chart with zero drawable points is not "an empty chart", it is
+  // no chart at all; this replaces it rather than rendering an axis with
+  // nothing on it.
+  moodChartEmpty: "Not enough retros yet to chart a mood trend.",
+  // The chart's own aria-label -- a line drawing is invisible to a screen
+  // reader, so this names the range and how many of those months actually
+  // carry a mood. Never claims a gap is "0" (moodPointDTO's own comment:
+  // null is a gap, never 0) -- it says how many months were *tracked*,
+  // not what an untracked month's value was.
+  moodChartLabel: (fromLabel: string, toLabel: string, trackedCount: number, totalCount: number) =>
+    `Mood from ${fromLabel} to ${toLabel}, ${trackedCount} of ${totalCount} months tracked`,
+  // RetroHistoryList/RetroDetailPanel arrive in Tasks 11-12 -- this is the
+  // placeholder shown in the mount point until a retro is selected there.
+  detailPlaceholder: "Select a retro to see its detail.",
+
+  // RetroDetail.tsx's own load-error copy -- distinct from loadError below,
+  // which is GET /retros' (the history list's) own failure copy. A reader
+  // selecting a month whose detail 500s must not be told "your retros"
+  // failed to load when the list beside it is sitting there, loaded fine.
+  detailLoadError: "Couldn't load this retro.",
+
+  wentWellHeading: "What went well",
+  wasHardHeading: "What was hard",
+  notesHeading: "Notes",
+
+  // "Actions for July" over a June retro's own action list -- the design's
+  // own heading (dc.html): actions decided in a retro are carried out the
+  // month AFTER it, not the retro's own month.
+  actionsHeading: (monthName: string) => `Actions for ${monthName}`,
+
+  // An action's own provenance line, rendered only when RetroAction.carriedFrom
+  // is non-"" (retroActionSchema's own comment). See previousMonthName below
+  // for why this is always resolvable from the retro's own month rather than
+  // needing the carried-from id resolved.
+  carriedFrom: (monthName: string) => `Carried from ${monthName}`,
+
+  moodLabel: (mood: number) => `mood ${mood}/5`,
+
+  // RetroDetail.tsx's own per-row tick failure -- a network error or a
+  // household mid-offline moment must not look like the click did nothing.
+  tickError: "Couldn't update that action. Try again.",
+
+  loadError: "Couldn't load your retros.",
+  // GET /retros is marriage-AND-owner gated (router.go's own comment on the
+  // group: requireOwner is stacked even though a limited member can never
+  // hold CapMarriage today -- domain.ErrLimitedCannotHoldMarriage already
+  // refuses it one layer down, and the route does not lean on that alone).
+  // This explains a 403 rather than showing loadError above or a blank page
+  // -- the same branch GoalsPage.tsx/BillsPage.tsx/BudgetPage.tsx all carry
+  // for their own owner-gated GETs (docs/LEARNING.md pattern 1's own entry
+  // on the class of bug this branch exists to close).
+  ownerOnlyHeading: "Owner only",
+  ownerOnlyBody:
+    "Retros are visible to the household owner. Ask them if you'd like to see where things stand.",
+
+  startError: "Couldn't start a retro. Try again.",
+
+  // RetroModal.tsx (Task 13) below. Distinct string from privacyBadge above
+  // -- the page header and the modal show genuinely different copy at the
+  // design's own two spots (dc.html: "🔒 Private — parents only" on the
+  // header badge, "🔒 Private — just the two of you" under the modal's
+  // title), the same "two real shapes, not one reused" reasoning
+  // monthNameOnly/monthYearLabel already give for this file's month helpers.
+  modalPrivacyBadge: "🔒 Private — just the two of you",
+
+  // The mood radio group's own legend (dc.html's modal: "How was this
+  // month, overall?"), and the five options themselves in the order the
+  // mockup draws them, worst to best -- retroDTO.Mood/domain.ParseMood's own
+  // 1..5 scale, so option N's value is literally N. `label` is each radio's
+  // own accessible name (aria-label): the emoji alone means nothing to a
+  // screen reader, and the tile's visible glyph is the emoji, not this text.
+  moodQuestion: "How was this month, overall?",
+  moodOptions: [
+    { value: 1, emoji: "😞", label: "Terrible" },
+    { value: 2, emoji: "😕", label: "Not great" },
+    { value: 3, emoji: "😐", label: "Okay" },
+    { value: 4, emoji: "🙂", label: "Good" },
+    { value: 5, emoji: "😄", label: "Great" },
+  ] as const,
+
+  // The two textareas' own placeholders, copied verbatim from dc.html's
+  // modal ("One line per win… (each of you adds their own)" /
+  // "Be honest, be kind…") -- wentWellHeading/wasHardHeading above are
+  // reused as-is for these fields' visible labels, since RetroDetail.tsx
+  // already names the same two concepts with the same two words.
+  wentWellPlaceholder: "One line per win… (each of you adds their own)",
+  wasHardPlaceholder: "Be honest, be kind…",
+  // Notes has no placeholder in the mockup at all -- see RetroModal.tsx's
+  // own header comment on why the field exists here despite that.
+  notesPlaceholder: "Anything else worth remembering for next time…",
+
+  // MoneyCheckInPanel.tsx (Task 14) below. "Budget"/"Goals today" are fixed
+  // labels, not functions -- the clause after the colon is composed from
+  // BUDGET_COPY/GOAL_COPY's own strings (Budget's and Goals' own specs
+  // already pin that wording; this panel renders it, it does not invent a
+  // third phrasing for the same figure). "Goals today" carries the
+  // "today" the design spec's decision 3 requires explicitly: budget is the
+  // retro's own month (useBudget(month)), goals are today's live standing
+  // (useGoals(), no month argument at all -- a goal's progress is a
+  // contributions ledger against a target date, not a monthly bucket), and
+  // the panel must say which is which rather than let two differently-scoped
+  // numbers sit side by side looking like they describe the same moment.
+  moneyCheckInHeading: "10-min money check-in",
+  budgetLabel: "Budget",
+  goalsTodayLabel: "Goals today",
+  // Shown instead of "N of M on track"/"N with no date" when a household has
+  // no live goals at all yet (datedCount and noDateCount both 0) -- the same
+  // "no placeholder for an absence" rule this file's doneSinceClause/
+  // MoodChart's own empty copy already follow, so this panel never renders a
+  // colon with nothing meaningful after it.
+  checkInNoGoalsYet: "No goals to check on yet.",
+  // Review finding: `b.percentOk` is false in two DIFFERENT situations
+  // (domain.PercentUsed's own doc comment) -- no budget row at all, and a
+  // real budget row whose every category cap is zero. BudgetPage.tsx:334
+  // gates its own empty state on `data.budget === null` alone, so a
+  // household that creates a budget and then removes every cap still sees
+  // BudgetPage's populated screen (History, Edit budget, the row itself
+  // proving "a budget is set"). This panel must not show "No budget set"
+  // for that same household -- that is the exact "two screens disagree"
+  // shape the no-recomputation rule exists to prevent. This is the second
+  // case's own copy: a budget exists, there is just nothing capped to
+  // report a percentage against.
+  checkInNoCapsYet: (monthName: string) => `No caps set for ${monthName} yet`,
+  // The panel's own fetch failure -- useBudget(month)/useGoals() are both
+  // owner-gated on the server (budgetCopy.ts's/goalCopy.ts's own
+  // ownerOnlyBody comments), and a household owner who holds marriage but
+  // not money capability reaches this exact 403 the moment the modal opens.
+  // Shown inline, never blocking Save/Finish -- the check-in is a prompt for
+  // a conversation, not a gate on writing the retro itself.
+  checkInLoadError: "Couldn't load this month's numbers.",
+
+  // The carry-over offer (design spec decision 4): last month's still-open
+  // actions, offered by name, one click each. previousMonthName below is the
+  // same calendar-arithmetic helper RetroActionRow.tsx's own "Carried from"
+  // label already uses -- see that helper's own comment for the trust
+  // boundary this offer's own list has to respect (only ever an id taken
+  // from useRetro(month)'s own `carryOver` field).
+  carryOverHeading: (monthName: string) => `Still open from ${monthName}`,
+  // The button's own accessible name (aria-label, not visible text -- see
+  // RetroModal.tsx's own comment on why): naming the specific action is what
+  // lets a screen reader tell two "Carry over" buttons in the same list
+  // apart, the identical reason moodOptions' own `label` above exists
+  // alongside a purely decorative emoji glyph.
+  carryOverButton: (body: string) => `Carry over ${body}`,
+  // The button's own visible text -- short, since the row beside it already
+  // shows the action's full body; carryOverButton above is what a screen
+  // reader announces instead of this repeated three times with nothing to
+  // tell them apart.
+  carryOverButtonLabel: "Carry over",
+  carryOverError: "Couldn't carry that action forward. Try again.",
+
+  // The add-action composer: dc.html's own dashed placeholder box reads
+  // "+ Add an action & assign it to one of you" -- reused verbatim as the
+  // text input's own placeholder (Task 13's own precedent for lifting a
+  // mockup's literal string onto a real form control, e.g.
+  // wentWellPlaceholder). "Add" is short on purpose: the input beside it is
+  // where the actual content lives, the same reasoning carryOverButtonLabel
+  // gives for its own short visible text.
+  addActionPlaceholder: "+ Add an action & assign it to one of you",
+  addAction: "Add",
+  // Each owner's own toggle button in the assignee row carries this as its
+  // `aria-label` -- the avatarInitial glyph alone ("A") is not a name to a
+  // screen reader, the same reason moodOptions' own `label` exists beside a
+  // decorative emoji. Takes the member's own displayName rather than
+  // composing one here (CLAUDE.md: "do not parse names" -- this reads
+  // exactly what useHouseholdMembers already resolved, nothing derived).
+  assignToMember: (displayName: string) => `Assign to ${displayName}`,
+  addActionError: "Couldn't add that action. Try again.",
+
+  // Discard draft: docs/LEARNING.md pattern 15's fourth instance in this
+  // feature -- DeleteDraft, DELETE /retros/{month} and useRetro.discardDraft
+  // were all real and tested (design spec decision 2, "a draft can be
+  // deleted; a finished retro cannot") with no component anywhere calling
+  // any of it. Shown only for a draft (completedAt === null); a finished
+  // retro offers nothing, because the server refuses one and an offer that
+  // always fails is worse than no offer. Confirmed in the page, never
+  // window.confirm -- TransactionModal.tsx's own delete flow is the
+  // precedent this mirrors exactly, trigger/body/confirm/cancel each their
+  // own key the same way transactionCopy.ts's four delete strings are.
+  discardDraftTrigger: "Discard draft",
+  discardDraftConfirmBody: "This draft will be permanently deleted. This can't be undone.",
+  discardDraftConfirmAction: "Yes, discard it",
+  discardDraftCancelAction: "Keep it",
+  // Only reachable through a genuine race (the other partner finishes this
+  // same retro in another tab between this modal loading and Discard being
+  // clicked) -- the trigger's own completedAt gate makes the ordinary path
+  // unreachable. retro_handlers.go's own handleDiscardRetro comment: the
+  // server answers the same generic 404 "That could not be found." a
+  // genuinely missing retro gets, deliberately not the design spec's own
+  // error-table wording ("That retro is finished and cannot be deleted") --
+  // "there is no draft here" reads the same either way, on purpose, so this
+  // fallback is for the non-ApiError case only (apiErrorMessage's own
+  // contract: a real ApiError's message wins over this).
+  discardDraftError: "Couldn't delete this draft. Try again.",
+
+  saveDraft: "Save draft",
+  finishRetro: "Finish retro",
+
+  // The version-conflict banner (spec's "Error handling" table: a stale
+  // PATCH answers 409 RETRO_CHANGED, and the screen "Never a merge, never a
+  // red failure alert"). Names what happened and what to do, not a generic
+  // failure -- and says explicitly that nothing typed was lost, which is the
+  // entire reason this is refused rather than silently merged (decision 6).
+  //
+  // No "Reload" action here on purpose -- an earlier draft of this modal had
+  // one, and a real browser walk against a real 409 showed exactly why it
+  // was wrong: `retro.reload()` clears `useRetro`'s own `conflict` flag
+  // (task-9-report.md's own contract, "clears on any successful refetch")
+  // without touching this modal's local fields, so the banner would
+  // disappear while the textareas still held the pre-conflict text: the very
+  // next Save would then PATCH that stale text over whatever the partner
+  // just wrote, with the new version attached and no error -- last write
+  // wins, the exact shape decision 6 in the design spec rejects by name.
+  // Closing this modal and reopening it is the only safe way to see the
+  // partner's version, because that is a fresh mount: a new useRetro(month)
+  // call, a fresh fetch, and a fresh seed of every field from it.
+  conflictBanner:
+    "Someone else saved this retro while you were editing. Nothing you typed here has been lost — but this retro's controls are turned off until you close it and reopen it to see their version.",
+
+  modalSaveError: "Couldn't save this retro. Try again.",
+
+  editRetro: "Edit",
+} as const;
+
+// "2026-07" -> "July" -- anchored on day 2, matching goalCopy.ts's own
+// monthNameOnly and billCopy.ts's parseDateOnly for the identical reason:
+// `new Date("2026-07-01")` parses as UTC midnight, which a household west of
+// UTC reads as the previous evening once toLocaleDateString applies the
+// local offset. Day 2 keeps every timezone this app runs in on the same
+// calendar month.
+export function monthNameOnly(month: string): string {
+  const [year, monthNum] = month.split("-").map(Number);
+  return new Date(year, monthNum - 1, 2).toLocaleDateString("en-US", { month: "long" });
+}
+
+// "2026-06" -> "June 2026" -- the history list's own row label (the design's
+// own `dc.html` reads "June 2026", "May 2026", ...), distinct from
+// monthNameOnly's bare "July" the header/empty-state Start buttons use.
+// Genuinely a different shape, not the same helper reused twice: a history
+// row has to stay unambiguous once a household has 13+ months of retros and
+// the same month name recurs across years, where the Start button never
+// shows more than one candidate month at a time and so never needs the year.
+export function monthYearLabel(month: string): string {
+  const [year, monthNum] = month.split("-").map(Number);
+  return new Date(year, monthNum - 1, 2).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
+// "2025-08" -> "Aug 2025" -- the doneSince clause's own month format,
+// short + year rather than monthNameOnly's long + no-year (the design's two
+// month strings on this one screen are genuinely different shapes, not a
+// single helper reused two ways).
+export function sinceLabel(since: string): string {
+  const [year, monthNum] = since.split("-").map(Number);
+  return new Date(year, monthNum - 1, 2).toLocaleDateString("en-US", { month: "short", year: "numeric" });
+}
+
+// "2026-06" -> "Jun" -- MoodChart.tsx's own x-axis label, short with no
+// year (the chart's own aria-label already states the range, so 320px of
+// plot width doesn't have to repeat it on every third tick). A fourth month
+// shape on this one screen, genuinely distinct from the three above: short
+// like sinceLabel, but no year like monthNameOnly.
+export function monthShortLabel(month: string): string {
+  const [year, monthNum] = month.split("-").map(Number);
+  return new Date(year, monthNum - 1, 2).toLocaleDateString("en-US", { month: "short" });
+}
+
+// "2026-07" -> "June" -- the calendar month immediately before the given
+// one. RetroDetail.tsx's own "Carried from June" label uses this rather than
+// resolving RetroAction.carriedFrom itself: that field is the id of the
+// SOURCE ACTION on the wire (RetroActionInput's own doc comment in
+// ports.go, "the id of last month's action when this one was carried"), an
+// opaque UUID with no month in it at all. Resolvable anyway, because the
+// design's own decision 4 ("Only the immediately previous month is
+// offered") guarantees a carried action's source is always this retro's own
+// month minus one -- there is no other month it could ever be, TODAY:
+// RetroService.Month (api/internal/usecase/retro.go) computes the ONLY
+// candidate list a client can ever carry from as
+// `OpenInMonth(month.AddDate(0, -1, 0))`, exactly one calendar month back,
+// and the ONE code path that calls addAction with a non-"" carriedFrom --
+// RetroModal's handleCarryOver -- passes only ids taken from that same
+// server-supplied carryOver list, never one the client composed.
+//
+// This is a real trust boundary, not a proven one: AddRetroAction's own SQL
+// (retro_action_repo.go) checks only that carriedFrom resolves to an action
+// belonging to a retro of THIS HOUSEHOLD, never that it belongs to the
+// immediately previous month -- confirmed live by inserting a carried_from
+// six months back in the dev database, which rendered a plausible but wrong
+// "Carried from July" instead of the true source month. Nothing on the wire
+// (retroActionDTO) names which month a carriedFrom id actually belongs to,
+// so this frontend has no way to verify the assumption from data alone --
+// only RetroService.Month's own offer-restriction keeps it true. Whoever
+// builds the carry-over control (Task 13) MUST only ever pass a carriedFrom
+// value taken from this retro's own `carryOver` list (RetroDetailResponse's
+// sibling field, already exactly that one-month-back set) -- passing
+// anything else breaks this label silently, not loudly.
+export function previousMonthName(month: string): string {
+  const [year, monthNum] = month.split("-").map(Number);
+  return new Date(year, monthNum - 2, 2).toLocaleDateString("en-US", { month: "long" });
+}
+
+// "2026-06" -> "July" -- the design's own "Actions for July" heading over a
+// June retro's action list (dc.html): what a retro decides gets done the
+// month AFTER the retro, not during it.
+export function nextMonthName(month: string): string {
+  const [year, monthNum] = month.split("-").map(Number);
+  return new Date(year, monthNum, 2).toLocaleDateString("en-US", { month: "long" });
+}
+
+// "2026-06-28T21:18:52+08:00" -> "Jun 28" -- the detail header's own
+// completion date. Unlike every month-only helper above, this takes a real
+// timestamp (retroDTO.CompletedAt is a *time.Time, task-7-report.md's own
+// sample carries a full offset) straight into `new Date`, with none of
+// monthNameOnly's UTC-midnight caution: that trap is specific to a bare
+// "YYYY-MM-DD" being parsed as UTC midnight, which a full timestamp with its
+// own offset never is.
+export function completedDateLabel(completedAt: string): string {
+  return new Date(completedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+// The header subtitle's second clause, composed here rather than inline in
+// RetrosPage.tsx so the "never 0 done, and never render it off a `since`
+// that came back null while doneCount is somehow positive" rule lives in one
+// place. Fails closed: a `since` that is unexpectedly null while doneCount is
+// somehow positive (a data shape this schema's own nullability allows even
+// though the service should never produce it) renders nothing rather than a
+// string built from a value that was not actually there.
+export function doneSinceClause(data: Pick<RetrosResponse, "doneCount" | "since">): string | null {
+  if (data.doneCount <= 0 || !data.since) return null;
+  return RETRO_COPY.doneSince(data.doneCount, sinceLabel(data.since));
+}

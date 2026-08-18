@@ -21,6 +21,7 @@ import { BudgetCard } from "./BudgetCard";
 import { OVERVIEW_COPY } from "./copy";
 import { GoalsCard } from "./GoalsCard";
 import { NextBillCard } from "./NextBillCard";
+import { NextRetroCard } from "./NextRetroCard";
 import { QuickAddMenu } from "./QuickAddMenu";
 import { SetupChecklist } from "./SetupChecklist";
 
@@ -28,6 +29,24 @@ export function OverviewPage() {
   const me = useMe();
   const isOwner = me.data?.membership.role === "owner";
   const hasMoney = me.data?.capabilities.includes("money") ?? false;
+  // Read straight off capabilities, not membership.role: GET /retros is
+  // also requireOwner (router.go), but validateCapabilitiesForRole
+  // (domain/identity.go) already guarantees that -- an OWNER must hold
+  // EVERY capability (AllCapabilities(), which includes money), and a
+  // LIMITED member can never hold marriage at all (ErrLimitedCannotHoldMarriage,
+  // backed by the owners_hold_all_capabilities/limited_members_have_no_marriage
+  // CHECK constraints in 00002_identity.sql, so this is not merely a
+  // convention the application layer could drift from). So hasMarriage is
+  // true only when hasMoney is too, for every membership this database can
+  // actually contain -- checking the capability alone is sufficient, with
+  // no second, redundant isOwner check needed here.
+  //
+  // hasMarriage is still evaluated independently of hasMoney below, though
+  // (this card is mounted outside the `!hasMoney` branch, not folded into
+  // its `else`) -- deliberately not leaning on the invariant above to keep
+  // the card visible. A future loosening of validateCapabilitiesForRole
+  // must not silently hide this card behind the no-money panel.
+  const hasMarriage = me.data?.capabilities.includes("marriage") ?? false;
 
   const accounts = useAccounts(false);
   // Only an owner may read a budget at all, so a limited member must not even
@@ -121,6 +140,20 @@ export function OverviewPage() {
           )}
         </>
       )}
+
+      {/* Gated on hasMarriage, not nested inside the !hasMoney branch above
+          -- deliberately not relying on hasMarriage's own comment (every
+          real owner holds money too) to keep this card reachable; see that
+          comment for why the states are coupled today but this placement
+          does not depend on it staying that way. This is also the ENTIRE
+          gate: NextRetroCard.tsx is only ever mounted here, and only calls
+          useRetros() once mounted, so a member without marriage never fires
+          GET /retros at all (that component's own header comment has the
+          full reasoning for why it needs no `enabled` prop the way
+          NextBillCard does). Full width rather than a grid cell, the same
+          placement SetupChecklist above uses and for the same reason: this
+          is not one of the four money cards the grid above was sized for. */}
+      {hasMarriage && <NextRetroCard />}
     </PageContainer>
   );
 }

@@ -17,27 +17,30 @@
 //       /money/budget RequireCapability("money") -> Budget (Task 11; BudgetPage stub -- Task 12 builds the real screen)
 //       /money/goals RequireCapability("money") -> Goals (Task 11; the real GoalsPage)
 //       /money/bills RequireCapability("money") -> Bills (the real BillsPage)
+//       /marriage/retros RequireCapability("marriage") -> Retros (Task 10; RetrosPage)
 //       /settings                                   -- the real Settings screen (Task 20)
 //
-// Marriage and Family have no routes: both were placeholders reading
-// "Arriving in slice N", and the sidebar no longer offers them (see
-// Sidebar.tsx's SPACE_PAGES). Their URLs fall through to rootRoute's
-// notFoundComponent -- and rootRoute sits above the pathless
-// authenticatedRoute/shellRoute in this tree, not below them, so that
-// fall-through carries two consequences worth knowing before you next touch
-// this file. First, the 404 renders shell-less: AppShell never mounts for
-// it, so there is no sidebar and (today) no link back anywhere else --
-// visiting /marriage is a dead end, not a redirect to a page that offers a
-// way out. Second, RequireAuth never runs either, so a signed-out visitor
-// with an old /marriage bookmark now reaches bare "Page not found." text
-// instead of being bounced to /sign-in the way every real route bounces
-// them. Both are accepted for now because these are dead links to a feature
-// that doesn't exist yet, not routes anyone should be linking to -- but
-// they are exactly the kind of thing that stops being fine the moment
-// notFoundComponent grows real content, or a route moves relative to
-// authenticatedRoute. Add the route back in the same change that builds the
-// page, alongside its SPACE_PAGES entry -- and re-add RequireCapability for
-// Marriage, which is capability-gated.
+// Marriage came back in Task 10, in the same change as its SPACE_PAGES entry
+// (Sidebar.tsx) and its RequireCapability guard -- 110ab0a deleted all three
+// together for the reason its own commit message gives (a nav row whose only
+// content is "Arriving in slice N" reads as broken), so nothing about that
+// reasoning is undone by adding the route back alone; the guard and the
+// sidebar entry have to land with it. marriageGuardRoute has one child today
+// (retros), unlike moneyGuardRoute, which has an index child (moneyIndexRoute,
+// path "/") that gives bare "/money" a real page. Marriage has no equivalent
+// index route -- nothing in the design links to bare "/marriage" (the
+// sidebar's own entry goes straight to "/marriage/retros") -- so a caller who
+// types it by hand still matches marriageGuardRoute itself (it is a real
+// route now, not an absence), runs RequireAuth and RequireCapability as
+// normal, and then has no child route left to render: AppShell's sidebar
+// shows, but the content area is blank rather than a page or a 404. This is
+// a known minor gap, not a redirect worth adding speculatively -- an index
+// route belongs to whichever task first gives Marriage a real landing page
+// distinct from Retros. Family still has no route at all: its own "Arriving
+// in slice 4" placeholder was deleted in the same commit as Marriage's and
+// nothing has rebuilt it yet, so /family/calendar still genuinely falls
+// through to rootRoute's notFoundComponent the way this file used to say
+// every Marriage URL did too.
 import {
   Navigate,
   createRootRoute,
@@ -52,6 +55,7 @@ import { SignInScreen } from "../features/auth/SignInScreen";
 import { SignUpScreen } from "../features/auth/SignUpScreen";
 import { SignUpCompleteScreen } from "../features/auth/SignUpCompleteScreen";
 import { useMe } from "../features/auth/useAuth";
+import { RetrosPage } from "../features/marriage/RetrosPage";
 import { BillsPage } from "../features/money/BillsPage";
 import { BudgetPage } from "../features/money/BudgetPage";
 import { FinancesPage } from "../features/money/FinancesPage";
@@ -235,6 +239,27 @@ const moneyBillsRoute = createRoute({
   component: BillsPage,
 });
 
+// Marriage's own guard, the moneyGuardRoute shape restated: a pathless route
+// whose only job is to run RequireCapability before any child mounts.
+// Nested under shellRoute, same as moneyGuardRoute -- so its own guard
+// actually runs, the identical reasoning moneyTransactionsRoute's comment
+// gives for why a route needs to sit under its capability's guard rather
+// than beside it.
+const marriageGuardRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "marriage",
+  component: () => <RequireCapability cap="marriage" />,
+});
+// Retros is Marriage's first page (Task 10) -- Vision & goals and Agreements
+// (docs/FEATURE_TRACKER.md section 6) will each get their own sibling route
+// under marriageGuardRoute when they're built, the same way moneyBudgetRoute
+// and moneyGoalsRoute joined moneyIndexRoute one at a time.
+const marriageRetrosRoute = createRoute({
+  getParentRoute: () => marriageGuardRoute,
+  path: "retros",
+  component: RetrosPage,
+});
+
 const settingsRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "settings",
@@ -263,6 +288,7 @@ export const routeTree = rootRoute.addChildren([
         moneyGoalsRoute,
         moneyBillsRoute,
       ]),
+      marriageGuardRoute.addChildren([marriageRetrosRoute]),
       settingsRoute,
     ]),
   ]),
