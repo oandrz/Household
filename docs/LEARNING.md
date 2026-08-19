@@ -930,6 +930,48 @@ person to ask whether the test could ever have gone red in the first place.
   from a suite that never wired the fixture in the first place; a registered
   one lets the wrongful call actually get recorded, which is the only way
   the assertion means what it says.
+- **A mutation the plan specified could not go red, and the reason was a
+  second mechanism nobody had named as covering for it.** The net worth
+  trend round's plan called for mutating away the `i != trendMonths-1` guard
+  in `networth_trend.go` — the guard that stops the newest month from being
+  reconverted — expecting the newest bar to then disagree with the headline
+  figure. It stayed green. `AccountService.Summary`'s own loop already
+  converts every counted account into the primary currency *before*
+  `trend()` ever runs, and the per-request FX rate cache
+  (`TestSummaryLooksUpEachRateOnce`, a different task's own guarantee) means
+  a second conversion of the same currency inside the same request returns
+  the identical cached rate — so removing the guard produced a
+  bit-identical result regardless. The guard is still real and still the
+  documented mechanism (a live provider is free to answer the same currency
+  differently twice in one request, and nothing else stops that), but no
+  black-box test in this package can discriminate its removal while the
+  cache exists, and building a white-box test that disables the cache to
+  force it red would only ever be re-testing the cache. Recorded rather than
+  chased into a test that cannot exist: the code comment for the guard now
+  says so explicitly, and the mutation-that-cannot-fail was reported as a
+  concern instead of as a pass. **A mutation that cannot go red is not
+  evidence the code is correct — it is evidence the test is not the thing
+  discriminating it,** and the fix is to say which mechanism *is* proven to
+  do the discriminating (here, the cache's own test), not to keep inventing
+  mutations against the wrong guard.
+- **A test exercised the defensive branch and still could not have caught a
+  realistic mistake inside it.** The same round's archived-account movement
+  test drives `deltasByAccountMonth`'s "this account isn't in the counted
+  set, skip its movement" branch — the one that keeps an archived account's
+  transactions out of every bar — and passes. But the test only asserts that
+  the excluded account's movements are absent from the result map; it never
+  asserts anything about the *other* accounts' movements being unaffected.
+  A currency-preserving mistake inside that branch (for instance, summing
+  the excluded account's delta into a neighbouring account's bucket instead
+  of discarding it) would still leave the test green, because the real
+  guarantee — "excluded accounts are in no bar" — actually lives one level
+  up, in `trend()`'s own `for _, a := range counted` loop, which never looks
+  at an account outside that set in the first place. The branch inside
+  `deltasByAccountMonth` is correct today, but the test covering it proves
+  only that the branch *runs*, not that it does the one thing a reader would
+  assume from its name. **Executing a branch and discriminating what it does
+  are different claims** — a coverage tool cannot tell them apart, and
+  neither can a reviewer skimming for a green checkmark next to the line.
 
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
@@ -1222,6 +1264,25 @@ something only that guard can produce.
   concurrency guard built at the database only protects the request that
   reaches it — a UI control offering to "recover" from the guard's own
   refusal needs the same scrutiny as the write path itself.**
+
+- Net worth trend round, Task 7 to Task 8: **a risk named and deferred is
+  still a risk, and the round that finally opened a real narrow browser
+  found it real.** Task 7's own progress notes flagged, unprompted, that
+  "the percentage renders inline in the 30px figure, and wrapping at mobile
+  width on Overview is unverified" — then deferred it to the browser walk
+  rather than guessing at a fix, because no vitest assertion on a 30px
+  `<p>` containing an inline `<span>` can evaluate real text wrapping; jsdom
+  performs no layout, the same gap every bullet in this pattern already
+  rests on. The Task 8 walk opened Overview at 360px (a mainstream Android
+  width) and 320px and found the badge's own text — `▼ 6.0% this month` —
+  wrapping mid-phrase, stranding "month" (or "this month") alone on its own
+  line, still in the danger colour, reading as a broken element rather than
+  part of the figure. Finances' own copy of the same badge (`▼ 6.0%`, no
+  "this month" suffix) does not wrap at either width — the extra words are
+  exactly what does not fit. Left unfixed pending a product decision, per
+  this round's own instruction not to patch a defect found this late in a
+  browser walk without one; recorded here so the next person does not have
+  to rediscover that the risk was already known and already named once.
 
 **If a behaviour depends on the platform, verify it in the platform.** A real
 browser is what found every frontend defect above, and nothing else could
@@ -1735,6 +1796,42 @@ mockup or brief ever named the control it would back. **A docs task that reconci
 moment this pattern re-checks itself for free**: the mechanical grep costs
 thirty seconds per hook and was already due, since nobody had run it since
 Task 9 built the hook two tasks before the composer gap even opened.
+
+### 16. A claim about the code is not evidence until someone checks it against the code
+
+- **The net worth trend's plan, 2026-08-19.** `docs/FEATURE_TRACKER.md`'s own
+  row said the twelve-month trend "needs balance snapshots: a second table,
+  and a separate decision about when a snapshot gets written (nightly? on
+  every balance change? on read?)." It was false the day it was written:
+  every balance in this product has always been derived from the
+  transactions ledger on read — `ListAccounts`'s own query, unchanged since
+  Transactions shipped — and the trend is the identical idea walked back
+  twelve months. `AccountRepository.MonthlyMovements` (one new query) plus
+  `AccountService.trend()` (`api/internal/usecase/networth_trend.go`)
+  recompute all twelve bars on every `GET /accounts`; no table, no
+  scheduler, no decision to defer. A shippable feature sat behind an
+  imagined migration, deferred out of this round's own spec, because
+  nobody read the query before believing the note about it. What would have
+  caught it sooner: a document that states an implementation constraint
+  should cite the code that imposes it, so a later reader can check the
+  citation instead of trusting the claim — the same discipline a line-number
+  citation owes a reader, below.
+- **The same round, a smaller instance of the identical habit.** Task 3's
+  review left two comments citing `account.go:167` for the one-day
+  opening-date slack a household in UTC+8 needs; the actual check had
+  already moved to line 177 by the time either comment was written. The
+  wrong number was corrected twice before it stuck in the tree — once in
+  Task 3's own fix round, and again when Task 4 touched the same file and
+  reintroduced it while editing nearby. A bare line number is a claim with
+  no way to check itself once the file around it moves; citing the
+  function, symbol or query name instead survives the code moving under it.
+
+**Treat a citation the way you'd treat a test assertion: something the next
+reader can verify against the thing it names, not something to trust because
+it reads confidently.** Both instances above cost nothing to produce and both
+would have cost thirty seconds to check — reading the query, or re-finding
+the line — against a small planning gap in one case and a wrong number in a
+comment in the other.
 
 ---
 

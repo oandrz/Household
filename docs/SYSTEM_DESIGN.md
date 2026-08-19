@@ -338,7 +338,7 @@ points inward, which is why every service is testable against in-memory doubles.
 |---|---|---|
 | `UserRepository` | `adapter/postgres` | Includes the transactional `CreateWithMembership` |
 | `HouseholdRepository`, `MembershipRepository`, `SessionRepository`, `MagicLinkRepository`, `LoginAttemptRepository`, `InviteRepository`, `SignupRepository`, `SpaceRepository`, `NotificationRepository` | `adapter/postgres` | Ten narrow repositories rather than one wide one |
-| `AccountRepository` | `adapter/postgres` | Eleventh. Accounts joined to the owner's display name (`AccountView`); its `MembershipBelongsToHousehold` is what stops an account being assigned to a member of a different household. `AccountView.Balance` is now a real sum — see §5 |
+| `AccountRepository` | `adapter/postgres` | Eleventh. Accounts joined to the owner's display name (`AccountView`); its `MembershipBelongsToHousehold` is what stops an account being assigned to a member of a different household. `AccountView.Balance` is now a real sum — see §5. `MonthlyMovements` is its newest method: one row per account per calendar month with any transaction, summed in that account's own currency (no FX conversion in SQL, the same division of labour `MonthTotals` already draws for `TransactionRepository`) — the twelve-month trend's only new read, and its filter is deliberately `ListAccounts`'s own balance expression split by month, kept identical on purpose (§5) |
 | `CategoryRepository` | `adapter/postgres` | Twelfth. `List` respects `sort_order`, the order the design draws rather than alphabetical; `EnsureSeeded` is idempotent under two concurrent first requests through one `INSERT ... ON CONFLICT DO NOTHING` against `UNIQUE(household_id, name)`, never a read-then-write. Budget grows it with `Create`, `Rename` and `SetArchived` — a category is referenced by transactions and budget lines, so it archives rather than deletes, the same reasoning `accounts.archived_at` already uses for a different table; `sort_order`'s own concurrent-create window is a known, accepted, cosmetic tie (see `docs/LEARNING.md`) |
 | `TransactionRepository` | `adapter/postgres` | Thirteenth. Keyset-paged `List` (a cursor is the last row's date and id, not an offset); `Update` never merges a patch — `TransactionService` turns a partial `PATCH` into a complete `domain.Transaction` first; `MonthTotals` returns rows rather than a SQL `SUM`, because a sum is only correct within one currency and the FX conversion lives in the service, not the repository |
 | `BudgetRepository` | `adapter/postgres` | Fourteenth. `Get` returns `domain.ErrNotFound` for an unbudgeted month, which the service turns into the empty state, not an error; `Upsert` replaces one household-month wholesale in a single transaction — parent row upserted on `(household_id, month)`, every existing line deleted, every new line inserted, category ownership validated first — never a merge, so a category the caller left out of the payload is unambiguously gone after the call; `History` returns the closed months in range that actually have a budget row, never zero-filled; `RollOverToGoal` writes a `goal_contributions` row **and** stamps `budgets.rolled_over_at`/`rollover_goal_id` in one transaction — the stamp is a conditional `UPDATE ... WHERE rolled_over_at IS NULL`, so a second concurrent call finds no row to update and answers `ErrRolloverAlreadyDone` rather than writing a second contribution (§5) |
@@ -789,13 +789,15 @@ sequenceDiagram
     alt caller's role is not owner
         H-->>B: 200 { accounts: only visible-to-limited rows,<br/>balance/openingBalance/balanceAsOf/summary all absent }
     else owner
-        H->>Svc: Summary(householdID, views)
-        loop each live account
+        H->>Svc: Summary(householdID, views, today)
+        loop each counted account
             Svc->>FX: Rate(account currency, primary) unless already primary
             Svc->>Svc: convert, then Add — domain.Money.Add<br/>refuses two different currencies
         end
-        Svc-->>H: NetWorthSummary
-        H-->>B: 200 { accounts, summary }
+        Svc->>Repo: MonthlyMovements(householdID, since)
+        Svc->>Svc: trend() — walk each counted account's live<br/>balance back twelve months by these deltas;<br/>the newest point reuses the value the loop<br/>above already converted, never reconverts it
+        Svc-->>H: NetWorthSummary { ..., Trend }
+        H-->>B: 200 { accounts, summary: { ..., trend } }
     end
 ```
 
@@ -857,6 +859,30 @@ balance" so the field cannot be mistaken for the one on the account row, and
 `AccountView`'s own doc comment says which of the two may ever be written
 back. A value whose meaning changes has to change its consumers with it;
 `docs/LEARNING.md` records what this cost when it did not.
+
+**The twelve-month trend is derived, the same way the balance above it is —
+there is no snapshot table.** `summary.trend` did not need one: `Summary`
+already holds every counted account's live, converted balance from the loop
+in the diagram above; `trend()` (`api/internal/usecase/networth_trend.go`)
+walks each one backwards, month by month, subtracting that month's delta from
+`MonthlyMovements`. Every one of the twelve bars is recomputed on every
+`GET /accounts`; nothing about the trend is written or scheduled anywhere. A
+gap in a household's history (an account not yet tracked back that far) is
+`nil`, never `0`, all the way from `domain.Money` through the wire's
+`netWorthMinor: null` to the chart drawing no bar at all for that month — a
+zero is a claim about the household's money, and the true answer for an
+untracked month is that there is nothing to claim.
+
+**The newest bar equals the headline figure by construction, not by
+coincidence.** `trend()` never reconverts the current month: for the newest
+point it reuses the exact `domain.Money` the loop above already added into
+the headline, so the two cannot disagree even if the FX provider is asked
+twice in one request and answers differently — nothing here forbids a live
+provider from doing that. Older months are converted at *today's* rate, not
+the rate that held at the time, because there is no historical rate table;
+the chart shows how balances moved with the exchange rate held still, which
+is the more useful of the two questions anyway (an account whose balance
+never moved should not appear to rise and fall because a currency did).
 
 ### Transactions — the ledger and month-to-date spend, one request
 
@@ -1926,8 +1952,12 @@ web/src/
                        restores the desktop grid unchanged), RequireAuth,
                        RequireCapability
     settings/          members, spaces, currency, notifications
-    money/             Finances page — net worth, breakdown, accounts and
-                       recent-transactions cards, the add/edit modal,
+    money/             Finances page — net worth (now with its twelve-month
+                       trend, NetWorthChart.tsx, inline SVG the same way
+                       marriage/MoodChart.tsx draws its own line — no
+                       charting dependency, and a month with no figure
+                       breaks the bar rather than drawing a zero), breakdown,
+                       accounts and recent-transactions cards, the add/edit modal,
                        archive and restore; the Transactions page —
                        filterable ledger, the add/edit/delete transaction
                        modal (Task 15's component, this is its only
@@ -1947,7 +1977,11 @@ web/src/
                        last route that ever used it)
     overview/          the interim Overview at / — five of the design's
                        seven cards Money and Marriage can supply (net worth,
-                       reusing money/NetWorthCard; this month's budget;
+                       reusing money/NetWorthCard, so it now also carries
+                       the month-to-date change badge (`▲ 2.1% this month`)
+                       — but never NetWorthChart itself, which stays
+                       Finances-only by design, since this card's job is a
+                       headline, not a breakdown; this month's budget;
                        goals on track; the next bill, reading the same
                        useBills hook /money/bills itself uses; and the next
                        retro, reading the same useRetros hook /marriage/retros

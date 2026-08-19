@@ -283,6 +283,25 @@ Built), taking the stated totals from 62/18/23/2 = 105 to
 **63/17/23/2 = 105** — row count unchanged, Built + Partial still **80 of
 105** (a Partial becoming Built moves neither side of that sum).
 
+**The net worth trend, 2026-08-19 — a wrong constraint corrected, and a real
+gap named instead.** The 12-month trend (Money's own last gap) is code-complete
+and walked in a real browser: the twelve-month series, the newest-bar-equals-
+headline guarantee, the change badge, the day-one and sparse-history states,
+and the archived-account exclusion all behave as specced. The row's own prose
+used to claim the trend needed a balance-snapshot table; it never did (see the
+rewritten paragraph above), and this correction alone is why the row stays 🟡
+rather than moving to ✅. The browser walk also found one live gap the plan's
+own test suite could not have caught by construction: the change badge's text
+wraps mid-phrase on Overview at mainstream mobile widths (360px, 320px),
+stranding "month" alone in the danger colour — Task 7 had flagged this exact
+risk as unverified and deferred it to the browser pass, and the browser pass
+is what found it real, so the row is marked 🟡 with this named instead of ✅.
+Recounting by this file's own rule (the first symbol in each row's own cell)
+finds **no symbol moved** — both "Net worth with 12-month trend" and "Net
+worth card" were already 🟡 and stay 🟡, only their prose changed — so every
+area's counts and the stated totals (63/17/23/2 = 105, 80 of 105 built or
+partly built) are unchanged by this update.
+
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
 | Entry & authentication | 10 | 1 | 0 | 0 |
@@ -424,7 +443,7 @@ replaced.
 
 | Feature | State |
 |---|---|
-| Net worth card | 🟡 — the figure and the not-computable case only, by reusing Finances' own card. The design's card also carries an assets/liabilities split and a trend |
+| Net worth card | 🟡 — the figure, the not-computable case, and now the month-to-date change badge, by reusing Finances' own card. The gap narrows to the assets/liabilities split only: Overview was never meant to carry the chart (that stays Finances-only by design, since the card's job here is a headline, not a breakdown), so "the trend half" on this screen means the change badge, and that badge is exactly the piece with the mobile-wrap gap — see "Net worth with 12-month trend" in Money below |
 | July budget card — percentage used | 🟡 — percentage used plus the two figures behind it, and a "Set a budget" link when the household has never budgeted. No sparkline. Owner-only: `GET /budgets/{month}` is `requireCapability(money)` **and** `requireOwner` |
 | Next bill card | ✅ — the next-due bill's name, amount and due date (or the overdue/autopay state in its place), reading `useBills`, the same hook and cache entry `/money/bills` itself uses |
 | Goals on track card | ✅ — the real `X of Y on track` figure and the next dated goal beneath it, reading `useGoals`, the same hook and cache entry `/money/goals` itself uses |
@@ -474,7 +493,7 @@ code *and* a walk confirming it. All five Money features are now walked.
 
 | Feature | State |
 |---|---|
-| Net worth with 12-month trend | 🟡 |
+| Net worth with 12-month trend | 🟡 — the twelve-month series, the newest-bar-equals-headline guarantee and the month-to-date change badge are built and walked in a real browser (Task 8, 2026-08-19). The gap is narrow and cosmetic: the change badge's text (`▼ 6.0% this month`) wraps mid-phrase on Overview at 360px and 320px — mainstream Android widths — leaving "month" (or "this month") stranded alone on its own line in the danger colour, looking like a broken element rather than part of the figure. Finances' own copy of the same badge (`▼ 6.0%`, no "this month" suffix) does not wrap at the same widths. Task 7 flagged this exact risk as unverified and deferred it to the browser pass; the browser pass found it real |
 | Assets and liabilities breakdown | ✅ |
 | Accounts by owner, with SGD/IDR split | ✅ |
 | Recent transactions strip | ✅ |
@@ -486,12 +505,27 @@ code *and* a walk confirming it. All five Money features are now walked.
 | Custom account types | ⬜ |
 | Warning in Settings before a primary-currency change strands every account | ⬜ |
 
-**Net worth is missing only its 12-month trend.** The figure itself — assets
-minus liabilities, converting each account into the household's primary
-currency before summing — is built and shown live. The trend needs balance
-snapshots: a second table, and a separate decision about when a snapshot gets
-written (nightly? on every balance change? on read?). Deferred as its own
-small spec, not folded into this one.
+**The 12-month trend shipped 2026-08-19, and the note that used to sit here
+was wrong.** It used to say the trend "needs balance snapshots: a second
+table, and a separate decision about when a snapshot gets written." It never
+did, and nobody had checked that claim against the code: balances in this
+product have always been derived from the transactions ledger, the same way
+`ListAccounts` computes today's balance on every read
+(`api/internal/adapter/postgres/queries/account.sql`). The trend is the same
+idea walked back twelve months — `ListAccountMonthlyMovements` sums each
+account's transactions by calendar month, and
+`AccountService.trend` (`api/internal/usecase/networth_trend.go`) subtracts
+each month's delta from today's live balance to get that month's figure.
+Every bar is recomputed on every `GET /accounts`; nothing is written or
+scheduled. The trade-off this buys — history is not frozen, so an account's
+past bars move if you edit an old transaction, and every month is converted
+at today's FX rate rather than the rate that held at the time — is spec
+decision 1 and decision 2 of
+`docs/superpowers/sdd/2026-08-19-net-worth-trend/`, not a gap. The only real
+gap left is the mobile-wrap cosmetic issue named in the row above.
+`docs/LEARNING.md` records the lesson: a document that states an
+implementation constraint without citing the code that imposes it is a claim
+the next reader will believe rather than check.
 
 **Archive and restore is not drawn anywhere in the design.** There is no
 remove control on the design's own account form or accounts list. An account
