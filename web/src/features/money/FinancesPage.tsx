@@ -18,6 +18,7 @@ import { FINANCES_COPY } from "./copy";
 import { NetWorthCard } from "./NetWorthCard";
 import { NetWorthChart } from "./NetWorthChart";
 import { RecentTransactionsCard } from "./RecentTransactionsCard";
+import { hasDrawableTrend } from "./trend";
 import { useAccounts } from "./useAccounts";
 
 function PageHeader() {
@@ -145,18 +146,39 @@ export function FinancesPage() {
     );
   }
 
+  // Only ever set on the computable branch (schemas.ts), and itself optional
+  // there -- a limited member never reaches this far (the `!summary` return
+  // above), so `trend` here means "an owner, with a real trend payload."
+  const trend = summary.computable ? summary.trend : undefined;
+  // Decided once, here, from the same rule NetWorthChart.tsx applies
+  // internally (hasDrawableTrend) -- so the "Last 12 months" heading
+  // (gated on `chart` inside NetWorthCard) and the sentence below can never
+  // disagree about whether there is a chart to describe. A household with
+  // exactly one account -- a real first day, since FirstRunPanel above only
+  // pre-empts zero accounts -- lands here with `trend` present but not
+  // drawable.
+  const trendDrawable = trend !== undefined && hasDrawableTrend(trend.points);
+
   return (
     <PageContainer>
       <PageHeader />
       {/* 1.7fr/1fr, not two equal columns: the chart needs the width the
           design gives it, and the breakdown card is a list that does not. */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-[1.7fr_1fr]">
-        <NetWorthCard
-          summary={summary}
-          chart={summary.computable && summary.trend
-            ? <NetWorthChart points={summary.trend.points} />
-            : null}
-        />
+        <div className="flex flex-col gap-2">
+          <NetWorthCard
+            summary={summary}
+            chart={trendDrawable && trend ? <NetWorthChart points={trend.points} /> : null}
+          />
+          {/* Lives outside the card on purpose: passing this text through the
+              `chart` slot instead would make it truthy, and NetWorthCard's
+              "Last 12 months" heading would render right above a sentence
+              saying there is not enough history for twelve months yet --
+              the exact contradiction this state exists to avoid. */}
+          {trend && !trendDrawable && (
+            <p className="text-[12.5px] text-muted">{FINANCES_COPY.trendEmpty}</p>
+          )}
+        </div>
         <BreakdownCard summary={summary} />
       </div>
       {/* Only reachable here, in the branch `summary` is present in -- which

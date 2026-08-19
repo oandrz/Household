@@ -59,6 +59,14 @@ export function NetWorthCard({
         <h2 id="net-worth-heading" className="text-xs text-muted">
           {FINANCES_COPY.netWorth}
         </h2>
+        {/* A JSX element is truthy regardless of what it renders, so this
+            label must never be gated on a chart that merely exists -- only
+            on one FinancesPage.tsx has already decided (via
+            NetWorthChart.tsx's own hasDrawableTrend) is worth naming
+            "Last 12 months". FinancesPage passes `null`, not the chart's own
+            empty-state text, for exactly that reason: this line trusts the
+            caller to have made that call already, rather than re-deriving
+            it here. */}
         {chart && <span className="text-xs text-muted">{FINANCES_COPY.trendWindow}</span>}
       </div>
       <p className="mt-1.5 text-[30px] font-semibold tracking-[-0.03em] text-ink">

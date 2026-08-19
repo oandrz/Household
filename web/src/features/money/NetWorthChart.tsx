@@ -7,6 +7,7 @@
 // data the page holds, never a second request.
 import { FINANCES_COPY, monthTickLabel } from "./copy";
 import type { TrendPoint } from "./schemas";
+import { hasDrawableTrend } from "./trend";
 
 const WIDTH = 320;
 const HEIGHT = 150;
@@ -32,11 +33,10 @@ const TICKS = [0, 3, 6, 11];
 export function NetWorthChart({ points }: { points: TrendPoint[] }) {
   const known = points.filter((point) => point.netWorthMinor !== null);
 
-  // Fewer than two known months is not a trend. A brand-new household has
-  // every account opened today, so it has exactly one -- and a single bar
-  // pinned to the right-hand edge with eleven empty slots beside it says less
-  // than the sentence does.
-  if (known.length < 2) {
+  // hasDrawableTrend lives in trend.ts, not here -- see that file's own
+  // comment for why, and for the second caller (FinancesPage.tsx) that
+  // relies on this component and that caller agreeing on the same rule.
+  if (!hasDrawableTrend(points)) {
     return (
       <p data-testid="net-worth-chart-empty" className="mt-4 text-[12.5px] text-muted">
         {FINANCES_COPY.trendEmpty}

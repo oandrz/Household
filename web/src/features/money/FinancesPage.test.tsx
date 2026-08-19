@@ -270,6 +270,103 @@ describe("FinancesPage", () => {
     expect(screen.queryByText(/[▲▼]/)).toBeNull();
   });
 
+  // A household with exactly one account, on its first day: FirstRunPanel
+  // above only pre-empts *zero* accounts, so this is the very next real
+  // render, not a hypothetical -- and the state a fix-round-1 review caught
+  // rendering "Last 12 months" directly above a sentence saying there is not
+  // enough history for twelve months. Eleven nulls and one real figure (not
+  // a shorter points array) because that is the literal shape
+  // trendPointSchema promises for a month nothing was tracked through yet
+  // (schemas.ts's own comment on netWorthMinor being nullable and required).
+  function oneKnownMonthTrendBody() {
+    const months = [
+      "2025-08", "2025-09", "2025-10", "2025-11",
+      "2025-12", "2026-01", "2026-02", "2026-03",
+      "2026-04", "2026-05", "2026-06", "2026-07",
+    ];
+    return {
+      points: months.map((month, index) => ({
+        month,
+        netWorthMinor: index === months.length - 1 ? 824055 : null,
+        complete: index === months.length - 1,
+      })),
+      // changeBasisPoints stays absent: one known month has no earlier month
+      // to compare against, so the server would never send one either.
+    };
+  }
+
+  it("explains why there's no chart yet for a one-month household, with no label over it", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture("owner") },
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/transactions": EMPTY_TRANSACTIONS,
+      "GET /api/v1/accounts": {
+        status: 200,
+        body: {
+          accounts: [{
+            id: "a1", nickname: "DBS Everyday", type: "cash",
+            ownerMembershipId: null, ownerName: null,
+            balance: { amountMinor: 824055, currency: "SGD" },
+            openingBalance: { amountMinor: 824055, currency: "SGD" },
+            balanceAsOf: "2026-07-26",
+            countTowardNetWorth: true, visibleToLimitedMembers: false,
+            archivedAt: null,
+          }],
+          summary: {
+            currency: "SGD", computable: true, netWorthMinor: 824055,
+            assetsMinor: 824055, liabilitiesMinor: 0,
+            breakdown: [{ type: "cash", totalMinor: 824055 }],
+            excludedNoRate: [], excludedByChoice: 0,
+            trend: oneKnownMonthTrendBody(),
+          },
+        },
+      },
+    });
+
+    renderWithRouter(<FinancesPage />);
+
+    expect(await screen.findByText(FINANCES_COPY.trendEmpty)).toBeInTheDocument();
+    // Not just "no bars" -- the heading row's own label must not appear
+    // either, or the page still claims a twelve-month chart it isn't
+    // drawing.
+    expect(screen.queryByText(FINANCES_COPY.trendWindow)).toBeNull();
+  });
+
+  it("styles a falling net worth in red, with the down arrow", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture("owner") },
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/transactions": EMPTY_TRANSACTIONS,
+      "GET /api/v1/accounts": {
+        status: 200,
+        body: {
+          accounts: [{
+            id: "a1", nickname: "DBS Everyday", type: "cash",
+            ownerMembershipId: null, ownerName: null,
+            balance: { amountMinor: 824055, currency: "SGD" },
+            openingBalance: { amountMinor: 800000, currency: "SGD" },
+            balanceAsOf: "2026-07-26",
+            countTowardNetWorth: true, visibleToLimitedMembers: false,
+            archivedAt: null,
+          }],
+          summary: {
+            currency: "SGD", computable: true, netWorthMinor: 824055,
+            assetsMinor: 824055, liabilitiesMinor: 0,
+            breakdown: [{ type: "cash", totalMinor: 824055 }],
+            excludedNoRate: [], excludedByChoice: 0,
+            trend: trendBody(-210),
+          },
+        },
+      },
+    });
+
+    renderWithRouter(<FinancesPage />);
+
+    const change = await screen.findByText("▼ 2.1%");
+    expect(change).toHaveClass("text-danger");
+    expect(change).not.toHaveClass("text-accent");
+  });
+
   // Six fixtures, not five: a fixture of exactly five would pass whether the
   // card slices to the newest five or simply renders everything it's given,
   // which proves nothing about the slicing this card exists to do. The sixth

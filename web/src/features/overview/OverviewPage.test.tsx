@@ -49,8 +49,14 @@ function summaryBody(netWorthMinor: number, trend?: unknown) {
   };
 }
 
-// Two complete months is all the card needs: it draws no chart, only the
-// percentage between the newest month and the one before it.
+// Twelve, not the two months the card actually reads (the percentage
+// compares only the newest month to the one before it). A full, drawable set
+// of points is what makes "shows the change on the net worth card, and never
+// the chart" a real assertion about NetWorthCard's own behaviour -- a
+// two-point fixture would have no bars to find regardless of whether the
+// card obeyed the missing `chart` prop, so the "never the chart" half of
+// that test would pass for the wrong reason (nothing to draw, not "correctly
+// drew nothing").
 function trendBody(changeBasisPoints: number) {
   const months = [
     "2025-08", "2025-09", "2025-10", "2025-11",
