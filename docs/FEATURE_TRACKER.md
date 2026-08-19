@@ -322,9 +322,9 @@ this file had just rewritten, and found it false: the Overview net worth
 tile (`design/Household Dashboard.dc.html:305`) draws three stacked
 lines — label, figure, change — in every iteration of the file, and
 nothing else. The only "Assets & liabilities" block the design contains
-anywhere (`:361-368`) is a separate sibling card, drawn only inside the
-Finances screen's own `is_finances` block, which this product already
-builds as its own row in this same table. There is no version of the
+anywhere is a separate sibling card, drawn only inside the Finances
+screen's own `is_finances` block, which this product already builds as
+its own row in this same table. There is no version of the
 Overview tile, on either screen, that was ever meant to carry a
 breakdown — a fact the row's own next clause had already half-admitted
 ("was never meant to… stays Finances-only by design") without anyone
@@ -480,7 +480,7 @@ replaced.
 
 | Feature | State |
 |---|---|
-| Net worth card | ✅ — the figure, the not-computable case, and the month-to-date change badge, by reusing Finances' own card. The design's own Overview tile (`design/Household Dashboard.dc.html:305`) draws exactly three stacked lines — label, figure, change — and nothing else, in every iteration of the file; the only "Assets & liabilities" block anywhere in the design (`:361-368`) is a separate sibling card on the Finances page, which this product already builds as its own row below. There is no version of the Overview tile that was ever meant to carry a breakdown, so there is no gap left to name here |
+| Net worth card | ✅ — the figure, the not-computable case, and the month-to-date change badge, by reusing Finances' own card. The design's own Overview tile (`design/Household Dashboard.dc.html:305`) draws exactly three stacked lines — label, figure, change — and nothing else, in every iteration of the file; the only "Assets & liabilities" block anywhere in the design is a separate sibling card on the Finances page, which this product already builds as its own row below. There is no version of the Overview tile that was ever meant to carry a breakdown, so there is no gap left to name here |
 | July budget card — percentage used | 🟡 — percentage used plus the two figures behind it, and a "Set a budget" link when the household has never budgeted. No sparkline. Owner-only: `GET /budgets/{month}` is `requireCapability(money)` **and** `requireOwner` |
 | Next bill card | ✅ — the next-due bill's name, amount and due date (or the overdue/autopay state in its place), reading `useBills`, the same hook and cache entry `/money/bills` itself uses |
 | Goals on track card | ✅ — the real `X of Y on track` figure and the next dated goal beneath it, reading `useGoals`, the same hook and cache entry `/money/goals` itself uses |

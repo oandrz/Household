@@ -79,6 +79,28 @@ type trendAccount struct {
 // with the exchange rate held still -- the more useful of the two charts
 // anyway, since an account whose balance never changed should not appear to
 // rise and fall because a currency did (spec decision 2).
+//
+// counted's balances come from the AccountView.List the handler already ran
+// (account_handlers.go); MonthlyMovements below is a second, separate read,
+// and the two are not wrapped in one transaction. There is a narrow window
+// between them in which a transaction can be written -- or deleted -- dated
+// in one of months[1..11] (a movement in months[0] is never read; walkBack
+// never looks at it). Land in that window and the newest bar still equals
+// the headline exactly, because both are read from the same List call, but
+// every bar older than the month the transaction is dated in is wrong by
+// that amount, silently and plausibly, until the next GET /accounts
+// recomputes both reads together and the window closes on its own.
+//
+// This is accepted deliberately, not overlooked: the window is one HTTP
+// request wide, it self-heals on the next refresh, and it is a smaller
+// cousin of the retroactivity spec decision 1 already accepts by name for
+// this same feature. A transaction (or the repeatable-read isolation that
+// would make one meaningful here) is more machinery than a self-healing,
+// narrow-window risk earns today. Revisit this if either changes: CSV import
+// (already on the roadmap) turns "one transaction in the window" into "a
+// bulk insert of hundreds," which is a materially wider window than this
+// paragraph was written to accept; or a snapshot table or cached trend
+// arrives, which would stop the next request from healing it for free.
 func (s *AccountService) trend(
 	ctx context.Context,
 	householdID string,

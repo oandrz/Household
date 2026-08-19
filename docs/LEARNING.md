@@ -1860,16 +1860,28 @@ Task 9 built the hook two tasks before the composer gap even opened.
   unchecked — proof that naming the discipline is not the same as
   applying it to everything in reach, especially the sentence sitting
   right next to the one just fixed.
+- **A fourth instance, found in the net worth trend branch's own final
+  review, inside the very paragraph written to warn about this.** The
+  correction above cites `design/Household Dashboard.dc.html:361-368` for
+  the Finances "Assets & liabilities" card. The card opens at line 359, its
+  heading is at 360, and it closes at 369 -- wrong by two lines at the start
+  and one at the end, in a range nobody had re-opened the file to check
+  since it was written. The fix was to stop citing a range at all: name the
+  block ("the *Assets & liabilities* card on the Finances page") instead of
+  its line numbers, the same prescription the paragraph itself already gives
+  for `account.go:167` drifting to 177. A citation inside the passage
+  arguing that citations need checking is not exempt from needing to be
+  checked.
 
 **Treat a citation the way you'd treat a test assertion: something the next
 reader can verify against the thing it names, not something to trust because
-it reads confidently.** All three instances above cost nothing to produce
+it reads confidently.** All four instances above cost nothing to produce
 and each would have cost under a minute to check — reading the query,
 re-finding the line, or opening the mockup — against a small planning gap,
-a wrong number in a comment, and a design claim nobody had opened the design
-to test. A citation checked once and never re-verified when the sentence
-around it is rewritten is not a citation any more; it is the same
-unverified claim wearing a reference.
+a wrong number in a comment, a design claim nobody had opened the design to
+test, and a line range nobody had re-measured. A citation checked once and
+never re-verified when the sentence around it is rewritten is not a citation
+any more; it is the same unverified claim wearing a reference.
 
 ---
 

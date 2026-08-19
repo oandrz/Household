@@ -294,6 +294,15 @@ func TestOwnerSeesTheTwelveMonthTrend(t *testing.T) {
 	if points[11].NetWorthMinor == nil || *points[11].NetWorthMinor != 824_055 {
 		t.Errorf("2026-07 = %v, want 824055", points[11].NetWorthMinor)
 	}
+	// The account was opened this month, so the newest bar has every counted
+	// account and the oldest bar is missing the only one there is -- not
+	// merely unknown, but explicitly incomplete.
+	if !points[11].Complete {
+		t.Error("2026-07 complete = false, want true -- the account is tracked by this month")
+	}
+	if points[0].Complete {
+		t.Error("2025-08 complete = true, want false -- the account was not open yet")
+	}
 	if got.Summary.Trend.ChangeBasisPoints != nil {
 		t.Errorf("changeBasisPoints = %d, want absent -- June is unknown",
 			*got.Summary.Trend.ChangeBasisPoints)
@@ -303,6 +312,16 @@ func TestOwnerSeesTheTwelveMonthTrend(t *testing.T) {
 	// the frontend needs the slot to keep the axis aligned.
 	if !bytes.Contains(rec.Body.Bytes(), []byte(`"netWorthMinor":null`)) {
 		t.Error("a gap month omits netWorthMinor entirely; it must be sent as null")
+	}
+
+	// complete needs the same byte-level pin netWorthMinor gets, for a reason
+	// specific to bool: a missing key and `false` decode to the exact same Go
+	// zero value, so a struct field alone cannot tell "the wire said false"
+	// from "the wire said nothing and Complete never got a JSON tag" -- only
+	// the raw bytes can. This is what an accidental `,omitempty` on the
+	// Complete tag would remove without any decoded assertion above noticing.
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"complete":false`)) {
+		t.Error(`the oldest month's complete field is missing from the wire; want a literal "complete":false`)
 	}
 
 	// Absent, not null. A decoded *int64 is nil either way, so only the raw
