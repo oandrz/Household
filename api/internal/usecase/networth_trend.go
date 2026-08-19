@@ -118,7 +118,7 @@ func (s *AccountService) trend(
 			return nil, err
 		}
 		trackedFrom := startOfMonth(a.account.OpeningBalanceAsOf)
-		// account.go:167 gives a household a full day of slack on this date so
+		// account.go:177 gives a household a full day of slack on this date so
 		// someone in UTC+8 can enter their own "today"; at a month boundary
 		// that lands the stored date in next month. The account is already in
 		// the headline regardless, so it belongs in the newest bar -- the same
@@ -166,7 +166,63 @@ func (s *AccountService) trend(
 		}
 	}
 
-	return &NetWorthTrend{Points: points}, nil
+	return &NetWorthTrend{
+		Points:            points,
+		ChangeBasisPoints: changeBasisPoints(points[trendMonths-1], points[trendMonths-2]),
+	}, nil
+}
+
+// changeBasisPoints is the "▲ 2.1%" beside the headline figure, in integer
+// basis points: 210 means 2.10%.
+//
+// It returns nil far more often than it returns a number, and each condition
+// is a claim the product must not make:
+//
+//   - either month unknown: there is no comparison to draw.
+//   - either month incomplete: the step between them is partly coverage, not
+//     growth. A household that started tracking a second account this month
+//     did not get richer by its balance.
+//   - a base of zero or less: a percentage of zero is undefined, and off a
+//     negative base it inverts its own sign -- a household climbing from
+//     -10,000 to -5,000 would be shown as -50%.
+//   - arithmetic that would overflow: the same fail-closed rule as everywhere,
+//     rather than a wrapped number that still renders.
+//
+// The rounding is half away from zero, matching Rate.Apply, so every rounding
+// decision on this screen is the same decision.
+func changeBasisPoints(current, previous TrendPoint) *int64 {
+	if current.NetWorth == nil || previous.NetWorth == nil {
+		return nil
+	}
+	if !current.Complete || !previous.Complete {
+		return nil
+	}
+
+	base := previous.NetWorth.Amount
+	if base <= 0 {
+		return nil
+	}
+	now := current.NetWorth.Amount
+	if now < math.MinInt64+base {
+		return nil
+	}
+	delta := now - base
+
+	if delta > math.MaxInt64/10_000 || delta < math.MinInt64/10_000 {
+		return nil
+	}
+	scaled := delta * 10_000
+	half := base / 2
+	if scaled > math.MaxInt64-half || scaled < math.MinInt64+half {
+		return nil
+	}
+	if scaled < 0 {
+		scaled -= half
+	} else {
+		scaled += half
+	}
+	points := scaled / base
+	return &points
 }
 
 // deltasByAccountMonth indexes the repository's rows by account and month.

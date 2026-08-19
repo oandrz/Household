@@ -116,7 +116,7 @@ func TestAMonthBeforeAnAccountWasTrackedIsAGap(t *testing.T) {
 // TestAnAccountOpenedNextMonthByClockSkewIsInTheNewestBar is the tracked-from
 // counterpart of TestTheNewestBarIsTheHeadlineFigure's future-dated movement.
 //
-// account.go:167 gives OpeningBalanceAsOf a day of slack so a household in
+// account.go:177 gives OpeningBalanceAsOf a day of slack so a household in
 // UTC+8 can enter their own "today" while the server's UTC clock is still on
 // the previous day (account_test.go:116-117 documents why). At a month
 // boundary that slack can store an opening date in the month AFTER `current`
@@ -253,5 +253,90 @@ func TestNoCountedAccountsMeansNoTrend(t *testing.T) {
 	}
 	if got.Trend != nil {
 		t.Errorf("Trend = %+v, want nil for a household with no counted accounts", got.Trend)
+	}
+}
+
+// TestTheChangeIsBasisPointsOfLastMonth is the design's own "▲ 2.1%", as an
+// integer. A percentage is not money, but there is no reason to put a float
+// on this wire when 210 says 2.10% exactly.
+func TestTheChangeIsBasisPointsOfLastMonth(t *testing.T) {
+	svc, repo := newAccountService(t)
+	view := account(t, domain.AccountCash, 1_000_000, "SGD",
+		openedOn(month(2025, time.August)), withBalance(1_021_000))
+	repo.addMovement(movement(view.Account.ID, month(2026, time.July), 21_000, "SGD"))
+
+	got, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{view}, fixedNow)
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if got.Trend.ChangeBasisPoints == nil {
+		t.Fatal("ChangeBasisPoints is nil, want 210")
+	}
+	if *got.Trend.ChangeBasisPoints != 210 {
+		t.Errorf("ChangeBasisPoints = %d, want 210 (21000 on 1000000)", *got.Trend.ChangeBasisPoints)
+	}
+}
+
+// TestTheChangeIsSuppressedWhenLastMonthWasIncomplete is the guard that stops
+// the product calling coverage growth. A household that starts tracking a
+// second account this month did not get 400% richer.
+func TestTheChangeIsSuppressedWhenLastMonthWasIncomplete(t *testing.T) {
+	svc, _ := newAccountService(t)
+	old := account(t, domain.AccountCash, 100_000, "SGD", openedOn(month(2025, time.August)))
+	old.Account.ID = "old"
+	fresh := account(t, domain.AccountCash, 400_000, "SGD", openedOn(month(2026, time.July)))
+	fresh.Account.ID = "fresh"
+
+	got, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{old, fresh}, fixedNow)
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if got.Trend.ChangeBasisPoints != nil {
+		t.Errorf("ChangeBasisPoints = %d, want nil -- June was missing an account July has",
+			*got.Trend.ChangeBasisPoints)
+	}
+}
+
+// TestTheChangeIsSuppressedOnANonPositiveBase: a percentage of zero is
+// undefined, and off a negative base it inverts its own sign -- a household
+// climbing from -10000 to -5000 would be shown as having fallen 50%.
+func TestTheChangeIsSuppressedOnANonPositiveBase(t *testing.T) {
+	svc, repo := newAccountService(t)
+	// -5000 in July: the sum owed fell from 10000 to 5000 that month. Both
+	// months are therefore negative net worth, which is the state this rule
+	// exists for.
+	loan := account(t, domain.AccountLoan, 10_000, "SGD",
+		openedOn(month(2025, time.August)), withBalance(5_000))
+	repo.addMovement(movement(loan.Account.ID, month(2026, time.July), -5_000, "SGD"))
+
+	got, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{loan}, fixedNow)
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if got.Trend.Points[10].NetWorth.Amount != -10_000 {
+		t.Fatalf("June = %d, want -10000 -- the fixture is wrong, not the rule",
+			got.Trend.Points[10].NetWorth.Amount)
+	}
+	if got.Trend.ChangeBasisPoints != nil {
+		t.Errorf("ChangeBasisPoints = %d, want nil on a negative base",
+			*got.Trend.ChangeBasisPoints)
+	}
+}
+
+// TestTheChangeRoundsHalfAwayFromZero matches Rate.Apply's rule, so every
+// rounding decision in a monetary path in this codebase is the same one.
+func TestTheChangeRoundsHalfAwayFromZero(t *testing.T) {
+	svc, repo := newAccountService(t)
+	// 15 on 20000 is 0.075% -- 7.5 basis points, which must round to 8.
+	view := account(t, domain.AccountCash, 20_000, "SGD",
+		openedOn(month(2025, time.August)), withBalance(20_015))
+	repo.addMovement(movement(view.Account.ID, month(2026, time.July), 15, "SGD"))
+
+	got, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{view}, fixedNow)
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if got.Trend.ChangeBasisPoints == nil || *got.Trend.ChangeBasisPoints != 8 {
+		t.Errorf("ChangeBasisPoints = %v, want 8 (7.5 rounds away from zero)", got.Trend.ChangeBasisPoints)
 	}
 }
