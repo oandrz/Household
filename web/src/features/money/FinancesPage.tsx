@@ -16,6 +16,7 @@ import { AccountsPanel } from "./AccountsPanel";
 import { BreakdownCard } from "./BreakdownCard";
 import { FINANCES_COPY } from "./copy";
 import { NetWorthCard } from "./NetWorthCard";
+import { NetWorthChart } from "./NetWorthChart";
 import { RecentTransactionsCard } from "./RecentTransactionsCard";
 import { useAccounts } from "./useAccounts";
 
@@ -147,8 +148,15 @@ export function FinancesPage() {
   return (
     <PageContainer>
       <PageHeader />
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <NetWorthCard summary={summary} />
+      {/* 1.7fr/1fr, not two equal columns: the chart needs the width the
+          design gives it, and the breakdown card is a list that does not. */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-[1.7fr_1fr]">
+        <NetWorthCard
+          summary={summary}
+          chart={summary.computable && summary.trend
+            ? <NetWorthChart points={summary.trend.points} />
+            : null}
+        />
         <BreakdownCard summary={summary} />
       </div>
       {/* Only reachable here, in the branch `summary` is present in -- which

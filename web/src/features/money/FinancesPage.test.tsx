@@ -29,6 +29,26 @@ const EMPTY_TRANSACTIONS = {
   },
 };
 
+// Twelve complete months, oldest first, in the window the server sends. A
+// helper rather than a literal in each test: the two tests below differ only
+// in whether changeBasisPoints is present, and spelling the points out twice
+// would bury the one difference that matters.
+function trendBody(changeBasisPoints?: number) {
+  const months = [
+    "2025-08", "2025-09", "2025-10", "2025-11",
+    "2025-12", "2026-01", "2026-02", "2026-03",
+    "2026-04", "2026-05", "2026-06", "2026-07",
+  ];
+  return {
+    points: months.map((month, index) => ({
+      month,
+      netWorthMinor: 800000 + index * 2000,
+      complete: true,
+    })),
+    ...(changeBasisPoints === undefined ? {} : { changeBasisPoints }),
+  };
+}
+
 // useMe() is called both by this page (to gate FirstRunPanel's add button)
 // and by AccountsPanel (to gate its own "+ Add account"), independently of
 // what GET /api/v1/accounts answers -- RequireCapability, the route's real
@@ -167,6 +187,87 @@ describe("FinancesPage", () => {
     // from the accounts fetch this test has otherwise awaited -- same reason
     // as the net worth figure above.
     expect(await within(accountsPanel).findByText(FINANCES_COPY.addAccount)).toBeInTheDocument();
+  });
+
+  it("shows the twelve-month chart and the change beside the figure", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture("owner") },
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/transactions": EMPTY_TRANSACTIONS,
+      "GET /api/v1/accounts": {
+        status: 200,
+        body: {
+          accounts: [{
+            id: "a1", nickname: "DBS Everyday", type: "cash",
+            ownerMembershipId: null, ownerName: null,
+            balance: { amountMinor: 824055, currency: "SGD" },
+            openingBalance: { amountMinor: 800000, currency: "SGD" },
+            balanceAsOf: "2026-07-26",
+            countTowardNetWorth: true, visibleToLimitedMembers: false,
+            archivedAt: null,
+          }],
+          summary: {
+            currency: "SGD", computable: true, netWorthMinor: 824055,
+            assetsMinor: 824055, liabilitiesMinor: 0,
+            breakdown: [{ type: "cash", totalMinor: 824055 }],
+            excludedNoRate: [], excludedByChoice: 0,
+            trend: trendBody(210),
+          },
+        },
+      },
+    });
+
+    const { container } = renderWithRouter(<FinancesPage />);
+
+    expect(await screen.findByText("▲ 2.1%")).toBeInTheDocument();
+    expect(screen.getByText(FINANCES_COPY.trendWindow)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(container.querySelectorAll("[data-testid='net-worth-bar']").length).toBe(12),
+    );
+  });
+
+  // The server omits changeBasisPoints whenever the comparison would be
+  // dishonest -- either month unknown or incomplete, or a base of zero or
+  // less. Absent must render as nothing: not "0.0%", not a dash, which would
+  // each read as a measurement that came back empty rather than one nobody
+  // can honestly make.
+  it("renders no change at all when the server sent none", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture("owner") },
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/transactions": EMPTY_TRANSACTIONS,
+      "GET /api/v1/accounts": {
+        status: 200,
+        body: {
+          accounts: [{
+            id: "a1", nickname: "DBS Everyday", type: "cash",
+            ownerMembershipId: null, ownerName: null,
+            balance: { amountMinor: 824055, currency: "SGD" },
+            openingBalance: { amountMinor: 800000, currency: "SGD" },
+            balanceAsOf: "2026-07-26",
+            countTowardNetWorth: true, visibleToLimitedMembers: false,
+            archivedAt: null,
+          }],
+          summary: {
+            currency: "SGD", computable: true, netWorthMinor: 824055,
+            assetsMinor: 824055, liabilitiesMinor: 0,
+            breakdown: [{ type: "cash", totalMinor: 824055 }],
+            excludedNoRate: [], excludedByChoice: 0,
+            trend: trendBody(),
+          },
+        },
+      },
+    });
+
+    const { container } = renderWithRouter(<FinancesPage />);
+
+    await waitFor(() =>
+      expect(container.querySelectorAll("[data-testid='net-worth-bar']").length).toBe(12),
+    );
+    // The arrows, not "%": no other figure on this screen carries one, so
+    // their absence is the precise claim, and it holds whichever direction a
+    // future change might have gone in.
+    expect(screen.queryByText(/[▲▼]/)).toBeNull();
   });
 
   // Six fixtures, not five: a fixture of exactly five would pass whether the

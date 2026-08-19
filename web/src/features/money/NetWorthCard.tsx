@@ -4,12 +4,26 @@
 // repeats the same figure as another part of the page -- a single-account
 // household's net worth equals that account's own balance -- can still be
 // addressed unambiguously in a test or by assistive tech.
+import type { ReactNode } from "react";
 import { useCurrencies } from "../auth/useAuth";
 import { FINANCES_COPY } from "./copy";
 import { formatMoney } from "./formatMoney";
 import type { Summary } from "./schemas";
 
-export function NetWorthCard({ summary }: { summary: Summary }) {
+// chart is a slot rather than something this card decides for itself: the
+// design draws the bars on Finances and not on Overview, and both screens
+// mount this same card. changeNote is the one word of copy that differs
+// between them -- Overview's card says "this month", Finances' figure sits
+// beside its own "Last 12 months" heading and does not need it.
+export function NetWorthCard({
+  summary,
+  chart,
+  changeNote,
+}: {
+  summary: Summary;
+  chart?: ReactNode;
+  changeNote?: string;
+}) {
   const currencies = useCurrencies();
   const symbol = currencies.data?.currencies.find(
     (c) => c.code === summary.currency,
@@ -41,12 +55,26 @@ export function NetWorthCard({ summary }: { summary: Summary }) {
       aria-labelledby="net-worth-heading"
       className="flex flex-col rounded-xl border border-hairline bg-card p-[22px]"
     >
-      <h2 id="net-worth-heading" className="text-xs text-muted">
-        {FINANCES_COPY.netWorth}
-      </h2>
+      <div className="flex items-baseline justify-between">
+        <h2 id="net-worth-heading" className="text-xs text-muted">
+          {FINANCES_COPY.netWorth}
+        </h2>
+        {chart && <span className="text-xs text-muted">{FINANCES_COPY.trendWindow}</span>}
+      </div>
       <p className="mt-1.5 text-[30px] font-semibold tracking-[-0.03em] text-ink">
         {formatMoney(summary.netWorthMinor, summary.currency, symbol)}
+        {summary.trend?.changeBasisPoints !== undefined && (
+          <span
+            className={`ml-2 text-[13px] font-semibold tracking-normal ${
+              summary.trend.changeBasisPoints < 0 ? "text-danger" : "text-accent"
+            }`}
+          >
+            {FINANCES_COPY.trendChange(summary.trend.changeBasisPoints)}
+            {changeNote ? ` ${changeNote}` : ""}
+          </span>
+        )}
       </p>
+      {chart}
 
       {summary.excludedNoRate.length > 0 && (
         <p className="mt-3 text-[11.5px] text-muted">

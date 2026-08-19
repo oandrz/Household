@@ -35,7 +35,7 @@ function meBody(overrides: { role?: string; capabilities?: string[] } = {}) {
 
 // A computable summary: the shape features/money/schemas.ts's discriminated
 // union takes when the server could convert every account.
-function summaryBody(netWorthMinor: number) {
+function summaryBody(netWorthMinor: number, trend?: unknown) {
   return {
     computable: true,
     currency: "SGD",
@@ -45,6 +45,25 @@ function summaryBody(netWorthMinor: number) {
     breakdown: [],
     excludedNoRate: [],
     excludedByChoice: 0,
+    ...(trend === undefined ? {} : { trend }),
+  };
+}
+
+// Two complete months is all the card needs: it draws no chart, only the
+// percentage between the newest month and the one before it.
+function trendBody(changeBasisPoints: number) {
+  const months = [
+    "2025-08", "2025-09", "2025-10", "2025-11",
+    "2025-12", "2026-01", "2026-02", "2026-03",
+    "2026-04", "2026-05", "2026-06", "2026-07",
+  ];
+  return {
+    points: months.map((month, index) => ({
+      month,
+      netWorthMinor: 1200000 + index * 4000,
+      complete: true,
+    })),
+    changeBasisPoints,
   };
 }
 
@@ -267,6 +286,49 @@ describe("OverviewPage", () => {
     expect(screen.getByText("SP utilities · Jul 8")).toBeInTheDocument();
     expect(await screen.findByText("3 of 4")).toBeInTheDocument();
     expect(screen.getByText("next: Bali · Dec 2026")).toBeInTheDocument();
+  });
+
+  it("shows the change on the net worth card, and never the chart", async () => {
+    const { container } = renderOverview({
+      "GET /api/v1/auth/me": { status: 200, body: meBody() },
+      "GET /api/v1/accounts": {
+        status: 200,
+        body: { accounts: [], summary: summaryBody(1248000, trendBody(210)) },
+      },
+      [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
+      "GET /api/v1/bills": {
+        status: 200,
+        body: billsBody({
+          billCount: 1,
+          nextDue: {
+            billId: "bill-1",
+            billName: "SP utilities",
+            dueOn: "2026-07-08",
+            amountMinor: 14230,
+            currency: "SGD",
+            overdue: false,
+            autopay: true,
+          },
+        }),
+      },
+      "GET /api/v1/goals": {
+        status: 200,
+        body: goalsBody(
+          {
+            onTrackCount: 3,
+            datedCount: 4,
+            nextGoal: { id: "goal-1", name: "Bali", targetMonth: "2026-12" },
+          },
+          [goalStub()],
+        ),
+      },
+      "GET /api/v1/retros": { status: 200, body: retrosBody() },
+    });
+
+    expect(await screen.findByText("▲ 2.1% this month")).toBeInTheDocument();
+    // The design draws no chart here, and the card must not grow one just
+    // because the data to draw it arrived.
+    expect(container.querySelector("[data-testid='net-worth-bar']")).toBeNull();
   });
 
   it("tells a member without money that Money is not shared with them", async () => {
