@@ -1265,9 +1265,9 @@ something only that guard can produce.
   reaches it — a UI control offering to "recover" from the guard's own
   refusal needs the same scrutiny as the write path itself.**
 
-- Net worth trend round, Task 7 to Task 8: **a risk named and deferred is
-  still a risk, and the round that finally opened a real narrow browser
-  found it real.** Task 7's own progress notes flagged, unprompted, that
+- Net worth trend round, Task 7 to Task 8: **a flagged-but-unverified visual
+  risk is not closed until someone looks, and the browser walk is where such
+  flags get retired.** Task 7's own progress notes flagged, unprompted, that
   "the percentage renders inline in the 30px figure, and wrapping at mobile
   width on Overview is unverified" — then deferred it to the browser walk
   rather than guessing at a fix, because no vitest assertion on a 30px
@@ -1278,11 +1278,22 @@ something only that guard can produce.
   wrapping mid-phrase, stranding "month" (or "this month") alone on its own
   line, still in the danger colour, reading as a broken element rather than
   part of the figure. Finances' own copy of the same badge (`▼ 6.0%`, no
-  "this month" suffix) does not wrap at either width — the extra words are
-  exactly what does not fit. Left unfixed pending a product decision, per
-  this round's own instruction not to patch a defect found this late in a
-  browser walk without one; recorded here so the next person does not have
-  to rediscover that the risk was already known and already named once.
+  "this month" suffix) did not wrap at either width — the extra words were
+  exactly what did not fit. Left unfixed at first, pending a product
+  decision, per the instruction not to patch a defect found this late in a
+  browser walk without one; the decision came back the same day (render the
+  change as its own line under the figure whenever a changeNote is present,
+  matching the design's own Overview tile, rather than inline beside a 30px
+  figure) and a fix round closed it, confirmed clean at both widths and
+  pinned by a test that asserts the badge's own DOM arrangement rather than
+  its words, since the words were identical either way and would not have
+  caught a regression back to inline. **The lesson is not "test more" — no
+  test in this stack can evaluate real text wrapping — it is that naming a
+  risk and deferring it is only half the job.** A risk written down and
+  never revisited is indistinguishable, to the next reader, from a risk
+  nobody noticed; the round that finally opens the real browser the risk was
+  waiting for is what turns the flag into either "confirmed safe" or "found
+  and fixed," and until that happens the flag is not evidence of anything.
 
 **If a behaviour depends on the platform, verify it in the platform.** A real
 browser is what found every frontend defect above, and nothing else could

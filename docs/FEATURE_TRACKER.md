@@ -283,24 +283,37 @@ Built), taking the stated totals from 62/18/23/2 = 105 to
 **63/17/23/2 = 105** — row count unchanged, Built + Partial still **80 of
 105** (a Partial becoming Built moves neither side of that sum).
 
-**The net worth trend, 2026-08-19 — a wrong constraint corrected, and a real
-gap named instead.** The 12-month trend (Money's own last gap) is code-complete
-and walked in a real browser: the twelve-month series, the newest-bar-equals-
-headline guarantee, the change badge, the day-one and sparse-history states,
-and the archived-account exclusion all behave as specced. The row's own prose
-used to claim the trend needed a balance-snapshot table; it never did (see the
-rewritten paragraph above), and this correction alone is why the row stays 🟡
-rather than moving to ✅. The browser walk also found one live gap the plan's
-own test suite could not have caught by construction: the change badge's text
-wraps mid-phrase on Overview at mainstream mobile widths (360px, 320px),
-stranding "month" alone in the danger colour — Task 7 had flagged this exact
-risk as unverified and deferred it to the browser pass, and the browser pass
-is what found it real, so the row is marked 🟡 with this named instead of ✅.
+**The net worth trend, 2026-08-19 — a wrong constraint corrected, a real gap
+found and closed the same day.** The 12-month trend (Money's own last gap) is
+code-complete and walked in a real browser: the twelve-month series, the
+newest-bar-equals-headline guarantee, the change badge, the day-one and
+sparse-history states, and the archived-account exclusion all behave as
+specced. The row's own prose used to claim the trend needed a
+balance-snapshot table; it never did (see the rewritten paragraph above). The
+browser walk also found one live gap the plan's own test suite could not have
+caught by construction: the change badge's text wrapped mid-phrase on
+Overview at mainstream mobile widths (360px, 320px), stranding "month" alone
+in the danger colour — Task 7 had flagged this exact risk as unverified and
+deferred it to the browser pass, and the browser pass is what found it real.
+First recorded 🟡 with the gap named rather than the ✅ the round's own plan
+asked for, because CLAUDE.md's tracker rule outranks a plan once a real gap
+is confirmed. A same-day fix round closed it: the badge now renders as its
+own line beneath the figure whenever the caller supplies a changeNote
+(Overview), matching the design's own Overview tile, instead of inline beside
+the 30px figure; Finances' bare `▼ 6.0%` (no changeNote) is untouched and
+still renders inline, as the design's Finances screen draws it. Confirmed
+clean at 360px and 320px in a real browser and pinned by a structural test
+(`NetWorthCard.test.tsx`, four cases) that asserts the badge's own DOM
+arrangement — parent element and tag name, not merely its words — so a
+regression back to always-inline cannot pass silently. The row moves to ✅.
 Recounting by this file's own rule (the first symbol in each row's own cell)
-finds **no symbol moved** — both "Net worth with 12-month trend" and "Net
-worth card" were already 🟡 and stay 🟡, only their prose changed — so every
-area's counts and the stated totals (63/17/23/2 = 105, 80 of 105 built or
-partly built) are unchanged by this update.
+finds exactly the one symbol this changes: "Net worth with 12-month trend"
+moves 🟡 → ✅; "Net worth card" was already 🟡 for a different, still-real
+reason (no assets/liabilities split on Overview) and stays 🟡. Money moves
+from 24/4/7/0 to **25/3/7/0** (24 rows unchanged, one Partial becomes Built),
+taking the stated totals from 63/17/23/2 = 105 to **64/16/23/2 = 105** — Built
++ Partial still **80 of 105** (a Partial becoming Built moves neither side of
+that sum).
 
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
@@ -308,11 +321,11 @@ partly built) are unchanged by this update.
 | Navigation shell | 7 | 1 | 1 | 0 |
 | Household settings | 11 | 8 | 2 | 0 |
 | Overview (home) | 5 | 3 | 2 | 0 |
-| Money | 24 | 4 | 7 | 0 |
+| Money | 25 | 3 | 7 | 0 |
 | Marriage | 6 | 0 | 9 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **63** | **17** | **23** | **2** |
+| **Total** | **64** | **16** | **23** | **2** |
 
 ---
 
@@ -443,7 +456,7 @@ replaced.
 
 | Feature | State |
 |---|---|
-| Net worth card | 🟡 — the figure, the not-computable case, and now the month-to-date change badge, by reusing Finances' own card. The gap narrows to the assets/liabilities split only: Overview was never meant to carry the chart (that stays Finances-only by design, since the card's job here is a headline, not a breakdown), so "the trend half" on this screen means the change badge, and that badge is exactly the piece with the mobile-wrap gap — see "Net worth with 12-month trend" in Money below |
+| Net worth card | 🟡 — the figure, the not-computable case, and the month-to-date change badge, by reusing Finances' own card. The gap narrows to the assets/liabilities split only: the design's card also carries a full assets/liabilities breakdown, which Overview's own card does not draw and was never meant to (that stays Finances-only by design, since this card's job here is a headline, not a breakdown) |
 | July budget card — percentage used | 🟡 — percentage used plus the two figures behind it, and a "Set a budget" link when the household has never budgeted. No sparkline. Owner-only: `GET /budgets/{month}` is `requireCapability(money)` **and** `requireOwner` |
 | Next bill card | ✅ — the next-due bill's name, amount and due date (or the overdue/autopay state in its place), reading `useBills`, the same hook and cache entry `/money/bills` itself uses |
 | Goals on track card | ✅ — the real `X of Y on track` figure and the next dated goal beneath it, reading `useGoals`, the same hook and cache entry `/money/goals` itself uses |
@@ -493,7 +506,7 @@ code *and* a walk confirming it. All five Money features are now walked.
 
 | Feature | State |
 |---|---|
-| Net worth with 12-month trend | 🟡 — the twelve-month series, the newest-bar-equals-headline guarantee and the month-to-date change badge are built and walked in a real browser (Task 8, 2026-08-19). The gap is narrow and cosmetic: the change badge's text (`▼ 6.0% this month`) wraps mid-phrase on Overview at 360px and 320px — mainstream Android widths — leaving "month" (or "this month") stranded alone on its own line in the danger colour, looking like a broken element rather than part of the figure. Finances' own copy of the same badge (`▼ 6.0%`, no "this month" suffix) does not wrap at the same widths. Task 7 flagged this exact risk as unverified and deferred it to the browser pass; the browser pass found it real |
+| Net worth with 12-month trend | ✅ — the twelve-month series, the newest-bar-equals-headline guarantee and the month-to-date change badge, walked in a real browser (Task 8, 2026-08-19). A fix round the same day closed the one gap the walk found: Overview's change badge (`▼ 6.0% this month`) wrapped mid-phrase at 360px and 320px because it rendered inline beside the 30px figure; it now renders as its own line underneath whenever the caller passes a changeNote (Overview), matching the design's own Overview tile, while Finances' bare `▼ 6.0%` (no changeNote) stays inline as it always did. Confirmed clean at both widths and pinned by a structural test (`NetWorthCard.test.tsx`) so it cannot silently regress to inline |
 | Assets and liabilities breakdown | ✅ |
 | Accounts by owner, with SGD/IDR split | ✅ |
 | Recent transactions strip | ✅ |
@@ -521,9 +534,11 @@ scheduled. The trade-off this buys — history is not frozen, so an account's
 past bars move if you edit an old transaction, and every month is converted
 at today's FX rate rather than the rate that held at the time — is spec
 decision 1 and decision 2 of
-`docs/superpowers/sdd/2026-08-19-net-worth-trend/`, not a gap. The only real
-gap left is the mobile-wrap cosmetic issue named in the row above.
-`docs/LEARNING.md` records the lesson: a document that states an
+`docs/superpowers/sdd/2026-08-19-net-worth-trend/`, not a gap. The browser
+walk that shipped this also found and closed a real, if narrow, defect: the
+change badge wrapped mid-phrase on Overview at mainstream mobile widths —
+see the row above for what broke and how it was fixed. `docs/LEARNING.md`
+records the lesson behind the wrong constraint: a document that states an
 implementation constraint without citing the code that imposes it is a claim
 the next reader will believe rather than check.
 

@@ -14,7 +14,14 @@ import type { Summary } from "./schemas";
 // design draws the bars on Finances and not on Overview, and both screens
 // mount this same card. changeNote is the one word of copy that differs
 // between them -- Overview's card says "this month", Finances' figure sits
-// beside its own "Last 12 months" heading and does not need it.
+// beside its own "Last 12 months" heading and does not need it. changeNote's
+// presence also decides the change's own layout, not just its wording: with
+// no changeNote (Finances) the bare "▲ 2.1%" stays inline beside the figure,
+// matching the design's Finances screen; with one (Overview) the whole
+// change renders as its own line underneath, matching the design's Overview
+// tile -- a bare arrow-and-percentage fits inline, "▲ 2.1% this month"
+// measured wider than an ordinary phone's content column and wrapped
+// mid-phrase when it was kept inline (docs/LEARNING.md pattern 3).
 //
 // chartEmptyNote is separate from chart, not a second thing packed into it:
 // Finances passes it instead of chart when there's a trend but not enough of
@@ -63,6 +70,18 @@ export function NetWorthCard({
     );
   }
 
+  // Hoisted out of the two render sites below (inline span, block <p>) so
+  // the arrow-and-percentage text and its colour are computed once, not
+  // duplicated between them and left free to drift apart.
+  const changeText =
+    summary.trend?.changeBasisPoints !== undefined
+      ? FINANCES_COPY.trendChange(summary.trend.changeBasisPoints)
+      : null;
+  const changeColorClass =
+    summary.trend?.changeBasisPoints !== undefined && summary.trend.changeBasisPoints < 0
+      ? "text-danger"
+      : "text-accent";
+
   return (
     <section
       aria-labelledby="net-worth-heading"
@@ -84,17 +103,33 @@ export function NetWorthCard({
       </div>
       <p className="mt-1.5 text-[30px] font-semibold tracking-[-0.03em] text-ink">
         {formatMoney(summary.netWorthMinor, summary.currency, symbol)}
-        {summary.trend?.changeBasisPoints !== undefined && (
+        {/* Finances passes no changeNote, so its own bare "▲ 2.1%" -- no
+            trailing words -- stays inline beside the figure, matching the
+            design's Finances screen, which sits the percentage right next to
+            "Last 12 months". Overview's copy adds "this month", which is
+            exactly what wrapped mid-phrase at 360px/320px when this stayed
+            inline (docs/LEARNING.md pattern 3) -- so once changeNote is
+            given, the whole change renders as its own line under the figure
+            instead (below), matching the design's own Overview card
+            (design/Household Dashboard.dc.html, the net worth tile), which
+            never puts the two on one line either. */}
+        {changeText !== null && !changeNote && (
           <span
-            className={`ml-2 text-[13px] font-semibold tracking-normal ${
-              summary.trend.changeBasisPoints < 0 ? "text-danger" : "text-accent"
-            }`}
+            data-testid="net-worth-change"
+            className={`ml-2 text-[13px] font-semibold tracking-normal ${changeColorClass}`}
           >
-            {FINANCES_COPY.trendChange(summary.trend.changeBasisPoints)}
-            {changeNote ? ` ${changeNote}` : ""}
+            {changeText}
           </span>
         )}
       </p>
+      {changeText !== null && changeNote && (
+        <p
+          data-testid="net-worth-change"
+          className={`mt-1 text-[13px] font-semibold tracking-normal ${changeColorClass}`}
+        >
+          {changeText} {changeNote}
+        </p>
+      )}
       {chart}
       {/* Same slot the chart itself would occupy (mt-4 text-[12.5px]
           text-muted matches NetWorthChart.tsx's own trendEmpty paragraph
