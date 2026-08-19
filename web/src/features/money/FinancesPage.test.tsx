@@ -325,11 +325,19 @@ describe("FinancesPage", () => {
 
     renderWithRouter(<FinancesPage />);
 
-    expect(await screen.findByText(FINANCES_COPY.trendEmpty)).toBeInTheDocument();
+    // within(netWorthCard), not screen -- a fix-round-2 review caught this
+    // exact sentence rendering as a sibling of the card instead of inside
+    // it (page background, no border, no padding), which `screen.findByText`
+    // alone can't see: text presence anywhere on the page says nothing about
+    // which box it landed in. Asserting containment means a future change
+    // that floats it back out of the card goes red here, not just at a
+    // browser walk.
+    const netWorthCard = await screen.findByRole("region", { name: "Net worth" });
+    expect(await within(netWorthCard).findByText(FINANCES_COPY.trendEmpty)).toBeInTheDocument();
     // Not just "no bars" -- the heading row's own label must not appear
-    // either, or the page still claims a twelve-month chart it isn't
+    // either, or the card still claims a twelve-month chart it isn't
     // drawing.
-    expect(screen.queryByText(FINANCES_COPY.trendWindow)).toBeNull();
+    expect(within(netWorthCard).queryByText(FINANCES_COPY.trendWindow)).toBeNull();
   });
 
   it("styles a falling net worth in red, with the down arrow", async () => {

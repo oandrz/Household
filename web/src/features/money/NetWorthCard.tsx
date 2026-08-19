@@ -15,13 +15,26 @@ import type { Summary } from "./schemas";
 // mount this same card. changeNote is the one word of copy that differs
 // between them -- Overview's card says "this month", Finances' figure sits
 // beside its own "Last 12 months" heading and does not need it.
+//
+// chartEmptyNote is separate from chart, not a second thing packed into it:
+// Finances passes it instead of chart when there's a trend but not enough of
+// one to draw (FinancesPage.tsx's own hasDrawableTrend call), so the note
+// renders inside this card's own padding -- the same convention
+// BreakdownCard, RecentTransactionsCard and this card's own not-computable
+// branch below all follow for their explanatory text -- while the "Last 12
+// months" heading, still gated on `chart` alone, stays suppressed. Passing a
+// JSX element through `chart` for this case instead (as an earlier version
+// of this fix did) made `chart` truthy for content that wasn't a chart,
+// which is exactly what re-triggered the heading.
 export function NetWorthCard({
   summary,
   chart,
+  chartEmptyNote,
   changeNote,
 }: {
   summary: Summary;
   chart?: ReactNode;
+  chartEmptyNote?: string;
   changeNote?: string;
 }) {
   const currencies = useCurrencies();
@@ -83,6 +96,12 @@ export function NetWorthCard({
         )}
       </p>
       {chart}
+      {/* Same slot the chart itself would occupy (mt-4 text-[12.5px]
+          text-muted matches NetWorthChart.tsx's own trendEmpty paragraph
+          exactly), so a household reads the same words in the same place
+          whether the "not enough history" branch is this one or that
+          component's -- only which of the two rendered it differs. */}
+      {chartEmptyNote && <p className="mt-4 text-[12.5px] text-muted">{chartEmptyNote}</p>}
 
       {summary.excludedNoRate.length > 0 && (
         <p className="mt-3 text-[11.5px] text-muted">
