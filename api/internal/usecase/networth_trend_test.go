@@ -323,6 +323,38 @@ func TestTheChangeIsSuppressedOnANonPositiveBase(t *testing.T) {
 	}
 }
 
+// TestTheChangeIsSuppressedOnAZeroBase is the half of "base <= 0" a negative
+// base cannot exercise: at base == 0 none of changeBasisPoints's overflow
+// guards wrap the way they do at a negative base (math.MinInt64+base does
+// not underflow when base is 0), so the only thing standing between this
+// state and "points := scaled / base" -- an integer divide by zero, which
+// panics -- is the base <= 0 check itself.
+func TestTheChangeIsSuppressedOnAZeroBase(t *testing.T) {
+	svc, repo := newAccountService(t)
+	// Cash and a loan of the same size cancel exactly in June: the household
+	// owns 5000 and owes 5000, for a genuine zero net worth, not a household
+	// with no accounts. In July the loan is paid down by 1000 and net worth
+	// becomes a real 1000 -- the ordinary way a household passes through
+	// zero on the way up.
+	cash := account(t, domain.AccountCash, 5_000, "SGD", openedOn(month(2025, time.August)))
+	loan := account(t, domain.AccountLoan, 5_000, "SGD",
+		openedOn(month(2025, time.August)), withBalance(4_000))
+	repo.addMovement(movement(loan.Account.ID, month(2026, time.July), -1_000, "SGD"))
+
+	got, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{cash, loan}, fixedNow)
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if got.Trend.Points[10].NetWorth.Amount != 0 {
+		t.Fatalf("June = %d, want 0 -- the fixture is wrong, not the rule",
+			got.Trend.Points[10].NetWorth.Amount)
+	}
+	if got.Trend.ChangeBasisPoints != nil {
+		t.Errorf("ChangeBasisPoints = %d, want nil on a zero base",
+			*got.Trend.ChangeBasisPoints)
+	}
+}
+
 // TestTheChangeRoundsHalfAwayFromZero matches Rate.Apply's rule, so every
 // rounding decision in a monetary path in this codebase is the same one.
 func TestTheChangeRoundsHalfAwayFromZero(t *testing.T) {
@@ -338,5 +370,26 @@ func TestTheChangeRoundsHalfAwayFromZero(t *testing.T) {
 	}
 	if got.Trend.ChangeBasisPoints == nil || *got.Trend.ChangeBasisPoints != 8 {
 		t.Errorf("ChangeBasisPoints = %v, want 8 (7.5 rounds away from zero)", got.Trend.ChangeBasisPoints)
+	}
+}
+
+// TestTheChangeRoundsHalfAwayFromZeroWhenNegative is the mirror of
+// TestTheChangeRoundsHalfAwayFromZero: the scaled < 0 branch runs on any
+// month net worth falls while the base stays positive, and none of the
+// other fixtures in this file reach it.
+func TestTheChangeRoundsHalfAwayFromZeroWhenNegative(t *testing.T) {
+	svc, repo := newAccountService(t)
+	// -15 on 20000 is -0.075% -- -7.5 basis points, which must round away
+	// from zero to -8, not toward it to -7.
+	view := account(t, domain.AccountCash, 20_000, "SGD",
+		openedOn(month(2025, time.August)), withBalance(19_985))
+	repo.addMovement(movement(view.Account.ID, month(2026, time.July), -15, "SGD"))
+
+	got, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{view}, fixedNow)
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if got.Trend.ChangeBasisPoints == nil || *got.Trend.ChangeBasisPoints != -8 {
+		t.Errorf("ChangeBasisPoints = %v, want -8 (-7.5 rounds away from zero)", got.Trend.ChangeBasisPoints)
 	}
 }
