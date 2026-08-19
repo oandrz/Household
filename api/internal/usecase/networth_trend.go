@@ -47,7 +47,24 @@ type NetWorthTrend struct {
 // inPrimary is the value that loop already added to the headline. Keeping it
 // is the whole point: the newest bar reuses that number instead of converting
 // the same balance a second time, so the bar and the figure above it cannot
-// disagree even if the rate provider is asked twice and answers differently.
+// disagree even if the rate provider is asked twice and answers differently
+// (spec decision 3 -- "the last bar is the headline figure, by construction").
+// This is the load-bearing guarantee; the converter's per-request rate cache
+// (TestSummaryLooksUpEachRateOnce) is a supporting refactor that happens to
+// make today's provider agree with itself too, not the thing this correctness
+// property rests on. A live provider is free to return two different rates
+// for the same currency inside one request -- nothing here forbids it -- and
+// reusing inPrimary is what survives that.
+//
+// No test in this package can turn the `i != trendMonths-1` guard in trend()
+// red by itself: with today's cache in place, the newest month's currency is
+// already primed before trend runs (Summary's own loop converts every counted
+// account first), so a reconversion at the newest month would return the same
+// cached rate and produce a bit-identical result regardless of the guard. The
+// guard is proven necessary, not decorative, only by disabling the cache and
+// watching TestTheNewestBarIsTheHeadlineFigure fail without it -- do not add
+// a white-box test for this; it would only ever observe the cache, which
+// TestSummaryLooksUpEachRateOnce already covers.
 type trendAccount struct {
 	account   domain.Account
 	balance   domain.Money
@@ -101,6 +118,15 @@ func (s *AccountService) trend(
 			return nil, err
 		}
 		trackedFrom := startOfMonth(a.account.OpeningBalanceAsOf)
+		// account.go:167 gives a household a full day of slack on this date so
+		// someone in UTC+8 can enter their own "today"; at a month boundary
+		// that lands the stored date in next month. The account is already in
+		// the headline regardless, so it belongs in the newest bar -- the same
+		// reason deltasByAccountMonth clamps a future-dated movement into the
+		// current month.
+		if trackedFrom.After(current) {
+			trackedFrom = current
+		}
 
 		for i, m := range months {
 			if trackedFrom.After(m) {

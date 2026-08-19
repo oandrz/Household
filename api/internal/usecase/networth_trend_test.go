@@ -113,6 +113,42 @@ func TestAMonthBeforeAnAccountWasTrackedIsAGap(t *testing.T) {
 	}
 }
 
+// TestAnAccountOpenedNextMonthByClockSkewIsInTheNewestBar is the tracked-from
+// counterpart of TestTheNewestBarIsTheHeadlineFigure's future-dated movement.
+//
+// account.go:167 gives OpeningBalanceAsOf a day of slack so a household in
+// UTC+8 can enter their own "today" while the server's UTC clock is still on
+// the previous day (account_test.go:116-117 documents why). At a month
+// boundary that slack can store an opening date in the month AFTER `current`
+// -- entered "1 August" from Singapore while the server is still on 31 July
+// UTC. Summary has already put this account in the headline regardless of
+// that date -- it counts every non-archived, counted, convertible view -- so
+// it must be in the newest bar too, the same reason deltasByAccountMonth
+// clamps a future-dated movement into the current month rather than losing it
+// in a month the walk never visits.
+func TestAnAccountOpenedNextMonthByClockSkewIsInTheNewestBar(t *testing.T) {
+	svc, _ := newAccountService(t)
+	sinceTheStart := account(t, domain.AccountCash, 400_000, "SGD", openedOn(month(2025, time.August)))
+	sinceTheStart.Account.ID = "since-the-start"
+	openedAhead := account(t, domain.AccountCash, 200_000, "SGD", openedOn(month(2026, time.August)))
+	openedAhead.Account.ID = "opened-ahead"
+
+	got, err := svc.Summary(context.Background(), "h-1",
+		[]usecase.AccountView{sinceTheStart, openedAhead}, fixedNow)
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	newest := got.Trend.Points[11]
+	if newest.NetWorth == nil || newest.NetWorth.Amount != got.NetWorth.Amount {
+		t.Errorf("newest bar = %v, headline = %d -- an account opened next month by clock "+
+			"skew is already in the headline and must be in the newest bar too",
+			newest.NetWorth, got.NetWorth.Amount)
+	}
+	if !newest.Complete {
+		t.Error("newest bar is marked incomplete, but both accounts are already in the headline")
+	}
+}
+
 // TestAMonthMissingOneAccountIsMarkedIncomplete is the middle state, and the
 // reason the chart is drawable at all for a household that adds an account.
 // The bar is real; it is missing an account the newest bar has, and the
@@ -143,14 +179,23 @@ func TestAMonthMissingOneAccountIsMarkedIncomplete(t *testing.T) {
 // TestArchivedAndUncountedAccountsAreInNoBar: whatever is out of the headline
 // is out of every bar. An account excluded from the total but drawn into the
 // history would make the chart's last bar the only one that agrees with it.
+//
+// MonthlyMovements includes archived accounts by contract (its own doc
+// comment says so, deliberately -- the caller decides what counts). So both
+// excluded accounts here get a movement too, dated in an older month, not
+// just a balance: without one, deltasByAccountMonth's "not in counted, drop
+// it" branch never runs in this test, and a regression that let an excluded
+// account's movement through would go unnoticed.
 func TestArchivedAndUncountedAccountsAreInNoBar(t *testing.T) {
-	svc, _ := newAccountService(t)
+	svc, repo := newAccountService(t)
 	counted := account(t, domain.AccountCash, 100_000, "SGD")
 	counted.Account.ID = "counted"
 	skipped := account(t, domain.AccountCash, 900_000, "SGD", notCounted)
 	skipped.Account.ID = "skipped"
 	gone := account(t, domain.AccountCash, 700_000, "SGD", archived)
 	gone.Account.ID = "gone"
+	repo.addMovement(movement(skipped.Account.ID, month(2026, time.June), 50_000, "SGD"))
+	repo.addMovement(movement(gone.Account.ID, month(2026, time.June), 30_000, "SGD"))
 
 	got, err := svc.Summary(context.Background(), "h-1",
 		[]usecase.AccountView{counted, skipped, gone}, fixedNow)
@@ -200,8 +245,9 @@ func TestALiabilityPullsTheBarDown(t *testing.T) {
 // all and the screen has one absence to branch on rather than two.
 func TestNoCountedAccountsMeansNoTrend(t *testing.T) {
 	svc, _ := newAccountService(t)
+	excluded := account(t, domain.AccountCash, 900_000, "SGD", notCounted)
 
-	got, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{}, fixedNow)
+	got, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{excluded}, fixedNow)
 	if err != nil {
 		t.Fatalf("Summary: %v", err)
 	}
