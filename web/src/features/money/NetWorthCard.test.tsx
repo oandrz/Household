@@ -83,10 +83,19 @@ describe("NetWorthCard's change badge", () => {
     expect(change).not.toHaveTextContent("this month");
   });
 
-  it("renders no change badge at all when changeBasisPoints is absent, with or without a changeNote", async () => {
+  it("renders no change badge at all when changeBasisPoints is absent, with a changeNote", async () => {
     stubFetchRoutes({ "GET /api/v1/currencies": CURRENCIES });
     const summary = summaryFixture({ trend: { points: [], changeBasisPoints: undefined } });
     renderWithRouter(<NetWorthCard summary={summary} changeNote="this month" />);
+
+    await screen.findByText("S$47,000.00");
+    expect(screen.queryByTestId("net-worth-change")).not.toBeInTheDocument();
+  });
+
+  it("renders no change badge at all when changeBasisPoints is absent, with no changeNote", async () => {
+    stubFetchRoutes({ "GET /api/v1/currencies": CURRENCIES });
+    const summary = summaryFixture({ trend: { points: [], changeBasisPoints: undefined } });
+    renderWithRouter(<NetWorthCard summary={summary} />);
 
     await screen.findByText("S$47,000.00");
     expect(screen.queryByTestId("net-worth-change")).not.toBeInTheDocument();

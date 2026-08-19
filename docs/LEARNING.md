@@ -1836,13 +1836,40 @@ Task 9 built the hook two tasks before the composer gap even opened.
   reintroduced it while editing nearby. A bare line number is a claim with
   no way to check itself once the file around it moves; citing the
   function, symbol or query name instead survives the code moving under it.
+- **The same round, a third instance, caught *while writing up the first
+  one* — a claim about a design mockup this time, not a query.** The
+  "Net worth card" row said Overview's gap was that "the design's card
+  also carries a full assets/liabilities breakdown, which Overview's own
+  card does not draw." Restated, not re-checked: the sentence was already
+  in the tracker before this round touched it, and the fix round that
+  corrected the trend row's own false constraint (the bullet above)
+  reworded this exact sentence right next to it, in the same paragraph,
+  without opening `design/Household Dashboard.dc.html` to look. A second
+  review round did look, and it does not say that: the Overview net worth
+  tile draws three stacked lines — label, figure, change — in every
+  iteration of the file, and the only "Assets & liabilities" block the
+  design contains anywhere is a separate sibling card the Finances screen
+  alone draws, already built as its own row in the same table. There was
+  no gap to name — the row's own next clause had already half-admitted it
+  ("was never meant to… stays Finances-only by design") without anyone
+  following that sentence to where it actually led. **What makes this
+  instance worth its own bullet, not a footnote on the one above:** the
+  person who wrote the corrected paragraph was, in that same paragraph,
+  actively practising "cite the code, don't trust the claim" against a
+  *different* sentence one row up, and still let this one through
+  unchecked — proof that naming the discipline is not the same as
+  applying it to everything in reach, especially the sentence sitting
+  right next to the one just fixed.
 
 **Treat a citation the way you'd treat a test assertion: something the next
 reader can verify against the thing it names, not something to trust because
-it reads confidently.** Both instances above cost nothing to produce and both
-would have cost thirty seconds to check — reading the query, or re-finding
-the line — against a small planning gap in one case and a wrong number in a
-comment in the other.
+it reads confidently.** All three instances above cost nothing to produce
+and each would have cost under a minute to check — reading the query,
+re-finding the line, or opening the mockup — against a small planning gap,
+a wrong number in a comment, and a design claim nobody had opened the design
+to test. A citation checked once and never re-verified when the sentence
+around it is rewritten is not a citation any more; it is the same
+unverified claim wearing a reference.
 
 ---
 

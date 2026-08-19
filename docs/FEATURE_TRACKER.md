@@ -303,29 +303,53 @@ own line beneath the figure whenever the caller supplies a changeNote
 the 30px figure; Finances' bare `▼ 6.0%` (no changeNote) is untouched and
 still renders inline, as the design's Finances screen draws it. Confirmed
 clean at 360px and 320px in a real browser and pinned by a structural test
-(`NetWorthCard.test.tsx`, four cases) that asserts the badge's own DOM
+(`NetWorthCard.test.tsx`, five cases) that asserts the badge's own DOM
 arrangement — parent element and tag name, not merely its words — so a
 regression back to always-inline cannot pass silently. The row moves to ✅.
 Recounting by this file's own rule (the first symbol in each row's own cell)
-finds exactly the one symbol this changes: "Net worth with 12-month trend"
-moves 🟡 → ✅; "Net worth card" was already 🟡 for a different, still-real
-reason (no assets/liabilities split on Overview) and stays 🟡. Money moves
-from 24/4/7/0 to **25/3/7/0** (24 rows unchanged, one Partial becomes Built),
-taking the stated totals from 63/17/23/2 = 105 to **64/16/23/2 = 105** — Built
-+ Partial still **80 of 105** (a Partial becoming Built moves neither side of
-that sum).
+found exactly one symbol changed at the time: "Net worth with 12-month
+trend" moved 🟡 → ✅; "Net worth card" was left 🟡 for a reason this file
+believed was real (no assets/liabilities split on Overview) and stayed 🟡.
+Money moved from 24/4/7/0 to **25/3/7/0** (24 rows unchanged, one Partial
+becomes Built), taking the stated totals from 63/17/23/2 = 105 to
+**64/16/23/2 = 105** — Built + Partial still **80 of 105** (a Partial
+becoming Built moves neither side of that sum).
+
+**Second correction, same day — the "Net worth card" gap this paragraph
+just left standing was never real either.** A review round checked the
+claim above against the design itself rather than trusting the sentence
+this file had just rewritten, and found it false: the Overview net worth
+tile (`design/Household Dashboard.dc.html:305`) draws three stacked
+lines — label, figure, change — in every iteration of the file, and
+nothing else. The only "Assets & liabilities" block the design contains
+anywhere (`:361-368`) is a separate sibling card, drawn only inside the
+Finances screen's own `is_finances` block, which this product already
+builds as its own row in this same table. There is no version of the
+Overview tile, on either screen, that was ever meant to carry a
+breakdown — a fact the row's own next clause had already half-admitted
+("was never meant to… stays Finances-only by design") without anyone
+following that sentence to its conclusion. **This is the same habit
+pattern 16 was written for, caught happening a second time while writing
+up the first**: a claim about a design mockup, restated without anyone
+opening the mockup to check it, in the very paragraph that exists to
+correct an unchecked claim about a query. See pattern 16's own entry in
+`docs/LEARNING.md` for the fuller lesson. "Net worth card" moves 🟡 → ✅.
+Recounting again: Overview (home) moves from 5/3/2/0 to **6/2/2/0** (10
+rows unchanged, one more Partial becomes Built), taking the stated
+totals from 64/16/23/2 = 105 to **65/15/23/2 = 105** — Built + Partial
+still **80 of 105**.
 
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
 | Entry & authentication | 10 | 1 | 0 | 0 |
 | Navigation shell | 7 | 1 | 1 | 0 |
 | Household settings | 11 | 8 | 2 | 0 |
-| Overview (home) | 5 | 3 | 2 | 0 |
+| Overview (home) | 6 | 2 | 2 | 0 |
 | Money | 25 | 3 | 7 | 0 |
 | Marriage | 6 | 0 | 9 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **64** | **16** | **23** | **2** |
+| **Total** | **65** | **15** | **23** | **2** |
 
 ---
 
@@ -456,7 +480,7 @@ replaced.
 
 | Feature | State |
 |---|---|
-| Net worth card | 🟡 — the figure, the not-computable case, and the month-to-date change badge, by reusing Finances' own card. The gap narrows to the assets/liabilities split only: the design's card also carries a full assets/liabilities breakdown, which Overview's own card does not draw and was never meant to (that stays Finances-only by design, since this card's job here is a headline, not a breakdown) |
+| Net worth card | ✅ — the figure, the not-computable case, and the month-to-date change badge, by reusing Finances' own card. The design's own Overview tile (`design/Household Dashboard.dc.html:305`) draws exactly three stacked lines — label, figure, change — and nothing else, in every iteration of the file; the only "Assets & liabilities" block anywhere in the design (`:361-368`) is a separate sibling card on the Finances page, which this product already builds as its own row below. There is no version of the Overview tile that was ever meant to carry a breakdown, so there is no gap left to name here |
 | July budget card — percentage used | 🟡 — percentage used plus the two figures behind it, and a "Set a budget" link when the household has never budgeted. No sparkline. Owner-only: `GET /budgets/{month}` is `requireCapability(money)` **and** `requireOwner` |
 | Next bill card | ✅ — the next-due bill's name, amount and due date (or the overdue/autopay state in its place), reading `useBills`, the same hook and cache entry `/money/bills` itself uses |
 | Goals on track card | ✅ — the real `X of Y on track` figure and the next dated goal beneath it, reading `useGoals`, the same hook and cache entry `/money/goals` itself uses |
