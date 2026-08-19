@@ -17,3 +17,6 @@ deploy/.env
 
 # Written by deploy/deploy.sh on the box. Per-install state, not source.
 deploy/.previous-image-tag
+
+# Isolated workspaces for subagent-driven execution.
+.worktrees/
