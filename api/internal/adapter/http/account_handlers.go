@@ -59,6 +59,26 @@ type excludedDTO struct {
 	Currency  string `json:"currency"`
 }
 
+// trendPointDTO is one bar. NetWorthMinor is a pointer WITHOUT omitempty, so
+// an unknown month arrives as an explicit null rather than a missing key: the
+// chart needs the slot to keep its axis aligned, and a zero would be a claim
+// about the household's money that nobody can make.
+type trendPointDTO struct {
+	Month         string `json:"month"`
+	NetWorthMinor *int64 `json:"netWorthMinor"`
+	Complete      bool   `json:"complete"`
+}
+
+// trendDTO carries the change as integer basis points -- 210 is 2.10%. A
+// percentage is not money, so the int64-minor-units rule does not literally
+// apply, but there is no reason to put a float on this wire either, and
+// omitempty is wrong for it too: the field is absent when suppressed, and 0
+// is a real reading meaning "unchanged".
+type trendDTO struct {
+	Points            []trendPointDTO `json:"points"`
+	ChangeBasisPoints *int64          `json:"changeBasisPoints,omitempty"`
+}
+
 // summaryDTO's NetWorthMinor, AssetsMinor and LiabilitiesMinor are pointers so
 // that an incomputable summary carries no figures at all rather than zeros.
 // Zero is a claim about the household's money; the truth in that state is that
@@ -72,6 +92,7 @@ type summaryDTO struct {
 	Breakdown        []breakdownDTO `json:"breakdown"`
 	ExcludedNoRate   []excludedDTO  `json:"excludedNoRate"`
 	ExcludedByChoice int            `json:"excludedByChoice"`
+	Trend            *trendDTO      `json:"trend,omitempty"`
 }
 
 type accountsResponse struct {
@@ -191,6 +212,18 @@ func toSummaryDTO(s usecase.NetWorthSummary) summaryDTO {
 	if s.Computable {
 		netWorth, assets, liabilities := s.NetWorth.Amount, s.Assets.Amount, s.Liabilities.Amount
 		dto.NetWorthMinor, dto.AssetsMinor, dto.LiabilitiesMinor = &netWorth, &assets, &liabilities
+	}
+	if s.Computable && s.Trend != nil {
+		points := make([]trendPointDTO, 0, len(s.Trend.Points))
+		for _, p := range s.Trend.Points {
+			point := trendPointDTO{Month: p.Month.Format(monthLayout), Complete: p.Complete}
+			if p.NetWorth != nil {
+				amount := p.NetWorth.Amount
+				point.NetWorthMinor = &amount
+			}
+			points = append(points, point)
+		}
+		dto.Trend = &trendDTO{Points: points, ChangeBasisPoints: s.Trend.ChangeBasisPoints}
 	}
 	for _, entry := range s.Breakdown {
 		dto.Breakdown = append(dto.Breakdown, breakdownDTO{
