@@ -663,6 +663,12 @@ func TestMonthlyMovementsSplitsTheBalanceExpressionByMonth(t *testing.T) {
 // a single-account test cannot: a cross-currency transfer credits the
 // destination with received_amount_minor, which is what actually landed. Use
 // amount_minor there and an IDR account would be credited a figure of SGD.
+//
+// BCA opens on the same day the transfer lands, deliberately -- it is the
+// only way this test can tell the incoming side's own >= from a > mutation.
+// Put the transfer any day after BCA's opening and both comparisons admit
+// the row identically, and the boundary this query shares with ListAccounts
+// goes unchecked on its incoming side.
 func TestMonthlyMovementsCreditsTheReceivingSideInItsOwnCurrency(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -671,7 +677,7 @@ func TestMonthlyMovementsCreditsTheReceivingSideInItsOwnCurrency(t *testing.T) {
 	householdID := insertTestHousehold(t, db)
 
 	dbs := insertTestAccountAsOf(t, db, householdID, "DBS", "SGD", 100_000, july(1))
-	bca := insertTestAccountAsOf(t, db, householdID, "BCA", "IDR", 0, july(1))
+	bca := insertTestAccountAsOf(t, db, householdID, "BCA", "IDR", 0, july(10))
 
 	if _, err := transactions.Create(ctx, domain.Transaction{
 		HouseholdID: householdID, Kind: domain.TransactionTransfer,
