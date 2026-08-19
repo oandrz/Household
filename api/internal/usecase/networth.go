@@ -43,6 +43,9 @@ type NetWorthSummary struct {
 	ExcludedNoRate   []ExcludedAccount
 	ExcludedByChoice int
 	Computable       bool
+	// Trend is the twelve-month series, nil when there is nothing to chart --
+	// an incomputable summary, or a household with no counted accounts.
+	Trend *NetWorthTrend
 }
 
 // Summary composes the figures above the accounts list from views the caller
@@ -90,6 +93,7 @@ func (s *AccountService) Summary(ctx context.Context, householdID string, views 
 	// must still read as a genuine, computable zero, not as "cannot compute."
 	considered := 0
 	converted := 0
+	counted := make([]trendAccount, 0, len(views))
 
 	for _, view := range views {
 		if view.Account.IsArchived() {
@@ -125,6 +129,15 @@ func (s *AccountService) Summary(ctx context.Context, householdID string, views 
 			continue
 		}
 
+		// Everything past this point is in the headline, so it is in the
+		// chart: the two must describe the same set of accounts or only the
+		// newest bar agrees with the figure above it.
+		counted = append(counted, trendAccount{
+			account:   view.Account,
+			balance:   view.Balance,
+			inPrimary: inPrimary,
+		})
+
 		if view.Account.Type.IsLiability() {
 			summary.Liabilities, err = summary.Liabilities.Add(inPrimary)
 		} else {
@@ -146,6 +159,14 @@ func (s *AccountService) Summary(ctx context.Context, householdID string, views 
 
 	if considered > 0 && converted == 0 {
 		summary.Computable = false
+	}
+
+	if summary.Computable && len(counted) > 0 {
+		trend, err := s.trend(ctx, householdID, conv, counted, today, zero)
+		if err != nil {
+			return NetWorthSummary{}, err
+		}
+		summary.Trend = trend
 	}
 
 	// Ordered by domain.AccountTypes rather than by map iteration, so the
