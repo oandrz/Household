@@ -380,11 +380,43 @@ type AccountView struct {
 	Balance   domain.Money
 }
 
+// AccountMonthMovement is one account's net movement across one calendar
+// month, in that account's own currency. It is the twelve-month net worth
+// chart's only new input.
+//
+// Delta is signed: money leaving the account is negative, money arriving is
+// positive, and a month with no movement produces no row rather than a zero
+// one -- a caller reads an absent month as "nothing moved", which is what an
+// absent row means.
+//
+// Month is the first of the month at midnight, so two values for the same
+// month compare equal.
+type AccountMonthMovement struct {
+	AccountID string
+	Month     time.Time
+	Delta     domain.Money
+}
+
 type AccountRepository interface {
 	// List returns one household's accounts, ordered oldest first. Archived
 	// accounts are included only when includeArchived is true, and never
 	// contribute to any total regardless.
 	List(ctx context.Context, householdID string, includeArchived bool) ([]AccountView, error)
+	// MonthlyMovements returns every account's per-month net movement from
+	// since onward, counting only transactions dated on or after that
+	// account's own opening_balance_as_of -- the same filter
+	// AccountView.Balance is computed with. The two must stay the same: the
+	// trend walks backwards from Balance by subtracting these, so a filter
+	// that differs by one row makes the older bars wrong and plausible at the
+	// same time.
+	//
+	// There is no upper bound on the transaction date, deliberately. Balance
+	// has none either, so a future-dated transaction is already inside the
+	// figure the walk anchors on and must be inside these rows too.
+	//
+	// Archived accounts are included; the caller decides what counts, exactly
+	// as it does for Balance.
+	MonthlyMovements(ctx context.Context, householdID string, since time.Time) ([]AccountMonthMovement, error)
 	// Get reports domain.ErrNotFound when no account with this id exists in
 	// this household -- including when one exists in a different household,
 	// which must be indistinguishable from not existing at all.

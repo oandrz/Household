@@ -576,3 +576,125 @@ func TestACrossCurrencyTransferCreditsTheDestinationInItsOwnCurrency(t *testing.
 			byName["BCA Tahapan"])
 	}
 }
+
+// TestMonthlyMovementsSplitsTheBalanceExpressionByMonth is the trend's whole
+// correctness argument in one test. The chart walks backwards from
+// AccountView.Balance by subtracting these deltas, so this query and the
+// balance_minor expression in ListAccounts must apply the same filter to the
+// same rows. Change the >= to a > here and the oldest bars drift away from
+// the headline figure -- silently, and by a plausible amount.
+func TestMonthlyMovementsSplitsTheBalanceExpressionByMonth(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	accounts := postgres.NewAccountRepo(db)
+	transactions := postgres.NewTransactionRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	// Opened on 1 June. The 1 June expense is ON the opening date, so it
+	// counts (the start-of-day rule); the 31 May one is before it and does
+	// not, because that history is already inside the opening figure.
+	dbs := insertTestAccountAsOf(t, db, householdID, "DBS", "SGD", 100_000,
+		time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC))
+
+	for _, tx := range []struct {
+		on     time.Time
+		amount int64
+	}{
+		{time.Date(2026, 5, 31, 0, 0, 0, 0, time.UTC), 5_000},
+		{time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), 1_000},
+		{july(4), 2_000},
+		{july(20), 3_000},
+	} {
+		if _, err := transactions.Create(ctx, domain.Transaction{
+			HouseholdID: householdID, Kind: domain.TransactionExpense,
+			OccurredOn: tx.on, Description: "Groceries",
+			FromAccountID: dbs,
+			Amount:        domain.Money{Amount: tx.amount, Currency: "SGD"},
+		}); err != nil {
+			t.Fatalf("create transaction on %s: %v", tx.on, err)
+		}
+	}
+
+	got, err := accounts.MonthlyMovements(ctx, householdID,
+		time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("MonthlyMovements: %v", err)
+	}
+
+	byMonth := map[string]int64{}
+	for _, m := range got {
+		if m.AccountID != dbs {
+			t.Fatalf("movement for account %s, want only %s", m.AccountID, dbs)
+		}
+		if m.Delta.Currency != "SGD" {
+			t.Errorf("delta currency = %q, want SGD (the account's own)", m.Delta.Currency)
+		}
+		byMonth[m.Month.Format("2006-01")] = m.Delta.Amount
+	}
+
+	// June: only the 1st counts, and an expense leaves the account.
+	if byMonth["2026-06"] != -1_000 {
+		t.Errorf("June = %d, want -1000 (the 31 May expense is before the opening date)", byMonth["2026-06"])
+	}
+	if byMonth["2026-07"] != -5_000 {
+		t.Errorf("July = %d, want -5000 (2000 + 3000)", byMonth["2026-07"])
+	}
+	if _, ok := byMonth["2026-05"]; ok {
+		t.Errorf("May is present: %v -- a transaction before the opening date must not appear at all", byMonth)
+	}
+
+	// The invariant the trend rests on: opening balance plus every delta in
+	// the window equals the balance the Finances screen prints.
+	views, err := accounts.List(ctx, householdID, false)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	var walked int64 = 100_000
+	for _, delta := range byMonth {
+		walked += delta
+	}
+	if got := balancesByNickname(t, views)["DBS"]; got != walked {
+		t.Fatalf("balance = %d but opening plus the deltas is %d -- the two "+
+			"expressions disagree, which is exactly what makes the chart lie", got, walked)
+	}
+}
+
+// TestMonthlyMovementsCreditsTheReceivingSideInItsOwnCurrency covers the half
+// a single-account test cannot: a cross-currency transfer credits the
+// destination with received_amount_minor, which is what actually landed. Use
+// amount_minor there and an IDR account would be credited a figure of SGD.
+func TestMonthlyMovementsCreditsTheReceivingSideInItsOwnCurrency(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	accounts := postgres.NewAccountRepo(db)
+	transactions := postgres.NewTransactionRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	dbs := insertTestAccountAsOf(t, db, householdID, "DBS", "SGD", 100_000, july(1))
+	bca := insertTestAccountAsOf(t, db, householdID, "BCA", "IDR", 0, july(1))
+
+	if _, err := transactions.Create(ctx, domain.Transaction{
+		HouseholdID: householdID, Kind: domain.TransactionTransfer,
+		OccurredOn: july(10), Description: "To Jakarta",
+		FromAccountID: dbs, ToAccountID: bca,
+		Amount:         domain.Money{Amount: 10_000, Currency: "SGD"},
+		ReceivedAmount: &domain.Money{Amount: 124_100_000, Currency: "IDR"},
+	}); err != nil {
+		t.Fatalf("create transfer: %v", err)
+	}
+
+	got, err := accounts.MonthlyMovements(ctx, householdID, july(1))
+	if err != nil {
+		t.Fatalf("MonthlyMovements: %v", err)
+	}
+	byAccount := map[string]usecase.AccountMonthMovement{}
+	for _, m := range got {
+		byAccount[m.AccountID] = m
+	}
+	if byAccount[dbs].Delta.Amount != -10_000 || byAccount[dbs].Delta.Currency != "SGD" {
+		t.Errorf("DBS = %+v, want -10000 SGD", byAccount[dbs].Delta)
+	}
+	if byAccount[bca].Delta.Amount != 124_100_000 || byAccount[bca].Delta.Currency != "IDR" {
+		t.Errorf("BCA = %+v, want 124100000 IDR -- what landed, in the account's own currency", byAccount[bca].Delta)
+	}
+}
