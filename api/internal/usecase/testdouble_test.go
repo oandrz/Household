@@ -1718,6 +1718,7 @@ func mustHash(t *testing.T, hasher usecase.PasswordHasher, plain string) string 
 type fakeAccountRepo struct {
 	accounts    map[string]domain.Account
 	memberships map[string]string
+	movements   []usecase.AccountMonthMovement
 	nextID      int
 }
 
@@ -1743,6 +1744,27 @@ func (r *fakeAccountRepo) List(_ context.Context, householdID string, includeArc
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Account.ID < out[j].Account.ID })
+	return out, nil
+}
+
+// addMovement is how a trend test says "this account moved by this much in
+// this month" without going near SQL.
+func (r *fakeAccountRepo) addMovement(m usecase.AccountMonthMovement) {
+	r.movements = append(r.movements, m)
+}
+
+// MonthlyMovements honours `since` and nothing else. It deliberately does not
+// filter by household or by opening date: every AccountService test runs one
+// household, and re-implementing the real query's filters here would be test
+// code asserting itself. Those filters have their own Postgres test.
+func (r *fakeAccountRepo) MonthlyMovements(_ context.Context, _ string, since time.Time) ([]usecase.AccountMonthMovement, error) {
+	var out []usecase.AccountMonthMovement
+	for _, m := range r.movements {
+		if m.Month.Before(since) {
+			continue
+		}
+		out = append(out, m)
+	}
 	return out, nil
 }
 

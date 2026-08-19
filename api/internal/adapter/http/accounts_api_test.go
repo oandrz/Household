@@ -1,10 +1,12 @@
 package httpadapter_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"sort"
 	"testing"
+	"time"
 )
 
 // --- Task 38: accounts, the first capability gate, and redaction ----------
@@ -243,5 +245,104 @@ func TestAccountErrorCodesMatchTheSpecTable(t *testing.T) {
 			rec := env.authed(t, http.MethodPost, "/api/v1/accounts", tc.body, session, csrf)
 			assertErrorResponse(t, rec, http.StatusUnprocessableEntity, tc.code)
 		})
+	}
+}
+
+// TestOwnerSeesTheTwelveMonthTrend pins the wire shape the Finances chart
+// reads. The window is fixed by the clock, so the months are assertable.
+func TestOwnerSeesTheTwelveMonthTrend(t *testing.T) {
+	env := newTestEnvWithClock(t, &movableClock{now: time.Date(2026, 7, 28, 9, 0, 0, 0, time.UTC)})
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	env.mustCreateAccount(t, session, csrf, map[string]any{
+		"nickname": "DBS Everyday", "type": "cash",
+		"openingBalanceMinor": 824_055, "openingBalanceCurrency": "SGD",
+		"openingBalanceAsOf": "2026-07-01",
+	})
+
+	rec := env.authedGet(t, "/api/v1/accounts", session)
+	var got struct {
+		Summary *struct {
+			Trend *struct {
+				Points []struct {
+					Month         string `json:"month"`
+					NetWorthMinor *int64 `json:"netWorthMinor"`
+					Complete      bool   `json:"complete"`
+				} `json:"points"`
+				ChangeBasisPoints *int64 `json:"changeBasisPoints"`
+			} `json:"trend"`
+		} `json:"summary"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Summary == nil || got.Summary.Trend == nil {
+		t.Fatal("no trend for an owner with an account")
+	}
+	points := got.Summary.Trend.Points
+	if len(points) != 12 {
+		t.Fatalf("points = %d, want 12", len(points))
+	}
+	if points[0].Month != "2025-08" || points[11].Month != "2026-07" {
+		t.Errorf("window = %s..%s, want 2025-08..2026-07", points[0].Month, points[11].Month)
+	}
+	// An account opened this month: every earlier month is a gap, and a gap
+	// is a null, never a zero.
+	if points[0].NetWorthMinor != nil {
+		t.Errorf("2025-08 = %d, want null -- nothing was tracked then", *points[0].NetWorthMinor)
+	}
+	if points[11].NetWorthMinor == nil || *points[11].NetWorthMinor != 824_055 {
+		t.Errorf("2026-07 = %v, want 824055", points[11].NetWorthMinor)
+	}
+	// The account was opened this month, so the newest bar has every counted
+	// account and the oldest bar is missing the only one there is -- not
+	// merely unknown, but explicitly incomplete.
+	if !points[11].Complete {
+		t.Error("2026-07 complete = false, want true -- the account is tracked by this month")
+	}
+	if points[0].Complete {
+		t.Error("2025-08 complete = true, want false -- the account was not open yet")
+	}
+	if got.Summary.Trend.ChangeBasisPoints != nil {
+		t.Errorf("changeBasisPoints = %d, want absent -- June is unknown",
+			*got.Summary.Trend.ChangeBasisPoints)
+	}
+
+	// netWorthMinor must be PRESENT and null on a gap month, not omitted:
+	// the frontend needs the slot to keep the axis aligned.
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"netWorthMinor":null`)) {
+		t.Error("a gap month omits netWorthMinor entirely; it must be sent as null")
+	}
+
+	// complete needs the same byte-level pin netWorthMinor gets, for a reason
+	// specific to bool: a missing key and `false` decode to the exact same Go
+	// zero value, so a struct field alone cannot tell "the wire said false"
+	// from "the wire said nothing and Complete never got a JSON tag" -- only
+	// the raw bytes can. This is what an accidental `,omitempty` on the
+	// Complete tag would remove without any decoded assertion above noticing.
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"complete":false`)) {
+		t.Error(`the oldest month's complete field is missing from the wire; want a literal "complete":false`)
+	}
+
+	// Absent, not null. A decoded *int64 is nil either way, so only the raw
+	// bytes can tell "we have no honest percentage" from "the percentage is
+	// null" -- and 0 is a real reading here, meaning unchanged, which is why
+	// the field carries omitempty and the figure above does not.
+	if bytes.Contains(rec.Body.Bytes(), []byte(`"changeBasisPoints"`)) {
+		t.Errorf("changeBasisPoints is present in the body; it must be omitted entirely when suppressed: %s", rec.Body.String())
+	}
+}
+
+// TestALimitedMemberGetsNoTrend needs no new guard to pass, and that is the
+// point: the trend rides inside the summary, which is already withheld whole.
+// The test exists so that a later refactor moving the trend to its own field
+// or its own route cannot leak amounts without going red.
+func TestALimitedMemberGetsNoTrend(t *testing.T) {
+	env := newTestEnv(t)
+	session, _ := env.signIn(t, env.moneyLimitedEmail, env.moneyLimitedPassword)
+
+	rec := env.authedGet(t, "/api/v1/accounts", session)
+	if bytes.Contains(rec.Body.Bytes(), []byte(`"trend"`)) {
+		t.Errorf("a limited member's response carries a trend: %s", rec.Body.String())
 	}
 }

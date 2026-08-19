@@ -21,6 +21,11 @@ export const OVERVIEW_COPY = {
     "Amounts are hidden for your account. The accounts shared with you are in Finances.",
   limitedGo: "Go to Finances",
 
+  // The design's card reads "▲ 2.1% this month" -- the same figure Finances
+  // shows, with the window named, because there is no "Last 12 months"
+  // heading here to imply it.
+  netWorthChangeNote: "this month",
+
   budgetHeading: "This month",
   // The never-budgeted state. The wording matches BudgetPage's own empty
   // state, which is the screen this card links to.

@@ -1,0 +1,337 @@
+package usecase
+
+import (
+	"context"
+	"fmt"
+	"math"
+	"time"
+
+	"github.com/andreasoentoro/hearth/api/internal/domain"
+)
+
+// trendMonths is the window the design draws: twelve bars, `Aug '25` to
+// `Jul '26` on its own axis.
+const trendMonths = 12
+
+// TrendPoint is one bar of the twelve-month net worth chart.
+//
+// NetWorth is nil for a month no counted account had been tracked through
+// yet. It is nil rather than zero for the reason NetWorthSummary.Computable
+// exists: zero is a claim about the household's money, and the truth in that
+// month is that we cannot know it.
+//
+// Complete is false when at least one counted account was still untracked in
+// that month -- the bar is real, but it is missing an account the newest bar
+// has, and the step up between them is coverage rather than growth. It is
+// also false on a month with no figure at all, so a caller that reads
+// Complete without checking NetWorth cannot mistake an empty month for a
+// whole one.
+type TrendPoint struct {
+	Month    time.Time
+	NetWorth *domain.Money
+	Complete bool
+}
+
+// NetWorthTrend is the twelve-month series and the month-to-date change.
+//
+// ChangeBasisPoints is integer basis points -- 210 means 2.10% -- and is nil
+// far more often than it is set. changeBasisPoints below has the four
+// conditions and why each one exists.
+type NetWorthTrend struct {
+	Points            []TrendPoint
+	ChangeBasisPoints *int64
+}
+
+// trendAccount is one counted account, carried out of Summary's own loop.
+//
+// inPrimary is the value that loop already added to the headline. Keeping it
+// is the whole point: the newest bar reuses that number instead of converting
+// the same balance a second time, so the bar and the figure above it cannot
+// disagree even if the rate provider is asked twice and answers differently
+// (spec decision 3 -- "the last bar is the headline figure, by construction").
+// This is the load-bearing guarantee; the converter's per-request rate cache
+// (TestSummaryLooksUpEachRateOnce) is a supporting refactor that happens to
+// make today's provider agree with itself too, not the thing this correctness
+// property rests on. A live provider is free to return two different rates
+// for the same currency inside one request -- nothing here forbids it -- and
+// reusing inPrimary is what survives that.
+//
+// No test in this package can turn the `i != trendMonths-1` guard in trend()
+// red by itself: with today's cache in place, the newest month's currency is
+// already primed before trend runs (Summary's own loop converts every counted
+// account first), so a reconversion at the newest month would return the same
+// cached rate and produce a bit-identical result regardless of the guard. The
+// guard is proven necessary, not decorative, only by disabling the cache and
+// watching TestTheNewestBarIsTheHeadlineFigure fail without it -- do not add
+// a white-box test for this; it would only ever observe the cache, which
+// TestSummaryLooksUpEachRateOnce already covers.
+type trendAccount struct {
+	account   domain.Account
+	balance   domain.Money
+	inPrimary domain.Money
+}
+
+// trend builds the twelve-month series for the accounts Summary counted.
+//
+// Every month is converted at TODAY's rate, not the rate that held in that
+// month: there is no historical rate table, and fx.StaticProvider has one
+// number in it. The chart therefore shows how the household's balances moved
+// with the exchange rate held still -- the more useful of the two charts
+// anyway, since an account whose balance never changed should not appear to
+// rise and fall because a currency did (spec decision 2).
+//
+// counted's balances come from the AccountView.List the handler already ran
+// (account_handlers.go); MonthlyMovements below is a second, separate read,
+// and the two are not wrapped in one transaction. There is a narrow window
+// between them in which a transaction can be written -- or deleted -- dated
+// in one of months[1..11] (a movement in months[0] is never read; walkBack
+// never looks at it). Land in that window and the newest bar still equals
+// the headline exactly, because both are read from the same List call, but
+// every bar older than the month the transaction is dated in is wrong by
+// that amount, silently and plausibly, until the next GET /accounts
+// recomputes both reads together and the window closes on its own.
+//
+// This is accepted deliberately, not overlooked: the window is one HTTP
+// request wide, it self-heals on the next refresh, and it is a smaller
+// cousin of the retroactivity spec decision 1 already accepts by name for
+// this same feature. A transaction (or the repeatable-read isolation that
+// would make one meaningful here) is more machinery than a self-healing,
+// narrow-window risk earns today. Revisit this if either changes: CSV import
+// (already on the roadmap) turns "one transaction in the window" into "a
+// bulk insert of hundreds," which is a materially wider window than this
+// paragraph was written to accept; or a snapshot table or cached trend
+// arrives, which would stop the next request from healing it for free.
+func (s *AccountService) trend(
+	ctx context.Context,
+	householdID string,
+	conv *converter,
+	counted []trendAccount,
+	today time.Time,
+	zero domain.Money,
+) (*NetWorthTrend, error) {
+	months := make([]time.Time, trendMonths)
+	current := startOfMonth(today)
+	for i := range months {
+		months[i] = current.AddDate(0, -(trendMonths - 1 - i), 0)
+	}
+
+	movements, err := s.d.Accounts.MonthlyMovements(ctx, householdID, months[0])
+	if err != nil {
+		return nil, err
+	}
+	deltas, err := deltasByAccountMonth(movements, current, counted)
+	if err != nil {
+		return nil, err
+	}
+
+	// running/known/missing are accumulated across accounts and folded into
+	// points at the end, because one account can only ever contribute to a
+	// month, never decide it: "complete" is a fact about all of them.
+	running := make([]domain.Money, trendMonths)
+	known := make([]bool, trendMonths)
+	missing := make([]bool, trendMonths)
+	for i := range running {
+		running[i] = zero
+	}
+
+	for _, a := range counted {
+		native, err := walkBack(a.balance.Amount, deltas[a.account.ID], months)
+		if err != nil {
+			return nil, err
+		}
+		trackedFrom := startOfMonth(a.account.OpeningBalanceAsOf)
+		// account.go:177 gives a household a full day of slack on this date so
+		// someone in UTC+8 can enter their own "today"; at a month boundary
+		// that lands the stored date in next month. The account is already in
+		// the headline regardless, so it belongs in the newest bar -- the same
+		// reason deltasByAccountMonth clamps a future-dated movement into the
+		// current month.
+		if trackedFrom.After(current) {
+			trackedFrom = current
+		}
+
+		for i, m := range months {
+			if trackedFrom.After(m) {
+				missing[i] = true
+				continue
+			}
+
+			inPrimary := a.inPrimary
+			if i != trendMonths-1 {
+				inPrimary, err = conv.convert(ctx, domain.Money{
+					Amount:   native[i],
+					Currency: a.balance.Currency,
+				})
+				if err != nil {
+					return nil, err
+				}
+			}
+
+			signed, err := a.account.Type.SignedNetWorthAmount(inPrimary)
+			if err != nil {
+				return nil, err
+			}
+			running[i], err = running[i].Add(signed)
+			if err != nil {
+				return nil, err
+			}
+			known[i] = true
+		}
+	}
+
+	points := make([]TrendPoint, trendMonths)
+	for i := range points {
+		points[i] = TrendPoint{Month: months[i], Complete: known[i] && !missing[i]}
+		if known[i] {
+			total := running[i]
+			points[i].NetWorth = &total
+		}
+	}
+
+	return &NetWorthTrend{
+		Points:            points,
+		ChangeBasisPoints: changeBasisPoints(points[trendMonths-1], points[trendMonths-2]),
+	}, nil
+}
+
+// changeBasisPoints is the "▲ 2.1%" beside the headline figure, in integer
+// basis points: 210 means 2.10%.
+//
+// It returns nil far more often than it returns a number, and each condition
+// is a claim the product must not make:
+//
+//   - either month unknown: there is no comparison to draw.
+//   - either month incomplete: the step between them is partly coverage, not
+//     growth. A household that started tracking a second account this month
+//     did not get richer by its balance.
+//   - a base of zero or less: a percentage of zero is undefined, and off a
+//     negative base it inverts its own sign -- a household climbing from
+//     -10,000 to -5,000 would be shown as -50%.
+//   - arithmetic that would overflow: the same fail-closed rule as everywhere,
+//     rather than a wrapped number that still renders.
+//
+// The rounding is half away from zero, matching Rate.Apply, so every rounding
+// decision on this screen is the same decision.
+func changeBasisPoints(current, previous TrendPoint) *int64 {
+	if current.NetWorth == nil || previous.NetWorth == nil {
+		return nil
+	}
+	if !current.Complete || !previous.Complete {
+		return nil
+	}
+
+	base := previous.NetWorth.Amount
+	if base <= 0 {
+		return nil
+	}
+	now := current.NetWorth.Amount
+	if now < math.MinInt64+base {
+		return nil
+	}
+	delta := now - base
+
+	if delta > math.MaxInt64/10_000 || delta < math.MinInt64/10_000 {
+		return nil
+	}
+	scaled := delta * 10_000
+	half := base / 2
+	if scaled > math.MaxInt64-half || scaled < math.MinInt64+half {
+		return nil
+	}
+	if scaled < 0 {
+		scaled -= half
+	} else {
+		scaled += half
+	}
+	points := scaled / base
+	return &points
+}
+
+// deltasByAccountMonth indexes the repository's rows by account and month.
+//
+// A month later than the current one is counted as the current one. That is
+// not a rounding convenience: AccountView.Balance has no upper bound on the
+// transaction date, so a transaction dated next month is already inside the
+// balance the walk anchors on. Left in its own bucket it would never be
+// subtracted, and every bar older than today would be wrong by its amount
+// while the newest bar still matched the headline.
+func deltasByAccountMonth(
+	movements []AccountMonthMovement,
+	current time.Time,
+	counted []trendAccount,
+) (map[string]map[int]domain.Money, error) {
+	currencies := make(map[string]string, len(counted))
+	for _, a := range counted {
+		currencies[a.account.ID] = a.balance.Currency
+	}
+
+	out := map[string]map[int]domain.Money{}
+	for _, m := range movements {
+		want, ok := currencies[m.AccountID]
+		if !ok {
+			// Archived, excluded by choice, or not in the views this summary
+			// describes. Whatever is out of the headline is out of the chart.
+			continue
+		}
+		// Fail closed. A delta in another currency cannot be subtracted from
+		// this account's balance, and adding it anyway would corrupt every
+		// older bar with a figure that still looks like money.
+		if m.Delta.Currency != want {
+			return nil, fmt.Errorf("%w: movement for account %s is %s, the account is %s",
+				domain.ErrCurrencyMismatch, m.AccountID, m.Delta.Currency, want)
+		}
+
+		month := startOfMonth(m.Month)
+		if month.After(current) {
+			month = current
+		}
+		byMonth, ok := out[m.AccountID]
+		if !ok {
+			byMonth = map[int]domain.Money{}
+			out[m.AccountID] = byMonth
+		}
+		key := monthKey(month)
+		if existing, ok := byMonth[key]; ok {
+			summed, err := existing.Add(m.Delta)
+			if err != nil {
+				return nil, err
+			}
+			byMonth[key] = summed
+			continue
+		}
+		byMonth[key] = m.Delta
+	}
+	return out, nil
+}
+
+// walkBack turns one account's current balance into its balance at the end of
+// every earlier month in the window: each step removes the month it is
+// leaving. The newest slot is the live balance itself, untouched.
+func walkBack(current int64, byMonth map[int]domain.Money, months []time.Time) ([]int64, error) {
+	native := make([]int64, len(months))
+	native[len(months)-1] = current
+	for i := len(months) - 2; i >= 0; i-- {
+		back, err := subtractDelta(native[i+1], byMonth[monthKey(months[i+1])].Amount)
+		if err != nil {
+			return nil, err
+		}
+		native[i] = back
+	}
+	return native, nil
+}
+
+// subtractDelta is balance - delta with the overflow refused rather than
+// wrapped. math.MinInt64 is checked on its own because it has no positive
+// counterpart, so negating it returns itself -- the same edge
+// AccountType.SignedNetWorthAmount and Money.String already guard.
+func subtractDelta(balance, delta int64) (int64, error) {
+	if delta == math.MinInt64 {
+		return 0, domain.ErrAmountOverflow
+	}
+	negated := -delta
+	if (negated > 0 && balance > math.MaxInt64-negated) ||
+		(negated < 0 && balance < math.MinInt64-negated) {
+		return 0, domain.ErrAmountOverflow
+	}
+	return balance + negated, nil
+}

@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"time"
 
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
@@ -42,6 +43,9 @@ type NetWorthSummary struct {
 	ExcludedNoRate   []ExcludedAccount
 	ExcludedByChoice int
 	Computable       bool
+	// Trend is the twelve-month series, nil when there is nothing to chart --
+	// an incomputable summary, or a household with no counted accounts.
+	Trend *NetWorthTrend
 }
 
 // Summary composes the figures above the accounts list from views the caller
@@ -55,12 +59,18 @@ type NetWorthSummary struct {
 // household. Rounding therefore happens per account (half away from zero, as
 // Rate.Apply already does) and the total is never re-rounded, so the figure is
 // deterministic.
-func (s *AccountService) Summary(ctx context.Context, householdID string, views []AccountView) (NetWorthSummary, error) {
+//
+// today drives the twelve-month window and is taken as a parameter, never read
+// from a clock in here, so every figure is deterministic in tests and the wall
+// clock is read exactly once, at the HTTP layer. RetroService.List is the same
+// shape for the same reason.
+func (s *AccountService) Summary(ctx context.Context, householdID string, views []AccountView, today time.Time) (NetWorthSummary, error) {
 	household, err := s.d.Households.Get(ctx, householdID)
 	if err != nil {
 		return NetWorthSummary{}, err
 	}
 	primary := household.PrimaryCurrency
+	conv := &converter{fx: s.d.FX, primary: primary, rates: map[string]Rate{}}
 
 	zero, err := domain.NewMoney(0, primary)
 	if err != nil {
@@ -83,6 +93,7 @@ func (s *AccountService) Summary(ctx context.Context, householdID string, views 
 	// must still read as a genuine, computable zero, not as "cannot compute."
 	considered := 0
 	converted := 0
+	counted := make([]trendAccount, 0, len(views))
 
 	for _, view := range views {
 		if view.Account.IsArchived() {
@@ -90,7 +101,7 @@ func (s *AccountService) Summary(ctx context.Context, householdID string, views 
 		}
 		considered++
 
-		inPrimary, err := s.convert(ctx, view.Balance, primary)
+		inPrimary, err := conv.convert(ctx, view.Balance)
 		if err != nil {
 			summary.ExcludedNoRate = append(summary.ExcludedNoRate, ExcludedAccount{
 				AccountID: view.Account.ID,
@@ -118,6 +129,15 @@ func (s *AccountService) Summary(ctx context.Context, householdID string, views 
 			continue
 		}
 
+		// Everything past this point is in the headline, so it is in the
+		// chart: the two must describe the same set of accounts or only the
+		// newest bar agrees with the figure above it.
+		counted = append(counted, trendAccount{
+			account:   view.Account,
+			balance:   view.Balance,
+			inPrimary: inPrimary,
+		})
+
 		if view.Account.Type.IsLiability() {
 			summary.Liabilities, err = summary.Liabilities.Add(inPrimary)
 		} else {
@@ -141,6 +161,14 @@ func (s *AccountService) Summary(ctx context.Context, householdID string, views 
 		summary.Computable = false
 	}
 
+	if summary.Computable && len(counted) > 0 {
+		trend, err := s.trend(ctx, householdID, conv, counted, today, zero)
+		if err != nil {
+			return NetWorthSummary{}, err
+		}
+		summary.Trend = trend
+	}
+
 	// Ordered by domain.AccountTypes rather than by map iteration, so the
 	// chart's bars do not reshuffle between two identical requests.
 	for _, accountType := range domain.AccountTypes() {
@@ -151,21 +179,42 @@ func (s *AccountService) Summary(ctx context.Context, householdID string, views 
 	return summary, nil
 }
 
-// convert turns one account's balance into the household's primary currency.
-// A same-currency balance short-circuits without consulting the provider at
-// all -- that is the overwhelmingly common case, it is exact, and it means a
+// converter turns balances into one primary currency, looking each rate up at
+// most once per request.
+//
+// One lookup, reused, is not an optimisation. Summary's headline and the
+// trend's newest bar must apply the SAME rate to the same account, or the
+// chart's last bar disagrees with the figure printed directly above it.
+// fx.StaticProvider returns one number forever, so two independent lookups
+// agree today by coincidence; a live provider could return two different rates
+// inside one request, and no test against the static provider would ever see
+// it.
+type converter struct {
+	fx      FXRateProvider
+	primary string
+	rates   map[string]Rate
+}
+
+// convert turns one balance into the household's primary currency. A
+// same-currency balance short-circuits without consulting the provider at all
+// -- that is the overwhelmingly common case, it is exact, and it means a
 // single-currency household never depends on a rate table it does not need.
-func (s *AccountService) convert(ctx context.Context, m domain.Money, primary string) (domain.Money, error) {
-	if m.Currency == primary {
+func (c *converter) convert(ctx context.Context, m domain.Money) (domain.Money, error) {
+	if m.Currency == c.primary {
 		return m, nil
 	}
-	rate, err := s.d.FX.Rate(ctx, m.Currency, primary)
-	if err != nil {
-		return domain.Money{}, err
+	rate, ok := c.rates[m.Currency]
+	if !ok {
+		var err error
+		rate, err = c.fx.Rate(ctx, m.Currency, c.primary)
+		if err != nil {
+			return domain.Money{}, err
+		}
+		c.rates[m.Currency] = rate
 	}
 	amount, err := rate.Apply(m.Amount)
 	if err != nil {
 		return domain.Money{}, err
 	}
-	return domain.Money{Amount: amount, Currency: primary}, nil
+	return domain.Money{Amount: amount, Currency: c.primary}, nil
 }

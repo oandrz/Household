@@ -76,7 +76,9 @@ export function OverviewPage() {
             {/* `summary` is omitted, not zeroed, for a member who may not see
                 amounts (features/money/schemas.ts). Its absence is the only
                 signal there is -- never synthesise one to fill the gap. */}
-            {accounts.data?.summary && <NetWorthCard summary={accounts.data.summary} />}
+            {accounts.data?.summary && (
+              <NetWorthCard summary={accounts.data.summary} changeNote={OVERVIEW_COPY.netWorthChangeNote} />
+            )}
 
             {/* Gated on isSuccess, not on `!accounts.data?.summary` alone:
                 summary is equally undefined while the request is still in

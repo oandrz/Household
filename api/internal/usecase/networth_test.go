@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -45,7 +46,7 @@ func TestSummarySubtractsDebtsFromAssets(t *testing.T) {
 	got, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{
 		account(t, domain.AccountCash, 6_199_000, "SGD"),
 		account(t, domain.AccountLoan, 1_450_000, "SGD"),
-	})
+	}, fixedNow)
 	if err != nil {
 		t.Fatalf("Summary: %v", err)
 	}
@@ -76,7 +77,7 @@ func TestSummaryConvertsBeforeAdding(t *testing.T) {
 	got, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{
 		account(t, domain.AccountCash, 824_055, "SGD"),
 		account(t, domain.AccountCash, 8_540_000_000, "IDR"),
-	})
+	}, fixedNow)
 	if err != nil {
 		t.Fatalf("Summary: %v", err)
 	}
@@ -94,7 +95,7 @@ func TestSummaryExcludesAndNamesAnAccountWithNoRate(t *testing.T) {
 	got, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{
 		account(t, domain.AccountCash, 824_055, "SGD"),
 		account(t, domain.AccountCash, 500_000, "USD"),
-	})
+	}, fixedNow)
 	if err != nil {
 		t.Fatalf("Summary: %v", err)
 	}
@@ -115,7 +116,7 @@ func TestSummaryIsNotComputableWhenNothingConverts(t *testing.T) {
 	got, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{
 		account(t, domain.AccountCash, 500_000, "USD"),
 		account(t, domain.AccountCash, 300_000, "EUR"),
-	})
+	}, fixedNow)
 	if err != nil {
 		t.Fatalf("Summary: %v", err)
 	}
@@ -133,7 +134,7 @@ func TestSummaryIsNotComputableWhenNothingConverts(t *testing.T) {
 func TestSummaryHasNoAccountsIsComputable(t *testing.T) {
 	svc, _ := newAccountService(t)
 
-	got, err := svc.Summary(context.Background(), "h-1", nil)
+	got, err := svc.Summary(context.Background(), "h-1", nil, fixedNow)
 	if err != nil {
 		t.Fatalf("Summary: %v", err)
 	}
@@ -152,7 +153,7 @@ func TestSummaryKeepsAnUncountedAccountInTheBreakdown(t *testing.T) {
 	got, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{
 		account(t, domain.AccountCash, 100_000, "SGD"),
 		account(t, domain.AccountInvestment, 900_000, "SGD", notCounted),
-	})
+	}, fixedNow)
 	if err != nil {
 		t.Fatalf("Summary: %v", err)
 	}
@@ -176,7 +177,7 @@ func TestSummaryBreakdownDrawsOnlyPopulatedTypes(t *testing.T) {
 	got, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{
 		account(t, domain.AccountCash, 100_000, "SGD"),
 		account(t, domain.AccountCash, 200_000, "SGD"),
-	})
+	}, fixedNow)
 	if err != nil {
 		t.Fatalf("Summary: %v", err)
 	}
@@ -206,7 +207,7 @@ func TestSummaryBreakdownIsOrderedByType(t *testing.T) {
 		account(t, domain.AccountCash, 100_000, "SGD"),
 		account(t, domain.AccountLoan, 1_450_000, "SGD"),
 		account(t, domain.AccountInvestment, 11_230_000, "SGD"),
-	})
+	}, fixedNow)
 	if err != nil {
 		t.Fatalf("Summary: %v", err)
 	}
@@ -231,7 +232,7 @@ func TestSummarySkipsArchivedAccounts(t *testing.T) {
 	live := account(t, domain.AccountCash, 100_000, "SGD")
 	gone := account(t, domain.AccountInvestment, 900_000, "SGD", archived)
 
-	got, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{live, gone})
+	got, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{live, gone}, fixedNow)
 	if err != nil {
 		t.Fatalf("Summary: %v", err)
 	}
@@ -253,7 +254,7 @@ func TestSummaryOfAnAllArchivedHouseholdIsAGenuineZero(t *testing.T) {
 
 	got, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{
 		account(t, domain.AccountCash, 100_000, "SGD", archived),
-	})
+	}, fixedNow)
 	if err != nil {
 		t.Fatalf("Summary: %v", err)
 	}
@@ -263,4 +264,60 @@ func TestSummaryOfAnAllArchivedHouseholdIsAGenuineZero(t *testing.T) {
 	if got.NetWorth.Amount != 0 {
 		t.Errorf("NetWorth = %d, want 0", got.NetWorth.Amount)
 	}
+}
+
+// TestSummaryLooksUpEachRateOnce is the guard on the trend's central promise,
+// written before the trend exists. The newest bar must equal the headline
+// figure, and it can only do that if both are converted with the same rate --
+// so Summary must consult the provider once per currency, not once per
+// account and again per month. fx.StaticProvider returns one number forever,
+// so nothing else in the suite would ever notice the difference.
+func TestSummaryLooksUpEachRateOnce(t *testing.T) {
+	counter := &countingRates{}
+	svc := newAccountServiceWithFX(t, counter)
+
+	// Distinct ids: `account()` derives one from the currency and the type, so
+	// three IDR cash accounts would otherwise share it -- harmless to Summary,
+	// but the trend keys its movements by account id and a later test adding
+	// one here would silently give all three the same history.
+	views := []usecase.AccountView{
+		account(t, domain.AccountCash, 1_000_000_000, "IDR"),
+		account(t, domain.AccountCash, 2_000_000_000, "IDR"),
+		account(t, domain.AccountCash, 3_000_000_000, "IDR"),
+	}
+	for i := range views {
+		views[i].Account.ID = fmt.Sprintf("idr-%d", i)
+	}
+
+	if _, err := svc.Summary(context.Background(), "h-1", views, fixedNow); err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if counter.calls != 1 {
+		t.Errorf("provider called %d times for three accounts in one currency, want 1", counter.calls)
+	}
+}
+
+// countingRates is staticTestRates that remembers how often it was asked.
+type countingRates struct{ calls int }
+
+func (c *countingRates) Rate(ctx context.Context, from, to string) (usecase.Rate, error) {
+	c.calls++
+	return staticTestRates{}.Rate(ctx, from, to)
+}
+
+// newAccountServiceWithFX is newAccountService with the FX double swapped,
+// the same shape bill_test.go's newBillServiceWithFX already uses.
+func newAccountServiceWithFX(t *testing.T, fx usecase.FXRateProvider) *usecase.AccountService {
+	t.Helper()
+	households := newHouseholdDouble()
+	households.put(domain.Household{
+		ID: "h-1", Name: "Andreas & Christine", FamilyName: "Oentoro",
+		PrimaryCurrency: "SGD", ShowSecondaryCurrency: true, SecondaryCurrency: "IDR", FXRateMode: "auto",
+	})
+	return usecase.NewAccountService(usecase.AccountDeps{
+		Accounts:   newFakeAccountRepo(),
+		Households: households,
+		FX:         fx,
+		Clock:      &fixedClock{now: fixedNow},
+	})
 }
