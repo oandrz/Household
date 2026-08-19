@@ -83,4 +83,28 @@ describe("NetWorthChart", () => {
       Number(positive?.getAttribute("y")),
     );
   });
+
+  // Tick count alone would stay green if TICKS changed to an evenly-spaced
+  // rule (dropping the newest month) or monthTickLabel broke -- asserting
+  // the visible text is what actually pins the design's own axis
+  // (Aug '25 · Nov '25 · Feb '26 · Jul '26).
+  it("labels the axis at the four design positions, including the newest month", () => {
+    render(<NetWorthChart points={twelvePoints()} />);
+
+    expect(screen.getByText("Aug '25")).toBeInTheDocument();
+    expect(screen.getByText("Nov '25")).toBeInTheDocument();
+    expect(screen.getByText("Feb '26")).toBeInTheDocument();
+    expect(screen.getByText("Jul '26")).toBeInTheDocument();
+  });
+
+  // The wire contract is exactly twelve points (Task 5), but trendSchema
+  // (schemas.ts) is a plain array with no length check -- a truncated or
+  // malformed response that still parses must degrade to fewer ticks, not
+  // crash on points[11]. This exercises the TICKS.filter guard in
+  // NetWorthChart.tsx directly, at a length short enough (5) that two of the
+  // four design tick positions (6 and 11) do not exist.
+  it("degrades to fewer ticks instead of crashing when given fewer than twelve points", () => {
+    const points = twelvePoints().slice(0, 5);
+    expect(() => render(<NetWorthChart points={points} />)).not.toThrow();
+  });
 });

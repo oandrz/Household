@@ -89,13 +89,27 @@ export function NetWorthChart({ points }: { points: TrendPoint[] }) {
               height={Math.max(1, Math.abs(baselineY - y))}
               rx={2}
               fill="currentColor"
+              // The newest point is always complete: networth_trend.go clamps
+              // trackedFrom down to the current month and only ever computes a
+              // trend when at least one account counts toward net worth, so
+              // months[11] cannot be missing (backend invariant, proven by
+              // TestAnAccountOpenedNextMonthByClockSkewIsInTheNewestBar). Full
+              // opacity here can therefore never contradict the "lighter bars
+              // are incomplete" note below.
               opacity={
                 index === points.length - 1 ? NEWEST : point.complete ? COMPLETE : INCOMPLETE
               }
             />
           );
         })}
-        {TICKS.map((index) => (
+        {/* points.length is a runtime fact, not a compile-time one -- trendSchema
+            (schemas.ts) is a plain array with no length check, so a truncated
+            or malformed response that still parses must not crash on
+            points[11]. Filtering keeps whichever of the four design
+            positions actually exist and degrades to fewer ticks instead;
+            MoodChart.tsx's `index % 3 === 0` is the same kind of
+            length-safety for its own axis. */}
+        {TICKS.filter((index) => index < points.length).map((index) => (
           <text
             key={points[index].month}
             x={PAD_X + index * (barWidth + BAR_GAP) + barWidth / 2}
@@ -113,7 +127,14 @@ export function NetWorthChart({ points }: { points: TrendPoint[] }) {
         <p data-testid="net-worth-chart-note" className="mt-2 text-[11.5px] text-muted">
           {firstComplete
             ? FINANCES_COPY.trendIncomplete(monthTickLabel(firstComplete.month))
-            : FINANCES_COPY.trendIncompleteUnknownStart}
+            : // Same backend invariant as the newest-bar opacity above means
+              // the newest month is always complete, so firstComplete can
+              // never come back null against real data -- this branch is
+              // unreachable in production. Kept anyway: TypeScript cannot
+              // encode a cross-service invariant, and deleting the fallback
+              // would turn a future violation of that invariant into a crash
+              // instead of a slightly less specific sentence.
+              FINANCES_COPY.trendIncompleteUnknownStart}
         </p>
       )}
     </div>
