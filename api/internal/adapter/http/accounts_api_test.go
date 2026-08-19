@@ -304,6 +304,14 @@ func TestOwnerSeesTheTwelveMonthTrend(t *testing.T) {
 	if !bytes.Contains(rec.Body.Bytes(), []byte(`"netWorthMinor":null`)) {
 		t.Error("a gap month omits netWorthMinor entirely; it must be sent as null")
 	}
+
+	// Absent, not null. A decoded *int64 is nil either way, so only the raw
+	// bytes can tell "we have no honest percentage" from "the percentage is
+	// null" -- and 0 is a real reading here, meaning unchanged, which is why
+	// the field carries omitempty and the figure above does not.
+	if bytes.Contains(rec.Body.Bytes(), []byte(`"changeBasisPoints"`)) {
+		t.Errorf("changeBasisPoints is present in the body; it must be omitted entirely when suppressed: %s", rec.Body.String())
+	}
 }
 
 // TestALimitedMemberGetsNoTrend needs no new guard to pass, and that is the

@@ -44,9 +44,13 @@ var invitePreAuthRoutes = map[string]bool{
 	"POST /api/v1/invites/{token}/accept": true,
 }
 
-// movableClock is a controllable usecase.Clock for the one test that needs
-// to fast-forward time without sleeping: proving a session's cookies slide
-// when the session is extended near expiry.
+// movableClock is a controllable usecase.Clock. It has two callers, for two
+// different reasons: TestSessionCookiesSlideWhenExtended fast-forwards time
+// without sleeping to prove a session's cookies slide when the session is
+// extended near expiry, and TestOwnerSeesTheTwelveMonthTrend pins the clock
+// to a fixed instant so the twelve-month trend window it asserts on is a
+// known, reproducible range rather than whatever month the suite happens to
+// run in.
 type movableClock struct{ now time.Time }
 
 func (c *movableClock) Now() time.Time          { return c.now }
@@ -164,10 +168,12 @@ func newTestEnv(t *testing.T) *testEnv {
 	return newTestEnvWithClock(t, clock.System{})
 }
 
-// newTestEnvWithClock is newTestEnv's more general form, used by the one
-// test that needs to fast-forward time to prove a session's cookies slide
-// when it's extended -- everything else gets the real wall clock via
-// newTestEnv.
+// newTestEnvWithClock is newTestEnv's more general form, used by the two
+// tests that need control over the clock rather than the real wall clock
+// newTestEnv gives everything else: TestSessionCookiesSlideWhenExtended
+// fast-forwards time to prove a session's cookies slide when it's extended,
+// and TestOwnerSeesTheTwelveMonthTrend pins the clock so its twelve-month
+// window is a fixed, assertable range.
 func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 	t.Helper()
 
