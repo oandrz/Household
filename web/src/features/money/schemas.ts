@@ -67,6 +67,29 @@ const excludedAccountSchema = z.object({
 // the moment a branch checks `summary.computable` -- there is no `!`
 // assertion for a component to reach for instead, because there is nothing
 // left to assert past the branch.
+// netWorthMinor is nullable and REQUIRED: the server sends an explicit null
+// for a month nothing was tracked through yet, so the chart keeps the slot
+// and the axis stays aligned. A zero would be a claim about the household's
+// money; a missing key would silently shorten the series.
+const trendPointSchema = z.object({
+  month: z.string(),
+  netWorthMinor: z.number().nullable(),
+  complete: z.boolean(),
+});
+
+// changeBasisPoints is integer basis points -- 210 is 2.10%. It is optional
+// because the server omits it whenever the comparison would be dishonest
+// (either month unknown or incomplete, or a base of zero or less), and
+// `optional` rather than `nullable` because absence is exactly what that
+// means: there is no percentage, not a percentage of nothing.
+const trendSchema = z.object({
+  points: z.array(trendPointSchema),
+  changeBasisPoints: z.number().optional(),
+});
+
+export type TrendPoint = z.infer<typeof trendPointSchema>;
+export type Trend = z.infer<typeof trendSchema>;
+
 const computableSummarySchema = z.object({
   currency: z.string(),
   computable: z.literal(true),
@@ -76,6 +99,7 @@ const computableSummarySchema = z.object({
   breakdown: z.array(breakdownEntrySchema),
   excludedNoRate: z.array(excludedAccountSchema),
   excludedByChoice: z.number(),
+  trend: trendSchema.optional(),
 });
 
 const incomputableSummarySchema = z.object({
