@@ -46,6 +46,25 @@ func (r *AccountRepo) List(ctx context.Context, householdID string, includeArchi
 	return out, nil
 }
 
+func (r *AccountRepo) MonthlyMovements(ctx context.Context, householdID string, since time.Time) ([]usecase.AccountMonthMovement, error) {
+	rows, err := r.q.ListAccountMonthlyMovements(ctx, sqlcgen.ListAccountMonthlyMovementsParams{
+		HouseholdID: uuid(householdID),
+		Since:       dateOnly(since),
+	})
+	if err != nil {
+		return nil, translate(err, "list account monthly movements")
+	}
+	out := make([]usecase.AccountMonthMovement, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, usecase.AccountMonthMovement{
+			AccountID: uuidToString(row.AccountID),
+			Month:     dateToTime(row.Month),
+			Delta:     domain.Money{Amount: row.DeltaMinor, Currency: row.Currency},
+		})
+	}
+	return out, nil
+}
+
 func (r *AccountRepo) Get(ctx context.Context, householdID, accountID string) (usecase.AccountView, error) {
 	row, err := r.q.GetAccount(ctx, sqlcgen.GetAccountParams{
 		HouseholdID: uuid(householdID),

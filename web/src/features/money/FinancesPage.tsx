@@ -16,7 +16,9 @@ import { AccountsPanel } from "./AccountsPanel";
 import { BreakdownCard } from "./BreakdownCard";
 import { FINANCES_COPY } from "./copy";
 import { NetWorthCard } from "./NetWorthCard";
+import { NetWorthChart } from "./NetWorthChart";
 import { RecentTransactionsCard } from "./RecentTransactionsCard";
+import { hasDrawableTrend } from "./trend";
 import { useAccounts } from "./useAccounts";
 
 function PageHeader() {
@@ -144,11 +146,38 @@ export function FinancesPage() {
     );
   }
 
+  // Only ever set on the computable branch (schemas.ts), and itself optional
+  // there -- a limited member never reaches this far (the `!summary` return
+  // above), so `trend` here means "an owner, with a real trend payload."
+  const trend = summary.computable ? summary.trend : undefined;
+  // Decided once, here, from the same rule NetWorthChart.tsx applies
+  // internally (hasDrawableTrend) -- so the "Last 12 months" heading and the
+  // "not enough history" note NetWorthCard renders in its place (both gated
+  // inside that component, on `chart` and `chartEmptyNote` respectively) can
+  // never disagree about whether there is a chart to describe. A household
+  // with exactly one account -- a real first day, since FirstRunPanel above
+  // only pre-empts zero accounts -- lands here with `trend` present but not
+  // drawable.
+  const trendDrawable = trend !== undefined && hasDrawableTrend(trend.points);
+
   return (
     <PageContainer>
       <PageHeader />
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <NetWorthCard summary={summary} />
+      {/* 1.7fr/1fr, not two equal columns: the chart needs the width the
+          design gives it, and the breakdown card is a list that does not. */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-[1.7fr_1fr]">
+        <NetWorthCard
+          summary={summary}
+          chart={trendDrawable && trend ? <NetWorthChart points={trend.points} /> : null}
+          // Inside the card's own padding, not a sibling of it -- the
+          // convention every other card on this page follows for its own
+          // empty/explanatory text (BreakdownCard, RecentTransactionsCard,
+          // this card's own not-computable branch). `chart` stays the only
+          // thing the "Last 12 months" heading is gated on, so passing both
+          // here would be a caller error -- trendDrawable makes it exactly
+          // one or the other, never both.
+          chartEmptyNote={trend && !trendDrawable ? FINANCES_COPY.trendEmpty : undefined}
+        />
         <BreakdownCard summary={summary} />
       </div>
       {/* Only reachable here, in the branch `summary` is present in -- which

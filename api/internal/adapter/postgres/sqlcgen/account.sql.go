@@ -131,6 +131,87 @@ func (q *Queries) GetAccount(ctx context.Context, arg GetAccountParams) (GetAcco
 	return i, err
 }
 
+const listAccountMonthlyMovements = `-- name: ListAccountMonthlyMovements :many
+SELECT account_id,
+       month,
+       SUM(delta_minor)::bigint AS delta_minor,
+       currency
+FROM (
+    SELECT t.from_account_id AS account_id,
+           DATE_TRUNC('month', t.occurred_on)::date AS month,
+           -t.amount_minor AS delta_minor,
+           a.opening_balance_currency AS currency
+    FROM transactions t
+    JOIN accounts a ON a.id = t.from_account_id
+    WHERE a.household_id = $1
+      AND t.occurred_on >= a.opening_balance_as_of
+      AND t.occurred_on >= $2::date
+    UNION ALL
+    SELECT t.to_account_id,
+           DATE_TRUNC('month', t.occurred_on)::date,
+           COALESCE(t.received_amount_minor, t.amount_minor),
+           a.opening_balance_currency
+    FROM transactions t
+    JOIN accounts a ON a.id = t.to_account_id
+    WHERE a.household_id = $1
+      AND t.occurred_on >= a.opening_balance_as_of
+      AND t.occurred_on >= $2::date
+) movements
+GROUP BY account_id, month, currency
+ORDER BY account_id, month
+`
+
+type ListAccountMonthlyMovementsParams struct {
+	HouseholdID pgtype.UUID
+	Since       pgtype.Date
+}
+
+type ListAccountMonthlyMovementsRow struct {
+	AccountID  pgtype.UUID
+	Month      pgtype.Date
+	DeltaMinor int64
+	Currency   string
+}
+
+// ListAccountMonthlyMovements is the twelve-month trend's only new read. One
+// row per account per calendar month that has any movement, summed in that
+// account's own currency -- no conversion happens here and none can, because
+// the FX provider lives in the usecase layer (MonthTotalsQuery says the same).
+//
+// The filter is ListAccounts's balance expression split by month, and must
+// stay identical to it: the trend walks backwards from AccountView.Balance by
+// subtracting these deltas, so one row's difference makes the older bars
+// disagree with the headline figure while still looking plausible.
+//
+// There is deliberately no upper bound on occurred_on, for the same reason
+// ListAccounts has none: a future-dated transaction is already inside the
+// balance the walk anchors on, so it must be inside these rows too. The
+// service buckets any month later than the current one into the current one.
+func (q *Queries) ListAccountMonthlyMovements(ctx context.Context, arg ListAccountMonthlyMovementsParams) ([]ListAccountMonthlyMovementsRow, error) {
+	rows, err := q.db.Query(ctx, listAccountMonthlyMovements, arg.HouseholdID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAccountMonthlyMovementsRow
+	for rows.Next() {
+		var i ListAccountMonthlyMovementsRow
+		if err := rows.Scan(
+			&i.AccountID,
+			&i.Month,
+			&i.DeltaMinor,
+			&i.Currency,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAccounts = `-- name: ListAccounts :many
 
 SELECT a.id, a.household_id, a.nickname, a.type, a.owner_membership_id, a.opening_balance_minor, a.opening_balance_currency, a.opening_balance_as_of, a.count_toward_net_worth, a.visible_to_limited_members, a.archived_at, a.created_at, u.display_name AS owner_name,

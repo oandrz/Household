@@ -283,17 +283,73 @@ Built), taking the stated totals from 62/18/23/2 = 105 to
 **63/17/23/2 = 105** — row count unchanged, Built + Partial still **80 of
 105** (a Partial becoming Built moves neither side of that sum).
 
+**The net worth trend, 2026-08-19 — a wrong constraint corrected, a real gap
+found and closed the same day.** The 12-month trend (Money's own last gap) is
+code-complete and walked in a real browser: the twelve-month series, the
+newest-bar-equals-headline guarantee, the change badge, the day-one and
+sparse-history states, and the archived-account exclusion all behave as
+specced. The row's own prose used to claim the trend needed a
+balance-snapshot table; it never did (see the rewritten paragraph above). The
+browser walk also found one live gap the plan's own test suite could not have
+caught by construction: the change badge's text wrapped mid-phrase on
+Overview at mainstream mobile widths (360px, 320px), stranding "month" alone
+in the danger colour — Task 7 had flagged this exact risk as unverified and
+deferred it to the browser pass, and the browser pass is what found it real.
+First recorded 🟡 with the gap named rather than the ✅ the round's own plan
+asked for, because CLAUDE.md's tracker rule outranks a plan once a real gap
+is confirmed. A same-day fix round closed it: the badge now renders as its
+own line beneath the figure whenever the caller supplies a changeNote
+(Overview), matching the design's own Overview tile, instead of inline beside
+the 30px figure; Finances' bare `▼ 6.0%` (no changeNote) is untouched and
+still renders inline, as the design's Finances screen draws it. Confirmed
+clean at 360px and 320px in a real browser and pinned by a structural test
+(`NetWorthCard.test.tsx`, five cases) that asserts the badge's own DOM
+arrangement — parent element and tag name, not merely its words — so a
+regression back to always-inline cannot pass silently. The row moves to ✅.
+Recounting by this file's own rule (the first symbol in each row's own cell)
+found exactly one symbol changed at the time: "Net worth with 12-month
+trend" moved 🟡 → ✅; "Net worth card" was left 🟡 for a reason this file
+believed was real (no assets/liabilities split on Overview) and stayed 🟡.
+Money moved from 24/4/7/0 to **25/3/7/0** (24 rows unchanged, one Partial
+becomes Built), taking the stated totals from 63/17/23/2 = 105 to
+**64/16/23/2 = 105** — Built + Partial still **80 of 105** (a Partial
+becoming Built moves neither side of that sum).
+
+**Second correction, same day — the "Net worth card" gap this paragraph
+just left standing was never real either.** A review round checked the
+claim above against the design itself rather than trusting the sentence
+this file had just rewritten, and found it false: the Overview net worth
+tile (`design/Household Dashboard.dc.html:305`) draws three stacked
+lines — label, figure, change — in every iteration of the file, and
+nothing else. The only "Assets & liabilities" block the design contains
+anywhere is a separate sibling card, drawn only inside the Finances
+screen's own `is_finances` block, which this product already builds as
+its own row in this same table. There is no version of the
+Overview tile, on either screen, that was ever meant to carry a
+breakdown — a fact the row's own next clause had already half-admitted
+("was never meant to… stays Finances-only by design") without anyone
+following that sentence to its conclusion. **This is the same habit
+pattern 16 was written for, caught happening a second time while writing
+up the first**: a claim about a design mockup, restated without anyone
+opening the mockup to check it, in the very paragraph that exists to
+correct an unchecked claim about a query. See pattern 16's own entry in
+`docs/LEARNING.md` for the fuller lesson. "Net worth card" moves 🟡 → ✅.
+Recounting again: Overview (home) moves from 5/3/2/0 to **6/2/2/0** (10
+rows unchanged, one more Partial becomes Built), taking the stated
+totals from 64/16/23/2 = 105 to **65/15/23/2 = 105** — Built + Partial
+still **80 of 105**.
+
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
 | Entry & authentication | 10 | 1 | 0 | 0 |
 | Navigation shell | 7 | 1 | 1 | 0 |
 | Household settings | 11 | 8 | 2 | 0 |
-| Overview (home) | 5 | 3 | 2 | 0 |
-| Money | 24 | 4 | 7 | 0 |
+| Overview (home) | 6 | 2 | 2 | 0 |
+| Money | 25 | 3 | 7 | 0 |
 | Marriage | 6 | 0 | 9 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **63** | **17** | **23** | **2** |
+| **Total** | **65** | **15** | **23** | **2** |
 
 ---
 
@@ -424,7 +480,7 @@ replaced.
 
 | Feature | State |
 |---|---|
-| Net worth card | 🟡 — the figure and the not-computable case only, by reusing Finances' own card. The design's card also carries an assets/liabilities split and a trend |
+| Net worth card | ✅ — the figure, the not-computable case, and the month-to-date change badge, by reusing Finances' own card. The design's own Overview tile (`design/Household Dashboard.dc.html:305`) draws exactly three stacked lines — label, figure, change — and nothing else, in every iteration of the file; the only "Assets & liabilities" block anywhere in the design is a separate sibling card on the Finances page, which this product already builds as its own row below. There is no version of the Overview tile that was ever meant to carry a breakdown, so there is no gap left to name here |
 | July budget card — percentage used | 🟡 — percentage used plus the two figures behind it, and a "Set a budget" link when the household has never budgeted. No sparkline. Owner-only: `GET /budgets/{month}` is `requireCapability(money)` **and** `requireOwner` |
 | Next bill card | ✅ — the next-due bill's name, amount and due date (or the overdue/autopay state in its place), reading `useBills`, the same hook and cache entry `/money/bills` itself uses |
 | Goals on track card | ✅ — the real `X of Y on track` figure and the next dated goal beneath it, reading `useGoals`, the same hook and cache entry `/money/goals` itself uses |
@@ -474,7 +530,7 @@ code *and* a walk confirming it. All five Money features are now walked.
 
 | Feature | State |
 |---|---|
-| Net worth with 12-month trend | 🟡 |
+| Net worth with 12-month trend | ✅ — the twelve-month series, the newest-bar-equals-headline guarantee and the month-to-date change badge, walked in a real browser (Task 8, 2026-08-19). A fix round the same day closed the one gap the walk found: Overview's change badge (`▼ 6.0% this month`) wrapped mid-phrase at 360px and 320px because it rendered inline beside the 30px figure; it now renders as its own line underneath whenever the caller passes a changeNote (Overview), matching the design's own Overview tile, while Finances' bare `▼ 6.0%` (no changeNote) stays inline as it always did. Confirmed clean at both widths and pinned by a structural test (`NetWorthCard.test.tsx`) so it cannot silently regress to inline |
 | Assets and liabilities breakdown | ✅ |
 | Accounts by owner, with SGD/IDR split | ✅ |
 | Recent transactions strip | ✅ |
@@ -486,12 +542,29 @@ code *and* a walk confirming it. All five Money features are now walked.
 | Custom account types | ⬜ |
 | Warning in Settings before a primary-currency change strands every account | ⬜ |
 
-**Net worth is missing only its 12-month trend.** The figure itself — assets
-minus liabilities, converting each account into the household's primary
-currency before summing — is built and shown live. The trend needs balance
-snapshots: a second table, and a separate decision about when a snapshot gets
-written (nightly? on every balance change? on read?). Deferred as its own
-small spec, not folded into this one.
+**The 12-month trend shipped 2026-08-19, and the note that used to sit here
+was wrong.** It used to say the trend "needs balance snapshots: a second
+table, and a separate decision about when a snapshot gets written." It never
+did, and nobody had checked that claim against the code: balances in this
+product have always been derived from the transactions ledger, the same way
+`ListAccounts` computes today's balance on every read
+(`api/internal/adapter/postgres/queries/account.sql`). The trend is the same
+idea walked back twelve months — `ListAccountMonthlyMovements` sums each
+account's transactions by calendar month, and
+`AccountService.trend` (`api/internal/usecase/networth_trend.go`) subtracts
+each month's delta from today's live balance to get that month's figure.
+Every bar is recomputed on every `GET /accounts`; nothing is written or
+scheduled. The trade-off this buys — history is not frozen, so an account's
+past bars move if you edit an old transaction, and every month is converted
+at today's FX rate rather than the rate that held at the time — is spec
+decision 1 and decision 2 of
+`docs/superpowers/sdd/2026-08-19-net-worth-trend/`, not a gap. The browser
+walk that shipped this also found and closed a real, if narrow, defect: the
+change badge wrapped mid-phrase on Overview at mainstream mobile widths —
+see the row above for what broke and how it was fixed. `docs/LEARNING.md`
+records the lesson behind the wrong constraint: a document that states an
+implementation constraint without citing the code that imposes it is a claim
+the next reader will believe rather than check.
 
 **Archive and restore is not drawn anywhere in the design.** There is no
 remove control on the design's own account form or accounts list. An account
