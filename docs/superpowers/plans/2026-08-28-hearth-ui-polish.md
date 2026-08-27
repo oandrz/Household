@@ -167,7 +167,9 @@ change, so the transitions Tasks 2-4 add are never shipped without it."
 - Modify: `web/src/features/money/BillStatCards.tsx`
 - Modify: `web/src/features/overview/BudgetCard.tsx`
 - Modify: `web/src/features/money/NetWorthCard.tsx`
-- Test: `web/src/features/money/formatMoney.test.ts` (assert the class contract lives in one place — see Step 1)
+- Test: none. This is a class-application sweep; the only unit test it could carry would assert a Tailwind class string, which the review rubric treats as a test that asserts nothing. Verification is the font probe in Step 1 and the column check in Step 5, with the existing suite as a regression net.
+
+**`BreakdownCard.tsx`'s Net row (line 55) is Task 16's, not this task's.** Add `.tabular` only to the per-type row span at line 44 here; Task 16 rewrites the Net span entirely and carries the class itself.
 
 **Interfaces:**
 - Consumes: the `.tabular` class from Task 1
@@ -201,7 +203,7 @@ In `web/src/features/money/TransactionsPage.tsx`, the amount span rendered besid
 
 - [ ] **Step 3: Apply it at the remaining money render sites**
 
-The same one-word addition in each of: `BreakdownCard.tsx` (both the per-type row's amount span at line 44 and the Net row's at 55), `BudgetStatCards.tsx`, `BillStatCards.tsx`, `overview/BudgetCard.tsx`, `NetWorthCard.tsx`.
+The same one-word addition in each of: `BreakdownCard.tsx` (the per-type row's amount span at line 44 **only** — see the note above), `BudgetStatCards.tsx`, `BillStatCards.tsx`, `overview/BudgetCard.tsx`, `NetWorthCard.tsx`.
 
 Only spans that render `formatMoney(...)` output. Not headings, not dates, not counts.
 
