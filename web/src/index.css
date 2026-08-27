@@ -58,6 +58,18 @@
      than being applied per component. Built on the accent rather than a new
      colour: a focus ring is the app pointing at itself, and the app is green. */
   --color-focus: var(--color-accent);
+}
+
+/* Outside @theme deliberately. Tailwind v4 emits a @theme variable only when
+   it sees the variable used, and it does not count a redefinition inside a
+   media query as a use -- so --transition-state, whose only other mention is
+   the prefers-reduced-motion block below, was tree-shaken out of :root
+   entirely. `transition-duration: var(--transition-state)` then computed to
+   0s, which would have made every hover transition in this milestone instant
+   and left the reduced-motion guard guarding nothing, silently and with no
+   test able to see it. None of these three are Tailwind namespaces anyway;
+   :root is where a plain custom property belongs. */
+:root {
   --focus-ring-width: 2px;
   --focus-ring-offset: 2px;
 
