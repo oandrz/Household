@@ -65,7 +65,7 @@ function AmountText({
     transaction.kind === "income" ? transaction.amount.amountMinor : -transaction.amount.amountMinor;
   return (
     <span
-      className={`whitespace-nowrap text-[13px] font-semibold ${
+      className={`tabular whitespace-nowrap text-[13px] font-semibold ${
         transaction.kind === "income" ? "text-accent" : "text-ink"
       }`}
     >

@@ -136,7 +136,7 @@ function PaymentRow({
             gets the row's full width instead of squeezing into a slice of it. */}
         <div className="flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-3">
           <span className="text-[11px] font-semibold text-accent">{BILL_COPY.paidLabel}</span>
-          <span className="w-20 text-right text-[13.5px] font-semibold text-ink">
+          <span className="tabular w-20 text-right text-[13.5px] font-semibold text-ink">
             {formatMoney(payment.amountMinor, payment.currency, symbolFor(payment.currency))}
           </span>
           {!confirming && onAskUndo && (
@@ -277,7 +277,7 @@ export function BillRow(props: BillRowProps) {
             </span>
           )
         )}
-        <span className="w-20 text-right text-[13.5px] font-semibold text-ink">
+        <span className="tabular w-20 text-right text-[13.5px] font-semibold text-ink">
           {formatMoney(bill.amountMinor, bill.currency, symbolFor(bill.currency))}
         </span>
         {/* Never on an archived row -- see this file's own header comment on

@@ -52,7 +52,7 @@ export function BudgetByPerson({
             <div className="flex-1">
               <div className="flex justify-between text-[13px]">
                 <span className="text-ink">{label}</span>
-                <span className="font-semibold text-ink">
+                <span className="tabular font-semibold text-ink">
                   {formatMoney(person.spentMinor, currency, symbol)}
                 </span>
               </div>

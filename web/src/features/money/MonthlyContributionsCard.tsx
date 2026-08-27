@@ -123,7 +123,10 @@ export function MonthlyContributionsCard({
                 className="h-2 w-2 flex-none rounded-sm"
                 style={{ background: SEGMENT_COLORS[index % SEGMENT_COLORS.length] }}
               />
-              {goal.name} · {formatMoney(goal.plannedMonthlyMinor, goal.currency, symbolFor(goal.currency))}
+              {goal.name} ·{" "}
+              <span className="tabular">
+                {formatMoney(goal.plannedMonthlyMinor, goal.currency, symbolFor(goal.currency))}
+              </span>
             </span>
           ))}
         </div>
@@ -132,13 +135,13 @@ export function MonthlyContributionsCard({
       <div className="mt-4 flex flex-wrap items-baseline gap-x-6 gap-y-1 border-t border-hairline pt-3.5 text-[13px]">
         <div>
           <span className="text-muted">{GOAL_COPY.plannedMonthlyTotalLabel}</span>{" "}
-          <span data-testid="monthly-contributions-planned" className="font-semibold text-ink">
+          <span data-testid="monthly-contributions-planned" className="tabular font-semibold text-ink">
             {plannedTotalLabel}
           </span>
         </div>
         <div>
           <span className="text-muted">{GOAL_COPY.actualThisMonthLabel}</span>{" "}
-          <span data-testid="monthly-contributions-actual" className="font-semibold text-accent">
+          <span data-testid="monthly-contributions-actual" className="tabular font-semibold text-accent">
             {actualLabel}
           </span>
         </div>

@@ -40,7 +40,7 @@ function CategoryRow({
             </span>
           )}
         </span>
-        <span className={category.over ? "font-semibold text-danger" : "text-muted"}>
+        <span className={`tabular ${category.over ? "font-semibold text-danger" : "text-muted"}`}>
           {formatMoney(category.spentMinor, currency, symbol)} /{" "}
           {formatMoney(category.capMinor, currency, symbol)}
           {category.over && ` ${BUDGET_COPY.overMarker}`}

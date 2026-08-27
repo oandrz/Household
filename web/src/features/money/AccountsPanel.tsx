@@ -63,7 +63,7 @@ function AccountRow({
       </div>
       <div className="flex items-center gap-3">
         {account.balance && (
-          <div className="text-[14px] font-semibold text-ink">
+          <div className="tabular text-[14px] font-semibold text-ink">
             {formatMoney(
               account.balance.amountMinor,
               account.balance.currency,

@@ -157,7 +157,7 @@ export function BudgetRolloverCard({
     const amount = formatMoney(rolloverAmountMinor, currency, symbol);
     return (
       <div data-testid="budget-rollover" className="flex flex-col gap-1.5">
-        <p data-testid="budget-rollover-done" className="text-[12px] leading-relaxed text-accent-dark">
+        <p data-testid="budget-rollover-done" className="tabular text-[12px] leading-relaxed text-accent-dark">
           {destination
             ? BUDGET_COPY.rolledOverDone(amount, destination.name)
             : BUDGET_COPY.rolledOverDoneUnknown(amount)}
@@ -193,7 +193,7 @@ export function BudgetRolloverCard({
 
   return (
     <div data-testid="budget-rollover-offer" className="flex flex-col gap-1.5">
-      <p data-testid="budget-rollover-offer-text" className="text-[12px] leading-relaxed text-accent-dark">
+      <p data-testid="budget-rollover-offer-text" className="tabular text-[12px] leading-relaxed text-accent-dark">
         {BUDGET_COPY.rolloverOffer(formatMoney(remainingMinor, currency, symbol), monthNameOnly(month))}
         {/* The separator lives inside the same guard as the button it
             introduces -- opening the picker unmounts the button below but

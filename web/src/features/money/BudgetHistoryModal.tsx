@@ -114,7 +114,7 @@ function HistoryRow({
         {month.closed ? (
           <span
             data-testid="budget-history-row-result"
-            className={`font-semibold ${over ? "text-danger" : "text-accent"}`}
+            className={`tabular font-semibold ${over ? "text-danger" : "text-accent"}`}
           >
             {formatResult(resultMinor, currency, symbol)}
           </span>
@@ -127,7 +127,7 @@ function HistoryRow({
       <div className="h-[6px] overflow-hidden rounded-full bg-canvas">
         <div className={`h-full ${barColorClass(month)}`} style={{ width: `${width}%` }} />
       </div>
-      <div className={`text-right text-[11.5px] ${!month.closed ? "text-muted" : over ? "text-danger" : "text-ink"}`}>
+      <div className={`tabular text-right text-[11.5px] ${!month.closed ? "text-muted" : over ? "text-danger" : "text-ink"}`}>
         {formatMoney(month.spentMinor, currency, symbol)}
         {!month.closed && "*"}
       </div>
@@ -193,11 +193,12 @@ export function BudgetHistoryModal({
             <SummaryCard
               label={BUDGET_COPY.historyAvgSpend}
               value={avgSpendMinor === null ? BUDGET_COPY.noValue : formatMoney(avgSpendMinor, currency, symbol)}
+              valueClassName="text-ink tabular"
             />
             <SummaryCard
               label={BUDGET_COPY.historyAvgSaved}
               value={avgSavedMinor === null ? BUDGET_COPY.noValue : formatMoney(avgSavedMinor, currency, symbol)}
-              valueClassName="text-accent"
+              valueClassName="text-accent tabular"
             />
             <SummaryCard
               label={BUDGET_COPY.historyMonthsUnderBudget}

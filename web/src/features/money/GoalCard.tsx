@@ -136,13 +136,15 @@ export function GoalCard({
           )}
         </div>
         <div className="mt-1.5 text-[13px] text-muted">
-          {formatMoney(goal.contributedMinor, goal.currency, symbol)} of{" "}
-          {formatMoney(goal.targetMinor, goal.currency, symbol)}
+          <span className="tabular">{formatMoney(goal.contributedMinor, goal.currency, symbol)}</span> of{" "}
+          <span className="tabular">{formatMoney(goal.targetMinor, goal.currency, symbol)}</span>
           {/* The date clause is omitted entirely when targetMonth is null
-              (a dateless goal, decision 3) -- not rendered empty. */}
+              (a dateless goal, decision 3) -- not rendered empty. Kept
+              outside both tabular spans above: it carries a year
+              ("Dec 2026"), and the placement rule excludes dates by name. */}
           {goal.targetMonth && ` · ${GOAL_COPY.dateClause(targetMonthLabel(goal.targetMonth))}`}
         </div>
-        <div className="mt-2.5 text-[12px] text-muted">
+        <div className="tabular mt-2.5 text-[12px] text-muted">
           {GOAL_COPY.perMonth(formatMoney(goal.plannedMonthlyMinor, goal.currency, symbol))}
         </div>
         {/* "Behind" is never a verdict without its arithmetic (task brief).
@@ -151,7 +153,7 @@ export function GoalCard({
             enough, and repeating a second, near-identical figure under it
             would read as the goal being in two states at once. */}
         {goal.status === "behind" && goal.requiredMonthlyOk && (
-          <div data-testid="goal-card-required" className="mt-1 text-[12px] font-semibold text-danger">
+          <div data-testid="goal-card-required" className="tabular mt-1 text-[12px] font-semibold text-danger">
             {GOAL_COPY.needsPerMonth(formatMoney(goal.requiredMonthlyMinor, goal.currency, symbol))}
           </div>
         )}
