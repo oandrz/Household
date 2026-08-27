@@ -76,26 +76,45 @@ Submitting "Log a transaction" empty produces no inline message. The browser's
 own `Please fill out this field.` bubble appears, and the field takes Chrome's
 default focus ring, measured live at `rgb(0, 95, 204)` and `0.8px`.
 
-This is **not** an app-wide gap, and the fix is not a new pattern. Hearth
-already renders inline errors, as `role="alert"` over `text-danger`, in
-`SignInScreen.tsx`, `AccountModal.tsx`, `GoalModal.tsx`, `BillModal.tsx`,
-`MarkPaidModal.tsx` and `GoalContributionsPanel.tsx`. Counting `required`
-attributes against `role="alert"` elements per file locates the gap precisely:
+The inline error machinery **already exists and already works**. Hearth renders
+errors as `role="alert"` over `text-danger` in twelve forms, `TransactionModal`
+among them — it holds `amountError` and `receivedAmountError` state, sets both
+from `handleSubmit`, and renders both.
 
-| file | `required` | `role="alert"` |
+The empty field never reaches any of it. `noValidate` appears in **zero** of the
+fifteen forms, so the browser's own constraint validation intercepts the submit
+event before `handleSubmit` runs. `TransactionModal.tsx:236-241` says so in a
+comment, about its own sibling field:
+
+> a literally empty required field never reaches this far at all (native
+> validation stops the submit event first, the same as any other required input
+> on this form)
+
+So the defect is not a missing error message. It is that native validation is
+the app's first-line error surface, and Hearth's own messages only fire for
+inputs that get past it — a bad number format, a zero amount.
+
+Two censuses were run and one was wrong; the corrected one is below. An earlier
+pass counted the *substring* `required`, which scored `GoalCard.tsx` at five —
+those are all `requiredMonthlyMinor` and `requiredMonthlyOk`. **`GoalCard.tsx`
+has no form fields at all** and is not part of this work. Counting the JSX
+attribute:
+
+| file | `required` attrs | `role="alert"` |
 |---|---|---|
-| `TransactionModal.tsx` | 12 | 3 |
-| `GoalCard.tsx` | 5 | 0 |
+| `TransactionModal.tsx` | 7 | 3 |
 | `GoalModal.tsx` | 4 | 5 |
 | `BillModal.tsx` | 4 | 4 |
-| `MarkPaidModal.tsx` | 2 | 2 |
+| `SignUpCompleteScreen.tsx` | 4 | 2 |
+| `AccountModal.tsx` | 3 | 2 |
 
-Two files, not ninety.
+Every one of the fifteen forms has the same shape. `TransactionModal` is the
+instance reproduced in the browser; the class is all fifteen.
 
 One thing to know before touching them: `formState` appears in **zero** files.
 `react-hook-form` is a dependency, but every form here is a hand-rolled
-`handleSubmit` over HTML `required`. The fix follows the existing hand-rolled
-pattern and does not introduce react-hook-form's validation surface.
+`handleSubmit`. The fix follows that pattern and does not introduce
+react-hook-form's validation surface.
 
 #### 1.1.4 The ⌘K chip does nothing
 
@@ -360,11 +379,22 @@ The test states the input plainly: a household whose only goal is achieved.
 
 ### 4.3 Inline validation
 
-`TransactionModal.tsx` and `GoalCard.tsx` adopt the `role="alert"` /
-`text-danger` pattern their siblings already use, and stop leaning on bare
-`required` as the error surface.
+`TransactionModal.tsx`'s `<form>` takes `noValidate`, so `handleSubmit` runs on
+an empty field instead of being intercepted. The existing machinery then does
+the work unchanged: `toMinorUnits("")` already returns `null`, which already
+feeds `describeAmountError`, which already renders through `amountError`. Each
+remaining `required` attribute on that form gets a matching JS check, so nothing
+that native validation used to catch becomes silently submittable.
 
-No new library, no `formState`. The pattern to copy is `GoalModal.tsx`.
+No new library, no `formState`, no new error component.
+
+**The class, named rather than assumed.** All fifteen forms share this shape and
+none carries `noValidate`. This milestone fixes the one instance reproduced in
+the browser and records the other fourteen — per `hunting-sibling-defects`,
+which exists in this repo because fixing one instance has failed to fix the
+class five times. Converting the remaining fourteen is a follow-up of its own,
+because each needs its own per-field JS checks and its own tests; doing them
+inside this milestone would triple its diff and bury the seven defects.
 
 ### 4.4 The ⌘K chip
 
@@ -434,4 +464,6 @@ Each is a place the app disagrees with itself.
 - **`BudgetByPerson`'s bar scale at one member.** §2.5.
 - **Modal and drawer entrance animation.** §2.3.
 - **`domain.PercentUsed`'s rounding.** §2.4.
+- **The other fourteen forms' `noValidate` conversion.** §4.3 — named as a
+  class, fixed at one instance, deliberately not swept here.
 - **Anything about the sparse primary household's whitespace.** §1.5.
