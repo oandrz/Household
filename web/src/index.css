@@ -50,6 +50,22 @@
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06);
   /* The auth screens' floating card, a heavier shadow than --shadow-card. */
   --shadow-auth-card: 0 12px 40px rgba(28, 27, 24, 0.07);
+
+  /* The focus ring. Chrome's default is rgb(0, 95, 204) at 0.8px -- an
+     off-palette blue, and too thin to see against --color-canvas. Nothing in
+     this codebase sets outline-none, so the :focus-visible rule below
+     substitutes for that default on every focusable element at once rather
+     than being applied per component. Built on the accent rather than a new
+     colour: a focus ring is the app pointing at itself, and the app is green. */
+  --color-focus: var(--color-accent);
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+
+  /* One duration for every hover/active/focus change, so two components can
+     never disagree about how fast the interface responds. 160ms is under the
+     ~200ms at which a state change stops reading as instant and starts
+     reading as animation -- these are feedback, not motion. */
+  --transition-state: 160ms;
 }
 
 body {
@@ -57,4 +73,30 @@ body {
   background: var(--color-canvas);
   color: var(--color-ink);
   font-family: var(--font-sans);
+}
+
+/* :focus-visible, not :focus -- a mouse click on a button should not leave a
+   ring the pointer user never asked for, which :focus would. Keyboard focus,
+   and focus moved programmatically (Modal.tsx does this on open), still ring. */
+:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* Tabular figures. NOT on body: a heading containing a year should stay
+   proportional. Applied at the elements that render formatMoney's output --
+   see formatMoney.ts, which already spends a comment on using U+2212 MINUS
+   rather than a hyphen "because every negative figure in this app is in a
+   column of numbers". This is the same argument, made about the digits. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Honours the OS setting for every state change the tokens above drive.
+   Added with the transitions rather than after them, because a transition
+   shipped without this is one somebody has to remember to come back for. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --transition-state: 0ms;
+  }
 }
