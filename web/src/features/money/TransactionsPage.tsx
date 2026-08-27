@@ -173,7 +173,7 @@ function AmountCell({
 }) {
   if (transaction.kind === "income") {
     return (
-      <span className="whitespace-nowrap text-[13.5px] font-semibold text-accent">
+      <span className="tabular whitespace-nowrap text-[13.5px] font-semibold text-accent">
         +{formatMoney(transaction.amount.amountMinor, transaction.amount.currency, symbolFor(transaction.amount.currency))}
       </span>
     );
@@ -185,7 +185,7 @@ function AmountCell({
     // half the transaction.
     const received = transaction.receivedAmount ?? transaction.amount;
     return (
-      <span className="whitespace-nowrap text-[13.5px] font-semibold text-ink">
+      <span className="tabular whitespace-nowrap text-[13.5px] font-semibold text-ink">
         {formatMoney(-transaction.amount.amountMinor, transaction.amount.currency, symbolFor(transaction.amount.currency))}
         {" → "}
         <span className="text-accent">
@@ -195,7 +195,7 @@ function AmountCell({
     );
   }
   return (
-    <span className="whitespace-nowrap text-[13.5px] font-semibold text-ink">
+    <span className="tabular whitespace-nowrap text-[13.5px] font-semibold text-ink">
       {formatMoney(-transaction.amount.amountMinor, transaction.amount.currency, symbolFor(transaction.amount.currency))}
     </span>
   );
@@ -448,7 +448,7 @@ export function TransactionsPage() {
         />
         <div className="ml-auto pb-1.5 text-[12.5px] text-muted">
           {TRANSACTIONS_COPY.spentThisMonth}{" "}
-          <b className="text-ink">
+          <b className="tabular text-ink">
             {formatMoney(summary.spentMinor, summary.currency, symbolFor(summary.currency))}
           </b>
         </div>

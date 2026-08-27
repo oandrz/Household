@@ -29,7 +29,7 @@ function StatCard({
   return (
     <div data-testid={testId} className="rounded-xl border border-hairline bg-card px-[22px] py-[18px]">
       <div className="text-xs text-muted">{label}</div>
-      <div className={`mt-1.5 text-2xl font-semibold tracking-[-0.02em] ${valueClassName ?? "text-ink"}`}>
+      <div className={`tabular mt-1.5 text-2xl font-semibold tracking-[-0.02em] ${valueClassName ?? "text-ink"}`}>
         {value}
         {subtitle && <span className="ml-1.5 text-[13px] font-normal text-muted">{subtitle}</span>}
       </div>

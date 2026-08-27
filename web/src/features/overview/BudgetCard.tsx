@@ -40,7 +40,7 @@ export function BudgetCard({ month }: { month: BudgetMonthResponse }) {
           <p className="mt-1.5 text-[30px] font-semibold tracking-[-0.03em] text-ink">
             {OVERVIEW_COPY.budgetUsed(month.percentUsed)}
           </p>
-          <p className="mt-1 text-[11.5px] text-muted">
+          <p className="tabular mt-1 text-[11.5px] text-muted">
             {OVERVIEW_COPY.budgetOf(
               formatMoney(month.spentMinor, month.currency, symbol),
               formatMoney(month.budgetedMinor, month.currency, symbol),

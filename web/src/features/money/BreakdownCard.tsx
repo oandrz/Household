@@ -41,7 +41,7 @@ export function BreakdownCard({ summary }: { summary: Summary }) {
           return (
             <div key={entry.type} className="flex items-center justify-between">
               <span className="text-ink">{ACCOUNT_TYPE_LABELS[entry.type]}</span>
-              <span className="font-semibold text-ink">
+              <span className="tabular font-semibold text-ink">
                 {formatMoney(signedMinor, summary.currency, symbol)}
               </span>
             </div>

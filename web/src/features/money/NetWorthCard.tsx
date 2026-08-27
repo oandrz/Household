@@ -101,7 +101,7 @@ export function NetWorthCard({
             it here. */}
         {chart && <span className="text-xs text-muted">{FINANCES_COPY.trendWindow}</span>}
       </div>
-      <p className="mt-1.5 text-[30px] font-semibold tracking-[-0.03em] text-ink">
+      <p className="tabular mt-1.5 text-[30px] font-semibold tracking-[-0.03em] text-ink">
         {formatMoney(summary.netWorthMinor, summary.currency, symbol)}
         {/* Finances passes no changeNote, so its own bare "▲ 2.1%" -- no
             trailing words -- stays inline beside the figure, matching the
