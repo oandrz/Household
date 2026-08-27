@@ -116,7 +116,11 @@ export function NetWorthCard({
         {changeText !== null && !changeNote && (
           <span
             data-testid="net-worth-change"
-            className={`ml-2 text-[13px] font-semibold tracking-normal ${changeColorClass}`}
+            // normal-nums overrides the inherited tabular-nums from the
+            // figure's own <p>: this badge is a single fluctuating
+            // percentage, not a column of figures to line up, so fixed
+            // digit widths buy it nothing and it reads better proportional.
+            className={`ml-2 text-[13px] font-semibold tracking-normal normal-nums ${changeColorClass}`}
           >
             {changeText}
           </span>

@@ -29,7 +29,7 @@ function StatCard({
   return (
     <div data-testid={testId} className="rounded-xl border border-hairline bg-card px-[22px] py-[18px]">
       <div className="text-xs text-muted">{label}</div>
-      <div className={`tabular mt-1.5 text-2xl font-semibold tracking-[-0.02em] ${valueClassName ?? "text-ink"}`}>
+      <div className={`mt-1.5 text-2xl font-semibold tracking-[-0.02em] ${valueClassName ?? "text-ink"}`}>
         {value}
         {subtitle && <span className="ml-1.5 text-[13px] font-normal text-muted">{subtitle}</span>}
       </div>
@@ -60,6 +60,7 @@ export function BillStatCards({
         testId="bills-stat-due-this-month"
         label={BILL_COPY.statDueThisMonth}
         value={formatMoney(dueThisMonthMinor, currency, symbol)}
+        valueClassName="text-ink tabular"
         // State 2's own contract: a zero here explains itself rather than
         // sitting as a bare "S$0.00" -- not gated to any named "state," just
         // to the figure actually being zero, the same as the card beside it.
@@ -69,7 +70,7 @@ export function BillStatCards({
         testId="bills-stat-paid-so-far"
         label={BILL_COPY.statPaidSoFar}
         value={formatMoney(paidSoFarMinor, currency, symbol)}
-        valueClassName="text-accent"
+        valueClassName="text-accent tabular"
         subtitle={paidSoFarMinor === 0 ? BILL_COPY.paidSoFarZero : undefined}
       />
       {nextDue && (
