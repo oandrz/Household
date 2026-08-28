@@ -354,3 +354,38 @@ func TestVisionSaveReportsNotFoundForADeletedVision(t *testing.T) {
 		t.Fatalf("want domain.ErrNotFound for a deleted vision, got %v", err)
 	}
 }
+
+// This repository does not get to assume v.Year was already validated --
+// VisionService normally checks it first, but this test calls the
+// repository directly, the same way a caller that forgot the check would.
+// 67562 is the value versionParam's own reasoning uses for Version:
+// int16(67562) == 2026, so an unguarded cast would silently write this save
+// against the wrong household-year instead of refusing it.
+func TestVisionSaveRefusesAYearOutOfRange(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewVisionRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	_, err := repo.Save(ctx, domain.Vision{HouseholdID: householdID, Year: 67562, Theme: "T"})
+	if !errors.Is(err, domain.ErrVisionYearOutOfRange) {
+		t.Fatalf("want ErrVisionYearOutOfRange, got %v", err)
+	}
+}
+
+// The same guard, on a milestone's own Year rather than the vision's --
+// InsertVisionMilestoneParams.Year is a second, independent int16 cast.
+func TestVisionSaveRefusesAMilestoneYearOutOfRange(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewVisionRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	_, err := repo.Save(ctx, domain.Vision{
+		HouseholdID: householdID, Year: 2026, Theme: "T",
+		Milestones: []domain.Milestone{{Year: 67562, Title: "Bad"}},
+	})
+	if !errors.Is(err, domain.ErrVisionYearOutOfRange) {
+		t.Fatalf("want ErrVisionYearOutOfRange, got %v", err)
+	}
+}

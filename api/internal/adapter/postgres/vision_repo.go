@@ -193,10 +193,22 @@ func (r *VisionRepo) Save(ctx context.Context, v domain.Vision) (domain.Vision, 
 		}
 
 		for i, m := range v.Milestones {
+			// Guarded, not a bare int16(m.Year): this repository did not
+			// construct m.Year, and a silent wrap (int16(67562) == 2026)
+			// would write a milestone against the wrong household-year --
+			// yearParam's own comment gives the full reasoning.
+			// Guarded, not a bare int16(m.Year): this repository did not
+			// construct m.Year, and a silent wrap (int16(67562) == 2026)
+			// would write a milestone against the wrong household-year --
+			// yearParam's own comment gives the full reasoning.
+			year, ok := yearParam(m.Year)
+			if !ok {
+				return domain.ErrVisionYearOutOfRange
+			}
 			if err := q.InsertVisionMilestone(ctx, sqlcgen.InsertVisionMilestoneParams{
 				VisionID: row.ID,
 				Position: int16(i),
-				Year:     int16(m.Year),
+				Year:     year,
 				Title:    m.Title,
 				Note:     m.Note,
 			}); err != nil {
@@ -218,12 +230,28 @@ func (r *VisionRepo) Save(ctx context.Context, v domain.Vision) (domain.Vision, 
 	// something references a measure, stable ids arrive, and a Save that had
 	// been quietly lying about them would spring on that change rather than
 	// on this one.
+	//
+	// This runs after pgx.BeginFunc has already committed, deliberately on
+	// the pool rather than the closed transaction: Postgres MVCC guarantees
+	// it sees this write's own committed state or a later one, never an
+	// in-progress one, so the only race is another save committing in the
+	// gap between commit and this read -- which hands the caller back a
+	// valid current document and a valid version token, just possibly not
+	// the content their own write produced. No lost update either way.
 	return r.Get(ctx, v.HouseholdID, v.Year)
 }
 
 // upsertParent is the whole of the concurrency contract, and the two branches
 // are genuinely different operations rather than one upsert with a flag.
 func (r *VisionRepo) upsertParent(ctx context.Context, q *sqlcgen.Queries, v domain.Vision) (sqlcgen.Vision, error) {
+	// Guarded up front, before either branch: this repository did not
+	// construct v.Year, and it is used again below in the update branch's
+	// existence check -- yearParam's own comment gives the full reasoning.
+	year, ok := yearParam(v.Year)
+	if !ok {
+		return sqlcgen.Vision{}, domain.ErrVisionYearOutOfRange
+	}
+
 	if v.Version == 0 {
 		// A create. CreateVision is ON CONFLICT DO NOTHING, so pgx.ErrNoRows
 		// here means the row appeared while this editor was typing -- the
@@ -231,7 +259,7 @@ func (r *VisionRepo) upsertParent(ctx context.Context, q *sqlcgen.Queries, v dom
 		// vision and both hold version 0.
 		row, err := q.CreateVision(ctx, sqlcgen.CreateVisionParams{
 			HouseholdID: uuid(v.HouseholdID),
-			Year:        int16(v.Year),
+			Year:        year,
 			Theme:       v.Theme,
 			Description: v.Description,
 		})
@@ -265,20 +293,52 @@ func (r *VisionRepo) upsertParent(ctx context.Context, q *sqlcgen.Queries, v dom
 	}
 	row, err := q.UpdateVision(ctx, sqlcgen.UpdateVisionParams{
 		HouseholdID: uuid(v.HouseholdID),
-		Year:        int16(v.Year),
+		Year:        year,
 		Theme:       v.Theme,
 		Description: v.Description,
 		Version:     version,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		// Zero rows is ambiguous: deleted, or the other partner saved first.
-		// One cheap read tells them apart, because a deleted vision must read
-		// back as ErrNotFound and never as "reload and try again" --
-		// RetroRepo.Update's own comment.
-		if _, getErr := r.Get(ctx, v.HouseholdID, v.Year); errors.Is(getErr, domain.ErrNotFound) {
+		// Zero rows is ambiguous: deleted, or the other partner saved first,
+		// and those need different answers -- RetroRepo.Update's own
+		// three-leg switch is the model, and for the same reason: reporting
+		// a re-read failure as "your partner saved first" would be a
+		// specific, false claim the household would act on (reload and
+		// retry against a row that can never come back).
+		//
+		// The existence check below MUST run on q (this transaction's
+		// connection), never on r.Get: r.Get is pool-backed, and calling it
+		// here -- from inside the open transaction pgx.BeginFunc already
+		// holds a connection for -- would try to acquire a SECOND connection
+		// while the first is still checked out. Enough concurrent
+		// version-guarded saves landing on this path at once, against
+		// pool.go's MaxConns, and every one of them blocks waiting for a
+		// connection none of the others can release: a self-deadlock, not a
+		// slowdown. RetroRepo holds no pool field at all for the identical
+		// reason -- its own comment notes every write there is exactly one
+		// statement, so it never re-reads from inside an open transaction.
+		_, getErr := q.GetVision(ctx, sqlcgen.GetVisionParams{
+			HouseholdID: uuid(v.HouseholdID),
+			Year:        year,
+		})
+		switch {
+		case errors.Is(getErr, pgx.ErrNoRows):
+			// Deleted: must read back as ErrNotFound, never "reload and try
+			// again" -- RetroRepo.Update's own comment gives the reasoning.
 			return sqlcgen.Vision{}, domain.ErrNotFound
+		case getErr == nil:
+			// Still there, at a version this UPDATE's WHERE clause did not
+			// match: the other partner saved first.
+			return sqlcgen.Vision{}, domain.ErrVisionChanged
+		default:
+			// The existence check itself failed for a reason that has
+			// nothing to do with concurrency -- a cancelled context, a
+			// timeout. Returning the real failure here, rather than folding
+			// it into ErrVisionChanged, is what stops a transient error from
+			// being reported to the household as a specific and false claim
+			// about their partner.
+			return sqlcgen.Vision{}, translate(getErr, "get vision (existence check)")
 		}
-		return sqlcgen.Vision{}, domain.ErrVisionChanged
 	}
 	if err != nil {
 		return sqlcgen.Vision{}, translate(err, "update vision")
@@ -293,6 +353,24 @@ func (r *VisionRepo) upsertParent(ctx context.Context, q *sqlcgen.Queries, v dom
 		Description: row.Description,
 		Version:     row.Version,
 	}, nil
+}
+
+// yearParam converts the port's int Year into the wire int16, reporting
+// ok=false rather than truncating when the value falls outside what a vision
+// year can legitimately be. v.Year and m.Year arrive from a request body via
+// VisionService with no repository-level guarantee they were validated
+// first -- CLAUDE.md's "fail closed on values you did not construct" -- and
+// int16(67562) == 2026 would otherwise let a value nobody validated silently
+// target the wrong household-year. Bounded by domain.Min/MaxVisionYear
+// rather than merely int16's range, so this also refuses a technically
+// wrap-safe but domain-invalid year (visions.year's own CHECK constraint
+// enforces the identical range in the database). versionParam (in
+// retro_repo.go, same package) is the identical guard for Version.
+func yearParam(year int) (int16, bool) {
+	if year < domain.MinVisionYear || year > domain.MaxVisionYear {
+		return 0, false
+	}
+	return int16(year), true
 }
 
 // validateMeasureGoals refuses a measure naming a goal outside this
