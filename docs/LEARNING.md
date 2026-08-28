@@ -3173,6 +3173,23 @@ route with a missing guard has no second line of defence.
   `touch` every file you edited before trusting what the browser shows, and
   when one change in a batch appears not to have landed, `curl` that module
   from Vite before doubting the code.**
+  **A third instance, Vision task 11: total silence, not a partial miss.**
+  Fixing a measure row's mid-number wrapping (`whitespace-nowrap` added to
+  `MeasureRow`, `PillarCard.tsx`) on a live `/marriage/vision` walk, a
+  reload showed the exact same wrapping as before the edit — not "mostly
+  fixed with one gap" this time, the fix simply never reached the browser
+  at all. `docker exec hearth-web-1 cat PillarCard.tsx` showed the correct,
+  edited file; the served DOM (`document.querySelector(...).outerHTML`)
+  still carried the pre-fix class list. `docker compose restart web` (no
+  `air` involved here, frontend-only) fixed it in one command, the same as
+  the first instance. What is new this time: no Vite console output ever
+  signalled a stale watcher — no "quiet log" to notice, because Vite prints
+  nothing between HMR updates by default, so there was no absence of
+  activity to read as a symptom, only the DOM's own class list disagreeing
+  with the file on disk. The general rule already given above still covers
+  it, but the tell is different: **compare what the browser actually served
+  against the file, not just against your memory of what you changed** —
+  `outerHTML`/`curl`, not "I re-read the file and it looks right."
 
 ### The first production deployment (2026-08-15)
 
