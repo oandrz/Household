@@ -13,7 +13,7 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 80 of 105 features built or partly built.
+**Where things stand:** 80 of 106 features built or partly built.
 
 > **In production since 2026-08-15**, at <https://oink.mywire.org>. **No count
 > below changes** — deployment is not a design feature, and this file's totals
@@ -339,6 +339,26 @@ rows unchanged, one more Partial becomes Built), taking the stated
 totals from 64/16/23/2 = 105 to **65/15/23/2 = 105** — Built + Partial
 still **80 of 105**.
 
+**The Vision reconnaissance, 2026-08-28 — one row added, nothing built.**
+Answering "what's next" meant reading the design's own Vision screen
+(`design/Household Dashboard.dc.html:590-615`) against this table's four Vision
+rows, and the screen draws a fifth thing no row covers: the marriage-duration
+block beside the theme hero — "Married · 14 years · Feb 14, 2012". It is not
+part of the yearly theme (a theme is set every January; a wedding date is set
+once), and nothing in this product holds it — no column on `households`, no
+field in Settings, no mention anywhere in `api/internal`. Added as ⬜ rather
+than folded silently into "Vision — yearly theme", because a row is the only
+way the next implementer finds out the date has to be captured somewhere
+before that block can render at all. The same read also confirmed what the
+four existing Vision rows already say — no `vision` symbol exists in
+`api/internal` or `web/src`, so nothing here is built and nothing moves state.
+Recounting by this file's own rule (the first symbol in each row's own cell)
+leaves every area unchanged except Marriage, which moves from 6/0/9/0 (15
+rows) to **6/0/10/0** (16 rows) — one row added, no row moved between states —
+taking the stated totals from 65/15/23/2 = 105 to **65/15/24/2 = 106**. The
+"Where things stand" headline (Built + Partial) is unchanged at **80**, now of
+**106** rather than 105: a new Not-started row moves the denominator only.
+
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
 | Entry & authentication | 10 | 1 | 0 | 0 |
@@ -346,10 +366,10 @@ still **80 of 105**.
 | Household settings | 11 | 8 | 2 | 0 |
 | Overview (home) | 6 | 2 | 2 | 0 |
 | Money | 25 | 3 | 7 | 0 |
-| Marriage | 6 | 0 | 9 | 0 |
+| Marriage | 6 | 0 | 10 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **65** | **15** | **23** | **2** |
+| **Total** | **65** | **15** | **24** | **2** |
 
 ---
 
@@ -976,6 +996,7 @@ landing page) belongs with it.
 | Carry an unfinished action into the next retro (no mockup — see below) | ✅ |
 | Delete a draft retro (no mockup — see below) | ✅ |
 | Vision — yearly theme | ⬜ |
+| Vision — marriage duration beside the theme ("Married · 14 years · Feb 14, 2012") | ⬜ *(drawn, deliberately not built — Vision spec decision 2. Nothing in this product stores a wedding date, no feature would read one, and the only derived figure is today minus the date; building it costs a column, a modal field the design itself never draws, a null state, a visibility decision and a leap-day edge, for no behaviour. The theme hero renders full width instead. Same treatment as the design's drawn-but-unbuilt "45 min" retro duration, Retros decision 8)* |
 | Vision — pillars with measures | ⬜ |
 | Vision — longer-horizon milestones | ⬜ |
 | Edit vision (modal) | ⬜ |

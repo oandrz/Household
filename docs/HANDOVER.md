@@ -285,13 +285,13 @@ them.
 **The UI-polish round, 2026-08-28.** Three milestones off
 `docs/superpowers/plans/2026-08-28-hearth-ui-polish.md`. **M1 merged** (PR #10,
 `d83ff22`) — focus rings, the transition token, hover and active states, the
-skip link, tabular figures, three unused font families dropped. **M2 is open as
-PR #11** (`fa38c58`) on branch `ui-defects`: the Transactions month contract
+skip link, tabular figures, three unused font families dropped. **M2 merged** (PR #11,
+`fa38c58`, branch `ui-defects`): the Transactions month contract
 (the only Go change), the achieved-goal card, Hearth's own validation messages,
 the ⌘K chip, the month filter's opening value, modal focus, and "<1% used" —
 plus the fix that turns `main` green again, since
 `TestOwnerSeesTheTwelveMonthTrend` had been failing daily on a clock pinned to
-an absolute past date. **M3 is open as PR #12** on branch `ui-consistency`
+an absolute past date. **M3 merged** (PR #12, `425c7a7`, branch `ui-consistency`)
 (Tasks 15-18): Bills' "All caught up" and Budget's insight panel get the border
 their siblings have, Finances weights Net as the total it is, and the Retros
 detail panel gets a composed empty state. **The plan is finished with M3** —
