@@ -909,6 +909,22 @@ sequenceDiagram
 One endpoint answers the ledger and "Spent this month" together, for the same
 reason `GET /accounts` answers the list and net worth together: the two
 describe the same rows and a second endpoint risks them disagreeing.
+
+**An absent `month` parameter means the current month, for both halves.**
+`parseTransactionFilter` sets the summary's month *and* `filter.Month` from the
+same default, so the ledger and the figures above it always describe the same
+month. They did not always: the default set only the summary's month and left
+`filter.Month` zero — which `TransactionFilter` documents as "every month" — so
+the screen read "0 in August 2026" above ten July rows. `month=all` is the one
+deliberate way out and widens the **list only**: the summary stays on the
+current month, because `MonthSummary` answers for exactly one calendar month by
+construction (`TransactionRepository.MonthTotals` returns that month's rows so
+the usecase layer can convert currencies before summing, and the single-month
+bound is the stated reason it may return rows rather than a SQL `SUM`). The
+frontend therefore drops the count and names the month beside the spend figure
+whenever the list is widened, so no figure ever sits unlabelled over rows it
+does not describe. Any other unrecognised `month` value is still refused with
+422 `INVALID_MONTH` — the widening is one spelled word, never a fallback.
 `nextCursor` is opaque — the date and id of the last row of the page, never
 something the frontend constructs — so a later change to sort order or paging
 predicate cannot become a breaking change to the client; `transactions_household_date_idx

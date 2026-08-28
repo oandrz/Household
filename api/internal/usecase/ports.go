@@ -497,7 +497,9 @@ type TransactionFilter struct {
 	CategoryID         string
 	PaidByMembershipID string
 	// Month is any instant inside the calendar month to list. Zero means every
-	// month.
+	// month -- but note the HTTP adapter never sends zero by default: an absent
+	// `month` parameter defaults to the current month, and only an explicit
+	// `month=all` produces zero here (see parseTransactionFilter).
 	Month time.Time
 
 	CursorDate time.Time

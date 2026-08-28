@@ -75,10 +75,19 @@ export function Modal({
       dialog.showModal();
     }
 
-    // A capable browser's showModal() already moved focus inside; only step
-    // in when it hasn't (jsdom, or a dialog with nothing focusable of its
-    // own to land on).
-    if (dialog && !dialog.contains(document.activeElement)) {
+    // showModal() focuses the first focusable descendant, which here is the
+    // header's ✕ -- the header precedes the children -- so a keyboard user
+    // opening a form modal started on Close rather than on the first thing to
+    // fill in. Prefer the panel's first form control, and fall back to the
+    // platform's own choice when the panel has none, so a confirmation modal
+    // with only buttons still lands inside the dialog rather than leaving
+    // focus wherever the page had it.
+    const firstField = dialog?.querySelector<HTMLElement>(
+      "input:not([type=hidden]), select, textarea",
+    );
+    if (firstField) {
+      firstField.focus();
+    } else if (dialog && !dialog.contains(document.activeElement)) {
       dialog.focus();
     }
 

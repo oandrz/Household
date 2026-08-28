@@ -165,16 +165,18 @@ export function Sidebar({ me }: { me: Me }) {
     // column.
     <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto border-r border-hairline bg-card px-4 py-[22px]">
       {/* The design's sidebar has no separate top bar; this brand row (logo
-          square, "Hearth", the ⌘K chip) is the only header it draws, so
-          AppShell's "header" is this. The ⌘K chip is static -- no command
-          palette exists to open. */}
+          square, "Hearth") is the only header it draws, so AppShell's
+          "header" is this.
+
+          The design also draws a ⌘K chip here. It is deliberately not
+          rendered: no command palette exists to open, and the chip appeared
+          in the mobile drawer too, on devices with no ⌘ key. It comes back
+          the day a palette does -- so do not re-add it from the design
+          file. */}
       <div className="flex items-center gap-2.5 px-2.5 pb-[18px]">
         <div className="h-7 w-7 rounded-lg bg-accent" />
         <div className="text-[15px] font-semibold tracking-[-0.01em]">
           Hearth
-        </div>
-        <div className="ml-auto rounded-md border border-hairline px-1.5 py-0.5 text-[11px] text-muted">
-          ⌘K
         </div>
       </div>
 

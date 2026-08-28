@@ -294,6 +294,31 @@ describe("OverviewPage", () => {
     expect(screen.getByText("next: Bali · Dec 2026")).toBeInTheDocument();
   });
 
+  // domain.PercentUsed rounds to the nearest whole percent, correctly, so
+  // S$2.00 of S$800.00 arrives as 0 -- and "0% used" reads as "nothing spent"
+  // to a household that has spent. The card holds spentMinor already, which is
+  // what tells that apart from a month where nothing has been spent at all.
+  //
+  // Asserted here rather than only on formatPercentUsed's own unit test: the
+  // helper cannot prove its callers pass the right second argument, and a call
+  // site passing a literal 0 would leave every unit test green.
+  it("says <1% used rather than 0% for a household that has barely spent", async () => {
+    renderOverview({
+      "GET /api/v1/auth/me": { status: 200, body: meBody() },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [], summary: summaryBody(1248000) } },
+      [`GET /api/v1/budgets/${MONTH}`]: {
+        status: 200,
+        body: budgetBody({ budgetedMinor: 80000, spentMinor: 200, remainingMinor: 79800, percentUsed: 0 }),
+      },
+      "GET /api/v1/bills": { status: 200, body: billsBody() },
+      "GET /api/v1/goals": { status: 200, body: goalsBody({}, [goalStub()]) },
+      "GET /api/v1/retros": { status: 200, body: retrosBody() },
+    });
+
+    expect(await screen.findByText("<1% used")).toBeInTheDocument();
+    expect(screen.queryByText("0% used")).toBeNull();
+  });
+
   it("shows the change on the net worth card, and never the chart", async () => {
     const { container } = renderOverview({
       "GET /api/v1/auth/me": { status: 200, body: meBody() },

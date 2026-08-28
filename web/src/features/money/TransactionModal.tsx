@@ -124,6 +124,14 @@ export function TransactionModal({
   const [receivedAmountTouched, setReceivedAmountTouched] = useState(isEditing);
 
   const [amountError, setAmountError] = useState<string | null>(null);
+  // Date, description and account carry `required` and nothing else. Until
+  // noValidate went on the form below, the browser refused an empty one before
+  // the submit event ever fired, so handleSubmit had never needed a check for
+  // them -- and removing the interception without adding these would send an
+  // empty description straight to an API that answers 422.
+  const [dateError, setDateError] = useState<string | null>(null);
+  const [descriptionError, setDescriptionError] = useState<string | null>(null);
+  const [accountError, setAccountError] = useState<string | null>(null);
   const [receivedAmountError, setReceivedAmountError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<unknown>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -214,6 +222,9 @@ export function TransactionModal({
     event.preventDefault();
     setAmountError(null);
     setReceivedAmountError(null);
+    setDateError(null);
+    setDescriptionError(null);
+    setAccountError(null);
 
     const amountMinor = toMinorUnits(amountInput, primaryCurrency);
     if (amountMinor === null) {
@@ -226,6 +237,30 @@ export function TransactionModal({
     }
     if (amountMinor <= 0) {
       setAmountError("Enter an amount greater than zero.");
+      return;
+    }
+
+    // Checked in the order the fields are drawn, so the message that appears
+    // is the first empty field reading down the form rather than whichever
+    // check happens to be written first here.
+    if (date === "") {
+      setDateError("Pick a date for this transaction.");
+      return;
+    }
+    if (description.trim() === "") {
+      // .trim(), deliberately broader than `required`, for the same reason
+      // Amount received's own check below is: constraint validation counts a
+      // whitespace-only value as present, so a form relying on the attribute
+      // alone would have accepted "   " as a description even before this.
+      setDescriptionError("Add a short description, like Cold Storage.");
+      return;
+    }
+    // Only reachable with no accounts at all, since every account select
+    // defaults to a real id and the Add button is disabled until one exists.
+    // Checked anyway: this refuses a value nobody here constructed, rather
+    // than posting an empty account id and letting the API name the problem.
+    if (kind === "transfer" ? fromAccountId === "" || toAccountId === "" : accountId === "") {
+      setAccountError("Choose an account for this transaction.");
       return;
     }
 
@@ -312,7 +347,15 @@ export function TransactionModal({
 
   return (
     <Modal open={open} onClose={onClose} title={TRANSACTIONS_COPY.logTransaction}>
-      <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
+      {/* noValidate: the browser's own constraint validation fires before the
+          submit event, so handleSubmit -- and every message this modal already
+          writes -- never ran for an empty field. What the person saw instead
+          was Chrome's bubble, in Chrome's words, with Chrome's blue ring, on a
+          form whose own message for that case was already written and already
+          rendered. Every `required` below keeps its attribute: it still
+          carries the semantics for assistive technology. The checks in
+          handleSubmit are what now refuse. */}
+      <form noValidate className="flex flex-col gap-4" onSubmit={handleSubmit}>
         <div className="flex gap-1.5">
           {KINDS.map((k) => (
             <button
@@ -375,6 +418,12 @@ export function TransactionModal({
           </p>
         )}
 
+        {dateError && (
+          <p role="alert" className="text-xs leading-snug text-danger">
+            {dateError}
+          </p>
+        )}
+
         <div className="flex flex-col gap-1.5">
           <label htmlFor="transaction-description" className="text-xs font-semibold text-label">
             Description
@@ -387,6 +436,11 @@ export function TransactionModal({
             onChange={(event) => setDescription(event.target.value)}
             className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
           />
+          {descriptionError && (
+            <p role="alert" className="text-xs leading-snug text-danger">
+              {descriptionError}
+            </p>
+          )}
         </div>
 
         {kind === "transfer" ? (
@@ -467,6 +521,12 @@ export function TransactionModal({
               </select>
             </div>
           </FieldPair>
+        )}
+
+        {accountError && (
+          <p role="alert" className="text-xs leading-snug text-danger">
+            {accountError}
+          </p>
         )}
 
         {kind === "transfer" && (

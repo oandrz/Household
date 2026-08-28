@@ -103,4 +103,37 @@ describe("Modal", () => {
     fireEvent.click(screen.getByRole("button", { name: /close/i }));
     expect(document.activeElement).toBe(trigger);
   });
+
+  // A real browser's showModal() lands focus on the first focusable
+  // descendant, which is the header's ✕ -- the header precedes the form -- so
+  // opening "Log a transaction" from the keyboard started the user on Close.
+  // Measured live before the fix; jsdom cannot reproduce it, because it has no
+  // showModal() and so never moves focus at all, which is exactly why this
+  // test can only prove the explicit choice below, never the platform's.
+  it("lands focus on the first form field, not the close button", () => {
+    render(
+      <Modal open onClose={() => {}} title="Log a transaction">
+        <form>
+          <label htmlFor="amount">Amount</label>
+          <input id="amount" />
+        </form>
+      </Modal>,
+    );
+
+    expect(document.activeElement).toBe(screen.getByLabelText("Amount"));
+  });
+
+  // A modal with nothing to fill in must still land somewhere inside itself,
+  // or Tab would resume from wherever the page was and walk straight out of a
+  // dialog the platform has not trapped.
+  it("still lands inside a modal that has no form field", () => {
+    render(
+      <Modal open onClose={() => {}} title="Delete this?">
+        <button type="button">Yes, delete</button>
+      </Modal>,
+    );
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.contains(document.activeElement)).toBe(true);
+  });
 });

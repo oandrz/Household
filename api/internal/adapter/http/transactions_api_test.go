@@ -1,9 +1,12 @@
 package httpadapter_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 )
 
 // TestTransactionWriteRoutesRequireCSRF drives the three mutating
@@ -174,4 +177,135 @@ func TestTransactionRoutesRequireMoneyAndOwner(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestListTransactionsDefaultsListAndSummaryToTheSameMonth drives the ledger
+// with no month parameter at all -- the state the screen opens in.
+//
+// handleListTransactions's own doc comment states the contract: it "serves the
+// ledger and the two figures above it together, because they are one screen
+// and must describe the same month." parseTransactionFilter broke it by
+// defaulting the summary's month unconditionally while leaving filter.Month
+// zero, which TransactionFilter documents as "every month". The screen read
+// "0 in August 2026" above ten July rows.
+//
+// The assertion is on the listed transactions' own dates against
+// summary.month, not on the count alone: a count check stays green if both
+// halves are wrong in the same direction.
+func TestListTransactionsDefaultsListAndSummaryToTheSameMonth(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	accountID := env.mustCreateAccountID(t, session, csrf)
+	categoryID, _ := env.firstExpenseCategory(t, session)
+
+	thisMonth, lastMonth := thisMonthAndLast()
+	env.mustCreateExpense(t, session, csrf, thisMonth.Format(dayLayout), categoryID, accountID, 2_000)
+	env.mustCreateExpense(t, session, csrf, lastMonth.Format(dayLayout), categoryID, accountID, 3_000)
+
+	body := env.listTransactions(t, session, "/api/v1/transactions")
+
+	want := thisMonth.Format("2006-01")
+	if body.Summary.Month != want {
+		t.Fatalf("summary.month = %q, want the current month %q", body.Summary.Month, want)
+	}
+	if body.Summary.Count != len(body.Transactions) {
+		t.Fatalf("summary.count = %d but the list carries %d rows; the two halves of one screen disagree",
+			body.Summary.Count, len(body.Transactions))
+	}
+	for _, txn := range body.Transactions {
+		if !strings.HasPrefix(txn.OccurredOn, body.Summary.Month) {
+			t.Errorf("listed a transaction on %s while the summary describes %s",
+				txn.OccurredOn, body.Summary.Month)
+		}
+	}
+}
+
+// TestListTransactionsWidensToEveryMonthOnMonthAll pins the one deliberate way
+// out of the default: month=all lists every month.
+//
+// The summary deliberately stays on the current month, and this test says so
+// rather than leaving it to be discovered. MonthSummary answers for exactly
+// one calendar month by construction -- TransactionRepository.MonthTotals
+// returns that month's rows so the usecase layer can convert currencies before
+// summing, and the single-month bound is the stated reason it may return rows
+// at all. "Spent ever" is a different question from "spent this month", so a
+// widened list keeps a month-labelled figure rather than inventing an all-time
+// one here. The frontend names the month beside the figure.
+func TestListTransactionsWidensToEveryMonthOnMonthAll(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	accountID := env.mustCreateAccountID(t, session, csrf)
+	categoryID, _ := env.firstExpenseCategory(t, session)
+
+	thisMonth, lastMonth := thisMonthAndLast()
+	env.mustCreateExpense(t, session, csrf, thisMonth.Format(dayLayout), categoryID, accountID, 2_000)
+	env.mustCreateExpense(t, session, csrf, lastMonth.Format(dayLayout), categoryID, accountID, 3_000)
+
+	body := env.listTransactions(t, session, "/api/v1/transactions?month=all")
+
+	if len(body.Transactions) != 2 {
+		t.Fatalf("month=all listed %d rows, want both months' 2", len(body.Transactions))
+	}
+	if body.Summary.Month != thisMonth.Format("2006-01") {
+		t.Errorf("summary.month = %q, want the current month %q -- month=all widens the list, not the figure",
+			body.Summary.Month, thisMonth.Format("2006-01"))
+	}
+}
+
+// TestListTransactionsRefusesAnUnreadableMonth keeps the widening on the one
+// spelled word. An unparseable month must still be refused rather than
+// silently widening the ledger, which is what treating any unrecognised value
+// as "all" would do.
+func TestListTransactionsRefusesAnUnreadableMonth(t *testing.T) {
+	env := newTestEnv(t)
+	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	rec := env.authedGet(t, "/api/v1/transactions?month=every", session)
+	assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "INVALID_MONTH")
+}
+
+// dayLayout is the wire format POST /transactions takes for occurredOn.
+const dayLayout = "2006-01-02"
+
+// thisMonthAndLast returns one day inside the current month and one inside the
+// previous one.
+//
+// The previous month is derived from the first of this month rather than by
+// subtracting a month from today, because AddDate normalises an overflowing
+// day forward: time.Now().AddDate(0, -1, 0) on the 31st of a month lands back
+// inside the current month, and a test whose "row outside this month" is
+// silently inside it passes for the wrong reason. The day before the 1st is
+// the previous month in every month of every year.
+func thisMonthAndLast() (thisMonth, lastMonth time.Time) {
+	now := time.Now().UTC()
+	thisMonth = time.Date(now.Year(), now.Month(), 1, 12, 0, 0, 0, time.UTC)
+	return thisMonth, thisMonth.AddDate(0, 0, -1)
+}
+
+// transactionsListBody is the half of the list response these tests read: the
+// dates the ledger shows, and the month the figures above it claim to
+// describe.
+type transactionsListBody struct {
+	Transactions []struct {
+		OccurredOn string `json:"occurredOn"`
+	} `json:"transactions"`
+	Summary struct {
+		Month string `json:"month"`
+		Count int    `json:"count"`
+	} `json:"summary"`
+}
+
+func (env *testEnv) listTransactions(t *testing.T, session *http.Cookie, path string) transactionsListBody {
+	t.Helper()
+	rec := env.authedGet(t, path, session)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list transactions: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body transactionsListBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode transactions: %v", err)
+	}
+	return body
 }

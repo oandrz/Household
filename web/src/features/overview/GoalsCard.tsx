@@ -56,6 +56,14 @@ export function GoalsCard({ goals }: { goals: GoalsResponse }) {
   // keeps the two screens from disagreeing about whether the household has
   // any goals at all.
   const hasAnyGoals = goals.goals.length > 0;
+  // Goals exist, but not one of them is dated, undated or next -- which is
+  // only reachable when every live goal is achieved, since the backend counts
+  // an achieved goal in neither split (the same List loop hasAnyGoals' own
+  // comment above cites). Without this branch the three clauses below are all
+  // null at once and the card renders its heading over nothing, which is the
+  // exact blank-card shape hasAnyGoals exists to prevent -- prevented one
+  // state too early.
+  const allAchieved = hasAnyGoals && !trackClause && !noDateClause && !summary.nextGoal;
 
   return (
     <section
@@ -80,6 +88,11 @@ export function GoalsCard({ goals }: { goals: GoalsResponse }) {
         </>
       ) : (
         <>
+          {allAchieved && (
+            <p className="mt-1.5 text-[30px] font-semibold tracking-[-0.03em] text-ink">
+              {OVERVIEW_COPY.goalsAllAchieved}
+            </p>
+          )}
           {trackClause && (
             <p className="mt-1.5 text-[30px] font-semibold tracking-[-0.03em] text-ink">{trackClause}</p>
           )}

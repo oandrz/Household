@@ -41,7 +41,15 @@ export function toQueryString(filters: TransactionFilters): string {
   if (filters.accountId) params.set("account_id", filters.accountId);
   if (filters.categoryId) params.set("category_id", filters.categoryId);
   if (filters.paidBy) params.set("paid_by", filters.paidBy);
+  // "" and undefined are different values here, deliberately. undefined is
+  // "the page has not chosen a month yet", which sends no month at all and
+  // lets parseTransactionFilter apply its default -- the current month, for
+  // the list and the summary alike. "" is the user having deliberately asked
+  // for every month, which must reach the server as the explicit `month=all`;
+  // sent as an absent parameter it would be read as the default and silently
+  // re-scope the ledger to this month, which is the widening quietly failing.
   if (filters.month) params.set("month", filters.month);
+  else if (filters.month === "") params.set("month", "all");
   if (filters.cursor) params.set("cursor", filters.cursor);
   const query = params.toString();
   return query ? `?${query}` : "";

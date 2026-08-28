@@ -33,6 +33,7 @@ import { BudgetByPerson } from "./BudgetByPerson";
 import { BudgetCategoryGrid } from "./BudgetCategoryGrid";
 import { BudgetRolloverCard } from "./BudgetRolloverCard";
 import { BudgetStatCards } from "./BudgetStatCards";
+import { formatPercentUsed } from "./percentUsedCopy";
 import { familyOfFourTemplate, fiftyThirtyTwentyTemplate, type TemplatePrefill } from "./budgetTemplates";
 import { formatMoney } from "./formatMoney";
 import { currentMonth } from "./month";
@@ -258,7 +259,7 @@ export function BudgetPage() {
                 just reads the server's own percentOk flag instead of
                 re-deriving the same guard from budgetedMinor here. */}
             {data.percentOk && (
-              <span data-testid="budget-percent-used">{BUDGET_COPY.percentUsed(data.percentUsed)}</span>
+              <span data-testid="budget-percent-used">{formatPercentUsed(data.percentUsed, data.spentMinor)}</span>
             )}
             {data.percentOk && " · "}
             {spentSoFar

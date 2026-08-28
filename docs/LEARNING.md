@@ -23,7 +23,7 @@ gets rebuilt.
 
 ### 1. Fixing an instance rarely fixes the class
 
-This happened **sixteen times** — one bullet each below, and the count is the
+This happened **eighteen times** — one bullet each below, and the count is the
 number of bullets, so recount it when you add one (it had already drifted by
 one before the UX-repair round noticed). Almost every time, the fix was
 correct and the sibling kept the bug; two of them are the variant where
@@ -336,6 +336,43 @@ fourth caller needed the same data. **A comment saying "this is deliberately a
 copy of that" is a design decision that expires** — at two it is a judgement
 call, at three it is a shared thing nobody owns. Grep for the endpoint before
 writing a hook for it.
+
+- **The fix for a lying label left the same lie one row below it, and only a
+  browser found it.** The Transactions screen's header claimed a month its
+  ledger did not describe — "0 in August 2026" over ten July rows — and the
+  fix made the default month apply to the list and the summary together.
+  Twelve tests, three mutation checks, both suites green. Then the M2 browser
+  walk picked July in the filter and read: header "10 in July 2026", ledger
+  full of July rows, and directly beneath them **"Spent this month
+  S$10,872.09"** — the identical claim-does-not-describe-the-figure defect,
+  in a second label on the same screen, untouched because the work had been
+  framed as "the header and the list" and that label was neither. It had been
+  wrong before this round too; the round simply made it reachable in one
+  click by putting a populated month control on the screen. **When you fix a
+  label that lies, the class is every other label on that screen, not the one
+  the bug report named** — and the instrument that found it was driving the
+  real page, not any test that could have been written for the fix as scoped.
+
+- **Giving a month-less request a meaning changed what every other caller of
+  that endpoint was asking for.** Fixing the Transactions month contract made
+  an absent `month` mean the current month. `GET /api/v1/transactions` has a
+  second caller: `RecentTransactionsCard`, the "Recent transactions" strip on
+  `/money`, which passed `{}` and whose own header comment said so proudly —
+  it shared one cache entry with the ledger's default request precisely
+  *because* the two were the same question. They stopped being the same
+  question in the commit that gave the default a meaning, and the card
+  silently became "recent transactions this month": on this dev household it
+  went from five rows to one, and on the first of any month it would show a
+  household with years of history nothing at all. That is the same defect
+  shape the round had just fixed, reintroduced one file over by the fix.
+  Caught by the caller sweep, then reproduced in the browser; **no test on
+  either side could have caught it**, because `stubFetchRoutes` matches exact
+  URLs and a stub is blind by construction to the *server's* meaning of a
+  request moving underneath it — worse, the card returns `null` on a query
+  error, so a wrong URL makes the stub throw into a component that renders
+  nothing and a suite that stays green. **When you give a previously-neutral
+  default a meaning, grep every caller of that endpoint in the same change**:
+  a default is a value with readers, exactly like a field whose meaning moved.
 
 **And when you change what a value *means*, its readers are the class.** The
 compiler will not find them, because nothing about the type changed; only a
@@ -924,6 +961,21 @@ person to ask whether the test could ever have gone red in the first place.
   (`RetroHistoryList.test.tsx`) that supplies `actionCount: 0` specifically to
   make sure the gap cannot reopen unnoticed.
 
+- **A guard that correctly refused the empty state, in front of nothing.**
+  `GoalsCard` computes `hasAnyGoals` from `goals.goals.length` rather than from
+  the summary counts, and its own comment explains exactly why: the backend
+  counts an achieved goal in neither `datedCount` nor `noDateCount`, so a
+  household whose only goal is funded has real goals and all-zero counts. The
+  guard was right. Behind it were three clauses — the on-track figure, the next
+  dated goal, the no-date count — and an achieved goal satisfies none of them,
+  so the card rendered its heading over blank space. The component reasoned its
+  way to the exact state twice, in two separate comments, and then had no
+  branch for it; a test even pinned the state, asserting only that the *empty*
+  state did not appear, with a comment calling the heading-alone render "the
+  honest render". **Proving a component does not take the wrong branch is not
+  proving it takes a right one** — assert what it says, not only what it does
+  not say. That makes at least the fifth zero-render defect in this product.
+
 - **The silent-absorption class, three instances in one feature.**
   `stubFetchRoutes` throws on an unregistered route *before* any capture
   runs, and across three separate Retros tasks that throw was then swallowed
@@ -988,6 +1040,24 @@ person to ask whether the test could ever have gone red in the first place.
   assume from its name. **Executing a branch and discriminating what it does
   are different claims** — a coverage tool cannot tell them apart, and
   neither can a reviewer skimming for a green checkmark next to the line.
+
+- **Every test checked one half of a response against a fixture, so no test
+  could fail on the two halves disagreeing.** `GET /transactions` answers the
+  ledger and the figures above it in one body, and `handleListTransactions`'s
+  own doc comment states why: they "are one screen and must describe the same
+  month." `parseTransactionFilter` set the summary's month unconditionally and
+  set `filter.Month` only inside `if raw != ""` — and `TransactionFilter`
+  documents a zero `Month` as *every* month. So the default request summarised
+  August and listed all time, and the screen read "0 in August 2026" above ten
+  July rows. The suite was green throughout, because each test asserted the
+  list against a list fixture and the summary against a summary fixture, and
+  every one of those assertions was true. **A response whose parts must agree
+  needs a test that compares them to each other**, not one that compares each
+  to something the test itself supplied: the assertion that caught this is
+  `summary.count == len(transactions)` plus every listed date starting with
+  `summary.month`, and it needed no fixture at all. Note also which check
+  would *not* have worked: a count-only assertion stays green whenever both
+  halves are wrong in the same direction.
 
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
@@ -1346,6 +1416,29 @@ something only that guard can produce.
   `@theme` into a plain `:root` block: `@theme` is for tokens Tailwind itself
   generates utility classes from, and a non-namespaced custom property that
   nothing but a media query ever references is not that.
+
+- **An injected clock did not reach the guard the test depended on, so the
+  test rotted on a schedule.** `TestOwnerSeesTheTwelveMonthTrend` pinned
+  `movableClock` to `2026-07-28` to make the trend window assertable. It
+  passed for thirty days and then failed every day after, with a 401 on the
+  very first authenticated request — nothing to do with the trend. Session
+  validity is enforced in SQL, not in Go: `GetLiveSession`'s `WHERE` carries
+  `expires_at > now()`, *Postgres's* `now()`, and `session_repo.go` already
+  said outright that "there is no separate check here". The injected clock
+  moved the app's idea of time and left the database's alone, so once real
+  wall time passed the pinned date plus `SessionTTL`, the session the test
+  signed in with was already expired before it made a single request. The
+  fake was real enough to look like control over time and not real enough to
+  be it. What makes this worth writing down twice: the test's own doc comment
+  claimed the pinned clock gave "a known, reproducible range rather than
+  whatever month the suite happens to run in" — the precise opposite of what
+  it had. A comment asserting a property is not the property. Fixed by
+  anchoring on `time.Now().UTC()` and deriving every asserted month from that
+  anchor, which is what the one other `movableClock` caller,
+  `TestSessionCookiesSlideWhenExtended`, already did — it moves *forward* from
+  real now and has never rotted. **When a fake stands in for something a real
+  dependency also owns, ask which of the two the code under test actually
+  consults.**
 
 **If a behaviour depends on the platform, verify it in the platform.** A real
 browser is what found every frontend defect above, and nothing else could
@@ -1859,6 +1952,30 @@ mockup or brief ever named the control it would back. **A docs task that reconci
 moment this pattern re-checks itself for free**: the mechanical grep costs
 thirty seconds per hook and was already due, since nobody had run it since
 Task 9 built the hook two tasks before the composer gap even opened.
+
+**A fourth instance, and this one had no missing caller at all — the platform
+was standing in front of the caller.** `TransactionModal` writes its own
+validation messages, sets them from `handleSubmit` via `describeAmountError`,
+and renders them in a `role="alert"` paragraph beside the field. All of it
+real, all of it tested. Submitting the form empty showed none of it: `noValidate`
+appears in **zero** of this app's fifteen forms, so the browser's own
+constraint validation refuses the submit before the `submit` event fires and
+`handleSubmit` never runs. What a household actually saw was Chrome's bubble,
+in Chrome's words, with Chrome's blue ring, on a form whose own message for
+that exact case was already written. The file said so itself, in a comment
+thirteen lines from the fix: "a literally empty required field never reaches
+this far at all".
+
+Two things generalise. **A capability can be unreachable because something
+else answers first, not only because nothing calls it** — the mechanical
+check for the missing-caller case (grep each hook's mutations for a caller)
+would have found nothing wrong here, because the caller exists and is
+correct. And **removing an interception exposes every case it was silently
+covering**: date, description and account carried `required` and no check in
+`handleSubmit`, because nothing had ever reached it with one of them empty.
+Adding `noValidate` without adding those three would have traded Chrome's
+bubble for a 422 from the API. The remaining fourteen forms share the shape
+and are named as a follow-up rather than swept in silently.
 
 ### 16. A claim about the code is not evidence until someone checks it against the code
 

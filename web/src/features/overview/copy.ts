@@ -31,7 +31,6 @@ export const OVERVIEW_COPY = {
   // state, which is the screen this card links to.
   budgetNone: "No budget set yet",
   budgetSetUp: "Set a budget",
-  budgetUsed: (percent: number) => `${percent}% used`,
   budgetOf: (spent: string, budgeted: string) => `${spent} of ${budgeted}`,
 
   // NextBillCard.tsx. amountLabel/dateLabel are pre-formatted by the caller
@@ -78,6 +77,10 @@ export const OVERVIEW_COPY = {
   // datedCount: 0, which still has goals, just none with a date. Mirrors
   // budgetNone/budgetSetUp above: a way in, not a blank card.
   goalsNone: "No goals yet",
+  // Every live goal is achieved. Distinct from goalsNone (never had one) and
+  // from the dateless case (has goals, none of them dated): both of those
+  // still have something left to do, and this household does not.
+  goalsAllAchieved: "All goals reached",
   goalsCreate: "Create a goal",
 
   setupHeading: "Finish setting up",

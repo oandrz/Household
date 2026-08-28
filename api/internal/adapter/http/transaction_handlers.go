@@ -19,6 +19,13 @@ const occurredOnLayout = "2006-01-02"
 // monthLayout is the wire format for the month filter.
 const monthLayout = "2006-01"
 
+// monthAll is the one wire value that widens the ledger to every month. It is
+// spelled out rather than inferred from an empty `month=`, because an empty
+// value is what a cleared form control sends by accident and must not silently
+// mean something different from sending no month at all. See
+// parseTransactionFilter.
+const monthAll = "all"
+
 // defaultPageSize and maxPageSize mirror TransactionRepository.List's own
 // constants (see its doc comment in usecase/ports.go): the repository
 // defaults an unset or non-positive limit to 50 and clamps anything above 200
@@ -225,8 +232,29 @@ func parseTransactionFilter(w http.ResponseWriter, r *http.Request) (usecase.Tra
 		filter.PaidByMembershipID = raw
 	}
 
+	// The default month applies to BOTH halves of this response. Setting only
+	// the summary's month here and leaving filter.Month zero -- which
+	// TransactionFilter documents as "every month" -- is what let the ledger
+	// list July under a header reading "0 in August 2026". The contract
+	// handleListTransactions states in its own doc comment is that the list and
+	// the two figures above it describe the same month.
+	//
+	// month=all is the deliberate way out, and it widens the list only: the
+	// summary stays on the current month. MonthSummary answers for exactly one
+	// calendar month by construction -- TransactionRepository.MonthTotals
+	// returns that month's rows so the usecase layer can convert currencies
+	// before summing, and the single-month bound is the stated reason it may
+	// return rows at all rather than a SQL SUM. "Spent ever" is a different
+	// question from "spent this month" and would need its own query and its own
+	// wording, so it is not invented here. The frontend names the month beside
+	// the figure, so a widened list never shows an unlabelled one.
 	month := time.Now().UTC()
-	if raw := q.Get("month"); raw != "" {
+	switch raw := q.Get("month"); raw {
+	case "":
+		filter.Month = month
+	case monthAll:
+		// filter.Month stays zero: every month.
+	default:
 		parsed, err := time.Parse(monthLayout, raw)
 		if err != nil {
 			WriteError(w, http.StatusUnprocessableEntity, "INVALID_MONTH",

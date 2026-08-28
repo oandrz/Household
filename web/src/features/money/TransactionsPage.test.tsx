@@ -123,6 +123,7 @@ function renderPage(options: {
   transactions: Transaction[];
   summary: SummaryInput;
   filtered?: { transactions: Transaction[]; summary: SummaryInput };
+  allMonths?: { transactions: Transaction[]; summary: SummaryInput };
   nextCursor?: string | null;
   accounts?: Account[];
   extraRoutes?: Record<string, RouteResponse | RouteResponse[]>;
@@ -139,6 +140,11 @@ function renderPage(options: {
       status: 200,
       body: { accounts: options.accounts ?? [accountFixture()] },
     },
+    // No month in the key: the page opens with its month filter unchosen, so
+    // the first request carries none and the server decides which month that
+    // means (parseTransactionFilter). The Month control still shows that
+    // month -- it is resolved for display from the response, not written into
+    // the filter state -- so no second request follows.
     "GET /api/v1/transactions": {
       status: 200,
       body: {
@@ -175,12 +181,33 @@ function renderPage(options: {
   };
 
   if (options.filtered) {
-    routes["GET /api/v1/transactions?kind=income"] = {
+    // Carries the month as well as the kind: changing any filter commits the
+    // month the control was already showing, so from then on the request
+    // names it explicitly. Same month, same rows -- but a different key, and
+    // a stub that ignored the querystring would hide that.
+    routes[
+      `GET /api/v1/transactions?kind=income&month=${fullSummary(options.summary).month}`
+    ] = {
       status: 200,
       body: {
         transactions: options.filtered.transactions,
         nextCursor: null,
         summary: fullSummary(options.filtered.summary),
+      },
+    };
+  }
+
+  if (options.allMonths) {
+    // month=all, not an absent month: an absent one is what the page sends
+    // before anything is chosen, and the server reads that as the current
+    // month. The widened request has to be its own key or this stub would let
+    // "widen the ledger" quietly resolve to "the same month again".
+    routes["GET /api/v1/transactions?month=all"] = {
+      status: 200,
+      body: {
+        transactions: options.allMonths.transactions,
+        nextCursor: null,
+        summary: fullSummary(options.allMonths.summary),
       },
     };
   }
@@ -196,9 +223,107 @@ function renderPage(options: {
 }
 
 describe("TransactionsPage", () => {
-  it("shows the first-run panel when the household has logged nothing", async () => {
-    renderPage({ transactions: [], summary: { count: 0, spentMinor: 0 } });
+  // The Month control used to open blank, so Chrome drew its own empty-month
+  // placeholder -- a row of dashes that reads as a broken control rather than
+  // as "any month". It now shows the month the server says the figures above
+  // the ledger describe, which is also the month the ledger itself is scoped
+  // to (parseTransactionFilter defaults both halves together).
+  it("opens on the month the summary describes, not blank", async () => {
+    renderPage({
+      transactions: [expenseFixture()],
+      summary: { count: 1, spentMinor: 5230 },
+    });
+
+    expect(await screen.findByLabelText(/month/i)).toHaveValue("2026-07");
+  });
+
+  // "Spent this month" is a claim, and it is only true while the month is the
+  // server's own default. Choosing July left that label sitting above a July
+  // figure under a header already reading "10 in July 2026" -- found in the
+  // browser walk, one row below the defect this change started from.
+  it("names the month on the spend figure once the household picks one", async () => {
+    renderPage({
+      transactions: [expenseFixture()],
+      summary: { count: 1, spentMinor: 5230 },
+      extraRoutes: {
+        "GET /api/v1/transactions?month=2026-06": {
+          status: 200,
+          body: {
+            transactions: [],
+            nextCursor: null,
+            summary: fullSummary({ month: "2026-06", count: 0, spentMinor: 0 }),
+          },
+        },
+      },
+    });
+
+    expect(await screen.findByText(/spent this month/i)).toBeInTheDocument();
+
+    fireEvent.change(await screen.findByLabelText(/month/i), {
+      target: { value: "2026-06" },
+    });
+
+    expect(await screen.findByText(/spent in June 2026/i)).toBeInTheDocument();
+    expect(screen.queryByText(/spent this month/i)).toBeNull();
+  });
+
+  // The ledger opens on the current month, so an empty response no longer
+  // means an empty ledger -- it means an empty month, and the screen must not
+  // claim more than it knows. The first-run panel belongs to the widened
+  // state, the only one that can honestly say nothing has ever been logged.
+  it("names the empty month rather than claiming the ledger is empty", async () => {
+    renderPage({
+      transactions: [],
+      summary: { count: 0, spentMinor: 0 },
+      allMonths: { transactions: [], summary: { count: 0, spentMinor: 0 } },
+    });
+
+    expect(
+      await screen.findByText(/nothing logged in july 2026/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/nothing logged yet/i)).toBeNull();
+  });
+
+  it("shows the first-run panel once every month is shown and there is still nothing", async () => {
+    renderPage({
+      transactions: [],
+      summary: { count: 0, spentMinor: 0 },
+      allMonths: { transactions: [], summary: { count: 0, spentMinor: 0 } },
+    });
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /show every month/i }),
+    );
+
     expect(await screen.findByText(/nothing logged yet/i)).toBeInTheDocument();
+  });
+
+  // Widening drops the count rather than reprinting the month's own. The
+  // summary still describes one calendar month (MonthSummary answers for
+  // exactly one by construction), so "1 in July 2026" over an all-time list
+  // would be the very mismatch the default's fix removed -- and the spend
+  // figure keeps naming its month for the same reason.
+  it("stops claiming a month over the list once every month is shown", async () => {
+    renderPage({
+      transactions: [],
+      summary: { count: 0, spentMinor: 0 },
+      allMonths: {
+        transactions: [expenseFixture()],
+        summary: { count: 1, spentMinor: 5230 },
+      },
+    });
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /show every month/i }),
+    );
+
+    // The row is asserted too, not only the copy: the heading above is driven
+    // by local state, so a widening that never reached the server as month=all
+    // would still relabel the header while the ledger below it stayed scoped.
+    expect(await screen.findByText("Cold Storage")).toBeInTheDocument();
+    expect(screen.getByText(/every month/i)).toBeInTheDocument();
+    expect(screen.queryByText(/1 in July 2026/i)).toBeNull();
+    expect(screen.getByText(/spent in July 2026/i)).toBeInTheDocument();
   });
 
   // A household that filtered to "Income" and saw the first-run panel would
@@ -348,7 +473,15 @@ describe("TransactionsPage", () => {
   });
 
   it("keeps the generic first-run copy once an account exists", async () => {
-    renderPage({ transactions: [], summary: { count: 0, spentMinor: 0 } });
+    renderPage({
+      transactions: [],
+      summary: { count: 0, spentMinor: 0 },
+      allMonths: { transactions: [], summary: { count: 0, spentMinor: 0 } },
+    });
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /show every month/i }),
+    );
 
     expect(await screen.findByText(/nothing logged yet/i)).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /add an account/i })).toBeNull();
