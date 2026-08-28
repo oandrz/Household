@@ -237,6 +237,36 @@ describe("TransactionsPage", () => {
     expect(await screen.findByLabelText(/month/i)).toHaveValue("2026-07");
   });
 
+  // "Spent this month" is a claim, and it is only true while the month is the
+  // server's own default. Choosing July left that label sitting above a July
+  // figure under a header already reading "10 in July 2026" -- found in the
+  // browser walk, one row below the defect this change started from.
+  it("names the month on the spend figure once the household picks one", async () => {
+    renderPage({
+      transactions: [expenseFixture()],
+      summary: { count: 1, spentMinor: 5230 },
+      extraRoutes: {
+        "GET /api/v1/transactions?month=2026-06": {
+          status: 200,
+          body: {
+            transactions: [],
+            nextCursor: null,
+            summary: fullSummary({ month: "2026-06", count: 0, spentMinor: 0 }),
+          },
+        },
+      },
+    });
+
+    expect(await screen.findByText(/spent this month/i)).toBeInTheDocument();
+
+    fireEvent.change(await screen.findByLabelText(/month/i), {
+      target: { value: "2026-06" },
+    });
+
+    expect(await screen.findByText(/spent in June 2026/i)).toBeInTheDocument();
+    expect(screen.queryByText(/spent this month/i)).toBeNull();
+  });
+
   // The ledger opens on the current month, so an empty response no longer
   // means an empty ledger -- it means an empty month, and the screen must not
   // claim more than it knows. The first-run panel belongs to the widened

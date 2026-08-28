@@ -366,6 +366,16 @@ export function TransactionsPage() {
   // disagree with the server's across a midnight or a timezone -- the same
   // header-versus-list disagreement this whole change exists to end.
   const filterValues = { ...filters, month: filters.month ?? summary.month };
+  // "Spent this month" is only true while the month is the server's own
+  // default. Found in the browser walk: choosing July left the figure labelled
+  // "Spent this month" above a header reading "10 in July 2026" -- the same
+  // label-does-not-describe-the-figure defect this whole change exists to end,
+  // one row further down the screen. Any month the household picked, and the
+  // widened state, name their month instead.
+  const spendLabel =
+    filters.month === null
+      ? TRANSACTIONS_COPY.spentThisMonth
+      : TRANSACTIONS_COPY.spentInMonth(monthLabel(summary.month));
   const symbolFor = (currency: string) =>
     currencies.data?.currencies.find((c) => c.code === currency)?.symbol;
   const excludedCurrencies = [...new Set(summary.excludedNoRate.map((e) => e.currency))].join(", ");
@@ -480,9 +490,7 @@ export function TransactionsPage() {
           members={members}
         />
         <div className="ml-auto pb-1.5 text-[12.5px] text-muted">
-          {showingAllMonths
-            ? TRANSACTIONS_COPY.spentInMonth(monthLabel(summary.month))
-            : TRANSACTIONS_COPY.spentThisMonth}{" "}
+          {spendLabel}{" "}
           <b className="text-ink">
             {formatMoney(summary.spentMinor, summary.currency, symbolFor(summary.currency))}
           </b>
