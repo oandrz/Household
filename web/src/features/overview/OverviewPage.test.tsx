@@ -249,6 +249,25 @@ function visionBody(overrides: Partial<Vision> = {}): Vision {
   };
 }
 
+// The identical proof `renderableRetrosBody()` above gives for NextRetroCard
+// -- a vision response that WOULD render VisionCard's own real content (a
+// theme, a pillar) if the query behind it were ever allowed to fire.
+// VisionCard shares OverviewPage's own `hasMarriage &&` gate with
+// NextRetroCard rather than carrying a second capability check of its own,
+// so the two marriage-gate tests below need this registered alongside
+// renderableRetrosBody() -- a mutation that broke gating for VisionCard
+// alone, leaving NextRetroCard's intact, would otherwise go undetected:
+// with no route registered at all, VisionCard's own
+// `if (!vision.data) return null` would swallow the failed request into an
+// absence that looks identical to the gate having worked.
+function renderableVisionBody(): Vision {
+  return visionBody({
+    theme: "Slow down together",
+    version: 1,
+    pillars: [{ name: "Us before logistics", description: "", measures: [] }],
+  });
+}
+
 // `routes` accepts a single response or an ordered list per route (the same
 // union GoalModal.test.tsx's own `renderModal` widens `extraRoutes` to) --
 // this task's own "refetches goals after it saves" test needs a route that
@@ -930,12 +949,13 @@ describe("OverviewPage", () => {
   // the "explains the missing figures" test above, which this test's own
   // positive assertion is modelled on for the identical reason).
   //
-  // "GET /api/v1/retros" is registered with real, renderable data
-  // (renderableRetrosBody, not an empty one) on purpose: if OverviewPage's
-  // own `hasMarriage &&` gate were ever deleted, this member's browser
-  // would show the card's real content, not merely "no card" for some
-  // unrelated reason (an errored, unregistered request that NextRetroCard's
-  // own `if (!retros.data) return null` swallows into an identical-looking
+  // "GET /api/v1/retros" and "GET /marriage/vision" are both registered
+  // with real, renderable data (renderableRetrosBody/renderableVisionBody,
+  // neither an empty one) on purpose: if OverviewPage's own
+  // `hasMarriage &&` gate were ever deleted for either card, this member's
+  // browser would show that card's real content, not merely "no card" for
+  // some unrelated reason (an errored, unregistered request that either
+  // card's own `if (!data) return null` swallows into an identical-looking
   // absence). See the mutation check below.
   it("renders nothing for a member without the marriage capability, and the rest of the page still renders", async () => {
     renderOverview({
@@ -948,12 +968,14 @@ describe("OverviewPage", () => {
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
       "GET /api/v1/bills": { status: 200, body: billsBody() },
       "GET /api/v1/retros": { status: 200, body: renderableRetrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: renderableVisionBody() } },
     });
 
     // The rest of the page is alive -- an owner with money still gets their
     // real net worth figure.
     expect(await screen.findByText("S$12,480.00")).toBeInTheDocument();
     expect(screen.queryByTestId("next-retro-card")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("vision-card")).not.toBeInTheDocument();
   });
 
   // The sibling proof the gate test above cannot give on its own: not just
@@ -966,8 +988,9 @@ describe("OverviewPage", () => {
   // TanStack Query's error path or a component's own catch with the suite
   // staying green, so this asserts the request directly rather than
   // leaning on that throw.
-  it("makes no request for a member who cannot see retros", async () => {
+  it("makes no request for a member who cannot see retros or vision", async () => {
     let retrosRequested = false;
+    let visionRequested = false;
     renderOverview({
       "GET /api/v1/auth/me": {
         status: 200,
@@ -984,9 +1007,17 @@ describe("OverviewPage", () => {
           retrosRequested = true;
         },
       },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: {
+        status: 200,
+        body: { vision: renderableVisionBody() },
+        capture: () => {
+          visionRequested = true;
+        },
+      },
     });
 
     await screen.findByText("Overview");
     expect(retrosRequested).toBe(false);
+    expect(visionRequested).toBe(false);
   });
 });
