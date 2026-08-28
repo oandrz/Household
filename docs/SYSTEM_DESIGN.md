@@ -533,6 +533,8 @@ to a real address and so are not on that path.
 | POST | `/retros/{month}/actions` | session · marriage · owner · CSRF |
 | PATCH | `/retros/{month}/actions/{id}` | session · marriage · owner · CSRF — the tick; deliberately does not touch the retro's own `version` (§5) |
 | DELETE | `/retros/{month}/actions/{id}` | session · marriage · owner · CSRF |
+| GET | `/marriage/vision` | session · marriage · owner — same reasoning as the retro reads above; the year comes from `?year=`, range-checked against `domain.MinVisionYear`/`MaxVisionYear` before the service is ever called (an unchecked value would let Postgres's `int16` column silently wrap a wildly out-of-range year onto another one, §5); a year nobody has saved answers 200 with an empty document at version 0, never 404 — the empty state IS the page |
+| PUT | `/marriage/vision/{year}` | session · marriage · owner · CSRF — joins the retro writes' own CSRF sub-group, not a new one; replaces the whole document under a version guard, the same shape `PUT /budgets/{month}` uses |
 | GET | `/healthz`, `/readyz` | none — outside `/api/v1` |
 
 Three test matrices walk the live router and assert this: every non-public

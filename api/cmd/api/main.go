@@ -86,6 +86,7 @@ func run() error {
 	billRepo := postgres.NewBillRepo(db)
 	retroRepo := postgres.NewRetroRepo(db)
 	retroActionRepo := postgres.NewRetroActionRepo(db)
+	visionRepo := postgres.NewVisionRepo(db)
 
 	hasher := crypto.NewArgon2Hasher(cfg.Argon2Time, cfg.Argon2MemoryKiB, cfg.Argon2Threads)
 	tokens := crypto.NewTokenGenerator()
@@ -194,6 +195,10 @@ func run() error {
 		Categories: categoryRepo,
 	})
 	retroSvc := usecase.NewRetroService(retroRepo, retroActionRepo)
+	// goalRepo doubles as the GoalProgressReader: Vision needs one
+	// percentage from Goals and the narrow port is what keeps it from
+	// depending on GoalRepository's whole surface.
+	visionSvc := usecase.NewVisionService(visionRepo, goalRepo, sysClock)
 
 	srv := &http.Server{
 		Addr: fmt.Sprintf(":%d", cfg.Port),
@@ -211,6 +216,7 @@ func run() error {
 			Goals:        goalSvc,
 			Bills:        billSvc,
 			Retros:       retroSvc,
+			Visions:      visionSvc,
 			Users:        users,
 			Memberships:  memberships,
 			Sessions:     sessions,

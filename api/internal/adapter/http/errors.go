@@ -324,6 +324,32 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, domain.ErrRetroActionBodyRequired):
 		WriteError(w, http.StatusBadRequest, "RETRO_ACTION_BODY_REQUIRED",
 			"Give this action some text before saving it.", nil)
+	// --- Vision (Task 9) ----------------------------------------------------
+	case errors.Is(err, domain.ErrVisionChanged):
+		WriteError(w, http.StatusConflict, "VISION_CHANGED",
+			"This vision changed while you were editing it. Reload and try again.", nil)
+	case errors.Is(err, domain.ErrVisionGoalUnknown):
+		WriteError(w, http.StatusUnprocessableEntity, "VISION_GOAL_UNKNOWN",
+			"That savings goal is not one of this household's.", nil)
+	case errors.Is(err, domain.ErrVisionThemeRequired):
+		WriteError(w, http.StatusUnprocessableEntity, "VISION_THEME_REQUIRED",
+			"Give this year a theme.", nil)
+	case errors.Is(err, domain.ErrVisionMeasureAmbiguous),
+		errors.Is(err, domain.ErrVisionMeasureGoalRequired):
+		WriteError(w, http.StatusUnprocessableEntity, "VISION_MEASURE_INVALID",
+			"A measure is either a number you keep, or a savings goal — not both.", nil)
+	case errors.Is(err, domain.ErrVisionThemeTooLong),
+		errors.Is(err, domain.ErrVisionDescriptionTooLong),
+		errors.Is(err, domain.ErrVisionYearOutOfRange),
+		errors.Is(err, domain.ErrVisionPillarNameRequired),
+		errors.Is(err, domain.ErrVisionMeasureLabelRequired),
+		errors.Is(err, domain.ErrVisionMeasureTargetNotPositive),
+		errors.Is(err, domain.ErrVisionMeasureCurrentNegative),
+		errors.Is(err, domain.ErrVisionMilestoneTitleRequired),
+		errors.Is(err, domain.ErrVisionTooManyPillars),
+		errors.Is(err, domain.ErrVisionTooManyMeasures),
+		errors.Is(err, domain.ErrVisionTooManyMilestones):
+		WriteError(w, http.StatusUnprocessableEntity, "VISION_INVALID", err.Error(), nil)
 	// domain.ErrUnknownContributionSource has no case here, deliberately: it
 	// means a goal_contributions row holds a source value this code never
 	// wrote (ParseContributionSource's own doc comment), which is a real
