@@ -483,7 +483,7 @@ replaced.
 | Net worth card | ✅ — the figure, the not-computable case, and the month-to-date change badge, by reusing Finances' own card. The design's own Overview tile (`design/Household Dashboard.dc.html:305`) draws exactly three stacked lines — label, figure, change — and nothing else, in every iteration of the file; the only "Assets & liabilities" block anywhere in the design is a separate sibling card on the Finances page, which this product already builds as its own row below. There is no version of the Overview tile that was ever meant to carry a breakdown, so there is no gap left to name here |
 | July budget card — percentage used | 🟡 — percentage used plus the two figures behind it, and a "Set a budget" link when the household has never budgeted. No sparkline. Owner-only: `GET /budgets/{month}` is `requireCapability(money)` **and** `requireOwner` |
 | Next bill card | ✅ — the next-due bill's name, amount and due date (or the overdue/autopay state in its place), reading `useBills`, the same hook and cache entry `/money/bills` itself uses |
-| Goals on track card | ✅ — the real `X of Y on track` figure and the next dated goal beneath it, reading `useGoals`, the same hook and cache entry `/money/goals` itself uses |
+| Goals on track card | ✅ — the real `X of Y on track` figure and the next dated goal beneath it, reading `useGoals`, the same hook and cache entry `/money/goals` itself uses. A household whose every live goal is achieved reads "All goals reached": an achieved goal is counted in neither `datedCount` nor `noDateCount` and is never `nextGoal`, so all three clauses were null at once and the card painted its heading over blank space (`docs/LEARNING.md`, the zero-render pattern) |
 | Next retro card with carried-over actions | ✅ — shows the current month's retro (draft or finished), or the startable month as a prompt, plus its OPEN action count beneath. `GET /retros` carries both `actionCount` (the total) and `openActionCount` per row; the card reads the latter, the design's own "carried-over actions" figure. Shipped 🟡 first (Task 15, reading the total instead, which overstated outstanding work on a fully-ticked retro) — closed end to end (SQL subquery through the zod schema), leaving `RetroHistoryList`'s own "K actions, ticked or not" row reading the total it is supposed to |
 | Vision check-in strip | ⬜ |
 | "This week" agenda | ⬜ |
@@ -627,6 +627,21 @@ second page held in local state, separate from the reactive first page —
 editing or deleting a row that lives on an appended page patches or removes
 it there directly, so a correction made on an older page is not left showing
 its stale, pre-edit value.
+
+**The month the header names and the month the ledger lists are the same
+month, and always were meant to be.** `handleListTransactions` says so in its
+own doc comment — the ledger and the two figures above it "are one screen and
+must describe the same month" — but `parseTransactionFilter` defaulted only the
+summary's month and left `filter.Month` zero, which means every month, so the
+screen read "0 in August 2026" above ten July rows. The default now applies to
+both halves. `month=all` is the one deliberate way out and widens the **list**
+only: the summary still answers for one calendar month by construction, so the
+screen drops its count and names the month beside the spend figure rather than
+printing either over rows they do not describe. The Month control opens on the
+month the response named (it opened blank, which Chrome draws as a row of
+dashes reading like a broken control), and an empty current month gets its own
+state — naming the month, offering "Show every month" — instead of the
+first-run panel, which only the widened view can honestly show.
 
 **Inline category editing and Export CSV are the two pieces of the design's
 Transactions screen still unbuilt, for different reasons.** Changing a
