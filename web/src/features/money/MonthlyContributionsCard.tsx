@@ -123,7 +123,10 @@ export function MonthlyContributionsCard({
                 className="h-2 w-2 flex-none rounded-sm"
                 style={{ background: SEGMENT_COLORS[index % SEGMENT_COLORS.length] }}
               />
-              {goal.name} · {formatMoney(goal.plannedMonthlyMinor, goal.currency, symbolFor(goal.currency))}
+              {goal.name} ·{" "}
+              <span className="tabular">
+                {formatMoney(goal.plannedMonthlyMinor, goal.currency, symbolFor(goal.currency))}
+              </span>
             </span>
           ))}
         </div>

@@ -73,6 +73,17 @@ function RetroHistoryRow({
   // selecting one does not shift the list by a pixel.
   const background = summary.finished ? "" : "bg-callout";
   const border = selected ? "border-accent" : "border-transparent";
+  // Hover has to agree with the status tint above, not paint over it: a
+  // finished row's hover is the ordinary hover:bg-canvas every clickable row
+  // in this app uses, but the draft row already carries bg-callout as its
+  // one visible "in progress" cue -- hover:bg-canvas at the same specificity
+  // would REPLACE that tint rather than deepen it, so pointing at a draft is
+  // exactly when it would stop looking like one (indistinguishable from a
+  // hovered finished row). hover:bg-callout-border swaps in the callout
+  // family's own deeper step instead -- the token is named for a border, but
+  // #cfe0d8 is used here purely as "callout, one shade in," not as a border
+  // colour, so a hovered draft still reads as a draft.
+  const hoverBackground = summary.finished ? "hover:bg-canvas" : "hover:bg-callout-border";
 
   return (
     <button
@@ -97,7 +108,7 @@ function RetroHistoryRow({
       // they carry onSelect -- Task 10's stand-in correctly noted no floor
       // applied to a row nothing could be clicked into yet; that is no
       // longer true once this component replaces it.
-      className={`min-h-11 w-full rounded-lg border px-3 py-2 text-left text-[13.5px] sm:min-h-0 ${background} ${border}`}
+      className={`min-h-11 w-full rounded-lg border px-3 py-2 text-left text-[13.5px] transition-colors duration-[var(--transition-state)] sm:min-h-0 ${hoverBackground} ${background} ${border}`}
     >
       <div className="font-semibold text-ink">{monthYearLabel(summary.month)}</div>
       {summary.finished ? (
@@ -159,7 +170,7 @@ export function RetroHistoryList({ summaries, onSelect, selectedMonth }: RetroHi
               }
               // Same 44px reasoning as the row buttons above -- this is the
               // brief's own named example of a control the floor applies to.
-              className="min-h-11 rounded-lg px-3 py-2 text-left text-[12.5px] font-semibold text-accent sm:min-h-0"
+              className="min-h-11 rounded-lg px-3 py-2 text-left text-[12.5px] font-semibold text-accent transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off sm:min-h-0"
             >
               {RETRO_COPY.showOlderYear(group.year, group.rows.length)}
             </button>

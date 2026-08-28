@@ -43,13 +43,45 @@
 
   --font-sans: "Schibsted Grotesk", system-ui, sans-serif;
   --font-serif: "Newsreader", Georgia, serif;
-  --font-alt: "Karla", system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  /* --font-alt (Karla) and --font-mono (IBM Plex Mono) were defined here and
+     referenced by nothing, alongside an IBM Plex Sans that had no token at
+     all -- three families downloaded on every cold load for no glyph. A
+     monospace face for figures is a decision worth taking deliberately, with
+     tabular figures already in hand; it should not be taken by picking up a
+     token that happened to be lying here. */
 
   --radius-card: 8px;
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06);
   /* The auth screens' floating card, a heavier shadow than --shadow-card. */
   --shadow-auth-card: 0 12px 40px rgba(28, 27, 24, 0.07);
+
+  /* The focus ring. Chrome's default is rgb(0, 95, 204) at 0.8px -- an
+     off-palette blue, and too thin to see against --color-canvas. Nothing in
+     this codebase sets outline-none, so the :focus-visible rule below
+     substitutes for that default on every focusable element at once rather
+     than being applied per component. Built on the accent rather than a new
+     colour: a focus ring is the app pointing at itself, and the app is green. */
+  --color-focus: var(--color-accent);
+}
+
+/* Outside @theme deliberately. Tailwind v4 emits a @theme variable only when
+   it sees the variable used, and it does not count a redefinition inside a
+   media query as a use -- so --transition-state, whose only other mention is
+   the prefers-reduced-motion block below, was tree-shaken out of :root
+   entirely. `transition-duration: var(--transition-state)` then computed to
+   0s, which would have made every hover transition in this milestone instant
+   and left the reduced-motion guard guarding nothing, silently and with no
+   test able to see it. None of these three are Tailwind namespaces anyway;
+   :root is where a plain custom property belongs. */
+:root {
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+
+  /* One duration for every hover/active/focus change, so two components can
+     never disagree about how fast the interface responds. 160ms is under the
+     ~200ms at which a state change stops reading as instant and starts
+     reading as animation -- these are feedback, not motion. */
+  --transition-state: 160ms;
 }
 
 body {
@@ -57,4 +89,34 @@ body {
   background: var(--color-canvas);
   color: var(--color-ink);
   font-family: var(--font-sans);
+}
+
+/* :focus-visible, not :focus -- a mouse click on a button should not leave a
+   ring the pointer user never asked for, which :focus would. Keyboard focus,
+   and focus moved programmatically (Modal.tsx does this on open), still ring. */
+:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* Tabular figures. NOT on body: a heading containing a year should stay
+   proportional. Belongs where figures stack or repeat and the eye travels
+   between them -- a ledger column, a grid of categories, a row of stat
+   cards. It does NOT belong on a lone display figure or a figure embedded
+   in a prose sentence, where fixed digit widths only pad the punctuation
+   out. See formatMoney.ts, which already spends a comment on using U+2212
+   MINUS rather than a hyphen "because every negative figure in this app is
+   in a column of numbers" -- that reasoning is what decides which side of
+   this rule a given figure falls on. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Honours the OS setting for every state change the tokens above drive.
+   Added with the transitions rather than after them, because a transition
+   shipped without this is one somebody has to remember to come back for. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --transition-state: 0ms;
+  }
 }

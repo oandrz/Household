@@ -107,7 +107,7 @@ export function SubscriptionsCard({
                 <div className="text-[11px] text-muted">{CADENCE_LABELS[bill.cadence]}</div>
               )}
             </div>
-            <span className="text-[13px] font-semibold text-ink">
+            <span className="tabular text-[13px] font-semibold text-ink">
               {formatMoney(bill.amountMinor, bill.currency, symbolFor(bill.currency))}
             </span>
           </div>

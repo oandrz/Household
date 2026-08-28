@@ -23,7 +23,7 @@ gets rebuilt.
 
 ### 1. Fixing an instance rarely fixes the class
 
-This happened **fifteen times** — one bullet each below, and the count is the
+This happened **sixteen times** — one bullet each below, and the count is the
 number of bullets, so recount it when you add one (it had already drifted by
 one before the UX-repair round noticed). Almost every time, the fix was
 correct and the sibling kept the bug; two of them are the variant where
@@ -292,6 +292,22 @@ fix in the same branch *created* the sibling.
   own stated intent instead: drive the page in a real browser and measure
   `getBoundingClientRect()` on every interactive element, which finds a 36.3px
   link the same way regardless of which Tailwind class produced it.
+
+- **UI-polish round: naming instances found half the defects; writing the rule
+  down found the rest.** Measured first: `tabular-nums` on the Overview hero
+  figure — a lone display figure with nothing else on screen for it to align
+  against — cost 196.81px against 172.84px without it, 24px wider, 14%, the
+  extra width landing as gaps around the comma and the decimal point rather
+  than anything a reader gains. `tabular-nums` only earns its width where a
+  column of figures needs to line up; a figure with nothing beside it never
+  has that column. The first correction, made from that one measurement,
+  named two specific sites to fix. Review of the same change found two more.
+  Only once the *rule itself* was written down — never on a lone figure, only
+  where digits actually stack — and a sweep was asked for against that rule
+  did the remaining four surface: eight sites in total, so naming instances
+  alone would have missed six of the eight. The rule now lives once, at its
+  one canonical site — the `.tabular` comment in `web/src/index.css` — rather
+  than being restated at each of the eight call sites that follow it.
 
 **When you fix something, grep for its shape before you close it.** The question
 that finds these is not "is this fixed?" but "where else does this pattern
@@ -1295,6 +1311,42 @@ something only that guard can produce.
   waiting for is what turns the flag into either "confirmed safe" or "found
   and fixed," and until that happens the flag is not evidence of anything.
 
+- **UI-polish round: a census, not a test, is what found the gap, and it had
+  been open for the entire life of the project.** Across roughly ninety
+  components, the frontend carried zero `focus-visible` rules, zero `active:`
+  rules, zero `tabular-nums`, and four `hover:` rules — and had shipped with
+  Chrome's own default focus ring (`rgb(0, 95, 204)`, 0.8px) inside a
+  cream-and-forest palette it never matched, the whole time. No test could
+  have caught any of it, because nothing in this suite asserts on an
+  interaction state at all — the same gap the Kind filter's own
+  `:focus-visible` defect already exposed once in this pattern, since
+  `fireEvent.click` fires a click directly at an element and never sends the
+  keystroke a real Tab press would. What actually found it was two things,
+  neither one a test: counting how many files used each interaction-state
+  utility (the zero and four above), and driving the app with a keyboard
+  instead of a mouse. **A periodic count of a utility's usage across the
+  codebase is a cheap check no test suite can express, and a browser walk
+  driven by Tab and arrow keys finds a different set of defects than one
+  driven by clicks** — the second is not a more thorough version of the
+  first, it is a different instrument pointed at a different gap.
+- **Tailwind v4 tree-shakes a `@theme` custom property it does not see used,
+  and a redefinition inside a media query does not count as a use.**
+  `--transition-state: 160ms` was declared in `@theme` and referenced only
+  inside a `prefers-reduced-motion` block that redefined it to `0ms` — no
+  plain rule anywhere read the `@theme` value directly, so Tailwind's scanner
+  dropped it from the emitted `:root` entirely. `transition-duration:
+  var(--transition-state)` then computed to `0s` everywhere it was used:
+  every hover transition this round added would have been instant, and the
+  reduced-motion guard existed to disable a transition that the tree-shaking
+  bug had already disabled for everyone. `tsc`, `eslint`, `vite build` and
+  583 tests all passed against the built CSS, because none of them reads a
+  computed style — the same gap every bullet in this pattern already rests
+  on. Found by probing `getComputedStyle` in a real browser, the only place
+  the variable's absence was visible. Fixed by moving the property out of
+  `@theme` into a plain `:root` block: `@theme` is for tokens Tailwind itself
+  generates utility classes from, and a non-namespaced custom property that
+  nothing but a media query ever references is not that.
+
 **If a behaviour depends on the platform, verify it in the platform.** A real
 browser is what found every frontend defect above, and nothing else could
 have: jsdom has no working `<dialog>`, no CSS cascade and no layout at all, so
@@ -1877,16 +1929,35 @@ Task 9 built the hook two tasks before the composer gap even opened.
   not "cite carefully." A citation inside the passage arguing that
   citations need checking is not exempt from needing to be checked, and
   neither is the fix for it.
+- **A fifth instance, UI-polish round, and the first where the drifted claim
+  lived inside the rule's own comment rather than in a citation of one.**
+  Two comments each asserted a rule the code no longer followed. One sat in
+  `web/src/index.css`, on the `.tabular` rule itself, restating the rule in
+  words that had fallen out of step with what the rule actually says by the
+  time the round finished correcting it (see pattern 1's tabular-nums entry
+  above). The other, in `GoalCard.tsx`, cited "the placement rule excludes
+  dates by name" — a clause that was never written anywhere in this project;
+  grepping for it after the fact found nothing to find. Both are the same
+  failure as a stale line number wearing different clothes: a comment that
+  restates a rule in its own words, rather than pointing at the rule's one
+  real statement, has nothing tying it to that statement once either side
+  changes, so the paraphrase has no way to notice it has drifted. The
+  drift-proof form is the one this pattern already prescribes for a line
+  citation — name the single place the rule actually lives and point at it,
+  rather than repeating it in prose that can only ever be checked by going
+  and finding that place anyway.
 
 **Treat a citation the way you'd treat a test assertion: something the next
 reader can verify against the thing it names, not something to trust because
-it reads confidently.** All four instances above cost nothing to produce
+it reads confidently.** All five instances above cost nothing to produce
 and each would have cost under a minute to check — reading the query,
-re-finding the line, or opening the mockup — against a small planning gap,
-a wrong number in a comment, a design claim nobody had opened the design to
-test, and a line range nobody had re-measured. A citation checked once and
-never re-verified when the sentence around it is rewritten is not a citation
-any more; it is the same unverified claim wearing a reference.
+re-finding the line, opening the mockup, or grepping for the clause a
+comment claimed existed — against a small planning gap, a wrong number in a
+comment, a design claim nobody had opened the design to test, a line range
+nobody had re-measured, and a rule restated in a comment's own words rather
+than pointed at. A citation checked once and never re-verified when the
+sentence around it is rewritten is not a citation any more; it is the same
+unverified claim wearing a reference.
 
 ---
 
@@ -2803,6 +2874,23 @@ route with a missing guard has no second line of defence.
   layer a value crosses, not assumed to travel with the value** — a fixture
   chosen for one layer's convenience can accidentally satisfy a neighbouring
   layer's whole reason for existing.
+
+- **A hover state that replaces a status tint erases the status.**
+  `RetroHistoryList`'s draft row is tinted `bg-callout` to mark a retro "In
+  progress" — the tint is the only thing on the row saying so. The UI-polish
+  round's new `hover:bg-canvas`, added uniformly across history rows as part
+  of the milestone's hover-state pass, sits at the same specificity and
+  overwrote it: pointing at the draft row made it indistinguishable from a
+  hovered finished row, so the one moment a household reached for that row
+  was the exact moment its status disappeared. The mechanism is the same
+  cascade-order trap the grouped sidebar's Money links already hit (see
+  pattern 3) — a later rule at equal specificity wins regardless of which
+  state a reader would call more important — but the shape is worth naming
+  on its own: a hover rule added everywhere, on the assumption that hover is
+  always additive, silently deletes whatever state a row's own background
+  was already carrying. Fixed by branching the hover class on the same
+  condition that applies the tint, so the draft row hovers to a different,
+  still-distinguishable colour instead of losing its own.
 
 ### Tooling and infrastructure
 

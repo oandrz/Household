@@ -136,7 +136,7 @@ function PaymentRow({
             gets the row's full width instead of squeezing into a slice of it. */}
         <div className="flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-3">
           <span className="text-[11px] font-semibold text-accent">{BILL_COPY.paidLabel}</span>
-          <span className="w-20 text-right text-[13.5px] font-semibold text-ink">
+          <span className="tabular w-20 text-right text-[13.5px] font-semibold text-ink">
             {formatMoney(payment.amountMinor, payment.currency, symbolFor(payment.currency))}
           </span>
           {!confirming && onAskUndo && (
@@ -144,7 +144,7 @@ function PaymentRow({
               type="button"
               aria-label={BILL_COPY.undoAriaLabel(payment.billName)}
               onClick={() => onAskUndo(payment)}
-              className="text-[11px] font-semibold text-danger"
+              className="-mx-1.5 -my-0.5 rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-danger transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off"
             >
               {BILL_COPY.undoTrigger}
             </button>
@@ -164,7 +164,7 @@ function PaymentRow({
               // min-h-11/sm:min-h-0: py-2.5 alone measured short of the 44px
               // floor at this text size -- TransactionFilters.tsx's own
               // SELECT_CLASS comment has the measured numbers.
-              className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[12.5px] font-semibold text-label sm:min-h-0 sm:py-1.5"
+              className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[12.5px] font-semibold text-label transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off sm:min-h-0 sm:py-1.5"
             >
               {BILL_COPY.cancelAction}
             </button>
@@ -277,7 +277,7 @@ export function BillRow(props: BillRowProps) {
             </span>
           )
         )}
-        <span className="w-20 text-right text-[13.5px] font-semibold text-ink">
+        <span className="tabular w-20 text-right text-[13.5px] font-semibold text-ink">
           {formatMoney(bill.amountMinor, bill.currency, symbolFor(bill.currency))}
         </span>
         {/* Never on an archived row -- see this file's own header comment on
@@ -298,7 +298,7 @@ export function BillRow(props: BillRowProps) {
               onMarkPaid(bill);
             }}
             onKeyDown={(event) => event.stopPropagation()}
-            className="text-[11px] font-semibold text-accent"
+            className="-mx-1.5 -my-0.5 rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-accent transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off"
           >
             {BILL_COPY.markPaidTrigger}
           </button>
@@ -313,7 +313,7 @@ export function BillRow(props: BillRowProps) {
               onRestore(bill.id);
             }}
             onKeyDown={(event) => event.stopPropagation()}
-            className="text-[11px] font-semibold text-accent disabled:cursor-not-allowed disabled:opacity-60"
+            className="-mx-1.5 -my-0.5 rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-accent transition-colors duration-[var(--transition-state)] enabled:hover:bg-canvas enabled:active:bg-toggle-off disabled:cursor-not-allowed disabled:opacity-60"
           >
             {BILL_COPY.restore}
           </button>
@@ -328,7 +328,7 @@ export function BillRow(props: BillRowProps) {
               onArchive(bill.id);
             }}
             onKeyDown={(event) => event.stopPropagation()}
-            className="text-[11px] font-semibold text-danger disabled:cursor-not-allowed disabled:opacity-60"
+            className="-mx-1.5 -my-0.5 rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-danger transition-colors duration-[var(--transition-state)] enabled:hover:bg-canvas enabled:active:bg-toggle-off disabled:cursor-not-allowed disabled:opacity-60"
           >
             {BILL_COPY.archive}
           </button>

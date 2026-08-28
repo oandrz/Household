@@ -113,8 +113,19 @@ export function GoalCard({
             }
           : undefined
       }
-      className={`flex items-center gap-[22px] rounded-xl border border-hairline bg-card p-6 ${
-        clickable ? "cursor-pointer" : ""
+      // hover:border-accent/hover:bg-callout, not hover:bg-canvas: this card's
+      // own surface already is bg-card, and bg-canvas is the page's own
+      // ground colour, so a canvas hover here would read as the card fading
+      // into the page rather than responding to the cursor. BudgetPage.tsx's
+      // template cards (the app's only prior hover before this task) already
+      // use this exact pair for the identical shape -- a clickable card with
+      // a hairline border -- so this mirrors that precedent rather than
+      // inventing a new one. No active: state, matching BudgetPage's own
+      // cards. Gated on `clickable` alongside cursor-pointer: an archived
+      // card (no onEdit) must not hover into looking pressable when a click
+      // on it does nothing.
+      className={`flex items-center gap-[22px] rounded-xl border border-hairline bg-card p-6 transition-colors duration-[var(--transition-state)] ${
+        clickable ? "cursor-pointer hover:border-accent hover:bg-callout" : ""
       }`}
     >
       <ProgressRing percent={goal.percent} />
@@ -136,13 +147,18 @@ export function GoalCard({
           )}
         </div>
         <div className="mt-1.5 text-[13px] text-muted">
-          {formatMoney(goal.contributedMinor, goal.currency, symbol)} of{" "}
-          {formatMoney(goal.targetMinor, goal.currency, symbol)}
+          <span className="tabular">{formatMoney(goal.contributedMinor, goal.currency, symbol)}</span> of{" "}
+          <span className="tabular">{formatMoney(goal.targetMinor, goal.currency, symbol)}</span>
           {/* The date clause is omitted entirely when targetMonth is null
-              (a dateless goal, decision 3) -- not rendered empty. */}
+              (a dateless goal, decision 3) -- not rendered empty. Kept
+              outside both tabular spans above: appended as
+              " · by Dec 2026", it is a prose fragment tacked onto the
+              line, not a value to scan -- index.css's own .tabular
+              comment is the one statement of that exclusion; not
+              restated here. */}
           {goal.targetMonth && ` · ${GOAL_COPY.dateClause(targetMonthLabel(goal.targetMonth))}`}
         </div>
-        <div className="mt-2.5 text-[12px] text-muted">
+        <div className="tabular mt-2.5 text-[12px] text-muted">
           {GOAL_COPY.perMonth(formatMoney(goal.plannedMonthlyMinor, goal.currency, symbol))}
         </div>
         {/* "Behind" is never a verdict without its arithmetic (task brief).
@@ -166,7 +182,7 @@ export function GoalCard({
             // size falls short of the 44px floor on a phone. Not dense --
             // this is the card's one action in that state, not a row it
             // shares with anything else.
-            className="mt-2.5 inline-flex min-h-11 items-center text-[11px] font-semibold text-accent disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
+            className="-mx-1.5 mt-2.5 inline-flex min-h-11 items-center rounded-md px-1.5 text-[11px] font-semibold text-accent transition-colors duration-[var(--transition-state)] enabled:hover:bg-canvas enabled:active:bg-toggle-off disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
           >
             {GOAL_COPY.restore}
           </button>
@@ -195,7 +211,7 @@ export function GoalCard({
                   onAddContribution(goal);
                 }}
                 onKeyDown={(event) => event.stopPropagation()}
-                className="min-h-11 text-accent sm:min-h-0"
+                className="-mx-1.5 min-h-11 rounded-md px-1.5 text-accent transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off sm:min-h-0"
               >
                 {GOAL_COPY.addContribution}
               </button>
@@ -221,7 +237,7 @@ export function GoalCard({
                   onArchive(goal.id);
                 }}
                 onKeyDown={(event) => event.stopPropagation()}
-                className="min-h-11 text-danger disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
+                className="-mx-1.5 min-h-11 rounded-md px-1.5 text-danger transition-colors duration-[var(--transition-state)] enabled:hover:bg-canvas enabled:active:bg-toggle-off disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
               >
                 {GOAL_COPY.archive}
               </button>
