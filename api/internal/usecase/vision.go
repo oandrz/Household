@@ -45,8 +45,7 @@ type VisionView struct {
 	Milestones  []domain.Milestone
 }
 
-// VisionService composes the Vision screen. Its one write (Save) is Task
-// 8's job -- this file only reads.
+// VisionService composes the Vision screen and is its one write path (Save).
 type VisionService struct {
 	visions VisionRepository
 	goals   GoalProgressReader
@@ -109,6 +108,30 @@ func (s *VisionService) compose(ctx context.Context, householdID string, v domai
 		Year: v.Year, Theme: v.Theme, Description: v.Description,
 		Version: v.Version, Pillars: pillars, Milestones: milestones,
 	}, nil
+}
+
+// Save validates the draft, then replaces the whole document. The household
+// and year come from the caller (the route), never from the body: a request
+// that names another household must not be able to write into it, and the
+// service is where that is settled rather than in each handler.
+func (s *VisionService) Save(ctx context.Context, householdID string, year int, draft domain.Vision) (VisionView, error) {
+	// The route's values win over anything the body claims -- this is the
+	// one line standing between a request and writing into a household it
+	// does not belong to. Set before Validate, so a body naming another
+	// household is judged against ITS OWN year/household constraints, not
+	// smuggled past them.
+	draft.HouseholdID = householdID
+	draft.Year = year
+
+	if err := draft.Validate(); err != nil {
+		return VisionView{}, err
+	}
+
+	saved, err := s.visions.Save(ctx, draft)
+	if err != nil {
+		return VisionView{}, err
+	}
+	return s.compose(ctx, householdID, saved)
 }
 
 // linkedGoalIDs collects every goal a measure in this vision points at, so
