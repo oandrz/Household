@@ -3258,3 +3258,103 @@ func (d *retroActionRepoDouble) OpenInMonth(_ context.Context, householdID strin
 // is load-bearing, not decoration -- see goalDouble's own identical
 // assertion for why.
 var _ usecase.RetroActionRepository = (*retroActionRepoDouble)(nil)
+
+// --- Vision ---------------------------------------------------------------
+
+// visionRepoDouble is the in-memory VisionRepository every VisionService
+// test runs against, implementing every port method for the same Liskov
+// reason retroRepoDouble does -- Task 8's Save tests build on this same
+// double rather than a second one.
+type visionRepoDouble struct {
+	rows map[string]domain.Vision // keyed by visionRowKey(householdID, year)
+}
+
+func newVisionRepoDouble() *visionRepoDouble {
+	return &visionRepoDouble{rows: map[string]domain.Vision{}}
+}
+
+func visionRowKey(householdID string, year int) string {
+	return fmt.Sprintf("%s/%d", householdID, year)
+}
+
+// seed inserts a vision directly, bypassing Save, for a test that wants one
+// to already exist -- the same role retroRepoDouble.seed plays for retros.
+func (d *visionRepoDouble) seed(v domain.Vision) domain.Vision {
+	d.rows[visionRowKey(v.HouseholdID, v.Year)] = v
+	return v
+}
+
+// Get reports domain.ErrNotFound for a household-year nobody has saved yet
+// -- the port's own contract, and the distinction VisionService.Get turns
+// into the empty vision the screen renders rather than an error page.
+func (d *visionRepoDouble) Get(_ context.Context, householdID string, year int) (domain.Vision, error) {
+	row, ok := d.rows[visionRowKey(householdID, year)]
+	if !ok {
+		return domain.Vision{}, domain.ErrNotFound
+	}
+	return row, nil
+}
+
+// Save mirrors the real VisionRepo.Save's version guard, the port's own
+// two-case contract: Version 0 must be a create, refused with
+// domain.ErrVisionChanged if a row is already there; a positive Version
+// must match the stored one exactly or be refused the same way. No test in
+// this file exercises it yet -- Task 7 only reads -- but the double must
+// still satisfy the whole interface, and Task 8 builds its Save tests on
+// this same implementation rather than inventing a second one.
+func (d *visionRepoDouble) Save(_ context.Context, v domain.Vision) (domain.Vision, error) {
+	key := visionRowKey(v.HouseholdID, v.Year)
+	existing, ok := d.rows[key]
+	if v.Version == 0 {
+		if ok {
+			return domain.Vision{}, domain.ErrVisionChanged
+		}
+	} else if !ok {
+		// Deleted, not raced -- a row that no longer exists at all must
+		// read back as ErrNotFound, never as "the other partner saved
+		// first," which would send a household to reload and retry
+		// against a row that can never come back. The port's own doc
+		// comment (and RetroRepo.Update's, which this mirrors) is explicit
+		// that these two zero-rows causes are different answers.
+		return domain.Vision{}, domain.ErrNotFound
+	} else if existing.Version != v.Version {
+		return domain.Vision{}, domain.ErrVisionChanged
+	}
+	v.Version++
+	d.rows[key] = v
+	return v, nil
+}
+
+// var _ usecase.VisionRepository = (*visionRepoDouble)(nil) below is
+// load-bearing, not decoration -- see goalDouble's own identical assertion
+// for why.
+var _ usecase.VisionRepository = (*visionRepoDouble)(nil)
+
+// goalProgressDouble is the in-memory GoalProgressReader every
+// VisionService test runs against. A goal id absent from progress is a
+// miss, not an error -- the port's own contract for a linked measure whose
+// goal was deleted, which is exactly what
+// TestVisionGetRendersNoFigureWhenTheLinkedGoalIsGone relies on.
+type goalProgressDouble struct {
+	progress map[string]usecase.GoalProgress
+}
+
+func newGoalProgressDouble() *goalProgressDouble {
+	return &goalProgressDouble{progress: map[string]usecase.GoalProgress{}}
+}
+
+// ProgressByIDs answers only the ids it is asked about, the same scoping
+// the real SQL implementation gets from its WHERE clause -- a test that
+// seeded progress for a goal nobody linked to must never see it leak into
+// an unrelated measure.
+func (d *goalProgressDouble) ProgressByIDs(_ context.Context, _ string, goalIDs []string) (map[string]usecase.GoalProgress, error) {
+	out := map[string]usecase.GoalProgress{}
+	for _, id := range goalIDs {
+		if p, ok := d.progress[id]; ok {
+			out[id] = p
+		}
+	}
+	return out, nil
+}
+
+var _ usecase.GoalProgressReader = (*goalProgressDouble)(nil)
