@@ -155,4 +155,50 @@ var (
 	// from a rendering bug, which is why it is refused rather than trimmed to
 	// empty and saved.
 	ErrRetroActionBodyRequired = errors.New("a retro action needs a body")
+
+	// ErrVisionThemeRequired is a save with no theme. The empty vision GET
+	// returns for a year never set is allowed to have none; a save is not.
+	ErrVisionThemeRequired = errors.New("a vision needs a theme")
+
+	ErrVisionThemeTooLong = errors.New("a vision theme is too long")
+
+	ErrVisionDescriptionTooLong = errors.New("a vision description is too long")
+
+	ErrVisionYearOutOfRange = errors.New("a year must be between 1900 and 2200")
+
+	ErrVisionPillarNameRequired = errors.New("a pillar needs a name")
+
+	ErrVisionMeasureLabelRequired = errors.New("a measure needs a label")
+
+	ErrVisionMeasureTargetNotPositive = errors.New("a measure target must be positive")
+
+	ErrVisionMeasureCurrentNegative = errors.New("a measure's current value cannot be negative")
+
+	// ErrVisionMeasureAmbiguous covers every shape that is neither cleanly typed
+	// nor cleanly linked -- both at once, neither at all, or an unrecognised
+	// kind. One error rather than three: from the editor's point of view they are
+	// the same mistake, and the database's measure_is_typed_or_linked refuses the
+	// same set.
+	ErrVisionMeasureAmbiguous = errors.New("a measure is either typed or linked to a goal, never both")
+
+	ErrVisionMeasureGoalRequired = errors.New("a linked measure needs a goal")
+
+	ErrVisionMilestoneTitleRequired = errors.New("a milestone needs a title")
+
+	ErrVisionTooManyPillars = errors.New("too many pillars")
+
+	ErrVisionTooManyMeasures = errors.New("too many measures on one pillar")
+
+	ErrVisionTooManyMilestones = errors.New("too many milestones")
+
+	// ErrVisionChanged is the optimistic-concurrency refusal, the twin of
+	// ErrRetroChanged. It also covers the first save: two owners who both read an
+	// unset year both hold version 0, and the second one must be told rather than
+	// silently overwriting a whole year of pillars.
+	ErrVisionChanged = errors.New("this vision changed while you were editing it")
+
+	// ErrVisionGoalUnknown is a measure naming a goal that is not this
+	// household's. Indistinguishable from a goal that does not exist, the scoping
+	// rule every repository here already follows.
+	ErrVisionGoalUnknown = errors.New("a measure's goal does not belong to this household")
 )
