@@ -37,6 +37,22 @@ export function AppShell() {
 
   return (
     <div className="min-h-dvh bg-surface lg:grid lg:grid-cols-[236px_1fr]">
+      {/* First in DOM order, so it is the first thing Tab reaches. Visually
+          hidden until focused: sr-only alone would keep it hidden even while
+          focused, which makes it unusable for the sighted keyboard user it
+          exists for.
+
+          Not rendered while the drawer is open: <main> is `inert` in that
+          state (see below), so activating this link would jump focus at
+          content that cannot receive it -- a link that visibly does nothing. */}
+      {!navOpen && (
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[60] focus:rounded-lg focus:bg-card focus:px-4 focus:py-2 focus:text-[13px] focus:font-semibold focus:text-ink"
+        >
+          Skip to content
+        </a>
+      )}
       <MobileTopBar onOpenNav={() => setNavOpen(true)} />
       <NavDrawer open={navOpen} onClose={() => setNavOpen(false)}>
         <Sidebar me={me.data} />
@@ -44,7 +60,7 @@ export function AppShell() {
       {/* `inert` keeps Tab out of the page while the drawer's opaque backdrop
           covers it -- the one part of a <dialog>'s behaviour that cannot be
           expressed in CSS. React 19 forwards it as a real attribute. */}
-      <main inert={navOpen || undefined} className="lg:overflow-y-auto">
+      <main id="main-content" inert={navOpen || undefined} className="lg:overflow-y-auto">
         {/* 1204px is the design's own content width, not a taste: its canvas
             is 1440px wide with a 236px sidebar (design/Household
             Dashboard.dc.html, screen 5a). Without this, `1fr` gives every

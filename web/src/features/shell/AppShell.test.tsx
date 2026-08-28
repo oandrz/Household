@@ -107,8 +107,15 @@ describe("AppShell", () => {
     openNav();
     await waitFor(() => expect(main.hasAttribute("inert")).toBe(true));
 
+    // The skip link targets <main>, which is inert while the drawer covers
+    // it -- rendering the link here would point a keyboard user at content
+    // they cannot reach, a link that visibly does nothing. So it is removed
+    // for exactly as long as <main> is inert, not merely hidden.
+    expect(screen.queryByRole("link", { name: /skip to content/i })).toBeNull();
+
     fireEvent.click(screen.getByTestId("nav-drawer-backdrop"));
     await waitFor(() => expect(main.hasAttribute("inert")).toBe(false));
+    expect(screen.getByRole("link", { name: /skip to content/i })).toBeInTheDocument();
   });
 
   it("closes the drawer on navigation", async () => {
@@ -145,5 +152,20 @@ describe("AppShell", () => {
     // would double every one of them.
     const links = await screen.findAllByTestId("sidebar-space");
     expect(links).toHaveLength(5);
+  });
+
+  it("puts a skip link ahead of the navigation, pointing at the page content", async () => {
+    renderShell();
+
+    const skip = await screen.findByRole("link", { name: /skip to content/i });
+
+    // Ahead of the nav in DOM order, which is what makes it the first thing a
+    // keyboard reaches -- a skip link rendered after the nav it skips is
+    // decoration.
+    const nav = screen.getByRole("navigation");
+    expect(skip.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    expect(skip).toHaveAttribute("href", "#main-content");
+    expect(document.querySelector("#main-content")?.tagName).toBe("MAIN");
   });
 });
