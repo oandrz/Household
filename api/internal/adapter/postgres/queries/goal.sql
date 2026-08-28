@@ -149,6 +149,30 @@ DELETE FROM goal_contributions
 WHERE id = $1 AND goal_id = $2 AND household_id = $3
 RETURNING source, source_budget_month;
 
+-- GoalProgressByIDs is Vision's one read of Goals (usecase.GoalProgressReader).
+-- It returns a row only for an id that belongs to THIS household, so a goal
+-- in another household is indistinguishable from one that does not exist --
+-- an id this query does not return is a miss, not an error; ProgressByIDs
+-- turns that into a plain absence from the returned map, and Vision renders
+-- a figureless measure for it.
+--
+-- Deliberately NOT filtered on archived_at: an archived goal counts as found
+-- and keeps its figure (spec decision 8, "archiving is not deletion anywhere
+-- else in this product either" -- usecase.GoalProgressReader's own doc
+-- comment). Only a real DELETE unlinks a measure, by firing goals.id's own
+-- ON DELETE SET NULL into vision_measures.goal_id.
+--
+-- The contributed total is ListGoalsWithTotals' own expression, verbatim --
+-- same LEFT JOIN, same COALESCE -- so this codebase never carries two
+-- different definitions of how far along a goal is.
+-- name: GoalProgressByIDs :many
+SELECT g.id, g.name, g.target_amount_minor,
+       COALESCE(SUM(c.amount_minor), 0)::bigint AS contributed_minor
+FROM goals g
+LEFT JOIN goal_contributions c ON c.goal_id = g.id
+WHERE g.household_id = $1 AND g.id = ANY(sqlc.arg(goal_ids)::uuid[])
+GROUP BY g.id, g.name, g.target_amount_minor;
+
 -- ClearBudgetRollover undoes RollOverToGoal's stamp when the contribution it
 -- wrote is deleted -- see GoalRepository.DeleteContribution's own doc comment
 -- for why leaving the stamp behind would strand the household: money gone

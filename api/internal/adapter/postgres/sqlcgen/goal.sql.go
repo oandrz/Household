@@ -165,6 +165,68 @@ func (q *Queries) GetGoalWithTotal(ctx context.Context, arg GetGoalWithTotalPara
 	return i, err
 }
 
+const goalProgressByIDs = `-- name: GoalProgressByIDs :many
+SELECT g.id, g.name, g.target_amount_minor,
+       COALESCE(SUM(c.amount_minor), 0)::bigint AS contributed_minor
+FROM goals g
+LEFT JOIN goal_contributions c ON c.goal_id = g.id
+WHERE g.household_id = $1 AND g.id = ANY($2::uuid[])
+GROUP BY g.id, g.name, g.target_amount_minor
+`
+
+type GoalProgressByIDsParams struct {
+	HouseholdID pgtype.UUID
+	GoalIds     []pgtype.UUID
+}
+
+type GoalProgressByIDsRow struct {
+	ID                pgtype.UUID
+	Name              string
+	TargetAmountMinor int64
+	ContributedMinor  int64
+}
+
+// GoalProgressByIDs is Vision's one read of Goals (usecase.GoalProgressReader).
+// It returns a row only for an id that belongs to THIS household, so a goal
+// in another household is indistinguishable from one that does not exist --
+// an id this query does not return is a miss, not an error; ProgressByIDs
+// turns that into a plain absence from the returned map, and Vision renders
+// a figureless measure for it.
+//
+// Deliberately NOT filtered on archived_at: an archived goal counts as found
+// and keeps its figure (spec decision 8, "archiving is not deletion anywhere
+// else in this product either" -- usecase.GoalProgressReader's own doc
+// comment). Only a real DELETE unlinks a measure, by firing goals.id's own
+// ON DELETE SET NULL into vision_measures.goal_id.
+//
+// The contributed total is ListGoalsWithTotals' own expression, verbatim --
+// same LEFT JOIN, same COALESCE -- so this codebase never carries two
+// different definitions of how far along a goal is.
+func (q *Queries) GoalProgressByIDs(ctx context.Context, arg GoalProgressByIDsParams) ([]GoalProgressByIDsRow, error) {
+	rows, err := q.db.Query(ctx, goalProgressByIDs, arg.HouseholdID, arg.GoalIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GoalProgressByIDsRow
+	for rows.Next() {
+		var i GoalProgressByIDsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.TargetAmountMinor,
+			&i.ContributedMinor,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const insertGoalContribution = `-- name: InsertGoalContribution :one
 INSERT INTO goal_contributions (goal_id, household_id, amount_minor, occurred_on, note, source, source_budget_month)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
