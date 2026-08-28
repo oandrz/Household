@@ -42,14 +42,18 @@ import { OVERVIEW_COPY } from "./copy";
 // unresolved link, or a kind this build doesn't recognise ("broken"). Any
 // of those reaching the kind branch below would print a stale or invented
 // percent/count, which is exactly the untrue-number ruling 3 forbids.
+// The met marker is part of the figure, not decoration on the pillar card:
+// without it the SAME measure read "2 of 2 ✓" on /marriage/vision and
+// "2 of 2" here, so a household glancing at the Overview could not tell a
+// target they had hit from one they had not. PillarCard.tsx's MeasureRow
+// appends the identical marker on the identical condition; the two surfaces
+// now say the same thing about the same number.
 function overviewLine(pillar: VisionPillar): { label: string; figure: string | null } {
   const measure = pillar.measures[0];
   if (!measure) return { label: pillar.name, figure: null };
   if (!measure.hasFigure) return { label: measure.label, figure: null };
-  return {
-    label: measure.label,
-    figure: measure.kind === "linked" ? `${measure.percent}%` : `${measure.current} of ${measure.target}`,
-  };
+  const figure = measure.kind === "linked" ? `${measure.percent}%` : `${measure.current} of ${measure.target}`;
+  return { label: measure.label, figure: measure.met ? `${figure} ✓` : figure };
 }
 
 export function VisionCard() {
@@ -87,8 +91,16 @@ export function VisionCard() {
       <p className="mt-1.5 text-[19px] font-semibold tracking-[-0.01em]">
         {OVERVIEW_COPY.visionThemeQuote(data.theme)}
       </p>
+      {/* max-w on the lines, not on the card: the design draws this card in a
+          column roughly 300px wide (dc.html:336), where justify-between puts
+          a label and its figure a few centimetres apart. Overview mounts it
+          full-bleed alongside its other full-width cards, which stretched
+          that same row to over a thousand pixels -- far enough that the eye
+          stops reading "Date nights / month" and "2 of 2" as one fact. The
+          band stays full width to match its neighbours; only the text stops
+          spreading. */}
       {data.pillars.length > 0 && (
-        <div className="mt-4 flex flex-col gap-2.5 text-[12.5px]">
+        <div className="mt-4 flex max-w-[560px] flex-col gap-2.5 text-[12.5px]">
           {data.pillars.map((pillar, i) => {
             const line = overviewLine(pillar);
             return (

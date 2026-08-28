@@ -61,14 +61,25 @@ export function PillarCard({ pillar, index }: { pillar: VisionPillar; index: num
           {pillar.description}
         </p>
       )}
-      <div className="mt-3.5 flex flex-col gap-2 border-t border-hairline pt-3">
-        {pillar.measures.map((measure, i) => (
-          // Index key: measureDTO carries no id at all (visionSchemas.ts),
-          // and this array is read-only display here -- nothing in this
-          // task reorders or removes a single measure client-side.
-          <MeasureRow key={i} measure={measure} />
-        ))}
-      </div>
+      {/* The rule is part of the measures block, not a fixture of the card:
+          a pillar with no measures rendered it anyway, so "Growth" drew a
+          divider separating its description from nothing -- worst at a
+          phone width, where the empty band below the rule is most of the
+          card. Same rule the description above already follows: render the
+          separator only when there is something to separate. A pillar
+          legitimately has none (domain.Pillar caps measures at 8 but
+          requires none), and the Overview's own line falls back to the
+          pillar name for exactly this case. */}
+      {pillar.measures.length > 0 && (
+        <div className="mt-3.5 flex flex-col gap-2 border-t border-hairline pt-3">
+          {pillar.measures.map((measure, i) => (
+            // Index key: measureDTO carries no id at all (visionSchemas.ts),
+            // and this array is read-only display here -- nothing in this
+            // task reorders or removes a single measure client-side.
+            <MeasureRow key={i} measure={measure} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

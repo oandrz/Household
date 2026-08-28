@@ -97,6 +97,32 @@ describe("VisionCard", () => {
     expect(lines[1]).toHaveTextContent("62%");
   });
 
+  // The same measure read "2 of 2 ✓" on /marriage/vision and "2 of 2" here,
+  // so the Overview could not tell a target the household had hit from one
+  // they had not. Both fixtures are `2 of 2`-shaped on purpose: only `met`
+  // differs, so the assertion pins the marker rather than the arithmetic.
+  it("marks a met measure the way the pillar card does, and leaves an unmet one plain", async () => {
+    renderCard(
+      visionFixture({
+        pillars: [
+          pillarFixture({
+            name: "Us before logistics",
+            measures: [measureFixture({ label: "Date nights / month", current: 2, target: 2, met: true })],
+          }),
+          pillarFixture({
+            name: "Faith and family",
+            measures: [measureFixture({ label: "Weekends away", current: 2, target: 4, met: false })],
+          }),
+        ],
+      }),
+    );
+
+    const lines = await screen.findAllByTestId("vision-overview-line");
+    expect(lines[0]).toHaveTextContent("2 of 2 ✓");
+    expect(lines[1]).toHaveTextContent("2 of 4");
+    expect(lines[1]).not.toHaveTextContent("✓");
+  });
+
   it("falls back to the pillar's own name when it has no measures", async () => {
     renderCard(
       visionFixture({ pillars: [pillarFixture({ name: "Us before logistics", measures: [] })] }),

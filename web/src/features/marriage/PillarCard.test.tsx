@@ -42,6 +42,27 @@ describe("PillarCard", () => {
     ).toBeInTheDocument();
   });
 
+  // The rule under the description belongs to the measures block. A pillar
+  // with none rendered it anyway, so the card drew a divider separating its
+  // description from nothing -- most of the card at a phone width. Asserts
+  // the separator's absence, not just that no measure rows appear: the rows
+  // were already absent while the rule was still there.
+  it("draws no divider under the description when the pillar has no measures", () => {
+    const { container } = render(<PillarCard pillar={pillarFixture({ measures: [] })} index={2} />);
+
+    expect(screen.queryAllByTestId("vision-measure-row")).toHaveLength(0);
+    expect(container.querySelector(".border-t")).toBeNull();
+  });
+
+  it("draws the divider once the pillar has a measure to separate", () => {
+    const { container } = render(
+      <PillarCard pillar={pillarFixture({ measures: [measureFixture()] })} index={0} />,
+    );
+
+    expect(screen.getAllByTestId("vision-measure-row")).toHaveLength(1);
+    expect(container.querySelector(".border-t")).not.toBeNull();
+  });
+
   // index is 0-based (array position); the label is 1-based -- this is the
   // one place that translation happens, so a caller passing the raw array
   // index straight through gets the design's own "Pillar 1", "Pillar 2"

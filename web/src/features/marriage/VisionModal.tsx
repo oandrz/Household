@@ -628,7 +628,12 @@ export function VisionModal({
   }
 
   return (
-    <Modal open onClose={onClose} title={VISION_COPY.modalTitle}>
+    // wide: the design draws this modal at 640px (dc.html:928), not the 420px
+    // every other modal takes. It is the only form in the app nesting three
+    // levels of editable rows -- pillars, each pillar's own measures, then
+    // milestones -- and at 420px each nested card and its ✕ crowd the field
+    // beside them.
+    <Modal open wide onClose={onClose} title={VISION_COPY.modalTitle}>
       <p className="-mt-2 mb-4 text-xs text-muted">{VISION_COPY.modalPrivacyBadge}</p>
 
       <form
