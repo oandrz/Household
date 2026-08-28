@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // --- Task 9: vision routes and the guard -----------------------------------
@@ -246,5 +247,96 @@ func TestPutVisionRoundTripsPillarsAndMilestones(t *testing.T) {
 	}
 	if len(got.Vision.Milestones) != 1 {
 		t.Fatalf("milestones did not round-trip: %+v", got.Vision.Milestones)
+	}
+}
+
+// TestGetVisionWithNoYearDefaultsToTheCurrentYear pins the branch
+// handleGetVision takes when the caller names no year at all --
+// VisionService.CurrentYear()'s own contract -- and is plausibly the first
+// request Task 10's page makes on load, which nothing above this test
+// exercises: every other test in this file always sends an explicit
+// ?year=.
+func TestGetVisionWithNoYearDefaultsToTheCurrentYear(t *testing.T) {
+	env := newTestEnv(t)
+	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	rec := env.authedGet(t, "/api/v1/marriage/vision", session)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body = %s)", rec.Code, rec.Body.String())
+	}
+	body := decodeVision(t, rec)
+	wantYear := time.Now().Year()
+	if body.Vision.Year != wantYear {
+		t.Fatalf("year = %d, want %d (today's year, since no ?year was given)", body.Vision.Year, wantYear)
+	}
+}
+
+// TestPutVisionRoundTripsALinkedMeasure closes a coverage gap Task 8's own
+// report named explicitly for whoever wrote the next Vision task that
+// exercises goal-linking through Save (task-8-report.md's Concerns
+// section): no test above links a measure to a real goal, so four fields
+// Task 10's zod schema mirrors -- hasFigure, percent, goalId, goalName --
+// have never been observed populated on the wire.
+//
+// The goal is given one contribution bringing it to a distinctive 50%,
+// deliberately not 0: Current is always 0 for a linked measure
+// (toMeasureView, usecase/vision.go, never sets it), so a regression that
+// swapped Percent for Current in toVisionDTO would still read 0 and pass
+// undetected against an untouched goal -- only a genuinely non-zero,
+// non-Current percent makes that mutation visible.
+func TestPutVisionRoundTripsALinkedMeasure(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	goal := env.mustCreateGoal(t, session, csrf, map[string]any{
+		"name": "House deposit", "targetMinor": 1_000_000, "plannedMonthlyMinor": 50_000,
+	})
+	contribRec := env.authed(t, http.MethodPost, "/api/v1/goals/"+goal.Goal.ID+"/contributions",
+		map[string]any{"amountMinor": 500_000, "occurredOn": time.Now().Format("2006-01-02")}, session, csrf)
+	if contribRec.Code != http.StatusCreated {
+		t.Fatalf("add contribution: status = %d, body = %s", contribRec.Code, contribRec.Body.String())
+	}
+
+	body := map[string]any{
+		"version":     0,
+		"theme":       "Building our nest",
+		"description": "",
+		"pillars": []any{
+			map[string]any{
+				"name":        "Money together",
+				"description": "",
+				"measures": []any{
+					map[string]any{"label": "House deposit", "kind": "linked", "goalId": goal.Goal.ID},
+				},
+			},
+		},
+		"milestones": []any{},
+	}
+	rec := env.authed(t, http.MethodPut, "/api/v1/marriage/vision/2026", body, session, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	got := decodeVision(t, rec)
+	if len(got.Vision.Pillars) != 1 || len(got.Vision.Pillars[0].Measures) != 1 {
+		t.Fatalf("pillars did not round-trip: %+v", got.Vision.Pillars)
+	}
+	measure := got.Vision.Pillars[0].Measures[0]
+	if measure.Kind != "linked" {
+		t.Fatalf("kind = %q, want \"linked\"", measure.Kind)
+	}
+	if !measure.HasFigure {
+		t.Fatal("hasFigure = false, want true -- a resolved linked goal must render its percentage")
+	}
+	if measure.GoalID != goal.Goal.ID {
+		t.Fatalf("goalId = %q, want %q", measure.GoalID, goal.Goal.ID)
+	}
+	if measure.GoalName != "House deposit" {
+		t.Fatalf("goalName = %q, want %q", measure.GoalName, "House deposit")
+	}
+	if measure.Percent != 50 {
+		t.Fatalf("percent = %d, want 50 (500,000 of a 1,000,000 target)", measure.Percent)
+	}
+	if measure.Current != 0 {
+		t.Fatalf("current = %d, want 0 -- Current is typed-only and must not be read for a linked measure", measure.Current)
 	}
 }
