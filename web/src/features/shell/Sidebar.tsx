@@ -70,6 +70,17 @@ const SPACE_PAGES: Record<string, { label: string; to: string }[]> = {
 const NAV_ITEM_CLASS =
   "inline-flex min-h-11 items-center rounded-lg px-2.5 py-2 text-[13.5px] font-semibold lg:min-h-[auto]";
 
+// Background, never a hover:text-* -- the comment above explains why a second
+// colour class on these links cannot be relied on to win the cascade. A
+// background is a different CSS property, so it never enters that fight.
+// Kept out of NAV_ITEM_CLASS itself (that constant's own comment: "Layout
+// only -- no color here," and a background is a colour) and applied
+// unconditionally, not gated on `isActive`, so it can never become a second
+// conditional class fighting the active colour the way text-accent/text-ink
+// already do.
+const NAV_ITEM_STATE_CLASS =
+  "transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off";
+
 function SpaceLink({ space }: { space: Space }) {
   const matchRoute = useMatchRoute();
   const pages = SPACE_PAGES[space.key];
@@ -110,7 +121,7 @@ function SpaceLink({ space }: { space: Space }) {
             key={page.to}
             data-testid="sidebar-space"
             to={page.to}
-            className={`${NAV_ITEM_CLASS} ${isActive ? "text-accent" : "text-ink"}`}
+            className={`${NAV_ITEM_CLASS} ${NAV_ITEM_STATE_CLASS} ${isActive ? "text-accent" : "text-ink"}`}
           >
             {page.label}
           </Link>
@@ -167,7 +178,10 @@ export function Sidebar({ me }: { me: Me }) {
         </div>
       </div>
 
-      <Link to="/" className={`${NAV_ITEM_CLASS} ${overviewActive ? "text-accent" : "text-ink"}`}>
+      <Link
+        to="/"
+        className={`${NAV_ITEM_CLASS} ${NAV_ITEM_STATE_CLASS} ${overviewActive ? "text-accent" : "text-ink"}`}
+      >
         Overview
       </Link>
 
@@ -177,7 +191,10 @@ export function Sidebar({ me }: { me: Me }) {
 
       <div className="flex-1" />
 
-      <Link to="/settings" className={`${NAV_ITEM_CLASS} ${settingsActive ? "text-accent" : "text-ink"}`}>
+      <Link
+        to="/settings"
+        className={`${NAV_ITEM_CLASS} ${NAV_ITEM_STATE_CLASS} ${settingsActive ? "text-accent" : "text-ink"}`}
+      >
         Settings
       </Link>
 
@@ -202,7 +219,7 @@ export function Sidebar({ me }: { me: Me }) {
           // lives inside the drawer, which switches at `lg`, so a 768px
           // tablet still driving the touch drawer must not fall back to a
           // 24px target.
-          className="grid h-11 w-11 flex-none place-items-center rounded-md text-[13px] text-label disabled:opacity-60 lg:h-6 lg:w-6"
+          className="grid h-11 w-11 flex-none place-items-center rounded-md text-[13px] text-label transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off disabled:opacity-60 lg:h-6 lg:w-6"
         >
           ⏻
         </button>

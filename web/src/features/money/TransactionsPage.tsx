@@ -214,7 +214,7 @@ function TransactionRow({
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center justify-between gap-3 border-b border-hairline py-3 text-left last:border-b-0"
+      className="flex w-full items-center justify-between gap-3 border-b border-hairline py-3 text-left last:border-b-0 transition-colors duration-[var(--transition-state)] hover:bg-canvas"
     >
       <div>
         <div className="text-[13.5px] font-semibold text-ink">{transaction.description}</div>
@@ -404,7 +404,7 @@ export function TransactionsPage() {
               size falls short of the 44px floor on a phone). */}
           <Link
             to="/money"
-            className="mb-1 inline-flex min-h-11 items-center text-xs font-semibold text-accent sm:min-h-0"
+            className="mb-1 -mx-1.5 inline-flex min-h-11 items-center rounded-md px-1.5 text-xs font-semibold text-accent transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off sm:min-h-0"
           >
             {TRANSACTIONS_COPY.backToFinances}
           </Link>
@@ -420,7 +420,7 @@ export function TransactionsPage() {
             type="button"
             disabled={accounts.length === 0}
             onClick={() => setAddOpen(true)}
-            className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
+            className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white transition-colors duration-[var(--transition-state)] hover:bg-accent-dark active:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
           >
             {TRANSACTIONS_COPY.add}
           </button>
@@ -471,7 +471,7 @@ export function TransactionsPage() {
                 // min-h-11/sm:min-h-0: py-2.5 alone measured short of the
                 // 44px floor at this text size -- TransactionFilters.tsx's
                 // own SELECT_CLASS comment has the measured numbers.
-                className="min-h-11 rounded-lg border border-hairline px-3 py-2.5 text-xs font-semibold text-accent sm:min-h-0 sm:py-1.5"
+                className="min-h-11 rounded-lg border border-hairline px-3 py-2.5 text-xs font-semibold text-accent transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off sm:min-h-0 sm:py-1.5"
               >
                 {TRANSACTIONS_COPY.noMatchesAction}
               </button>
@@ -488,7 +488,7 @@ export function TransactionsPage() {
                   in the header's hint beside the disabled button. */}
               <Link
                 to="/money"
-                className="inline-flex min-h-11 items-center rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0"
+                className="inline-flex min-h-11 items-center rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white transition-colors duration-[var(--transition-state)] hover:bg-accent-dark active:bg-accent-dark sm:min-h-0"
               >
                 {TRANSACTIONS_COPY.noAccountsAction}
               </Link>
@@ -524,7 +524,7 @@ export function TransactionsPage() {
                 type="button"
                 disabled={loadingOlder}
                 onClick={handleLoadOlder}
-                className="w-full py-3.5 text-center text-[12.5px] font-semibold text-accent disabled:opacity-60"
+                className="w-full rounded-md py-3.5 text-center text-[12.5px] font-semibold text-accent transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off disabled:opacity-60"
               >
                 {TRANSACTIONS_COPY.loadOlder}
               </button>
