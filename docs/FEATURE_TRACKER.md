@@ -487,6 +487,35 @@ removed, and recounting by this file's own rule confirms the table below is
 still exactly 71/15/19/2 = 107** — unchanged from the state Task 13's own
 paragraph above left it in.
 
+**Vision's fifteen-criterion browser walk (Task 15) has now run and
+passed, 15 of 15** (2026-08-29), the same bar Retros' Task 17 and every
+Money feature were held to before their rows could read plain ✅ —
+confirming the six Vision rows in this section and the two Overview rows
+(`Vision 2026 card`, `Vision check-in strip`) that had been marked ✅ ahead
+of this walk, on the product owner's own instruction, per the doc pass
+above. Recorded in full, criterion by criterion, in
+`docs/superpowers/plans/2026-08-28-hearth-vision-verification.md`, including
+one criterion (8, deleting a goal a measure links to) met by a deliberate,
+narrow substitute rather than its most literal path: Goals' own spec
+(`2026-08-01-hearth-goals-design.md`) says plainly that a goal is never
+deleted and has no `DELETE` endpoint — so "delete that goal from
+`/money/goals`" was exercised with a direct SQL `DELETE` against the same
+row a household can only ever archive through the product, the identical
+shape Retros' own criterion 10 used for a state its product had no button
+for. **No product defect needed a code fix, and no row here moves or
+downgrades to 🟡.** One documented, deliberate trade-off surfaced during the
+walk rather than a defect: editing and saving a vision that already
+contains a measure whose linked goal was deleted resets that measure to a
+typed `0 of 1` placeholder unless the household explicitly fixes it first —
+`VisionModal.tsx`'s own seeding comment names this as the intended,
+least-surprising default for a domain state (`goal_id`, `current` and
+`target` all null) the write path itself refuses to accept back unchanged.
+Recorded in `docs/LEARNING.md` under Vision's own walk rather than treated
+as a defect here, the same standard Retros' "Findings, not defects" held
+its own disagreements to. Recounting by this file's own rule confirms the
+table below is still exactly 71/15/19/2 = 107 — a browser walk confirms
+rows already marked Built; it does not add or move one on its own.
+
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
 | Entry & authentication | 10 | 1 | 0 | 0 |

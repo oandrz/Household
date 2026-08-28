@@ -3351,6 +3351,28 @@ route with a missing guard has no second line of defence.
   it, but the tell is different: **compare what the browser actually served
   against the file, not just against your memory of what you changed** —
   `outerHTML`/`curl`, not "I re-read the file and it looks right."
+  **A fourth instance, Vision task 15's own fifteen-criterion browser
+  walk: the whole back half of a file, silently.** Opening the Edit-vision
+  modal for the very first time in this walk, the "Pillars" heading and
+  "+ Add pillar" button rendered as zero-width, zero-height elements —
+  `document.querySelector('[data-testid="vision-modal-add-pillar"]')`
+  resolved to a real `<button>` with `getBoundingClientRect()` reading
+  `0×0`, because its own text content was empty, and so was its sibling
+  `<span>`'s. `curl`ing the served module
+  (`http://localhost:5173/src/features/marriage/visionCopy.ts`) settled it
+  in one command: the entire `--- VisionModal (Task 12) ---` half of the
+  file — `modalTitle` through `reloadAndDiscardChanges`, everything the
+  modal needs beyond the page itself — was simply absent from what Vite
+  was serving, though `cat`ting the file on disk showed it in full. Not one
+  missing key this time (the second instance) and not total silence on a
+  single component (the third) — an entire later section of one file,
+  never picked up, on a container that had been running for two hours
+  before this walk started. `docker compose restart web` fixed it in one
+  command, the same as every prior instance, and the served module then
+  matched the file byte for byte. **The size of the miss does not predict
+  the size of the fix, and does not change the check**: `curl` the module
+  Vite is actually serving before concluding a freshly-built screen is
+  broken, however much of it looks wrong.
 
 ### The first production deployment (2026-08-15)
 
@@ -3476,6 +3498,57 @@ no test suite can hold.
   Corrected in place rather than deleting the row and leaving the sentence
   standing. **A verification document describing a tidier run than the real one
   is worse than no document, because it is believed.**
+
+### Vision's fifteen-criterion browser walk (2026-08-29)
+
+- **A later spec can assume a capability an earlier, sibling spec deliberately
+  refused to build.** Criterion 8 reads "delete that goal from `/money/goals`"
+  as though deleting a goal were an ordinary product action; Vision's own
+  design doc treats it that way too, pinning `goal_id ON DELETE SET NULL` and
+  a CHECK constraint's third branch specifically for "the state a deleted goal
+  leaves behind." But Goals' own spec (`2026-08-01-hearth-goals-design.md`)
+  says plainly, twice: "A goal archives; it is never deleted" and "Goals are
+  **not** deleted and have no `DELETE` endpoint" — and the code agrees:
+  `GoalRepository` has no `Delete` method at all, `router.go` wires no
+  `DELETE /goals/{id}`, and `SetArchived`'s own comment says why ("there is no
+  delete, the accounts precedent"). Nothing in Vision's own spec cross-checked
+  this against Goals' — it was written three and a half weeks later, by
+  someone who evidently assumed deletion was a normal goal operation because
+  the schema and the CHECK constraint's own reasoning imply one exists.
+  **The fix was not to build the missing endpoint** — that would override a
+  deliberate, documented decision in a different feature for the sake of one
+  criterion's literal wording — **but to exercise the same mechanism the
+  criterion cares about (the CHECK's third branch, and the measure's
+  broken-link render) through a raw SQL `DELETE`,** the identical shape
+  Retros' criterion 10 used for a state its own product had no button for,
+  and to name the gap plainly rather than pass over it. **When one feature's
+  schema or tests assume another feature can do something, check that
+  feature's own spec for an explicit "never" before assuming the assumption
+  holds** — grep the sibling spec for the verb before building around it.
+- **A whole-document editor can silently launder a domain state its own write
+  path refuses to accept.** Vision's `measure_is_typed_or_linked` CHECK has a
+  third branch — `goal_id`, `current_value` and `target_value` all `NULL` —
+  that only a referential `SET NULL` can produce; the domain refuses to
+  *create* that state on any `PUT` (spec decision 8's own words: "the domain
+  still refuses to create one"). `VisionModal.tsx`'s own seeding effect
+  (`useEffect` around `seededYear`) handles this correctly and says so in a
+  comment: a "broken" measure loads into the editor as an editable typed
+  measure, `current: 0, target: 1`, the least-surprising default given
+  neither real mode has anything left to show. But that default is *silent*
+  in the panel a household actually sees: editing this vision's theme alone
+  and saving — never touching the Emergency-fund row — turned "Goal removed"
+  into "0 of 1" on this walk, because the whole document, placeholder measure
+  included, goes back on every save (spec decision 5). The household never
+  chose "0 of 1"; the editor's own default did, and nothing in the modal
+  flags that row as needing attention before Save is pressed. This is a
+  documented, deliberate trade-off (the comment is real and the reasoning
+  is sound — "not a silently resurrected link to a goal that no longer
+  resolves") and this walk did not change it, the same standard Retros' own
+  "Findings, not defects" held its disagreements to. Recorded here because
+  the general shape recurs: **a form that seeds itself from a state its own
+  submission cannot represent needs to say so in the UI, not only in a code
+  comment** — a household editing an unrelated field should not be able to
+  fabricate a number by omission.
 
 ---
 
