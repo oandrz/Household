@@ -373,7 +373,10 @@ still a placeholder `onEdit` — Vision spec's task 12 replaces it wholesale
 next, which is also why the "+ Add milestone" tile counts as shipped here
 rather than held back: it is visible and wired to the same handler the
 header's own Edit vision button is, matching the design's own two entry
-points into one editor, even though neither does anything yet. Recounting by
+points into one editor (`dc.html` draws `onClick="{{ openVision }}"` twice —
+the header button and the milestone tile; the empty state's own call to
+action, added later, is Hearth's own third, not the design's) — even though
+neither does anything yet. Recounting by
 this file's own rule leaves every area unchanged except Marriage, which
 moves from 6/0/10/0 (16 rows) to **9/0/7/0** (16 rows) — three rows move from
 Not-started to Built, none added or removed — taking the stated totals from
@@ -427,6 +430,40 @@ unchanged except Overview (home), which moves from 6/2/2/0 (10 rows) to
 Not-started to Built — taking the stated totals from 69/15/20/2 = 106 to
 **71/15/19/2 = 107**. The "Where things stand" headline (Built + Partial)
 moves from 84 to **86**, now of **107**.
+
+**Vision's doc pass, 2026-08-29 — no row moves; two things corrected in
+prose, one thing checked and left alone.** Task 14 verified rather than
+assumed what Tasks 9–13 had already written here. First, the claim it was
+told to fix — that this file and `docs/SYSTEM_DESIGN.md` say the Edit-vision
+modal has "both" entry points — does not hold: every row and every narrative
+paragraph above already names **three** (the header's Edit vision button,
+the "+ Add milestone" tile, and the empty state's own call to action), and a
+search of this file's full git history finds no "both entry points" text
+ever committed. The one sentence that reads that way at a glance — "matching
+the design's own two entry points," in the 2026-08-29 Vision-page paragraph
+above — turns out to be correct as written: `design/Household
+Dashboard.dc.html` really does draw `onClick="{{ openVision }}"` exactly
+twice (the header button and the milestone tile, not the empty state, which
+the design does not draw); Hearth's own third is an addition, not a miscount.
+Clarified in place so it cannot be misread as an undercount of what was
+built. Second, **the "Vision — yearly theme" row now says plainly that
+per-year history is real and reachable**, not merely stored: the schema
+keeps one vision per `(household_id, year)` forever, and the modal's year
+select is a real, working affordance onto it, not a drawn-but-inert field —
+narrowed to the previous, current and next year by the UI, not by the API.
+Third, checked and left alone: **the `/marriage` index redirect and the
+year select's own reach into a past year were both considered for their own
+row and neither got one.** The redirect is unreachable-by-design plumbing —
+the identical shape `moneyIndexRoute` already has, and that route has never
+carried a row of its own either, only the prose above and in section 6 — and
+the year select is not "something the design never drew" the way Accounts'
+archive/restore or Goals' contributions were: `modalVision`'s own mockup
+draws a Year field, `▾` and all, so widening its own row's prose (done
+above) is the honest-sized change, not a new line item for a control the
+design already put in the picture. **No row moved, none was added or
+removed, and recounting by this file's own rule confirms the table below is
+still exactly 71/15/19/2 = 107** — unchanged from the state Task 13's own
+paragraph above left it in.
 
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
@@ -1067,7 +1104,7 @@ for Money.
 | Start retro (modal) with mood, money check-in and actions | ✅ *(the design's own "45 min" duration is drawn, not built — spec decision 8)* |
 | Carry an unfinished action into the next retro (no mockup — see below) | ✅ |
 | Delete a draft retro (no mockup — see below) | ✅ |
-| Vision — yearly theme | ✅ *(`VisionPage.tsx`'s theme hero, Vision spec's task 11 — the year label, the theme in literal quotes, and its description; an empty description renders nothing, not an empty block)* |
+| Vision — yearly theme | ✅ *(`VisionPage.tsx`'s theme hero, Vision spec's task 11 — the year label, the theme in literal quotes, and its description; an empty description renders nothing, not an empty block. **Per-year history is real, not merely stored**: `visions` keeps one row per `(household_id, year)` forever (spec decision 4), and a household genuinely can reach a past year — the modal's own year select (`vision-modal-year`) is the only affordance that changes which year this page renders, and it writes back to `VisionPage`'s own `year` state, so the same mounted `useVision(year)` call reloads on the SAME page rather than the modal alone. The select offers only the previous, current and next calendar year, anchored on today, so 2025 or 2027 is reachable through the UI today but 2019 is not — the server accepts any year in `MinVisionYear`–`MaxVisionYear`, so that narrowing is a UI choice, not an API limit, and a page-level year picker of its own would be a small, real addition rather than a gap in what already exists)* |
 | Vision — marriage duration beside the theme ("Married · 14 years · Feb 14, 2012") | ⬜ *(drawn, deliberately not built — Vision spec decision 2. Nothing in this product stores a wedding date, no feature would read one, and the only derived figure is today minus the date; building it costs a column, a modal field the design itself never draws, a null state, a visibility decision and a leap-day edge, for no behaviour. The theme hero renders full width instead. Same treatment as the design's drawn-but-unbuilt "45 min" retro duration, Retros decision 8)* |
 | Vision — pillars with measures | ✅ *(`PillarCard.tsx`, Vision spec's task 11 — numbered "Pillar 1", "Pillar 2"…, name, description and every measure. A measure with `hasFigure: false` (a linked goal deleted, a link that failed to resolve, or an unrecognised kind) renders its label and no number at all, never "0 of 0" or "0%" — the same "blank the figure and say why" rule Accounts applies when a primary-currency change leaves net worth uncomputable)* |
 | Vision — longer-horizon milestones | ✅ *(`MilestoneGrid.tsx`, Vision spec's task 11 — one card per milestone, in order, with year, title and note; an empty note renders nothing. The dashed "+ Add milestone" tile opens the Edit-vision modal (Vision spec's task 12), the same as the header's own Edit vision button)* |

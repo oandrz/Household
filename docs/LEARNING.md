@@ -519,6 +519,32 @@ count stays the number of bullets.)
   being tested, the fixture's other N-1 entries need to differ from the one
   under test in every field the assertion reads — a shared value in any one
   of them is a mutation the test cannot see.**
+- **The same feature produced three more instances of this pattern, each
+  claiming more than its assertion checked.** First, Vision spec's Task 1:
+  `TestVisionMeasureCannotBeBothTypedAndLinked` originally asserted only
+  `err == nil` after inserting a measure carrying both a goal and a typed
+  target — but the test's own name claims `measure_is_typed_or_linked`
+  fired specifically, and a bare `err == nil` check passes identically for
+  a typo'd column name or a dropped connection. Fixed by unwrapping to
+  `*pgconn.PgError` and asserting `ConstraintName ==
+  "measure_is_typed_or_linked"` by name, so the test proves the database
+  refused *this* ambiguous row, not merely that something went wrong.
+  Second, Task 4: `TestVisionRepoGetReadsPillarsMeasuresAndMilestonesInPositionOrder`
+  inserted a single pillar, so `ListVisionPillars`' `ORDER BY position`
+  could be deleted with nothing going red — a one-row fixture cannot prove
+  an ordering clause, the identical shape pattern 2's own `bill_id` entry
+  above already names for a `WHERE` clause. Fixed by inserting a second
+  pillar out of position order and asserting `Pillars[0]` is the
+  position-0 one. Third, Task 10: the frontend's two `useVision` save tests
+  asserted the outgoing `PUT` body with `toMatchObject({ version })` —
+  which passes for *any* body that happens to carry that one field, so a
+  save that silently dropped `theme`, `description`, every pillar and
+  every milestone from the request would have gone unnoticed. Fixed by
+  widening both to `toEqual(the full expected body)`. All three were
+  caught in review, by rereading what each test's name and its assertion
+  actually proved against each other, not by a mutation run that had
+  already gone red — the same reading the two entries above this one
+  needed.
 - A comment on `FinancesPage.test.tsx`'s archive-toggle test claimed to be
   "the end-to-end proof" that `invalidateAccounts` (`useAccounts.ts`) returns
   its `Promise.all` rather than firing it and forgetting. Disproven: dropping
@@ -1669,6 +1695,18 @@ scoped inherits that query's blind spot for free.
   *why* `avatar_initial` widened from `char(1)` to `text` in the same
   migration — a one-rune expansion that `char(1)` would otherwise reject
   outright.
+- Vision spec, Task 2: theme and description caps (`domain.MaxVisionThemeLen`,
+  `MaxVisionDescriptionLen`) were first written as `len(v.Theme) > cap` —
+  `len` on a Go string counts bytes. Hearth is built for a Singapore
+  household, where a theme written in Chinese is not a hypothetical; every
+  character in it is three bytes in UTF-8, so a 120-character promise
+  silently became a 40-character one for exactly the households this
+  product's own market makes ordinary, while every English fixture in the
+  test suite — one byte per rune — never came near the boundary that would
+  have shown it. Fixed to `utf8.RuneCountInString`, the same fix pattern 10's
+  first bullet already made for `initialOf`, on the same category of field
+  (user-authored text, capped for display, never validated against a
+  non-Latin fixture until asked to be).
 
 **Code that assumes "the first character" fits in one byte, or that upper-casing
 never changes a string's length, is written for ASCII and will not say so.**
@@ -2443,6 +2481,52 @@ unverified claim wearing a reference.
   invisible to the plan that assumes it isn't there** — the CHECK constraint
   was doing its job the entire time, silently, and the only reason it
   surfaced at all was a test that needed to defeat it and could not.
+- Vision spec, Task 1: **a referential action is a write, so every
+  write-time constraint applies to it — including one that only ever meant
+  to police `INSERT`.** `vision_measures` began, in spec review, as a
+  two-branch `CHECK` (a
+  measure is either typed or linked to a goal, never both, never neither).
+  `goal_id` is `ON DELETE SET NULL`, so deleting a goal executes an `UPDATE`
+  on every measure that pointed at it — and Postgres enforces `CHECK`
+  constraints on `UPDATE` exactly as it does on `INSERT`, not only the
+  statement a reader would picture first. The `SET NULL` sets `goal_id`
+  alone, leaving `target_value`/`current_value` still `NULL` from the
+  measure's linked state — a row the two-branch CHECK refuses, so **deleting
+  a savings goal would have raised a constraint violation from inside the
+  Goals feature**, the one place nobody debugging a failed goal deletion
+  would think to go looking for Vision. Caught reasoning through the cascade
+  before any code existed, the same way the `transactions.household_id`
+  `CASCADE`-vs-`RESTRICT` entry above this one was — not by a test, because
+  no test yet existed to fail. The schema now carries a third, explicit
+  branch for exactly this all-`NULL` shape, and
+  `TestDeletingALinkedGoalUnlinksTheMeasureInsteadOfFailing` proves deleting
+  the goal succeeds and leaves the measure's row present rather than
+  erroring. **Whenever a foreign key on a CHECK-constrained table carries
+  `ON DELETE SET NULL` (or `CASCADE`'s own `UPDATE`-shaped cousins), ask
+  what the constraint says about the row the referential action itself is
+  about to produce** — not only about the rows the application inserts.
+- Vision spec, Task 5: **a repository method that opens a transaction must
+  never call a method that acquires its own connection — even a read, even
+  its own `Get`.** `VisionRepo.Save`'s stale-`UPDATE` path needed a second read to tell "the
+  row is gone" apart from "someone else saved first" (`RetroRepository`'s
+  own pattern), and the first version of it called the pool-backed `r.Get`
+  — four separate queries, each acquiring a connection from `pgxpool.Pool`
+  — from inside the `pgx.BeginFunc` transaction that was already holding one
+  connection checked out. One such call is merely wasteful, borrowing a
+  second connection it did not need to. Enough of them landing at once,
+  against the pool's own `MaxConns`, is not a slowdown: every concurrent
+  version-guarded save blocks on a connection that only a save ahead of it
+  in the same queue could release, and none of them can, because every one
+  is holding its own first connection open waiting for a second. Found in
+  review, reasoning about what happens under concurrent saves — no test
+  in this codebase drives real concurrent database load, so nothing here
+  would have gone red on its own. Fixed by moving the existence check onto
+  `q`, the transaction-scoped `*sqlcgen.Queries` the open transaction
+  already holds (`ab2e5cf`), the same discipline `RetroRepository` gets for
+  free by never re-reading from inside its own transaction at all. **Inside
+  an open transaction, every further read has to run on that transaction's
+  own connection — reaching back out to the pool from in there is a request
+  for a second connection while the first is still yours.**
 
 ### HTTP layer
 
