@@ -63,4 +63,68 @@ export const VISION_COPY = {
   ownerOnlyHeading: "Owner only",
   ownerOnlyBody:
     "Vision & goals is visible to the household owner. Ask them if you'd like to see where things stand.",
+
+  // --- VisionModal (Task 12) ---------------------------------------------
+
+  // dc.html's own modalVision header: title plus the privacy/cadence note
+  // shown under it, verbatim.
+  modalTitle: "Edit our vision",
+  modalPrivacyBadge: "🔒 Private — parents only. Usually set together each January.",
+
+  modalThemeLabel: "This year's theme",
+  modalYearLabel: "Year",
+  modalDescriptionLabel: "What it means to us",
+
+  modalPillarsHeading: "Pillars",
+  addPillar: "+ Add pillar",
+  modalPillarNameLabel: "Pillar name",
+  modalPillarDescriptionLabel: "What this pillar means",
+  // A pillar's own name, when it has one, makes the control specific enough
+  // that a screen reader announcing every "Remove" button on the page (this
+  // modal can hold up to 12) doesn't read the same word twelve times running
+  // -- the identical reason GoalContributionsPanel.tsx names its own
+  // per-row delete controls. Falls back to a plain "Remove pillar" for a
+  // freshly-added one that has no name yet.
+  removePillar: (name: string) => (name ? `Remove pillar "${name}"` : "Remove pillar"),
+
+  modalMeasuresHeading: "Measures",
+  addMeasure: "+ Add measure",
+  modalMeasureLabelLabel: "Label",
+  modalMeasureModeLabel: "Track by",
+  // The two choices decision 1 draws a hard line between: a plain number the
+  // household types in themselves, or this measure's progress read live off
+  // a savings goal. Never both -- see setMeasureMode's own comment, the one
+  // place that rule is enforced.
+  modalMeasureModeTyped: "A number we keep",
+  modalMeasureModeLinked: "A savings goal",
+  modalMeasureCurrentLabel: "Current",
+  modalMeasureTargetLabel: "Target",
+  modalMeasureGoalLabel: "Goal",
+  modalMeasureGoalPlaceholder: "Choose a goal",
+  removeMeasure: (label: string) => (label ? `Remove measure "${label}"` : "Remove measure"),
+
+  modalMilestoneYearLabel: "Year",
+  modalMilestoneTitleLabel: "Title",
+  modalMilestoneNoteLabel: "Note",
+  removeMilestone: (title: string) => (title ? `Remove milestone "${title}"` : "Remove milestone"),
+
+  cancel: "Cancel",
+  saveVision: "Save vision",
+
+  // The one client-side check this modal makes before ever reaching the
+  // server (advisor's own finding: the empty state seeds theme: "", so a
+  // brand-new household's very first Save would otherwise round-trip a 422
+  // for something checkable in three lines) -- Hearth's own message, not the
+  // browser's, per the UI-polish round (CLAUDE.md's own rule).
+  modalThemeRequired: "Give this year a theme before saving.",
+  modalSaveError: "Couldn't save this year's vision. Try again.",
+
+  // The version-conflict banner. Named for what the button actually does --
+  // discards the draft and shows the partner's version -- rather than a bare
+  // "Reload", which would read as a safe, resumable refresh. See
+  // VisionModal.tsx's own header comment for why that's the only honest
+  // action to offer here.
+  conflictBanner:
+    "Someone else saved this year's vision while you were editing. Nothing has been sent -- but reloading will discard the changes you made here and show their version instead.",
+  reloadAndDiscardChanges: "Reload and discard my changes",
 } as const;

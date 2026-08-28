@@ -14,12 +14,34 @@
 // Transactions; docs/LEARNING.md pattern 1's own entry), which is why both
 // get their own two-test pair here exactly as RetrosPage.test.tsx does, plus
 // the mutation check in this task's own report.
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
 import { VisionPage } from "./VisionPage";
 import type { Vision, VisionMeasure, VisionPillar } from "./visionSchemas";
+import type { GoalsResponse } from "../money/goalSchemas";
+
+// VisionModal (Task 12) calls useGoals({ includeArchived: true }) the
+// moment it mounts, for its own linked-measure picker -- every test below
+// that opens the modal needs this registered too, or stubFetchRoutes throws
+// before any capture runs (RetroModal.test.tsx's own header comment records
+// the identical finding for its money/members routes). No goals is the
+// right default here: none of these tests cares what the picker offers,
+// only that the modal itself opened.
+const EMPTY_GOALS: GoalsResponse = {
+  currency: "SGD",
+  goals: [],
+  summary: {
+    plannedMonthlyTotalMinor: 0,
+    actualThisMonthMinor: 0,
+    onTrackCount: 0,
+    datedCount: 0,
+    noDateCount: 0,
+    excludedNoRate: 0,
+    nextGoal: null,
+  },
+};
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -215,6 +237,52 @@ describe("VisionPage", () => {
     expect(screen.queryByTestId("vision-hero")).not.toBeInTheDocument();
     expect(screen.queryByTestId("vision-pillar-card")).not.toBeInTheDocument();
     expect(screen.queryByTestId("vision-milestone-card")).not.toBeInTheDocument();
+  });
+
+  // Ruling 4: `onEdit` has three call sites, and nothing before this task
+  // proved any of them were actually wired -- it was still VisionPage.tsx's
+  // own no-op placeholder (task-11's own comment on the handler) until this
+  // task replaced it wholesale. Each site gets its own test, rather than
+  // one test that clicks all three, so a wiring break on just one of them
+  // fails with a name that says which -- deleting any single
+  // `onClick={onEdit}` below must turn exactly one of these three red.
+  describe("the Edit-vision modal's three entry points", () => {
+    it("clicking Edit vision opens the modal", async () => {
+      renderPage(visionFixture(), {
+        "GET /api/v1/goals?include_archived=true": { status: 200, body: EMPTY_GOALS },
+      });
+
+      fireEvent.click(await screen.findByTestId("vision-edit"));
+
+      const dialog = await screen.findByRole("dialog");
+      expect(within(dialog).getByRole("heading", { level: 2, name: "Edit our vision" })).toBeInTheDocument();
+    });
+
+    it("clicking + Add milestone opens the modal", async () => {
+      renderPage(
+        visionFixture({ milestones: [{ year: 2027, title: "Sabbatical", note: "" }] }),
+        { "GET /api/v1/goals?include_archived=true": { status: 200, body: EMPTY_GOALS } },
+      );
+
+      fireEvent.click(await screen.findByTestId("vision-add-milestone"));
+
+      const dialog = await screen.findByRole("dialog");
+      expect(within(dialog).getByRole("heading", { level: 2, name: "Edit our vision" })).toBeInTheDocument();
+    });
+
+    // The one entry point every household with no vision yet sees first --
+    // and the site this task's own mutation check (Step 6) targets directly,
+    // because nothing before this task covered it at all.
+    it("clicking the empty state's call to action opens the modal", async () => {
+      renderPage(visionFixture({ version: 0, theme: "", description: "", pillars: [], milestones: [] }), {
+        "GET /api/v1/goals?include_archived=true": { status: 200, body: EMPTY_GOALS },
+      });
+
+      fireEvent.click(await screen.findByTestId("vision-empty-cta"));
+
+      const dialog = await screen.findByRole("dialog");
+      expect(within(dialog).getByRole("heading", { level: 2, name: "Edit our vision" })).toBeInTheDocument();
+    });
   });
 
   it("milestones render in order with their year, title and note", async () => {

@@ -470,6 +470,27 @@ count stays the number of bullets.)
   failed as collateral damage instead. Both implementers noticed on their own,
   devised a more surgical mutation that isolated the one claim in question,
   and reported both attempts rather than only the one that worked.
+- `VisionModal`'s mode-switch test (Vision spec's task 12) asserted the
+  "switching clears the other mode's inputs" rule by reading the DOM after a
+  typed → linked → typed → linked round trip: current/target absent while
+  linked, a blank goal picker on the first visit, current/target back at
+  their defaults after returning to typed. The mutation the task's own Step 5
+  names (`setMeasureMode`'s typed branch no longer clearing `goalId`) left
+  every one of those green. The reason is structural, not a weak assertion:
+  the *linked* branch clears `goalId` unconditionally on every entry,
+  regardless of what the typed branch just did to it, so re-entering linked
+  a second time always shows an empty picker whether or not the bug is
+  present — the round trip's own last step erases the evidence of the first
+  leg's mistake. And typed mode renders no goal field at all, so there is
+  nothing in that state's DOM to read the leaked value back from either. The
+  only place a preserved `goalId` is observable is the wire: the test now
+  saves while still in typed mode and asserts the exact PUT body carries
+  `goalId: ""`, which the mutation turns red immediately. **A "cleared"
+  claim about a field one render state hides is not tested by any assertion
+  confined to states that render it** — if every path back to a check point
+  passes through a step that resets the very thing being verified, only the
+  data that actually leaves the component (the request body, not the DOM)
+  can still tell the two branches apart.
 - A comment on `FinancesPage.test.tsx`'s archive-toggle test claimed to be
   "the end-to-end proof" that `invalidateAccounts` (`useAccounts.ts`) returns
   its `Promise.all` rather than firing it and forgetting. Disproven: dropping
@@ -1986,6 +2007,34 @@ covering**: date, description and account carried `required` and no check in
 Adding `noValidate` without adding those three would have traded Chrome's
 bubble for a 422 from the API. The remaining fourteen forms share the shape
 and are named as a follow-up rather than swept in silently.
+
+**A sixth instance, Vision spec's task 12, and this time the call site was
+wired from the start — the gap was that nothing proved it did anything.**
+`VisionPage.tsx`'s `onEdit` had three `onClick={onEdit}` call sites from
+task 11 onward — the header's Edit vision button, MilestoneGrid's "+ Add
+milestone" tile, and the empty state's own call to action — every one of
+them a real, rendered, correctly-wired button. `onEdit` itself was a
+documented no-op placeholder until task 12 built the modal, at which point
+all three became live in the same commit that replaced the handler. Nothing
+before task 12 had ever asserted that clicking any of the three actually
+opened anything, because there was nothing to open — a review finding on
+task 11 named this explicitly and deferred it, rather than letting a green
+suite imply the wiring was proven. The empty state's own call to action is
+the sharper case of the three: it is the first thing a brand-new household
+with no vision yet sees, and it had never been clicked in a test at any
+point in this feature's history. Task 12 added one test per call site
+(`VisionPage.test.tsx`, "the Edit-vision modal's three entry points") and
+mutation-checked the one with no prior coverage: deleting `onClick={onEdit}`
+from the empty-state button turned exactly that one test red and no other,
+confirming each of the three is independently covered rather than one test
+accidentally exercising all three through a shared render path. **The
+mechanical check from the earlier instances above does not generalise to
+this shape** — grepping for a caller of `onEdit` would have found three,
+correctly, and said nothing about whether any of them produced an
+observable effect once the handler stopped being a no-op. What actually
+catches it: for a handler wired to more than one control, assert the effect
+of each control separately, and mutate one call site's own wiring in
+isolation to confirm its test — not a sibling's — is what goes red.
 
 ### 16. A claim about the code is not evidence until someone checks it against the code
 

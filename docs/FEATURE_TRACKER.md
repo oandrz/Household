@@ -13,7 +13,7 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 83 of 106 features built or partly built.
+**Where things stand:** 84 of 106 features built or partly built.
 
 > **In production since 2026-08-15**, at <https://oink.mywire.org>. **No count
 > below changes** — deployment is not a design feature, and this file's totals
@@ -380,6 +380,30 @@ Not-started to Built, none added or removed — taking the stated totals from
 65/15/24/2 = 106 to **68/15/21/2 = 106**. The "Where things stand" headline
 (Built + Partial) moves from 80 to **83**, still of **106**.
 
+**The Edit-vision modal ships, 2026-08-29 — one row moves.** Vision spec's
+task 12 built `VisionModal.tsx` and replaced `VisionPage.tsx`'s own `onEdit`
+— a no-op placeholder since task 11, whose own comment said as much — with
+the real editor task 11 deliberately left for it. It is the whole document
+in one form: theme, a year select offering only the previous, current and
+next calendar year (a household setting January's theme in December needs
+next year; one writing up a year nobody recorded needs last year), the
+description, every pillar's name, description and measures, and every
+milestone, saved together in a single `PUT`. Two fields the design's own
+modal never drew at all (spec decision 7) are new here rather than carried
+over from the mockup — a pillar's own description and a measure editor per
+pillar — because the page already rendered both (task 11) with nowhere to
+edit either. All three of `onEdit`'s call sites now open it, including the
+empty state's own call to action, which a review finding on task 11
+deliberately left unproven until this task made the handler do something
+observable. Edit vision (modal) moves from Not-started to Built; the
+marriage-duration block stays the one deliberately-unbuilt row in this
+section (decision 2, unchanged by this task). Recounting by this file's own
+rule leaves every area unchanged except Marriage, which moves from 9/0/7/0
+(16 rows) to **10/0/6/0** (16 rows) — one row moves from Not-started to
+Built, none added or removed — taking the stated totals from 68/15/21/2 = 106
+to **69/15/20/2 = 106**. The "Where things stand" headline (Built + Partial)
+moves from 83 to **84**, still of **106**.
+
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
 | Entry & authentication | 10 | 1 | 0 | 0 |
@@ -387,10 +411,10 @@ Not-started to Built, none added or removed — taking the stated totals from
 | Household settings | 11 | 8 | 2 | 0 |
 | Overview (home) | 6 | 2 | 2 | 0 |
 | Money | 25 | 3 | 7 | 0 |
-| Marriage | 9 | 0 | 7 | 0 |
+| Marriage | 10 | 0 | 6 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **68** | **15** | **21** | **2** |
+| **Total** | **69** | **15** | **20** | **2** |
 
 ---
 
@@ -1020,8 +1044,8 @@ for Money.
 | Vision — yearly theme | ✅ *(`VisionPage.tsx`'s theme hero, Vision spec's task 11 — the year label, the theme in literal quotes, and its description; an empty description renders nothing, not an empty block)* |
 | Vision — marriage duration beside the theme ("Married · 14 years · Feb 14, 2012") | ⬜ *(drawn, deliberately not built — Vision spec decision 2. Nothing in this product stores a wedding date, no feature would read one, and the only derived figure is today minus the date; building it costs a column, a modal field the design itself never draws, a null state, a visibility decision and a leap-day edge, for no behaviour. The theme hero renders full width instead. Same treatment as the design's drawn-but-unbuilt "45 min" retro duration, Retros decision 8)* |
 | Vision — pillars with measures | ✅ *(`PillarCard.tsx`, Vision spec's task 11 — numbered "Pillar 1", "Pillar 2"…, name, description and every measure. A measure with `hasFigure: false` (a linked goal deleted, a link that failed to resolve, or an unrecognised kind) renders its label and no number at all, never "0 of 0" or "0%" — the same "blank the figure and say why" rule Accounts applies when a primary-currency change leaves net worth uncomputable)* |
-| Vision — longer-horizon milestones | ✅ *(`MilestoneGrid.tsx`, Vision spec's task 11 — one card per milestone, in order, with year, title and note; an empty note renders nothing. The dashed "+ Add milestone" tile is visible but not yet functional — it calls the same placeholder `onEdit` the header's Edit vision button does, until the row below builds the modal)* |
-| Edit vision (modal) | ⬜ *(`VisionPage.tsx`'s `onEdit` is a no-op placeholder as of Vision spec's task 11 — both entry points, the header's Edit vision button and MilestoneGrid's "+ Add milestone" tile, already call it, so wiring the real modal in needs no further plumbing on this page)* |
+| Vision — longer-horizon milestones | ✅ *(`MilestoneGrid.tsx`, Vision spec's task 11 — one card per milestone, in order, with year, title and note; an empty note renders nothing. The dashed "+ Add milestone" tile opens the Edit-vision modal (Vision spec's task 12), the same as the header's own Edit vision button)* |
+| Edit vision (modal) | ✅ *(`VisionModal.tsx`, Vision spec's task 12 — the whole-document editor: theme, a year select offering only the previous/current/next calendar year, description, every pillar's name, description and measures, and every milestone, saved together in one `PUT`. Adds the two fields the design's own modal never drew at all (spec decision 7) — a pillar's own description and a measure editor per pillar (a label, then either a typed current/target pair or a linked-goal picker, never both; switching modes clears the other's inputs rather than leaving a hidden stale value that would still submit). All three of `onEdit`'s call sites open it — the header's Edit vision button, the "+ Add milestone" tile, and the empty state's own call to action, the one every household with no vision yet sees first. A stale `version` (409) latches a one-way conflict banner decided from the response's own error code (RetroModal.tsx's precedent, for the same staleness reason); its only action reloads the year and discards the local draft outright, rather than trying to resume editing in place)* |
 | Agreements by section | ⬜ |
 | Agreements empty state with starter sets | ⬜ |
 | Propose a change — add, edit, remove (modal) | ⬜ |

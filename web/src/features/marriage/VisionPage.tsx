@@ -4,34 +4,41 @@
 // convention: fetch orchestration lives in useVision.ts, and no apiFetch
 // call belongs here.
 //
-// Owns `year` (initialised to currentVisionYear()) because Task 12's modal
-// will offer a year select that changes which year this page looks at
-// (task-11's own ruling 1) -- this task does not build that control, only
-// the state it will later write to, so there is no setter here yet: Task
-// 12 modifies this file anyway to mount the modal, and adds the setter at
-// the same time it adds the first caller for it. `onEdit` is likewise a
-// placeholder Task 12 replaces wholesale (ruling 2): building half a modal
-// here would mean reviewing it twice.
+// Owns `year` AND its setter (task-11's own ruling 1): the Edit-vision
+// modal's own year select changes which year this page -- and the single
+// mounted `useVision(year)` call below -- looks at, rather than each
+// holding a year of its own. useVision.ts's own header comment explains why
+// that matters, not just where the state lives: switching year on this SAME
+// instance is what lets its `conflictAt` effect (keyed on `year`) reset
+// itself; a second, modal-owned `useVision` call would carry a second,
+// independent `conflictAt` that effect could never reach.
 import { useState } from "react";
 import { ApiError } from "../../api/client";
 import { PageContainer } from "../../components/PageContainer";
 import { MilestoneGrid } from "./MilestoneGrid";
 import { PillarCard } from "./PillarCard";
+import { VisionModal } from "./VisionModal";
 import { VISION_COPY } from "./visionCopy";
 import { currentVisionYear } from "./visionQueryKeys";
 import { useVision } from "./useVision";
 
 export function VisionPage() {
-  const [year] = useState(currentVisionYear());
+  const [year, setYear] = useState(currentVisionYear());
   const vision = useVision(year);
+  // Whether the Edit-vision modal is open -- a plain boolean rather than
+  // the modal's own component instance, since it takes no id or other prop
+  // this page would otherwise need to remember between opens (unlike
+  // RetrosPage.tsx's own editingMonth, which the modal needs to know WHICH
+  // retro to load). Every one of this modal's three entry points -- the
+  // header's Edit vision button, MilestoneGrid's own "+ Add milestone"
+  // tile, and the empty state's own call to action -- opens the identical
+  // editor against whichever `year` this page currently holds, matching the
+  // design's own single entry point drawn three times (dc.html: all three
+  // carry onClick="{{ openVision }}").
+  const [modalOpen, setModalOpen] = useState(false);
 
-  // Task 12 replaces this with real state that opens VisionModal -- both
-  // the header's own Edit vision button below and MilestoneGrid's own
-  // "+ Add milestone" tile call it (ruling 2), matching the design's own
-  // two entry points into one editor (dc.html: both carry
-  // onClick="{{ openVision }}").
   function onEdit() {
-    // No-op until Task 12.
+    setModalOpen(true);
   }
 
   if (vision.loading) {
@@ -151,6 +158,23 @@ export function VisionPage() {
 
           <MilestoneGrid milestones={data.milestones} onEdit={onEdit} />
         </>
+      )}
+
+      {/* Mounted last, matching RetrosPage.tsx's own RetroModal placement --
+          rendered only while open, so a closed modal costs this page
+          nothing (no GET, no goals fetch) beyond the boolean itself. */}
+      {modalOpen && (
+        <VisionModal
+          year={year}
+          onYearChange={setYear}
+          data={vision.data}
+          loading={vision.loading}
+          error={vision.error}
+          saveVision={vision.saveVision}
+          isSaving={vision.isSaving}
+          reload={vision.reload}
+          onClose={() => setModalOpen(false)}
+        />
       )}
     </PageContainer>
   );

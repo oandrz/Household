@@ -39,13 +39,14 @@ brief ever asked for it (`docs/LEARNING.md` pattern 15). **Retros' own
 fifteen-criterion browser walk (Task 17) has run and passed, 15 of 15**
 (2026-08-18), the same bar every Money feature was held to before its
 tracker row could read ✅, recorded in
-`docs/superpowers/plans/2026-08-16-hearth-retros-verification.md`. Vision's
-own read side is now real too — `VisionPage.tsx`, `PillarCard.tsx` and
+`docs/superpowers/plans/2026-08-16-hearth-retros-verification.md`. Vision is
+now real end to end — `VisionPage.tsx`, `PillarCard.tsx` and
 `MilestoneGrid.tsx` (Vision spec's task 11) render the theme hero, pillar
-measures and longer-horizon milestones `useVision` already exposed (task
-10) — but its Edit-vision modal (Vision spec's task 11 left `onEdit` a no-op
-placeholder; Vision spec's task 12 builds the real one) is not, so a
-household can see this year's vision and cannot yet set one. Agreements has
+measures and longer-horizon milestones `useVision` exposes (task 10), and
+`VisionModal.tsx` (Vision spec's task 12) is the whole-document editor all
+three of `onEdit`'s call sites now open — the header's Edit vision button,
+the "+ Add milestone" tile and the empty state's own call to action — so a
+household can both see a year's vision and set one. Agreements has
 not been started. Family is not built. See
 `docs/FEATURE_TRACKER.md` section 6 for exactly which of Marriage's rows are
 done, including the two deliberate divergences from the design spec's own
@@ -2076,19 +2077,35 @@ web/src/
                        label and no number at all, never "0 of 0" or "0%",
                        the one place this rule is expressed. MilestoneGrid
                        renders one card per milestone (year, title, note)
-                       plus a dashed "+ Add milestone" tile. Both the header's
-                       Edit vision button and "+ Add milestone" call the same
-                       onEdit handler VisionPage owns -- a no-op placeholder
-                       as of this task; the Edit-vision modal (Vision spec's
-                       task 12) replaces it wholesale, and VisionPage's own
-                       `year` state (initialised to currentVisionYear(),
-                       passed into useVision(year)) is what that modal's own
-                       year select will later write to. Every pillar's and
-                       the vision's own description renders nothing when
-                       empty, not an empty block -- the empty-vision response
-                       carries "" on the wire, never null. useVision reads
-                       and writes /marriage/vision; visionQueryKeys.ts holds
-                       its cache key and currentVisionYear() the same way
+                       plus a dashed "+ Add milestone" tile. All three of
+                       onEdit's call sites -- the header's Edit vision
+                       button, "+ Add milestone" and the empty state's own
+                       call to action -- open VisionModal (Vision spec's
+                       task 12), the whole-document editor: theme, a year
+                       select offering only the previous/current/next
+                       calendar year (changing it writes back to
+                       VisionPage's own `year` state, so the same mounted
+                       useVision(year) call refetches and the modal reseeds
+                       every field from the newly loaded year), description,
+                       every pillar's name/description/measures and every
+                       milestone, saved together in one PUT. The measure
+                       editor adds the two fields the design's own modal
+                       never drew (spec decision 7) -- a pillar's own
+                       description and, per measure, a label plus either a
+                       typed current/target pair or a linked-goal picker,
+                       never both; switching modes clears the other's
+                       inputs rather than leaving a hidden stale value that
+                       would still submit. A stale version (409
+                       VISION_CHANGED) latches a one-way conflict banner
+                       decided from the response's own error code, whose
+                       only action reloads the year and discards the local
+                       draft outright rather than resuming it in place.
+                       Every pillar's and the vision's own description
+                       renders nothing when empty, not an empty block --
+                       the empty-vision response carries "" on the wire,
+                       never null. useVision reads and writes
+                       /marriage/vision; visionQueryKeys.ts holds its cache
+                       key and currentVisionYear() the same way
                        retroQueryKeys.ts does for Retros. Mounted at
                        /marriage/vision
     placeholder/       named stand-ins for unbuilt areas, and only for areas
