@@ -113,8 +113,19 @@ export function GoalCard({
             }
           : undefined
       }
-      className={`flex items-center gap-[22px] rounded-xl border border-hairline bg-card p-6 ${
-        clickable ? "cursor-pointer" : ""
+      // hover:border-accent/hover:bg-callout, not hover:bg-canvas: this card's
+      // own surface already is bg-card, and bg-canvas is the page's own
+      // ground colour, so a canvas hover here would read as the card fading
+      // into the page rather than responding to the cursor. BudgetPage.tsx's
+      // template cards (the app's only prior hover before this task) already
+      // use this exact pair for the identical shape -- a clickable card with
+      // a hairline border -- so this mirrors that precedent rather than
+      // inventing a new one. No active: state, matching BudgetPage's own
+      // cards. Gated on `clickable` alongside cursor-pointer: an archived
+      // card (no onEdit) must not hover into looking pressable when a click
+      // on it does nothing.
+      className={`flex items-center gap-[22px] rounded-xl border border-hairline bg-card p-6 transition-colors duration-[var(--transition-state)] ${
+        clickable ? "cursor-pointer hover:border-accent hover:bg-callout" : ""
       }`}
     >
       <ProgressRing percent={goal.percent} />
