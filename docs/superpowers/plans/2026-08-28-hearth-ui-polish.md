@@ -81,6 +81,23 @@ In `web/src/index.css`, inside the existing `@theme` block, after the `--shadow-
      than being applied per component. Built on the accent rather than a new
      colour: a focus ring is the app pointing at itself, and the app is green. */
   --color-focus: var(--color-accent);
+```
+
+Only `--color-focus` belongs in `@theme` — it is a real `--color-*` namespace token, so Tailwind can generate utilities from it.
+
+The other three are plain custom properties and go in a `:root` block **outside** `@theme`, immediately after it:
+
+```css
+/* Outside @theme deliberately. Tailwind v4 emits a @theme variable only when
+   it sees the variable used, and it does not count a redefinition inside a
+   media query as a use -- so --transition-state, whose only other mention is
+   the prefers-reduced-motion block below, was tree-shaken out of :root
+   entirely. `transition-duration: var(--transition-state)` then computed to
+   0s, which would have made every hover transition in this milestone instant
+   and left the reduced-motion guard guarding nothing, silently and with no
+   test able to see it. None of these three are Tailwind namespaces anyway;
+   :root is where a plain custom property belongs. */
+:root {
   --focus-ring-width: 2px;
   --focus-ring-offset: 2px;
 
@@ -89,6 +106,7 @@ In `web/src/index.css`, inside the existing `@theme` block, after the `--shadow-
      ~200ms at which a state change stops reading as instant and starts
      reading as animation -- these are feedback, not motion. */
   --transition-state: 160ms;
+}
 ```
 
 - [ ] **Step 2: Add the global focus-visible rule and the reduced-motion guard**
@@ -140,6 +158,26 @@ getComputedStyle(document.activeElement).outlineColor
 ```
 
 Expected: an `rgb(26, 107, 82)`-family value (the accent), **not** `rgb(0, 95, 204)`.
+
+Then confirm every token this task adds actually survived into `:root` — Tailwind drops `@theme` variables it does not see used, and a dropped token fails silently:
+
+```js
+const cs = getComputedStyle(document.documentElement);
+const probe = document.createElement('div');
+probe.style.transitionDuration = 'var(--transition-state)';
+document.documentElement.appendChild(probe);
+const dur = getComputedStyle(probe).transitionDuration;
+probe.remove();
+console.log({
+  focus: cs.getPropertyValue('--color-focus').trim(),
+  width: cs.getPropertyValue('--focus-ring-width').trim(),
+  offset: cs.getPropertyValue('--focus-ring-offset').trim(),
+  transition: cs.getPropertyValue('--transition-state').trim(),
+  computedDuration: dur,
+});
+```
+
+Expected: no value is empty, and `computedDuration` is `0.16s` — **not** `0s`. A `0s` here means the token was tree-shaken and Task 3's transitions will do nothing.
 
 - [ ] **Step 5: Commit**
 
@@ -1499,7 +1537,7 @@ Net currently renders with `text-muted` on the label and the same `font-semibold
       </div>
 ```
 
-The `tabular` class comes from M1 Task 1; if M1 has not merged, drop it and let Task 2's sweep pick this up.
+**`tabular` is already on this span — do not treat it as new.** M1's browser walk found the Assets card rendering the same figure twice with decimals 4.8px apart, because this row had been reserved for this task while the per-type rows above it were already tabular. The class was brought forward into M1 rather than shipping that misalignment for two PRs. This task's remaining work on the row is its label weight and figure size, as above.
 
 - [ ] **Step 2: Run the Finances tests**
 
