@@ -1,6 +1,9 @@
 package domain
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 // The collection caps. A save rewrites every child of a document, so the cost
 // of one write has to be bounded by something other than whatever a request
@@ -75,10 +78,14 @@ func (v Vision) Validate() error {
 	if strings.TrimSpace(v.Theme) == "" {
 		return ErrVisionThemeRequired
 	}
-	if len(v.Theme) > MaxVisionThemeLen {
+	// Rune count, not len: len is bytes, and a theme written in Chinese (this
+	// product is built for a Singapore household) would otherwise be capped
+	// at a third of what the product promises.
+	if utf8.RuneCountInString(v.Theme) > MaxVisionThemeLen {
 		return ErrVisionThemeTooLong
 	}
-	if len(v.Description) > MaxVisionDescriptionLen {
+	// Same reasoning as the theme check above: count runes, not bytes.
+	if utf8.RuneCountInString(v.Description) > MaxVisionDescriptionLen {
 		return ErrVisionDescriptionTooLong
 	}
 	if v.Year < MinVisionYear || v.Year > MaxVisionYear {

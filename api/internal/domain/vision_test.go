@@ -87,3 +87,27 @@ func TestVisionValidationRefuses(t *testing.T) {
 		})
 	}
 }
+
+// TestVisionThemeCapCountsRunesNotBytes pins the fix for a defect in the
+// original brief: MaxVisionThemeLen is a character count ("≤ 120 chars" in
+// the spec), so the cap must be checked with utf8.RuneCountInString, not
+// len(). A household writing its theme in Chinese -- Hearth is built for a
+// Singapore household -- would otherwise be capped at a third of what the
+// product promises, since each such character costs three bytes in UTF-8.
+func TestVisionThemeCapCountsRunesNotBytes(t *testing.T) {
+	t.Run("120 multi-byte characters is exactly at the cap and passes", func(t *testing.T) {
+		v := validVision()
+		v.Theme = strings.Repeat("好", domain.MaxVisionThemeLen)
+		if err := v.Validate(); err != nil {
+			t.Fatalf("expected a 120-character theme to validate, got %v", err)
+		}
+	})
+
+	t.Run("121 multi-byte characters is over the cap and is refused", func(t *testing.T) {
+		v := validVision()
+		v.Theme = strings.Repeat("好", domain.MaxVisionThemeLen+1)
+		if err := v.Validate(); !errors.Is(err, domain.ErrVisionThemeTooLong) {
+			t.Fatalf("want %v, got %v", domain.ErrVisionThemeTooLong, err)
+		}
+	})
+}
