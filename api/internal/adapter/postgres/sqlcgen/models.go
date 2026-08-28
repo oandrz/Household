@@ -248,3 +248,41 @@ type User struct {
 	AvatarInitial string
 	CreatedAt     pgtype.Timestamptz
 }
+
+type Vision struct {
+	ID          pgtype.UUID
+	HouseholdID pgtype.UUID
+	Year        int16
+	Theme       string
+	Description string
+	Version     int32
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+type VisionMeasure struct {
+	ID           pgtype.UUID
+	PillarID     pgtype.UUID
+	Position     int16
+	Label        string
+	CurrentValue *int32
+	TargetValue  *int32
+	GoalID       pgtype.UUID
+}
+
+type VisionMilestone struct {
+	ID       pgtype.UUID
+	VisionID pgtype.UUID
+	Year     int16
+	Title    string
+	Note     string
+	Position int16
+}
+
+type VisionPillar struct {
+	ID          pgtype.UUID
+	VisionID    pgtype.UUID
+	Position    int16
+	Name        string
+	Description string
+}

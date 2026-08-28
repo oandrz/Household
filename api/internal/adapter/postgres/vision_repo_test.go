@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres"
+	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
 // A measure carrying BOTH a goal link and a typed target renders two
@@ -100,4 +101,99 @@ func insertTestGoal(t *testing.T, db *postgres.DB, householdID string) string {
 		t.Fatalf("insert goal: %v", err)
 	}
 	return id
+}
+
+func TestVisionRepoGetReportsNotFoundForAYearNeverSet(t *testing.T) {
+	db := openTestDB(t)
+	repo := postgres.NewVisionRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	_, err := repo.Get(context.Background(), householdID, 2026)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("want domain.ErrNotFound, got %v", err)
+	}
+}
+
+func TestVisionRepoGetReadsPillarsMeasuresAndMilestonesInPositionOrder(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewVisionRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	var visionID, pillarID string
+	if err := db.Pool().QueryRow(ctx,
+		`INSERT INTO visions (household_id, year, theme, description)
+		 VALUES ($1, 2026, 'Slow down together', 'Fewer commitments.') RETURNING id`,
+		householdID).Scan(&visionID); err != nil {
+		t.Fatalf("insert vision: %v", err)
+	}
+	if err := db.Pool().QueryRow(ctx,
+		`INSERT INTO vision_pillars (vision_id, position, name, description)
+		 VALUES ($1, 0, 'Us before logistics', 'Partners first.') RETURNING id`,
+		visionID).Scan(&pillarID); err != nil {
+		t.Fatalf("insert pillar: %v", err)
+	}
+	// Inserted out of order on purpose: the ORDER BY is what this asserts.
+	if _, err := db.Pool().Exec(ctx,
+		`INSERT INTO vision_measures (pillar_id, position, label, current_value, target_value)
+		 VALUES ($1, 1, 'Weekends away', 2, 4), ($1, 0, 'Date nights / month', 2, 2)`, pillarID); err != nil {
+		t.Fatalf("insert measures: %v", err)
+	}
+	if _, err := db.Pool().Exec(ctx,
+		`INSERT INTO vision_milestones (vision_id, position, year, title, note)
+		 VALUES ($1, 1, 2029, 'Bigger place', ''), ($1, 0, 2027, 'Sabbatical', 'Indonesia')`, visionID); err != nil {
+		t.Fatalf("insert milestones: %v", err)
+	}
+
+	got, err := repo.Get(ctx, householdID, 2026)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Theme != "Slow down together" || got.Version != 1 {
+		t.Fatalf("theme/version wrong: %+v", got)
+	}
+	if len(got.Pillars) != 1 || len(got.Pillars[0].Measures) != 2 {
+		t.Fatalf("want one pillar with two measures, got %+v", got.Pillars)
+	}
+	if got.Pillars[0].Measures[0].Label != "Date nights / month" {
+		t.Fatalf("measures out of position order: %+v", got.Pillars[0].Measures)
+	}
+	if got.Pillars[0].Measures[0].Kind != domain.MeasureTyped {
+		t.Fatalf("want a typed measure, got kind %q", got.Pillars[0].Measures[0].Kind)
+	}
+	if len(got.Milestones) != 2 || got.Milestones[0].Title != "Sabbatical" {
+		t.Fatalf("milestones out of position order: %+v", got.Milestones)
+	}
+}
+
+func TestVisionRepoGetReadsABrokenLinkAsBroken(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewVisionRepo(db)
+	householdID := insertTestHousehold(t, db)
+	goalID := insertTestGoal(t, db, householdID)
+
+	var visionID, pillarID string
+	_ = db.Pool().QueryRow(ctx,
+		`INSERT INTO visions (household_id, year, theme) VALUES ($1, 2026, 'T') RETURNING id`,
+		householdID).Scan(&visionID)
+	_ = db.Pool().QueryRow(ctx,
+		`INSERT INTO vision_pillars (vision_id, position, name) VALUES ($1, 0, 'P') RETURNING id`,
+		visionID).Scan(&pillarID)
+	if _, err := db.Pool().Exec(ctx,
+		`INSERT INTO vision_measures (pillar_id, position, label, goal_id) VALUES ($1, 0, 'Emergency fund', $2)`,
+		pillarID, goalID); err != nil {
+		t.Fatalf("insert measure: %v", err)
+	}
+	if _, err := db.Pool().Exec(ctx, `DELETE FROM goals WHERE id = $1`, goalID); err != nil {
+		t.Fatalf("delete goal: %v", err)
+	}
+
+	got, err := repo.Get(ctx, householdID, 2026)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Pillars[0].Measures[0].Kind != domain.MeasureBroken {
+		t.Fatalf("want MeasureBroken after the goal was deleted, got %q", got.Pillars[0].Measures[0].Kind)
+	}
 }
