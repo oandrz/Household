@@ -2,7 +2,10 @@ package postgres_test
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres"
 )
@@ -31,8 +34,14 @@ func TestVisionMeasureCannotBeBothTypedAndLinked(t *testing.T) {
 	_, err := db.Pool().Exec(ctx,
 		`INSERT INTO vision_measures (pillar_id, position, label, current_value, target_value, goal_id)
 		 VALUES ($1, 0, 'Emergency fund', 2, 4, $2)`, pillarID, goalID)
-	if err == nil {
-		t.Fatal("expected measure_is_typed_or_linked to refuse a measure that is both typed and linked")
+	// Any error would pass a bare err == nil check -- a typo in the column
+	// list or a dropped connection looks the same as a refused row. Unwrap to
+	// the driver error and check which constraint fired, so this test proves
+	// the database refused the ambiguous measure specifically, not merely
+	// that something went wrong.
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.ConstraintName != "measure_is_typed_or_linked" {
+		t.Fatalf("expected measure_is_typed_or_linked to refuse a measure that is both typed and linked, got: %v", err)
 	}
 }
 
