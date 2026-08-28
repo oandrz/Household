@@ -59,8 +59,26 @@ export function AppShell() {
       </NavDrawer>
       {/* `inert` keeps Tab out of the page while the drawer's opaque backdrop
           covers it -- the one part of a <dialog>'s behaviour that cannot be
-          expressed in CSS. React 19 forwards it as a real attribute. */}
-      <main id="main-content" inert={navOpen || undefined} className="lg:overflow-y-auto">
+          expressed in CSS. React 19 forwards it as a real attribute.
+
+          `tabIndex={-1}` on <main>: a hash jump to an element only moves
+          focus there if the element is focusable, and <main> is not,
+          natively -- Chrome happens to focus it anyway on a `#hash`
+          navigation, but Safari and Firefox have long histories of just
+          scrolling and leaving focus wherever it was. Without this, the
+          skip link would work in Chrome and silently fail everywhere else,
+          landing the very next Tab back on the navigation -- the eight-link
+          traversal this file exists to remove. `-1` specifically, not `0`:
+          `-1` makes the element a valid *target* for focus without adding
+          it as a stop in the normal tab order, so this does not add a tab
+          stop to every page -- it only makes the one jump the skip link
+          performs actually land. */}
+      <main
+        id="main-content"
+        tabIndex={-1}
+        inert={navOpen || undefined}
+        className="lg:overflow-y-auto"
+      >
         {/* 1204px is the design's own content width, not a taste: its canvas
             is 1440px wide with a 236px sidebar (design/Household
             Dashboard.dc.html, screen 5a). Without this, `1fr` gives every

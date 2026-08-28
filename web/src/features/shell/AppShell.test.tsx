@@ -166,6 +166,15 @@ describe("AppShell", () => {
     expect(skip.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     expect(skip).toHaveAttribute("href", "#main-content");
-    expect(document.querySelector("#main-content")?.tagName).toBe("MAIN");
+    const main = document.querySelector("#main-content");
+    expect(main?.tagName).toBe("MAIN");
+
+    // <main> is not natively focusable, so a hash jump alone moves focus
+    // there only in browsers that opt to (Chrome does; Safari and Firefox
+    // have long histories of just scrolling). tabindex="-1" makes it a
+    // valid focus target without adding it to the tab order -- "-1", not
+    // "0", because "0" would add a stop to every page instead of removing
+    // the eight this link exists to skip.
+    expect(main).toHaveAttribute("tabindex", "-1");
   });
 });
