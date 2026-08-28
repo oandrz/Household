@@ -447,7 +447,17 @@ export function BudgetPage() {
               </div>
 
               {(data.dailyPaceOk || overSentence || rolloverMayShow) && (
-                <div data-testid="budget-insight" className="rounded-xl bg-callout px-5 py-[18px]">
+                // Same panel shape, same missing border, same fix as
+                // BillsPage.tsx's bills-all-caught-up -- a callout-tinted panel
+                // last in a right rail whose sibling above it is a bordered
+                // card. Swept with it rather than after it: the two carried a
+                // byte-identical class string, so fixing one and not the other
+                // would have made the app disagree with itself in a new place
+                // while closing the old one.
+                <div
+                  data-testid="budget-insight"
+                  className="rounded-xl border border-callout-border bg-callout px-5 py-[18px]"
+                >
                   {data.dailyPaceOk && (
                     <p className="text-[13px] font-semibold text-accent">
                       {BUDGET_COPY.onPaceToSave(formatMoney(data.remainingMinor, data.currency, symbol))}
