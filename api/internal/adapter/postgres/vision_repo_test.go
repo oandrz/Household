@@ -120,18 +120,30 @@ func TestVisionRepoGetReadsPillarsMeasuresAndMilestonesInPositionOrder(t *testin
 	repo := postgres.NewVisionRepo(db)
 	householdID := insertTestHousehold(t, db)
 
-	var visionID, pillarID string
+	var visionID string
 	if err := db.Pool().QueryRow(ctx,
 		`INSERT INTO visions (household_id, year, theme, description)
 		 VALUES ($1, 2026, 'Slow down together', 'Fewer commitments.') RETURNING id`,
 		householdID).Scan(&visionID); err != nil {
 		t.Fatalf("insert vision: %v", err)
 	}
+	// Two pillars, inserted out of position order on purpose -- position 1
+	// first, then position 0 -- the same pattern the measures and milestones
+	// below already use, so this proves ORDER BY position rather than
+	// insertion order. A prior version of this test used only one pillar,
+	// under which ListVisionPillars' ORDER BY could be deleted with nothing
+	// going red.
+	if _, err := db.Pool().Exec(ctx,
+		`INSERT INTO vision_pillars (vision_id, position, name, description)
+		 VALUES ($1, 1, 'Money without fear', '')`, visionID); err != nil {
+		t.Fatalf("insert pillar 1: %v", err)
+	}
+	var pillarID string
 	if err := db.Pool().QueryRow(ctx,
 		`INSERT INTO vision_pillars (vision_id, position, name, description)
 		 VALUES ($1, 0, 'Us before logistics', 'Partners first.') RETURNING id`,
 		visionID).Scan(&pillarID); err != nil {
-		t.Fatalf("insert pillar: %v", err)
+		t.Fatalf("insert pillar 0: %v", err)
 	}
 	// Inserted out of order on purpose: the ORDER BY is what this asserts.
 	if _, err := db.Pool().Exec(ctx,
@@ -152,8 +164,14 @@ func TestVisionRepoGetReadsPillarsMeasuresAndMilestonesInPositionOrder(t *testin
 	if got.Theme != "Slow down together" || got.Version != 1 {
 		t.Fatalf("theme/version wrong: %+v", got)
 	}
-	if len(got.Pillars) != 1 || len(got.Pillars[0].Measures) != 2 {
-		t.Fatalf("want one pillar with two measures, got %+v", got.Pillars)
+	if len(got.Pillars) != 2 {
+		t.Fatalf("want two pillars, got %+v", got.Pillars)
+	}
+	if got.Pillars[0].Name != "Us before logistics" {
+		t.Fatalf("pillars out of position order: %+v", got.Pillars)
+	}
+	if len(got.Pillars[0].Measures) != 2 {
+		t.Fatalf("want the position-0 pillar's two measures, got %+v", got.Pillars[0].Measures)
 	}
 	if got.Pillars[0].Measures[0].Label != "Date nights / month" {
 		t.Fatalf("measures out of position order: %+v", got.Pillars[0].Measures)
