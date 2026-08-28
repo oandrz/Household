@@ -448,7 +448,7 @@ export function TransactionsPage() {
         />
         <div className="ml-auto pb-1.5 text-[12.5px] text-muted">
           {TRANSACTIONS_COPY.spentThisMonth}{" "}
-          <b className="tabular text-ink">
+          <b className="text-ink">
             {formatMoney(summary.spentMinor, summary.currency, symbolFor(summary.currency))}
           </b>
         </div>

@@ -164,7 +164,7 @@ export function GoalCard({
             enough, and repeating a second, near-identical figure under it
             would read as the goal being in two states at once. */}
         {goal.status === "behind" && goal.requiredMonthlyOk && (
-          <div data-testid="goal-card-required" className="tabular mt-1 text-[12px] font-semibold text-danger">
+          <div data-testid="goal-card-required" className="mt-1 text-[12px] font-semibold text-danger">
             {GOAL_COPY.needsPerMonth(formatMoney(goal.requiredMonthlyMinor, goal.currency, symbol))}
           </div>
         )}

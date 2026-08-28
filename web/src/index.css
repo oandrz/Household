@@ -100,10 +100,14 @@ body {
 }
 
 /* Tabular figures. NOT on body: a heading containing a year should stay
-   proportional. Applied at the elements that render formatMoney's output --
-   see formatMoney.ts, which already spends a comment on using U+2212 MINUS
-   rather than a hyphen "because every negative figure in this app is in a
-   column of numbers". This is the same argument, made about the digits. */
+   proportional. Belongs where figures stack or repeat and the eye travels
+   between them -- a ledger column, a grid of categories, a row of stat
+   cards. It does NOT belong on a lone display figure or a figure embedded
+   in a prose sentence, where fixed digit widths only pad the punctuation
+   out. See formatMoney.ts, which already spends a comment on using U+2212
+   MINUS rather than a hyphen "because every negative figure in this app is
+   in a column of numbers" -- that reasoning is what decides which side of
+   this rule a given figure falls on. */
 .tabular {
   font-variant-numeric: tabular-nums;
 }
