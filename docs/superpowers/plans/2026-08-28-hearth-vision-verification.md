@@ -8,6 +8,18 @@ during the walk and are recorded under "Findings, not defects" below rather
 than treated as bugs, because both are documented, deliberate decisions
 already sitting in the code.
 
+**Addendum (2026-08-29, final whole-branch review):** criterion 7 was
+re-walked against a non-zero percentage. The original run below is
+preserved verbatim, since it is not wrong — only a weak witness: it
+demonstrated a linked measure against a *zero*-contribution goal, and
+`Current` is always 0 for a linked measure (`toVisionDTO`'s own shape), so a
+regression swapping `Percent` for `Current` would still render `0%` and
+pass unnoticed. The re-walk (same row, its own paragraph below) linked the
+measure to a goal actually holding a balance and confirmed the Vision page
+renders that non-zero figure, matching `/money/goals`. Still 15 of 15; this
+addendum makes that criterion's own PASS a stronger one, not a different
+one.
+
 Run 2026-08-28/29 (host clock +08 crossed midnight mid-walk, reading
 2026-08-29 04:54–05:16 for the bulk of the criteria; the API container is
 UTC, reading 2026-08-28 20:54–21:16 for the same instants — the same
@@ -90,7 +102,7 @@ walked in numeric order except where noted inline.
 | 4 | Saving a theme and description renders the hero, theme in quotes at full width, and no marriage-duration block | **PASS** — saved theme `Slow down together` and a description; the hero (`data-testid="vision-hero"`) rendered `"Slow down together"` (literal quote marks in the text node, not CSS) at full card width with the description beneath it, and no second column, no "Married · N years · date" block anywhere in the DOM or any screenshot at any width this walk took. Visible in every full-page screenshot from `04-07-09-vision-page-full.png` onward. |
 | 5 | Adding a pillar with a description and two typed measures renders Pillar 1, its description and both measures with their N of M figures | **PASS** — added pillar "Us time" with a description and two typed measures. Rendered: `PILLAR 1` / `Us time` / the description, then `Date nights / month  2 of 2 ✓` and `Phone-free dinners / week  1 of 4`, both `data-testid="vision-measure-row"`. Screenshot `04-07-09-vision-page-full.png`. |
 | 6 | A measure at its target shows the met marker; one below target does not | **PASS** — `Date nights / month`, saved current 2 / target 2, rendered `2 of 2 ✓` with the accent-coloured, semibold styling `MeasureRow`'s own `measure.met` branch applies. `Phone-free dinners / week`, saved current 1 / target 4, rendered `1 of 4` with no `✓` and the plain-weight styling. Both read directly from the DOM text, not eyeballed from a screenshot alone. |
-| 7 | Adding a measure linked to a savings goal renders that goal's percentage, and it matches what /money/goals shows for the same goal | **PASS** — added a measure "Emergency fund" linked to the seeded `Emergency fund` goal (Track by → "A savings goal" → Goal → "Emergency fund"). Vision rendered `Emergency fund  0%`. `/money/goals` independently rendered `0% Emergency fund S$0.00 of S$30,000.00` for the same goal — the two figures match exactly, both derived from the same zero-contribution state (`domain.GoalProgressPercent(0, 3000000) = 0`). |
+| 7 | Adding a measure linked to a savings goal renders that goal's percentage, and it matches what /money/goals shows for the same goal | **PASS, re-verified against a non-zero percentage in the 2026-08-29 whole-branch-review addendum — see that paragraph below the original entry.** Original entry (2026-08-28/29, preserved verbatim): PASS — added a measure "Emergency fund" linked to the seeded `Emergency fund` goal (Track by → "A savings goal" → Goal → "Emergency fund"). Vision rendered `Emergency fund  0%`. `/money/goals` independently rendered `0% Emergency fund S$0.00 of S$30,000.00` for the same goal — the two figures match exactly, both derived from the same zero-contribution state (`domain.GoalProgressPercent(0, 3000000) = 0`). **This PASS is real but a weak witness**: `Current` is always 0 for a linked measure (`toVisionDTO`'s own shape, `api/internal/usecase/vision.go`), so a regression that swapped `Percent` for `Current` in that same function would still render `0%` here and this criterion would still read PASS — the zero-contribution figure cannot tell the correct field from the wrong one. **Re-walk (2026-08-29, final whole-branch review, non-zero)**: by this point the original seeded `Emergency fund` goal had been deleted (criterion 8, this walk's own second half) and its Vision measure reset to a typed `0 of 1` (Finding 2, "Findings, not defects" below), so a fresh goal was created rather than reusing either — `/money/goals` → "Create your first goal" → name `Emergency fund`, target `S$1,000.00`, starting balance `S$500.00`, no target date, planned monthly `S$0`. `/money/goals` rendered `50% Emergency fund S$500.00 of S$1,000.00` for it (screenshot `07-revisit-goals-50pct.png`). Opened Edit vision, switched the `Emergency fund` measure's Track by to "A savings goal", chose the new `Emergency fund` goal, and saved — `PUT /api/v1/marriage/vision/2026` answered `200` on the wire (`browser_network_requests`). `/marriage/vision` then rendered `Emergency fund  50%` (screenshot `07-revisit-vision-50pct.png`) — the same non-zero figure `/money/goals` shows for the same goal, and a figure `0%` could not have come from. This is the discriminating case: only a live read of `Percent` (not `Current`, which stays 0) produces `50%` here, so this re-walk is the evidence a `Percent`/`Current` swap in `toVisionDTO` would actually fail, closing the gap the original zero-contribution run left open. |
 | 8 | Delete that goal from /money/goals. The delete must succeed — not error — and the Vision page must then show that measure's label with no number. This exercises the database constraint branch that would otherwise make deleting a goal fail inside the Goals feature | **PASS, by a substitute the task brief's own instructions anticipate — see below** — Goals has no delete affordance and no `DELETE` route at all, by a *different* feature's own deliberate decision (Goals' spec: "Goals are **not** deleted and have no `DELETE` endpoint"; `GoalRepository` has no `Delete` method; `router.go` wires no `DELETE /goals/{id}`). Before touching the goal at all, checked for a blocking reference (`select id, rollover_goal_id from budgets where rollover_goal_id is not null` → 0 rows, so no `NO ACTION` FK would block the delete). **First, through the real product**: clicked Archive on `/money/goals` — the goal left the live list, and reloading `/marriage/vision` still read `Emergency fund  0%`, unchanged — confirming decision 8's other half ("archiving is not deletion") through an actual affordance before touching SQL. **Then the delete itself**: `DELETE FROM goals WHERE name = 'Emergency fund'` against the running Postgres container — `DELETE 1`, no constraint violation of any kind, the CHECK's third branch (`measure_is_typed_or_linked`'s `goal_id IS NULL AND target_value IS NULL AND current_value IS NULL` arm) absorbing the referential `SET NULL` exactly as spec decision 8 describes. `select label, goal_id, current_value, target_value from vision_measures` immediately after read the `Emergency fund` row **still present**, `goal_id` now empty, both values still null — the row survived, only the link broke. Reloading `/marriage/vision` in the browser then read `Emergency fund  Goal removed` — the exact `measureFigureUnavailable` copy, no number anywhere near it. Screenshot `08-goal-removed.png`. |
 | 9 | Adding three milestones renders them in order under Longer horizon, each with its year, title and note | **PASS** — added, in order, `2026 / Weekend in Bali / Just the two of us, no kids.`, `2027 / Renovate the kitchen / Tied to the house fund.`, `2028 / Ten years married / A trip somewhere we've never been.` All three rendered under `Longer horizon` in the same order, each `data-testid="vision-milestone-card"` carrying its year, title and note. Screenshot `04-07-09-vision-page-full.png`. |
 | 10 | + Add milestone opens the same modal | **PASS** — closed the editor, then clicked the page's own dashed `data-testid="vision-add-milestone"` tile in the Longer horizon panel (distinct from the modal's own internal "+ Add milestone", used to add rows once already inside). It opened the identical `Edit our vision` dialog — same title, same privacy badge, same theme/description/pillars already populated — not a second, milestone-only form. Screenshot `10-add-milestone-opens-modal.png`. |
@@ -175,6 +187,21 @@ nobody had noticed.
 Stated exactly, since several numbers above depend on reading it precisely,
 and some of what changed here was never reversed.
 
+**Updated 2026-08-29, final whole-branch review (criterion 7's non-zero
+re-walk).** The bullets below describe the state as of the original walk;
+the re-walk changed two of them further, stated here rather than left for
+the numbers to go stale the way A1's own finding warns against: a fresh
+goal named `Emergency fund` (id `d781daaf-e714-4af0-bb02-abe78966797b`,
+target `S$1,000.00`, planned monthly `S$0`, one contribution of `S$500.00`
+recorded as its starting balance — `50%`) now exists, created because the
+original seeded goal of that name was gone (see the Goals bullet below);
+and the 2026 vision's `Emergency fund` measure was switched back from typed
+`0 of 1` to linked, against that new goal, through the real Edit-vision
+modal — `select label, goal_id, current_value, target_value from
+vision_measures` now reads `goal_id` set and both values `NULL` for that
+row, and `visions.version` for `2026` reads `4` (not the `3` below).
+Nothing else in this section changed.
+
 - **Visions**: `2026`, theme `"Slow down together (edited by A)"` — three
   pillars (`Us time`: measures `Date nights / month` 2 of 2 ✓,
   `Phone-free dinners / week` 1 of 4, `Emergency fund` 0 of 1 — see Finding
@@ -194,19 +221,32 @@ and some of what changed here was never reversed.
   this restore's timestamps. Nothing reads a measure's or milestone's own
   id from outside its vision (spec decision 5), so this is a cosmetic
   difference from the pre-delete row, not a substantive one — but stated
-  here rather than left for the version number to contradict silently.
+  here rather than left for the version number to contradict silently. (As
+  of the 2026-08-29 re-walk, `version` reads `4` and the `Emergency fund`
+  measure is linked, not typed — see the update note above this list.)
   `2027`, version 1, theme `"New chapter"`, no pillars, no milestones —
   created at criterion 12 and never built out further, since the criterion
   only needed the year to exist; this row is the app's own original write,
   untouched since. No other year has a row.
-- **Goals: none.** The seeded `Emergency fund` goal was archived (criterion
-  8's own first half, through the real product) and then deleted outright
-  via direct SQL (criterion 8's own second half, the substitute named
-  above) — `select count(*) from goals` reads `0`, and `/money/goals`
-  itself now reads "No savings goals yet." This was not restored; a
-  household resuming this dev database next should know the linked measure
-  above (`Emergency fund`, now typed `0 of 1`) no longer names a real goal
-  anywhere in the system.
+- **Goals: one, added by the 2026-08-29 re-walk.** The originally seeded
+  `Emergency fund` goal was archived (criterion 8's own first half, through
+  the real product) and then deleted outright via direct SQL (criterion 8's
+  own second half, the substitute named above) — at the end of the original
+  walk `select count(*) from goals` read `0`, and `/money/goals` itself
+  read "No savings goals yet." That emptiness was not restored — this is
+  the same dormant-`MeasureBroken` state E1/Finding 2 discuss — but
+  criterion 7's re-walk needed a goal with a real balance to demonstrate a
+  non-zero percentage, so it created one fresh, through the real product
+  (`/money/goals` → Create your first goal): `Emergency fund`, target
+  `S$1,000.00`, starting balance `S$500.00`, no target date, planned
+  monthly `S$0`. This is a different row from the original seeded goal (a
+  new id, no history), named here so a later reader does not assume it is
+  the same `Emergency fund` criterion 8 deleted. A household resuming this
+  dev database next should know the vision's own `Emergency fund` measure
+  is, as of this re-walk, linked to *this* new goal, not the typed `0 of 1`
+  Finding 2 describes and not the original goal criterion 8 deleted —
+  three distinct things this walk's own history has now attached to one
+  label, disambiguated here rather than left for a later reader to conflate.
 - **Jamie (`jamie@example.test`) now has a real password** (`jamie-dev-
   password`, set via `expect` driving `adminctl reset-password` — see
   criterion 14's own entry for why the plain command alone could not run in
@@ -223,7 +263,11 @@ and some of what changed here was never reversed.
   three pillars, four measures and three milestones (criterion 13's
   negative-half re-verification); and the four `INSERT`s that rebuilt that
   row afterward (described in the Visions bullet above). No table besides
-  those five was touched directly.
+  those five was touched directly. **The 2026-08-29 re-walk added no SQL of
+  its own** — the new goal and the measure's relink both went through the
+  real product (`/money/goals`'s Create-goal form and the Edit-vision
+  modal), the same "through an actual affordance" standard criterion 8's
+  own first half held itself to.
 - **`hearth-web-1` was restarted mid-walk** (the stale-dev-server diagnosis
   above) and is currently running with an up-to-date module graph; a future
   session should not need to repeat that restart unless the same class of
@@ -231,12 +275,20 @@ and some of what changed here was never reversed.
 
 ---
 
-## Screenshots: 20 files, 20 distinct hashes
+## Screenshots: 22 files, 22 distinct hashes
 
 `shasum -a 256` over
-`docs/superpowers/plans/2026-08-28-hearth-vision-screenshots/` returns 20
-distinct hashes across 20 files — no accidental duplicate this walk.
-Criteria **1 (folded into `01-02-empty-state.png`'s own before-state), 6, 7
+`docs/superpowers/plans/2026-08-28-hearth-vision-screenshots/` returns 22
+distinct hashes across 22 files — no accidental duplicate across either the
+original walk or the 2026-08-29 addendum. The original walk itself
+produced 20 of the 22 (see below for which criteria went without one); the
+addendum added `07-revisit-vision-50pct.png` and `07-revisit-goals-50pct.png`,
+criterion 7's own non-zero re-walk (its own paragraph above has the detail),
+so criterion 7 is no longer one of the criteria without an image of its
+own — it has two, now the only criterion whose entry improved from "asserted
+from text alone" to "asserted from text and pictured," because that is
+exactly the evidence the original entry was missing.
+Criteria **1 (folded into `01-02-empty-state.png`'s own before-state), 6,
 and 9** carry no image of their own beyond one already listed for an
 adjacent criterion — each is asserted directly from a DOM text read or a
 wire response quoted verbatim in its own row above, the evidence this
@@ -257,8 +309,14 @@ image, though — `getBoundingClientRect()` reading `0×0` on
 quoted verbatim in the stale-server paragraph above, and that evidence does
 not depend on the missing screenshot.
 
-`git status --short api web` read empty throughout this task — no code was
-changed, only two documentation files and this one — so `make lint && make
-test` was not re-run; the tree is byte-identical to the commit this walk
-started from (`0e048cd`), which was already confirmed green before Task 15
-began.
+`git status --short api web` read empty throughout Task 15 itself
+(2026-08-28/29) — no code was changed, only two documentation files and
+this one — so `make lint && make test` was not re-run; the tree is
+byte-identical to the commit this walk started from (`0e048cd`), which was
+already confirmed green before Task 15 began. **This no-code-changed claim
+covers Task 15 only, not the 2026-08-29 final-whole-branch-review addendum
+elsewhere in this document**, which does touch `api` and `web` (see that
+review's own report for the full diff and its own `make lint && make test`
+run) — named explicitly here so this sentence is not misread, the same
+staleness class its neighbour paragraph above (the stale-server diagnosis)
+exists to avoid.

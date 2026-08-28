@@ -32,9 +32,11 @@ export function VisionPage() {
   // retro to load). Every one of this modal's three entry points -- the
   // header's Edit vision button, MilestoneGrid's own "+ Add milestone"
   // tile, and the empty state's own call to action -- opens the identical
-  // editor against whichever `year` this page currently holds, matching the
-  // design's own single entry point drawn three times (dc.html: all three
-  // carry onClick="{{ openVision }}").
+  // editor against whichever `year` this page currently holds. The design
+  // itself only draws two of these (dc.html: the Edit vision button and the
+  // "+ Add milestone" tile both carry onClick="{{ openVision }}", lines 595
+  // and 612) -- the empty state's own call to action is Hearth's own third
+  // entry point, not drawn in the design at all.
   const [modalOpen, setModalOpen] = useState(false);
 
   function onEdit() {

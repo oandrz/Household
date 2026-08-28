@@ -104,7 +104,7 @@ describe("PillarCard", () => {
   // jsdom lays nothing out, so this pins the mechanism (the class that
   // stops it) rather than the pixels, the same idiom RetrosPage.test.tsx's
   // own centring comment uses for a property jsdom cannot see directly.
-  it("keeps the figure on one line even when the label is long enough to wrap", () => {
+  it("renders the figure with the no-wrap class", () => {
     render(
       <PillarCard
         pillar={pillarFixture({

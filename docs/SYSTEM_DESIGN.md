@@ -40,10 +40,10 @@ fifteen-criterion browser walk (Task 17) has run and passed, 15 of 15**
 (2026-08-18), the same bar every Money feature was held to before its
 tracker row could read ✅, recorded in
 `docs/superpowers/plans/2026-08-16-hearth-retros-verification.md`. Vision,
-Marriage's second feature, is code-complete and reviewed, code-shaped the
-same way Retros is: its four tables and their relationships, including the
-cross-feature edge into `goals` (§6), its two routes joining Retros' own
-route group (§4), `VisionService` and its two ports —
+Marriage's second feature, is code-complete, reviewed and now walked,
+code-shaped the same way Retros is: its four tables and their relationships,
+including the cross-feature edge into `goals` (§6), its two routes joining
+Retros' own route group (§4), `VisionService` and its two ports —
 `VisionRepository`/`GoalProgressReader` (§3) — are all built (§5, "Vision —
 a whole-document replace"), and its frontend — `VisionPage.tsx`,
 `PillarCard.tsx` and `MilestoneGrid.tsx` (Vision spec's task 11) render the
@@ -52,12 +52,14 @@ exposes (task 10), and `VisionModal.tsx` (Vision spec's task 12) is the
 whole-document editor all three of `onEdit`'s call sites now open — the
 header's Edit vision button, the "+ Add milestone" tile and the empty
 state's own call to action — so a household can both see a year's vision
-and set one (§7). **Unlike Retros, Vision's own browser walk has not run
-yet** — its plan holds that task 15, still to come — so its rows in
-`docs/FEATURE_TRACKER.md` read ✅ on the strength of the code and
-`make test` alone, the same standing Bills and Goals held between their own
-last code task and their walk, not yet the "reviewed and walked" bar Retros
-carries in this paragraph. Agreements has
+and set one (§7). **Vision's own fifteen-criterion browser walk has run and
+passed, 15 of 15** (2026-08-29), the same bar every Money feature and Retros
+were held to before their tracker rows could read ✅, recorded in
+`docs/superpowers/plans/2026-08-28-hearth-vision-verification.md` — so its
+rows in `docs/FEATURE_TRACKER.md` now stand on the same "reviewed and
+walked" footing Retros carries in this paragraph, not the code and
+`make test` alone the way Bills and Goals stood between their own last code
+task and their walk. Agreements has
 not been started. Family is not built. See
 `docs/FEATURE_TRACKER.md` section 6 for exactly which of Marriage's rows are
 done, including the two deliberate divergences from the design spec's own

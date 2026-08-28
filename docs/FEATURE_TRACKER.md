@@ -503,18 +503,24 @@ deleted and has no `DELETE` endpoint — so "delete that goal from
 row a household can only ever archive through the product, the identical
 shape Retros' own criterion 10 used for a state its product had no button
 for. **No product defect needed a code fix, and no row here moves or
-downgrades to 🟡.** One documented, deliberate trade-off surfaced during the
-walk rather than a defect: editing and saving a vision that already
-contains a measure whose linked goal was deleted resets that measure to a
-typed `0 of 1` placeholder unless the household explicitly fixes it first —
-`VisionModal.tsx`'s own seeding comment names this as the intended,
-least-surprising default for a domain state (`goal_id`, `current` and
-`target` all null) the write path itself refuses to accept back unchanged.
-Recorded in `docs/LEARNING.md` under Vision's own walk rather than treated
-as a defect here, the same standard Retros' "Findings, not defects" held
-its own disagreements to. Recounting by this file's own rule confirms the
-table below is still exactly 71/15/19/2 = 107 — a browser walk confirms
-rows already marked Built; it does not add or move one on its own.
+downgrades to 🟡.** One thing surfaced during the walk that the final
+whole-branch review (2026-08-29) later re-classified: editing and saving a
+vision that already contains a measure whose linked goal was deleted resets
+that measure to a typed `0 of 1` placeholder unless the household
+explicitly fixes it first. First recorded here as a documented, deliberate
+trade-off; the review's own verdict is the opposite — **a latent defect,
+not an accepted trade-off** — dormant only because Goals has no `DELETE`
+route to reach `MeasureBroken` through the running product at all (this
+walk needed a raw SQL `DELETE` to produce it), not because the state is
+actually fine to ship. Still no code fix here and no row moves, because the
+fix belongs to whoever builds Goals' delete, not to this merge: a third
+seeded state in `VisionModal.tsx` that blocks Save until the household
+picks a goal or types a number, not a relaxed domain. Recorded in full in
+`docs/LEARNING.md` under Vision's own walk section, and noted at the
+seeding effect in `VisionModal.tsx` itself. Recounting by this file's own
+rule confirms the table below is still exactly 71/15/19/2 = 107 — a browser
+walk confirms rows already marked Built; it does not add or move one on its
+own.
 
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|

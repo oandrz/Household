@@ -197,10 +197,6 @@ func (r *VisionRepo) Save(ctx context.Context, v domain.Vision) (domain.Vision, 
 			// construct m.Year, and a silent wrap (int16(67562) == 2026)
 			// would write a milestone against the wrong household-year --
 			// yearParam's own comment gives the full reasoning.
-			// Guarded, not a bare int16(m.Year): this repository did not
-			// construct m.Year, and a silent wrap (int16(67562) == 2026)
-			// would write a milestone against the wrong household-year --
-			// yearParam's own comment gives the full reasoning.
 			year, ok := yearParam(m.Year)
 			if !ok {
 				return domain.ErrVisionYearOutOfRange

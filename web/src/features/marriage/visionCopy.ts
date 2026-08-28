@@ -111,12 +111,21 @@ export const VISION_COPY = {
   cancel: "Cancel",
   saveVision: "Save vision",
 
-  // The one client-side check this modal makes before ever reaching the
-  // server (advisor's own finding: the empty state seeds theme: "", so a
-  // brand-new household's very first Save would otherwise round-trip a 422
-  // for something checkable in three lines) -- Hearth's own message, not the
-  // browser's, per the UI-polish round (CLAUDE.md's own rule).
+  // The two client-side checks this modal makes before ever reaching the
+  // server -- see handleSave's own comments in VisionModal.tsx for why
+  // each exists. The first (advisor's own finding: the empty state seeds
+  // theme: "", so a brand-new household's very first Save would otherwise
+  // round-trip a 422 for something checkable in three lines) -- Hearth's
+  // own message, not the browser's, per the UI-polish round (CLAUDE.md's
+  // own rule).
   modalThemeRequired: "Give this year a theme before saving.",
+  // The second: a measure switched to "A savings goal" and saved without
+  // one picked is neither typed nor linked. Deliberately does not echo
+  // VISION_MEASURE_INVALID's server-side wording ("not both") -- that
+  // message is wrong here, since this household picked neither, and
+  // errors.go's own ErrVisionMeasureGoalRequired case carries the matching
+  // server-side copy for the same reason.
+  modalMeasureGoalRequired: "Pick a savings goal for that measure, or switch it back to a number you keep.",
   modalSaveError: "Couldn't save this year's vision. Try again.",
 
   // The version-conflict banner. Named for what the button actually does --

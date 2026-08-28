@@ -72,8 +72,6 @@ CREATE TABLE vision_measures (
     )
 );
 
-CREATE INDEX vision_measures_pillar_id_idx ON vision_measures (pillar_id);
-
 -- A milestone's year is deliberately independent of its vision's year:
 -- the design's own milestones sit years ahead of the vision they belong to
 -- (2027, 2029 and 2032 inside a 2026 vision) -- a milestone is a future

@@ -489,6 +489,21 @@ export function VisionModal({
           // uses, is the least surprising choice: an editable shape the
           // household must fill in themselves, not a silently resurrected
           // link to a goal that no longer resolves.
+          //
+          // KNOWN GAP (docs/LEARNING.md, "Vision's fifteen-criterion
+          // browser walk"): this seeds a figure -- "0 of 1" -- the
+          // household never typed, and a save that never opens this row
+          // (editing only the theme, say) resends it unchanged, silently
+          // converting "Goal removed" into a fabricated number. Dormant
+          // only because Goals has no delete route to reach MeasureBroken
+          // in the first place. handleSave's own `unresolvedLinkedMeasure`
+          // check (added for the goal-required bug) does NOT catch this --
+          // that check looks for kind === "linked" with no goalId, and this
+          // measure lands here as "typed", not "linked". The fix when Goals
+          // gains delete is not relaxing the domain (write strictly is
+          // correct) but a third seeded state: an editable row that visibly
+          // says "needs a goal or a number" and blocks Save until the
+          // household resolves it one way or the other.
           kind: m.kind === "linked" ? "linked" : "typed",
           current: m.kind === "typed" ? m.current : 0,
           target: m.kind === "typed" ? m.target : m.kind === "broken" ? 1 : 0,
@@ -534,15 +549,30 @@ export function VisionModal({
 
   async function handleSave() {
     setSaveError(null);
-    // The one client-side check this modal makes before ever reaching the
-    // server: the empty-document path (decision 9) seeds theme as "", so a
-    // brand-new household's very first Save would otherwise round-trip a
-    // 422 for something checkable in three lines. Hearth's own message, not
-    // the browser's -- this form carries no `required` attribute anywhere,
-    // per the UI-polish round's own rule that native validation is not this
-    // product's error surface.
+    // The first of two client-side checks this modal makes before ever
+    // reaching the server. This one: the empty-document path (decision 9)
+    // seeds theme as "", so a brand-new household's very first Save would
+    // otherwise round-trip a 422 for something checkable in three lines.
+    // Hearth's own message, not the browser's -- this form carries no
+    // `required` attribute anywhere, per the UI-polish round's own rule
+    // that native validation is not this product's error surface.
     if (theme.trim() === "") {
       setSaveError(VISION_COPY.modalThemeRequired);
+      return;
+    }
+    // The second: a measure switched to "A savings goal" (setMeasureMode's
+    // linked branch) but never given one is neither typed nor linked --
+    // Validate would refuse it as ErrVisionMeasureGoalRequired, but the
+    // household's own click that reaches this state (switch the mode, then
+    // Save without picking a goal) is only two clicks away and this modal's
+    // only OTHER client-side check was the theme above, so the round trip
+    // was the household's sole feedback until now. Named here rather than
+    // left to the server round-trip.
+    const unresolvedLinkedMeasure = pillars.some((p) =>
+      p.measures.some((m) => m.kind === "linked" && m.goalId === ""),
+    );
+    if (unresolvedLinkedMeasure) {
+      setSaveError(VISION_COPY.modalMeasureGoalRequired);
       return;
     }
     try {

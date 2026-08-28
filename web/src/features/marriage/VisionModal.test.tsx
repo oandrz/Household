@@ -299,6 +299,36 @@ describe("VisionModal", () => {
     });
   });
 
+  // A household that switches a measure to "A savings goal" and saves
+  // before picking one has picked NEITHER -- the bug this test guards
+  // against is the server's old, shared VISION_MEASURE_INVALID message
+  // telling them they'd picked BOTH. Checked client-side, before the round
+  // trip: the PUT must never fire at all.
+  it("Save vision refuses a measure switched to a goal with none picked, without reaching the server", async () => {
+    const stub = instrument({
+      "GET /api/v1/marriage/vision?year=2026": {
+        status: 200,
+        body: { vision: visionFixture({ version: 3, pillars: [pillarFixture({ measures: [] })] }) },
+      },
+      "GET /api/v1/goals?include_archived=true": { status: 200, body: GOALS_RESPONSE },
+      "PUT /api/v1/marriage/vision/2026": { status: 200, body: { vision: visionFixture({ version: 4 }) } },
+    });
+    renderWithRouter(<Harness initialYear={2026} onClose={vi.fn()} />);
+
+    const pillar = await screen.findByTestId("vision-modal-pillar");
+    fireEvent.click(within(pillar).getByTestId("vision-modal-add-measure"));
+    const measure = within(pillar).getByTestId("vision-modal-measure");
+    fireEvent.change(within(measure).getByTestId("vision-modal-measure-mode"), { target: { value: "linked" } });
+    expect(within(measure).getByTestId("vision-modal-measure-goal")).toHaveValue("");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save vision" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Pick a savings goal for that measure, or switch it back to a number you keep.",
+    );
+    expect(stub.called("PUT /api/v1/marriage/vision/2026")).toBe(false);
+  });
+
   it("+ Add milestone appends a row with year, title and note", async () => {
     renderModal(visionFixture({ milestones: [] }));
     await screen.findByTestId("vision-modal-theme");

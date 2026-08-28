@@ -3540,15 +3540,29 @@ no test suite can hold.
   into "0 of 1" on this walk, because the whole document, placeholder measure
   included, goes back on every save (spec decision 5). The household never
   chose "0 of 1"; the editor's own default did, and nothing in the modal
-  flags that row as needing attention before Save is pressed. This is a
-  documented, deliberate trade-off (the comment is real and the reasoning
-  is sound — "not a silently resurrected link to a goal that no longer
-  resolves") and this walk did not change it, the same standard Retros' own
-  "Findings, not defects" held its disagreements to. Recorded here because
-  the general shape recurs: **a form that seeds itself from a state its own
-  submission cannot represent needs to say so in the UI, not only in a code
-  comment** — a household editing an unrelated field should not be able to
-  fabricate a number by omission.
+  flags that row as needing attention before Save is pressed. **Revised
+  verdict, from the final whole-branch review: this is a latent defect, not
+  an accepted trade-off.** The comment at the seeding effect is real and its
+  reasoning about *which shape to land in* is sound — typed, blank-but-valid
+  defaults beats a silently resurrected link — but that reasoning never
+  addressed whether the *fabricated figure* should be allowed to leave the
+  editor unresolved. It is dormant today for one reason only: Goals has no
+  `DELETE` route and no `GoalRepository.Delete` (this same walk's own
+  criterion 8 finding, above), so `MeasureBroken` cannot be reached through
+  the running product at all — this walk needed a raw SQL `DELETE` against
+  the database to produce it. Nothing here is a decision the household ever
+  benefits from; it is a gap that has not yet had the chance to bite anyone.
+  **The fix, when Goals gains a real delete, is not relaxing the domain** —
+  "read tolerantly, write strictly" (`MeasureBroken`'s own doc comment) is
+  correct and should stay — **but a third seeded state in the modal**: a
+  visibly unresolved row, distinct from both typed and linked, that blocks
+  Save until the household either picks a goal or types a number. Noted at
+  the seeding effect in `VisionModal.tsx` as well, so whoever builds Goals'
+  delete finds it from the code, not only from this log. Recorded here
+  because the general shape recurs beyond this one feature: **a form that
+  seeds itself from a state its own submission cannot represent needs to
+  say so in the UI, not only in a code comment** — a household editing an
+  unrelated field should not be able to fabricate a number by omission.
 
 ---
 

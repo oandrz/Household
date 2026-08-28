@@ -205,6 +205,42 @@ func TestPutVisionWithAStaleVersionIsAConflict(t *testing.T) {
 	assertErrorResponse(t, second, http.StatusConflict, "VISION_CHANGED")
 }
 
+// TestPutVisionWithALinkedMeasureMissingAGoalIs422 pins errors.go's own
+// split of the domain's two measure-shape sentinels into two different
+// codes and messages (the final whole-branch review's own A3 finding): a
+// household that switches a measure to "A savings goal" and saves without
+// picking one has picked NEITHER, so it must never be told VISION_MEASURE_
+// INVALID's "not both" copy -- that message is actively wrong for this
+// shape. VisionModal.tsx's own client-side check (added alongside this
+// fix) stops this request from ever leaving the browser, which is exactly
+// why this HTTP-layer test exists: with that guard in place, nothing else
+// in this codebase reaches MapDomainError's ErrVisionMeasureGoalRequired
+// case, so only a test that calls the handler directly -- bypassing the
+// client guard the way a stale frontend build or a non-browser caller
+// would -- can prove that case, and its own code, is wired correctly.
+func TestPutVisionWithALinkedMeasureMissingAGoalIs422(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	body := map[string]any{
+		"version":     0,
+		"theme":       "Slow down together",
+		"description": "",
+		"pillars": []any{
+			map[string]any{
+				"name":        "Us before logistics",
+				"description": "",
+				"measures": []any{
+					map[string]any{"label": "Emergency fund", "kind": "linked", "goalId": ""},
+				},
+			},
+		},
+		"milestones": []any{},
+	}
+	rec := env.authed(t, http.MethodPut, "/api/v1/marriage/vision/2026", body, session, csrf)
+	assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "VISION_MEASURE_GOAL_REQUIRED")
+}
+
 // TestPutVisionRoundTripsPillarsAndMilestones is a wire-level pin that a
 // save's response actually carries back what was sent, composed with the
 // service's own arithmetic (a 2-of-2 typed measure comes back Met) --

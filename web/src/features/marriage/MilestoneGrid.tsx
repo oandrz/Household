@@ -1,10 +1,9 @@
 // The "Longer horizon" panel: one card per milestone plus the dashed
 // "+ Add milestone" affordance. `onEdit` is a plain callback owned by
-// VisionPage.tsx -- today a no-op placeholder (task-11's own ruling 2), the
-// same one the header's own Edit vision button calls, matching the design's
-// two entry points into one editor (dc.html: both carry
-// onClick="{{ openVision }}"). Task 12 replaces the placeholder wholesale;
-// this component does not change when that happens.
+// VisionPage.tsx -- it opens the real Edit-vision modal (Vision spec's
+// task 12), the same one the header's own Edit vision button calls,
+// matching the design's two entry points into one editor (dc.html: both
+// carry onClick="{{ openVision }}").
 import { VISION_COPY } from "./visionCopy";
 import type { VisionMilestone } from "./visionSchemas";
 
