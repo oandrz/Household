@@ -47,10 +47,15 @@ var invitePreAuthRoutes = map[string]bool{
 // movableClock is a controllable usecase.Clock. It has two callers, for two
 // different reasons: TestSessionCookiesSlideWhenExtended fast-forwards time
 // without sleeping to prove a session's cookies slide when the session is
-// extended near expiry, and TestOwnerSeesTheTwelveMonthTrend pins the clock
-// to a fixed instant so the twelve-month trend window it asserts on is a
-// known, reproducible range rather than whatever month the suite happens to
-// run in.
+// extended near expiry, and TestOwnerSeesTheTwelveMonthTrend anchors the clock
+// to a stable instant inside the current month so the twelve-month trend
+// window it asserts on is exact.
+//
+// Both callers anchor on real now, and a third must too. Session expiry is
+// enforced by Postgres's now() inside GetLiveSession's WHERE clause, not by
+// this clock, so a test that pins this clock to an absolute past date still
+// signs in against real wall time -- and starts failing one SessionTTL after
+// it is written. That is not hypothetical; it is what happened here.
 type movableClock struct{ now time.Time }
 
 func (c *movableClock) Now() time.Time          { return c.now }

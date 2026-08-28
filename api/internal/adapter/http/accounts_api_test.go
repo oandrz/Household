@@ -249,15 +249,40 @@ func TestAccountErrorCodesMatchTheSpecTable(t *testing.T) {
 }
 
 // TestOwnerSeesTheTwelveMonthTrend pins the wire shape the Finances chart
-// reads. The window is fixed by the clock, so the months are assertable.
+// reads.
+//
+// The clock is anchored to real now rather than to an absolute date, because
+// session expiry is not enforced by this clock at all: GetLiveSession's WHERE
+// clause carries `expires_at > now()` -- Postgres's now(), real wall time --
+// and session_repo.go states outright that there is no second check in Go. An
+// injected clock cannot reach that guard, so a test pinned to an absolute past
+// instant stops authenticating exactly one SessionTTL after it is written.
+// This one did: green for thirty days, then red every day after, while its own
+// comment promised a "known, reproducible range".
+//
+// The anchor is the 15th at midday because every month has a 15th. The 28th is
+// not safe in February, the 1st sits on a timezone boundary, and AddDate
+// normalises an overflowing day forward into the next month rather than
+// refusing -- so an anchor on the 31st would silently assert the wrong window.
+// Every month asserted below is derived from the anchor, so the window travels
+// with the calendar and the assertions stay exact.
 func TestOwnerSeesTheTwelveMonthTrend(t *testing.T) {
-	env := newTestEnvWithClock(t, &movableClock{now: time.Date(2026, 7, 28, 9, 0, 0, 0, time.UTC)})
+	now := time.Now().UTC()
+	anchor := time.Date(now.Year(), now.Month(), 15, 12, 0, 0, 0, time.UTC)
+	thisMonth := anchor.Format("2006-01")
+	oldestMonth := anchor.AddDate(0, -11, 0).Format("2006-01")
+
+	env := newTestEnvWithClock(t, &movableClock{now: anchor})
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
 
 	env.mustCreateAccount(t, session, csrf, map[string]any{
 		"nickname": "DBS Everyday", "type": "cash",
 		"openingBalanceMinor": 824_055, "openingBalanceCurrency": "SGD",
-		"openingBalanceAsOf": "2026-07-01",
+		// The first of the anchor's own month. usecase/account.go refuses an
+		// opening balance dated more than a day ahead of Clock.Now(), and the
+		// assertions below need the account tracked from this month and from
+		// no month earlier.
+		"openingBalanceAsOf": thisMonth + "-01",
 	})
 
 	rec := env.authedGet(t, "/api/v1/accounts", session)
@@ -283,28 +308,29 @@ func TestOwnerSeesTheTwelveMonthTrend(t *testing.T) {
 	if len(points) != 12 {
 		t.Fatalf("points = %d, want 12", len(points))
 	}
-	if points[0].Month != "2025-08" || points[11].Month != "2026-07" {
-		t.Errorf("window = %s..%s, want 2025-08..2026-07", points[0].Month, points[11].Month)
+	if points[0].Month != oldestMonth || points[11].Month != thisMonth {
+		t.Errorf("window = %s..%s, want %s..%s",
+			points[0].Month, points[11].Month, oldestMonth, thisMonth)
 	}
 	// An account opened this month: every earlier month is a gap, and a gap
 	// is a null, never a zero.
 	if points[0].NetWorthMinor != nil {
-		t.Errorf("2025-08 = %d, want null -- nothing was tracked then", *points[0].NetWorthMinor)
+		t.Errorf("%s = %d, want null -- nothing was tracked then", oldestMonth, *points[0].NetWorthMinor)
 	}
 	if points[11].NetWorthMinor == nil || *points[11].NetWorthMinor != 824_055 {
-		t.Errorf("2026-07 = %v, want 824055", points[11].NetWorthMinor)
+		t.Errorf("%s = %v, want 824055", thisMonth, points[11].NetWorthMinor)
 	}
 	// The account was opened this month, so the newest bar has every counted
 	// account and the oldest bar is missing the only one there is -- not
 	// merely unknown, but explicitly incomplete.
 	if !points[11].Complete {
-		t.Error("2026-07 complete = false, want true -- the account is tracked by this month")
+		t.Errorf("%s complete = false, want true -- the account is tracked by this month", thisMonth)
 	}
 	if points[0].Complete {
-		t.Error("2025-08 complete = true, want false -- the account was not open yet")
+		t.Errorf("%s complete = true, want false -- the account was not open yet", oldestMonth)
 	}
 	if got.Summary.Trend.ChangeBasisPoints != nil {
-		t.Errorf("changeBasisPoints = %d, want absent -- June is unknown",
+		t.Errorf("changeBasisPoints = %d, want absent -- the month before the window is unknown",
 			*got.Summary.Trend.ChangeBasisPoints)
 	}
 

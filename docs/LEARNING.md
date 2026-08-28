@@ -1347,6 +1347,29 @@ something only that guard can produce.
   generates utility classes from, and a non-namespaced custom property that
   nothing but a media query ever references is not that.
 
+- **An injected clock did not reach the guard the test depended on, so the
+  test rotted on a schedule.** `TestOwnerSeesTheTwelveMonthTrend` pinned
+  `movableClock` to `2026-07-28` to make the trend window assertable. It
+  passed for thirty days and then failed every day after, with a 401 on the
+  very first authenticated request — nothing to do with the trend. Session
+  validity is enforced in SQL, not in Go: `GetLiveSession`'s `WHERE` carries
+  `expires_at > now()`, *Postgres's* `now()`, and `session_repo.go` already
+  said outright that "there is no separate check here". The injected clock
+  moved the app's idea of time and left the database's alone, so once real
+  wall time passed the pinned date plus `SessionTTL`, the session the test
+  signed in with was already expired before it made a single request. The
+  fake was real enough to look like control over time and not real enough to
+  be it. What makes this worth writing down twice: the test's own doc comment
+  claimed the pinned clock gave "a known, reproducible range rather than
+  whatever month the suite happens to run in" — the precise opposite of what
+  it had. A comment asserting a property is not the property. Fixed by
+  anchoring on `time.Now().UTC()` and deriving every asserted month from that
+  anchor, which is what the one other `movableClock` caller,
+  `TestSessionCookiesSlideWhenExtended`, already did — it moves *forward* from
+  real now and has never rotted. **When a fake stands in for something a real
+  dependency also owns, ask which of the two the code under test actually
+  consults.**
+
 **If a behaviour depends on the platform, verify it in the platform.** A real
 browser is what found every frontend defect above, and nothing else could
 have: jsdom has no working `<dialog>`, no CSS cascade and no layout at all, so
