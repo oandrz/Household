@@ -13,7 +13,7 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 80 of 106 features built or partly built.
+**Where things stand:** 83 of 106 features built or partly built.
 
 > **In production since 2026-08-15**, at <https://oink.mywire.org>. **No count
 > below changes** — deployment is not a design feature, and this file's totals
@@ -359,6 +359,27 @@ taking the stated totals from 65/15/23/2 = 105 to **65/15/24/2 = 106**. The
 "Where things stand" headline (Built + Partial) is unchanged at **80**, now of
 **106** rather than 105: a new Not-started row moves the denominator only.
 
+**The Vision page ships, 2026-08-29 — three rows move.** Vision spec's task
+11 built `VisionPage.tsx`, `PillarCard.tsx` and `MilestoneGrid.tsx` (the
+route, the sidebar entry and the `/marriage` index redirect landing in the
+same change, `110ab0a`'s own condition, restated in section 6 above): the
+theme hero, the pillar grid with its measures, and the longer-horizon
+milestone panel all read real data off `useVision(year)` (Vision spec's task
+10). Three of the five Vision rows the reconnaissance above found move from
+Not-started to Built — yearly theme, pillars with measures, longer-horizon
+milestones. The other two stay ⬜: the marriage-duration block is still
+deliberately unbuilt (Vision spec decision 2), and Edit vision (modal) is
+still a placeholder `onEdit` — Vision spec's task 12 replaces it wholesale
+next, which is also why the "+ Add milestone" tile counts as shipped here
+rather than held back: it is visible and wired to the same handler the
+header's own Edit vision button is, matching the design's own two entry
+points into one editor, even though neither does anything yet. Recounting by
+this file's own rule leaves every area unchanged except Marriage, which
+moves from 6/0/10/0 (16 rows) to **9/0/7/0** (16 rows) — three rows move from
+Not-started to Built, none added or removed — taking the stated totals from
+65/15/24/2 = 106 to **68/15/21/2 = 106**. The "Where things stand" headline
+(Built + Partial) moves from 80 to **83**, still of **106**.
+
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
 | Entry & authentication | 10 | 1 | 0 | 0 |
@@ -366,10 +387,10 @@ taking the stated totals from 65/15/23/2 = 105 to **65/15/24/2 = 106**. The
 | Household settings | 11 | 8 | 2 | 0 |
 | Overview (home) | 6 | 2 | 2 | 0 |
 | Money | 25 | 3 | 7 | 0 |
-| Marriage | 6 | 0 | 10 | 0 |
+| Marriage | 9 | 0 | 7 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **65** | **15** | **24** | **2** |
+| **Total** | **68** | **15** | **21** | **2** |
 
 ---
 
@@ -979,13 +1000,14 @@ sentence "Arriving in slice 3" reads as a broken product rather than an
 honest one — worth keeping on record here since it explains why Marriage had
 no route at all between that commit and task 10, not because the feature
 regressed. One known minor gap task 10 left rather than fixing speculatively:
-`marriageGuardRoute` has one child (`retros`) and no index route, so a caller
-who types bare `/marriage` by hand now matches a real route (unlike before,
-when it 404'd) and sees the sidebar shell with a blank content area instead
-of a page — nothing in the design links to bare `/marriage`, so this is
-low-priority, but the next task to give Marriage a second page should
-consider whether an index route (redirecting to Retros, or a real Marriage
-landing page) belongs with it.
+`marriageGuardRoute` had one child (`retros`) and no index route, so a caller
+who typed bare `/marriage` by hand matched a real route (unlike before, when
+it 404'd) and saw the sidebar shell with a blank content area instead of a
+page. **The Vision spec's task 11 closed that gap** the moment Marriage grew
+a second page to redirect to: `marriageIndexRoute` (path `"/"`, `beforeLoad`
+throwing `redirect({ to: "/marriage/retros" })`) now sends bare `/marriage`
+to Retros, the same "first page wins" choice `moneyIndexRoute` already made
+for Money.
 
 | Feature | State |
 |---|---|
@@ -995,11 +1017,11 @@ landing page) belongs with it.
 | Start retro (modal) with mood, money check-in and actions | ✅ *(the design's own "45 min" duration is drawn, not built — spec decision 8)* |
 | Carry an unfinished action into the next retro (no mockup — see below) | ✅ |
 | Delete a draft retro (no mockup — see below) | ✅ |
-| Vision — yearly theme | ⬜ |
+| Vision — yearly theme | ✅ *(`VisionPage.tsx`'s theme hero, Vision spec's task 11 — the year label, the theme in literal quotes, and its description; an empty description renders nothing, not an empty block)* |
 | Vision — marriage duration beside the theme ("Married · 14 years · Feb 14, 2012") | ⬜ *(drawn, deliberately not built — Vision spec decision 2. Nothing in this product stores a wedding date, no feature would read one, and the only derived figure is today minus the date; building it costs a column, a modal field the design itself never draws, a null state, a visibility decision and a leap-day edge, for no behaviour. The theme hero renders full width instead. Same treatment as the design's drawn-but-unbuilt "45 min" retro duration, Retros decision 8)* |
-| Vision — pillars with measures | ⬜ |
-| Vision — longer-horizon milestones | ⬜ |
-| Edit vision (modal) | ⬜ |
+| Vision — pillars with measures | ✅ *(`PillarCard.tsx`, Vision spec's task 11 — numbered "Pillar 1", "Pillar 2"…, name, description and every measure. A measure with `hasFigure: false` (a linked goal deleted, a link that failed to resolve, or an unrecognised kind) renders its label and no number at all, never "0 of 0" or "0%" — the same "blank the figure and say why" rule Accounts applies when a primary-currency change leaves net worth uncomputable)* |
+| Vision — longer-horizon milestones | ✅ *(`MilestoneGrid.tsx`, Vision spec's task 11 — one card per milestone, in order, with year, title and note; an empty note renders nothing. The dashed "+ Add milestone" tile is visible but not yet functional — it calls the same placeholder `onEdit` the header's Edit vision button does, until the row below builds the modal)* |
+| Edit vision (modal) | ⬜ *(`VisionPage.tsx`'s `onEdit` is a no-op placeholder as of Vision spec's task 11 — both entry points, the header's Edit vision button and MilestoneGrid's "+ Add milestone" tile, already call it, so wiring the real modal in needs no further plumbing on this page)* |
 | Agreements by section | ⬜ |
 | Agreements empty state with starter sets | ⬜ |
 | Propose a change — add, edit, remove (modal) | ⬜ |

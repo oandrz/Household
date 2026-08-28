@@ -39,8 +39,14 @@ brief ever asked for it (`docs/LEARNING.md` pattern 15). **Retros' own
 fifteen-criterion browser walk (Task 17) has run and passed, 15 of 15**
 (2026-08-18), the same bar every Money feature was held to before its
 tracker row could read ✅, recorded in
-`docs/superpowers/plans/2026-08-16-hearth-retros-verification.md`. Vision and
-Agreements have not been started. Family is not built. See
+`docs/superpowers/plans/2026-08-16-hearth-retros-verification.md`. Vision's
+own read side is now real too — `VisionPage.tsx`, `PillarCard.tsx` and
+`MilestoneGrid.tsx` (Vision spec's task 11) render the theme hero, pillar
+measures and longer-horizon milestones `useVision` already exposed (task
+10) — but its Edit-vision modal (Vision spec's task 11 left `onEdit` a no-op
+placeholder; Vision spec's task 12 builds the real one) is not, so a
+household can see this year's vision and cannot yet set one. Agreements has
+not been started. Family is not built. See
 `docs/FEATURE_TRACKER.md` section 6 for exactly which of Marriage's rows are
 done, including the two deliberate divergences from the design spec's own
 prose the walk found and left as shipped.
@@ -384,7 +390,7 @@ graph TD
     Session --> Cap{"Capability-gated<br/>route group?"}
     Cap -->|"accounts: money"| RequireCap["requireCapability(money)<br/>403 unless the caller's membership has it"]
     Cap -->|"transactions, categories,<br/>budgets, goals, bills: money AND owner —<br/>reads included"| RequireCapTxn["requireCapability(money)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
-    Cap -->|"retros: marriage AND owner —<br/>reads included"| RequireCapRetro["requireCapability(marriage)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
+    Cap -->|"retros, marriage/vision:<br/>marriage AND owner — reads included"| RequireCapRetro["requireCapability(marriage)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
     Cap -->|"no — most routes"| Safe{"GET or HEAD?"}
     RequireCap --> Safe
     RequireCapTxn --> Safe
@@ -2047,6 +2053,44 @@ web/src/
                        brief ever asked for deleting a single action
                        (docs/LEARNING.md pattern 15). Mounted at
                        /marriage/retros
+
+                       VisionPage -- header (title, subtitle, Edit vision
+                       button), a green theme hero (year label, theme in
+                       literal quotes, description), a three-column
+                       PillarCard grid and the "Longer horizon"
+                       MilestoneGrid panel, plus the loading/error/
+                       owner-only/empty states RetrosPage already
+                       established just above. No marriage-duration block
+                       beside the theme hero -- Vision spec decision 2, the
+                       design draws "Married · 14 years · Feb 14, 2012" but
+                       nothing in this product stores a wedding date, so the
+                       hero renders theme and description full width
+                       instead. version: 0 (visionSchema) means the year has
+                       no vision yet and renders an empty state with its own
+                       call to action, never a grid of blank cards.
+                       PillarCard renders one pillar's "Pillar N" label,
+                       name, description and measures -- a measure with
+                       hasFigure: false (a linked goal deleted, a link that
+                       failed to resolve, or a kind this build does not
+                       recognise, measureDTO's own comment) renders its
+                       label and no number at all, never "0 of 0" or "0%",
+                       the one place this rule is expressed. MilestoneGrid
+                       renders one card per milestone (year, title, note)
+                       plus a dashed "+ Add milestone" tile. Both the header's
+                       Edit vision button and "+ Add milestone" call the same
+                       onEdit handler VisionPage owns -- a no-op placeholder
+                       as of this task; the Edit-vision modal (Vision spec's
+                       task 12) replaces it wholesale, and VisionPage's own
+                       `year` state (initialised to currentVisionYear(),
+                       passed into useVision(year)) is what that modal's own
+                       year select will later write to. Every pillar's and
+                       the vision's own description renders nothing when
+                       empty, not an empty block -- the empty-vision response
+                       carries "" on the wire, never null. useVision reads
+                       and writes /marriage/vision; visionQueryKeys.ts holds
+                       its cache key and currentVisionYear() the same way
+                       retroQueryKeys.ts does for Retros. Mounted at
+                       /marriage/vision
     placeholder/       named stand-ins for unbuilt areas, and only for areas
                        a household can already reach. Empty of callers as of
                        this feature: / stopped using it when the interim
@@ -2087,16 +2131,24 @@ and Bills (`/money/bills`) — via the `SPACE_PAGES` map in `Sidebar.tsx` (see
 **`/marriage/retros` is Marriage's own return to the app** (task 10),
 mirroring the shape every capability-gated `/money/*` route already takes:
 `marriageGuardRoute` (`RequireCapability cap="marriage"`) nested under
-`shellRoute`, with `retros` as its one child. Unlike `moneyGuardRoute`,
-`marriageGuardRoute` has no index route — nothing in the design links to
-bare `/marriage`, so a caller who types it anyway now matches a real route
-(unlike before task 10) and sees the sidebar with a blank content area,
+`shellRoute`. Task 10 gave it one child (`retros`) and no index route,
+which meant a caller who typed bare `/marriage` matched a real route
+(unlike before task 10) but saw the sidebar with a blank content area,
 neither a page nor a 404 (`docs/LEARNING.md`'s frontend section has the full
-mechanism). `SPACE_PAGES.marriage` renders the identical grouped
-label-plus-links shape Money uses, with one link (Retros) — the
-single-link branch that shape used to have a separate code path for was
-already deleted as unreachable before Marriage needed it again, so no
-rendering logic changed, only the map entry.
+mechanism of why — a guard route with children but no index matches the
+bare parent path too). **Vision spec's task 11 added `/marriage/vision`
+(`VisionPage`) as Marriage's second child, and closed that gap with it**:
+`marriageIndexRoute` (path `"/"`, `beforeLoad` throwing
+`redirect({ to: "/marriage/retros" })`) now sends bare `/marriage` to
+Retros, the same "first page wins" choice `moneyIndexRoute` already made for
+Money — though Money's own index route *is* its first page (`FinancesPage`)
+rather than redirecting to a sibling, since Finances has no separate URL of
+its own the way Retros does. `SPACE_PAGES.marriage` renders the identical
+grouped label-plus-links shape Money uses, now with two links (Retros,
+Vision & goals) — the single-link branch that shape used to have a separate
+code path for was already deleted as unreachable before Marriage first
+needed it (task 10), so no rendering logic changed for either link, only the
+map entries.
 
 **`/` is a real page, and it is the only one with no capability guard above
 it.** Every other screen sits behind `RequireAuth` *and* `RequireCapability`,
