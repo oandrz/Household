@@ -151,8 +151,11 @@ export function GoalCard({
           <span className="tabular">{formatMoney(goal.targetMinor, goal.currency, symbol)}</span>
           {/* The date clause is omitted entirely when targetMonth is null
               (a dateless goal, decision 3) -- not rendered empty. Kept
-              outside both tabular spans above: it carries a year
-              ("Dec 2026"), and the placement rule excludes dates by name. */}
+              outside both tabular spans above: appended as
+              " · by Dec 2026", it is a prose fragment tacked onto the
+              line, not a value to scan -- index.css's own .tabular
+              comment is the one statement of that exclusion; not
+              restated here. */}
           {goal.targetMonth && ` · ${GOAL_COPY.dateClause(targetMonthLabel(goal.targetMonth))}`}
         </div>
         <div className="tabular mt-2.5 text-[12px] text-muted">
