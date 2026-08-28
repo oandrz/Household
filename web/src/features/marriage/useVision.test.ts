@@ -41,11 +41,11 @@ describe("useVision", () => {
     });
 
     const { result } = renderUseVision(2026);
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await waitFor(() => expect(result.current.loading).toBe(false));
 
     expect(result.current.error).toBeNull();
-    expect(result.current.vision?.version).toBe(0);
-    expect(result.current.vision?.theme).toBe("");
+    expect(result.current.data?.version).toBe(0);
+    expect(result.current.data?.theme).toBe("");
   });
 
   // A hook that let a caller pass version could send a stale one by
@@ -93,7 +93,7 @@ describe("useVision", () => {
     });
 
     const { result } = renderUseVision(2026);
-    await waitFor(() => expect(result.current.vision?.version).toBe(4));
+    await waitFor(() => expect(result.current.data?.version).toBe(4));
 
     await act(() =>
       result.current.saveVision({
@@ -107,7 +107,7 @@ describe("useVision", () => {
     expect(putBody).toMatchObject({ version: 4 });
     // Proves saveVision invalidates and awaits the refetch, not just fires
     // the PUT -- the same reason useRetro.ts's own writes await afterWrite.
-    await waitFor(() => expect(result.current.vision?.version).toBe(5));
+    await waitFor(() => expect(result.current.data?.version).toBe(5));
   });
 
   it("sends version 0 for a year that had none, so the save is a create", async () => {
@@ -127,12 +127,12 @@ describe("useVision", () => {
     });
 
     const { result } = renderUseVision(2026);
-    await waitFor(() => expect(result.current.vision?.version).toBe(0));
+    await waitFor(() => expect(result.current.data?.version).toBe(0));
 
     await act(() => result.current.saveVision({ theme: "T", description: "", pillars: [], milestones: [] }));
 
     expect(putBody).toMatchObject({ version: 0 });
-    await waitFor(() => expect(result.current.vision?.version).toBe(1));
+    await waitFor(() => expect(result.current.data?.version).toBe(1));
   });
 
   it("refuses a response whose measure kind it does not recognise", async () => {
@@ -171,6 +171,132 @@ describe("useVision", () => {
 
     const { result } = renderUseVision(2026);
     await waitFor(() => expect(result.current.error).toBeTruthy());
-    expect(result.current.vision).toBeUndefined();
+    expect(result.current.data).toBeUndefined();
+  });
+
+  // The 409 VISION_CHANGED / everything-else distinction is the whole point
+  // of `conflict`: it must mean specifically "another save already landed",
+  // not "some save request failed" -- the same reason useRetro.ts checks
+  // `err.code === "RETRO_CHANGED"` rather than treating any mutation error
+  // as a conflict.
+  it("sets conflict when a save fails with 409 VISION_CHANGED", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/marriage/vision?year=2026": {
+        status: 200,
+        body: { vision: visionFixture({ version: 3 }) },
+      },
+      "PUT /api/v1/marriage/vision/2026": {
+        status: 409,
+        body: {
+          error: { code: "VISION_CHANGED", message: "This vision changed while you were editing it." },
+        },
+      },
+    });
+
+    const { result } = renderUseVision(2026);
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    expect(result.current.conflict).toBe(false);
+
+    await act(() =>
+      result.current
+        .saveVision({ theme: "mine", description: "", pillars: [], milestones: [] })
+        .catch(() => {}),
+    );
+
+    expect(result.current.conflict).toBe(true);
+  });
+
+  it("does not set conflict when a save fails for another reason", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/marriage/vision?year=2026": {
+        status: 200,
+        body: { vision: visionFixture({ version: 3 }) },
+      },
+      "PUT /api/v1/marriage/vision/2026": {
+        status: 500,
+        body: { error: { code: "INTERNAL", message: "Something broke." } },
+      },
+    });
+
+    const { result } = renderUseVision(2026);
+    await waitFor(() => expect(result.current.data).toBeDefined());
+
+    await act(() =>
+      result.current
+        .saveVision({ theme: "mine", description: "", pillars: [], milestones: [] })
+        .catch(() => {}),
+    );
+
+    expect(result.current.conflict).toBe(false);
+  });
+
+  // conflict is cleared "on a successful refetch," not left true forever once
+  // tripped -- Task 12's modal needs its reload message to go away once the
+  // page shows current data again. useRetro.ts's own test of the same name
+  // covers the identical reasoning for retros.
+  it("reload clears conflict once the refetch resolves successfully", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/marriage/vision?year=2026": [
+        { status: 200, body: { vision: visionFixture({ version: 3 }) } },
+        { status: 200, body: { vision: visionFixture({ version: 3 }) } },
+      ],
+      "PUT /api/v1/marriage/vision/2026": {
+        status: 409,
+        body: {
+          error: { code: "VISION_CHANGED", message: "This vision changed while you were editing it." },
+        },
+      },
+    });
+
+    const { result } = renderUseVision(2026);
+    await waitFor(() => expect(result.current.data).toBeDefined());
+
+    await act(() =>
+      result.current
+        .saveVision({ theme: "mine", description: "", pillars: [], milestones: [] })
+        .catch(() => {}),
+    );
+    expect(result.current.conflict).toBe(true);
+
+    await act(async () => {
+      await result.current.reload();
+    });
+
+    expect(result.current.conflict).toBe(false);
+  });
+
+  // A reload() that itself fails (offline, a 500) has shown the caller
+  // nothing current, so there is nothing yet to call resolved -- conflict
+  // must stay set rather than being cleared unconditionally the moment
+  // reload() is merely called.
+  it("reload leaves conflict set when the refetch itself fails", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/marriage/vision?year=2026": [
+        { status: 200, body: { vision: visionFixture({ version: 3 }) } },
+        { status: 500, body: { error: { code: "INTERNAL", message: "Something broke." } } },
+      ],
+      "PUT /api/v1/marriage/vision/2026": {
+        status: 409,
+        body: {
+          error: { code: "VISION_CHANGED", message: "This vision changed while you were editing it." },
+        },
+      },
+    });
+
+    const { result } = renderUseVision(2026);
+    await waitFor(() => expect(result.current.data).toBeDefined());
+
+    await act(() =>
+      result.current
+        .saveVision({ theme: "mine", description: "", pillars: [], milestones: [] })
+        .catch(() => {}),
+    );
+    expect(result.current.conflict).toBe(true);
+
+    await act(async () => {
+      await result.current.reload();
+    });
+
+    expect(result.current.conflict).toBe(true);
   });
 });
