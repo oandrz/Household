@@ -165,12 +165,51 @@ describe("GoalsCard", () => {
     expect(await screen.findByText("Goals on track")).toBeInTheDocument();
     expect(screen.queryByText("No goals yet")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Create a goal" })).not.toBeInTheDocument();
-    // Nothing in `summary` describes an achieved-only household today (the
-    // design has no copy for it, and inventing one is outside this fix's
-    // scope) -- so the honest render is the heading alone, with none of the
-    // dated/next/no-date lines, none of which apply to an achieved goal.
+    // None of the dated/next/no-date lines apply to an achieved goal, so none
+    // of them render. What fills the card instead is asserted in its own test
+    // below -- an earlier round of this fix stopped here, at a card that
+    // correctly skipped the empty state and then had nothing left to draw.
     expect(screen.queryByText(/^\d+ of \d+$/)).not.toBeInTheDocument();
     expect(screen.queryByText(/^next:/)).not.toBeInTheDocument();
     expect(screen.queryByText(/with no date/)).not.toBeInTheDocument();
+  });
+
+  // The state a household reaches by succeeding: its only goal is funded and
+  // not yet archived. Every clause below `hasAnyGoals` is null at once -- an
+  // achieved goal is counted in neither `datedCount` nor `noDateCount` and is
+  // never `nextGoal` -- so the guard above correctly refused the empty state
+  // and the card then painted its heading over blank space. The guard was
+  // right; there was simply no fourth branch behind it.
+  it("says something true when every goal is already achieved", async () => {
+    renderWithRouter(
+      <GoalsCard
+        goals={goalsFixture({ datedCount: 0, noDateCount: 0, nextGoal: null }, [
+          goalFixture({ id: "g1", name: "Japan 2027", status: "achieved", percent: 100 }),
+        ])}
+      />,
+    );
+
+    expect(await screen.findByText("Goals on track")).toBeInTheDocument();
+    expect(screen.getByText("All goals reached")).toBeInTheDocument();
+
+    // Not the never-had-a-goal empty state: this household has one, and it won.
+    expect(screen.queryByText("No goals yet")).not.toBeInTheDocument();
+  });
+
+  // The fourth branch must stay closed for every household that still has
+  // something left to do, or it would sit above a real "2 of 3" and tell a
+  // household mid-way that it was finished.
+  it("does not claim every goal is reached while any clause still applies", async () => {
+    renderWithRouter(
+      <GoalsCard
+        goals={goalsFixture(
+          { onTrackCount: 2, datedCount: 3, noDateCount: 1, nextGoal: null },
+          [goalFixture({ id: "g1" }), goalFixture({ id: "g2" })],
+        )}
+      />,
+    );
+
+    expect(await screen.findByText("2 of 3")).toBeInTheDocument();
+    expect(screen.queryByText("All goals reached")).not.toBeInTheDocument();
   });
 });

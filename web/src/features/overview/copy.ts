@@ -78,6 +78,10 @@ export const OVERVIEW_COPY = {
   // datedCount: 0, which still has goals, just none with a date. Mirrors
   // budgetNone/budgetSetUp above: a way in, not a blank card.
   goalsNone: "No goals yet",
+  // Every live goal is achieved. Distinct from goalsNone (never had one) and
+  // from the dateless case (has goals, none of them dated): both of those
+  // still have something left to do, and this household does not.
+  goalsAllAchieved: "All goals reached",
   goalsCreate: "Create a goal",
 
   setupHeading: "Finish setting up",
