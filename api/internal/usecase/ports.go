@@ -1037,3 +1037,61 @@ type BillRepository interface {
 	// adds; the repository never does money arithmetic across currencies.
 	MonthTotals(ctx context.Context, householdID string, month time.Time) (dueMinor, paidMinor map[string]int64, err error)
 }
+
+// GoalProgress is the only thing Vision needs to know about a goal: what to
+// call it and how far along it is. Percent is already
+// domain.GoalProgressPercent's own capped 0-100 figure -- Vision does not
+// recompute it, because a second percent formula in this codebase is exactly
+// the kind of drift the Money specs spent five features avoiding.
+type GoalProgress struct {
+	GoalID  string
+	Name    string
+	Percent int
+}
+
+// GoalProgressReader is one method wide on purpose. VisionService needs the
+// progress of a handful of goal ids; handing it GoalRepository -- whose own
+// contract runs to forty lines about contribution scoping -- would be
+// interface segregation traded away for one percentage.
+type GoalProgressReader interface {
+	// ProgressByIDs returns an entry for each id that exists in THIS
+	// household. A missing id is a miss, not an error: a measure whose goal
+	// was deleted renders as a label with no figure, and making that an
+	// error path would turn an ordinary page render into a failure.
+	// Scoped by householdID in SQL, so a goal in another household is
+	// indistinguishable from one that does not exist.
+	ProgressByIDs(ctx context.Context, householdID string, goalIDs []string) (map[string]GoalProgress, error)
+}
+
+// VisionRepository stores one household's per-year visions. Every method is
+// scoped by householdID and must filter on it in SQL.
+type VisionRepository interface {
+	// Get reports domain.ErrNotFound when the household has no vision for
+	// that year. Turning that into the empty vision the screen renders is
+	// VisionService's job, not this one's -- a repository that invented a
+	// row would make "never set" and "set to blank" indistinguishable here.
+	Get(ctx context.Context, householdID string, year int) (domain.Vision, error)
+	// Save replaces the whole document in ONE transaction: upsert the parent,
+	// delete every child, insert the submitted ones. Partial success must be
+	// impossible -- BudgetRepo.Upsert is the model.
+	//
+	// Concurrency, in two cases that must not be collapsed:
+	//   v.Version == 0  -- a create. Succeeds only while that household-year
+	//                      has no row; reports domain.ErrVisionChanged if one
+	//                      appeared since the caller read the empty vision.
+	//   v.Version  > 0  -- an update, WHERE version = v.Version. Zero rows
+	//                      affected means either the vision was deleted or
+	//                      the other partner saved first, and those are
+	//                      different answers: re-read to tell them apart and
+	//                      report domain.ErrNotFound or
+	//                      domain.ErrVisionChanged accordingly.
+	//                      RetroRepo.Update's own comment explains why the
+	//                      cheap second read is worth it.
+	//
+	// A measure naming a goal outside this household must be refused with
+	// domain.ErrVisionGoalUnknown, checked INSIDE the transaction: the
+	// vision_measures FK only proves a goal exists somewhere, never that it
+	// is this household's -- the same hole validateLineCategories closes for
+	// budget lines.
+	Save(ctx context.Context, v domain.Vision) (domain.Vision, error)
+}
