@@ -13,7 +13,7 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 84 of 106 features built or partly built.
+**Where things stand:** 86 of 107 features built or partly built.
 
 > **In production since 2026-08-15**, at <https://oink.mywire.org>. **No count
 > below changes** — deployment is not a design feature, and this file's totals
@@ -404,17 +404,41 @@ Built, none added or removed — taking the stated totals from 68/15/21/2 = 106
 to **69/15/20/2 = 106**. The "Where things stand" headline (Built + Partial)
 moves from 83 to **84**, still of **106**.
 
+**Vision's two Overview surfaces ship, 2026-08-29 — one row added, one row
+moves.** Vision spec's task 13 built `VisionCard.tsx` and the check-in strip
+inside `NextRetroCard.tsx` — the last two pieces of Vision & goals living
+outside `/marriage/vision` itself. The Overview (home) section's own row for
+"Vision 2026 card" never existed even though that section's intro paragraph
+had counted the card among the design's seven since the Vision
+reconnaissance (2026-08-28) — added now as ✅ directly, the same
+find-and-build-in-one-motion this file has taken before, rather than landing
+as a bare ⬜ first. "Vision check-in strip" moves from Not-started to Built.
+Both surfaces read `useVision(currentVisionYear())` independently (one call
+in each component, not one lifted to `OverviewPage.tsx` and passed down) —
+`useVision` takes no `enabled` option, so gating the request for a member
+without `marriage` has to be OverviewPage choosing not to mount the
+component at all, the same shape `NextRetroCard.tsx`'s own header comment
+already gives for `useRetros`; the two calls share one TanStack Query cache
+entry, so mounting both costs one network request, not two — proved in
+`OverviewPage.test.tsx`, not merely assumed from how the library is
+documented to behave. Recounting by this file's own rule leaves every area
+unchanged except Overview (home), which moves from 6/2/2/0 (10 rows) to
+**8/2/1/0** (11 rows) — one row added as Built, one row moves from
+Not-started to Built — taking the stated totals from 69/15/20/2 = 106 to
+**71/15/19/2 = 107**. The "Where things stand" headline (Built + Partial)
+moves from 84 to **86**, now of **107**.
+
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
 | Entry & authentication | 10 | 1 | 0 | 0 |
 | Navigation shell | 7 | 1 | 1 | 0 |
 | Household settings | 11 | 8 | 2 | 0 |
-| Overview (home) | 6 | 2 | 2 | 0 |
+| Overview (home) | 8 | 2 | 1 | 0 |
 | Money | 25 | 3 | 7 | 0 |
 | Marriage | 10 | 0 | 6 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **69** | **15** | **20** | **2** |
+| **Total** | **71** | **15** | **19** | **2** |
 
 ---
 
@@ -531,17 +555,18 @@ The full checklist is at the end of `docs/LEARNING.md`.
 
 ## 4 · Overview (home)
 
-`/` is a real page as of the interim Overview (M2), and now carries five of
+`/` is a real page as of the interim Overview (M2), and now carries six of
 the design's **seven** cards (counted directly off `design/Household
 Dashboard.dc.html`'s own Overview screen — the money row of four, the
 Marriage "Next retro" card, "This week" and "Vision 2026"; the header's own
 "+ Add" button is not a card) — three from Money (net worth, budget, goals),
-one more from Bills (next bill) and one from Marriage (next retro) — plus a
-setup checklist and a limited-member panel the design does not draw. The
-remaining two cards (Vision check-in strip, "This week" agenda) need Vision
-and Family, neither of which exist yet — so this section is no longer
-mostly ⬜, and the page grows into the designed Overview rather than being
-replaced.
+one more from Bills (next bill) and two from Marriage (next retro, Vision
+2026) — plus a setup checklist and a limited-member panel the design does
+not draw. The Vision check-in strip (design's own line inside the Next retro
+card, not a card of its own, so it does not add to the seven) is built too.
+The one remaining card ("This week" agenda) needs Family, which does not
+exist yet — so this section is no longer mostly ⬜, and the page grows into
+the designed Overview rather than being replaced.
 
 | Feature | State |
 |---|---|
@@ -550,7 +575,8 @@ replaced.
 | Next bill card | ✅ — the next-due bill's name, amount and due date (or the overdue/autopay state in its place), reading `useBills`, the same hook and cache entry `/money/bills` itself uses |
 | Goals on track card | ✅ — the real `X of Y on track` figure and the next dated goal beneath it, reading `useGoals`, the same hook and cache entry `/money/goals` itself uses. A household whose every live goal is achieved reads "All goals reached": an achieved goal is counted in neither `datedCount` nor `noDateCount` and is never `nextGoal`, so all three clauses were null at once and the card painted its heading over blank space (`docs/LEARNING.md`, the zero-render pattern) |
 | Next retro card with carried-over actions | ✅ — shows the current month's retro (draft or finished), or the startable month as a prompt, plus its OPEN action count beneath. `GET /retros` carries both `actionCount` (the total) and `openActionCount` per row; the card reads the latter, the design's own "carried-over actions" figure. Shipped 🟡 first (Task 15, reading the total instead, which overstated outstanding work on a fully-ticked retro) — closed end to end (SQL subquery through the zod schema), leaving `RetroHistoryList`'s own "K actions, ticked or not" row reading the total it is supposed to |
-| Vision check-in strip | ⬜ |
+| Vision 2026 card | ✅ *(`VisionCard.tsx`, Vision spec's task 13 — a row this table never carried until now, though the section's own intro paragraph had already counted it among the seven cards since the Vision reconnaissance. Renders one line per pillar, in `position` order, each showing that pillar's FIRST measure with its live figures, not the design's own three flat commitment lines ("1 weekend away per quarter" etc.) — a third shape the design never says how to store (spec decision 3). A pillar with no measures falls back to its own name; a measure with `hasFigure: false` shows its label and no number. Omitted entirely — not an empty quotation — for a year with no vision yet (`version: 0`); Overview's setup checklist is the surface that names what is missing, not this card)* |
+| Vision check-in strip | ✅ *(inside `NextRetroCard.tsx`, Vision spec's task 13 — "Vision check-in: 2026 theme — "…"", gated on the theme being non-empty, which a version-0 year always sends as `""`, so the strip and the card agree about when there is nothing to show without a second, separate check)* |
 | "This week" agenda | ⬜ |
 | "+ Add" quick-create menu | 🟡 — four of six entries now live: Transaction, Account, Savings goal and Bill. Transaction and Bill are both disabled with their reason until an account exists — a bill needs a pay-from account the same way an expense needs a from-account; Savings goal has no such precondition (Goals decision 6 — there is no funding-source account to require). Calendar event and Marriage retro still join it in the change that builds each |
 | Setup checklist (no mockup — see below) | ✅ |

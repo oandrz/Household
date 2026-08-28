@@ -51,14 +51,15 @@ not been started. Family is not built. See
 `docs/FEATURE_TRACKER.md` section 6 for exactly which of Marriage's rows are
 done, including the two deliberate divergences from the design spec's own
 prose the walk found and left as shipped.
-Overview is **partly** built: `/` carries an interim page composed of five of
+Overview is **partly** built: `/` carries an interim page composed of six of
 the design's seven cards (the money row of four, Marriage's "Next retro",
 "This week" and "Vision 2026" — the header's own "+ Add" button is not a
-card) that Money and Marriage can now supply, plus a setup
+card) that Money and Marriage can now supply, plus the Vision check-in strip
+(inside the Next retro card, not a card of its own), a setup
 checklist and a quick-create menu, and it grows into the designed Overview as
-the rest of Marriage and Family arrive rather than being replaced (§7). It adds no
+Family arrives rather than being replaced (§7). It adds no
 endpoint, no table and no port — it is composition over what Accounts,
-Transactions, Budget, Goals and Bills already expose. The UX-repair round of
+Transactions, Budget, Goals, Bills and Vision already expose. The UX-repair round of
 2026-07-31 that preceded it shipped no feature at all — it bounded the page
 container, removed the two unbuilt spaces from the navigation along with
 their four routes, and rewrote copy; Marriage's route, guard and sidebar
@@ -1381,7 +1382,7 @@ graph TD
     Shell --> Drawer["NavDrawer — off-canvas below lg,<br/>lg:contents at lg and above"]
     Drawer --> Sidebar["Sidebar renders me.spaces —<br/>already filtered and ordered by the server —<br/>expanding each into its built pages client-side,<br/>and dropping a builtin space that has none"]
     Shell --> Page["Route content"]
-    Page --> Overview["/ Overview — GET /accounts,<br/>GET /budgets/{month} and GET /goals for<br/>an owner only, GET /household/members<br/>via the shared hook"]
+    Page --> Overview["/ Overview — GET /accounts,<br/>GET /budgets/{month}, GET /goals and<br/>GET /bills for an owner only; GET<br/>/household/members via the shared hook;<br/>GET /retros and GET /marriage/vision<br/>for a marriage member"]
     Page --> Settings["Settings panels — their own queries"]
     Settings -->|"on mutation"| Invalidate["invalidate ['me'] and the panel's query,<br/>awaited so the guard spans the refetch"]
 ```
@@ -1437,22 +1438,33 @@ page or several alike — Money renders as "MONEY" over Finances,
 Transactions, Budget, Goals and Bills; Marriage renders as "MARRIAGE" over
 its one page, Retros.
 
-**Overview fetches nothing of its own.** Its six requests are the ones
-Accounts, Budget, Goals, Bills, Retros and Settings already make, through the
-same hooks and the same cache keys, so a figure on the front door cannot
-disagree with the same figure on the screen it links to — the browser walk
-checks exactly that (net worth on `/` against net worth on `/money`).
-`useGoals` is the same hook `GoalsPage` itself calls, so the "X of Y on
-track" figure on Overview's Goals card and the same count on `/money/goals`
-share one cache entry rather than risking two independent reads of `GET
-/goals` disagreeing; `NextBillCard` reuses `useBills` the identical way,
-against `/money/bills`'s own cache entry, and gained no query of its own —
-the `enabled` option `useBills` grew for exactly this reuse (Task 11)
-predates `NextBillCard` by several tasks. `NextRetroCard` reuses `useRetros`
-the same way again, against `/marriage/retros`'s own cache entry, reading
-`openActionCount` rather than `actionCount` — the two disagree the moment a
-retro's actions are partly ticked, and `docs/LEARNING.md` carries the gap
-between them as its own entry. One of those hooks is new
+**Overview fetches nothing of its own.** Its seven requests are the ones
+Accounts, Budget, Goals, Bills, Retros, Vision and Settings already make,
+through the same hooks and the same cache keys, so a figure on the front
+door cannot disagree with the same figure on the screen it links to — the
+browser walk checks exactly that (net worth on `/` against net worth on
+`/money`). `useGoals` is the same hook `GoalsPage` itself calls, so the "X
+of Y on track" figure on Overview's Goals card and the same count on
+`/money/goals` share one cache entry rather than risking two independent
+reads of `GET /goals` disagreeing; `NextBillCard` reuses `useBills` the
+identical way, against `/money/bills`'s own cache entry, and gained no
+query of its own — the `enabled` option `useBills` grew for exactly this
+reuse (Task 11) predates `NextBillCard` by several tasks. `NextRetroCard`
+reuses `useRetros` the same way again, against `/marriage/retros`'s own
+cache entry, reading `openActionCount` rather than `actionCount` — the two
+disagree the moment a retro's actions are partly ticked, and
+`docs/LEARNING.md` carries the gap between them as its own entry.
+`VisionCard` and `NextRetroCard`'s own check-in strip (Vision spec's task
+13) push the pattern one step further: both call `useVision(currentVisionYear())`
+directly rather than either taking the data as a prop from the other, because
+`useVision` (unlike `useBills`/`useGoals`) was never given an `enabled`
+option — a member without `marriage` must still never be allowed to call it,
+so the only gate available is `OverviewPage` choosing not to mount either
+component at all. That leaves *two* independent callers on Overview alone,
+plus `VisionPage`'s own third — all three key off `visionQueryKey(year)`, so
+a household that glances at Overview and then opens `/marriage/vision` in
+the same visit still costs one `GET /marriage/vision` call, not three.
+One of those hooks is new
 only in the sense that it stopped being three: `useHouseholdMembers` was
 declared privately and identically in `AccountModal`, `TransactionsPage` and
 `MembersPanel`, all against `["household", "members"]`, sharing one cache
@@ -2000,7 +2012,7 @@ web/src/
                        and its undo, and the Subscriptions panel, mounted
                        at /money/bills (replacing moneySplatRoute, the
                        last route that ever used it)
-    overview/          the interim Overview at / — five of the design's
+    overview/          the interim Overview at / — six of the design's
                        seven cards Money and Marriage can supply (net worth,
                        reusing money/NetWorthCard, so it now also carries
                        the month-to-date change badge (`▲ 2.1% this month`)
@@ -2008,11 +2020,22 @@ web/src/
                        Finances-only by design, since this card's job is a
                        headline, not a breakdown; this month's budget;
                        goals on track; the next bill, reading the same
-                       useBills hook /money/bills itself uses; and the next
+                       useBills hook /money/bills itself uses; the next
                        retro, reading the same useRetros hook /marriage/retros
                        itself uses, beneath it the retro's own openActionCount
-                       -- the design's "carried-over actions" figure, §5), a
-                       setup checklist, and the "+ Add" quick-create menu
+                       -- the design's "carried-over actions" figure, §5, and
+                       (Vision spec's task 13) the Vision check-in strip
+                       beneath that, "Vision check-in: <year> theme —
+                       '<theme>'", gated on the theme being non-empty rather
+                       than a second version check; and VisionCard, one line
+                       per pillar showing that pillar's FIRST measure with
+                       its live figures rather than the design's own three
+                       flat commitment lines -- a third shape the design
+                       never records how to store -- reading the same
+                       useVision hook /marriage/vision itself uses, omitted
+                       entirely (not an empty quotation) for a year with no
+                       vision yet), a setup checklist, and the "+ Add"
+                       quick-create menu
     marriage/          RetrosPage -- header (title, subtitle, done-count
                        clause, privacy badge, start-retro button), the
                        five screen states (first-run, a draft in progress,

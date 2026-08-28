@@ -4,10 +4,13 @@ import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
 import { currentMonth } from "../money/month";
 import type { RetrosResponse } from "../marriage/retroSchemas";
+import { currentVisionYear } from "../marriage/visionQueryKeys";
+import type { Vision } from "../marriage/visionSchemas";
 import { OVERVIEW_COPY } from "./copy";
 import { OverviewPage } from "./OverviewPage";
 
 const MONTH = currentMonth();
+const YEAR = currentVisionYear();
 
 function meBody(overrides: { role?: string; capabilities?: string[] } = {}) {
   return {
@@ -226,6 +229,26 @@ function renderableRetrosBody(): RetrosResponse {
   });
 }
 
+// theme: "" and version: 0 -- the wire shape a never-set year sends
+// (visionSchema's own comment) -- the default for every owner-role test
+// below that doesn't care about VisionCard's or the check-in strip's own
+// figures (VisionCard.test.tsx/NextRetroCard.test.tsx cover those in
+// isolation). meBody()'s own default capabilities list includes "marriage",
+// so every owner-role test in this file mounts both NextRetroCard and
+// VisionCard, and each needs this route registered -- the same reason
+// retrosBody()'s own comment above gives for NextRetroCard's GET /retros.
+function visionBody(overrides: Partial<Vision> = {}): Vision {
+  return {
+    year: YEAR,
+    theme: "",
+    description: "",
+    version: 0,
+    pillars: [],
+    milestones: [],
+    ...overrides,
+  };
+}
+
 // `routes` accepts a single response or an ordered list per route (the same
 // union GoalModal.test.tsx's own `renderModal` widens `extraRoutes` to) --
 // this task's own "refetches goals after it saves" test needs a route that
@@ -253,7 +276,7 @@ function renderOverview(routes: Record<string, RouteResponse | RouteResponse[]>)
 
 describe("OverviewPage", () => {
   it("shows net worth, this month's budget, the next bill and goals on track to an owner", async () => {
-    renderOverview({
+    const { fetchMock } = renderOverview({
       "GET /api/v1/auth/me": { status: 200, body: meBody() },
       "GET /api/v1/accounts": { status: 200, body: { accounts: [], summary: summaryBody(1248000) } },
       [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
@@ -284,6 +307,10 @@ describe("OverviewPage", () => {
         ),
       },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: {
+        status: 200,
+        body: { vision: visionBody({ theme: "Slow down together", version: 1 }) },
+      },
     });
 
     expect(await screen.findByText("S$12,480.00")).toBeInTheDocument();
@@ -292,6 +319,18 @@ describe("OverviewPage", () => {
     expect(screen.getByText("SP utilities · Jul 8")).toBeInTheDocument();
     expect(await screen.findByText("3 of 4")).toBeInTheDocument();
     expect(screen.getByText("next: Bali · Dec 2026")).toBeInTheDocument();
+    // Proof the two marriage surfaces actually mount together on the real
+    // page, not merely in each component's own isolated test file.
+    expect(await screen.findByTestId("vision-card")).toHaveTextContent('"Slow down together"');
+    expect(screen.getByTestId("vision-checkin-strip")).toHaveTextContent("Slow down together");
+    // VisionCard.tsx and NextRetroCard.tsx each own an independent
+    // useVision(currentVisionYear()) call, but both read the identical
+    // ["vision", year] TanStack Query key from the one QueryClient this page
+    // mounts under -- so the two calls dedupe into a single network request,
+    // not two. This is the assertion that actually proves that, rather than
+    // just trusting how React Query is documented to behave.
+    const visionCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes("/marriage/vision"));
+    expect(visionCalls).toHaveLength(1);
   });
 
   // domain.PercentUsed rounds to the nearest whole percent, correctly, so
@@ -313,6 +352,7 @@ describe("OverviewPage", () => {
       "GET /api/v1/bills": { status: 200, body: billsBody() },
       "GET /api/v1/goals": { status: 200, body: goalsBody({}, [goalStub()]) },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
     });
 
     expect(await screen.findByText("<1% used")).toBeInTheDocument();
@@ -354,6 +394,7 @@ describe("OverviewPage", () => {
         ),
       },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
     });
 
     expect(await screen.findByText("▲ 2.1% this month")).toBeInTheDocument();
@@ -489,6 +530,7 @@ describe("OverviewPage", () => {
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
       "GET /api/v1/bills": { status: 200, body: billsBody() },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
     });
 
     const link = await screen.findByRole("link", { name: /set a budget/i });
@@ -506,6 +548,7 @@ describe("OverviewPage", () => {
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
       "GET /api/v1/bills": { status: 200, body: billsBody() },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
     });
 
     expect(await screen.findByText("Finish setting up")).toBeInTheDocument();
@@ -534,6 +577,7 @@ describe("OverviewPage", () => {
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
       "GET /api/v1/bills": { status: 200, body: billsBody() },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
     });
 
     // Waiting on the budget card, not merely on the heading: the checklist's
@@ -572,6 +616,7 @@ describe("OverviewPage", () => {
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
       "GET /api/v1/bills": { status: 200, body: billsBody() },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
     });
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -616,6 +661,7 @@ describe("OverviewPage", () => {
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
       "GET /api/v1/bills": { status: 200, body: billsBody() },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
     });
 
     fireEvent.click(await screen.findByRole("button", { name: "+ Add" }));
@@ -643,6 +689,7 @@ describe("OverviewPage", () => {
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
       "GET /api/v1/bills": { status: 200, body: billsBody() },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
     });
 
     fireEvent.click(await screen.findByRole("button", { name: "+ Add" }));
@@ -696,6 +743,7 @@ describe("OverviewPage", () => {
         },
       },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
     });
 
     fireEvent.click(await screen.findByRole("button", { name: "+ Add" }));
@@ -751,6 +799,7 @@ describe("OverviewPage", () => {
         },
       },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
     });
 
     expect(await screen.findByText(OVERVIEW_COPY.goalsNone)).toBeInTheDocument();
@@ -832,6 +881,7 @@ describe("OverviewPage", () => {
         },
       },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
     });
 
     expect(await screen.findByText(OVERVIEW_COPY.nextBillNone)).toBeInTheDocument();
@@ -865,6 +915,7 @@ describe("OverviewPage", () => {
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
       "GET /api/v1/bills": { status: 200, body: billsBody() },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
     });
 
     fireEvent.click(await screen.findByRole("button", { name: "+ Add" }));

@@ -26,10 +26,20 @@ import { Link } from "@tanstack/react-router";
 import { currentMonth } from "../money/month";
 import { monthNameOnly, nextMonthName } from "../marriage/retroCopy";
 import { useRetros } from "../marriage/useRetros";
+import { currentVisionYear } from "../marriage/visionQueryKeys";
+import { useVision } from "../marriage/useVision";
 import { OVERVIEW_COPY } from "./copy";
 
 export function NextRetroCard() {
   const retros = useRetros();
+  // The check-in strip's own data (design's "Vision check-in: 2026 theme —
+  // 'Slow down together'", drawn inside this same card). A second,
+  // independent useVision(currentVisionYear()) call rather than one shared
+  // with VisionCard.tsx -- VisionCard.tsx's own header comment explains why
+  // that hook has to be mounted per-component (no `enabled` option to gate
+  // it centrally) and why two independent callers on the same query key cost
+  // one request, not two.
+  const vision = useVision(currentVisionYear());
 
   // Same three-states-as-one guard NextBillCard.tsx uses: still loading, or
   // errored (a household owner is the only caller this route usually sees,
@@ -98,6 +108,26 @@ export function NextRetroCard() {
             {data.startMonth ? OVERVIEW_COPY.nextRetroStart(monthNameOnly(data.startMonth)) : OVERVIEW_COPY.nextRetroGo}
           </Link>
         </>
+      )}
+
+      {/* The design's own strip (dc.html: a border-topped line under the
+          carried-actions block, inside this same card). Gated on
+          `vision.data?.theme` truthiness alone, not a second `version === 0`
+          check: a year with no vision always carries theme: "" on the wire
+          (visionSchema's own comment), so an empty theme already covers
+          "still loading," "errored" and "version 0" in the one condition a
+          reader can see is right, without a second source of truth that
+          could silently disagree with VisionCard.tsx's own version check. */}
+      {vision.data?.theme && (
+        <p
+          data-testid="vision-checkin-strip"
+          className="mt-3.5 border-t border-hairline pt-3.5 text-[12.5px] text-muted"
+        >
+          {OVERVIEW_COPY.visionCheckInLabel}{" "}
+          <b className="font-semibold text-ink">
+            {OVERVIEW_COPY.visionCheckInTheme(vision.data.year, vision.data.theme)}
+          </b>
+        </p>
       )}
     </section>
   );

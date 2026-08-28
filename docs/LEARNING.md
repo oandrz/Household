@@ -491,6 +491,34 @@ count stays the number of bullets.)
   passes through a step that resets the very thing being verified, only the
   data that actually leaves the component (the request body, not the DOM)
   can still tell the two branches apart.
+- Two mutation-check gaps caught before shipping, both in `VisionCard.tsx`
+  (Vision spec's task 13), by a reviewer reading the draft test file before
+  either mutation was actually run. First: the "renders nothing at all for a
+  year with no vision" test's fixture was going to be an empty vision
+  (`theme: ""`, `pillars: []`) at `version: 0` — the same shape the guard is
+  *supposed* to produce. A mutation that deleted the `version === 0` check
+  entirely would have rendered exactly that same nothing, for a completely
+  different reason, and the test would have stayed green either way, never
+  discriminating the guard from its absence. Rewritten to build the fixture
+  from otherwise real, renderable content (a real theme, a pillar with a
+  measure) with only `version: 0` set — now deleting the guard makes real
+  content appear, and the test goes red for the actual reason it claims to
+  check, exactly like the `real_ip_recursive` case above: **a "renders
+  nothing" test proves nothing about the guard unless there is something
+  real for the guard to be suppressing.** Second: the "shows the pillar's
+  FIRST measure" test's two-measure fixture originally gave both measures
+  the same label ("Date nights / month") with only their figures differing.
+  A mutation reading `measures[measures.length - 1]` instead of
+  `measures[0]` would have shown a different figure but the *same* label
+  text, which the test's only assertion (`toHaveTextContent(label)`) cannot
+  see — a presence check on a label two measures share is blind to which of
+  them actually rendered. Given the two measures distinct labels **and**
+  distinct figures, plus explicit `not.toHaveTextContent(...)` assertions on
+  both halves of the second measure, and the `measures.length - 1` mutation
+  now goes red immediately. **When a "the first N" or "the last N" rule is
+  being tested, the fixture's other N-1 entries need to differ from the one
+  under test in every field the assertion reads — a shared value in any one
+  of them is a mutation the test cannot see.**
 - A comment on `FinancesPage.test.tsx`'s archive-toggle test claimed to be
   "the end-to-end proof" that `invalidateAccounts` (`useAccounts.ts`) returns
   its `Promise.all` rather than firing it and forgetting. Disproven: dropping
