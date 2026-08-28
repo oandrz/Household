@@ -604,6 +604,46 @@ describe("the real route tree", () => {
     expect(screen.queryByText("Page not found.")).not.toBeInTheDocument();
   });
 
+  // marriageIndexRoute's own beforeLoad is unconditional -- it does not
+  // check capability itself, RequireCapability.tsx's own comment on why
+  // client-side gating is presentation only. So a member without marriage
+  // transits /marriage/retros on the way through (beforeLoad resolves the
+  // redirect before marriageGuardRoute's own component -- RequireCapability
+  // -- ever mounts to block it) rather than being stopped at bare
+  // "/marriage" itself. The destination is still correct: RequireCapability
+  // runs against /marriage/retros exactly as the redirect test above pins
+  // for a member who holds the capability, and bounces this one to / the
+  // same as if they had typed /marriage/retros directly. Worth pinning on
+  // its own -- this route shape (an index route's beforeLoad sitting inside
+  // a capability-gated parent) is the same kind of ordering LEARNING.md
+  // already found empirically surprising once for this exact route group
+  // (the blank-content-area entry) rather than assumed from reading the
+  // tree.
+  it("still ends a marriage-less member at / when they type bare /marriage, via /marriage/retros", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": {
+        status: 200,
+        body: meFixture({
+          membership: {
+            id: "membership-2",
+            householdId: "household-1",
+            userId: "user-2",
+            role: "limited",
+            capabilities: ["calendar", "chores"],
+          },
+          capabilities: ["calendar", "chores"],
+        }),
+      },
+    });
+
+    const { router } = renderApp("/marriage");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Overview" }),
+    ).toBeInTheDocument();
+  });
+
   // Fix round 5, Finding 1 (critical): this is the exact reproduction the
   // coordinator's reviewer used -- /invite/tok with GET /api/v1/auth/me
   // returning 401 (a genuine, signed-out invitee -- Christine from `make

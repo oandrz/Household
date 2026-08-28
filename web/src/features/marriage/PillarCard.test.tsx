@@ -98,6 +98,33 @@ describe("PillarCard", () => {
     expect(row).not.toHaveTextContent("✓");
   });
 
+  // A real browser walk at 305px found this: a long measure label crowds
+  // the figure for width in the row's flex layout, and without
+  // whitespace-nowrap the figure itself wraps mid-number ("2 of" / "4") --
+  // jsdom lays nothing out, so this pins the mechanism (the class that
+  // stops it) rather than the pixels, the same idiom RetrosPage.test.tsx's
+  // own centring comment uses for a property jsdom cannot see directly.
+  it("keeps the figure on one line even when the label is long enough to wrap", () => {
+    render(
+      <PillarCard
+        pillar={pillarFixture({
+          measures: [
+            measureFixture({
+              label: "Weekends away together this year, just the two of us",
+              current: 2,
+              target: 4,
+              met: false,
+            }),
+          ],
+        })}
+        index={0}
+      />,
+    );
+
+    const figure = screen.getByText("2 of 4");
+    expect(figure.className).toContain("whitespace-nowrap");
+  });
+
   it("a linked measure renders its percent, not a count", () => {
     render(
       <PillarCard

@@ -14,7 +14,7 @@
 // Transactions; docs/LEARNING.md pattern 1's own entry), which is why both
 // get their own two-test pair here exactly as RetrosPage.test.tsx does, plus
 // the mutation check in this task's own report.
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
@@ -270,22 +270,5 @@ describe("VisionPage", () => {
 
     expect(await screen.findByTestId("vision-load-error")).toHaveTextContent("Couldn't load this year's vision.");
     expect(screen.queryByTestId("vision-owner-only")).not.toBeInTheDocument();
-  });
-
-  // Task 12 replaces this no-op wholesale (task-11's own ruling 2) -- this
-  // proves both entry points reach a real handler today (clicking neither
-  // throws, and neither opens a dialog this task never built) without
-  // asserting anything about what Task 12's modal will eventually do.
-  it("clicking Edit vision or + Add milestone does not throw or open a dialog", async () => {
-    renderPage(
-      visionFixture({
-        milestones: [{ year: 2027, title: "Sabbatical month in Indonesia", note: "" }],
-      }),
-    );
-
-    fireEvent.click(await screen.findByTestId("vision-edit"));
-    fireEvent.click(await screen.findByTestId("vision-add-milestone"));
-
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 });

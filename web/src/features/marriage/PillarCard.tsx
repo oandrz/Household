@@ -12,19 +12,29 @@ import type { VisionMeasure, VisionPillar } from "./visionSchemas";
 // this build doesn't recognise. Rendering a number for any of those would
 // state something untrue about the household, the same way a zero net
 // worth would after a primary-currency change leaves it uncomputable.
+// items-start, not the flex row's own default (stretch): a long label wraps
+// to two or three lines at a phone width (a real browser walk at 305px
+// found this, not assumed) and stretch would centre the short figure
+// against that whole block instead of pinning it level with the label's
+// first line. whitespace-nowrap on the figure span is the other half of
+// that same walk's finding: without it, "2 of 4" itself wraps mid-number
+// ("2 of" / "4") the moment the label crowds it for width -- flex-shrink-0
+// keeps it from being asked to shrink into that wrap in the first place.
 function MeasureRow({ measure }: { measure: VisionMeasure }) {
   if (!measure.hasFigure) {
     return (
-      <div data-testid="vision-measure-row" className="flex justify-between gap-3 text-[12.5px] text-ink">
+      <div data-testid="vision-measure-row" className="flex items-start justify-between gap-3 text-[12.5px] text-ink">
         <span>{measure.label}</span>
-        <span className="text-muted">{VISION_COPY.measureFigureUnavailable}</span>
+        <span className="shrink-0 whitespace-nowrap text-muted">{VISION_COPY.measureFigureUnavailable}</span>
       </div>
     );
   }
   return (
-    <div data-testid="vision-measure-row" className="flex justify-between gap-3 text-[12.5px] text-ink">
+    <div data-testid="vision-measure-row" className="flex items-start justify-between gap-3 text-[12.5px] text-ink">
       <span>{measure.label}</span>
-      <span className={`tabular ${measure.met ? "font-semibold text-accent" : "font-semibold"}`}>
+      <span
+        className={`tabular shrink-0 whitespace-nowrap ${measure.met ? "font-semibold text-accent" : "font-semibold"}`}
+      >
         {measure.kind === "linked" ? `${measure.percent}%` : `${measure.current} of ${measure.target}`}
         {measure.met ? " ✓" : ""}
       </span>
