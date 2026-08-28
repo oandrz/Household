@@ -282,6 +282,26 @@ queries — so every mobile layout is invention, named as such in
 gaps are in §5 below, and the feature tracker's row is 🟡, not ✅, because of
 them.
 
+**The UI-polish round, 2026-08-28.** Three milestones off
+`docs/superpowers/plans/2026-08-28-hearth-ui-polish.md`. **M1 merged** (PR #10,
+`d83ff22`) — focus rings, the transition token, hover and active states, the
+skip link, tabular figures, three unused font families dropped. **M2 is open as
+PR #11** on branch `ui-defects`: the Transactions month contract (the only Go
+change), the achieved-goal card, Hearth's own validation messages, the ⌘K chip,
+the month filter's opening value, modal focus, and "<1% used" — plus the fix
+that turns `main` green again, since `TestOwnerSeesTheTwelveMonthTrend` had been
+failing daily on a clock pinned to an absolute past date. **M3 is Tasks 15-18**
+and has not started; branch it off `main` once M2 merges.
+
+Two things about the dev box, both from M2's browser walk. **The dev database
+changed**: reaching the achieved-goal and "<1% used" states needed data that did
+not exist, so an achieved goal ("Japan 2027", S$10 of S$10), an August budget
+(Food capped at S$800) and a S$2.00 "Kopi" expense on 2026-08-28 were created
+through the UI. And **`noValidate` is still absent from fourteen of the app's
+fifteen forms** — only `TransactionModal` was fixed; `GoalModal` answered the
+walk with Chrome's own "Please fill out this field.". That sweep is named in
+the spec's Out of scope and is real work, not a hypothetical.
+
 ---
 
 ## 2. Running it
