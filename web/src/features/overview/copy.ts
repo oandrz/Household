@@ -31,7 +31,6 @@ export const OVERVIEW_COPY = {
   // state, which is the screen this card links to.
   budgetNone: "No budget set yet",
   budgetSetUp: "Set a budget",
-  budgetUsed: (percent: number) => `${percent}% used`,
   budgetOf: (spent: string, budgeted: string) => `${spent} of ${budgeted}`,
 
   // NextBillCard.tsx. amountLabel/dateLabel are pre-formatted by the caller

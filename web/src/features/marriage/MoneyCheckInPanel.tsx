@@ -22,6 +22,7 @@ import { useGoals } from "../money/useGoals";
 import { BUDGET_COPY } from "../money/budgetCopy";
 import { GOAL_COPY } from "../money/goalCopy";
 import { formatMoney } from "../money/formatMoney";
+import { formatPercentUsed } from "../money/percentUsedCopy";
 import { RETRO_COPY, monthNameOnly } from "./retroCopy";
 
 export function MoneyCheckInPanel({ month }: { month: string }) {
@@ -67,7 +68,7 @@ export function MoneyCheckInPanel({ month }: { month: string }) {
       ? BUDGET_COPY.emptyHeadline(monthNameOnly(b.month))
       : b.percentOk
         ? [
-            BUDGET_COPY.percentUsed(b.percentUsed),
+            formatPercentUsed(b.percentUsed, b.spentMinor),
             // dailyPaceOk gates the whole "on pace to save" figure the same
             // way BudgetStatCards.tsx's own fourth card is gated --
             // server-computed, hidden when Remaining <= 0 or the viewed

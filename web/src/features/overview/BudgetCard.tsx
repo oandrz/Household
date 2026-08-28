@@ -4,6 +4,7 @@
 import { Link } from "@tanstack/react-router";
 import { useCurrencies } from "../auth/useAuth";
 import { formatMoney } from "../money/formatMoney";
+import { formatPercentUsed } from "../money/percentUsedCopy";
 import type { BudgetMonthResponse } from "../money/budgetSchemas";
 import { OVERVIEW_COPY } from "./copy";
 
@@ -38,7 +39,7 @@ export function BudgetCard({ month }: { month: BudgetMonthResponse }) {
       ) : (
         <>
           <p className="mt-1.5 text-[30px] font-semibold tracking-[-0.03em] text-ink">
-            {OVERVIEW_COPY.budgetUsed(month.percentUsed)}
+            {formatPercentUsed(month.percentUsed, month.spentMinor)}
           </p>
           <p className="mt-1 text-[11.5px] text-muted">
             {OVERVIEW_COPY.budgetOf(

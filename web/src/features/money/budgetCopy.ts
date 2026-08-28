@@ -19,8 +19,6 @@ export const BUDGET_COPY = {
   daysLeftInMonth: (days: number, month: string) =>
     `${days} day${days === 1 ? "" : "s"} left in ${month}`,
 
-  percentUsed: (percent: number) => `${percent}% used`,
-
   editBudget: "Edit budget",
   history: "History",
 
