@@ -286,21 +286,40 @@ them.
 `docs/superpowers/plans/2026-08-28-hearth-ui-polish.md`. **M1 merged** (PR #10,
 `d83ff22`) — focus rings, the transition token, hover and active states, the
 skip link, tabular figures, three unused font families dropped. **M2 is open as
-PR #11** on branch `ui-defects`: the Transactions month contract (the only Go
-change), the achieved-goal card, Hearth's own validation messages, the ⌘K chip,
-the month filter's opening value, modal focus, and "<1% used" — plus the fix
-that turns `main` green again, since `TestOwnerSeesTheTwelveMonthTrend` had been
-failing daily on a clock pinned to an absolute past date. **M3 is Tasks 15-18**
-and has not started; branch it off `main` once M2 merges.
+PR #11** (`fa38c58`) on branch `ui-defects`: the Transactions month contract
+(the only Go change), the achieved-goal card, Hearth's own validation messages,
+the ⌘K chip, the month filter's opening value, modal focus, and "<1% used" —
+plus the fix that turns `main` green again, since
+`TestOwnerSeesTheTwelveMonthTrend` had been failing daily on a clock pinned to
+an absolute past date. **M3 is open as PR #12** on branch `ui-consistency`
+(Tasks 15-18): Bills' "All caught up" and Budget's insight panel get the border
+their siblings have, Finances weights Net as the total it is, and the Retros
+detail panel gets a composed empty state. **The plan is finished with M3** —
+there is no M4 in it.
 
-Two things about the dev box, both from M2's browser walk. **The dev database
-changed**: reaching the achieved-goal and "<1% used" states needed data that did
-not exist, so an achieved goal ("Japan 2027", S$10 of S$10), an August budget
-(Food capped at S$800) and a S$2.00 "Kopi" expense on 2026-08-28 were created
-through the UI. And **`noValidate` is still absent from fourteen of the app's
-fifteen forms** — only `TransactionModal` was fixed; `GoalModal` answered the
-walk with Chrome's own "Please fill out this field.". That sweep is named in
-the spec's Out of scope and is real work, not a hypothetical.
+Two of M3's decisions are worth knowing before touching those files. The
+caught-up and insight panels keep `bg-callout` and take `border-callout-border`
+rather than becoming `bg-card` — their copy is `text-accent`/`text-accent-dark`,
+which this app only ever puts on the callout tint. And the Net figure
+deliberately did **not** take the plan's `text-[15px]`: `tabular-nums` aligns a
+column at one size only, so a larger Net puts its decimal off the x-coordinate
+of every row it sums. Both are commented at the line.
+
+Three things about the dev box. **The dev database changed twice.** M2's walk
+needed states that did not exist, so an achieved goal ("Japan 2027", S$10 of
+S$10), an August budget (Food capped at S$800) and a S$2.00 "Kopi" expense on
+2026-08-28 were created through the UI. M3's walk needed a household with at
+least one bill and all of them paid to reach "All caught up" at all, and neither
+household had any, so a monthly **"Internet" bill** (S$59.90, Utilities, next
+due 2026-08-15, ticked as a subscription) was created and marked paid — which
+**writes a real S$59.90 expense to the ledger**. That is why Net worth reads
+−S$5,921.90 rather than M2's −S$5,862.00, and why Budget's Utilities row shows
+S$59.90 against a S$0.00 cap. **Check which household you are signed into, and
+which round's figures you are comparing against, before concluding a screen is
+wrong.** And **`noValidate` is still absent from fourteen of the app's fifteen
+forms** — only `TransactionModal` was fixed; `GoalModal` answered the walk with
+Chrome's own "Please fill out this field.". That sweep is named in the spec's
+Out of scope and is real work, not a hypothetical.
 
 ---
 
@@ -363,9 +382,35 @@ Magic links, invites and sign-up links all land there in development.
 
 ### Driving the app in a browser
 
-Every "done" claim here needs a browser walk (see §1 and `CLAUDE.md`). Four
+Every "done" claim here needs a browser walk (see §1 and `CLAUDE.md`). Six
 things cost previous walks real time, so they are written down rather than
 rediscovered:
+
+- **Both MCP browsers refuse to attach if a previous session left one
+  running.** The M2 handover said to reach for the Playwright MCP when
+  chrome-devtools answers `The browser is already running for
+  .../chrome-profile. Use --isolated` — but M3 found Playwright answers the
+  same way about its own profile (`Browser is already in use for
+  .../ms-playwright-mcp/mcp-chrome-f265c67`). The orphan is an
+  automation-profile Chrome, not the user's, and killing it scoped to that
+  profile cannot touch a personal browser:
+
+  ```bash
+  pkill -f "user-data-dir=/Volumes/Oink_Machine/Library/Caches/ms-playwright-mcp/mcp-chrome-f265c67"
+  ```
+
+  Match on the `--user-data-dir=` path, never on `Google Chrome` — that would
+  close whatever the person at the keyboard has open.
+- **`touch` every file you edited before you trust what the browser shows.**
+  Vite's watcher does not reliably see writes on this volume. M3 edited five
+  files, four reached the browser and one did not, so the page rendered the
+  new markup wrapped around an empty string — with the file correct on disk, a
+  hard reload changing nothing (the staleness is server-side) and the
+  type-check passing, so every signal pointed at the code being wrong. Check a
+  suspect module by asking Vite for it directly, which is the discriminating
+  test: `curl -s http://localhost:5173/src/<path> | grep <the new symbol>`.
+  `docs/LEARNING.md`'s Tooling section has the fuller case, including the
+  earlier deployment-round one.
 
 - **Clicking by element reference goes stale.** A reference captured in the
   same batch as a navigation often points at a tree React has since

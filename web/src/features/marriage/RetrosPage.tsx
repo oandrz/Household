@@ -218,7 +218,18 @@ export function RetrosPage() {
                 <RetroDetail month={selectedMonth} />
               </>
             ) : (
-              <p className="text-[13px] text-muted">{RETRO_COPY.detailPlaceholder}</p>
+              // `h-full` resolves here because this div's parent is a grid item
+              // stretched to the row the 340px history list sets, so its height
+              // is definite even though nothing declares one -- checked in a
+              // browser rather than assumed, since a percentage height against
+              // an auto-height parent collapses to the content and centres
+              // nothing while every class is still present.
+              <div className="flex h-full flex-col items-center justify-center gap-1.5 px-8 text-center">
+                <p className="text-[15px] text-ink">{RETRO_COPY.detailPlaceholder}</p>
+                <p className="max-w-[42ch] text-[12.5px] leading-relaxed text-muted">
+                  {RETRO_COPY.detailPlaceholderBody}
+                </p>
+              </div>
             )}
           </div>
         </div>

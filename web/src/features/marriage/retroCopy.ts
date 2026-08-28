@@ -69,6 +69,12 @@ export const RETRO_COPY = {
   // RetroHistoryList/RetroDetailPanel arrive in Tasks 11-12 -- this is the
   // placeholder shown in the mount point until a retro is selected there.
   detailPlaceholder: "Select a retro to see its detail.",
+  // The second line of that empty panel. detailPlaceholder alone was one muted
+  // sentence adrift in a card as tall as the history list beside it; this says
+  // what the panel is for once a month is picked, which is the shape the
+  // Overview's own empty cards already use (a line, then what it would show).
+  detailPlaceholderBody:
+    "Each month's retro keeps its mood, its notes and the actions you agreed on.",
 
   // RetroDetail.tsx's own load-error copy -- distinct from loadError below,
   // which is GET /retros' (the history list's) own failure copy. A reader

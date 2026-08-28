@@ -487,7 +487,20 @@ export function BillsPage() {
               />
 
               {allCaughtUp && (
-                <div data-testid="bills-all-caught-up" className="rounded-xl bg-callout px-5 py-[18px]">
+                // The border is what SubscriptionsCard above has and this panel
+                // did not, which left it reading as loose text on the canvas
+                // rather than as one of the page's panels. The fill stays
+                // `bg-callout` rather than becoming `bg-card`: this is the one
+                // panel on the page that is good news, and both lines inside it
+                // are `text-accent`/`text-accent-dark`, which the app only ever
+                // puts on the callout tint (InviteScreen.tsx:155,
+                // TransactionsPage.tsx:480) and never on a card. So the border
+                // is `border-callout-border`, the tint's own edge, not the
+                // `border-hairline` a `bg-card` panel gets.
+                <div
+                  data-testid="bills-all-caught-up"
+                  className="rounded-xl border border-callout-border bg-callout px-5 py-[18px]"
+                >
                   <p className="text-[13px] font-semibold text-accent">{BILL_COPY.allCaughtUpHeadline}</p>
                   <p className="mt-1.5 text-[12px] leading-relaxed text-accent-dark">
                     {BILL_COPY.allCaughtUpBody(

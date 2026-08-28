@@ -50,7 +50,16 @@ export function BreakdownCard({ summary }: { summary: Summary }) {
       </div>
 
       <div className="flex items-center justify-between border-t border-hairline pt-3 text-[13px]">
-        <span className="text-muted">{FINANCES_COPY.net}</span>
+        {/* Net is the conclusion the rows above add up to, not another row in
+            the list -- so its label carries the ink and the weight the rows'
+            labels do not, rather than the muted colour a peer row gets. The
+            weight is the whole change: the figure deliberately keeps the rows'
+            own 13px, tried at 15px in a browser and rejected twice over. The
+            card's own <h2> is 14px, so a 15px total outranks the heading it
+            sits under; and `tabular` only lines a column up at ONE size, so a
+            larger Net puts its decimal off the x-coordinate of every row it
+            sums -- undoing the alignment this class is here for. */}
+        <span className="font-semibold text-ink">{FINANCES_COPY.net}</span>
         <span className="tabular font-semibold text-ink">
           {formatMoney(summary.netWorthMinor, summary.currency, symbol)}
         </span>

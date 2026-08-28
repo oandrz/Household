@@ -384,6 +384,16 @@ that comes due: whoever ships X owns it. Here the comment was right, specific,
 and load-bearing, and it still did not stop the defect, because nothing made
 shipping Transactions go and read it.
 
+**The cheapest sweep is a grep for the literal string you are about to
+change, run before you change it.** M3's Bills panel turned out to share a
+byte-identical class string with `BudgetPage`'s `budget-insight`: same shape,
+same missing border, same position last in a right rail under a bordered card.
+The grep found it in seconds and both were fixed in one commit. Had it gone
+the usual way, the fix would have closed one disagreement and left an
+identical one a page over, for the next browser walk to file as a fresh
+defect. (No bullet added above: this one was caught before it shipped, and the
+count stays the number of bullets.)
+
 ### 2. A test that cannot fail protects nothing
 
 - A sidebar ordering test supplied spaces **already in ascending order**, so a
@@ -3009,6 +3019,33 @@ route with a missing guard has no second line of defence.
   condition that applies the tint, so the draft row hovers to a different,
   still-distinguishable colour instead of losing its own.
 
+- **A panel built from the design file agrees with the design file and
+  disagrees with the page it lands on.** M3's three defects were one shape
+  three times over. Bills' "All caught up" had a card's radius and neither a
+  card's border nor its background, so the one panel on the page that is good
+  news read as loose text on the canvas. Finances' Net row carried a muted
+  label and the same figure weight as the per-type rows it sums, so the
+  conclusion read as another peer. Retros' empty detail panel put one muted
+  sentence at the top of a card as tall as the history list beside it. Each
+  was defensible in isolation and each was wrong beside its own neighbours,
+  which is precisely what a design file cannot show you: it draws the panel,
+  not the panel's siblings at the moment the panel joins them. **Review a new
+  panel against the page it joins, not against the design it came from** —
+  open the page, look at the element directly above it, and name the property
+  that differs. All three of these are one glance apart from invisible.
+- **Changing a `tabular` figure's font size undoes the alignment `tabular` is
+  there for.** M3's plan called for the Net figure to go to `text-[15px]` to
+  read as a total. Tried in a browser, it failed twice: the card's own `<h2>`
+  is 14px, so a 15px total outranks the heading it sits under, and — the
+  non-taste half — `tabular-nums` only lines a column up at *one* size, so the
+  larger Net put its decimal point off the x-coordinate of every row it sums.
+  That is the exact misalignment M1's walk had already fixed once on this card
+  by bringing `tabular` forward. The fix was the label weight alone, which was
+  the part of the change that carried the meaning. **A size change inside a
+  column of aligned figures is a column change, not a type change** — the
+  rule in `index.css`'s `.tabular` comment is about figures that stack, and a
+  figure that stops matching its stack has left the stack.
+
 ### Tooling and infrastructure
 
 - The architecture lint **never enforced the rule it existed for**. Both branches
@@ -3119,6 +3156,23 @@ route with a missing guard has no second line of defence.
   longer than a save-and-check cycle should take, restart it
   (`docker compose restart api web`) before spending more time doubting the
   code.**
+  **It happened again in M3, in the form that is harder to notice.** Five
+  files were edited in one round; four of them reached the browser and one —
+  `retroCopy.ts` — did not, so the page rendered the new markup with an
+  *empty* string where the new copy belonged. Nothing looked broken enough to
+  suspect the tooling: a hard reload did not fix it (the staleness is
+  server-side, not in the browser cache), the type-check passed, and the file
+  on disk was plainly correct, so the obvious reading was that the code was
+  wrong. The same discriminating check settled it in one command —
+  `curl -s http://localhost:5173/src/features/marriage/retroCopy.ts | grep …`
+  returned a transform with the new key absent — and `touch` on the file was
+  enough to make the watcher notice. **A partial miss is the dangerous
+  shape**: when only one module in a change goes stale, the app still renders,
+  the other edits visibly work, and the browser walk this repo requires before
+  calling anything done returns a confident, wrong verdict. **On this host,
+  `touch` every file you edited before trusting what the browser shows, and
+  when one change in a batch appears not to have landed, `curl` that module
+  from Vite before doubting the code.**
 
 ### The first production deployment (2026-08-15)
 
