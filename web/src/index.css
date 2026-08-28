@@ -43,8 +43,12 @@
 
   --font-sans: "Schibsted Grotesk", system-ui, sans-serif;
   --font-serif: "Newsreader", Georgia, serif;
-  --font-alt: "Karla", system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  /* --font-alt (Karla) and --font-mono (IBM Plex Mono) were defined here and
+     referenced by nothing, alongside an IBM Plex Sans that had no token at
+     all -- three families downloaded on every cold load for no glyph. A
+     monospace face for figures is a decision worth taking deliberately, with
+     tabular figures already in hand; it should not be taken by picking up a
+     token that happened to be lying here. */
 
   --radius-card: 8px;
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06);
