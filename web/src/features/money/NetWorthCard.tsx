@@ -101,7 +101,7 @@ export function NetWorthCard({
             it here. */}
         {chart && <span className="text-xs text-muted">{FINANCES_COPY.trendWindow}</span>}
       </div>
-      <p className="tabular mt-1.5 text-[30px] font-semibold tracking-[-0.03em] text-ink">
+      <p className="mt-1.5 text-[30px] font-semibold tracking-[-0.03em] text-ink">
         {formatMoney(summary.netWorthMinor, summary.currency, symbol)}
         {/* Finances passes no changeNote, so its own bare "▲ 2.1%" -- no
             trailing words -- stays inline beside the figure, matching the
@@ -116,11 +116,7 @@ export function NetWorthCard({
         {changeText !== null && !changeNote && (
           <span
             data-testid="net-worth-change"
-            // normal-nums overrides the inherited tabular-nums from the
-            // figure's own <p>: this badge is a single fluctuating
-            // percentage, not a column of figures to line up, so fixed
-            // digit widths buy it nothing and it reads better proportional.
-            className={`ml-2 text-[13px] font-semibold tracking-normal normal-nums ${changeColorClass}`}
+            className={`ml-2 text-[13px] font-semibold tracking-normal ${changeColorClass}`}
           >
             {changeText}
           </span>
