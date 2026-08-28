@@ -20,3 +20,7 @@ deploy/.previous-image-tag
 
 # Isolated workspaces for subagent-driven execution.
 .worktrees/
+
+# Playwright MCP walk artifacts (screenshots, page snapshots, console logs).
+# Written into the repo root and web/ by a browser walk; never part of a change.
+.playwright-mcp/
