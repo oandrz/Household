@@ -196,6 +196,51 @@ describe("TransactionModal", () => {
     expect(within(incomeSelect).queryByText("Groceries")).not.toBeInTheDocument();
   });
 
+  // Submitting empty used to be intercepted by the browser's own constraint
+  // validation, so handleSubmit never ran and the app's own message -- which
+  // exists, and is written -- was never shown. What appeared instead was
+  // Chrome's bubble, in Chrome's words, with Chrome's blue ring. jsdom
+  // implements constraint validation too, so this genuinely covers the
+  // interception rather than only the message.
+  it("shows its own message on an empty amount rather than deferring to the browser", async () => {
+    const { onSubmit } = renderModal();
+
+    fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
+
+    expect(await screen.findByText(/Enter an amount, like/)).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  // The other required fields on this form had no check in handleSubmit at
+  // all, because nothing ever reached it with one of them empty. Removing the
+  // browser's interception without adding these would have let an empty date
+  // or description through to the API, which answers 422 -- a server error
+  // where the form should have said one word.
+  it("refuses an empty date with its own message", async () => {
+    const { onSubmit } = renderModal();
+
+    fireEvent.change(screen.getByLabelText(/^amount/i), { target: { value: "52.30" } });
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "Cold Storage" } });
+    fireEvent.change(screen.getByLabelText(/date/i), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
+
+    expect(await screen.findByText(/Pick a date/)).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("refuses a blank description with its own message", async () => {
+    const { onSubmit } = renderModal();
+
+    fireEvent.change(screen.getByLabelText(/^amount/i), { target: { value: "52.30" } });
+    // Whitespace, not empty: `required` treats a space as present, so this is
+    // a value the browser would have let through even before noValidate.
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "   " } });
+    fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
+
+    expect(await screen.findByText(/Add a short description/)).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it("shows no delete control when adding", () => {
     renderModal();
     expect(screen.queryByRole("button", { name: /delete transaction/i })).not.toBeInTheDocument();
