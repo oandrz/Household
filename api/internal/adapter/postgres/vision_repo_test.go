@@ -215,3 +215,142 @@ func TestVisionRepoGetReadsABrokenLinkAsBroken(t *testing.T) {
 		t.Fatalf("want MeasureBroken after the goal was deleted, got %q", got.Pillars[0].Measures[0].Kind)
 	}
 }
+
+func TestVisionSaveCreatesAtVersionZeroAndRefusesASecondCreate(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewVisionRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	draft := domain.Vision{HouseholdID: householdID, Year: 2026, Theme: "Slow down together", Version: 0}
+	saved, err := repo.Save(ctx, draft)
+	if err != nil {
+		t.Fatalf("first create: %v", err)
+	}
+	if saved.Version != 1 {
+		t.Fatalf("a create must land at version 1, got %d", saved.Version)
+	}
+
+	// The first-save race: both partners read the empty vision, both hold 0.
+	_, err = repo.Save(ctx, draft)
+	if !errors.Is(err, domain.ErrVisionChanged) {
+		t.Fatalf("want ErrVisionChanged for a second version-0 save, got %v", err)
+	}
+}
+
+func TestVisionSaveRefusesAStaleVersion(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewVisionRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	first, err := repo.Save(ctx, domain.Vision{HouseholdID: householdID, Year: 2026, Theme: "A"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	second, err := repo.Save(ctx, domain.Vision{HouseholdID: householdID, Year: 2026, Theme: "B", Version: first.Version})
+	if err != nil {
+		t.Fatalf("second save: %v", err)
+	}
+	// The returned version must be the POST-write one, because it is the token
+	// the next save sends. A query whose RETURNING gave back the version it
+	// read would make every subsequent save conflict against itself.
+	if second.Version != first.Version+1 {
+		t.Fatalf("want the incremented version back, got %d after %d", second.Version, first.Version)
+	}
+	// first.Version is now stale.
+	_, err = repo.Save(ctx, domain.Vision{HouseholdID: householdID, Year: 2026, Theme: "C", Version: first.Version})
+	if !errors.Is(err, domain.ErrVisionChanged) {
+		t.Fatalf("want ErrVisionChanged, got %v", err)
+	}
+}
+
+func TestVisionSaveIsOneTransaction(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewVisionRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	good := domain.Vision{
+		HouseholdID: householdID, Year: 2026, Theme: "Slow down together",
+		Pillars: []domain.Pillar{{Name: "Us before logistics", Measures: []domain.Measure{
+			{Label: "Date nights / month", Kind: domain.MeasureTyped, Current: 2, Target: 2},
+		}}},
+	}
+	saved, err := repo.Save(ctx, good)
+	if err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+
+	// The injected fault: a milestone year outside vision_milestones' own
+	// CHECK range, submitted AFTER a valid pillar and measure have already
+	// been inserted in this transaction.
+	bad := good
+	bad.Version = saved.Version
+	bad.Theme = "Overwritten"
+	bad.Pillars = []domain.Pillar{{Name: "Replaced", Measures: nil}}
+	bad.Milestones = []domain.Milestone{{Year: 9999, Title: "Out of range"}}
+	if _, err := repo.Save(ctx, bad); err == nil {
+		t.Fatal("expected the out-of-range milestone year to fail the save")
+	}
+
+	after, err := repo.Get(ctx, householdID, 2026)
+	if err != nil {
+		t.Fatalf("get after the failed save: %v", err)
+	}
+	if after.Theme != "Slow down together" {
+		t.Fatalf("the parent row was not rolled back: theme is %q", after.Theme)
+	}
+	if len(after.Pillars) != 1 || after.Pillars[0].Name != "Us before logistics" {
+		t.Fatalf("children were not rolled back: %+v", after.Pillars)
+	}
+	if len(after.Pillars[0].Measures) != 1 {
+		t.Fatalf("measures were not rolled back: %+v", after.Pillars[0].Measures)
+	}
+}
+
+func TestVisionSaveRefusesAGoalFromAnotherHousehold(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewVisionRepo(db)
+	mine := insertTestHousehold(t, db)
+	theirs := insertTestHousehold(t, db)
+	theirGoal := insertTestGoal(t, db, theirs)
+
+	_, err := repo.Save(ctx, domain.Vision{
+		HouseholdID: mine, Year: 2026, Theme: "T",
+		Pillars: []domain.Pillar{{Name: "P", Measures: []domain.Measure{
+			{Label: "Emergency fund", Kind: domain.MeasureLinked, GoalID: theirGoal},
+		}}},
+	})
+	if !errors.Is(err, domain.ErrVisionGoalUnknown) {
+		t.Fatalf("want ErrVisionGoalUnknown, got %v", err)
+	}
+}
+
+// The zero-row UPDATE's two possible causes must not be collapsed into one
+// answer: this is the "deleted" leg, the twin of
+// TestVisionSaveRefusesAStaleVersion's "someone else saved first" leg. A
+// version-guarded save against a household-year that no longer exists must
+// report domain.ErrNotFound, never domain.ErrVisionChanged -- a caller that
+// saw ErrVisionChanged would reload and retry forever against a row that can
+// never come back.
+func TestVisionSaveReportsNotFoundForADeletedVision(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewVisionRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	first, err := repo.Save(ctx, domain.Vision{HouseholdID: householdID, Year: 2026, Theme: "A"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := db.Pool().Exec(ctx, `DELETE FROM visions WHERE household_id = $1 AND year = 2026`, householdID); err != nil {
+		t.Fatalf("delete vision: %v", err)
+	}
+
+	_, err = repo.Save(ctx, domain.Vision{HouseholdID: householdID, Year: 2026, Theme: "B", Version: first.Version})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("want domain.ErrNotFound for a deleted vision, got %v", err)
+	}
+}
