@@ -139,7 +139,7 @@ describe("FinancesPage", () => {
     stubFetchRoutes({
       "GET /api/v1/auth/me": { status: 200, body: meFixture("owner") },
       "GET /api/v1/currencies": CURRENCIES,
-      "GET /api/v1/transactions": EMPTY_TRANSACTIONS,
+      "GET /api/v1/transactions?month=all": EMPTY_TRANSACTIONS,
       "GET /api/v1/accounts": {
         status: 200,
         body: {
@@ -193,7 +193,7 @@ describe("FinancesPage", () => {
     stubFetchRoutes({
       "GET /api/v1/auth/me": { status: 200, body: meFixture("owner") },
       "GET /api/v1/currencies": CURRENCIES,
-      "GET /api/v1/transactions": EMPTY_TRANSACTIONS,
+      "GET /api/v1/transactions?month=all": EMPTY_TRANSACTIONS,
       "GET /api/v1/accounts": {
         status: 200,
         body: {
@@ -235,7 +235,7 @@ describe("FinancesPage", () => {
     stubFetchRoutes({
       "GET /api/v1/auth/me": { status: 200, body: meFixture("owner") },
       "GET /api/v1/currencies": CURRENCIES,
-      "GET /api/v1/transactions": EMPTY_TRANSACTIONS,
+      "GET /api/v1/transactions?month=all": EMPTY_TRANSACTIONS,
       "GET /api/v1/accounts": {
         status: 200,
         body: {
@@ -299,7 +299,7 @@ describe("FinancesPage", () => {
     stubFetchRoutes({
       "GET /api/v1/auth/me": { status: 200, body: meFixture("owner") },
       "GET /api/v1/currencies": CURRENCIES,
-      "GET /api/v1/transactions": EMPTY_TRANSACTIONS,
+      "GET /api/v1/transactions?month=all": EMPTY_TRANSACTIONS,
       "GET /api/v1/accounts": {
         status: 200,
         body: {
@@ -344,7 +344,7 @@ describe("FinancesPage", () => {
     stubFetchRoutes({
       "GET /api/v1/auth/me": { status: 200, body: meFixture("owner") },
       "GET /api/v1/currencies": CURRENCIES,
-      "GET /api/v1/transactions": EMPTY_TRANSACTIONS,
+      "GET /api/v1/transactions?month=all": EMPTY_TRANSACTIONS,
       "GET /api/v1/accounts": {
         status: 200,
         body: {
@@ -415,7 +415,7 @@ describe("FinancesPage", () => {
     stubFetchRoutes({
       "GET /api/v1/auth/me": { status: 200, body: meFixture("owner") },
       "GET /api/v1/currencies": CURRENCIES,
-      "GET /api/v1/transactions": {
+      "GET /api/v1/transactions?month=all": {
         status: 200,
         body: {
           transactions,
@@ -461,13 +461,85 @@ describe("FinancesPage", () => {
     );
   });
 
+  // The strip asks for every month, not for the current one. It used to send
+  // no month at all, which meant the same thing until parseTransactionFilter
+  // gave a month-less request a meaning -- and the day it did, this card
+  // silently became "recent transactions this month", which is empty on the
+  // first of every month for a household with years of history.
+  //
+  // The route key is the assertion. RecentTransactionsCard returns null on a
+  // query error, so an unregistered URL makes stubFetchRoutes throw into a
+  // card that renders nothing and a suite that stays green -- the silent
+  // absorption docs/LEARNING.md already records. Registering only month=all,
+  // and then requiring a row the current month does not contain, is what
+  // makes a wrong request visible here.
+  it("asks for every month, not just the current one", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture("owner") },
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/transactions?month=all": {
+        status: 200,
+        body: {
+          transactions: [
+            {
+              id: "t1",
+              kind: "expense" as const,
+              // Deliberately not this month: the point of the assertion is a
+              // row a month-scoped request could not return.
+              occurredOn: "2024-02-29",
+              description: "Ancient history",
+              categoryId: null,
+              categoryName: "Groceries",
+              paidByMembershipId: null,
+              paidByName: null,
+              fromAccountId: "a1",
+              fromAccountName: "DBS Everyday",
+              toAccountId: null,
+              toAccountName: null,
+              amount: { amountMinor: 1050, currency: "SGD" },
+              receivedAmount: null,
+              beforeFromAccountOpeningBalance: false,
+              beforeToAccountOpeningBalance: null,
+            },
+          ],
+          nextCursor: null,
+          summary: { currency: "SGD", month: "2026-07", count: 1, spentMinor: 1050, excludedNoRate: [] },
+        },
+      },
+      "GET /api/v1/accounts": {
+        status: 200,
+        body: {
+          accounts: [{
+            id: "a1", nickname: "DBS Everyday", type: "cash",
+            ownerMembershipId: null, ownerName: null,
+            balance: { amountMinor: 824055, currency: "SGD" },
+            openingBalance: { amountMinor: 800000, currency: "SGD" },
+            balanceAsOf: "2026-07-26",
+            countTowardNetWorth: true, visibleToLimitedMembers: false,
+            archivedAt: null,
+          }],
+          summary: {
+            currency: "SGD", computable: true, netWorthMinor: 824055,
+            assetsMinor: 824055, liabilitiesMinor: 0,
+            breakdown: [{ type: "cash", totalMinor: 824055 }],
+            excludedNoRate: [], excludedByChoice: 0,
+          },
+        },
+      },
+    });
+
+    renderWithRouter(<FinancesPage />);
+
+    expect(await screen.findByText("Ancient history")).toBeInTheDocument();
+  });
+
   // The state a household reaches by changing its primary currency in
   // Settings. A zero here would say they have nothing.
   it("shows no figure at all when nothing can be converted", async () => {
     stubFetchRoutes({
       "GET /api/v1/auth/me": { status: 200, body: meFixture("owner") },
       "GET /api/v1/currencies": CURRENCIES,
-      "GET /api/v1/transactions": EMPTY_TRANSACTIONS,
+      "GET /api/v1/transactions?month=all": EMPTY_TRANSACTIONS,
       "GET /api/v1/accounts": {
         status: 200,
         body: {
@@ -528,7 +600,7 @@ describe("FinancesPage", () => {
     stubFetchRoutes({
       "GET /api/v1/auth/me": { status: 200, body: meFixture("owner") },
       "GET /api/v1/currencies": CURRENCIES,
-      "GET /api/v1/transactions": EMPTY_TRANSACTIONS,
+      "GET /api/v1/transactions?month=all": EMPTY_TRANSACTIONS,
       "GET /api/v1/accounts": [
         {
           status: 200,

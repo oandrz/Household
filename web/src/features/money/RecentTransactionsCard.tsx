@@ -2,14 +2,19 @@
 // comment: "It has no data until Transactions ships, and the design draws no
 // empty state for it"). Transactions ships the data; this is the strip.
 //
-// Reads through useTransactions({}), the exact query TransactionsPage's own
-// default (unfiltered) state resolves to -- toQueryString turns both an
-// empty object and an all-undefined TransactionFilters into the same "no
-// query string" request, and TanStack Query keys a query by its filters
-// object's JSON serialisation, which drops undefined-valued keys the same
-// way -- so both pages share one cache entry rather than this card standing
-// up a second endpoint for five rows the ledger's own first page already
-// carries.
+// Reads through useTransactions({ month: "" }), which is the wire request
+// `month=all`. This card is a *recency* strip -- the five newest rows in the
+// ledger -- and recency is not a month: a month-scoped request would empty
+// this card on the first of every month for a household with years of
+// history, which is the shape of the very defect the month contract fixed on
+// the Transactions screen.
+//
+// It used to pass `{}` and share one cache entry with TransactionsPage's own
+// default request. That stopped being the same question the day
+// parseTransactionFilter gave a month-less request a meaning: an absent month
+// now means the current month, for the list and the summary alike. The two
+// screens therefore hold two cache entries now, deliberately -- five rows
+// against a second key is the cheaper of the two wrongs.
 import { Link } from "@tanstack/react-router";
 import { useCurrencies } from "../auth/useAuth";
 import { FINANCES_COPY } from "./copy";
@@ -79,7 +84,7 @@ function AmountText({
 }
 
 export function RecentTransactionsCard() {
-  const transactionsQuery = useTransactions({});
+  const transactionsQuery = useTransactions({ month: "" });
   const currencies = useCurrencies();
   const symbolFor = (currency: string) =>
     currencies.data?.currencies.find((c) => c.code === currency)?.symbol;
@@ -96,7 +101,7 @@ export function RecentTransactionsCard() {
 
   // Trusts the server's own order rather than re-sorting -- keyset
   // pagination walks the ledger newest-first (TransactionsPage's own
-  // groupByDay comment), so the first five rows of the unfiltered first page
+  // groupByDay comment), so the first five rows of the all-months first page
   // are already the five newest.
   const rows = transactionsQuery.data.transactions.slice(0, VISIBLE_ROWS);
 

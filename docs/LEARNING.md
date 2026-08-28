@@ -23,7 +23,7 @@ gets rebuilt.
 
 ### 1. Fixing an instance rarely fixes the class
 
-This happened **seventeen times** — one bullet each below, and the count is the
+This happened **eighteen times** — one bullet each below, and the count is the
 number of bullets, so recount it when you add one (it had already drifted by
 one before the UX-repair round noticed). Almost every time, the fix was
 correct and the sibling kept the bug; two of them are the variant where
@@ -352,6 +352,27 @@ writing a hook for it.
   label that lies, the class is every other label on that screen, not the one
   the bug report named** — and the instrument that found it was driving the
   real page, not any test that could have been written for the fix as scoped.
+
+- **Giving a month-less request a meaning changed what every other caller of
+  that endpoint was asking for.** Fixing the Transactions month contract made
+  an absent `month` mean the current month. `GET /api/v1/transactions` has a
+  second caller: `RecentTransactionsCard`, the "Recent transactions" strip on
+  `/money`, which passed `{}` and whose own header comment said so proudly —
+  it shared one cache entry with the ledger's default request precisely
+  *because* the two were the same question. They stopped being the same
+  question in the commit that gave the default a meaning, and the card
+  silently became "recent transactions this month": on this dev household it
+  went from five rows to one, and on the first of any month it would show a
+  household with years of history nothing at all. That is the same defect
+  shape the round had just fixed, reintroduced one file over by the fix.
+  Caught by the caller sweep, then reproduced in the browser; **no test on
+  either side could have caught it**, because `stubFetchRoutes` matches exact
+  URLs and a stub is blind by construction to the *server's* meaning of a
+  request moving underneath it — worse, the card returns `null` on a query
+  error, so a wrong URL makes the stub throw into a component that renders
+  nothing and a suite that stays green. **When you give a previously-neutral
+  default a meaning, grep every caller of that endpoint in the same change**:
+  a default is a value with readers, exactly like a field whose meaning moved.
 
 **And when you change what a value *means*, its readers are the class.** The
 compiler will not find them, because nothing about the type changed; only a
