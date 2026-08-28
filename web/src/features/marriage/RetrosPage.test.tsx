@@ -302,6 +302,31 @@ describe("RetrosPage", () => {
     expect(screen.getByTestId("retro-detail-mount")).toBeInTheDocument();
   });
 
+  // The empty detail panel is TWO lines, and both are load-bearing: the first
+  // says what to do, the second says what doing it gets you. Asserted as a
+  // pair inside the mount point because the second line is the one that can
+  // silently vanish -- delete its <p> and the panel still renders, still
+  // centres, and every other test in this file stays green. jsdom cannot see
+  // that it is centred, so this pins the only part of the change a test can
+  // actually hold: that the supporting line is there at all.
+  it("shows both lines of the empty detail panel before a retro is selected", async () => {
+    renderPage(
+      retrosFixture({
+        retros: [summaryFixture({ id: "retro-june", month: "2026-06", finished: true })],
+        mood: [{ month: "2026-06", mood: 4 }],
+        doneCount: 1,
+        since: "2026-06",
+        startMonth: "2026-07",
+      }),
+    );
+
+    const mount = await screen.findByTestId("retro-detail-mount");
+    expect(within(mount).getByText("Select a retro to see its detail.")).toBeInTheDocument();
+    expect(
+      within(mount).getByText("Each month's retro keeps its mood, its notes and the actions you agreed on."),
+    ).toBeInTheDocument();
+  });
+
   // Pins the wiring itself, not just RetroDetail.tsx's own component test
   // (RetroDetail.test.tsx). docs/LEARNING.md pattern 15 -- MoodChart's own
   // <MoodChart .../> render line could have been deleted with the whole
