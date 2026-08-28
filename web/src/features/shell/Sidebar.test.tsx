@@ -93,6 +93,19 @@ function meFixture(spaces: Space[]): Me {
 }
 
 describe("Sidebar", () => {
+  // The chip advertised a command palette that does not exist -- the file
+  // said so itself -- on desktop and inside the mobile drawer alike, on
+  // devices with no ⌘ key. A palette is a feature and gets its own slice;
+  // until then the app must not promise it.
+  it("does not advertise a command palette", async () => {
+    renderWithRouter(<Sidebar me={meFixture([moneySpace])} />);
+
+    // The brand row proves the header actually rendered, so the negative
+    // assertion below means the chip's absence and not the sidebar's.
+    expect(await screen.findByText("Hearth")).toBeInTheDocument();
+    expect(screen.queryByText("⌘K")).toBeNull();
+  });
+
   it("renders no row for a builtin space whose pages are not built yet", async () => {
     // Family only -- Marriage got its own SPACE_PAGES entry back in task 10
     // (see the tests below), so it can no longer stand in for "a builtin
