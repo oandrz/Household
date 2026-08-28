@@ -40,7 +40,10 @@ const EMPTY_TRANSACTION_FILTERS: TransactionFilterValues = {
   accountId: "",
   categoryId: "",
   paidBy: "",
-  month: "",
+  // null, not "": clearing the filters returns the screen to the state it
+  // opens in -- the current month -- rather than widening the ledger to every
+  // month, which is a different thing and has its own control.
+  month: null,
 };
 
 // A one-off fetch for "Load older transactions", deliberately not routed
@@ -267,7 +270,12 @@ export function TransactionsPage() {
     accountId: filters.accountId || undefined,
     categoryId: filters.categoryId || undefined,
     paidBy: filters.paidBy || undefined,
-    month: filters.month || undefined,
+    // `?? undefined`, not `|| undefined`: "" is a deliberate "every month" and
+    // toQueryString turns it into the explicit `month=all`. Collapsing it to
+    // undefined would send no month at all, which the server reads as its
+    // default -- silently re-scoping the ledger to this month while the
+    // control shows it cleared.
+    month: filters.month ?? undefined,
   };
 
   const transactionsQuery = useTransactions(queryFilters);
@@ -334,7 +342,30 @@ export function TransactionsPage() {
   const { summary } = transactionsQuery.data;
   const rows = [...transactionsQuery.data.transactions, ...olderRows];
   const nextCursor = olderRows.length > 0 ? olderNextCursor : transactionsQuery.data.nextCursor;
-  const filtersActive = Object.values(filters).some((v) => v !== "");
+  // Month is deliberately not counted here. The ledger now opens on the
+  // current month rather than on all time, so a month in the control is the
+  // screen's default state, not the household having filtered something --
+  // and treating it as one would answer a brand-new household's empty ledger
+  // with "Nothing matches those filters", which is both untrue and a dead
+  // end. An empty month gets its own state further down.
+  const otherFiltersActive =
+    filters.kind !== "" ||
+    filters.accountId !== "" ||
+    filters.categoryId !== "" ||
+    filters.paidBy !== "";
+  const showingAllMonths = filters.month === "";
+  // What the Month control shows. An unchosen month displays the one the
+  // server just answered for rather than staying blank: a blank
+  // <input type="month"> renders Chrome's own empty-state placeholder, a row
+  // of dashes that reads as a broken control rather than as "any month".
+  //
+  // Resolved for display only -- the filter state itself stays null, so the
+  // request carries no month and the server keeps deciding which one that is.
+  // Seeding the state instead would make the page refetch under a month it
+  // had just been told about, and a client that computed its own "now" could
+  // disagree with the server's across a midnight or a timezone -- the same
+  // header-versus-list disagreement this whole change exists to end.
+  const filterValues = { ...filters, month: filters.month ?? summary.month };
   const symbolFor = (currency: string) =>
     currencies.data?.currencies.find((c) => c.code === currency)?.symbol;
   const excludedCurrencies = [...new Set(summary.excludedNoRate.map((e) => e.currency))].join(", ");
@@ -412,7 +443,9 @@ export function TransactionsPage() {
             {TRANSACTIONS_COPY.title}
           </h1>
           <p className="mt-1 text-[13px] text-muted">
-            {TRANSACTIONS_COPY.countInMonth(summary.count, monthLabel(summary.month))}
+            {showingAllMonths
+              ? TRANSACTIONS_COPY.everyMonth
+              : TRANSACTIONS_COPY.countInMonth(summary.count, monthLabel(summary.month))}
           </p>
         </div>
         <div className="flex flex-col items-end gap-1">
@@ -440,14 +473,16 @@ export function TransactionsPage() {
 
       <div className="flex flex-wrap items-end gap-3">
         <TransactionFilters
-          values={filters}
+          values={filterValues}
           onChange={setFilters}
           accounts={accounts}
           categories={categories}
           members={members}
         />
         <div className="ml-auto pb-1.5 text-[12.5px] text-muted">
-          {TRANSACTIONS_COPY.spentThisMonth}{" "}
+          {showingAllMonths
+            ? TRANSACTIONS_COPY.spentInMonth(monthLabel(summary.month))
+            : TRANSACTIONS_COPY.spentThisMonth}{" "}
           <b className="text-ink">
             {formatMoney(summary.spentMinor, summary.currency, symbolFor(summary.currency))}
           </b>
@@ -462,7 +497,7 @@ export function TransactionsPage() {
 
       <div className="rounded-xl border border-hairline bg-card px-[22px] py-2">
         {rows.length === 0 ? (
-          filtersActive ? (
+          otherFiltersActive ? (
             <div className="flex flex-col items-center gap-3 py-14 text-center">
               <p className="text-sm font-semibold text-ink">{TRANSACTIONS_COPY.noMatchesTitle}</p>
               <button
@@ -492,6 +527,25 @@ export function TransactionsPage() {
               >
                 {TRANSACTIONS_COPY.noAccountsAction}
               </Link>
+            </div>
+          ) : !showingAllMonths ? (
+            // Sits between "nothing matches your filters" and the first-run
+            // panel because it is neither: the household filtered nothing, and
+            // an empty current month says nothing about whether earlier ones
+            // are empty too. Widening is the one action that can tell them
+            // apart, so it is the one offered -- and if every month is empty
+            // as well, the branch below is what they land on.
+            <div className="flex flex-col items-center gap-3 py-14 text-center">
+              <p className="text-sm font-semibold text-ink">
+                {TRANSACTIONS_COPY.nothingInMonth(monthLabel(summary.month))}
+              </p>
+              <button
+                type="button"
+                onClick={() => setFilters({ ...filterValues, month: "" })}
+                className="min-h-11 rounded-lg border border-hairline px-3 py-2.5 text-xs font-semibold text-accent transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off sm:min-h-0 sm:py-1.5"
+              >
+                {TRANSACTIONS_COPY.allMonthsAction}
+              </button>
             </div>
           ) : (
             <div className="flex flex-col items-center gap-3 py-14 text-center">

@@ -10,6 +10,17 @@ export const TRANSACTIONS_COPY = {
   spentThisMonth: "Spent this month",
   countInMonth: (count: number, month: string) =>
     `${count} in ${month}`,
+  // Shown instead of countInMonth once the ledger is widened to every month.
+  // It carries no count on purpose: summary.count is the *current month's*
+  // count (MonthSummary answers for one calendar month by construction), so
+  // printing it over an all-time list would recreate the exact defect this
+  // pairing exists to prevent -- a figure describing a different set of rows
+  // from the ones underneath it. The list's own length is no better: it is
+  // one page of a keyset walk, not a total.
+  everyMonth: "Every month",
+  // The spend figure keeps naming its month when the list no longer matches
+  // it, so "Spent this month" never sits unlabelled above an all-time ledger.
+  spentInMonth: (month: string) => `Spent in ${month}`,
   // The design's own banner. It is the promise categories exist to keep.
   categoriesFeedBudget:
     "Every expense's category feeds that category's Budget spend automatically.",
@@ -23,6 +34,14 @@ export const TRANSACTIONS_COPY = {
   // been wiped.
   noMatchesTitle: "Nothing matches those filters.",
   noMatchesAction: "Clear filters",
+
+  // Distinct from both of the above. The ledger opens on the current month,
+  // so an empty one is neither "your filters match nothing" (the household
+  // filtered nothing) nor the first-run panel (it cannot be known from here
+  // whether earlier months are empty too). Naming the month and offering the
+  // way out is the only honest thing this screen can say.
+  nothingInMonth: (month: string) => `Nothing logged in ${month}.`,
+  allMonthsAction: "Show every month",
 
   // The first-run state above assumes there is somewhere to log *to*. With no
   // accounts there is not, and the header's "+ Add transaction" is disabled --

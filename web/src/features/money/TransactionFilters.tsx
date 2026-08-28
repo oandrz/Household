@@ -26,7 +26,14 @@ export type TransactionFilterValues = {
   accountId: string;
   categoryId: string;
   paidBy: string;
-  month: string;
+  // Three states, not two, because a month input has three: null is "the
+  // household has not chosen one", which lets the server apply its own
+  // default (the current month, for the ledger and the figures above it
+  // alike -- parseTransactionFilter); "" is the household deliberately asking
+  // for every month; and "YYYY-MM" is a month it picked. Collapsing the first
+  // two into "" is what would make a cleared filter indistinguishable from an
+  // untouched one, and only one of those may widen the ledger.
+  month: string | null;
 };
 
 const SELECT_CLASS =
@@ -200,11 +207,28 @@ export function TransactionFilters({
         <input
           id="txn-filter-month"
           type="month"
-          value={values.month}
+          value={values.month ?? ""}
           onChange={(event) => set("month", event.target.value)}
           className={SELECT_CLASS}
         />
       </div>
+
+      {/* The deliberate way back to every month, rather than leaving it to
+          clearing the input. A blank <input type="month"> renders Chrome's
+          own empty-state placeholder -- a row of dashes that reads as a
+          broken control rather than as "any month" -- so the widened state
+          needs a control that says what it does. Rendered only when a month
+          is set: with the ledger already showing every month there is
+          nothing for it to widen. */}
+      {values.month !== "" && (
+        <button
+          type="button"
+          onClick={() => set("month", "")}
+          className="min-h-11 self-end rounded-lg px-1.5 py-2.5 text-[11.5px] font-semibold text-accent transition-colors duration-[var(--transition-state)] hover:text-accent-dark sm:min-h-0 sm:py-1.5"
+        >
+          All months
+        </button>
+      )}
     </div>
   );
 }
