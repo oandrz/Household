@@ -37,7 +37,7 @@
 //      fetches inside the same tick, in which case dataUpdatedAt never
 //      advances between the failed save and the next successful fetch, and
 //      (1) alone would leave `conflict` stuck true.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, apiFetch } from "../../api/client";
 import { visionQueryKey } from "./visionQueryKeys";
@@ -85,6 +85,18 @@ export function useVision(year: number) {
   });
 
   const conflict = conflictAt !== null && query.dataUpdatedAt <= conflictAt;
+
+  // VisionPage owns `year` as its own state, and the Edit-vision modal's
+  // year select changes it on the SAME mounted useVision instance rather
+  // than remounting -- so conflictAt, without this, would survive a year
+  // switch. A 409 while saving 2026 followed by switching to 2025 would
+  // then show 2025 as conflicted even though nothing happened there, and
+  // offer a reload that resolves nothing. Resetting here, not by keying
+  // conflictAt off `year` some other way, is what keeps this hook's single
+  // conflictAt slot honest about which year it describes.
+  useEffect(() => {
+    setConflictAt(null);
+  }, [year]);
 
   const saveMutation = useMutation({
     mutationFn: async (body: SaveVisionBody): Promise<Vision> => {
