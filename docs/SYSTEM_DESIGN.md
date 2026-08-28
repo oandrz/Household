@@ -39,14 +39,25 @@ brief ever asked for it (`docs/LEARNING.md` pattern 15). **Retros' own
 fifteen-criterion browser walk (Task 17) has run and passed, 15 of 15**
 (2026-08-18), the same bar every Money feature was held to before its
 tracker row could read ✅, recorded in
-`docs/superpowers/plans/2026-08-16-hearth-retros-verification.md`. Vision is
-now real end to end — `VisionPage.tsx`, `PillarCard.tsx` and
-`MilestoneGrid.tsx` (Vision spec's task 11) render the theme hero, pillar
-measures and longer-horizon milestones `useVision` exposes (task 10), and
-`VisionModal.tsx` (Vision spec's task 12) is the whole-document editor all
-three of `onEdit`'s call sites now open — the header's Edit vision button,
-the "+ Add milestone" tile and the empty state's own call to action — so a
-household can both see a year's vision and set one. Agreements has
+`docs/superpowers/plans/2026-08-16-hearth-retros-verification.md`. Vision,
+Marriage's second feature, is code-complete and reviewed, code-shaped the
+same way Retros is: its four tables and their relationships, including the
+cross-feature edge into `goals` (§6), its two routes joining Retros' own
+route group (§4), `VisionService` and its two ports —
+`VisionRepository`/`GoalProgressReader` (§3) — are all built (§5, "Vision —
+a whole-document replace"), and its frontend — `VisionPage.tsx`,
+`PillarCard.tsx` and `MilestoneGrid.tsx` (Vision spec's task 11) render the
+theme hero, pillar measures and longer-horizon milestones `useVision`
+exposes (task 10), and `VisionModal.tsx` (Vision spec's task 12) is the
+whole-document editor all three of `onEdit`'s call sites now open — the
+header's Edit vision button, the "+ Add milestone" tile and the empty
+state's own call to action — so a household can both see a year's vision
+and set one (§7). **Unlike Retros, Vision's own browser walk has not run
+yet** — its plan holds that task 15, still to come — so its rows in
+`docs/FEATURE_TRACKER.md` read ✅ on the strength of the code and
+`make test` alone, the same standing Bills and Goals held between their own
+last code task and their walk, not yet the "reviewed and walked" bar Retros
+carries in this paragraph. Agreements has
 not been started. Family is not built. See
 `docs/FEATURE_TRACKER.md` section 6 for exactly which of Marriage's rows are
 done, including the two deliberate divergences from the design spec's own
@@ -358,7 +369,7 @@ points inward, which is why every service is testable against in-memory doubles.
 | `RetroRepository` | `adapter/postgres` | Seventeenth. `Create` answers `ErrAlreadyExists` on the `UNIQUE(household_id, month)` clash; `Update` takes the caller-normalised month and version it loaded, and tells "the retro is gone" (`ErrNotFound`, from a recheck read) from "someone saved first" (`ErrRetroChanged`, from a zero-row `UPDATE ... WHERE version = $n`) apart — never merges (§5); `Complete` is idempotent on the caller's own `at`; `DeleteDraft` puts `WHERE completed_at IS NULL` in the SQL itself, not a service `if`, so a zero-row match on a finished retro is `ErrNotFound`, not a silent no-op (`docs/LEARNING.md`'s Bills `SetBillNextDue` entry is the same defect shape this port was built to avoid) |
 | `RetroActionRepository` | `adapter/postgres` | Eighteenth. `Add` writes the action and its assignees in one transaction, so a bad assignee id leaves no orphan action; `carriedFrom` is validated through a join back to `retros` requiring the same household before it is trusted, and a malformed id is refused rather than silently read as SQL NULL (`docs/LEARNING.md`) — "fail closed on values you did not construct" applied to a field the client supplies directly. `OpenInMonth` backs both the modal's "Still open from July" offer and Overview's `openActionCount` |
 | `VisionRepository` | `adapter/postgres` | Nineteenth. `Get` returns `domain.ErrNotFound` for a year never set, which `VisionService` turns into the empty vision the screen renders (decision 9) — the repository never invents a row. `Save` replaces the whole document — parent upserted, every child deleted and reinserted — in one transaction, under the same two-shape version guard `RetroRepository.Update` established: `version == 0` is a create, refused with `domain.ErrVisionChanged` if a row has appeared since the caller read the empty vision; `version > 0` is an update, `WHERE version = $n`, with a zero-row result re-read to tell "the vision is gone" apart from "someone saved first." The existence check runs on the transaction's own connection, never the pool-backed `Get` — calling `Get` from inside `Save`'s own `pgx.BeginFunc` would hold one pool connection while asking the pool for a second, which starves it under concurrent saves (`docs/LEARNING.md`). A measure naming a goal outside this household is refused inside the same transaction with `domain.ErrVisionGoalUnknown` — the `vision_measures` foreign key alone only proves the goal exists *somewhere* |
-| `GoalProgressReader` | `adapter/postgres` (`*GoalRepo` already satisfies it) | Twentieth, and one method wide on purpose — the same interface-segregation reasoning as `AccountLookup`/`CategoryLookup` above, for a caller in the opposite direction: `VisionService` needs one thing from Goals, the progress of a handful of goal ids, not the forty-line `GoalRepository` contract. `ProgressByIDs` returns an entry only for an id that exists in the caller's own household; a missing id is a miss, not an error — a measure whose goal was deleted renders as a label with no figure (spec decision 8), not a failed page. Counts an *archived* goal as found, deliberately: archiving is not deletion anywhere else in this product, so a measure linked to an archived goal keeps its figure |
+| `GoalProgressReader` | `adapter/postgres` (`*GoalRepo` already satisfies it) | Unnumbered, like `AccountLookup`/`CategoryLookup` above — a narrow port, not a repository. One method wide on purpose, the same interface-segregation reasoning as those two, for a caller in the opposite direction: `VisionService` needs one thing from Goals, the progress of a handful of goal ids, not the forty-line `GoalRepository` contract. `ProgressByIDs` returns an entry only for an id that exists in the caller's own household; a missing id is a miss, not an error — a measure whose goal was deleted renders as a label with no figure (spec decision 8), not a failed page. Counts an *archived* goal as found, deliberately: archiving is not deletion anywhere else in this product, so a measure linked to an archived goal keeps its figure |
 | `PasswordHasher`, `TokenGenerator` | `adapter/crypto` | argon2id with cost from config; tokens are random, stored hashed |
 | `Mailer` | `adapter/mail` | SMTP; TLS policy and credentials from config |
 | `Clock` | `adapter/clock` | So lockout windows and expiry are deterministic in tests |

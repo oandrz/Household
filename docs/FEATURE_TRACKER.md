@@ -431,32 +431,54 @@ Not-started to Built — taking the stated totals from 69/15/20/2 = 106 to
 **71/15/19/2 = 107**. The "Where things stand" headline (Built + Partial)
 moves from 84 to **86**, now of **107**.
 
-**Vision's doc pass, 2026-08-29 — no row moves; two things corrected in
-prose, one thing checked and left alone.** Task 14 verified rather than
-assumed what Tasks 9–13 had already written here. First, the claim it was
-told to fix — that this file and `docs/SYSTEM_DESIGN.md` say the Edit-vision
-modal has "both" entry points — does not hold: every row and every narrative
-paragraph above already names **three** (the header's Edit vision button,
-the "+ Add milestone" tile, and the empty state's own call to action), and a
-search of this file's full git history finds no "both entry points" text
-ever committed. The one sentence that reads that way at a glance — "matching
-the design's own two entry points," in the 2026-08-29 Vision-page paragraph
-above — turns out to be correct as written: `design/Household
-Dashboard.dc.html` really does draw `onClick="{{ openVision }}"` exactly
-twice (the header button and the milestone tile, not the empty state, which
-the design does not draw); Hearth's own third is an addition, not a miscount.
-Clarified in place so it cannot be misread as an undercount of what was
-built. Second, **the "Vision — yearly theme" row now says plainly that
-per-year history is real and reachable**, not merely stored: the schema
-keeps one vision per `(household_id, year)` forever, and the modal's year
-select is a real, working affordance onto it, not a drawn-but-inert field —
-narrowed to the previous, current and next year by the UI, not by the API.
-Third, checked and left alone: **the `/marriage` index redirect and the
-year select's own reach into a past year were both considered for their own
-row and neither got one.** The redirect is unreachable-by-design plumbing —
-the identical shape `moneyIndexRoute` already has, and that route has never
-carried a row of its own either, only the prose above and in section 6 — and
-the year select is not "something the design never drew" the way Accounts'
+**Vision's doc pass, 2026-08-29 — no row moves; three things corrected or
+added in prose, one thing checked and left alone.** Task 14 verified rather
+than assumed what Tasks 9–13 had already written here. First, the claim it
+was told to fix — that this file and `docs/SYSTEM_DESIGN.md` currently say
+the Edit-vision modal has "both" entry points — does not hold *today*: every
+row and every narrative paragraph above already names **three** (the
+header's Edit vision button, the "+ Add milestone" tile, and the empty
+state's own call to action). It did hold once: Vision spec's task 11
+(`8f2ee81`) shipped this file with "`VisionPage.tsx`'s `onEdit` is a no-op
+placeholder ... both entry points, the header's Edit vision button and
+MilestoneGrid's '+ Add milestone' tile, already call it" — true at that
+moment, since the modal and its empty-state CTA did not exist yet — and
+task 12 (`8814e70`) correctly rewrote it to "All three of `onEdit`'s call
+sites" the instant the modal shipped a third. So the git history does
+contain "both entry points" text, but as an accurate description of a
+transitional state that was correctly superseded, not a persisting error —
+a claim worth checking against the actual commits rather than a single
+`grep` on the working tree, which is what the first pass of this note got
+wrong. Separately, the one sentence elsewhere that reads ambiguously at a
+glance — "matching the design's own two entry points," in the 2026-08-29
+Vision-page paragraph above — is correct as written for a different reason:
+`design/Household Dashboard.dc.html` really does draw
+`onClick="{{ openVision }}"` exactly twice (the header button and the
+milestone tile, not the empty state, which the design does not draw);
+Hearth's own third is an addition, not a miscount. Clarified in place so it
+cannot be misread as an undercount of what was built. Second, **the "Vision
+— yearly theme" row now says plainly that per-year history is real and
+reachable**, not merely stored: the schema keeps one vision per
+`(household_id, year)` forever, and the modal's year select is a real,
+working affordance onto it, not a drawn-but-inert field — narrowed to the
+previous, current and next year by the UI, not by the API. Third, **all
+four Vision rows in this section read ✅ ahead of Vision's own browser
+walk** — Vision spec's task 15, not yet run as of this pass. This file's own
+legend defines ✅ as "Built **and verified**," and the Retros rows just
+above only earned a plain ✅ once Retros' task 17 walk passed 15 of 15
+(recorded in its own paragraph above); Vision's four rows were marked ✅ by
+tasks 11–13 as each shipped, with no equivalent walk behind them yet. Left
+at ✅ rather than downgraded, on this task's own instruction — the code is
+built, reviewed and covered by `make test`, exactly the same standing Bills
+and Goals held between their own last code task and their walk — but stated
+here so nobody reads "the Marriage rows are ✅" as "the walk has run." The
+same gap applies to the two Overview rows in section 4. Fourth, checked and
+left alone: **the `/marriage` index redirect and the year select's own
+reach into a past year were both considered for their own row and neither
+got one.** The redirect is unreachable-by-design plumbing — the identical
+shape `moneyIndexRoute` already has, and that route has never carried a row
+of its own either, only the prose above and in section 6 — and the year
+select is not "something the design never drew" the way Accounts'
 archive/restore or Goals' contributions were: `modalVision`'s own mockup
 draws a Year field, `▾` and all, so widening its own row's prose (done
 above) is the honest-sized change, not a new line item for a control the
