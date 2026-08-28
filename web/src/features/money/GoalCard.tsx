@@ -168,7 +168,7 @@ export function GoalCard({
             // size falls short of the 44px floor on a phone. Not dense --
             // this is the card's one action in that state, not a row it
             // shares with anything else.
-            className="-mx-1.5 mt-2.5 inline-flex min-h-11 items-center rounded-md px-1.5 text-[11px] font-semibold text-accent transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
+            className="-mx-1.5 mt-2.5 inline-flex min-h-11 items-center rounded-md px-1.5 text-[11px] font-semibold text-accent transition-colors duration-[var(--transition-state)] enabled:hover:bg-canvas enabled:active:bg-toggle-off disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
           >
             {GOAL_COPY.restore}
           </button>
@@ -223,7 +223,7 @@ export function GoalCard({
                   onArchive(goal.id);
                 }}
                 onKeyDown={(event) => event.stopPropagation()}
-                className="-mx-1.5 min-h-11 rounded-md px-1.5 text-danger transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
+                className="-mx-1.5 min-h-11 rounded-md px-1.5 text-danger transition-colors duration-[var(--transition-state)] enabled:hover:bg-canvas enabled:active:bg-toggle-off disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
               >
                 {GOAL_COPY.archive}
               </button>

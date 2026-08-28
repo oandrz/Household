@@ -404,7 +404,7 @@ export function TransactionsPage() {
               size falls short of the 44px floor on a phone). */}
           <Link
             to="/money"
-            className="mb-1 -mx-1.5 inline-flex min-h-11 items-center rounded-md px-1.5 text-xs font-semibold text-accent transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off sm:min-h-0"
+            className="mb-1 inline-flex min-h-11 items-center text-xs font-semibold text-accent sm:min-h-0"
           >
             {TRANSACTIONS_COPY.backToFinances}
           </Link>
@@ -420,7 +420,7 @@ export function TransactionsPage() {
             type="button"
             disabled={accounts.length === 0}
             onClick={() => setAddOpen(true)}
-            className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white transition-colors duration-[var(--transition-state)] hover:bg-accent-dark active:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
+            className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white transition-colors duration-[var(--transition-state)] enabled:hover:bg-accent-dark enabled:active:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
           >
             {TRANSACTIONS_COPY.add}
           </button>
@@ -524,7 +524,7 @@ export function TransactionsPage() {
                 type="button"
                 disabled={loadingOlder}
                 onClick={handleLoadOlder}
-                className="w-full rounded-md py-3.5 text-center text-[12.5px] font-semibold text-accent transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off disabled:opacity-60"
+                className="w-full rounded-md py-3.5 text-center text-[12.5px] font-semibold text-accent transition-colors duration-[var(--transition-state)] enabled:hover:bg-canvas enabled:active:bg-toggle-off disabled:opacity-60"
               >
                 {TRANSACTIONS_COPY.loadOlder}
               </button>

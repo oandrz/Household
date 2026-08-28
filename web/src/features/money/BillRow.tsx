@@ -313,7 +313,7 @@ export function BillRow(props: BillRowProps) {
               onRestore(bill.id);
             }}
             onKeyDown={(event) => event.stopPropagation()}
-            className="-mx-1.5 -my-0.5 rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-accent transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off disabled:cursor-not-allowed disabled:opacity-60"
+            className="-mx-1.5 -my-0.5 rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-accent transition-colors duration-[var(--transition-state)] enabled:hover:bg-canvas enabled:active:bg-toggle-off disabled:cursor-not-allowed disabled:opacity-60"
           >
             {BILL_COPY.restore}
           </button>
@@ -328,7 +328,7 @@ export function BillRow(props: BillRowProps) {
               onArchive(bill.id);
             }}
             onKeyDown={(event) => event.stopPropagation()}
-            className="-mx-1.5 -my-0.5 rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-danger transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off disabled:cursor-not-allowed disabled:opacity-60"
+            className="-mx-1.5 -my-0.5 rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-danger transition-colors duration-[var(--transition-state)] enabled:hover:bg-canvas enabled:active:bg-toggle-off disabled:cursor-not-allowed disabled:opacity-60"
           >
             {BILL_COPY.archive}
           </button>

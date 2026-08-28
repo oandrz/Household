@@ -90,7 +90,7 @@ function AccountRow({
                 aria-label={`Restore ${account.nickname}`}
                 disabled={pending}
                 onClick={() => onRestore(account.id)}
-                className="-mx-1.5 min-h-11 rounded-md px-1.5 transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
+                className="-mx-1.5 min-h-11 rounded-md px-1.5 transition-colors duration-[var(--transition-state)] enabled:hover:bg-canvas enabled:active:bg-toggle-off disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
               >
                 Restore
               </button>
@@ -103,7 +103,7 @@ function AccountRow({
                 aria-label={`Archive ${account.nickname}`}
                 disabled={pending}
                 onClick={() => onArchive(account.id)}
-                className="-mx-1.5 min-h-11 rounded-md px-1.5 text-danger transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
+                className="-mx-1.5 min-h-11 rounded-md px-1.5 text-danger transition-colors duration-[var(--transition-state)] enabled:hover:bg-canvas enabled:active:bg-toggle-off disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
               >
                 Archive
               </button>

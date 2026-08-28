@@ -219,7 +219,7 @@ export function Sidebar({ me }: { me: Me }) {
           // lives inside the drawer, which switches at `lg`, so a 768px
           // tablet still driving the touch drawer must not fall back to a
           // 24px target.
-          className="grid h-11 w-11 flex-none place-items-center rounded-md text-[13px] text-label transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off disabled:opacity-60 lg:h-6 lg:w-6"
+          className="grid h-11 w-11 flex-none place-items-center rounded-md text-[13px] text-label transition-colors duration-[var(--transition-state)] enabled:hover:bg-canvas enabled:active:bg-toggle-off disabled:opacity-60 lg:h-6 lg:w-6"
         >
           ⏻
         </button>
