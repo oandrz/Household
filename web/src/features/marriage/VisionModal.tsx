@@ -662,48 +662,67 @@ export function VisionModal({
             own single scrolling region, not a rebuild of Modal.tsx for one
             caller's content length. */}
         <div className="flex max-h-[65vh] flex-col gap-4 overflow-y-auto pr-1">
-          <div className="flex flex-col gap-1.5 sm:w-[150px]">
-            <label htmlFor={yearSelectId} className="text-xs font-semibold text-label">
-              {VISION_COPY.modalYearLabel}
-            </label>
-            <select
-              id={yearSelectId}
-              data-testid="vision-modal-year"
-              value={year}
-              onChange={(event) => onYearChange(Number(event.target.value))}
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
-            >
-              {yearOptions().map((y) => (
-                <option key={y} value={y}>
-                  {y}
-                </option>
-              ))}
-            </select>
+          {/* Theme and year share one row, theme wide and year narrow, the
+              way the design draws them (dc.html:932, grid 1fr/150px). The
+              theme is what this modal is for; the year is which one you are
+              setting. Stacking the year alone above the theme -- which is
+              what this was -- gave the smaller decision the more prominent
+              position, and put it first in the tab order too.
+
+              The year select stays mounted through a year change while the
+              newly chosen year's document loads; the theme field cannot,
+              because there is no theme to edit until it arrives. So the
+              left cell carries whichever of the two states applies, and the
+              row keeps its shape either way rather than collapsing to a
+              lone select with a loading line orphaned beneath it. Below
+              `sm` the grid is one column and they stack, theme first. */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_150px]">
+            <div className="flex flex-col justify-end gap-1.5">
+              {ready ? (
+                <>
+                  <label htmlFor={themeId} className="text-xs font-semibold text-label">
+                    {VISION_COPY.modalThemeLabel}
+                  </label>
+                  <input
+                    id={themeId}
+                    data-testid="vision-modal-theme"
+                    type="text"
+                    value={theme}
+                    onChange={(event) => setTheme(event.target.value)}
+                    className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+                  />
+                </>
+              ) : loading ? (
+                <p className="text-xs text-muted">Loading…</p>
+              ) : error ? (
+                <p role="alert" data-testid="vision-modal-load-error" className="text-xs text-danger">
+                  {VISION_COPY.loadError}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor={yearSelectId} className="text-xs font-semibold text-label">
+                {VISION_COPY.modalYearLabel}
+              </label>
+              <select
+                id={yearSelectId}
+                data-testid="vision-modal-year"
+                value={year}
+                onChange={(event) => onYearChange(Number(event.target.value))}
+                className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              >
+                {yearOptions().map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
-          {!ready ? (
-            loading ? (
-              <p className="text-xs text-muted">Loading…</p>
-            ) : error ? (
-              <p role="alert" data-testid="vision-modal-load-error" className="text-xs text-danger">
-                {VISION_COPY.loadError}
-              </p>
-            ) : null
-          ) : (
+          {ready && (
             <>
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor={themeId} className="text-xs font-semibold text-label">
-                  {VISION_COPY.modalThemeLabel}
-                </label>
-                <input
-                  id={themeId}
-                  data-testid="vision-modal-theme"
-                  type="text"
-                  value={theme}
-                  onChange={(event) => setTheme(event.target.value)}
-                  className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
-                />
-              </div>
 
               <div className="flex flex-col gap-1.5">
                 <label htmlFor={descriptionId} className="text-xs font-semibold text-label">

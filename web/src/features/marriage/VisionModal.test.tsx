@@ -194,6 +194,18 @@ describe("VisionModal", () => {
     expect(await screen.findByTestId("vision-modal-theme")).toHaveValue("Slow down together");
     expect(screen.getByTestId("vision-modal-description")).toHaveValue("Fewer commitments, more presence.");
 
+    // The theme comes before the year, as the design's own row does
+    // (dc.html:932, theme 1fr / year 150px). The theme is what the modal is
+    // for; the year only says which one is being set -- so it leads, in
+    // reading order and in tab order. DOCUMENT_POSITION_FOLLOWING asserts
+    // the relationship rather than either element's coordinates, which
+    // jsdom cannot lay out.
+    const themeField = screen.getByTestId("vision-modal-theme");
+    const yearField = screen.getByTestId("vision-modal-year");
+    expect(
+      themeField.compareDocumentPosition(yearField) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
     const pillar = screen.getByTestId("vision-modal-pillar");
     expect(within(pillar).getByTestId("vision-modal-pillar-name")).toHaveValue("Us before logistics");
     // The field the design's own modal draws no box for at all (spec
