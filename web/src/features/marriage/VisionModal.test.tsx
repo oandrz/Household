@@ -194,6 +194,24 @@ describe("VisionModal", () => {
     expect(await screen.findByTestId("vision-modal-theme")).toHaveValue("Slow down together");
     expect(screen.getByTestId("vision-modal-description")).toHaveValue("Fewer commitments, more presence.");
 
+    // Each row that pairs a growing field with a fixed-width control (the
+    // ✕, the year box) gives that field `min-w-0`. A flex item defaults to
+    // min-width:auto, so without it the field refuses to shrink below its
+    // content's intrinsic width and pushes its neighbour out of the row --
+    // measured at 360px, the milestone ✕ hung 39px past the modal's scroll
+    // container and gave it a horizontal scrollbar. Asserts the class, not a
+    // width: jsdom does no layout, so the name says "carries the class"
+    // rather than claiming an outcome it cannot see. The real widths were
+    // checked in a browser.
+    for (const testid of [
+      "vision-modal-measure-label",
+      "vision-modal-pillar-name",
+      "vision-modal-milestone-title",
+    ]) {
+      const field = screen.getAllByTestId(testid)[0];
+      expect(field.parentElement?.className).toContain("min-w-0");
+    }
+
     // The theme comes before the year, as the design's own row does
     // (dc.html:932, theme 1fr / year 150px). The theme is what the modal is
     // for; the year only says which one is being set -- so it leads, in
