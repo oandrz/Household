@@ -522,34 +522,126 @@ describe("the real route tree", () => {
     expect(router.state.location.pathname).toBe("/marriage/retros");
   });
 
-  // Bare "/marriage" has no index route -- only "retros" is a child of
-  // marriageGuardRoute, unlike moneyGuardRoute, which has moneyIndexRoute
-  // (path "/") giving bare "/money" a real page. That asymmetry is accepted,
-  // not a defect: nothing in the design links to bare "/marriage" (the
-  // sidebar goes straight to "/marriage/retros"), so there is no real
-  // caller for an index route to serve yet. What this test pins is that the
-  // *shape* of that acceptance doesn't drift silently -- before task 10,
-  // "/marriage" fell all the way through to rootRoute's notFoundComponent
-  // (shell-less, RequireAuth never running); today marriageGuardRoute is a
-  // real route, so RequireAuth and RequireCapability both run as normal and
-  // AppShell renders, but there is no child route left to fill the content
-  // area. A caller who clears the guard sees the sidebar with nothing
-  // beside it -- neither a page nor "Page not found." -- confirmed
-  // empirically with a throwaway probe before this test was written, the
-  // same way the money group's own index-route precedent above was read
-  // from the code rather than assumed.
-  it("renders the shell with a blank content area for bare /marriage today, not a 404", async () => {
-    stubFetchRoutes({ "GET /api/v1/auth/me": { status: 200, body: meFixture() } });
+  // Task 11's own analogue of the retros redirect test above: marriageVisionRoute
+  // sits under marriageGuardRoute too, so a member without the marriage
+  // capability must never reach the Vision screen either.
+  it("redirects a member without the marriage capability away from /marriage/vision", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": {
+        status: 200,
+        body: meFixture({
+          membership: {
+            id: "membership-2",
+            householdId: "household-1",
+            userId: "user-2",
+            role: "limited",
+            capabilities: ["calendar", "chores"],
+          },
+          capabilities: ["calendar", "chores"],
+        }),
+      },
+    });
+
+    const { router } = renderApp("/marriage/vision");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Overview" }),
+    ).toBeInTheDocument();
+  });
+
+  // The positive counterpart the redirect test above needs -- and the one
+  // that actually proves marriageVisionRoute exists and mounts the real
+  // VisionPage, not a 404.
+  it("mounts the Vision page at /marriage/vision for a caller who has the marriage capability", async () => {
+    // VisionPage.tsx's own currentVisionYear() reads the real calendar, so
+    // `Date` is faked first (the Budget test's own `toFake: ["Date"]`
+    // convention above) to pin which year it requests.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-15T12:00:00Z"));
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      "GET /api/v1/marriage/vision?year=2026": {
+        status: 200,
+        body: {
+          vision: { year: 2026, theme: "", description: "", version: 0, pillars: [], milestones: [] },
+        },
+      },
+    });
+
+    const { router } = renderApp("/marriage/vision");
+
+    expect(await screen.findByTestId("vision-page")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/marriage/vision");
+    // Real timers restored in this file's shared afterEach below.
+  });
+
+  // Task 11 gave marriageGuardRoute a real index route -- before this, bare
+  // "/marriage" matched marriageGuardRoute itself (a real route, not an
+  // absence), ran RequireAuth and RequireCapability as normal, and then had
+  // no child route left to render: AppShell's sidebar showed, but the
+  // content area was blank rather than a page or a 404 (router.tsx's own
+  // header comment has the full history, confirmed empirically with a
+  // throwaway probe before task 10's own version of this test was written).
+  // Marriage now has two pages, so the index redirects to the first --
+  // moneyIndexRoute's own "first page wins" choice, restated here as an
+  // actual redirect (Money's own index route IS its first page rather than
+  // redirecting to a sibling, since Finances has no separate URL of its own
+  // the way Retros does).
+  it("redirects bare /marriage to /marriage/retros, its first page", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      "GET /api/v1/retros": {
+        status: 200,
+        body: { retros: [], mood: [], doneCount: 0, since: null, startMonth: "2026-08" },
+      },
+    });
 
     const { router } = renderApp("/marriage");
 
-    // The sidebar itself is the proof AppShell mounted -- RequireAuth
-    // cleared and RequireCapability("marriage") passed (meFixture's default
-    // membership holds it).
-    expect(await screen.findByRole("link", { name: "Overview" })).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/marriage");
+    await waitFor(() => expect(router.state.location.pathname).toBe("/marriage/retros"));
+    expect(await screen.findByTestId("retros-page")).toBeInTheDocument();
     expect(screen.queryByText("Page not found.")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("retros-page")).not.toBeInTheDocument();
+  });
+
+  // marriageIndexRoute's own beforeLoad is unconditional -- it does not
+  // check capability itself, RequireCapability.tsx's own comment on why
+  // client-side gating is presentation only. So a member without marriage
+  // transits /marriage/retros on the way through (beforeLoad resolves the
+  // redirect before marriageGuardRoute's own component -- RequireCapability
+  // -- ever mounts to block it) rather than being stopped at bare
+  // "/marriage" itself. The destination is still correct: RequireCapability
+  // runs against /marriage/retros exactly as the redirect test above pins
+  // for a member who holds the capability, and bounces this one to / the
+  // same as if they had typed /marriage/retros directly. Worth pinning on
+  // its own -- this route shape (an index route's beforeLoad sitting inside
+  // a capability-gated parent) is the same kind of ordering LEARNING.md
+  // already found empirically surprising once for this exact route group
+  // (the blank-content-area entry) rather than assumed from reading the
+  // tree.
+  it("still ends a marriage-less member at / when they type bare /marriage, via /marriage/retros", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": {
+        status: 200,
+        body: meFixture({
+          membership: {
+            id: "membership-2",
+            householdId: "household-1",
+            userId: "user-2",
+            role: "limited",
+            capabilities: ["calendar", "chores"],
+          },
+          capabilities: ["calendar", "chores"],
+        }),
+      },
+    });
+
+    const { router } = renderApp("/marriage");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Overview" }),
+    ).toBeInTheDocument();
   });
 
   // Fix round 5, Finding 1 (critical): this is the exact reproduction the

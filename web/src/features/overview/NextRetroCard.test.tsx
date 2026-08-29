@@ -1,18 +1,24 @@
 // NextRetroCard.tsx owns its own useRetros call, the same reason
 // NextBillCard.test.tsx tests that component the "stub the route, mount the
 // real component, wait for the request to settle" way rather than the
-// GoalsCard.test.tsx way (an already-typed prop).
-import { screen } from "@testing-library/react";
+// GoalsCard.test.tsx way (an already-typed prop). It also owns its own
+// useVision call now, for the Vision check-in strip -- VisionCard.tsx's own
+// header comment explains why that hook is mounted per-component rather than
+// lifted to OverviewPage.
+import { screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
 import { currentMonth } from "../money/month";
 import { monthNameOnly, nextMonthName } from "../marriage/retroCopy";
 import type { RetroSummary, RetrosResponse } from "../marriage/retroSchemas";
+import { currentVisionYear } from "../marriage/visionQueryKeys";
+import type { Vision } from "../marriage/visionSchemas";
 import { OVERVIEW_COPY } from "./copy";
 import { NextRetroCard } from "./NextRetroCard";
 
 const MONTH = currentMonth();
+const YEAR = currentVisionYear();
 
 // A minimal, schema-valid RetroSummary (retroSummarySchema's own required
 // fields) -- every field present rather than optional, matching
@@ -41,9 +47,26 @@ function retrosFixture(overrides: Partial<RetrosResponse> = {}): RetrosResponse 
   };
 }
 
+// theme: "" by default -- the same wire shape a never-set year sends
+// (visionSchema's own version: 0 comment) -- so every test in this file that
+// doesn't care about the strip keeps seeing it absent, the same
+// empty-default convention retrosFixture/summaryFixture already follow.
+function visionFixture(overrides: Partial<Vision> = {}): Vision {
+  return {
+    year: YEAR,
+    theme: "",
+    description: "",
+    version: 0,
+    pillars: [],
+    milestones: [],
+    ...overrides,
+  };
+}
+
 function renderCard(retrosResponse: RetrosResponse, extraRoutes: Record<string, RouteResponse | RouteResponse[]> = {}) {
   const fetchMock = stubFetchRoutes({
     "GET /api/v1/retros": { status: 200, body: retrosResponse },
+    [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionFixture() } },
     ...extraRoutes,
   });
   return { fetchMock, ...renderWithRouter(<NextRetroCard />) };
@@ -143,7 +166,10 @@ describe("NextRetroCard", () => {
   // (NextBillCard.test.tsx's own comment on why the first query there is
   // `find`, not `get`, states the identical reason).
   it("renders nothing before its query has resolved", async () => {
-    stubFetchRoutes({ "GET /api/v1/retros": { status: 200, body: retrosFixture() } });
+    stubFetchRoutes({
+      "GET /api/v1/retros": { status: 200, body: retrosFixture() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionFixture() } },
+    });
     renderWithRouter(
       <div data-testid="next-retro-card-wrapper">
         <NextRetroCard />
@@ -152,5 +178,48 @@ describe("NextRetroCard", () => {
 
     const wrapper = await screen.findByTestId("next-retro-card-wrapper");
     expect(wrapper).toBeEmptyDOMElement();
+  });
+
+  // The design's own strip (dc.html: "Vision check-in: 2026 theme -- 'Slow
+  // down together'", inside this same card). Its own describe block, not
+  // folded into the tests above: this is Vision's data, not Retros', so
+  // these two are the only tests in this file that touch the vision route
+  // for a reason beyond satisfying the stub.
+  describe("Vision check-in strip", () => {
+    it('shows "Vision check-in: <year> theme — <theme>" when this year has a vision', async () => {
+      renderCard(retrosFixture(), {
+        [`GET /api/v1/marriage/vision?year=${YEAR}`]: {
+          status: 200,
+          body: { vision: visionFixture({ theme: "Slow down together", version: 1 }) },
+        },
+      });
+
+      const strip = await screen.findByTestId("vision-checkin-strip");
+      expect(strip).toHaveTextContent(`Vision check-in: ${YEAR} theme — "Slow down together"`);
+    });
+
+    // version 0's own theme is always "" on the wire (visionSchema's own
+    // comment), so the default `visionFixture()` this file's `renderCard`
+    // already stubs with is exactly the "no vision yet" case -- no override
+    // needed to reach it.
+    it("omits the strip when this year has no vision yet", async () => {
+      let visionRequested = false;
+      renderCard(retrosFixture(), {
+        [`GET /api/v1/marriage/vision?year=${YEAR}`]: {
+          status: 200,
+          body: { vision: visionFixture() },
+          capture: () => {
+            visionRequested = true;
+          },
+        },
+      });
+
+      await screen.findByTestId("next-retro-card");
+      // Proof the vision request itself resolved, not merely that the retro
+      // card rendered -- the two queries are independent, and this card's
+      // own top-level guard only waits on retros.
+      await waitFor(() => expect(visionRequested).toBe(true));
+      expect(screen.queryByTestId("vision-checkin-strip")).not.toBeInTheDocument();
+    });
   });
 });

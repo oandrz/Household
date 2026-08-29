@@ -18,6 +18,7 @@
 //       /money/goals RequireCapability("money") -> Goals (Task 11; the real GoalsPage)
 //       /money/bills RequireCapability("money") -> Bills (the real BillsPage)
 //       /marriage/retros RequireCapability("marriage") -> Retros (Task 10; RetrosPage)
+//       /marriage/vision RequireCapability("marriage") -> Vision & goals (Task 11; VisionPage)
 //       /settings                                   -- the real Settings screen (Task 20)
 //
 // Marriage came back in Task 10, in the same change as its SPACE_PAGES entry
@@ -25,27 +26,30 @@
 // together for the reason its own commit message gives (a nav row whose only
 // content is "Arriving in slice N" reads as broken), so nothing about that
 // reasoning is undone by adding the route back alone; the guard and the
-// sidebar entry have to land with it. marriageGuardRoute has one child today
-// (retros), unlike moneyGuardRoute, which has an index child (moneyIndexRoute,
-// path "/") that gives bare "/money" a real page. Marriage has no equivalent
-// index route -- nothing in the design links to bare "/marriage" (the
-// sidebar's own entry goes straight to "/marriage/retros") -- so a caller who
-// types it by hand still matches marriageGuardRoute itself (it is a real
-// route now, not an absence), runs RequireAuth and RequireCapability as
-// normal, and then has no child route left to render: AppShell's sidebar
-// shows, but the content area is blank rather than a page or a 404. This is
-// a known minor gap, not a redirect worth adding speculatively -- an index
-// route belongs to whichever task first gives Marriage a real landing page
-// distinct from Retros. Family still has no route at all: its own "Arriving
-// in slice 4" placeholder was deleted in the same commit as Marriage's and
-// nothing has rebuilt it yet, so /family/calendar still genuinely falls
-// through to rootRoute's notFoundComponent the way this file used to say
-// every Marriage URL did too.
+// sidebar entry have to land with it. marriageGuardRoute had one child at
+// that point (retros) and no index child, unlike moneyGuardRoute's own
+// moneyIndexRoute (path "/") which gives bare "/money" a real page -- a
+// caller who typed bare "/marriage" by hand matched marriageGuardRoute
+// itself (a real route, not an absence), ran RequireAuth and
+// RequireCapability as normal, and then had no child route left to render:
+// AppShell's sidebar showed, but the content area was blank rather than a
+// page or a 404. That was accepted as a known minor gap at the time, not a
+// redirect worth adding speculatively, on the reasoning that an index route
+// belongs to whichever task first gives Marriage a real landing page
+// distinct from Retros -- Task 11 is that task: Vision & goals is Marriage's
+// second page, so marriageIndexRoute now redirects bare "/marriage" to
+// "/marriage/retros", the same "first page wins" choice moneyIndexRoute
+// already made for Money. Family still has no route at all: its own
+// "Arriving in slice 4" placeholder was deleted in the same commit as
+// Marriage's and nothing has rebuilt it yet, so /family/calendar still
+// genuinely falls through to rootRoute's notFoundComponent the way this file
+// used to say every Marriage URL did too.
 import {
   Navigate,
   createRootRoute,
   createRoute,
   createRouter,
+  redirect,
   useParams,
   useSearch,
 } from "@tanstack/react-router";
@@ -56,6 +60,7 @@ import { SignUpScreen } from "../features/auth/SignUpScreen";
 import { SignUpCompleteScreen } from "../features/auth/SignUpCompleteScreen";
 import { useMe } from "../features/auth/useAuth";
 import { RetrosPage } from "../features/marriage/RetrosPage";
+import { VisionPage } from "../features/marriage/VisionPage";
 import { BillsPage } from "../features/money/BillsPage";
 import { BudgetPage } from "../features/money/BudgetPage";
 import { FinancesPage } from "../features/money/FinancesPage";
@@ -250,14 +255,33 @@ const marriageGuardRoute = createRoute({
   path: "marriage",
   component: () => <RequireCapability cap="marriage" />,
 });
-// Retros is Marriage's first page (Task 10) -- Vision & goals and Agreements
-// (docs/FEATURE_TRACKER.md section 6) will each get their own sibling route
-// under marriageGuardRoute when they're built, the same way moneyBudgetRoute
-// and moneyGoalsRoute joined moneyIndexRoute one at a time.
+// Retros is Marriage's first page (Task 10). Vision & goals is its second
+// (Task 11) -- Agreements (docs/FEATURE_TRACKER.md section 6) will get its
+// own sibling route under marriageGuardRoute when it's built, the same way
+// moneyBudgetRoute and moneyGoalsRoute joined moneyIndexRoute one at a time.
 const marriageRetrosRoute = createRoute({
   getParentRoute: () => marriageGuardRoute,
   path: "retros",
   component: RetrosPage,
+});
+const marriageVisionRoute = createRoute({
+  getParentRoute: () => marriageGuardRoute,
+  path: "vision",
+  component: VisionPage,
+});
+
+// Task 10 left marriageGuardRoute with one child and no index, so bare
+// "/marriage" rendered the shell with an empty content area (this file's
+// own header comment has the full history). Marriage now has two pages, so
+// the index goes to the first of them -- moneyIndexRoute's own "first page
+// wins" choice, restated for Marriage now that it has a "first page" to
+// redirect to at all.
+const marriageIndexRoute = createRoute({
+  getParentRoute: () => marriageGuardRoute,
+  path: "/",
+  beforeLoad: () => {
+    throw redirect({ to: "/marriage/retros" });
+  },
 });
 
 const settingsRoute = createRoute({
@@ -288,7 +312,7 @@ export const routeTree = rootRoute.addChildren([
         moneyGoalsRoute,
         moneyBillsRoute,
       ]),
-      marriageGuardRoute.addChildren([marriageRetrosRoute]),
+      marriageGuardRoute.addChildren([marriageIndexRoute, marriageRetrosRoute, marriageVisionRoute]),
       settingsRoute,
     ]),
   ]),

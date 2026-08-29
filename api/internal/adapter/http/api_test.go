@@ -297,6 +297,11 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 		Categories: categoryRepo,
 	})
 	retroSvc := usecase.NewRetroService(postgres.NewRetroRepo(db), postgres.NewRetroActionRepo(db))
+	// goalRepo doubles as the GoalProgressReader, the same reasoning
+	// cmd/api/main.go's own wiring comment gives: Vision needs one
+	// percentage from Goals and the narrow port is what keeps it from
+	// depending on GoalRepository's whole surface.
+	visionSvc := usecase.NewVisionService(postgres.NewVisionRepo(db), goalRepo, clk)
 
 	deps := httpadapter.Deps{
 		Pinger:       db,
@@ -312,6 +317,7 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 		Goals:        goalSvc,
 		Bills:        billSvc,
 		Retros:       retroSvc,
+		Visions:      visionSvc,
 		Users:        users,
 		Memberships:  memberships,
 		Sessions:     sessions,

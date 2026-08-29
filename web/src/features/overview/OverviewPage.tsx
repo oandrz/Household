@@ -24,6 +24,7 @@ import { NextBillCard } from "./NextBillCard";
 import { NextRetroCard } from "./NextRetroCard";
 import { QuickAddMenu } from "./QuickAddMenu";
 import { SetupChecklist } from "./SetupChecklist";
+import { VisionCard } from "./VisionCard";
 
 export function OverviewPage() {
   const me = useMe();
@@ -148,14 +149,26 @@ export function OverviewPage() {
           real owner holds money too) to keep this card reachable; see that
           comment for why the states are coupled today but this placement
           does not depend on it staying that way. This is also the ENTIRE
-          gate: NextRetroCard.tsx is only ever mounted here, and only calls
-          useRetros() once mounted, so a member without marriage never fires
-          GET /retros at all (that component's own header comment has the
-          full reasoning for why it needs no `enabled` prop the way
-          NextBillCard does). Full width rather than a grid cell, the same
+          gate for both cards below -- the same one ruling 4 (task-13's own
+          brief) asks Vision's two surfaces to reuse rather than duplicate:
+          NextRetroCard.tsx and VisionCard.tsx are only ever mounted here,
+          and each only calls its own hook (useRetros, useVision) once
+          mounted, so a member without marriage never fires GET /retros or
+          GET /marriage/vision at all (NextRetroCard.tsx's own header
+          comment has the full reasoning for why that gate has to live here
+          rather than as an `enabled` prop the way NextBillCard's does; the
+          identical reasoning covers VisionCard.tsx, spelled out in its own
+          header comment). Full width rather than a grid cell, the same
           placement SetupChecklist above uses and for the same reason: this
-          is not one of the four money cards the grid above was sized for. */}
+          is not one of the four money cards the grid above was sized for --
+          and not the design's own three-column row either (dc.html:
+          Marriage / This week / Vision 2026), which this task does not
+          reflow into two columns just because the third ("This week") is
+          not built yet. That is a layout call for whoever builds Family, or
+          for a browser walk to flag if the stacked shape reads wrong --
+          not one to make blind in jsdom. */}
       {hasMarriage && <NextRetroCard />}
+      {hasMarriage && <VisionCard />}
     </PageContainer>
   );
 }

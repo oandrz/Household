@@ -123,16 +123,19 @@ describe("Sidebar", () => {
 
   // Task 10: Marriage's own SPACE_PAGES entry, restored alongside its route
   // and RequireCapability guard (router.tsx's own header comment on why all
-  // three land together). Renders as a group label plus one link, the same
-  // shape Money takes with several -- SpaceLink's grouped branch already
-  // handles `pages.length === 1` identically to `length > 1` (SPACE_PAGES's
-  // own comment), so this needed no new rendering logic, only the entry.
-  it("renders a Marriage group with a Retros link for a member holding the capability", async () => {
+  // three land together), with a single Retros link at first. Task 11 added
+  // Vision & goals as the group's second link -- SpaceLink's grouped branch
+  // already handles any page count identically (SPACE_PAGES's own comment
+  // on `length === 1` vs `length > 1`), so this needed no new rendering
+  // logic, only the entry.
+  it("renders a Marriage group with Retros and Vision & goals links for a member holding the capability", async () => {
     renderWithRouter(<Sidebar me={meFixture([marriageSpace])} />);
 
     expect(await screen.findByTestId("sidebar-space-label")).toHaveTextContent("Marriage");
     const retros = screen.getByRole("link", { name: "Retros" });
     expect(retros).toHaveAttribute("href", "/marriage/retros");
+    const vision = screen.getByRole("link", { name: "Vision & goals" });
+    expect(vision).toHaveAttribute("href", "/marriage/vision");
   });
 
   // The server -- not this component -- decides who sees Marriage at all:
@@ -147,6 +150,7 @@ describe("Sidebar", () => {
 
     expect(screen.queryByText("Marriage")).toBeNull();
     expect(screen.queryByRole("link", { name: "Retros" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Vision & goals" })).not.toBeInTheDocument();
   });
 
   it("still renders a space the household created, which has no built pages either", async () => {

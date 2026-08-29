@@ -470,6 +470,81 @@ count stays the number of bullets.)
   failed as collateral damage instead. Both implementers noticed on their own,
   devised a more surgical mutation that isolated the one claim in question,
   and reported both attempts rather than only the one that worked.
+- `VisionModal`'s mode-switch test (Vision spec's task 12) asserted the
+  "switching clears the other mode's inputs" rule by reading the DOM after a
+  typed → linked → typed → linked round trip: current/target absent while
+  linked, a blank goal picker on the first visit, current/target back at
+  their defaults after returning to typed. The mutation the task's own Step 5
+  names (`setMeasureMode`'s typed branch no longer clearing `goalId`) left
+  every one of those green. The reason is structural, not a weak assertion:
+  the *linked* branch clears `goalId` unconditionally on every entry,
+  regardless of what the typed branch just did to it, so re-entering linked
+  a second time always shows an empty picker whether or not the bug is
+  present — the round trip's own last step erases the evidence of the first
+  leg's mistake. And typed mode renders no goal field at all, so there is
+  nothing in that state's DOM to read the leaked value back from either. The
+  only place a preserved `goalId` is observable is the wire: the test now
+  saves while still in typed mode and asserts the exact PUT body carries
+  `goalId: ""`, which the mutation turns red immediately. **A "cleared"
+  claim about a field one render state hides is not tested by any assertion
+  confined to states that render it** — if every path back to a check point
+  passes through a step that resets the very thing being verified, only the
+  data that actually leaves the component (the request body, not the DOM)
+  can still tell the two branches apart.
+- Two mutation-check gaps caught before shipping, both in `VisionCard.tsx`
+  (Vision spec's task 13), by a reviewer reading the draft test file before
+  either mutation was actually run. First: the "renders nothing at all for a
+  year with no vision" test's fixture was going to be an empty vision
+  (`theme: ""`, `pillars: []`) at `version: 0` — the same shape the guard is
+  *supposed* to produce. A mutation that deleted the `version === 0` check
+  entirely would have rendered exactly that same nothing, for a completely
+  different reason, and the test would have stayed green either way, never
+  discriminating the guard from its absence. Rewritten to build the fixture
+  from otherwise real, renderable content (a real theme, a pillar with a
+  measure) with only `version: 0` set — now deleting the guard makes real
+  content appear, and the test goes red for the actual reason it claims to
+  check, exactly like the `real_ip_recursive` case above: **a "renders
+  nothing" test proves nothing about the guard unless there is something
+  real for the guard to be suppressing.** Second: the "shows the pillar's
+  FIRST measure" test's two-measure fixture originally gave both measures
+  the same label ("Date nights / month") with only their figures differing.
+  A mutation reading `measures[measures.length - 1]` instead of
+  `measures[0]` would have shown a different figure but the *same* label
+  text, which the test's only assertion (`toHaveTextContent(label)`) cannot
+  see — a presence check on a label two measures share is blind to which of
+  them actually rendered. Given the two measures distinct labels **and**
+  distinct figures, plus explicit `not.toHaveTextContent(...)` assertions on
+  both halves of the second measure, and the `measures.length - 1` mutation
+  now goes red immediately. **When a "the first N" or "the last N" rule is
+  being tested, the fixture's other N-1 entries need to differ from the one
+  under test in every field the assertion reads — a shared value in any one
+  of them is a mutation the test cannot see.**
+- **The same feature produced three more instances of this pattern, each
+  claiming more than its assertion checked.** First, Vision spec's Task 1:
+  `TestVisionMeasureCannotBeBothTypedAndLinked` originally asserted only
+  `err == nil` after inserting a measure carrying both a goal and a typed
+  target — but the test's own name claims `measure_is_typed_or_linked`
+  fired specifically, and a bare `err == nil` check passes identically for
+  a typo'd column name or a dropped connection. Fixed by unwrapping to
+  `*pgconn.PgError` and asserting `ConstraintName ==
+  "measure_is_typed_or_linked"` by name, so the test proves the database
+  refused *this* ambiguous row, not merely that something went wrong.
+  Second, Task 4: `TestVisionRepoGetReadsPillarsMeasuresAndMilestonesInPositionOrder`
+  inserted a single pillar, so `ListVisionPillars`' `ORDER BY position`
+  could be deleted with nothing going red — a one-row fixture cannot prove
+  an ordering clause, the identical shape pattern 2's own `bill_id` entry
+  above already names for a `WHERE` clause. Fixed by inserting a second
+  pillar out of position order and asserting `Pillars[0]` is the
+  position-0 one. Third, Task 10: the frontend's two `useVision` save tests
+  asserted the outgoing `PUT` body with `toMatchObject({ version })` —
+  which passes for *any* body that happens to carry that one field, so a
+  save that silently dropped `theme`, `description`, every pillar and
+  every milestone from the request would have gone unnoticed. Fixed by
+  widening both to `toEqual(the full expected body)`. All three were
+  caught in review, by rereading what each test's name and its assertion
+  actually proved against each other, not by a mutation run that had
+  already gone red — the same reading the two entries above this one
+  needed.
 - A comment on `FinancesPage.test.tsx`'s archive-toggle test claimed to be
   "the end-to-end proof" that `invalidateAccounts` (`useAccounts.ts`) returns
   its `Promise.all` rather than firing it and forgetting. Disproven: dropping
@@ -1620,6 +1695,18 @@ scoped inherits that query's blind spot for free.
   *why* `avatar_initial` widened from `char(1)` to `text` in the same
   migration — a one-rune expansion that `char(1)` would otherwise reject
   outright.
+- Vision spec, Task 2: theme and description caps (`domain.MaxVisionThemeLen`,
+  `MaxVisionDescriptionLen`) were first written as `len(v.Theme) > cap` —
+  `len` on a Go string counts bytes. Hearth is built for a Singapore
+  household, where a theme written in Chinese is not a hypothetical; every
+  character in it is three bytes in UTF-8, so a 120-character promise
+  silently became a 40-character one for exactly the households this
+  product's own market makes ordinary, while every English fixture in the
+  test suite — one byte per rune — never came near the boundary that would
+  have shown it. Fixed to `utf8.RuneCountInString`, the same fix pattern 10's
+  first bullet already made for `initialOf`, on the same category of field
+  (user-authored text, capped for display, never validated against a
+  non-Latin fixture until asked to be).
 
 **Code that assumes "the first character" fits in one byte, or that upper-casing
 never changes a string's length, is written for ASCII and will not say so.**
@@ -1986,6 +2073,34 @@ covering**: date, description and account carried `required` and no check in
 Adding `noValidate` without adding those three would have traded Chrome's
 bubble for a 422 from the API. The remaining fourteen forms share the shape
 and are named as a follow-up rather than swept in silently.
+
+**A sixth instance, Vision spec's task 12, and this time the call site was
+wired from the start — the gap was that nothing proved it did anything.**
+`VisionPage.tsx`'s `onEdit` had three `onClick={onEdit}` call sites from
+task 11 onward — the header's Edit vision button, MilestoneGrid's "+ Add
+milestone" tile, and the empty state's own call to action — every one of
+them a real, rendered, correctly-wired button. `onEdit` itself was a
+documented no-op placeholder until task 12 built the modal, at which point
+all three became live in the same commit that replaced the handler. Nothing
+before task 12 had ever asserted that clicking any of the three actually
+opened anything, because there was nothing to open — a review finding on
+task 11 named this explicitly and deferred it, rather than letting a green
+suite imply the wiring was proven. The empty state's own call to action is
+the sharper case of the three: it is the first thing a brand-new household
+with no vision yet sees, and it had never been clicked in a test at any
+point in this feature's history. Task 12 added one test per call site
+(`VisionPage.test.tsx`, "the Edit-vision modal's three entry points") and
+mutation-checked the one with no prior coverage: deleting `onClick={onEdit}`
+from the empty-state button turned exactly that one test red and no other,
+confirming each of the three is independently covered rather than one test
+accidentally exercising all three through a shared render path. **The
+mechanical check from the earlier instances above does not generalise to
+this shape** — grepping for a caller of `onEdit` would have found three,
+correctly, and said nothing about whether any of them produced an
+observable effect once the handler stopped being a no-op. What actually
+catches it: for a handler wired to more than one control, assert the effect
+of each control separately, and mutate one call site's own wiring in
+isolation to confirm its test — not a sibling's — is what goes red.
 
 ### 16. A claim about the code is not evidence until someone checks it against the code
 
@@ -2366,6 +2481,52 @@ unverified claim wearing a reference.
   invisible to the plan that assumes it isn't there** — the CHECK constraint
   was doing its job the entire time, silently, and the only reason it
   surfaced at all was a test that needed to defeat it and could not.
+- Vision spec, Task 1: **a referential action is a write, so every
+  write-time constraint applies to it — including one that only ever meant
+  to police `INSERT`.** `vision_measures` began, in spec review, as a
+  two-branch `CHECK` (a
+  measure is either typed or linked to a goal, never both, never neither).
+  `goal_id` is `ON DELETE SET NULL`, so deleting a goal executes an `UPDATE`
+  on every measure that pointed at it — and Postgres enforces `CHECK`
+  constraints on `UPDATE` exactly as it does on `INSERT`, not only the
+  statement a reader would picture first. The `SET NULL` sets `goal_id`
+  alone, leaving `target_value`/`current_value` still `NULL` from the
+  measure's linked state — a row the two-branch CHECK refuses, so **deleting
+  a savings goal would have raised a constraint violation from inside the
+  Goals feature**, the one place nobody debugging a failed goal deletion
+  would think to go looking for Vision. Caught reasoning through the cascade
+  before any code existed, the same way the `transactions.household_id`
+  `CASCADE`-vs-`RESTRICT` entry above this one was — not by a test, because
+  no test yet existed to fail. The schema now carries a third, explicit
+  branch for exactly this all-`NULL` shape, and
+  `TestDeletingALinkedGoalUnlinksTheMeasureInsteadOfFailing` proves deleting
+  the goal succeeds and leaves the measure's row present rather than
+  erroring. **Whenever a foreign key on a CHECK-constrained table carries
+  `ON DELETE SET NULL` (or `CASCADE`'s own `UPDATE`-shaped cousins), ask
+  what the constraint says about the row the referential action itself is
+  about to produce** — not only about the rows the application inserts.
+- Vision spec, Task 5: **a repository method that opens a transaction must
+  never call a method that acquires its own connection — even a read, even
+  its own `Get`.** `VisionRepo.Save`'s stale-`UPDATE` path needed a second read to tell "the
+  row is gone" apart from "someone else saved first" (`RetroRepository`'s
+  own pattern), and the first version of it called the pool-backed `r.Get`
+  — four separate queries, each acquiring a connection from `pgxpool.Pool`
+  — from inside the `pgx.BeginFunc` transaction that was already holding one
+  connection checked out. One such call is merely wasteful, borrowing a
+  second connection it did not need to. Enough of them landing at once,
+  against the pool's own `MaxConns`, is not a slowdown: every concurrent
+  version-guarded save blocks on a connection that only a save ahead of it
+  in the same queue could release, and none of them can, because every one
+  is holding its own first connection open waiting for a second. Found in
+  review, reasoning about what happens under concurrent saves — no test
+  in this codebase drives real concurrent database load, so nothing here
+  would have gone red on its own. Fixed by moving the existence check onto
+  `q`, the transaction-scoped `*sqlcgen.Queries` the open transaction
+  already holds (`ab2e5cf`), the same discipline `RetroRepository` gets for
+  free by never re-reading from inside its own transaction at all. **Inside
+  an open transaction, every further read has to run on that transaction's
+  own connection — reaching back out to the pool from in there is a request
+  for a second connection while the first is still yours.**
 
 ### HTTP layer
 
@@ -3173,6 +3334,45 @@ route with a missing guard has no second line of defence.
   `touch` every file you edited before trusting what the browser shows, and
   when one change in a batch appears not to have landed, `curl` that module
   from Vite before doubting the code.**
+  **A third instance, Vision task 11: total silence, not a partial miss.**
+  Fixing a measure row's mid-number wrapping (`whitespace-nowrap` added to
+  `MeasureRow`, `PillarCard.tsx`) on a live `/marriage/vision` walk, a
+  reload showed the exact same wrapping as before the edit — not "mostly
+  fixed with one gap" this time, the fix simply never reached the browser
+  at all. `docker exec hearth-web-1 cat PillarCard.tsx` showed the correct,
+  edited file; the served DOM (`document.querySelector(...).outerHTML`)
+  still carried the pre-fix class list. `docker compose restart web` (no
+  `air` involved here, frontend-only) fixed it in one command, the same as
+  the first instance. What is new this time: no Vite console output ever
+  signalled a stale watcher — no "quiet log" to notice, because Vite prints
+  nothing between HMR updates by default, so there was no absence of
+  activity to read as a symptom, only the DOM's own class list disagreeing
+  with the file on disk. The general rule already given above still covers
+  it, but the tell is different: **compare what the browser actually served
+  against the file, not just against your memory of what you changed** —
+  `outerHTML`/`curl`, not "I re-read the file and it looks right."
+  **A fourth instance, Vision task 15's own fifteen-criterion browser
+  walk: the whole back half of a file, silently.** Opening the Edit-vision
+  modal for the very first time in this walk, the "Pillars" heading and
+  "+ Add pillar" button rendered as zero-width, zero-height elements —
+  `document.querySelector('[data-testid="vision-modal-add-pillar"]')`
+  resolved to a real `<button>` with `getBoundingClientRect()` reading
+  `0×0`, because its own text content was empty, and so was its sibling
+  `<span>`'s. `curl`ing the served module
+  (`http://localhost:5173/src/features/marriage/visionCopy.ts`) settled it
+  in one command: the entire `--- VisionModal (Task 12) ---` half of the
+  file — `modalTitle` through `reloadAndDiscardChanges`, everything the
+  modal needs beyond the page itself — was simply absent from what Vite
+  was serving, though `cat`ting the file on disk showed it in full. Not one
+  missing key this time (the second instance) and not total silence on a
+  single component (the third) — an entire later section of one file,
+  never picked up, on a container that had been running for two hours
+  before this walk started. `docker compose restart web` fixed it in one
+  command, the same as every prior instance, and the served module then
+  matched the file byte for byte. **The size of the miss does not predict
+  the size of the fix, and does not change the check**: `curl` the module
+  Vite is actually serving before concluding a freshly-built screen is
+  broken, however much of it looks wrong.
 
 ### The first production deployment (2026-08-15)
 
@@ -3298,6 +3498,71 @@ no test suite can hold.
   Corrected in place rather than deleting the row and leaving the sentence
   standing. **A verification document describing a tidier run than the real one
   is worse than no document, because it is believed.**
+
+### Vision's fifteen-criterion browser walk (2026-08-29)
+
+- **A later spec can assume a capability an earlier, sibling spec deliberately
+  refused to build.** Criterion 8 reads "delete that goal from `/money/goals`"
+  as though deleting a goal were an ordinary product action; Vision's own
+  design doc treats it that way too, pinning `goal_id ON DELETE SET NULL` and
+  a CHECK constraint's third branch specifically for "the state a deleted goal
+  leaves behind." But Goals' own spec (`2026-08-01-hearth-goals-design.md`)
+  says plainly, twice: "A goal archives; it is never deleted" and "Goals are
+  **not** deleted and have no `DELETE` endpoint" — and the code agrees:
+  `GoalRepository` has no `Delete` method at all, `router.go` wires no
+  `DELETE /goals/{id}`, and `SetArchived`'s own comment says why ("there is no
+  delete, the accounts precedent"). Nothing in Vision's own spec cross-checked
+  this against Goals' — it was written three and a half weeks later, by
+  someone who evidently assumed deletion was a normal goal operation because
+  the schema and the CHECK constraint's own reasoning imply one exists.
+  **The fix was not to build the missing endpoint** — that would override a
+  deliberate, documented decision in a different feature for the sake of one
+  criterion's literal wording — **but to exercise the same mechanism the
+  criterion cares about (the CHECK's third branch, and the measure's
+  broken-link render) through a raw SQL `DELETE`,** the identical shape
+  Retros' criterion 10 used for a state its own product had no button for,
+  and to name the gap plainly rather than pass over it. **When one feature's
+  schema or tests assume another feature can do something, check that
+  feature's own spec for an explicit "never" before assuming the assumption
+  holds** — grep the sibling spec for the verb before building around it.
+- **A whole-document editor can silently launder a domain state its own write
+  path refuses to accept.** Vision's `measure_is_typed_or_linked` CHECK has a
+  third branch — `goal_id`, `current_value` and `target_value` all `NULL` —
+  that only a referential `SET NULL` can produce; the domain refuses to
+  *create* that state on any `PUT` (spec decision 8's own words: "the domain
+  still refuses to create one"). `VisionModal.tsx`'s own seeding effect
+  (`useEffect` around `seededYear`) handles this correctly and says so in a
+  comment: a "broken" measure loads into the editor as an editable typed
+  measure, `current: 0, target: 1`, the least-surprising default given
+  neither real mode has anything left to show. But that default is *silent*
+  in the panel a household actually sees: editing this vision's theme alone
+  and saving — never touching the Emergency-fund row — turned "Goal removed"
+  into "0 of 1" on this walk, because the whole document, placeholder measure
+  included, goes back on every save (spec decision 5). The household never
+  chose "0 of 1"; the editor's own default did, and nothing in the modal
+  flags that row as needing attention before Save is pressed. **Revised
+  verdict, from the final whole-branch review: this is a latent defect, not
+  an accepted trade-off.** The comment at the seeding effect is real and its
+  reasoning about *which shape to land in* is sound — typed, blank-but-valid
+  defaults beats a silently resurrected link — but that reasoning never
+  addressed whether the *fabricated figure* should be allowed to leave the
+  editor unresolved. It is dormant today for one reason only: Goals has no
+  `DELETE` route and no `GoalRepository.Delete` (this same walk's own
+  criterion 8 finding, above), so `MeasureBroken` cannot be reached through
+  the running product at all — this walk needed a raw SQL `DELETE` against
+  the database to produce it. Nothing here is a decision the household ever
+  benefits from; it is a gap that has not yet had the chance to bite anyone.
+  **The fix, when Goals gains a real delete, is not relaxing the domain** —
+  "read tolerantly, write strictly" (`MeasureBroken`'s own doc comment) is
+  correct and should stay — **but a third seeded state in the modal**: a
+  visibly unresolved row, distinct from both typed and linked, that blocks
+  Save until the household either picks a goal or types a number. Noted at
+  the seeding effect in `VisionModal.tsx` as well, so whoever builds Goals'
+  delete finds it from the code, not only from this log. Recorded here
+  because the general shape recurs beyond this one feature: **a form that
+  seeds itself from a state its own submission cannot represent needs to
+  say so in the UI, not only in a code comment** — a household editing an
+  unrelated field should not be able to fabricate a number by omission.
 
 ---
 

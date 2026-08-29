@@ -324,6 +324,64 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, domain.ErrRetroActionBodyRequired):
 		WriteError(w, http.StatusBadRequest, "RETRO_ACTION_BODY_REQUIRED",
 			"Give this action some text before saving it.", nil)
+	// --- Vision (Task 9) ----------------------------------------------------
+	case errors.Is(err, domain.ErrVisionChanged):
+		WriteError(w, http.StatusConflict, "VISION_CHANGED",
+			"This vision changed while you were editing it. Reload and try again.", nil)
+	case errors.Is(err, domain.ErrVisionGoalUnknown):
+		WriteError(w, http.StatusUnprocessableEntity, "VISION_GOAL_UNKNOWN",
+			"That savings goal is not one of this household's.", nil)
+	case errors.Is(err, domain.ErrVisionThemeRequired):
+		WriteError(w, http.StatusUnprocessableEntity, "VISION_THEME_REQUIRED",
+			"Give this year a theme.", nil)
+	case errors.Is(err, domain.ErrVisionMeasureAmbiguous):
+		WriteError(w, http.StatusUnprocessableEntity, "VISION_MEASURE_INVALID",
+			"A measure is either a number you keep, or a savings goal — not both.", nil)
+	case errors.Is(err, domain.ErrVisionMeasureGoalRequired):
+		// Deliberately its own code, not VISION_MEASURE_INVALID: that
+		// message tells a household they picked BOTH a number and a goal,
+		// which is actively wrong here -- switching a measure to "A savings
+		// goal" and saving without choosing one means they picked NEITHER.
+		// Same reasoning RETRO_NOTHING_TO_START's own comment gives for not
+		// reusing RETRO_EXISTS: two different causes want different copy.
+		WriteError(w, http.StatusUnprocessableEntity, "VISION_MEASURE_GOAL_REQUIRED",
+			"Pick a savings goal for that measure, or switch it back to a number you keep.", nil)
+	case errors.Is(err, domain.ErrVisionThemeTooLong):
+		WriteError(w, http.StatusUnprocessableEntity, "VISION_INVALID",
+			"A vision theme can be at most 120 characters.", nil)
+	case errors.Is(err, domain.ErrVisionDescriptionTooLong):
+		WriteError(w, http.StatusUnprocessableEntity, "VISION_INVALID",
+			"A vision description can be at most 2,000 characters.", nil)
+	case errors.Is(err, domain.ErrVisionYearOutOfRange):
+		// Shared by both a vision's own year and a milestone's (Vision.Validate
+		// returns this sentinel for either), so the message names neither
+		// specifically.
+		WriteError(w, http.StatusUnprocessableEntity, "VISION_INVALID",
+			"Choose a year between 1900 and 2200.", nil)
+	case errors.Is(err, domain.ErrVisionPillarNameRequired):
+		WriteError(w, http.StatusUnprocessableEntity, "VISION_INVALID",
+			"Give this pillar a name.", nil)
+	case errors.Is(err, domain.ErrVisionMeasureLabelRequired):
+		WriteError(w, http.StatusUnprocessableEntity, "VISION_INVALID",
+			"Give this measure a label.", nil)
+	case errors.Is(err, domain.ErrVisionMeasureTargetNotPositive):
+		WriteError(w, http.StatusUnprocessableEntity, "VISION_INVALID",
+			"A measure's target must be greater than zero.", nil)
+	case errors.Is(err, domain.ErrVisionMeasureCurrentNegative):
+		WriteError(w, http.StatusUnprocessableEntity, "VISION_INVALID",
+			"A measure's current value cannot be negative.", nil)
+	case errors.Is(err, domain.ErrVisionMilestoneTitleRequired):
+		WriteError(w, http.StatusUnprocessableEntity, "VISION_INVALID",
+			"Give this milestone a title.", nil)
+	case errors.Is(err, domain.ErrVisionTooManyPillars):
+		WriteError(w, http.StatusUnprocessableEntity, "VISION_INVALID",
+			"A vision can have at most 12 pillars.", nil)
+	case errors.Is(err, domain.ErrVisionTooManyMeasures):
+		WriteError(w, http.StatusUnprocessableEntity, "VISION_INVALID",
+			"A pillar can have at most 8 measures.", nil)
+	case errors.Is(err, domain.ErrVisionTooManyMilestones):
+		WriteError(w, http.StatusUnprocessableEntity, "VISION_INVALID",
+			"A vision can have at most 24 milestones.", nil)
 	// domain.ErrUnknownContributionSource has no case here, deliberately: it
 	// means a goal_contributions row holds a source value this code never
 	// wrote (ParseContributionSource's own doc comment), which is a real

@@ -27,6 +27,14 @@ func NewGoalRepo(db *DB) *GoalRepo {
 	return &GoalRepo{q: sqlcgen.New(db.Pool()), pool: db.Pool()}
 }
 
+// var _ pins GoalRepo to usecase.GoalProgressReader at compile time, the
+// narrower port VisionService depends on -- the same reason account_repo.go
+// pins AccountRepo to AccountLookup and category_repo.go pins CategoryRepo
+// to CategoryLookup. VisionService itself does not exist yet (a later
+// task), so without this line a signature drift from the port would go
+// unnoticed until that task lands.
+var _ usecase.GoalProgressReader = (*GoalRepo)(nil)
+
 func (r *GoalRepo) List(ctx context.Context, householdID string, includeArchived bool) ([]usecase.GoalRecord, error) {
 	rows, err := r.q.ListGoalsWithTotals(ctx, sqlcgen.ListGoalsWithTotalsParams{
 		HouseholdID:     uuid(householdID),
@@ -263,6 +271,41 @@ func (r *GoalRepo) MonthContributionTotals(ctx context.Context, householdID stri
 	out := make([]usecase.GoalMonthTotal, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, usecase.GoalMonthTotal{GoalID: uuidToString(row.GoalID), AmountMinor: row.AmountMinor})
+	}
+	return out, nil
+}
+
+// ProgressByIDs implements usecase.GoalProgressReader -- the one thing
+// Vision needs from Goals. It deliberately returns no entry for an id it did
+// not find, rather than an error: a measure whose goal was deleted renders
+// as a label with no figure, and making that an error would turn an
+// ordinary page render into a failure. GoalProgressByIDs' own SQL comment
+// explains the household scoping and why archived_at is not filtered.
+// Percent is domain.GoalProgressPercent's own capped figure, the same one
+// GoalService.List puts on a goal card -- never a second formula.
+func (r *GoalRepo) ProgressByIDs(ctx context.Context, householdID string, goalIDs []string) (map[string]usecase.GoalProgress, error) {
+	if len(goalIDs) == 0 {
+		return map[string]usecase.GoalProgress{}, nil
+	}
+	ids := make([]pgtype.UUID, 0, len(goalIDs))
+	for _, id := range goalIDs {
+		ids = append(ids, uuid(id))
+	}
+	rows, err := r.q.GoalProgressByIDs(ctx, sqlcgen.GoalProgressByIDsParams{
+		HouseholdID: uuid(householdID),
+		GoalIds:     ids,
+	})
+	if err != nil {
+		return nil, translate(err, "goal progress by ids")
+	}
+	out := make(map[string]usecase.GoalProgress, len(rows))
+	for _, row := range rows {
+		id := uuidToString(row.ID)
+		out[id] = usecase.GoalProgress{
+			GoalID:  id,
+			Name:    row.Name,
+			Percent: domain.GoalProgressPercent(row.ContributedMinor, row.TargetAmountMinor),
+		}
 	}
 	return out, nil
 }

@@ -39,19 +39,40 @@ brief ever asked for it (`docs/LEARNING.md` pattern 15). **Retros' own
 fifteen-criterion browser walk (Task 17) has run and passed, 15 of 15**
 (2026-08-18), the same bar every Money feature was held to before its
 tracker row could read ✅, recorded in
-`docs/superpowers/plans/2026-08-16-hearth-retros-verification.md`. Vision and
-Agreements have not been started. Family is not built. See
+`docs/superpowers/plans/2026-08-16-hearth-retros-verification.md`. Vision,
+Marriage's second feature, is code-complete, reviewed and now walked,
+code-shaped the same way Retros is: its four tables and their relationships,
+including the cross-feature edge into `goals` (§6), its two routes joining
+Retros' own route group (§4), `VisionService` and its two ports —
+`VisionRepository`/`GoalProgressReader` (§3) — are all built (§5, "Vision —
+a whole-document replace"), and its frontend — `VisionPage.tsx`,
+`PillarCard.tsx` and `MilestoneGrid.tsx` (Vision spec's task 11) render the
+theme hero, pillar measures and longer-horizon milestones `useVision`
+exposes (task 10), and `VisionModal.tsx` (Vision spec's task 12) is the
+whole-document editor all three of `onEdit`'s call sites now open — the
+header's Edit vision button, the "+ Add milestone" tile and the empty
+state's own call to action — so a household can both see a year's vision
+and set one (§7). **Vision's own fifteen-criterion browser walk has run and
+passed, 15 of 15** (2026-08-29), the same bar every Money feature and Retros
+were held to before their tracker rows could read ✅, recorded in
+`docs/superpowers/plans/2026-08-28-hearth-vision-verification.md` — so its
+rows in `docs/FEATURE_TRACKER.md` now stand on the same "reviewed and
+walked" footing Retros carries in this paragraph, not the code and
+`make test` alone the way Bills and Goals stood between their own last code
+task and their walk. Agreements has
+not been started. Family is not built. See
 `docs/FEATURE_TRACKER.md` section 6 for exactly which of Marriage's rows are
 done, including the two deliberate divergences from the design spec's own
 prose the walk found and left as shipped.
-Overview is **partly** built: `/` carries an interim page composed of five of
+Overview is **partly** built: `/` carries an interim page composed of six of
 the design's seven cards (the money row of four, Marriage's "Next retro",
 "This week" and "Vision 2026" — the header's own "+ Add" button is not a
-card) that Money and Marriage can now supply, plus a setup
+card) that Money and Marriage can now supply, plus the Vision check-in strip
+(inside the Next retro card, not a card of its own), a setup
 checklist and a quick-create menu, and it grows into the designed Overview as
-the rest of Marriage and Family arrive rather than being replaced (§7). It adds no
+Family arrives rather than being replaced (§7). It adds no
 endpoint, no table and no port — it is composition over what Accounts,
-Transactions, Budget, Goals and Bills already expose. The UX-repair round of
+Transactions, Budget, Goals, Bills and Vision already expose. The UX-repair round of
 2026-07-31 that preceded it shipped no feature at all — it bounded the page
 container, removed the two unbuilt spaces from the navigation along with
 their four routes, and rewrote copy; Marriage's route, guard and sidebar
@@ -288,6 +309,8 @@ graph TD
         Budget["BudgetService — Month, Save, History,<br/>RollOver; RollOver moves a closed<br/>month's Remaining into a goal, once"]
         Goal["GoalService — composes the whole<br/>Goals screen in one List call;<br/>a contribution moves no real money"]
         Bill["BillService — MarkPaid/UndoPayment write<br/>into TransactionRepository through<br/>BillRepository, not TransactionService"]
+        Retro["RetroService — Save is the shared-draft<br/>version guard; SetActionDone never<br/>touches it, a second repository entirely"]
+        Vision["VisionService — Get resolves linked<br/>measures through GoalProgressReader;<br/>Save replaces the whole document,<br/>version 0 meaning create"]
         Seed["Seed"]
     end
 
@@ -347,6 +370,8 @@ points inward, which is why every service is testable against in-memory doubles.
 | `AccountLookup`, `CategoryLookup` | `adapter/postgres` (`*AccountRepo` and `*CategoryRepo` already satisfy them) | Narrower ports `TransactionService` depends on instead of the full repositories above — interface segregation: it needs an account's currency and household, and whether a category id belongs to this household and what kind it is, never `List` or `EnsureSeeded`. `BillService.MarkPaid` depends on this same `AccountLookup`, for the same reason and to the same effect: the pay-from account's currency, not a value Bills stores of its own (§5). `BillService.Create`/`Update` depend on the same `CategoryLookup` too: a bill's category is copied onto the real expense `MarkPaid` writes, so it has to satisfy the ledger's own rule — this household's, and an expense category — or the spend lands in Budget's `Spent` and in no category row at all |
 | `RetroRepository` | `adapter/postgres` | Seventeenth. `Create` answers `ErrAlreadyExists` on the `UNIQUE(household_id, month)` clash; `Update` takes the caller-normalised month and version it loaded, and tells "the retro is gone" (`ErrNotFound`, from a recheck read) from "someone saved first" (`ErrRetroChanged`, from a zero-row `UPDATE ... WHERE version = $n`) apart — never merges (§5); `Complete` is idempotent on the caller's own `at`; `DeleteDraft` puts `WHERE completed_at IS NULL` in the SQL itself, not a service `if`, so a zero-row match on a finished retro is `ErrNotFound`, not a silent no-op (`docs/LEARNING.md`'s Bills `SetBillNextDue` entry is the same defect shape this port was built to avoid) |
 | `RetroActionRepository` | `adapter/postgres` | Eighteenth. `Add` writes the action and its assignees in one transaction, so a bad assignee id leaves no orphan action; `carriedFrom` is validated through a join back to `retros` requiring the same household before it is trusted, and a malformed id is refused rather than silently read as SQL NULL (`docs/LEARNING.md`) — "fail closed on values you did not construct" applied to a field the client supplies directly. `OpenInMonth` backs both the modal's "Still open from July" offer and Overview's `openActionCount` |
+| `VisionRepository` | `adapter/postgres` | Nineteenth. `Get` returns `domain.ErrNotFound` for a year never set, which `VisionService` turns into the empty vision the screen renders (decision 9) — the repository never invents a row. `Save` replaces the whole document — parent upserted, every child deleted and reinserted — in one transaction, under the same two-shape version guard `RetroRepository.Update` established: `version == 0` is a create, refused with `domain.ErrVisionChanged` if a row has appeared since the caller read the empty vision; `version > 0` is an update, `WHERE version = $n`, with a zero-row result re-read to tell "the vision is gone" apart from "someone saved first." The existence check runs on the transaction's own connection, never the pool-backed `Get` — calling `Get` from inside `Save`'s own `pgx.BeginFunc` would hold one pool connection while asking the pool for a second, which starves it under concurrent saves (`docs/LEARNING.md`). A measure naming a goal outside this household is refused inside the same transaction with `domain.ErrVisionGoalUnknown` — the `vision_measures` foreign key alone only proves the goal exists *somewhere* |
+| `GoalProgressReader` | `adapter/postgres` (`*GoalRepo` already satisfies it) | Unnumbered, like `AccountLookup`/`CategoryLookup` above — a narrow port, not a repository. One method wide on purpose, the same interface-segregation reasoning as those two, for a caller in the opposite direction: `VisionService` needs one thing from Goals, the progress of a handful of goal ids, not the forty-line `GoalRepository` contract. `ProgressByIDs` returns an entry only for an id that exists in the caller's own household; a missing id is a miss, not an error — a measure whose goal was deleted renders as a label with no figure (spec decision 8), not a failed page. Counts an *archived* goal as found, deliberately: archiving is not deletion anywhere else in this product, so a measure linked to an archived goal keeps its figure |
 | `PasswordHasher`, `TokenGenerator` | `adapter/crypto` | argon2id with cost from config; tokens are random, stored hashed |
 | `Mailer` | `adapter/mail` | SMTP; TLS policy and credentials from config |
 | `Clock` | `adapter/clock` | So lockout windows and expiry are deterministic in tests |
@@ -384,7 +409,7 @@ graph TD
     Session --> Cap{"Capability-gated<br/>route group?"}
     Cap -->|"accounts: money"| RequireCap["requireCapability(money)<br/>403 unless the caller's membership has it"]
     Cap -->|"transactions, categories,<br/>budgets, goals, bills: money AND owner —<br/>reads included"| RequireCapTxn["requireCapability(money)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
-    Cap -->|"retros: marriage AND owner —<br/>reads included"| RequireCapRetro["requireCapability(marriage)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
+    Cap -->|"retros, marriage/vision:<br/>marriage AND owner — reads included"| RequireCapRetro["requireCapability(marriage)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
     Cap -->|"no — most routes"| Safe{"GET or HEAD?"}
     RequireCap --> Safe
     RequireCapTxn --> Safe
@@ -533,6 +558,8 @@ to a real address and so are not on that path.
 | POST | `/retros/{month}/actions` | session · marriage · owner · CSRF |
 | PATCH | `/retros/{month}/actions/{id}` | session · marriage · owner · CSRF — the tick; deliberately does not touch the retro's own `version` (§5) |
 | DELETE | `/retros/{month}/actions/{id}` | session · marriage · owner · CSRF |
+| GET | `/marriage/vision` | session · marriage · owner — same reasoning as the retro reads above; the year comes from `?year=`, range-checked against `domain.MinVisionYear`/`MaxVisionYear` before the service is ever called (an unchecked value would let Postgres's `int16` column silently wrap a wildly out-of-range year onto another one, §5); a year nobody has saved answers 200 with an empty document at version 0, never 404 — the empty state IS the page |
+| PUT | `/marriage/vision/{year}` | session · marriage · owner · CSRF — joins the retro writes' own CSRF sub-group, not a new one; replaces the whole document under a version guard, the same shape `PUT /budgets/{month}` uses |
 | GET | `/healthz`, `/readyz` | none — outside `/api/v1` |
 
 Three test matrices walk the live router and assert this: every non-public
@@ -1360,6 +1387,127 @@ new one, with one extra foreign key naming where it came from
 (`ON DELETE SET NULL`, so deleting July's own row can never take August's
 copy of it down too).
 
+### Vision — a whole-document replace, and a `version: 0` that means "create"
+
+```mermaid
+sequenceDiagram
+    participant B1 as Browser (Andreas)
+    participant B2 as Browser (Christine)
+    participant H as Handler
+    participant Svc as VisionService
+    participant VRepo as VisionRepository
+    participant DB as Postgres
+
+    B1->>H: GET /marriage/vision?year=2026
+    H->>Svc: Get(householdID, 2026)
+    Svc->>VRepo: Get(householdID, 2026)
+    VRepo->>DB: SELECT ... -- no row for this household-year
+    VRepo-->>Svc: domain.ErrNotFound
+    Svc-->>B1: 200 version 0, theme empty, pillars/milestones empty<br/>-- the empty state IS the page, never 404
+
+    B1->>H: PUT /marriage/vision/2026<br/>{ version: 0, theme: "Slow down together", ... }
+    H->>Svc: Save(householdID, 2026, draft)
+    Svc->>VRepo: Save(v) -- v.Version == 0
+    VRepo->>DB: BEGIN
+    VRepo->>DB: INSERT INTO visions ... ON CONFLICT DO NOTHING -- 1 row, version=1
+    VRepo->>DB: DELETE every child, then INSERT every submitted<br/>pillar/measure/milestone, position = array index
+    VRepo->>DB: COMMIT
+    VRepo->>DB: Get(householdID, 2026) -- pool-backed, AFTER commit,<br/>never from inside the open transaction (see below)
+    VRepo-->>Svc: domain.Vision, version 1
+    Svc-->>B1: 200 { ..., version: 1 }
+
+    B2->>H: PUT /marriage/vision/2026<br/>{ version: 0, theme: "A different theme", ... }
+    Note over B2,H: Christine's tab loaded the same empty January<br/>before Andreas's save landed
+    H->>Svc: Save(householdID, 2026, draft)
+    Svc->>VRepo: Save(v) -- v.Version == 0
+    VRepo->>DB: INSERT ... ON CONFLICT DO NOTHING -- 0 rows,<br/>the year now has one
+    VRepo-->>Svc: domain.ErrVisionChanged
+    Svc-->>B2: 409 this vision changed while you were editing it
+```
+
+**`version: 0` on the wire means two different things depending on direction,
+and that is deliberate, not overloaded.** `GET` sends it to mean "nobody has
+saved this year yet"; `PUT` reads it back to mean "create it" rather than
+"blind overwrite." Without that meaning, the first save of a January is the
+one place the guard in decision 10 could not work at all: both owners open
+the modal on the same blank year, both hold the version `GET` gave them —
+which would have to be *something* — and whichever one saves second either
+silently wins (no guard) or is refused for having "the wrong version" of a
+document that never existed (a confusing refusal for a household's very
+first save). Routing `version == 0` to `CreateVision ... ON CONFLICT DO
+NOTHING` gives the create path the exact same "someone else won" answer,
+`domain.ErrVisionChanged`, that a stale update gets — one error the frontend
+already has a banner for, not a second one to build.
+
+**The existence check on a stale `UPDATE` must run on the open transaction's
+own connection, never on the pool-backed `Get`.** A zero-row `UPDATE ...
+WHERE version = $n` is ambiguous — the row could be gone, or another save
+could have landed first — and telling those apart needs a second read
+(`RetroRepository.Update`'s own pattern, the Retros flow just above).
+`VisionRepo.Save`
+originally ran that second read through `r.Get`, which acquires its own
+connection from the pool; called from inside `pgx.BeginFunc`, which is
+already holding one connection checked out, that is a request for a *second*
+connection while the first is still in use. One concurrent save hits this by
+luck; enough concurrent version-guarded saves hit it at once, against
+`pool.go`'s `MaxConns`, and every one blocks forever waiting for a connection
+none of the others can release — a self-deadlock, not a slowdown, and now
+its own `docs/LEARNING.md` entry. The fix routes the
+existence check through `q`, the transaction-scoped `*sqlcgen.Queries` the
+open transaction already holds, never back out to the pool.
+
+**A save deletes and reinserts every child row, so a measure's id never
+survives an edit — nothing outside its own vision references one, so
+nothing breaks (spec decision 5).** The read-back after `Save` runs
+deliberately *after* `COMMIT`, on the pool rather than the closed
+transaction: Postgres's own MVCC guarantees it sees this write's committed
+state or a later one, never an in-progress one, so the only race is another
+save landing in the gap between commit and read-back — which hands the
+caller a valid, current document and a valid version token, just possibly
+not the exact content their own write produced. No lost update either way,
+the same "hand back what's actually stored" contract
+`RetroRepository.Update`'s own doc comment already promises.
+
+**`measure_is_typed_or_linked`'s third branch is what stops deleting a goal
+from breaking Vision, and it is currently reachable only by SQL, not by the
+product.** `vision_measures.goal_id` is `ON DELETE SET NULL` (§6) — a
+*referential action*, which Postgres executes as an `UPDATE` on the measure
+row, and Postgres enforces `CHECK` constraints on every `UPDATE`, not only on
+`INSERT`. A CHECK with only "typed" and "linked" branches would leave that
+`UPDATE` writing `goal_id`, `target_value` and `current_value` all `NULL` —
+a row satisfying neither branch — so deleting the goal would fail with a
+constraint violation raised **inside the Goals feature**, the one place
+nobody debugging it would think to look at Vision. The third branch is
+exactly the broken-link state decision 8 already describes how to render, so
+the database is permitted to reach it only because `SET NULL` produces it;
+the domain still refuses to *create* one directly (a `PUT` naming neither a
+goal nor a target is `422`). **There is no `DELETE /goals/{id}` route in
+this product today** — `GoalRepository` carries no `Delete` method at all,
+and Goals only ever archives (`SetArchived`, the same shape Accounts and
+Bills use) — so this branch cannot be exercised through the app as it
+stands; `TestDeletingALinkedGoalUnlinksTheMeasureInsteadOfFailing` proves it
+directly against Postgres with a raw `DELETE FROM goals`, the only way to
+reach it today. The constraint is defence for the day a real delete path
+arrives, not dead code: an archived goal keeps its link and its figure
+regardless (archiving is not deletion anywhere else in this product either),
+so the branch currently guards a schema-level possibility rather than a
+reachable user action — worth knowing before treating "goal deletion" as a
+tested product flow rather than a tested database one.
+
+**`GoalProgressReader.ProgressByIDs` turns a missing id into a blank
+figure, never an error, which is what makes decision 8's rendering rule a
+lookup miss rather than an exception path.** A measure whose `goal_id` has
+gone `NULL` — by the mechanism above, or a link that simply failed to
+resolve — is not in the map `ProgressByIDs` returns; `VisionService.Get`
+reads that absence and sets `MeasureView.HasFigure = false`, so the page
+renders the label with a short named explanation and no number, never a
+stale or a zero one (the same "blank the figure and say why" rule Accounts
+applies when a primary-currency change leaves net worth uncomputable). An
+*archived* goal is still found and still keeps its figure — `ProgressByIDs`
+must not filter on `archived_at` the way `GoalRepository.List`'s
+`includeArchived` switch does, because archiving is not deletion here either
+and Vision always wants the figure a linked measure is pointing at.
+
 ### What the frontend loads
 
 ```mermaid
@@ -1372,7 +1520,7 @@ graph TD
     Shell --> Drawer["NavDrawer — off-canvas below lg,<br/>lg:contents at lg and above"]
     Drawer --> Sidebar["Sidebar renders me.spaces —<br/>already filtered and ordered by the server —<br/>expanding each into its built pages client-side,<br/>and dropping a builtin space that has none"]
     Shell --> Page["Route content"]
-    Page --> Overview["/ Overview — GET /accounts,<br/>GET /budgets/{month} and GET /goals for<br/>an owner only, GET /household/members<br/>via the shared hook"]
+    Page --> Overview["/ Overview — GET /accounts,<br/>GET /budgets/{month}, GET /goals and<br/>GET /bills for an owner only; GET<br/>/household/members via the shared hook;<br/>GET /retros and GET /marriage/vision<br/>for a marriage member"]
     Page --> Settings["Settings panels — their own queries"]
     Settings -->|"on mutation"| Invalidate["invalidate ['me'] and the panel's query,<br/>awaited so the guard spans the refetch"]
 ```
@@ -1426,24 +1574,36 @@ client-side map (`SPACE_PAGES` in `Sidebar.tsx`) turns a space with built
 pages into the design's uppercase group label plus one link per page, one
 page or several alike — Money renders as "MONEY" over Finances,
 Transactions, Budget, Goals and Bills; Marriage renders as "MARRIAGE" over
-its one page, Retros.
+its two pages, Retros and Vision & goals (Vision spec's task 11 added the
+second — see "Route table" §4 and the marriage/ entry below).
 
-**Overview fetches nothing of its own.** Its six requests are the ones
-Accounts, Budget, Goals, Bills, Retros and Settings already make, through the
-same hooks and the same cache keys, so a figure on the front door cannot
-disagree with the same figure on the screen it links to — the browser walk
-checks exactly that (net worth on `/` against net worth on `/money`).
-`useGoals` is the same hook `GoalsPage` itself calls, so the "X of Y on
-track" figure on Overview's Goals card and the same count on `/money/goals`
-share one cache entry rather than risking two independent reads of `GET
-/goals` disagreeing; `NextBillCard` reuses `useBills` the identical way,
-against `/money/bills`'s own cache entry, and gained no query of its own —
-the `enabled` option `useBills` grew for exactly this reuse (Task 11)
-predates `NextBillCard` by several tasks. `NextRetroCard` reuses `useRetros`
-the same way again, against `/marriage/retros`'s own cache entry, reading
-`openActionCount` rather than `actionCount` — the two disagree the moment a
-retro's actions are partly ticked, and `docs/LEARNING.md` carries the gap
-between them as its own entry. One of those hooks is new
+**Overview fetches nothing of its own.** Its seven requests are the ones
+Accounts, Budget, Goals, Bills, Retros, Vision and Settings already make,
+through the same hooks and the same cache keys, so a figure on the front
+door cannot disagree with the same figure on the screen it links to — the
+browser walk checks exactly that (net worth on `/` against net worth on
+`/money`). `useGoals` is the same hook `GoalsPage` itself calls, so the "X
+of Y on track" figure on Overview's Goals card and the same count on
+`/money/goals` share one cache entry rather than risking two independent
+reads of `GET /goals` disagreeing; `NextBillCard` reuses `useBills` the
+identical way, against `/money/bills`'s own cache entry, and gained no
+query of its own — the `enabled` option `useBills` grew for exactly this
+reuse (Task 11) predates `NextBillCard` by several tasks. `NextRetroCard`
+reuses `useRetros` the same way again, against `/marriage/retros`'s own
+cache entry, reading `openActionCount` rather than `actionCount` — the two
+disagree the moment a retro's actions are partly ticked, and
+`docs/LEARNING.md` carries the gap between them as its own entry.
+`VisionCard` and `NextRetroCard`'s own check-in strip (Vision spec's task
+13) push the pattern one step further: both call `useVision(currentVisionYear())`
+directly rather than either taking the data as a prop from the other, because
+`useVision` (unlike `useBills`/`useGoals`) was never given an `enabled`
+option — a member without `marriage` must still never be allowed to call it,
+so the only gate available is `OverviewPage` choosing not to mount either
+component at all. That leaves *two* independent callers on Overview alone,
+plus `VisionPage`'s own third — all three key off `visionQueryKey(year)`, so
+a household that glances at Overview and then opens `/marriage/vision` in
+the same visit still costs one `GET /marriage/vision` call, not three.
+One of those hooks is new
 only in the sense that it stopped being three: `useHouseholdMembers` was
 declared privately and identically in `AccountModal`, `TransactionsPage` and
 `MembersPanel`, all against `["household", "members"]`, sharing one cache
@@ -1520,6 +1680,11 @@ erDiagram
     retros ||--o{ retro_actions : has
     retro_actions ||--o{ retro_action_assignees : has
     memberships ||--o{ retro_action_assignees : "assigned to (CASCADE)"
+    households ||--o{ visions : "has, one per year (UNIQUE household_id, year)"
+    visions ||--o{ vision_pillars : has
+    vision_pillars ||--o{ vision_measures : has
+    goals ||--o{ vision_measures : "may be linked (nullable, SET NULL)"
+    visions ||--o{ vision_milestones : has
     users ||--o{ memberships : holds
     users ||--o{ sessions : owns
     users ||--o{ magic_links : owns
@@ -1725,6 +1890,40 @@ erDiagram
         uuid action_id PK "also FK to retro_actions — composite PK with membership_id, ON DELETE CASCADE"
         uuid membership_id PK "also FK to memberships — ON DELETE CASCADE"
     }
+    visions {
+        uuid id PK
+        uuid household_id FK
+        smallint year "CHECK 1900-2200 — UNIQUE(household_id, year), one row per calendar year"
+        text theme "NOT NULL, defaults to empty — a row can exist while blank (GET never 404s)"
+        text description "NOT NULL, defaults to empty"
+        integer version "NOT NULL DEFAULT 1 — the concurrency guard; 0 never appears here, only on the wire"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    vision_pillars {
+        uuid id PK
+        uuid vision_id FK
+        smallint position "UNIQUE(vision_id, position) — assigned from array order on save, no reordering UI yet"
+        text name "NOT NULL"
+        text description "NOT NULL, defaults to empty"
+    }
+    vision_measures {
+        uuid id PK
+        uuid pillar_id FK
+        smallint position "UNIQUE(pillar_id, position)"
+        text label "NOT NULL"
+        integer current_value "nullable — typed measures only"
+        integer target_value "nullable — typed measures only"
+        uuid goal_id FK "nullable — ON DELETE SET NULL, linked measures only"
+    }
+    vision_milestones {
+        uuid id PK
+        uuid vision_id FK
+        smallint year "CHECK 1900-2200 — independent of visions.year, usually years ahead"
+        text title "NOT NULL"
+        text note "NOT NULL, defaults to empty"
+        smallint position "UNIQUE(vision_id, position)"
+    }
 ```
 
 Notes that are not obvious from the shapes:
@@ -1737,13 +1936,19 @@ Notes that are not obvious from the shapes:
   context wherever it is present. `magic_links` and `signups` carry neither:
   a magic link identifies a user, not a membership, so it scopes through
   `user_id` instead; a sign-up identifies a verified address with no user or
-  household behind it yet. Separately, three tables carry **no**
+  household behind it yet. Separately, six tables carry **no**
   `household_id` at all because each is reached only through a parent that
   already has one, and scoping is a join rather than a filter:
   `budget_lines` (`budget_id` → `budgets.household_id`), `retro_actions`
-  (`retro_id` → `retros.household_id`) and `retro_action_assignees`
-  (`action_id` → `retro_actions` → `retros.household_id`, two joins deep).
-  `goal_contributions` and `bill_payments` look like the same shape —
+  (`retro_id` → `retros.household_id`), `retro_action_assignees`
+  (`action_id` → `retro_actions` → `retros.household_id`, two joins deep),
+  `vision_pillars` (`vision_id` → `visions.household_id`),
+  `vision_milestones` (`vision_id` → `visions.household_id`) and
+  `vision_measures` (`pillar_id` → `vision_pillars` →
+  `visions.household_id`, two joins deep — the same depth as
+  `retro_action_assignees`, and every method on `VisionRepository` is scoped
+  by `householdID` in SQL against the parent `visions` row for exactly that
+  reason). `goal_contributions` and `bill_payments` look like the same shape —
   each has a parent id too — but take the *opposite*, more defensive one:
   both carry their own `household_id` despite the parent join already
   existing, because that foreign key alone carries no database-level
@@ -1949,6 +2154,41 @@ Notes that are not obvious from the shapes:
   `transactions.paid_by_membership_id` is a membership id — a removed member
   behaves the way removed members already behave everywhere else in this
   schema.
+- **`visions.year` is a `smallint`, not a `date`, unlike `retros.month`.** A
+  retro happens on a specific date (the first of a month); a vision is a
+  calendar year with no day inside it to anchor a `date` column to.
+- **`visions.theme` and `.description` default to empty rather than merely
+  being `NOT NULL`**, because `GET` returns a real, renderable row for a year
+  nobody has saved (decision 9) — the simplest way to make that true is a row
+  that is allowed to exist while still blank, not a sentinel or a second
+  "unset" state layered on top.
+- **`vision_measures.goal_id` is `ON DELETE SET NULL`, and
+  `measure_is_typed_or_linked`'s third (all-`NULL`) branch exists only
+  because of it — removing that branch breaks Goals, not Vision.** See "Vision
+  — a whole-document replace" in §5 for the full mechanism (a referential
+  `SET NULL` is an `UPDATE`, and `CHECK` constraints run on every `UPDATE`)
+  and for how little of the product can reach it today (no `DELETE
+  /goals/{id}` route exists — Goals only archives).
+- **`vision_milestones.year` is deliberately independent of `visions.year`,
+  with no constraint tying the two.** The design's own milestones sit years
+  ahead of the vision they belong to (2027, 2029, 2032 inside a 2026 vision)
+  — a milestone is a future waypoint the vision aims at, not an event that
+  happened during the vision's own year.
+- **`vision_pillars`, `vision_measures` and `vision_milestones` all carry an
+  explicit `position`, unlike `retro_actions`, which deliberately has
+  none.** `retro_actions`' own note above explains why an explicit position
+  needs a safe writer and `retro_actions` never had one — two partners could
+  add an action at the same moment with no way to serialise it. Vision has no
+  such race: `PUT /marriage/vision/{year}` replaces every child of one
+  document in a single transaction, so `position` is assigned from the
+  submitted array's own index by a single writer, and the design numbers its
+  pillars visibly ("Pillar 1", "Pillar 2"), so the order is something the
+  household sees rather than an accident of insertion.
+- **A save deletes and reinserts every child row, so no child id survives an
+  edit.** Nothing outside a vision references one of its own pillars,
+  measures or milestones, so nothing breaks; the day something does (a
+  comment on a measure, a history of its value) is the change that has to
+  introduce stable ids, with its own rule for preserving them across a save.
 
 ---
 
@@ -1991,7 +2231,7 @@ web/src/
                        and its undo, and the Subscriptions panel, mounted
                        at /money/bills (replacing moneySplatRoute, the
                        last route that ever used it)
-    overview/          the interim Overview at / — five of the design's
+    overview/          the interim Overview at / — six of the design's
                        seven cards Money and Marriage can supply (net worth,
                        reusing money/NetWorthCard, so it now also carries
                        the month-to-date change badge (`▲ 2.1% this month`)
@@ -1999,11 +2239,22 @@ web/src/
                        Finances-only by design, since this card's job is a
                        headline, not a breakdown; this month's budget;
                        goals on track; the next bill, reading the same
-                       useBills hook /money/bills itself uses; and the next
+                       useBills hook /money/bills itself uses; the next
                        retro, reading the same useRetros hook /marriage/retros
                        itself uses, beneath it the retro's own openActionCount
-                       -- the design's "carried-over actions" figure, §5), a
-                       setup checklist, and the "+ Add" quick-create menu
+                       -- the design's "carried-over actions" figure, §5, and
+                       (Vision spec's task 13) the Vision check-in strip
+                       beneath that, "Vision check-in: <year> theme —
+                       '<theme>'", gated on the theme being non-empty rather
+                       than a second version check; and VisionCard, one line
+                       per pillar showing that pillar's FIRST measure with
+                       its live figures rather than the design's own three
+                       flat commitment lines -- a third shape the design
+                       never records how to store -- reading the same
+                       useVision hook /marriage/vision itself uses, omitted
+                       entirely (not an empty quotation) for a year with no
+                       vision yet), a setup checklist, and the "+ Add"
+                       quick-create menu
     marriage/          RetrosPage -- header (title, subtitle, done-count
                        clause, privacy badge, start-retro button), the
                        five screen states (first-run, a draft in progress,
@@ -2045,6 +2296,60 @@ web/src/
                        brief ever asked for deleting a single action
                        (docs/LEARNING.md pattern 15). Mounted at
                        /marriage/retros
+
+                       VisionPage -- header (title, subtitle, Edit vision
+                       button), a green theme hero (year label, theme in
+                       literal quotes, description), a three-column
+                       PillarCard grid and the "Longer horizon"
+                       MilestoneGrid panel, plus the loading/error/
+                       owner-only/empty states RetrosPage already
+                       established just above. No marriage-duration block
+                       beside the theme hero -- Vision spec decision 2, the
+                       design draws "Married · 14 years · Feb 14, 2012" but
+                       nothing in this product stores a wedding date, so the
+                       hero renders theme and description full width
+                       instead. version: 0 (visionSchema) means the year has
+                       no vision yet and renders an empty state with its own
+                       call to action, never a grid of blank cards.
+                       PillarCard renders one pillar's "Pillar N" label,
+                       name, description and measures -- a measure with
+                       hasFigure: false (a linked goal deleted, a link that
+                       failed to resolve, or a kind this build does not
+                       recognise, measureDTO's own comment) renders its
+                       label and no number at all, never "0 of 0" or "0%",
+                       the one place this rule is expressed. MilestoneGrid
+                       renders one card per milestone (year, title, note)
+                       plus a dashed "+ Add milestone" tile. All three of
+                       onEdit's call sites -- the header's Edit vision
+                       button, "+ Add milestone" and the empty state's own
+                       call to action -- open VisionModal (Vision spec's
+                       task 12), the whole-document editor: theme, a year
+                       select offering only the previous/current/next
+                       calendar year (changing it writes back to
+                       VisionPage's own `year` state, so the same mounted
+                       useVision(year) call refetches and the modal reseeds
+                       every field from the newly loaded year), description,
+                       every pillar's name/description/measures and every
+                       milestone, saved together in one PUT. The measure
+                       editor adds the two fields the design's own modal
+                       never drew (spec decision 7) -- a pillar's own
+                       description and, per measure, a label plus either a
+                       typed current/target pair or a linked-goal picker,
+                       never both; switching modes clears the other's
+                       inputs rather than leaving a hidden stale value that
+                       would still submit. A stale version (409
+                       VISION_CHANGED) latches a one-way conflict banner
+                       decided from the response's own error code, whose
+                       only action reloads the year and discards the local
+                       draft outright rather than resuming it in place.
+                       Every pillar's and the vision's own description
+                       renders nothing when empty, not an empty block --
+                       the empty-vision response carries "" on the wire,
+                       never null. useVision reads and writes
+                       /marriage/vision; visionQueryKeys.ts holds its cache
+                       key and currentVisionYear() the same way
+                       retroQueryKeys.ts does for Retros. Mounted at
+                       /marriage/vision
     placeholder/       named stand-ins for unbuilt areas, and only for areas
                        a household can already reach. Empty of callers as of
                        this feature: / stopped using it when the interim
@@ -2085,16 +2390,24 @@ and Bills (`/money/bills`) — via the `SPACE_PAGES` map in `Sidebar.tsx` (see
 **`/marriage/retros` is Marriage's own return to the app** (task 10),
 mirroring the shape every capability-gated `/money/*` route already takes:
 `marriageGuardRoute` (`RequireCapability cap="marriage"`) nested under
-`shellRoute`, with `retros` as its one child. Unlike `moneyGuardRoute`,
-`marriageGuardRoute` has no index route — nothing in the design links to
-bare `/marriage`, so a caller who types it anyway now matches a real route
-(unlike before task 10) and sees the sidebar with a blank content area,
+`shellRoute`. Task 10 gave it one child (`retros`) and no index route,
+which meant a caller who typed bare `/marriage` matched a real route
+(unlike before task 10) but saw the sidebar with a blank content area,
 neither a page nor a 404 (`docs/LEARNING.md`'s frontend section has the full
-mechanism). `SPACE_PAGES.marriage` renders the identical grouped
-label-plus-links shape Money uses, with one link (Retros) — the
-single-link branch that shape used to have a separate code path for was
-already deleted as unreachable before Marriage needed it again, so no
-rendering logic changed, only the map entry.
+mechanism of why — a guard route with children but no index matches the
+bare parent path too). **Vision spec's task 11 added `/marriage/vision`
+(`VisionPage`) as Marriage's second child, and closed that gap with it**:
+`marriageIndexRoute` (path `"/"`, `beforeLoad` throwing
+`redirect({ to: "/marriage/retros" })`) now sends bare `/marriage` to
+Retros, the same "first page wins" choice `moneyIndexRoute` already made for
+Money — though Money's own index route *is* its first page (`FinancesPage`)
+rather than redirecting to a sibling, since Finances has no separate URL of
+its own the way Retros does. `SPACE_PAGES.marriage` renders the identical
+grouped label-plus-links shape Money uses, now with two links (Retros,
+Vision & goals) — the single-link branch that shape used to have a separate
+code path for was already deleted as unreachable before Marriage first
+needed it (task 10), so no rendering logic changed for either link, only the
+map entries.
 
 **`/` is a real page, and it is the only one with no capability guard above
 it.** Every other screen sits behind `RequireAuth` *and* `RequireCapability`,

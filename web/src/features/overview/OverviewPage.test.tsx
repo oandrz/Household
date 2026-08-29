@@ -4,10 +4,13 @@ import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
 import { currentMonth } from "../money/month";
 import type { RetrosResponse } from "../marriage/retroSchemas";
+import { currentVisionYear } from "../marriage/visionQueryKeys";
+import type { Vision } from "../marriage/visionSchemas";
 import { OVERVIEW_COPY } from "./copy";
 import { OverviewPage } from "./OverviewPage";
 
 const MONTH = currentMonth();
+const YEAR = currentVisionYear();
 
 function meBody(overrides: { role?: string; capabilities?: string[] } = {}) {
   return {
@@ -226,6 +229,45 @@ function renderableRetrosBody(): RetrosResponse {
   });
 }
 
+// theme: "" and version: 0 -- the wire shape a never-set year sends
+// (visionSchema's own comment) -- the default for every owner-role test
+// below that doesn't care about VisionCard's or the check-in strip's own
+// figures (VisionCard.test.tsx/NextRetroCard.test.tsx cover those in
+// isolation). meBody()'s own default capabilities list includes "marriage",
+// so every owner-role test in this file mounts both NextRetroCard and
+// VisionCard, and each needs this route registered -- the same reason
+// retrosBody()'s own comment above gives for NextRetroCard's GET /retros.
+function visionBody(overrides: Partial<Vision> = {}): Vision {
+  return {
+    year: YEAR,
+    theme: "",
+    description: "",
+    version: 0,
+    pillars: [],
+    milestones: [],
+    ...overrides,
+  };
+}
+
+// The identical proof `renderableRetrosBody()` above gives for NextRetroCard
+// -- a vision response that WOULD render VisionCard's own real content (a
+// theme, a pillar) if the query behind it were ever allowed to fire.
+// VisionCard shares OverviewPage's own `hasMarriage &&` gate with
+// NextRetroCard rather than carrying a second capability check of its own,
+// so the two marriage-gate tests below need this registered alongside
+// renderableRetrosBody() -- a mutation that broke gating for VisionCard
+// alone, leaving NextRetroCard's intact, would otherwise go undetected:
+// with no route registered at all, VisionCard's own
+// `if (!vision.data) return null` would swallow the failed request into an
+// absence that looks identical to the gate having worked.
+function renderableVisionBody(): Vision {
+  return visionBody({
+    theme: "Slow down together",
+    version: 1,
+    pillars: [{ name: "Us before logistics", description: "", measures: [] }],
+  });
+}
+
 // `routes` accepts a single response or an ordered list per route (the same
 // union GoalModal.test.tsx's own `renderModal` widens `extraRoutes` to) --
 // this task's own "refetches goals after it saves" test needs a route that
@@ -253,7 +295,7 @@ function renderOverview(routes: Record<string, RouteResponse | RouteResponse[]>)
 
 describe("OverviewPage", () => {
   it("shows net worth, this month's budget, the next bill and goals on track to an owner", async () => {
-    renderOverview({
+    const { fetchMock } = renderOverview({
       "GET /api/v1/auth/me": { status: 200, body: meBody() },
       "GET /api/v1/accounts": { status: 200, body: { accounts: [], summary: summaryBody(1248000) } },
       [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
@@ -284,6 +326,10 @@ describe("OverviewPage", () => {
         ),
       },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: {
+        status: 200,
+        body: { vision: visionBody({ theme: "Slow down together", version: 1 }) },
+      },
     });
 
     expect(await screen.findByText("S$12,480.00")).toBeInTheDocument();
@@ -292,6 +338,18 @@ describe("OverviewPage", () => {
     expect(screen.getByText("SP utilities · Jul 8")).toBeInTheDocument();
     expect(await screen.findByText("3 of 4")).toBeInTheDocument();
     expect(screen.getByText("next: Bali · Dec 2026")).toBeInTheDocument();
+    // Proof the two marriage surfaces actually mount together on the real
+    // page, not merely in each component's own isolated test file.
+    expect(await screen.findByTestId("vision-card")).toHaveTextContent('"Slow down together"');
+    expect(screen.getByTestId("vision-checkin-strip")).toHaveTextContent("Slow down together");
+    // VisionCard.tsx and NextRetroCard.tsx each own an independent
+    // useVision(currentVisionYear()) call, but both read the identical
+    // ["vision", year] TanStack Query key from the one QueryClient this page
+    // mounts under -- so the two calls dedupe into a single network request,
+    // not two. This is the assertion that actually proves that, rather than
+    // just trusting how React Query is documented to behave.
+    const visionCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes("/marriage/vision"));
+    expect(visionCalls).toHaveLength(1);
   });
 
   // domain.PercentUsed rounds to the nearest whole percent, correctly, so
@@ -313,6 +371,7 @@ describe("OverviewPage", () => {
       "GET /api/v1/bills": { status: 200, body: billsBody() },
       "GET /api/v1/goals": { status: 200, body: goalsBody({}, [goalStub()]) },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
     });
 
     expect(await screen.findByText("<1% used")).toBeInTheDocument();
@@ -354,6 +413,7 @@ describe("OverviewPage", () => {
         ),
       },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
     });
 
     expect(await screen.findByText("▲ 2.1% this month")).toBeInTheDocument();
@@ -489,6 +549,7 @@ describe("OverviewPage", () => {
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
       "GET /api/v1/bills": { status: 200, body: billsBody() },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
     });
 
     const link = await screen.findByRole("link", { name: /set a budget/i });
@@ -506,6 +567,7 @@ describe("OverviewPage", () => {
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
       "GET /api/v1/bills": { status: 200, body: billsBody() },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
     });
 
     expect(await screen.findByText("Finish setting up")).toBeInTheDocument();
@@ -534,6 +596,7 @@ describe("OverviewPage", () => {
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
       "GET /api/v1/bills": { status: 200, body: billsBody() },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
     });
 
     // Waiting on the budget card, not merely on the heading: the checklist's
@@ -572,6 +635,7 @@ describe("OverviewPage", () => {
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
       "GET /api/v1/bills": { status: 200, body: billsBody() },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
     });
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -616,6 +680,7 @@ describe("OverviewPage", () => {
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
       "GET /api/v1/bills": { status: 200, body: billsBody() },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
     });
 
     fireEvent.click(await screen.findByRole("button", { name: "+ Add" }));
@@ -643,6 +708,7 @@ describe("OverviewPage", () => {
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
       "GET /api/v1/bills": { status: 200, body: billsBody() },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
     });
 
     fireEvent.click(await screen.findByRole("button", { name: "+ Add" }));
@@ -696,6 +762,7 @@ describe("OverviewPage", () => {
         },
       },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
     });
 
     fireEvent.click(await screen.findByRole("button", { name: "+ Add" }));
@@ -751,6 +818,7 @@ describe("OverviewPage", () => {
         },
       },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
     });
 
     expect(await screen.findByText(OVERVIEW_COPY.goalsNone)).toBeInTheDocument();
@@ -832,6 +900,7 @@ describe("OverviewPage", () => {
         },
       },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
     });
 
     expect(await screen.findByText(OVERVIEW_COPY.nextBillNone)).toBeInTheDocument();
@@ -865,6 +934,7 @@ describe("OverviewPage", () => {
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
       "GET /api/v1/bills": { status: 200, body: billsBody() },
       "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
     });
 
     fireEvent.click(await screen.findByRole("button", { name: "+ Add" }));
@@ -879,12 +949,13 @@ describe("OverviewPage", () => {
   // the "explains the missing figures" test above, which this test's own
   // positive assertion is modelled on for the identical reason).
   //
-  // "GET /api/v1/retros" is registered with real, renderable data
-  // (renderableRetrosBody, not an empty one) on purpose: if OverviewPage's
-  // own `hasMarriage &&` gate were ever deleted, this member's browser
-  // would show the card's real content, not merely "no card" for some
-  // unrelated reason (an errored, unregistered request that NextRetroCard's
-  // own `if (!retros.data) return null` swallows into an identical-looking
+  // "GET /api/v1/retros" and "GET /marriage/vision" are both registered
+  // with real, renderable data (renderableRetrosBody/renderableVisionBody,
+  // neither an empty one) on purpose: if OverviewPage's own
+  // `hasMarriage &&` gate were ever deleted for either card, this member's
+  // browser would show that card's real content, not merely "no card" for
+  // some unrelated reason (an errored, unregistered request that either
+  // card's own `if (!data) return null` swallows into an identical-looking
   // absence). See the mutation check below.
   it("renders nothing for a member without the marriage capability, and the rest of the page still renders", async () => {
     renderOverview({
@@ -897,12 +968,14 @@ describe("OverviewPage", () => {
       "GET /api/v1/goals": { status: 200, body: goalsBody() },
       "GET /api/v1/bills": { status: 200, body: billsBody() },
       "GET /api/v1/retros": { status: 200, body: renderableRetrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: renderableVisionBody() } },
     });
 
     // The rest of the page is alive -- an owner with money still gets their
     // real net worth figure.
     expect(await screen.findByText("S$12,480.00")).toBeInTheDocument();
     expect(screen.queryByTestId("next-retro-card")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("vision-card")).not.toBeInTheDocument();
   });
 
   // The sibling proof the gate test above cannot give on its own: not just
@@ -915,8 +988,9 @@ describe("OverviewPage", () => {
   // TanStack Query's error path or a component's own catch with the suite
   // staying green, so this asserts the request directly rather than
   // leaning on that throw.
-  it("makes no request for a member who cannot see retros", async () => {
+  it("makes no request for a member who cannot see retros or vision", async () => {
     let retrosRequested = false;
+    let visionRequested = false;
     renderOverview({
       "GET /api/v1/auth/me": {
         status: 200,
@@ -933,9 +1007,17 @@ describe("OverviewPage", () => {
           retrosRequested = true;
         },
       },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: {
+        status: 200,
+        body: { vision: renderableVisionBody() },
+        capture: () => {
+          visionRequested = true;
+        },
+      },
     });
 
     await screen.findByText("Overview");
     expect(retrosRequested).toBe(false);
+    expect(visionRequested).toBe(false);
   });
 });

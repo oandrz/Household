@@ -646,3 +646,92 @@ func TestDeleteRolloverClearsOnlyItsOwnMonth(t *testing.T) {
 			"deleting June's rollover must not touch July's", rolledOverAt, rolloverGoalID)
 	}
 }
+
+// TestGoalProgressByIDsReturnsOnlyThisHouseholdsGoals pins
+// usecase.GoalProgressReader's household scoping: a goal id from another
+// household must be indistinguishable from one that does not exist at all,
+// not merely absent from some higher-level filter.
+func TestGoalProgressByIDsReturnsOnlyThisHouseholdsGoals(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewGoalRepo(db)
+	mine := insertTestHousehold(t, db)
+	theirs := insertTestHousehold(t, db)
+	myGoal := insertTestGoal(t, db, mine)
+	theirGoal := insertTestGoal(t, db, theirs)
+
+	got, err := repo.ProgressByIDs(ctx, mine, []string{myGoal, theirGoal, myGoal})
+	if err != nil {
+		t.Fatalf("progress by ids: %v", err)
+	}
+	if _, ok := got[theirGoal]; ok {
+		t.Fatal("another household's goal must not appear")
+	}
+	progress, ok := got[myGoal]
+	if !ok {
+		t.Fatalf("want this household's goal, got %v", got)
+	}
+	if progress.Name != "Emergency fund" {
+		t.Fatalf("want the goal's name, got %q", progress.Name)
+	}
+	// insertTestGoal writes no contributions, so nothing has been saved yet.
+	if progress.Percent != 0 {
+		t.Fatalf("want 0%%, got %d", progress.Percent)
+	}
+}
+
+// TestGoalProgressByIDsIsAMissNotAnErrorForAnUnknownID pins the port's
+// central ruling: an id ProgressByIDs cannot find is a miss, not an error --
+// a measure whose linked goal was deleted must render as a label with no
+// figure, never fail the whole vision page.
+func TestGoalProgressByIDsIsAMissNotAnErrorForAnUnknownID(t *testing.T) {
+	db := openTestDB(t)
+	repo := postgres.NewGoalRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	got, err := repo.ProgressByIDs(context.Background(), householdID,
+		[]string{"00000000-0000-0000-0000-000000000000"})
+	if err != nil {
+		t.Fatalf("an unknown id must be a miss, not an error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("want an empty map, got %v", got)
+	}
+}
+
+// TestGoalProgressByIDsReportsAnArchivedGoalsProgress pins the other half of
+// the port's contract (usecase.GoalProgressReader's doc comment, spec
+// decision 8): archiving is not deletion anywhere else in this product, so
+// an archived goal must still count as found and keep its real figure.
+// Only a real DELETE fires goals.id's ON DELETE SET NULL into
+// vision_measures.goal_id -- without this test, nothing stops a future
+// editor "helpfully" adding an archived_at IS NULL filter to the query.
+func TestGoalProgressByIDsReportsAnArchivedGoalsProgress(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewGoalRepo(db)
+	householdID := insertTestHousehold(t, db)
+	goalID := insertTestGoal(t, db, householdID) // target_amount_minor 1000000
+
+	if _, err := repo.AddContribution(ctx, domain.GoalContribution{
+		GoalID: goalID, HouseholdID: householdID,
+		Amount: moneyOf(500000), OccurredOn: july(5), Source: domain.ContributionManual,
+	}); err != nil {
+		t.Fatalf("AddContribution: %v", err)
+	}
+	if _, err := repo.SetArchived(ctx, householdID, goalID, true, july(6)); err != nil {
+		t.Fatalf("SetArchived: %v", err)
+	}
+
+	got, err := repo.ProgressByIDs(ctx, householdID, []string{goalID})
+	if err != nil {
+		t.Fatalf("progress by ids: %v", err)
+	}
+	progress, ok := got[goalID]
+	if !ok {
+		t.Fatalf("an archived goal must still be found -- archiving is not deletion, got %v", got)
+	}
+	if progress.Percent != 50 {
+		t.Fatalf("want 50%% (500000/1000000), got %d", progress.Percent)
+	}
+}

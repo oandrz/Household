@@ -13,7 +13,7 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 80 of 105 features built or partly built.
+**Where things stand:** 86 of 107 features built or partly built.
 
 > **In production since 2026-08-15**, at <https://oink.mywire.org>. **No count
 > below changes** — deployment is not a design feature, and this file's totals
@@ -339,17 +339,200 @@ rows unchanged, one more Partial becomes Built), taking the stated
 totals from 64/16/23/2 = 105 to **65/15/23/2 = 105** — Built + Partial
 still **80 of 105**.
 
+**The Vision reconnaissance, 2026-08-28 — one row added, nothing built.**
+Answering "what's next" meant reading the design's own Vision screen
+(`design/Household Dashboard.dc.html:590-615`) against this table's four Vision
+rows, and the screen draws a fifth thing no row covers: the marriage-duration
+block beside the theme hero — "Married · 14 years · Feb 14, 2012". It is not
+part of the yearly theme (a theme is set every January; a wedding date is set
+once), and nothing in this product holds it — no column on `households`, no
+field in Settings, no mention anywhere in `api/internal`. Added as ⬜ rather
+than folded silently into "Vision — yearly theme", because a row is the only
+way the next implementer finds out the date has to be captured somewhere
+before that block can render at all. The same read also confirmed what the
+four existing Vision rows already say — no `vision` symbol exists in
+`api/internal` or `web/src`, so nothing here is built and nothing moves state.
+Recounting by this file's own rule (the first symbol in each row's own cell)
+leaves every area unchanged except Marriage, which moves from 6/0/9/0 (15
+rows) to **6/0/10/0** (16 rows) — one row added, no row moved between states —
+taking the stated totals from 65/15/23/2 = 105 to **65/15/24/2 = 106**. The
+"Where things stand" headline (Built + Partial) is unchanged at **80**, now of
+**106** rather than 105: a new Not-started row moves the denominator only.
+
+**The Vision page ships, 2026-08-29 — three rows move.** Vision spec's task
+11 built `VisionPage.tsx`, `PillarCard.tsx` and `MilestoneGrid.tsx` (the
+route, the sidebar entry and the `/marriage` index redirect landing in the
+same change, `110ab0a`'s own condition, restated in section 6 above): the
+theme hero, the pillar grid with its measures, and the longer-horizon
+milestone panel all read real data off `useVision(year)` (Vision spec's task
+10). Three of the five Vision rows the reconnaissance above found move from
+Not-started to Built — yearly theme, pillars with measures, longer-horizon
+milestones. The other two stay ⬜: the marriage-duration block is still
+deliberately unbuilt (Vision spec decision 2), and Edit vision (modal) is
+still a placeholder `onEdit` — Vision spec's task 12 replaces it wholesale
+next, which is also why the "+ Add milestone" tile counts as shipped here
+rather than held back: it is visible and wired to the same handler the
+header's own Edit vision button is, matching the design's own two entry
+points into one editor (`dc.html` draws `onClick="{{ openVision }}"` twice —
+the header button and the milestone tile; the empty state's own call to
+action, added later, is Hearth's own third, not the design's) — even though
+neither does anything yet. Recounting by
+this file's own rule leaves every area unchanged except Marriage, which
+moves from 6/0/10/0 (16 rows) to **9/0/7/0** (16 rows) — three rows move from
+Not-started to Built, none added or removed — taking the stated totals from
+65/15/24/2 = 106 to **68/15/21/2 = 106**. The "Where things stand" headline
+(Built + Partial) moves from 80 to **83**, still of **106**.
+
+**The Edit-vision modal ships, 2026-08-29 — one row moves.** Vision spec's
+task 12 built `VisionModal.tsx` and replaced `VisionPage.tsx`'s own `onEdit`
+— a no-op placeholder since task 11, whose own comment said as much — with
+the real editor task 11 deliberately left for it. It is the whole document
+in one form: theme, a year select offering only the previous, current and
+next calendar year (a household setting January's theme in December needs
+next year; one writing up a year nobody recorded needs last year), the
+description, every pillar's name, description and measures, and every
+milestone, saved together in a single `PUT`. Two fields the design's own
+modal never drew at all (spec decision 7) are new here rather than carried
+over from the mockup — a pillar's own description and a measure editor per
+pillar — because the page already rendered both (task 11) with nowhere to
+edit either. All three of `onEdit`'s call sites now open it, including the
+empty state's own call to action, which a review finding on task 11
+deliberately left unproven until this task made the handler do something
+observable. Edit vision (modal) moves from Not-started to Built; the
+marriage-duration block stays the one deliberately-unbuilt row in this
+section (decision 2, unchanged by this task). Recounting by this file's own
+rule leaves every area unchanged except Marriage, which moves from 9/0/7/0
+(16 rows) to **10/0/6/0** (16 rows) — one row moves from Not-started to
+Built, none added or removed — taking the stated totals from 68/15/21/2 = 106
+to **69/15/20/2 = 106**. The "Where things stand" headline (Built + Partial)
+moves from 83 to **84**, still of **106**.
+
+**Vision's two Overview surfaces ship, 2026-08-29 — one row added, one row
+moves.** Vision spec's task 13 built `VisionCard.tsx` and the check-in strip
+inside `NextRetroCard.tsx` — the last two pieces of Vision & goals living
+outside `/marriage/vision` itself. The Overview (home) section's own row for
+"Vision 2026 card" never existed even though that section's intro paragraph
+had counted the card among the design's seven since the Vision
+reconnaissance (2026-08-28) — added now as ✅ directly, the same
+find-and-build-in-one-motion this file has taken before, rather than landing
+as a bare ⬜ first. "Vision check-in strip" moves from Not-started to Built.
+Both surfaces read `useVision(currentVisionYear())` independently (one call
+in each component, not one lifted to `OverviewPage.tsx` and passed down) —
+`useVision` takes no `enabled` option, so gating the request for a member
+without `marriage` has to be OverviewPage choosing not to mount the
+component at all, the same shape `NextRetroCard.tsx`'s own header comment
+already gives for `useRetros`; the two calls share one TanStack Query cache
+entry, so mounting both costs one network request, not two — proved in
+`OverviewPage.test.tsx`, not merely assumed from how the library is
+documented to behave. Recounting by this file's own rule leaves every area
+unchanged except Overview (home), which moves from 6/2/2/0 (10 rows) to
+**8/2/1/0** (11 rows) — one row added as Built, one row moves from
+Not-started to Built — taking the stated totals from 69/15/20/2 = 106 to
+**71/15/19/2 = 107**. The "Where things stand" headline (Built + Partial)
+moves from 84 to **86**, now of **107**.
+
+**Vision's doc pass, 2026-08-29 — no row moves; three things corrected or
+added in prose, one thing checked and left alone.** Task 14 verified rather
+than assumed what Tasks 9–13 had already written here. First, the claim it
+was told to fix — that this file and `docs/SYSTEM_DESIGN.md` currently say
+the Edit-vision modal has "both" entry points — does not hold *today*: every
+row and every narrative paragraph above already names **three** (the
+header's Edit vision button, the "+ Add milestone" tile, and the empty
+state's own call to action). It did hold once: Vision spec's task 11
+(`8f2ee81`) shipped this file with "`VisionPage.tsx`'s `onEdit` is a no-op
+placeholder ... both entry points, the header's Edit vision button and
+MilestoneGrid's '+ Add milestone' tile, already call it" — true at that
+moment, since the modal and its empty-state CTA did not exist yet — and
+task 12 (`8814e70`) correctly rewrote it to "All three of `onEdit`'s call
+sites" the instant the modal shipped a third. So the git history does
+contain "both entry points" text, but as an accurate description of a
+transitional state that was correctly superseded, not a persisting error —
+a claim worth checking against the actual commits rather than a single
+`grep` on the working tree, which is what the first pass of this note got
+wrong. Separately, the one sentence elsewhere that reads ambiguously at a
+glance — "matching the design's own two entry points," in the 2026-08-29
+Vision-page paragraph above — is correct as written for a different reason:
+`design/Household Dashboard.dc.html` really does draw
+`onClick="{{ openVision }}"` exactly twice (the header button and the
+milestone tile, not the empty state, which the design does not draw);
+Hearth's own third is an addition, not a miscount. Clarified in place so it
+cannot be misread as an undercount of what was built. Second, **the "Vision
+— yearly theme" row now says plainly that per-year history is real and
+reachable**, not merely stored: the schema keeps one vision per
+`(household_id, year)` forever, and the modal's year select is a real,
+working affordance onto it, not a drawn-but-inert field — narrowed to the
+previous, current and next year by the UI, not by the API. Third, **all
+four Vision rows in this section read ✅ ahead of Vision's own browser
+walk** — Vision spec's task 15, not yet run as of this pass. This file's own
+legend defines ✅ as "Built **and verified**," and the Retros rows just
+above only earned a plain ✅ once Retros' task 17 walk passed 15 of 15
+(recorded in its own paragraph above); Vision's four rows were marked ✅ by
+tasks 11–13 as each shipped, with no equivalent walk behind them yet. Left
+at ✅ rather than downgraded, on this task's own instruction — the code is
+built, reviewed and covered by `make test`, exactly the same standing Bills
+and Goals held between their own last code task and their walk — but stated
+here so nobody reads "the Marriage rows are ✅" as "the walk has run." The
+same gap applies to the two Overview rows in section 4. Fourth, checked and
+left alone: **the `/marriage` index redirect and the year select's own
+reach into a past year were both considered for their own row and neither
+got one.** The redirect is unreachable-by-design plumbing — the identical
+shape `moneyIndexRoute` already has, and that route has never carried a row
+of its own either, only the prose above and in section 6 — and the year
+select is not "something the design never drew" the way Accounts'
+archive/restore or Goals' contributions were: `modalVision`'s own mockup
+draws a Year field, `▾` and all, so widening its own row's prose (done
+above) is the honest-sized change, not a new line item for a control the
+design already put in the picture. **No row moved, none was added or
+removed, and recounting by this file's own rule confirms the table below is
+still exactly 71/15/19/2 = 107** — unchanged from the state Task 13's own
+paragraph above left it in.
+
+**Vision's fifteen-criterion browser walk (Task 15) has now run and
+passed, 15 of 15** (2026-08-29), the same bar Retros' Task 17 and every
+Money feature were held to before their rows could read plain ✅ —
+confirming the six Vision rows in this section and the two Overview rows
+(`Vision 2026 card`, `Vision check-in strip`) that had been marked ✅ ahead
+of this walk, on the product owner's own instruction, per the doc pass
+above. Recorded in full, criterion by criterion, in
+`docs/superpowers/plans/2026-08-28-hearth-vision-verification.md`, including
+one criterion (8, deleting a goal a measure links to) met by a deliberate,
+narrow substitute rather than its most literal path: Goals' own spec
+(`2026-08-01-hearth-goals-design.md`) says plainly that a goal is never
+deleted and has no `DELETE` endpoint — so "delete that goal from
+`/money/goals`" was exercised with a direct SQL `DELETE` against the same
+row a household can only ever archive through the product, the identical
+shape Retros' own criterion 10 used for a state its product had no button
+for. **No product defect needed a code fix, and no row here moves or
+downgrades to 🟡.** One thing surfaced during the walk that the final
+whole-branch review (2026-08-29) later re-classified: editing and saving a
+vision that already contains a measure whose linked goal was deleted resets
+that measure to a typed `0 of 1` placeholder unless the household
+explicitly fixes it first. First recorded here as a documented, deliberate
+trade-off; the review's own verdict is the opposite — **a latent defect,
+not an accepted trade-off** — dormant only because Goals has no `DELETE`
+route to reach `MeasureBroken` through the running product at all (this
+walk needed a raw SQL `DELETE` to produce it), not because the state is
+actually fine to ship. Still no code fix here and no row moves, because the
+fix belongs to whoever builds Goals' delete, not to this merge: a third
+seeded state in `VisionModal.tsx` that blocks Save until the household
+picks a goal or types a number, not a relaxed domain. Recorded in full in
+`docs/LEARNING.md` under Vision's own walk section, and noted at the
+seeding effect in `VisionModal.tsx` itself. Recounting by this file's own
+rule confirms the table below is still exactly 71/15/19/2 = 107 — a browser
+walk confirms rows already marked Built; it does not add or move one on its
+own.
+
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
 | Entry & authentication | 10 | 1 | 0 | 0 |
 | Navigation shell | 7 | 1 | 1 | 0 |
 | Household settings | 11 | 8 | 2 | 0 |
-| Overview (home) | 6 | 2 | 2 | 0 |
+| Overview (home) | 8 | 2 | 1 | 0 |
 | Money | 25 | 3 | 7 | 0 |
-| Marriage | 6 | 0 | 9 | 0 |
+| Marriage | 10 | 0 | 6 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **65** | **15** | **23** | **2** |
+| **Total** | **71** | **15** | **19** | **2** |
 
 ---
 
@@ -466,17 +649,18 @@ The full checklist is at the end of `docs/LEARNING.md`.
 
 ## 4 · Overview (home)
 
-`/` is a real page as of the interim Overview (M2), and now carries five of
+`/` is a real page as of the interim Overview (M2), and now carries six of
 the design's **seven** cards (counted directly off `design/Household
 Dashboard.dc.html`'s own Overview screen — the money row of four, the
 Marriage "Next retro" card, "This week" and "Vision 2026"; the header's own
 "+ Add" button is not a card) — three from Money (net worth, budget, goals),
-one more from Bills (next bill) and one from Marriage (next retro) — plus a
-setup checklist and a limited-member panel the design does not draw. The
-remaining two cards (Vision check-in strip, "This week" agenda) need Vision
-and Family, neither of which exist yet — so this section is no longer
-mostly ⬜, and the page grows into the designed Overview rather than being
-replaced.
+one more from Bills (next bill) and two from Marriage (next retro, Vision
+2026) — plus a setup checklist and a limited-member panel the design does
+not draw. The Vision check-in strip (design's own line inside the Next retro
+card, not a card of its own, so it does not add to the seven) is built too.
+The one remaining card ("This week" agenda) needs Family, which does not
+exist yet — so this section is no longer mostly ⬜, and the page grows into
+the designed Overview rather than being replaced.
 
 | Feature | State |
 |---|---|
@@ -485,7 +669,8 @@ replaced.
 | Next bill card | ✅ — the next-due bill's name, amount and due date (or the overdue/autopay state in its place), reading `useBills`, the same hook and cache entry `/money/bills` itself uses |
 | Goals on track card | ✅ — the real `X of Y on track` figure and the next dated goal beneath it, reading `useGoals`, the same hook and cache entry `/money/goals` itself uses. A household whose every live goal is achieved reads "All goals reached": an achieved goal is counted in neither `datedCount` nor `noDateCount` and is never `nextGoal`, so all three clauses were null at once and the card painted its heading over blank space (`docs/LEARNING.md`, the zero-render pattern) |
 | Next retro card with carried-over actions | ✅ — shows the current month's retro (draft or finished), or the startable month as a prompt, plus its OPEN action count beneath. `GET /retros` carries both `actionCount` (the total) and `openActionCount` per row; the card reads the latter, the design's own "carried-over actions" figure. Shipped 🟡 first (Task 15, reading the total instead, which overstated outstanding work on a fully-ticked retro) — closed end to end (SQL subquery through the zod schema), leaving `RetroHistoryList`'s own "K actions, ticked or not" row reading the total it is supposed to |
-| Vision check-in strip | ⬜ |
+| Vision 2026 card | ✅ *(`VisionCard.tsx`, Vision spec's task 13 — a row this table never carried until now, though the section's own intro paragraph had already counted it among the seven cards since the Vision reconnaissance. Renders one line per pillar, in `position` order, each showing that pillar's FIRST measure with its live figures, not the design's own three flat commitment lines ("1 weekend away per quarter" etc.) — a third shape the design never says how to store (spec decision 3). A pillar with no measures falls back to its own name; a measure with `hasFigure: false` shows its label and no number. Omitted entirely — not an empty quotation — for a year with no vision yet (`version: 0`); Overview's setup checklist is the surface that names what is missing, not this card)* |
+| Vision check-in strip | ✅ *(inside `NextRetroCard.tsx`, Vision spec's task 13 — "Vision check-in: 2026 theme — "…"", gated on the theme being non-empty, which a version-0 year always sends as `""`, so the strip and the card agree about when there is nothing to show without a second, separate check)* |
 | "This week" agenda | ⬜ |
 | "+ Add" quick-create menu | 🟡 — four of six entries now live: Transaction, Account, Savings goal and Bill. Transaction and Bill are both disabled with their reason until an account exists — a bill needs a pay-from account the same way an expense needs a from-account; Savings goal has no such precondition (Goals decision 6 — there is no funding-source account to require). Calendar event and Marriage retro still join it in the change that builds each |
 | Setup checklist (no mockup — see below) | ✅ |
@@ -959,13 +1144,14 @@ sentence "Arriving in slice 3" reads as a broken product rather than an
 honest one — worth keeping on record here since it explains why Marriage had
 no route at all between that commit and task 10, not because the feature
 regressed. One known minor gap task 10 left rather than fixing speculatively:
-`marriageGuardRoute` has one child (`retros`) and no index route, so a caller
-who types bare `/marriage` by hand now matches a real route (unlike before,
-when it 404'd) and sees the sidebar shell with a blank content area instead
-of a page — nothing in the design links to bare `/marriage`, so this is
-low-priority, but the next task to give Marriage a second page should
-consider whether an index route (redirecting to Retros, or a real Marriage
-landing page) belongs with it.
+`marriageGuardRoute` had one child (`retros`) and no index route, so a caller
+who typed bare `/marriage` by hand matched a real route (unlike before, when
+it 404'd) and saw the sidebar shell with a blank content area instead of a
+page. **The Vision spec's task 11 closed that gap** the moment Marriage grew
+a second page to redirect to: `marriageIndexRoute` (path `"/"`, `beforeLoad`
+throwing `redirect({ to: "/marriage/retros" })`) now sends bare `/marriage`
+to Retros, the same "first page wins" choice `moneyIndexRoute` already made
+for Money.
 
 | Feature | State |
 |---|---|
@@ -975,10 +1161,11 @@ landing page) belongs with it.
 | Start retro (modal) with mood, money check-in and actions | ✅ *(the design's own "45 min" duration is drawn, not built — spec decision 8)* |
 | Carry an unfinished action into the next retro (no mockup — see below) | ✅ |
 | Delete a draft retro (no mockup — see below) | ✅ |
-| Vision — yearly theme | ⬜ |
-| Vision — pillars with measures | ⬜ |
-| Vision — longer-horizon milestones | ⬜ |
-| Edit vision (modal) | ⬜ |
+| Vision — yearly theme | ✅ *(`VisionPage.tsx`'s theme hero, Vision spec's task 11 — the year label, the theme in literal quotes, and its description; an empty description renders nothing, not an empty block. **Per-year history is real, not merely stored**: `visions` keeps one row per `(household_id, year)` forever (spec decision 4), and a household genuinely can reach a past year — the modal's own year select (`vision-modal-year`) is the only affordance that changes which year this page renders, and it writes back to `VisionPage`'s own `year` state, so the same mounted `useVision(year)` call reloads on the SAME page rather than the modal alone. The select offers only the previous, current and next calendar year, anchored on today, so 2025 or 2027 is reachable through the UI today but 2019 is not — the server accepts any year in `MinVisionYear`–`MaxVisionYear`, so that narrowing is a UI choice, not an API limit, and a page-level year picker of its own would be a small, real addition rather than a gap in what already exists)* |
+| Vision — marriage duration beside the theme ("Married · 14 years · Feb 14, 2012") | ⬜ *(drawn, deliberately not built — Vision spec decision 2. Nothing in this product stores a wedding date, no feature would read one, and the only derived figure is today minus the date; building it costs a column, a modal field the design itself never draws, a null state, a visibility decision and a leap-day edge, for no behaviour. The theme hero renders full width instead. Same treatment as the design's drawn-but-unbuilt "45 min" retro duration, Retros decision 8)* |
+| Vision — pillars with measures | ✅ *(`PillarCard.tsx`, Vision spec's task 11 — numbered "Pillar 1", "Pillar 2"…, name, description and every measure. A measure with `hasFigure: false` (a linked goal deleted, a link that failed to resolve, or an unrecognised kind) renders its label and no number at all, never "0 of 0" or "0%" — the same "blank the figure and say why" rule Accounts applies when a primary-currency change leaves net worth uncomputable)* |
+| Vision — longer-horizon milestones | ✅ *(`MilestoneGrid.tsx`, Vision spec's task 11 — one card per milestone, in order, with year, title and note; an empty note renders nothing. The dashed "+ Add milestone" tile opens the Edit-vision modal (Vision spec's task 12), the same as the header's own Edit vision button)* |
+| Edit vision (modal) | ✅ *(`VisionModal.tsx`, Vision spec's task 12 — the whole-document editor: theme, a year select offering only the previous/current/next calendar year, description, every pillar's name, description and measures, and every milestone, saved together in one `PUT`. Adds the two fields the design's own modal never drew at all (spec decision 7) — a pillar's own description and a measure editor per pillar (a label, then either a typed current/target pair or a linked-goal picker, never both; switching modes clears the other's inputs rather than leaving a hidden stale value that would still submit). All three of `onEdit`'s call sites open it — the header's Edit vision button, the "+ Add milestone" tile, and the empty state's own call to action, the one every household with no vision yet sees first. A stale `version` (409) latches a one-way conflict banner decided from the response's own error code (RetroModal.tsx's precedent, for the same staleness reason); its only action reloads the year and discards the local draft outright, rather than trying to resume editing in place)* |
 | Agreements by section | ⬜ |
 | Agreements empty state with starter sets | ⬜ |
 | Propose a change — add, edit, remove (modal) | ⬜ |

@@ -56,6 +56,7 @@ type Deps struct {
 	Goals        *usecase.GoalService
 	Bills        *usecase.BillService
 	Retros       *usecase.RetroService
+	Visions      *usecase.VisionService
 	Users        usecase.UserRepository
 	Memberships  usecase.MembershipRepository
 	Sessions     usecase.SessionRepository
@@ -303,6 +304,7 @@ func NewRouter(deps Deps) http.Handler {
 
 				m.Get("/retros", handleListRetros(deps))
 				m.Get("/retros/{month}", handleGetRetro(deps))
+				m.Get("/marriage/vision", handleGetVision(deps))
 
 				// Every write joins its own CSRF sub-group, the same shape
 				// this file already uses for goals and bills above: the two
@@ -320,6 +322,7 @@ func NewRouter(deps Deps) http.Handler {
 					w.Post("/retros/{month}/actions", handleAddRetroAction(deps))
 					w.Patch("/retros/{month}/actions/{id}", handleSetRetroActionDone(deps))
 					w.Delete("/retros/{month}/actions/{id}", handleRemoveRetroAction(deps))
+					w.Put("/marriage/vision/{year}", handleSaveVision(deps))
 				})
 			})
 		})

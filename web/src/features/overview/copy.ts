@@ -149,5 +149,20 @@ export const OVERVIEW_COPY = {
   // the fail-closed fallback for that state: a plain way in, never a
   // "Start null retro" string built from a month that was not there.
   nextRetroGo: "Go to Retros",
+
+  // VisionCard.tsx. Local duplicates of VISION_COPY's own themeLabel/
+  // themeQuote (marriage/visionCopy.ts) -- the same GoalsCard/GOAL_COPY
+  // trade-off already stated above: a couple of one-liners here, not a
+  // coupling from Overview's copy module to Marriage's.
+  visionThemeLabel: (year: number) => `${year} theme`,
+  visionThemeQuote: (theme: string) => `"${theme}"`,
+
+  // NextRetroCard.tsx's own check-in strip (design's "Vision check-in:
+  // 2026 theme — "Slow down together""). Split into a label and a value
+  // rather than one template string, matching the design's own markup
+  // (dc.html: a plain "Vision check-in:" followed by a <b> for the rest) --
+  // only the value carries emphasis.
+  visionCheckInLabel: "Vision check-in:",
+  visionCheckInTheme: (year: number, theme: string) => `${year} theme — "${theme}"`,
 } as const;
 

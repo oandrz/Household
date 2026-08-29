@@ -52,11 +52,21 @@ export function Modal({
   onClose,
   title,
   children,
+  wide = false,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
+  // Opt-in second width, defaulting to the 420px every modal used to get.
+  // The design does not give all modals one width: the Edit-vision modal is
+  // drawn at 640px (dc.html:928) because it nests three levels of editable
+  // rows -- pillars, each pillar's measures, then milestones -- and at 420px
+  // those nested cards and their remove buttons crowd each other. A boolean
+  // rather than a number: both values are static classes Tailwind can see at
+  // build time, which a runtime `w-[${n}px]` would not be, and the call site
+  // reads as intent ("this is the wide one") rather than a magic number.
+  wide?: boolean;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
@@ -145,7 +155,9 @@ export function Modal({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="max-w-[calc(100vw-32px)] w-[420px] rounded-2xl border border-hairline bg-card p-6 shadow-[var(--shadow-auth-card)]">
+      <div
+        className={`max-w-[calc(100vw-32px)] ${wide ? "w-[640px]" : "w-[420px]"} rounded-2xl border border-hairline bg-card p-6 shadow-[var(--shadow-auth-card)]`}
+      >
         <div className="mb-4 flex items-center justify-between gap-4">
           <h2
             id={titleId}

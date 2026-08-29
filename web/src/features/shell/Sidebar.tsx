@@ -42,11 +42,15 @@ const SPACE_PAGES: Record<string, { label: string; to: string }[]> = {
     { label: "Bills", to: "/money/bills" },
   ],
   // Task 10 -- Retros is the first of Marriage's three pages
-  // (docs/FEATURE_TRACKER.md section 6: Vision & goals and Agreements are
-  // still ⬜). This is the entry `110ab0a` deleted alongside `/marriage`'s
-  // own route and guard; all three came back together (see router.tsx's own
-  // header comment on why splitting them across tasks isn't safe).
-  marriage: [{ label: "Retros", to: "/marriage/retros" }],
+  // (docs/FEATURE_TRACKER.md section 6). This is the entry `110ab0a` deleted
+  // alongside `/marriage`'s own route and guard; all three came back
+  // together (see router.tsx's own header comment on why splitting them
+  // across tasks isn't safe). Task 11 added Vision & goals as the second --
+  // Agreements is still ⬜.
+  marriage: [
+    { label: "Retros", to: "/marriage/retros" },
+    { label: "Vision & goals", to: "/marriage/vision" },
+  ],
 };
 
 // Layout only -- no color here. `text-ink`/`text-accent`/`text-muted` are
