@@ -178,6 +178,12 @@ func TestOwnerOnlyRoutesRejectALimitedMember(t *testing.T) {
 	// The admin floor guards the branch above the same way the owner floor
 	// below guards the walk: if the subtree stopped being enumerated, the
 	// branch would assert nothing and pass.
+	//
+	// Raise it as admin routes are added, exactly as the owner floor below
+	// has been raised. 1 is the count today (POST /admin/session); left at 1
+	// it would still pass with three of the four mutating admin routes Task 8
+	// adds silently dropped from the walk -- which is the vacuous pass this
+	// floor exists to catch.
 	if adminChecked < 1 {
 		t.Fatalf("checked %d admin routes, want at least 1 -- "+
 			"the walk is no longer reaching the admin subtree", adminChecked)

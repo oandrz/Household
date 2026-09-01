@@ -356,39 +356,35 @@ func NewRouter(deps Deps) http.Handler {
 			// auditAdmin wraps it rather than each handler: a handler that
 			// forgets to log is the failure mode.
 			//
-			// requireCSRF is stacked at the subtree root, OUTSIDE the two
-			// guards, rather than around POST /session alone. Two reasons,
-			// and the ordering is the load-bearing part:
+			// requireCSRF is stacked at the subtree root, but INNERMOST of the
+			// three -- behind both admin guards. Each half of that is
+			// deliberate and neither survives on its own:
 			//
-			// Every mutating admin route is CSRF-checked by construction. A
-			// route added to this subtree later cannot be wired outside a
-			// group it does not have to opt into, and GET is exempt inside
+			// At the root, rather than around POST /session alone, every
+			// mutating admin route is CSRF-checked by construction. Nesting
+			// it around the one route that needs it today would leave a
+			// mutating route added to the granted group tomorrow with no CSRF
+			// guard at all and no test to notice. GET is exempt inside
 			// requireCSRF itself, so the reads are unaffected.
 			//
-			// And it is what lets TestEveryMutatingRouteRequiresCSRF keep
-			// walking this subtree like any other. That matrix signs in as an
-			// ordinary owner; with requirePlatformAdmin outermost, POST
-			// /admin/session would answer its CSRF-less probe with the 404,
-			// and the only ways to make the matrix green again would be to
-			// exempt the route -- which would leave the product's one
-			// unauthenticated-shaped admin write unguarded -- or to drop the
-			// route from the walk, which is the same thing with an extra
-			// step.
+			// Innermost, rather than ahead of the guards, so that a
+			// CSRF-rejected admin request still writes its audit row. A
+			// cross-site forgery aimed at a real platform admin is exactly
+			// the event admin_audit_log exists to make visible, and with the
+			// CSRF check in front of auditAdmin it would be refused without
+			// leaving a trace. It also keeps requirePlatformAdmin's 404 as
+			// the first thing a signed-in non-admin meets, whatever they send
+			// or omit.
 			//
-			// This does mean a signed-in non-admin who deliberately withholds
-			// their own CSRF token can tell POST /admin/session (403
-			// CSRF_INVALID) from an unrouted path (404). That is inside the
-			// envelope this plan already accepts, not a new hole:
-			// TestEveryProtectedRouteRejectsAnUnauthenticatedCaller requires
-			// this subtree to answer 401 to an anonymous prober where an
-			// unrouted path answers 404, so "indistinguishable from a typo"
-			// is already scoped to an authenticated, well-formed request. A
-			// guard about whether a request is *authentic* belongs outside
-			// the guard that hides *who may ask*.
+			// The cost is paid by a test, not by the product:
+			// TestEveryMutatingRouteRequiresCSRF walks this subtree like any
+			// other and needs its caller to get past requirePlatformAdmin
+			// first, so it makes its owner a platform admin. See the comment
+			// on that line -- it is load-bearing, not scaffolding.
 			g.Route("/admin", func(adm chi.Router) {
-				adm.Use(requireCSRF)
 				adm.Use(requirePlatformAdmin(deps))
 				adm.Use(auditAdmin(deps))
+				adm.Use(requireCSRF)
 
 				// The one route that must be reachable without a grant --
 				// it is how a grant is obtained.

@@ -261,6 +261,20 @@ func TestEveryProtectedRouteRejectsAnUnauthenticatedCaller(t *testing.T) {
 // CSRF_INVALID.
 func TestEveryMutatingRouteRequiresCSRF(t *testing.T) {
 	env := newTestEnv(t)
+	// The owner is made a platform admin so this walk can reach the CSRF
+	// check on the /admin subtree at all. router.go stacks requireCSRF
+	// INNERMOST there, behind requirePlatformAdmin, so that a forged admin
+	// request still writes an audit row -- which means a caller with no
+	// platform_admins row meets the 404 first and this matrix would assert
+	// nothing about CSRF on those routes.
+	//
+	// Do not delete this line to "simplify the fixture": it is what keeps
+	// POST /api/v1/admin/session inside the walk instead of allowlisted out
+	// of it. Granting platform admin is safe for every OTHER assertion here
+	// because it changes the behaviour of exactly one middleware --
+	// requirePlatformAdmin is IsPlatformAdmin's only caller, and nothing
+	// else in non-test code reads platform_admins.
+	env.makePlatformAdmin(t, env.ownerEmail)
 	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
 
 	public := map[string]bool{

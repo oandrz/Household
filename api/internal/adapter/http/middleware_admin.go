@@ -34,6 +34,18 @@ const adminGrantTTL = 30 * time.Minute
 // it would leave a future wrapped-sentinel path free to turn an outage into
 // exactly the clean "no" this comment forbids. There is no error from this
 // call a caller should ever learn anything from.
+//
+// The limit of the 404, stated so nobody rediscovers it as a bug: it hides
+// the surface from AUTHENTICATED non-admins only. An unauthenticated caller
+// gets 401, not 404, because requireSession necessarily runs first --
+// TestEveryProtectedRouteRejectsAnUnauthenticatedCaller requires exactly
+// that of every route here -- so a stranger with no credentials can already
+// tell /admin/flags from an unrouted path. That is accepted, not overlooked:
+// the existence of an admin surface is not the secret. WHO holds it is, and
+// a later task puts isPlatformAdmin into GET /auth/me for every caller
+// anyway. What this guard buys is that a signed-in household member poking
+// at the API learns nothing, and that nobody can enumerate the subtree's
+// shape by watching which paths answer differently.
 func requirePlatformAdmin(deps Deps) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -97,8 +109,19 @@ func auditAdmin(deps Deps) func(http.Handler) http.Handler {
 				Action:      r.Method + " " + r.URL.Path,
 				Target:      target,
 				Detail:      detail,
-				IP:          r.RemoteAddr,
-				At:          deps.Clock.Now(),
+				// r.RemoteAddr here is middleware.RealIP's rewrite of it, read
+				// from headers -- so this column is only ever as trustworthy as
+				// the proxy in front of the service. web/nginx.conf is what
+				// makes it trustworthy today, and says so at length: it blanks
+				// any client-supplied True-Client-IP and sets X-Real-IP from
+				// $remote_addr (chi takes the first non-empty of True-Client-IP,
+				// X-Real-IP, X-Forwarded-For, with no trusted-proxy list of its
+				// own), while nginx's real_ip module trusts X-Forwarded-For only
+				// from 172.28.0.0/16 with real_ip_recursive off. Run this
+				// service with anything else in front of it, or with nothing,
+				// and the attacker chooses what this column says.
+				IP: r.RemoteAddr,
+				At: deps.Clock.Now(),
 			}); err != nil {
 				// An unwritable audit log closes the surface. The alternative
 				// -- serve the request and log a warning -- is an admin
