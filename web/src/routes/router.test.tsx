@@ -48,6 +48,8 @@ function meFixture(overrides: Partial<Me> = {}): Me {
     },
     capabilities: ["calendar", "chores", "money", "marriage"],
     spaces: [],
+    isPlatformAdmin: false,
+    features: {},
     ...overrides,
   };
 }

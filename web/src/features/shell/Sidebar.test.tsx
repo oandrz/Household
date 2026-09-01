@@ -63,7 +63,10 @@ const travelSpace = space({
   isBuiltin: false,
 });
 
-function meFixture(spaces: Space[]): Me {
+// overrides defaults to {} rather than gaining a second parallel fixture
+// function -- Task 10's admin-link tests need everything this fixture
+// already builds, plus one flipped bit.
+function meFixture(spaces: Space[], overrides: Partial<Me> = {}): Me {
   return {
     user: {
       id: "user-1",
@@ -89,6 +92,9 @@ function meFixture(spaces: Space[]): Me {
     },
     capabilities: ["calendar", "chores", "money", "marriage"],
     spaces,
+    isPlatformAdmin: false,
+    features: {},
+    ...overrides,
   };
 }
 
@@ -475,5 +481,23 @@ describe("Sidebar", () => {
         ),
       ).toBe(true);
     });
+  });
+
+  // The Admin link is not a space -- it does not go through SPACE_PAGES or
+  // me.spaces at all, so it needs its own pair of tests: gone for the
+  // ordinary case, present only for the one flag that governs it.
+  it("does not show an Admin link for an ordinary owner", async () => {
+    renderWithRouter(<Sidebar me={meFixture([])} />);
+
+    expect(await screen.findByText("Andreas & Christine")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Admin" })).not.toBeInTheDocument();
+  });
+
+  it("shows an Admin link for a platform admin", async () => {
+    renderWithRouter(
+      <Sidebar me={meFixture([], { isPlatformAdmin: true })} />,
+    );
+
+    expect(await screen.findByRole("link", { name: "Admin" })).toBeInTheDocument();
   });
 });
