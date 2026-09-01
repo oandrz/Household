@@ -100,6 +100,10 @@ func run() error {
 	visionRepo := postgres.NewVisionRepo(db)
 	telegramLinks := postgres.NewTelegramLinkRepo(db)
 	telegramAccounts := postgres.NewTelegramAccountRepo(db)
+	platformAdminRepo := postgres.NewPlatformAdminRepo(db)
+	featureFlagRepo := postgres.NewFeatureFlagRepo(db)
+	adminAuditRepo := postgres.NewAdminAuditRepo(db)
+	adminReauthRepo := postgres.NewAdminReauthAttemptRepo(db)
 
 	hasher := crypto.NewArgon2Hasher(cfg.Argon2Time, cfg.Argon2MemoryKiB, cfg.Argon2Threads)
 	tokens := crypto.NewTokenGenerator()
@@ -237,6 +241,22 @@ func run() error {
 	// percentage from Goals and the narrow port is what keeps it from
 	// depending on GoalRepository's whole surface.
 	visionSvc := usecase.NewVisionService(visionRepo, goalRepo, sysClock)
+	adminSvc := usecase.NewAdminService(usecase.AdminDeps{
+		Admins: platformAdminRepo,
+		Flags:  featureFlagRepo,
+		Audit:  adminAuditRepo,
+		Clock:  sysClock,
+	})
+	// Policy is left zero on purpose: NewAdminReauthService fills in
+	// domain.DefaultLockoutPolicy(), the same shape NewAuthService uses for
+	// the household lock. The two locks share that policy while deliberately
+	// counting into separate ledgers -- see 00012_admin.sql.
+	adminReauthSvc := usecase.NewAdminReauthService(usecase.AdminReauthDeps{
+		Users:    users,
+		Attempts: adminReauthRepo,
+		Hasher:   hasher,
+		Clock:    sysClock,
+	})
 
 	srv := &http.Server{
 		Addr: fmt.Sprintf(":%d", cfg.Port),
@@ -256,6 +276,8 @@ func run() error {
 			Retros:       retroSvc,
 			Visions:      visionSvc,
 			Telegram:     telegramSvc,
+			Admin:        adminSvc,
+			AdminReauth:  adminReauthSvc,
 			Users:        users,
 			Memberships:  memberships,
 			Sessions:     sessions,

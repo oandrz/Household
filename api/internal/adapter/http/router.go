@@ -60,7 +60,16 @@ type Deps struct {
 	// Telegram is nil when no bot is configured. The route checks for nil
 	// rather than being conditionally registered, so the router's shape does
 	// not change with configuration and every test builds the same tree.
-	Telegram    *usecase.TelegramAuthService
+	Telegram *usecase.TelegramAuthService
+	// Admin and AdminReauth are the platform-operator surface's two
+	// services. Unlike Telegram above they are never nil in a real
+	// deployment: the /admin subtree is always routed, and
+	// requirePlatformAdmin's 404 -- not conditional registration -- is what
+	// hides it. Leaving them nil therefore does not disable the surface; it
+	// makes every admin request panic into recoverer's 500, which is the
+	// loud failure a silently-open admin surface would not be.
+	Admin       *usecase.AdminService
+	AdminReauth *usecase.AdminReauthService
 	Users       usecase.UserRepository
 	Memberships usecase.MembershipRepository
 	Sessions    usecase.SessionRepository
@@ -82,8 +91,11 @@ func NewRouter(deps Deps) http.Handler {
 	// is wrong for this API.
 	r.Use(recoverer)
 
+	// writeNotFound, not an inline WriteError: requirePlatformAdmin answers
+	// with the identical helper, so a hidden admin route and a genuinely
+	// absent one cannot drift apart into two distinguishable bodies.
 	r.NotFound(func(w http.ResponseWriter, _ *http.Request) {
-		WriteError(w, http.StatusNotFound, "NOT_FOUND", "That endpoint does not exist.", nil)
+		writeNotFound(w)
 	})
 	r.MethodNotAllowed(func(w http.ResponseWriter, _ *http.Request) {
 		WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "That method is not allowed here.", nil)
@@ -336,6 +348,55 @@ func NewRouter(deps Deps) http.Handler {
 					w.Patch("/retros/{month}/actions/{id}", handleSetRetroActionDone(deps))
 					w.Delete("/retros/{month}/actions/{id}", handleRemoveRetroAction(deps))
 					w.Put("/marriage/vision/{year}", handleSaveVision(deps))
+				})
+			})
+
+			// The admin surface. requirePlatformAdmin answers 404 to everyone
+			// else, so this whole subtree is invisible to a household member.
+			// auditAdmin wraps it rather than each handler: a handler that
+			// forgets to log is the failure mode.
+			//
+			// requireCSRF is stacked at the subtree root, OUTSIDE the two
+			// guards, rather than around POST /session alone. Two reasons,
+			// and the ordering is the load-bearing part:
+			//
+			// Every mutating admin route is CSRF-checked by construction. A
+			// route added to this subtree later cannot be wired outside a
+			// group it does not have to opt into, and GET is exempt inside
+			// requireCSRF itself, so the reads are unaffected.
+			//
+			// And it is what lets TestEveryMutatingRouteRequiresCSRF keep
+			// walking this subtree like any other. That matrix signs in as an
+			// ordinary owner; with requirePlatformAdmin outermost, POST
+			// /admin/session would answer its CSRF-less probe with the 404,
+			// and the only ways to make the matrix green again would be to
+			// exempt the route -- which would leave the product's one
+			// unauthenticated-shaped admin write unguarded -- or to drop the
+			// route from the walk, which is the same thing with an extra
+			// step.
+			//
+			// This does mean a signed-in non-admin who deliberately withholds
+			// their own CSRF token can tell POST /admin/session (403
+			// CSRF_INVALID) from an unrouted path (404). That is inside the
+			// envelope this plan already accepts, not a new hole:
+			// TestEveryProtectedRouteRejectsAnUnauthenticatedCaller requires
+			// this subtree to answer 401 to an anonymous prober where an
+			// unrouted path answers 404, so "indistinguishable from a typo"
+			// is already scoped to an authenticated, well-formed request. A
+			// guard about whether a request is *authentic* belongs outside
+			// the guard that hides *who may ask*.
+			g.Route("/admin", func(adm chi.Router) {
+				adm.Use(requireCSRF)
+				adm.Use(requirePlatformAdmin(deps))
+				adm.Use(auditAdmin(deps))
+
+				// The one route that must be reachable without a grant --
+				// it is how a grant is obtained.
+				adm.Post("/session", handleAdminSession(deps))
+
+				adm.Group(func(granted chi.Router) {
+					granted.Use(requireAdminGrant(deps))
+					granted.Get("/flags", handleListFlags(deps))
 				})
 			})
 		})

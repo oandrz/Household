@@ -1,0 +1,155 @@
+package httpadapter
+
+import (
+	"context"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/andreasoentoro/hearth/api/internal/usecase"
+)
+
+// adminGrantTTL is how long one re-authentication opens the admin surface for.
+// It is deliberately not extended by activity, unlike the session itself (see
+// sessionExtendThreshold in middleware_session.go): a long admin session is
+// re-authenticated, not renewed silently.
+const adminGrantTTL = 30 * time.Minute
+
+// requirePlatformAdmin answers 404 -- not 403 -- to a caller with no
+// platform_admins row. A 403 would confirm both that /admin exists and that
+// this path is the right one; to everyone else the whole surface must look
+// like a typo.
+//
+// A lookup *failure* is a 500, not a 404. "The database is down" must not read
+// as a clean "you are not an admin", or an outage would silently lock the
+// operator out with a message saying the page does not exist. That is why the
+// error branch below calls logAndWriteInternal directly rather than
+// MapDomainError: AdminService.IsPlatformAdmin has already consumed
+// domain.ErrNotFound into a plain false (see its own doc comment), so every
+// non-nil error it can return is a lookup failure -- but MapDomainError's
+// table contains a domain.ErrNotFound case answering 404, and routing through
+// it would leave a future wrapped-sentinel path free to turn an outage into
+// exactly the clean "no" this comment forbids. There is no error from this
+// call a caller should ever learn anything from.
+func requirePlatformAdmin(deps Deps) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			scope, ok := RequestScope(r)
+			if !ok {
+				WriteError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Sign in required.", nil)
+				return
+			}
+			isAdmin, err := deps.Admin.IsPlatformAdmin(r.Context(), scope.UserID)
+			if err != nil {
+				logAndWriteInternal(w, r, err)
+				return
+			}
+			if !isAdmin {
+				writeNotFound(w)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// auditAdmin writes one admin_audit_log row per request that reaches it,
+// reads included. It is middleware rather than a call in each handler because
+// a handler that forgets is the failure mode, and middleware cannot forget.
+//
+// The row is written before the handler runs, so a handler that panics or
+// times out still leaves a trace of the attempt. detail carries the route
+// pattern's parameters -- never a body, a password or a row value.
+//
+// One request shape reaches an admin route without being audited: a mutating
+// one that fails requireCSRF, which router.go stacks outside this middleware.
+// That is deliberate. A double-submit check failing means the request was
+// never established as intentional in the first place, so there is no actor
+// whose action the row would be recording -- see router.go's own comment on
+// the /admin subtree for why CSRF sits outside the gate at all.
+func auditAdmin(deps Deps) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			scope, ok := RequestScope(r)
+			if !ok {
+				WriteError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Sign in required.", nil)
+				return
+			}
+
+			target := ""
+			detail := map[string]any{}
+			if rctx := chi.RouteContext(r.Context()); rctx != nil {
+				for i, key := range rctx.URLParams.Keys {
+					if i < len(rctx.URLParams.Values) {
+						detail[key] = rctx.URLParams.Values[i]
+						if target == "" {
+							target = rctx.URLParams.Values[i]
+						}
+					}
+				}
+			}
+
+			if err := deps.Admin.RecordAudit(r.Context(), usecase.AdminAuditEntry{
+				ActorUserID: scope.UserID,
+				Action:      r.Method + " " + r.URL.Path,
+				Target:      target,
+				Detail:      detail,
+				IP:          r.RemoteAddr,
+				At:          deps.Clock.Now(),
+			}); err != nil {
+				// An unwritable audit log closes the surface. The alternative
+				// -- serve the request and log a warning -- is an admin
+				// surface that works fine with auditing silently off, which is
+				// the exact state this table exists to make impossible.
+				slog.ErrorContext(r.Context(), "admin audit write failed",
+					"request_id", middleware.GetReqID(r.Context()), "error", err)
+				WriteError(w, http.StatusServiceUnavailable, "AUDIT_UNAVAILABLE",
+					"The admin surface is closed because its audit log cannot be written.", nil)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// requireAdminGrant refuses until the caller has re-entered their password
+// within adminGrantTTL. Its 401 carries ADMIN_REAUTH_REQUIRED rather than
+// UNAUTHENTICATED so the frontend can show a password prompt instead of
+// bouncing the operator all the way out to sign-in.
+func requireAdminGrant(deps Deps) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			grant, ok := RequestAdminGrant(r)
+			if !ok || grant == nil || !grant.After(deps.Clock.Now()) {
+				WriteError(w, http.StatusUnauthorized, "ADMIN_REAUTH_REQUIRED",
+					"Confirm your password to open the admin surface.", nil)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// adminGrantKey is the request-context key requireSession stores the session
+// row's admin grant under. Unexported so no other package can collide.
+type adminGrantKey struct{}
+
+// RequestAdminGrant reads the grant expiry requireSession placed on r. The
+// bool is false for any request that never passed through requireSession.
+func RequestAdminGrant(r *http.Request) (*time.Time, bool) {
+	grant, ok := r.Context().Value(adminGrantKey{}).(*time.Time)
+	return grant, ok
+}
+
+func withAdminGrant(ctx context.Context, expiresAt *time.Time) context.Context {
+	return context.WithValue(ctx, adminGrantKey{}, expiresAt)
+}
+
+// writeNotFound answers exactly what the router's own NotFound handler does,
+// so a hidden admin route and a genuinely absent one are byte-identical.
+func writeNotFound(w http.ResponseWriter) {
+	WriteError(w, http.StatusNotFound, "NOT_FOUND", "That endpoint does not exist.", nil)
+}

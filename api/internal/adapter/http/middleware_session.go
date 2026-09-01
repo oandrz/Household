@@ -115,7 +115,15 @@ func requireSession(deps Deps) func(http.Handler) http.Handler {
 			}
 
 			scope := Scope{UserID: record.UserID, HouseholdID: record.HouseholdID, Membership: membership}
-			next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, scopeKey{}, scope)))
+			// The admin grant is put on the context from the same session
+			// record the scope is built from, so the two can never disagree
+			// about which session is speaking. It is carried separately
+			// rather than folded into Scope because it is not part of the
+			// caller's household identity: every downstream consumer of
+			// Scope (requireCapability, requireOwner, every handler) would
+			// otherwise gain a field that means nothing to it.
+			ctx = withAdminGrant(context.WithValue(ctx, scopeKey{}, scope), record.AdminGrantExpiresAt)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }

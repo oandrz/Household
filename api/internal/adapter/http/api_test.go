@@ -142,6 +142,16 @@ type testEnv struct {
 
 	signupMailer *signupMailer
 
+	// users, platformAdmins and adminAudit are three of the repositories the
+	// env already wires into the router, kept so a test can reach the
+	// database behind the API. The admin tests need all three: there is
+	// deliberately no HTTP route that creates a platform admin, and a test
+	// that asserts on the audit log must not read it through a route that is
+	// itself audited.
+	users          usecase.UserRepository
+	platformAdmins usecase.PlatformAdminRepository
+	adminAudit     usecase.AdminAuditRepository
+
 	// deps is the exact Deps every route in env.router was built from, kept
 	// so a test can build a second router sharing everything except one
 	// swapped-out dependency -- see routerWithMemberships below, the one
@@ -303,6 +313,25 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 	// depending on GoalRepository's whole surface.
 	visionSvc := usecase.NewVisionService(postgres.NewVisionRepo(db), goalRepo, clk)
 
+	platformAdminRepo := postgres.NewPlatformAdminRepo(db)
+	adminAuditRepo := postgres.NewAdminAuditRepo(db)
+	adminSvc := usecase.NewAdminService(usecase.AdminDeps{
+		Admins: platformAdminRepo,
+		Flags:  postgres.NewFeatureFlagRepo(db),
+		Audit:  adminAuditRepo,
+		Clock:  clk,
+	})
+	// Policy is left zero: NewAdminReauthService fills in
+	// domain.DefaultLockoutPolicy(), which is what
+	// TestAdminReauthLockoutLeavesHouseholdSignInWorking's three attempts
+	// are counted against.
+	adminReauthSvc := usecase.NewAdminReauthService(usecase.AdminReauthDeps{
+		Users:    users,
+		Attempts: postgres.NewAdminReauthAttemptRepo(db),
+		Hasher:   hasher,
+		Clock:    clk,
+	})
+
 	deps := httpadapter.Deps{
 		Pinger:       db,
 		Auth:         authSvc,
@@ -318,6 +347,8 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 		Bills:        billSvc,
 		Retros:       retroSvc,
 		Visions:      visionSvc,
+		Admin:        adminSvc,
+		AdminReauth:  adminReauthSvc,
 		Users:        users,
 		Memberships:  memberships,
 		Sessions:     sessions,
@@ -327,7 +358,14 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 	}
 	router := httpadapter.NewRouter(deps)
 
-	env := &testEnv{router: router, deps: deps, signupMailer: sigMailer}
+	env := &testEnv{
+		router:         router,
+		deps:           deps,
+		signupMailer:   sigMailer,
+		users:          users,
+		platformAdmins: platformAdminRepo,
+		adminAudit:     adminAuditRepo,
+	}
 
 	ctx := context.Background()
 	h, err := households.Create(ctx, domain.Household{
@@ -477,6 +515,33 @@ func (env *testEnv) mustCreateAccount(t *testing.T, session, csrf *http.Cookie, 
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create account: status = %d, body = %s", rec.Code, rec.Body.String())
 	}
+}
+
+// makePlatformAdmin grants the platform-admin row directly through the
+// repository rather than over HTTP, because there is deliberately no HTTP
+// route that can create one: an admin surface that can mint its own admins
+// turns one stolen session into permanent access.
+func (env *testEnv) makePlatformAdmin(t *testing.T, email string) {
+	t.Helper()
+	user, err := env.users.ByEmail(context.Background(), email)
+	if err != nil {
+		t.Fatalf("look up %s: %v", email, err)
+	}
+	if err := env.platformAdmins.Grant(context.Background(), user.User.ID, "test"); err != nil {
+		t.Fatalf("grant platform admin: %v", err)
+	}
+}
+
+// auditRowCount reads the audit log's length through the repository. The
+// admin API's own /admin/audit route is not used here: a test that asserts on
+// auditing must not depend on a route that is itself audited.
+func (env *testEnv) auditRowCount(t *testing.T) int {
+	t.Helper()
+	entries, err := env.adminAudit.Recent(context.Background(), 1000)
+	if err != nil {
+		t.Fatalf("recent audit: %v", err)
+	}
+	return len(entries)
 }
 
 // signIn signs in through the public API, exactly as a browser would, and

@@ -101,9 +101,42 @@ func TestOwnerOnlyRoutesRejectALimitedMember(t *testing.T) {
 	replacer := strings.NewReplacer("{id}", "00000000-0000-0000-0000-000000000000")
 
 	checked := 0
+	adminChecked := 0
 	err := chi.Walk(routes, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		switch method {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			return nil
+		}
+		// The admin subtree is gated on an axis orthogonal to household
+		// ownership -- a platform_admins row, not domain.RoleOwner -- and its
+		// refusal is deliberately a 404, so requiring 403 FORBIDDEN of it
+		// would be asserting the opposite of what the design wants (see
+		// requirePlatformAdmin's doc comment for why a 403 there would
+		// confirm both that the surface exists and that the caller found the
+		// right path).
+		//
+		// It is asserted rather than allowlisted past. A skip would waste the
+		// one walk that already has a non-owner signed in and every admin
+		// route enumerated; this branch turns the same walk into a structural
+		// second check of the 404, covering every mutating admin route added
+		// later for free, without a named entry anyone could forget.
+		if strings.HasPrefix(route, "/api/v1/admin") {
+			path := replacer.Replace(route)
+			req := httptest.NewRequest(method, path, bytes.NewReader([]byte("{}")))
+			req.Header.Set("Content-Type", "application/json")
+			req.AddCookie(session)
+			req.AddCookie(csrf)
+			req.Header.Set("X-CSRF-Token", csrf.Value)
+			rec := httptest.NewRecorder()
+			env.router.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusNotFound {
+				t.Errorf("%s %s: status = %d, want 404 -- the admin surface must look "+
+					"like a typo to a household member (body = %s)", method, route, rec.Code, rec.Body.String())
+			} else if body := decodeError(t, rec); body.Error.Code != "NOT_FOUND" {
+				t.Errorf("%s %s: error code = %q, want NOT_FOUND", method, route, body.Error.Code)
+			}
+			adminChecked++
 			return nil
 		}
 		if invitePreAuthRoutes[method+" "+route] {
@@ -141,7 +174,14 @@ func TestOwnerOnlyRoutesRejectALimitedMember(t *testing.T) {
 	if err != nil {
 		t.Fatalf("chi.Walk: %v", err)
 	}
-	t.Logf("checked %d owner-gated candidate routes", checked)
+	t.Logf("checked %d owner-gated candidate routes, %d admin routes", checked, adminChecked)
+	// The admin floor guards the branch above the same way the owner floor
+	// below guards the walk: if the subtree stopped being enumerated, the
+	// branch would assert nothing and pass.
+	if adminChecked < 1 {
+		t.Fatalf("checked %d admin routes, want at least 1 -- "+
+			"the walk is no longer reaching the admin subtree", adminChecked)
+	}
 	// 10, not the pre-accounts 6: the four accounts write routes are mutating
 	// and owner-gated too, and a floor left at the old count would still pass
 	// if all four vanished from the walk -- exactly the vacuous pass this
