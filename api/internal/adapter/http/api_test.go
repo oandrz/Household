@@ -142,20 +142,23 @@ type testEnv struct {
 
 	signupMailer *signupMailer
 
-	// users, platformAdmins and adminAudit are three of the repositories the
-	// env already wires into the router, kept so a test can reach the
-	// database behind the API. The admin tests need all three: there is
-	// deliberately no HTTP route that creates a platform admin, and a test
-	// that asserts on the audit log must not read it through a route that is
-	// itself audited.
+	// These four are repositories the env already wires into the router, kept
+	// so a test can reach the database behind the API. The admin tests need
+	// all four: there is deliberately no HTTP route that creates a platform
+	// admin; a test that asserts on the audit log must not read it through a
+	// route that is itself audited; and featureFlags lets
+	// TestAdminLookupFailureIs500NotHidden rebuild a complete AdminService
+	// with only its Admins port swapped for a broken one.
 	users          usecase.UserRepository
 	platformAdmins usecase.PlatformAdminRepository
+	featureFlags   usecase.FeatureFlagRepository
 	adminAudit     usecase.AdminAuditRepository
 
 	// deps is the exact Deps every route in env.router was built from, kept
 	// so a test can build a second router sharing everything except one
-	// swapped-out dependency -- see routerWithMemberships below, the one
-	// caller that needs this today.
+	// swapped-out dependency. Two callers need it: routerWithMemberships
+	// below, and TestAdminLookupFailureIs500NotHidden, which swaps Admin for
+	// a service whose platform_admins lookup always fails.
 	deps httpadapter.Deps
 }
 
@@ -314,10 +317,11 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 	visionSvc := usecase.NewVisionService(postgres.NewVisionRepo(db), goalRepo, clk)
 
 	platformAdminRepo := postgres.NewPlatformAdminRepo(db)
+	featureFlagRepo := postgres.NewFeatureFlagRepo(db)
 	adminAuditRepo := postgres.NewAdminAuditRepo(db)
 	adminSvc := usecase.NewAdminService(usecase.AdminDeps{
 		Admins: platformAdminRepo,
-		Flags:  postgres.NewFeatureFlagRepo(db),
+		Flags:  featureFlagRepo,
 		Audit:  adminAuditRepo,
 		Clock:  clk,
 	})
@@ -364,6 +368,7 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 		signupMailer:   sigMailer,
 		users:          users,
 		platformAdmins: platformAdminRepo,
+		featureFlags:   featureFlagRepo,
 		adminAudit:     adminAuditRepo,
 	}
 
