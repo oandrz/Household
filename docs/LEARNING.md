@@ -2225,23 +2225,28 @@ isolation to confirm its test — not a sibling's — is what goes red.
 **A seventh instance, the admin-surface browser walk (2026-09-02), and this
 time the code was correct and the test was correct — a green suite proved
 the control worked, and it still shipped unusable.** `/admin/flags`'s only
-interactive control, a segmented toggle, was real: the right `PUT` fired, the
-right class asserted the current state in `AdminFlagsPage.test.tsx`, and
-`make test` was clean. Driving the actual screen found it anyway: 12px text
-in a muted grey on a transparent ground inside a hairline border, right-
-aligned roughly 1900px from its own label at a 2246px viewport. It did not
-register on a first read of the screen at all, and its presence had to be
-confirmed through the accessibility tree and `getBoundingClientRect` — not
-through looking at the page a household, or an operator, actually would.
-No unit test could have caught this: a jsdom render has no viewport, no
-layout, and no notion of "did a human's eye land on this," which is exactly
-what a `toHaveClass` assertion checks instead. The same walk found a sharper
+interactive control, a segmented On/Off toggle, was real and correctly
+tested: `AdminFlagsPage.test.tsx` asserts the right `PUT` fires and checks
+`aria-pressed` on the On and Off buttons for exactly the state each row is
+in (the one segment with no button behind it — "Default," meaning no
+override exists — is asserted by a background-colour class instead, since
+there is nothing to press back to it). Every one of those assertions was
+correct and stayed green. Driving the actual screen found something none of
+them could see: 12px text in a muted grey on a transparent ground inside a
+hairline border, right-aligned roughly 1900px from its own label at a 2246px
+viewport. It did not register on a first read of the screen at all, and its
+presence had to be confirmed through the accessibility tree and
+`getBoundingClientRect` — not through looking at the page a household, or an
+operator, actually would. No unit test could have caught this: a jsdom
+render has no viewport and no layout, so `aria-pressed` being correct and a
+control being findable are two entirely different claims, and only one of
+them has a DOM API to assert against. The same walk found a sharper
 case of the pattern this section is named for, one click away: there is no
 control anywhere on the screen to *create* a household override — only a
 global toggle and a "Remove" on overrides that already exist — so the
 per-household targeting the whole two-layer flag model exists to provide is,
 today, reachable only by a hand-written `PUT` (`docs/FEATURE_TRACKER.md` §9,
-[ADR 5](../adr/0005-platform-admin-authorization.md)). **This is the standing
+[ADR 5](adr/0005-platform-admin-authorization.md)). **This is the standing
 argument for driving the real page rather than trusting the suite one more
 time, with fresh evidence**: nothing here was a failing assertion waiting to
 be written, because there was no code path to assert against in the first
@@ -2739,7 +2744,7 @@ more; it is the same unverified claim wearing a reference.
   table, `admin_reauth_attempts`, keyed on `user_id` rather than
   `household_id`, evaluated by the identical `domain.LockoutPolicy` so the
   *policy* is shared even though the *ledger* is not (see [ADR
-  5](../adr/0005-platform-admin-authorization.md)). None of the sixteen named
+  5](adr/0005-platform-admin-authorization.md)). None of the sixteen named
   patterns above fits this shape exactly — the closest is pattern 11's
   reasoning about asymmetric blast radius between a limit that inconveniences
   one caller and one that fails wider than intended, but that pattern is
