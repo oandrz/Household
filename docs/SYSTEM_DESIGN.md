@@ -524,12 +524,14 @@ shape. It arrives when CSV import gives it a second implementation to
 abstract over, not automatically "with the Money slice". Automatic sync via
 SGFinDex is not available to an app like this.
 
-`LoginAttemptRepository` and `SignupRepository` both carry a `Prune(ctx,
-before)` method, added together because both back the two tables a stranger
-can grow without ever holding an account (§6 explains why). `adminctl prune`
-is their only caller, and refuses an `--older-than` under seven days so it can
-never reach inside `domain.LockoutPolicy.Window` and clear a lockout that is
-still live.
+`LoginAttemptRepository`, `SignupRepository` and `TelegramLinkRepository` all
+carry a `Prune(ctx, before)` method, because all three back the three tables a
+stranger can grow without ever holding an account (§6 explains why).
+`telegram_link_requests` is the third — the nonce table: a link nobody ever
+redeemed has no `chat_id`, so nothing else bounds how many a stranger can
+mint. `adminctl prune` is their only caller, and refuses an `--older-than`
+under seven days so it can never reach inside `domain.LockoutPolicy.Window`
+and clear a lockout that is still live.
 
 ---
 

@@ -696,7 +696,7 @@ The full checklist is at the end of `docs/LEARNING.md`.
 | Notifications — overspend alerts | 🟡 | Same gap as the row above: stored and editable, never sent |
 | Notifications — monthly retro reminder | 🟡 | Same gap as the two rows above: stored and editable, never sent. Retros itself is built now (section 6), so this row has something real to remind a household of — the gap is only that nothing in this codebase runs on a clock |
 | Notifications — weekly family digest | 🟡 | Same gap: stored and editable, never sent |
-| Retention pruning (`adminctl prune`) | ✅ | No UI — `cmd/adminctl prune --older-than=<days>` deletes consumed/expired `signups` and stale `login_attempts` past the cutoff. Refuses anything under a seven-day floor so it can never reach inside `domain.LockoutPolicy.Window` and clear a lockout that is still live |
+| Retention pruning (`adminctl prune`) | ✅ | No UI — `cmd/adminctl prune --older-than=<days>` deletes consumed/expired `signups`, stale `login_attempts` and consumed/expired `telegram_link_requests` past the cutoff. Refuses anything under a seven-day floor so it can never reach inside `domain.LockoutPolicy.Window` and clear a lockout that is still live |
 | Connected accounts | ⬜ | Belongs with Money. Note that automatic bank sync is not available to an app like this — see Money below |
 
 ## 4 · Overview (home)

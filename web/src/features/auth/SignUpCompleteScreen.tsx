@@ -278,7 +278,7 @@ function CompleteSignUpForm({
             // email address -- see docs/FEATURE_TRACKER.md.
             <p className="text-xs text-label">
               You are signing up with Telegram. Your sign-in links come to
-              that chat. Telegram is the only way to sign in for now -- the
+              that chat. Telegram is the only way to sign in for now — the
               password below is saved for later but will not sign you in
               yet.
             </p>

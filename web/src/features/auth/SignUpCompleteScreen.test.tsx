@@ -220,6 +220,14 @@ describe("SignUpCompleteScreen", () => {
 
     await screen.findByText(/telegram/i);
     expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
+
+    // The channel badge alone isn't the point: the account-recovery warning
+    // is. Without an email, Telegram is the only door in, and the password
+    // field on this same screen does not work yet -- matching /telegram/i
+    // above would still pass with this sentence deleted entirely, so pin its
+    // substance directly rather than trust the broader match to cover it.
+    expect(screen.getByText(/only way to sign in/i)).toBeInTheDocument();
+    expect(screen.getByText(/will not sign you in/i)).toBeInTheDocument();
   });
 
   it("still shows the read-only address for an email sign-up", async () => {

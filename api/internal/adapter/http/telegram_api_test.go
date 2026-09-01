@@ -203,9 +203,16 @@ func TestTelegramStartIs404WhenTheFeatureIsOff(t *testing.T) {
 // exist: a caller could then tell "no such route" apart from "Telegram not
 // configured" by the message alone, even though both still answer 404
 // NOT_FOUND. Comparing the two responses byte for byte is what actually
-// proves there is no distinguisher. See the mutation proof recorded in the
-// final-fix-wave report: changing the handler's message makes this test
-// fail, and restoring it makes this test pass again.
+// proves the message itself carries no distinguisher. It does not prove there
+// is none anywhere in the response: the per-IP limiter sits ahead of this
+// handler unconditionally (router.go), so a 21st POST from the same IP inside
+// the hour answers 429 RATE_LIMITED forever, where a genuinely unrouted path
+// never would. That gap is not a leak, though -- a configured install
+// rate-limits identically to an unconfigured one, so what a caller learns
+// from it is only "this build has the route", true of every install of this
+// version. See the mutation proof recorded in the final-fix-wave report:
+// changing the handler's message makes this test fail, and restoring it
+// makes this test pass again.
 func TestTelegramStartIs404WhenTheFeatureIsOffIsByteIdenticalToAnUnroutedPath(t *testing.T) {
 	env := newTestEnv(t) // the existing helper: Deps.Telegram is nil
 

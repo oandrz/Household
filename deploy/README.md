@@ -202,7 +202,8 @@ $C run --rm admin /app/adminctl create-invite \
   --email=new@example.com --name=Name --role=limited \
   --capabilities=money --inviter-email=owner@example.com
 
-# Retention: delete consumed/expired signups and stale login attempts.
+# Retention: delete consumed/expired signups and Telegram link requests,
+# and stale login attempts.
 $C run --rm admin /app/adminctl prune --older-than=30
 
 # Migration status. `admin` only gets GOOSE_DBSTRING from .env — GOOSE_DRIVER
