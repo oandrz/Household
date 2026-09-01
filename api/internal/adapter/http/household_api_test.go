@@ -179,13 +179,15 @@ func TestOwnerOnlyRoutesRejectALimitedMember(t *testing.T) {
 	// below guards the walk: if the subtree stopped being enumerated, the
 	// branch would assert nothing and pass.
 	//
-	// Raise it as admin routes are added, exactly as the owner floor below
-	// has been raised. 1 is the count today (POST /admin/session); left at 1
-	// it would still pass with three of the four mutating admin routes Task 8
-	// adds silently dropped from the walk -- which is the vacuous pass this
-	// floor exists to catch.
-	if adminChecked < 1 {
-		t.Fatalf("checked %d admin routes, want at least 1 -- "+
+	// 4, not the pre-Task-8 1: POST /admin/session plus the three mutating
+	// flag routes Task 8 adds (PUT .../flags/{key}, PUT and DELETE
+	// .../flags/{key}/households/{householdID}). Left at 1 it would still
+	// pass with all three of those silently dropped from the walk -- the
+	// exact vacuous pass this floor exists to catch. Raise it again as more
+	// admin routes are added, exactly as the owner floor below has been
+	// raised.
+	if adminChecked < 4 {
+		t.Fatalf("checked %d admin routes, want at least 4 -- "+
 			"the walk is no longer reaching the admin subtree", adminChecked)
 	}
 	// 10, not the pre-accounts 6: the four accounts write routes are mutating

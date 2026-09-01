@@ -141,6 +141,9 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 			"That capability set is not valid for this role.", nil)
 	case errors.Is(err, domain.ErrUnknownRole):
 		WriteError(w, http.StatusUnprocessableEntity, "INVALID_ROLE", "That role is not recognised.", nil)
+	case errors.Is(err, domain.ErrUnknownFlag):
+		WriteError(w, http.StatusUnprocessableEntity, "UNKNOWN_FLAG",
+			"That feature flag does not exist in this build.", nil)
 	case errors.Is(err, domain.ErrAmountOverflow):
 		// Reaching the HTTP layer means a calculation is wrong, not that the
 		// caller sent a bad request -- nothing on this API surface accepts a

@@ -415,6 +415,17 @@ func NewRouter(deps Deps) http.Handler {
 				adm.Group(func(granted chi.Router) {
 					granted.Use(requireAdminGrant(deps))
 					granted.Get("/flags", handleListFlags(deps))
+
+					// No requireCSRF here: it already sits at the /admin
+					// subtree root, above requireAdminGrant, so every
+					// mutating route in this group is covered by
+					// construction -- see this file's own comment on the
+					// /admin subtree for why it is deliberately outermost
+					// of the three guards rather than nested around just
+					// these three routes.
+					granted.Put("/flags/{key}", handleSetGlobalFlag(deps))
+					granted.Put("/flags/{key}/households/{householdID}", handleSetHouseholdFlag(deps))
+					granted.Delete("/flags/{key}/households/{householdID}", handleClearHouseholdFlag(deps))
 				})
 			})
 		})

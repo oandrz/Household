@@ -32,7 +32,15 @@ func requireFeature(deps Deps, flag domain.Flag) func(http.Handler) http.Handler
 
 			flags, err := deps.Admin.GlobalFlags(r.Context())
 			if err != nil {
-				MapDomainError(w, r, err)
+				// logAndWriteInternal, not MapDomainError: see
+				// requirePlatformAdmin's doc comment in middleware_admin.go
+				// for why a lookup failure must never be allowed to read as
+				// domain.ErrNotFound's mapped 404. Here that 404 means "this
+				// feature is hidden on this install," so routing a database
+				// outage through MapDomainError would tell a would-be
+				// signer-up that sign-up does not exist here, instead of
+				// reporting a server fault.
+				logAndWriteInternal(w, r, err)
 				return
 			}
 			if !flags.Enabled(flag) {

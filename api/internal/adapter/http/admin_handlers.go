@@ -2,6 +2,8 @@ package httpadapter
 
 import (
 	"net/http"
+
+	"github.com/go-chi/chi/v5"
 )
 
 type adminSessionRequest struct {
@@ -94,5 +96,69 @@ func handleListFlags(deps Deps) http.HandlerFunc {
 			body.Flags = append(body.Flags, dto)
 		}
 		WriteJSON(w, http.StatusOK, body)
+	}
+}
+
+type setFlagRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+// handleSetGlobalFlag writes the install-wide override. It answers the whole
+// refreshed flag list rather than 204, so the screen never has to guess what
+// the write did to the effective values.
+func handleSetGlobalFlag(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope, ok := RequestScope(r)
+		if !ok {
+			WriteError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Sign in required.", nil)
+			return
+		}
+		var req setFlagRequest
+		if !decodeJSONBody(w, r, &req) {
+			return
+		}
+		key := chi.URLParam(r, "key")
+		if err := deps.Admin.SetGlobalFlag(r.Context(), key, req.Enabled, scope.UserID); err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		handleListFlags(deps)(w, r)
+	}
+}
+
+// handleSetHouseholdFlag writes one household's override, subject to the same
+// unknown-key refusal as handleSetGlobalFlag above.
+func handleSetHouseholdFlag(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope, ok := RequestScope(r)
+		if !ok {
+			WriteError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Sign in required.", nil)
+			return
+		}
+		var req setFlagRequest
+		if !decodeJSONBody(w, r, &req) {
+			return
+		}
+		key := chi.URLParam(r, "key")
+		householdID := chi.URLParam(r, "householdID")
+		if err := deps.Admin.SetHouseholdFlag(r.Context(), householdID, key, req.Enabled, scope.UserID); err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		handleListFlags(deps)(w, r)
+	}
+}
+
+// handleClearHouseholdFlag removes the override. "No opinion" and "explicitly
+// off" are different states; DELETE is how the first is reached.
+func handleClearHouseholdFlag(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		key := chi.URLParam(r, "key")
+		householdID := chi.URLParam(r, "householdID")
+		if err := deps.Admin.ClearHouseholdFlag(r.Context(), householdID, key); err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		handleListFlags(deps)(w, r)
 	}
 }

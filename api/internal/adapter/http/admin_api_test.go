@@ -405,3 +405,75 @@ func TestMeMarksAPlatformAdmin(t *testing.T) {
 		t.Fatal("a platform admin's me bundle does not say so")
 	}
 }
+
+// TestAdminCanToggleAFlagGlobally walks the happy path end to end: an admin
+// turns a flag on, and the flag-gated route it was hiding behind opens.
+func TestAdminCanToggleAFlagGlobally(t *testing.T) {
+	env := newTestEnv(t)
+	env.makePlatformAdmin(t, env.ownerEmail)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	env.authed(t, http.MethodPost, "/api/v1/admin/session",
+		map[string]string{"password": env.ownerPassword}, session, csrf)
+
+	rec := env.authed(t, http.MethodPut, "/api/v1/admin/flags/family_calendar",
+		map[string]bool{"enabled": true}, session, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT flag = %d, body %s; want 200", rec.Code, rec.Body.String())
+	}
+
+	rec = env.authedGet(t, "/api/v1/family/calendar", session)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("the gated route after enabling = %d, want 200", rec.Code)
+	}
+}
+
+// TestAdminFlagWritesRefuseAnUnknownKey pins the fail-closed rule: a key
+// domain.ParseFlag does not recognise is refused before anything is written,
+// not silently accepted into an orphaned row.
+func TestAdminFlagWritesRefuseAnUnknownKey(t *testing.T) {
+	env := newTestEnv(t)
+	env.makePlatformAdmin(t, env.ownerEmail)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	env.authed(t, http.MethodPost, "/api/v1/admin/session",
+		map[string]string{"password": env.ownerPassword}, session, csrf)
+
+	rec := env.authed(t, http.MethodPut, "/api/v1/admin/flags/not_a_flag",
+		map[string]bool{"enabled": true}, session, csrf)
+	assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "UNKNOWN_FLAG")
+}
+
+// TestClearingAHouseholdOverrideIsNotTheSameAsTurningItOff pins the rule the
+// whole DELETE route exists for: "no opinion" and "explicitly off" are
+// different states. Setting a household override to false must make the
+// gated route answer 404 (explicitly off); clearing that same override must
+// make it answer 200 again, because with no override left the household falls
+// back to the global true set above -- not to false, and not to a second
+// 404 that would mean the DELETE quietly became another way to turn it off.
+func TestClearingAHouseholdOverrideIsNotTheSameAsTurningItOff(t *testing.T) {
+	env := newTestEnv(t)
+	env.makePlatformAdmin(t, env.ownerEmail)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	env.authed(t, http.MethodPost, "/api/v1/admin/session",
+		map[string]string{"password": env.ownerPassword}, session, csrf)
+
+	env.authed(t, http.MethodPut, "/api/v1/admin/flags/family_calendar",
+		map[string]bool{"enabled": true}, session, csrf)
+	env.authed(t, http.MethodPut,
+		"/api/v1/admin/flags/family_calendar/households/"+env.householdID,
+		map[string]bool{"enabled": false}, session, csrf)
+
+	rec := env.authedGet(t, "/api/v1/family/calendar", session)
+	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
+
+	rec = env.authed(t, http.MethodDelete,
+		"/api/v1/admin/flags/family_calendar/households/"+env.householdID, nil, session, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("DELETE override = %d, want 200", rec.Code)
+	}
+
+	// With the override gone the household falls back to the global true.
+	rec = env.authedGet(t, "/api/v1/family/calendar", session)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("after clearing the override = %d, want 200", rec.Code)
+	}
+}
