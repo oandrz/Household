@@ -13,6 +13,8 @@
 // The sidebar's ⌘K chip is deliberately absent: it opens nothing (no command
 // palette exists), and on 375px it would cost width that a product name and a
 // 44px touch target both need.
+import { MenuIcon } from "../../components/icons";
+
 export function MobileTopBar({ onOpenNav }: { onOpenNav: () => void }) {
   return (
     <header className="sticky top-0 z-30 flex items-center gap-2.5 border-b border-hairline bg-card px-4 py-2.5 lg:hidden">
@@ -24,7 +26,7 @@ export function MobileTopBar({ onOpenNav }: { onOpenNav: () => void }) {
         aria-label="Open navigation"
         className="ml-auto grid h-11 w-11 place-items-center rounded-lg border border-hairline text-[15px] text-ink"
       >
-        ☰
+        <MenuIcon />
       </button>
     </header>
   );

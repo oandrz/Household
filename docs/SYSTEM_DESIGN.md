@@ -2598,7 +2598,11 @@ web/src/
   api/client.ts        apiFetch — the only way the app talks to the server:
                        CSRF header, credentials, error envelope decoding,
                        401 handling
-  components/          generic primitives only (Modal, on native <dialog>)
+  components/          generic primitives only: Modal (native <dialog>),
+                       PageContainer, FieldPair, ToggleSwitch, and icons.tsx --
+                       every icon is an inline SVG, never a Unicode character,
+                       because a character only renders where a font on the
+                       device covers its codepoint (docs/LEARNING.md)
   features/
     auth/              sign-in, invite, magic-link, sign-up screens and hooks.
                        SignInScreen also carries the "Continue with Telegram"

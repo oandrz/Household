@@ -66,6 +66,7 @@ import { ApiError } from "../../api/client";
 import { apiErrorMessage } from "../auth/copy";
 import { Modal } from "../../components/Modal";
 import { FieldPair } from "../../components/FieldPair";
+import { CloseIcon } from "../../components/icons";
 import { useGoals } from "../money/useGoals";
 import type { Goal } from "../money/goalSchemas";
 import { VISION_COPY } from "./visionCopy";
@@ -174,7 +175,7 @@ function MeasureEditor({
           onClick={onRemove}
           className="flex h-11 w-11 flex-none items-center justify-center text-[15px] text-danger sm:h-7 sm:w-7"
         >
-          ✕
+          <CloseIcon />
         </button>
       </div>
 
@@ -307,7 +308,7 @@ function PillarEditor({
           onClick={onRemove}
           className="mt-[22px] flex h-11 w-11 flex-none items-center justify-center text-[15px] text-danger sm:h-7 sm:w-7"
         >
-          ✕
+          <CloseIcon />
         </button>
       </div>
 
@@ -420,7 +421,7 @@ function MilestoneEditor({
         onClick={onRemove}
         className="mt-0.5 flex h-11 w-11 flex-none items-center justify-center text-[15px] text-danger sm:h-7 sm:w-7"
       >
-        ✕
+        <CloseIcon />
       </button>
     </div>
   );

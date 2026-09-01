@@ -42,6 +42,7 @@
 // jsdom, or a hypothetical non-modal-capable browser) gets `open` set by
 // JSX at all.
 import { type ReactNode, useEffect, useId, useRef } from "react";
+import { CloseIcon } from "./icons";
 
 const supportsShowModal =
   typeof HTMLDialogElement !== "undefined" &&
@@ -173,7 +174,7 @@ export function Modal({
             // the shell's `lg` nav switch, so the pointer breakpoint is fine.
             className="grid h-11 w-11 flex-none place-items-center rounded-lg bg-canvas text-[13px] text-label sm:h-7 sm:w-7"
           >
-            ✕
+            <CloseIcon />
           </button>
         </div>
         {children}

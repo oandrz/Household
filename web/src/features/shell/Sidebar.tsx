@@ -14,6 +14,7 @@
 import { Link, useMatchRoute, useNavigate } from "@tanstack/react-router";
 import type { Me, Space } from "../auth/schemas";
 import { useSignOut } from "../auth/useAuth";
+import { PowerIcon } from "../../components/icons";
 
 // One entry per built page of each space, in the design's order. A space
 // present here renders as the design's uppercase group label plus a link
@@ -227,7 +228,7 @@ export function Sidebar({ me }: { me: Me }) {
           // 24px target.
           className="grid h-11 w-11 flex-none place-items-center rounded-md text-[13px] text-label transition-colors duration-[var(--transition-state)] enabled:hover:bg-canvas enabled:active:bg-toggle-off disabled:opacity-60 lg:h-6 lg:w-6"
         >
-          ⏻
+          <PowerIcon />
         </button>
       </div>
     </nav>

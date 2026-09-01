@@ -26,6 +26,7 @@ import { useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 import { apiFetch, ApiError } from "../../api/client";
 import { Modal } from "../../components/Modal";
+import { CloseIcon } from "../../components/icons";
 import { apiErrorMessage } from "../auth/copy";
 import { BUDGET_COPY } from "./budgetCopy";
 import { categorySchema as fullCategorySchema } from "./budgetSchemas";
@@ -618,7 +619,7 @@ function BudgetModalForm({
                 // shell's `lg` nav switch.
                 className="grid h-11 w-11 flex-none place-items-center rounded-lg bg-canvas text-[12px] text-label sm:h-7 sm:w-7"
               >
-                ✕
+                <CloseIcon />
               </button>
             </div>
           ))}

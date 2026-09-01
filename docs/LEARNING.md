@@ -3379,6 +3379,24 @@ route with a missing guard has no second line of defence.
   result only reads correctly for some inputs, the caller has to know which —
   return the whole thing, and test the empty branch, which is where the
   ungrammatical output always lives.**
+- **An icon typed as a Unicode character is a bet that the device has a font
+  covering it, and the phone in the household's hand is where that bet is
+  settled.** Sign out was `⏻` (U+23FB POWER SYMBOL). On a Samsung Fold 7 it
+  rendered as nothing: the navigation drawer's sign-out control was a blank
+  button. It looked perfect on macOS throughout, because macOS ships a font
+  with that glyph and Android does not — and the app's own webfont, Schibsted
+  Grotesk, carries neither it, `☰` (U+2630, the only control that reopens
+  navigation on a phone) nor `✕` (U+2715, every close and remove control). All
+  three were leaning on whatever the device fell back to. Fixed by drawing
+  them: `components/icons.tsx`, inline SVG on `currentColor`, `aria-hidden`
+  because each control already carries its meaning in an `aria-label`.
+  **The rule is the coverage, not the character:** `‹ › — ·` are ordinary
+  Latin punctuation and safe anywhere, `▲ ▼ ✓` sit in blocks with broad
+  fallback coverage and read beside their own labels, but a control whose
+  entire visible content is a rare codepoint disappears when the bet loses,
+  and disappears silently — nothing errors, nothing logs, and no test in a
+  jsdom suite can see a missing glyph. Device coverage is not something a
+  desktop review or a screenshot from the developer's own machine can check.
 
 ### Tooling and infrastructure
 
