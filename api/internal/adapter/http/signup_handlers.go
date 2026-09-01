@@ -30,6 +30,14 @@ func handleSignUp(deps Deps) http.HandlerFunc {
 
 // handleSignUpPreview reads no body -- the token is in the path -- so it does
 // not call decodeJSONBody, exactly as handleInvitePreview does not.
+//
+// CONTROLLER RULING R3: the body carries channel alongside email, mirroring
+// usecase.SignupPreview -- see that type's own doc comment for why the
+// create-household screen needs to know which identity the token proved. A
+// plain map, not a struct with `json:"email,omitempty"`, is deliberate: a
+// Telegram sign-up's Email is "", and omitempty on a struct field would drop
+// the key entirely rather than send it empty. json.Marshal of a map never
+// omits a key for an empty value, so this shape cannot make that mistake.
 func handleSignUpPreview(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		preview, err := deps.Signups.Preview(r.Context(), chi.URLParam(r, "token"))
@@ -37,7 +45,7 @@ func handleSignUpPreview(deps Deps) http.HandlerFunc {
 			MapDomainError(w, r, err)
 			return
 		}
-		WriteJSON(w, http.StatusOK, map[string]string{"email": preview.Email})
+		WriteJSON(w, http.StatusOK, map[string]string{"email": preview.Email, "channel": preview.Channel})
 	}
 }
 

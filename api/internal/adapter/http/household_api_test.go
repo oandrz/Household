@@ -84,6 +84,10 @@ func TestOwnerOnlyRoutesRejectALimitedMember(t *testing.T) {
 		"POST /api/v1/auth/magic-link/consume":       true,
 		"POST /api/v1/auth/sign-up":                  true,
 		"POST /api/v1/auth/sign-up/{token}/complete": true,
+		// Same reasoning: no identifier, no session required. It answers 404
+		// rather than 403 when Telegram is not configured -- the same 404
+		// any unrouted path gets -- regardless of who is signed in.
+		"POST /api/v1/auth/telegram/start": true,
 		// Any signed-in member, owner or not, may end their own session --
 		// ownership has nothing to do with signing yourself out.
 		"POST /api/v1/auth/sign-out": true,

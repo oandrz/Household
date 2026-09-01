@@ -57,11 +57,15 @@ type Deps struct {
 	Bills        *usecase.BillService
 	Retros       *usecase.RetroService
 	Visions      *usecase.VisionService
-	Users        usecase.UserRepository
-	Memberships  usecase.MembershipRepository
-	Sessions     usecase.SessionRepository
-	Tokens       usecase.TokenGenerator
-	Clock        usecase.Clock
+	// Telegram is nil when no bot is configured. The route checks for nil
+	// rather than being conditionally registered, so the router's shape does
+	// not change with configuration and every test builds the same tree.
+	Telegram    *usecase.TelegramAuthService
+	Users       usecase.UserRepository
+	Memberships usecase.MembershipRepository
+	Sessions    usecase.SessionRepository
+	Tokens      usecase.TokenGenerator
+	Clock       usecase.Clock
 	// Secure controls the Secure flag on the session and CSRF cookies. It is
 	// !cfg.IsDevelopment(): false only in development, so cookies still work
 	// over plain http on localhost.
@@ -115,6 +119,15 @@ func NewRouter(deps Deps) http.Handler {
 			})
 			auth.Get("/sign-up/{token}", handleSignUpPreview(deps))
 			auth.Post("/sign-up/{token}/complete", handleCompleteSignUp(deps))
+
+			// Its own limiter instance, not the sign-up group's: a person who
+			// has just signed up should not find Telegram sign-in already
+			// spent, and vice versa.
+			auth.Group(func(tg chi.Router) {
+				now := func() time.Time { return deps.Clock.Now() }
+				tg.Use(rateLimitByIP(newIPRateLimiter(telegramStartsPerIPPerHour, time.Hour, now)))
+				tg.Post("/telegram/start", handleTelegramStart(deps))
+			})
 
 			auth.Group(func(g chi.Router) {
 				g.Use(requireSession(deps))
