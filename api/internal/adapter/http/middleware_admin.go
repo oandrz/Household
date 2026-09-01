@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
@@ -73,8 +72,16 @@ func requirePlatformAdmin(deps Deps) func(http.Handler) http.Handler {
 // a handler that forgets is the failure mode, and middleware cannot forget.
 //
 // The row is written before the handler runs, so a handler that panics or
-// times out still leaves a trace of the attempt. detail carries the route
-// pattern's parameters -- never a body, a password or a row value.
+// times out still leaves a trace of the attempt. Target is the full request
+// path, never a body, a password or a row value: chi only populates a
+// route's URL parameters (the {key}, {householdID} kind) once its own
+// tree.FindRoute has matched, which happens inside routeHTTP -- the last
+// step of this subtree's middleware chain, run after requirePlatformAdmin,
+// this middleware and requireCSRF have all already executed. A row written
+// here, before the handler runs, therefore cannot carry those parameters;
+// the path itself already contains every value they would have held, so
+// Detail is left an empty object rather than populated with data that isn't
+// there yet.
 //
 // requireCSRF runs inside this middleware, not outside it, so a request
 // refused for a missing or mismatched CSRF token has already left its row.
@@ -91,24 +98,11 @@ func auditAdmin(deps Deps) func(http.Handler) http.Handler {
 				return
 			}
 
-			target := ""
-			detail := map[string]any{}
-			if rctx := chi.RouteContext(r.Context()); rctx != nil {
-				for i, key := range rctx.URLParams.Keys {
-					if i < len(rctx.URLParams.Values) {
-						detail[key] = rctx.URLParams.Values[i]
-						if target == "" {
-							target = rctx.URLParams.Values[i]
-						}
-					}
-				}
-			}
-
 			if err := deps.Admin.RecordAudit(r.Context(), usecase.AdminAuditEntry{
 				ActorUserID: scope.UserID,
 				Action:      r.Method + " " + r.URL.Path,
-				Target:      target,
-				Detail:      detail,
+				Target:      r.URL.Path,
+				Detail:      map[string]any{},
 				// r.RemoteAddr here is middleware.RealIP's rewrite of it, read
 				// from headers -- so this column is only ever as trustworthy as
 				// the proxy in front of the service. web/nginx.conf is what

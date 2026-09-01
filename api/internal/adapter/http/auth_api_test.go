@@ -239,19 +239,22 @@ func TestEveryProtectedRouteRejectsAnUnauthenticatedCaller(t *testing.T) {
 	// (a routing regression, a chi API change), the loop above asserts
 	// nothing and the test would pass for the wrong reason.
 	t.Logf("checked %d protected routes", checked)
-	// 18, not the pre-calendar 17: GET /api/v1/family/calendar (Task 6) sits
-	// behind requireSession same as every other route here -- requireFeature
-	// only decides whether the flag it guards is on, never whether a session
-	// exists -- so it is one more protected route this walk must see.
+	// 62, not the pre-Task-8 18: this floor had drifted well below the
+	// walk's real count -- several tasks after Task 6 added protected routes
+	// (the admin subtree among them) without anyone raising it, which is
+	// exactly the vacuous-pass risk this comment warns about, just realised
+	// slowly instead of all at once. Task 8's review caught the gap and
+	// re-set it to the walk's actual output rather than nudging it forward
+	// by whatever that task alone added.
 	//
-	// Raising this number is not what would catch that route losing its
+	// Raising this number is not what would catch a single route losing its
 	// session guard -- chi.Walk enumerates it into checked either way. The
 	// per-route `rec.Code != http.StatusUnauthorized` assertion inside the
 	// loop above is what catches that. This floor's own job is the vacuous
 	// pass the comment above it already names: a walk that silently stopped
 	// enumerating routes at all.
-	if checked < 18 {
-		t.Fatalf("checked %d protected routes, want at least 18 -- "+
+	if checked < 62 {
+		t.Fatalf("checked %d protected routes, want at least 62 -- "+
 			"the walk may not be enumerating routes correctly", checked)
 	}
 }
@@ -343,11 +346,14 @@ func TestEveryMutatingRouteRequiresCSRF(t *testing.T) {
 		t.Fatalf("chi.Walk: %v", err)
 	}
 	t.Logf("checked %d mutating routes", checked)
-	// 11, not the pre-accounts 7: the same four accounts write routes are
-	// mutating and CSRF-gated too (see the identical reasoning on the 10
-	// floor in TestOwnerOnlyRoutesRejectALimitedMember, household_api_test.go).
-	if checked < 11 {
-		t.Fatalf("checked %d mutating routes, want at least 11 -- "+
+	// 44, not the pre-Task-8 11: the same drift as the 62 floor above, in
+	// this walk's own mutating-route count -- several tasks' worth of
+	// mutating routes (the admin subtree's three flag-write routes among
+	// them) landed without this number ever being raised to match. Re-set
+	// to the walk's actual output rather than patched forward incrementally,
+	// the same correction applied there.
+	if checked < 44 {
+		t.Fatalf("checked %d mutating routes, want at least 44 -- "+
 			"the walk may not be enumerating routes correctly", checked)
 	}
 }
