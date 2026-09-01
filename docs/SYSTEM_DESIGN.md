@@ -2492,6 +2492,16 @@ Notes that are not obvious from the shapes:
   There is no account-deletion feature yet to force the question; when one
   arrives, it has to decide what happens to that user's audit rows rather than
   having Postgres decide it by default.
+- **`admin_audit_log.ip` is only as trustworthy as whatever sits in front of
+  this service, and in development nothing does.** `auditAdmin`'s own comment
+  names what makes the column trustworthy in production: `web/nginx.conf`
+  blanks any client-supplied `True-Client-IP` and sets `X-Real-IP` from
+  `$remote_addr`, which is the value chi's `RealIP` middleware actually reads.
+  The browser walk ran with no such proxy in front of the dev stack, so every
+  row it wrote carries the Docker Compose network's own container address
+  (`172.22.0.5:…`) rather than a client address — expected, not a defect, but
+  worth stating so a reader of the dev database's own audit log does not read
+  that column as identifying anything.
 - **`admin_reauth_attempts` exists so `login_attempts` never has to know about
   the admin surface.** Both tables record a failed password attempt and both
   are evaluated by the same `domain.LockoutPolicy`, but `login_attempts` locks

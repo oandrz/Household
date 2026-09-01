@@ -198,8 +198,9 @@ re-auth mistypes into that same table would mean an operator fumbling their
 *own* password, on a screen nobody else in their household can even see,
 locks their entire family out of the ordinary product as a side effect.
 
-`AdminReauthService.Verify`'s own doc comment states the reasoning at the
-point a future reader would go looking for it:
+The `AdminReauthService` struct's own doc comment states the reasoning
+(`api/internal/usecase/admin_reauth.go`) — not `Verify`'s own comment
+further down, which is shorter and about something else:
 
 > Its failures are counted in their own ledger, never in `login_attempts`.
 > That table's lockout is household-scoped, so an operator's mistypes there

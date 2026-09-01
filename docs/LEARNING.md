@@ -2383,10 +2383,25 @@ case and no coordinate system to assert legibility in for the second.
   contains every value those parameters would have held), `Detail` stays an
   empty object, and the comment now explains *why* parameters can't be read
   there instead of claiming they are.
+- **An eighth instance, same branch, found the same way as the seventh and
+  still live in the tree, unfixed, at the time of writing.**
+  `migrations/00012_admin.sql`'s own comment on `admin_audit_log` says
+  `target`, `detail` and `ip` "default rather than being NOT NULL without
+  one, because auditAdmin writes from middleware where there is not always a
+  target to name." That was true when the migration was written and stopped
+  being true the moment the seventh instance's fix landed: `Target` is now
+  always `r.URL.Path`, never empty, so the reasoning the comment gives for
+  the column's own nullability is stale one file away from the code that
+  made it stale. **Known and pending, not fixed here** — this is a docs
+  task, and the comment lives in product code — carried on this branch's own
+  final fix wave. Left in the tree long enough to be caught twice, by two
+  different readers, is itself the evidence for the closing paragraph below:
+  a comment's claim does not get re-checked just because a sibling comment
+  making the identical claim was already fixed.
 
 **Treat a citation the way you'd treat a test assertion: something the next
 reader can verify against the thing it names, not something to trust because
-it reads confidently.** All seven instances above cost nothing to produce
+it reads confidently.** All eight instances above cost nothing to produce
 and each would have cost under a minute to check — reading the query,
 re-finding the line, opening the mockup, grepping for the clause a comment
 claimed existed, or reading the one function (`chi`'s `routeHTTP`) whose
@@ -2394,10 +2409,12 @@ order the claim depended on — against a small planning gap, a wrong number in
 a comment, a design claim nobody had opened the design to test, a line range
 nobody had re-measured, a rule restated in a comment's own words rather than
 pointed at, seven checkable claims that drifted the moment the code moved
-under them on a single branch, and a field silently empty for its entire life
-because its own doc comment said otherwise. A citation checked once and never
-re-verified when the sentence around it is rewritten is not a citation any
-more; it is the same unverified claim wearing a reference.
+under them on a single branch, a field silently empty for its entire life
+because its own doc comment said otherwise, and a sibling comment one file
+away making the identical claim, already proven false, that nobody had gone
+back to check. A citation checked once and never re-verified when the
+sentence around it is rewritten is not a citation any more; it is the same
+unverified claim wearing a reference.
 
 ---
 
