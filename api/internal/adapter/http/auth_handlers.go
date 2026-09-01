@@ -98,23 +98,41 @@ func toSpaceDTOs(spaces []domain.Space) []spaceDTO {
 	return out
 }
 
-// meResponseBody is GET /auth/me's body, and also what a successful sign-in,
-// magic-link consumption, and invite acceptance answer with -- see
-// completeSignIn below. The design deliberately returns everything the
-// application shell needs in one response so the sidebar never waits on a
-// request waterfall.
+// meResponseBody is GET /auth/me's body, and also what every completeSignIn
+// caller answers with -- see completeSignIn below. The design deliberately
+// returns everything the application shell needs in one response so the
+// sidebar never waits on a request waterfall.
 type meResponseBody struct {
 	User         userDTO       `json:"user"`
 	Household    householdDTO  `json:"household"`
 	Membership   membershipDTO `json:"membership"`
 	Capabilities []string      `json:"capabilities"`
 	Spaces       []spaceDTO    `json:"spaces"`
+	// IsPlatformAdmin is what makes the sidebar's /admin link appear. It is
+	// not authorization: requirePlatformAdmin decides that, and lying here
+	// would only produce a link to a 404.
+	IsPlatformAdmin bool `json:"isPlatformAdmin"`
+	// Features carries every flag this build defines, resolved for this
+	// caller. Every key is present, so the client never interprets an
+	// absence.
+	Features map[string]bool `json:"features"`
 }
 
 // buildMeResponse assembles the GET /auth/me bundle for one caller. It is
-// read-only, which is why every one of sign-in/magic-link-consume/invite-
-// accept can call it before ever writing a cookie: an assembly failure here
-// must never leave a live session cookie sitting next to a 500 response.
+// read-only, which is why every caller of it except handleMe (below) can run
+// before ever writing a cookie: completeSignIn's callers are themselves the
+// calls that create the session, so an assembly failure here must never
+// leave a live session cookie sitting next to a 500 response.
+//
+// It resolves the caller's flags and admin status itself rather than reading
+// them off a Scope, even though requireSession puts the flags there: every
+// caller of this function except handleMe runs before any session -- and
+// therefore any Scope -- exists. Reading from Scope would leave all of those
+// responses without the fields entirely. The cost is one extra pair of
+// indexed lookups on the one caller that does have a Scope, GET /auth/me
+// itself. This is stated as a property, not a count of callers: a new
+// pre-session caller added later stays correct without this comment needing
+// an edit.
 func buildMeResponse(ctx context.Context, deps Deps, userID, householdID string) (meResponseBody, error) {
 	user, err := deps.Users.ByID(ctx, userID)
 	if err != nil {
@@ -132,21 +150,30 @@ func buildMeResponse(ctx context.Context, deps Deps, userID, householdID string)
 	if err != nil {
 		return meResponseBody{}, err
 	}
+	flags, err := deps.Admin.FlagsFor(ctx, householdID)
+	if err != nil {
+		return meResponseBody{}, err
+	}
+	isAdmin, err := deps.Admin.IsPlatformAdmin(ctx, userID)
+	if err != nil {
+		return meResponseBody{}, err
+	}
 	return meResponseBody{
-		User:         toUserDTO(user.User),
-		Household:    toHouseholdDTO(household),
-		Membership:   toMembershipDTO(membership),
-		Capabilities: membership.Capabilities.Strings(),
-		Spaces:       toSpaceDTOs(spaces),
+		User:            toUserDTO(user.User),
+		Household:       toHouseholdDTO(household),
+		Membership:      toMembershipDTO(membership),
+		Capabilities:    membership.Capabilities.Strings(),
+		Spaces:          toSpaceDTOs(spaces),
+		IsPlatformAdmin: isAdmin,
+		Features:        flags.Strings(),
 	}, nil
 }
 
-// completeSignIn is the common tail of sign-in, magic-link consumption, and
-// invite acceptance: all three produce a usecase.SignInResult, and all three
-// must answer identically -- the me bundle, a session cookie and a CSRF
-// cookie. The me bundle is assembled, and the CSRF token generated, before
-// either cookie is written, so a failure at either step never leaves a live
-// session cookie paired with an error response.
+// completeSignIn is the common tail for every call site that produces a
+// usecase.SignInResult: they must all answer identically -- the me bundle, a
+// session cookie and a CSRF cookie. The me bundle is assembled, and the CSRF
+// token generated, before either cookie is written, so a failure at either
+// step never leaves a live session cookie paired with an error response.
 func completeSignIn(w http.ResponseWriter, r *http.Request, deps Deps, result usecase.SignInResult) {
 	body, err := buildMeResponse(r.Context(), deps, result.UserID, result.HouseholdID)
 	if err != nil {

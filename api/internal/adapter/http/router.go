@@ -60,7 +60,22 @@ type Deps struct {
 	// Telegram is nil when no bot is configured. The route checks for nil
 	// rather than being conditionally registered, so the router's shape does
 	// not change with configuration and every test builds the same tree.
-	Telegram    *usecase.TelegramAuthService
+	Telegram *usecase.TelegramAuthService
+	// Admin and AdminReauth are the platform-operator surface's two
+	// services. Unlike Telegram above they are never nil in a real
+	// deployment: the /admin subtree is always routed, and
+	// requirePlatformAdmin's 404 -- not conditional registration -- is what
+	// hides it. Admin is required well beyond /admin, though: requireSession
+	// resolves flags through it on every authenticated request, before Scope
+	// is even built, so a nil Admin panics into recoverer's 500 across the
+	// entire authenticated surface -- household, spaces, accounts, money,
+	// the admin subtree itself, everything requireSession gates. The
+	// pre-session auth routes need it too, through buildMeResponse -- see its
+	// own doc comment in auth_handlers.go for which callers that is and why --
+	// since they run before a session exists to hand requireSession anything
+	// to check.
+	Admin       *usecase.AdminService
+	AdminReauth *usecase.AdminReauthService
 	Users       usecase.UserRepository
 	Memberships usecase.MembershipRepository
 	Sessions    usecase.SessionRepository
@@ -82,8 +97,11 @@ func NewRouter(deps Deps) http.Handler {
 	// is wrong for this API.
 	r.Use(recoverer)
 
+	// writeNotFound, not an inline WriteError: requirePlatformAdmin answers
+	// with the identical helper, so a hidden admin route and a genuinely
+	// absent one cannot drift apart into two distinguishable bodies.
 	r.NotFound(func(w http.ResponseWriter, _ *http.Request) {
-		WriteError(w, http.StatusNotFound, "NOT_FOUND", "That endpoint does not exist.", nil)
+		writeNotFound(w)
 	})
 	r.MethodNotAllowed(func(w http.ResponseWriter, _ *http.Request) {
 		WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "That method is not allowed here.", nil)
@@ -114,11 +132,21 @@ func NewRouter(deps Deps) http.Handler {
 				// defers that read to request time, when every route's Deps is
 				// actually complete.
 				now := func() time.Time { return deps.Clock.Now() }
+				// The limiter stays outermost: a closed sign-up route must
+				// not become an unmetered way to make flag lookups.
 				su.Use(rateLimitByIP(newIPRateLimiter(signUpRequestsPerIPPerHour, time.Hour, now)))
+				su.Use(requireFeature(deps, domain.FlagSignupsOpen))
 				su.Post("/sign-up", handleSignUp(deps))
 			})
-			auth.Get("/sign-up/{token}", handleSignUpPreview(deps))
-			auth.Post("/sign-up/{token}/complete", handleCompleteSignUp(deps))
+			// The two token routes stay behind the same flag as the request
+			// route above: a half-finished sign-up must not be completable
+			// after registration closes, or a token minted before the switch
+			// stays redeemable indefinitely.
+			auth.Group(func(tok chi.Router) {
+				tok.Use(requireFeature(deps, domain.FlagSignupsOpen))
+				tok.Get("/sign-up/{token}", handleSignUpPreview(deps))
+				tok.Post("/sign-up/{token}/complete", handleCompleteSignUp(deps))
+			})
 
 			// Its own limiter instance, not the sign-up group's: a person who
 			// has just signed up should not find Telegram sign-in already
@@ -126,6 +154,7 @@ func NewRouter(deps Deps) http.Handler {
 			auth.Group(func(tg chi.Router) {
 				now := func() time.Time { return deps.Clock.Now() }
 				tg.Use(rateLimitByIP(newIPRateLimiter(telegramStartsPerIPPerHour, time.Hour, now)))
+				tg.Use(requireFeature(deps, domain.FlagTelegramSignIn))
 				tg.Post("/telegram/start", handleTelegramStart(deps))
 			})
 
@@ -156,6 +185,15 @@ func NewRouter(deps Deps) http.Handler {
 			g.Get("/household/members", handleListMembers(deps))
 			g.Get("/spaces", handleListSpaces(deps))
 			g.Get("/notification-preferences", handleGetNotificationPreferences(deps))
+
+			// The Family calendar's API stub, dark behind its flag. It answers
+			// an empty list rather than 501: a flag-gated route must behave
+			// like a real route once its flag is on, or the flag proves
+			// nothing about the feature it guards.
+			g.Group(func(f chi.Router) {
+				f.Use(requireFeature(deps, domain.FlagFamilyCalendar))
+				f.Get("/family/calendar", handleListCalendarEvents(deps))
+			})
 
 			g.Group(func(m chi.Router) {
 				m.Use(requireCSRF)
@@ -336,6 +374,62 @@ func NewRouter(deps Deps) http.Handler {
 					w.Patch("/retros/{month}/actions/{id}", handleSetRetroActionDone(deps))
 					w.Delete("/retros/{month}/actions/{id}", handleRemoveRetroAction(deps))
 					w.Put("/marriage/vision/{year}", handleSaveVision(deps))
+				})
+			})
+
+			// The admin surface. requirePlatformAdmin answers 404 to everyone
+			// else, so this whole subtree is invisible to a household member.
+			// auditAdmin wraps it rather than each handler: a handler that
+			// forgets to log is the failure mode.
+			//
+			// requireCSRF is stacked at the subtree root, but INNERMOST of the
+			// three -- behind both admin guards. Each half of that is
+			// deliberate and neither survives on its own:
+			//
+			// At the root, rather than around POST /session alone, every
+			// mutating admin route is CSRF-checked by construction. Nesting
+			// it around the one route that needs it today would leave a
+			// mutating route added to the granted group tomorrow with no CSRF
+			// guard at all and no test to notice. GET is exempt inside
+			// requireCSRF itself, so the reads are unaffected.
+			//
+			// Innermost, rather than ahead of the guards, so that a
+			// CSRF-rejected admin request still writes its audit row. A
+			// cross-site forgery aimed at a real platform admin is exactly
+			// the event admin_audit_log exists to make visible, and with the
+			// CSRF check in front of auditAdmin it would be refused without
+			// leaving a trace. It also keeps requirePlatformAdmin's 404 as
+			// the first thing a signed-in non-admin meets, whatever they send
+			// or omit.
+			//
+			// The cost is paid by a test, not by the product:
+			// TestEveryMutatingRouteRequiresCSRF walks this subtree like any
+			// other and needs its caller to get past requirePlatformAdmin
+			// first, so it makes its owner a platform admin. See the comment
+			// on that line -- it is load-bearing, not scaffolding.
+			g.Route("/admin", func(adm chi.Router) {
+				adm.Use(requirePlatformAdmin(deps))
+				adm.Use(auditAdmin(deps))
+				adm.Use(requireCSRF)
+
+				// The one route that must be reachable without a grant --
+				// it is how a grant is obtained.
+				adm.Post("/session", handleAdminSession(deps))
+
+				adm.Group(func(granted chi.Router) {
+					granted.Use(requireAdminGrant(deps))
+					granted.Get("/flags", handleListFlags(deps))
+
+					// No requireCSRF here: it already sits at the /admin
+					// subtree root, above requireAdminGrant, so every
+					// mutating route in this group is covered by
+					// construction -- see this file's own comment on the
+					// /admin subtree for why it is deliberately outermost
+					// of the three guards rather than nested around just
+					// these three routes.
+					granted.Put("/flags/{key}", handleSetGlobalFlag(deps))
+					granted.Put("/flags/{key}/households/{householdID}", handleSetHouseholdFlag(deps))
+					granted.Delete("/flags/{key}/households/{householdID}", handleClearHouseholdFlag(deps))
 				})
 			})
 		})

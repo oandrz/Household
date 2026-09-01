@@ -53,6 +53,11 @@ commands:
   prune [--older-than=30]                       delete consumed/expired signups, login attempts and
                                                  Telegram link requests older than this many days
                                                  (minimum 7)
+  grant-platform-admin --email= [--note=]       make this person an operator of this install
+  revoke-platform-admin --email=                take that away
+  list-platform-admins                          who can reach /admin
+  unlock-admin [--email=]                       clear a locked admin re-auth (defaults to the
+                                                 seeded owner)
 `
 
 func run(args []string) error {
@@ -98,6 +103,8 @@ func run(args []string) error {
 	invites := postgres.NewInviteRepo(db)
 	spaces := postgres.NewSpaceRepo(db)
 	notifications := postgres.NewNotificationRepo(db)
+	platformAdmins := postgres.NewPlatformAdminRepo(db)
+	adminAttempts := postgres.NewAdminReauthAttemptRepo(db)
 
 	hasher := crypto.NewArgon2Hasher(cfg.Argon2Time, cfg.Argon2MemoryKiB, cfg.Argon2Threads)
 	tokens := crypto.NewTokenGenerator()
@@ -143,6 +150,34 @@ func run(args []string) error {
 		}
 		return runPrune(ctx, postgres.NewSignupRepo(db), loginAttempts,
 			postgres.NewTelegramLinkRepo(db), time.Duration(*days)*24*time.Hour)
+	case "grant-platform-admin":
+		fs := flag.NewFlagSet("grant-platform-admin", flag.ContinueOnError)
+		fs.SetOutput(io.Discard) // see the matching comment in runResetPassword
+		email := fs.String("email", "", "the person's email address")
+		note := fs.String("note", "", "why they have this")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return runGrantPlatformAdmin(ctx, users, platformAdmins, *email, *note)
+	case "revoke-platform-admin":
+		fs := flag.NewFlagSet("revoke-platform-admin", flag.ContinueOnError)
+		fs.SetOutput(io.Discard) // see the matching comment in runResetPassword
+		email := fs.String("email", "", "the person's email address")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return runRevokePlatformAdmin(ctx, users, platformAdmins, *email)
+	case "list-platform-admins":
+		return runListPlatformAdmins(ctx, platformAdmins)
+	case "unlock-admin":
+		fs := flag.NewFlagSet("unlock-admin", flag.ContinueOnError)
+		fs.SetOutput(io.Discard) // see the matching comment in runResetPassword
+		email := fs.String("email", usecase.AndreasEmail,
+			"any admin's address to unlock; defaults to the seeded owner")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return runUnlockAdmin(ctx, users, adminAttempts, *email)
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", args[0], usage)
 	}
@@ -379,6 +414,113 @@ func resolveHouseholdByEmail(ctx context.Context, users usecase.UserRepository,
 		return "", "", fmt.Errorf("resolve the household for %q: %w", email, err)
 	}
 	return membership.HouseholdID, user.ID, nil
+}
+
+// resolveUserByEmail is resolveHouseholdByEmail's counterpart for the
+// platform-admin commands below, which act on one account rather than a
+// household. It exists so a mistyped address gets the same actionable
+// answer -- naming --email and saying there is no account -- however it
+// reached this file, rather than each command wrapping ByEmail's error in
+// its own words.
+func resolveUserByEmail(ctx context.Context, users usecase.UserRepository, email string) (usecase.StoredUser, error) {
+	user, err := users.ByEmail(ctx, email)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return usecase.StoredUser{}, fmt.Errorf("no account for %q; pass --email with a real address", email)
+		}
+		return usecase.StoredUser{}, fmt.Errorf("look up %q: %w", email, err)
+	}
+	return user, nil
+}
+
+// runGrantPlatformAdmin is the only way a platform admin comes into
+// existence. There is deliberately no HTTP route for this and no
+// self-promotion path anywhere in the product: an admin surface that could
+// mint its own admins would turn one stolen session into permanent access to
+// every household's data. Keeping creation here, on a command a stranger
+// cannot reach without a shell on this box, means the box itself is the
+// boundary -- not a password, not a session, not a role check that a bug
+// could get wrong.
+func runGrantPlatformAdmin(ctx context.Context, users usecase.UserRepository,
+	admins usecase.PlatformAdminRepository, email, note string) error {
+	if email == "" {
+		return errors.New("grant-platform-admin needs --email")
+	}
+	user, err := resolveUserByEmail(ctx, users, email)
+	if err != nil {
+		return err
+	}
+	if err := admins.Grant(ctx, user.ID, note); err != nil {
+		return err
+	}
+	fmt.Printf("%s can now reach /admin. They will be asked for their password on the way in.\n", email)
+	return nil
+}
+
+// runRevokePlatformAdmin is grant's inverse, and just as deliberately a CLI
+// command rather than a route: taking /admin away from someone must be an
+// action the box's operator takes, never one an admin session could take
+// against itself or another admin.
+func runRevokePlatformAdmin(ctx context.Context, users usecase.UserRepository,
+	admins usecase.PlatformAdminRepository, email string) error {
+	if email == "" {
+		return errors.New("revoke-platform-admin needs --email")
+	}
+	user, err := resolveUserByEmail(ctx, users, email)
+	if err != nil {
+		return err
+	}
+	if err := admins.Revoke(ctx, user.ID); err != nil {
+		return err
+	}
+	fmt.Printf("%s can no longer reach /admin.\n", email)
+	return nil
+}
+
+// runListPlatformAdmins takes no --email: it answers "who can reach
+// /admin", not "which one", so there is no single address to resolve and
+// nothing to guard.
+func runListPlatformAdmins(ctx context.Context, admins usecase.PlatformAdminRepository) error {
+	listings, err := admins.List(ctx)
+	if err != nil {
+		return err
+	}
+	if len(listings) == 0 {
+		fmt.Println("No platform admins.")
+		return nil
+	}
+	for _, l := range listings {
+		note := l.Note
+		if note == "" {
+			note = "(no note)"
+		}
+		fmt.Printf("%s  %s  %s  granted %s\n", l.Email, l.DisplayName, note, l.CreatedAt.Format(time.RFC3339))
+	}
+	return nil
+}
+
+// runUnlockAdmin is the escape hatch AdminReauthService.Verify's own comment
+// names: admin re-auth has no in-product recovery (no magic-link equivalent
+// for a locked admin the way household sign-in has one), so this command is
+// the only way back in once the lockout trips. That is an acceptable
+// trade-off rather than a gap, because the box is already the boundary that
+// grants platform admin in the first place -- nobody without shell access
+// here could have become an admin to get locked out as one.
+//
+// It defaults to the seeded owner exactly as unlock-household does, for the
+// same reason: `adminctl unlock-admin` with no arguments keeps working
+// against a freshly seeded database.
+func runUnlockAdmin(ctx context.Context, users usecase.UserRepository,
+	attempts usecase.AdminReauthAttemptRepository, email string) error {
+	user, err := resolveUserByEmail(ctx, users, email)
+	if err != nil {
+		return err
+	}
+	if err := attempts.ClearFailures(ctx, user.ID); err != nil {
+		return fmt.Errorf("clear failures: %w", err)
+	}
+	fmt.Println("Admin re-auth unlocked.")
+	return nil
 }
 
 // pruneFloor is the shortest retention window `prune` will accept. It is far

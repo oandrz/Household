@@ -48,6 +48,8 @@ function meFixture(overrides: Partial<Me> = {}): Me {
     },
     capabilities: ["calendar", "chores", "money", "marriage"],
     spaces: [],
+    isPlatformAdmin: false,
+    features: {},
     ...overrides,
   };
 }
@@ -684,5 +686,52 @@ describe("the real route tree", () => {
 
     expect(await screen.findByText("Welcome back.")).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/sign-in");
+  });
+
+  // Task 11: /admin sits outside shellRoute (AppShell's sidebar must not
+  // apply -- the admin surface has its own chrome), but still inside
+  // authenticatedRoute -- moneyIndexRoute and marriageIndexRoute's own
+  // "first page wins" redirect, restated for the admin subtree's one page.
+  // AdminShell and AdminFlagsPage are both behind React.lazy
+  // (adminBundleSplit.test.ts pins that this stays true at the source
+  // level), so this is also the one test in this file that exercises their
+  // Suspense boundaries -- a component test mounting AdminFlagsPage
+  // directly never would.
+  it("redirects a platform admin's bare /admin to /admin/flags", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture({ isPlatformAdmin: true }) },
+      "GET /api/v1/admin/flags": { status: 200, body: { flags: [] } },
+    });
+
+    const { router } = renderApp("/admin");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/admin/flags"));
+    expect(await screen.findByText("Hearth · Operator")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Feature flags" }),
+    ).toBeInTheDocument();
+  });
+
+  // requirePlatformAdmin answers 404, not 403, to an authenticated non-admin
+  // (middleware_admin.go's own doc comment: "to everyone else the whole
+  // surface must look like a typo") -- AdminGate's fail-closed default is
+  // what turns that into the identical screen a genuinely unrouted URL
+  // gets, chrome included: "Hearth · Operator" must not be on screen
+  // alongside it, or the surface would be answering "yes, but not for you"
+  // rather than looking like nothing is there at all.
+  it("shows the app's ordinary not-found page to a non-admin visiting /admin/flags", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture({ isPlatformAdmin: false }) },
+      "GET /api/v1/admin/flags": {
+        status: 404,
+        body: { error: { code: "NOT_FOUND", message: "That endpoint does not exist." } },
+      },
+    });
+
+    const { router } = renderApp("/admin/flags");
+
+    expect(await screen.findByText("Page not found.")).toBeInTheDocument();
+    expect(screen.queryByText("Hearth · Operator")).not.toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/admin/flags");
   });
 });

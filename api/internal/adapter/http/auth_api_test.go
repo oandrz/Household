@@ -2,6 +2,7 @@ package httpadapter_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -238,8 +239,24 @@ func TestEveryProtectedRouteRejectsAnUnauthenticatedCaller(t *testing.T) {
 	// (a routing regression, a chi API change), the loop above asserts
 	// nothing and the test would pass for the wrong reason.
 	t.Logf("checked %d protected routes", checked)
-	if checked < 17 {
-		t.Fatalf("checked %d protected routes, want at least 17 -- "+
+	// 62 is this walk's own re-measured output, never a number to bump by
+	// hand: tracked that way, this exact floor drifted through several
+	// tasks that each added protected routes without anyone re-running the
+	// walk: a stale 18 against a real count that had already reached 59
+	// before the task that finally re-ran the walk, and 62 by the time it
+	// did -- the vacuous-pass risk this comment warns
+	// about, realised slowly instead of all at once. Whenever a route is
+	// added, re-run the walk and set this to what it reports, not to
+	// whatever seems like enough of an increase.
+	//
+	// Raising this number is not what would catch a single route losing its
+	// session guard -- chi.Walk enumerates it into checked either way. The
+	// per-route `rec.Code != http.StatusUnauthorized` assertion inside the
+	// loop above is what catches that. This floor's own job is the vacuous
+	// pass the comment above it already names: a walk that silently stopped
+	// enumerating routes at all.
+	if checked < 62 {
+		t.Fatalf("checked %d protected routes, want at least 62 -- "+
 			"the walk may not be enumerating routes correctly", checked)
 	}
 }
@@ -261,6 +278,20 @@ func TestEveryProtectedRouteRejectsAnUnauthenticatedCaller(t *testing.T) {
 // CSRF_INVALID.
 func TestEveryMutatingRouteRequiresCSRF(t *testing.T) {
 	env := newTestEnv(t)
+	// The owner is made a platform admin so this walk can reach the CSRF
+	// check on the /admin subtree at all. router.go stacks requireCSRF
+	// INNERMOST there, behind requirePlatformAdmin, so that a forged admin
+	// request still writes an audit row -- which means a caller with no
+	// platform_admins row meets the 404 first and this matrix would assert
+	// nothing about CSRF on those routes.
+	//
+	// Do not delete this line to "simplify the fixture": it is what keeps
+	// POST /api/v1/admin/session inside the walk instead of allowlisted out
+	// of it. Granting platform admin is safe for every OTHER assertion here
+	// because it changes the behaviour of exactly one middleware --
+	// requirePlatformAdmin is IsPlatformAdmin's only caller, and nothing
+	// else in non-test code reads platform_admins.
+	env.makePlatformAdmin(t, env.ownerEmail)
 	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
 
 	public := map[string]bool{
@@ -317,11 +348,14 @@ func TestEveryMutatingRouteRequiresCSRF(t *testing.T) {
 		t.Fatalf("chi.Walk: %v", err)
 	}
 	t.Logf("checked %d mutating routes", checked)
-	// 11, not the pre-accounts 7: the same four accounts write routes are
-	// mutating and CSRF-gated too (see the identical reasoning on the 10
-	// floor in TestOwnerOnlyRoutesRejectALimitedMember, household_api_test.go).
-	if checked < 11 {
-		t.Fatalf("checked %d mutating routes, want at least 11 -- "+
+	// 44 is this walk's own re-measured output, never a number to bump by
+	// hand -- the identical reasoning the 62 floor above states in full:
+	// this exact floor drifted the same way: a stale 11 against a real
+	// count that had already reached 41 before the walk was finally
+	// re-run, and 44 when it was. Whenever a route
+	// is added, re-run the walk and set this to what it reports.
+	if checked < 44 {
+		t.Fatalf("checked %d mutating routes, want at least 44 -- "+
 			"the walk may not be enumerating routes correctly", checked)
 	}
 }
@@ -472,6 +506,43 @@ func TestSignUpPassesThroughThePerIPLimiter(t *testing.T) {
 
 	rec := env.do(http.MethodPost, "/api/v1/auth/sign-up",
 		map[string]string{"email": "ip-limited@example.test"})
+	assertErrorResponse(t, rec, http.StatusTooManyRequests, "RATE_LIMITED")
+}
+
+// TestClosedSignUpsStillCountAgainstTheIPLimiter pins the ordering router.go's
+// own comment insists on: su.Use(rateLimitByIP(...)) sits OUTSIDE
+// su.Use(requireFeature(...)) in the sign-up group, not inside it, so a
+// closed sign-up route cannot become an unmetered way to make flag lookups.
+//
+// Sending signUpRequestsPerIPPerHour closed requests and checking they all
+// answer 404 would not, on its own, distinguish "the limiter still runs
+// first and hasn't tripped yet" from "requireFeature short-circuits before
+// the limiter is ever reached" -- both look identical for the first five
+// requests. The sixth request is what tells them apart: if the limiter is
+// still outermost, its counter was incremented by all five closed requests
+// and the sixth answers 429, exactly as
+// TestSignUpPassesThroughThePerIPLimiter's open-signups version does. If the
+// two .Use() lines were ever swapped, every request here -- the sixth
+// included -- would answer 404 forever, because requireFeature would refuse
+// the request before the limiter's counter ever saw it.
+func TestClosedSignUpsStillCountAgainstTheIPLimiter(t *testing.T) {
+	env := newTestEnv(t)
+	if err := env.featureFlags.SetGlobal(context.Background(),
+		string(domain.FlagSignupsOpen), false, ""); err != nil {
+		t.Fatalf("SetGlobal: %v", err)
+	}
+
+	// Same perIPLimit as TestSignUpPassesThroughThePerIPLimiter, and the same
+	// reason for repeating the unexported constant's value as a literal.
+	const perIPLimit = 5
+	for i := 0; i < perIPLimit; i++ {
+		rec := env.do(http.MethodPost, "/api/v1/auth/sign-up",
+			map[string]string{"email": "closed-ip-limited@example.test"})
+		assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
+	}
+
+	rec := env.do(http.MethodPost, "/api/v1/auth/sign-up",
+		map[string]string{"email": "closed-ip-limited@example.test"})
 	assertErrorResponse(t, rec, http.StatusTooManyRequests, "RATE_LIMITED")
 }
 

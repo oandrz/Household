@@ -490,6 +490,26 @@ that will manage it (a deferred, separate spec) so it earns real usage first
 — and a household has to be able to exist before there is anything for that
 console to administer.
 
+**That console's first slice now exists, unmerged, on branch `admin-surface`.**
+It carries the authorization axis, the re-authentication grant, the audit log
+and feature flags end to end; the database browse, the outbound message
+inspector and household metrics are specified but unbuilt. Read
+[ADMIN_SURFACE_HANDOVER.md](ADMIN_SURFACE_HANDOVER.md) before touching it or
+planning the next slice — it carries the decisions that are load-bearing, the
+open items, and what the branch's own browser walk found.
+
+**The build order changed a second time on 2026-09-02.** The product owner
+reprioritised the four remaining platform-administration features ahead of any
+further household work. `docs/FEATURE_TRACKER.md`'s "Suggested order" carries
+the sequence, the reason for the order within it, and — stated plainly there
+rather than buried — what the choice costs: sections 1–8 are the product a
+customer buys, section 9 is the surface the operator uses to run the install,
+and no household member can see any of it. **Family is the household area most
+delayed by this**; it is the only one with nothing built at all. The case for
+doing it anyway is that the install is live, sign-up is self-serve and ungated,
+and three of the four exist to make a real install operable by someone who is
+not sitting at its database.
+
 **Slice 2 (Money) is done.** Accounts, Transactions, Budget, Goals and
 Bills — all five features — are code-complete, reviewed, and now all
 **walked in a browser**, each 15 of 15. Goals' own walk ran on 2026-08-01,

@@ -205,6 +205,28 @@ export function Sidebar({ me }: { me: Me }) {
         Settings
       </Link>
 
+      {/* Not a space, so it does not go through SPACE_PAGES or me.spaces --
+          this is the one person running the platform, not a household
+          feature. Rendered only for that flag; the server's own
+          requirePlatformAdmin is what actually refuses a non-admin (with a
+          404, not a 403 -- see middleware_admin.go), this is only the
+          courtesy of not showing a door that opens onto one.
+          NAV_ITEM_CLASS/NAV_ITEM_STATE_CLASS, the same pair every other nav
+          link carries -- this link was shipped with only a hand-picked
+          subset (no padding, no rounded hit-target, no hover/active state,
+          missing the lg:min-h-[auto] restore) and read as visibly
+          inconsistent beside them. `mt-6` stays, on top of those two, as
+          the one thing that *should* set this link apart: it is not a
+          space, so it does not belong in the run of space links above it.
+          Still exactly one colour class -- text-muted -- per the comment on
+          NAV_ITEM_CLASS: layout and state classes carry no colour of their
+          own, so there is nothing here for the cascade to arbitrate. */}
+      {me.isPlatformAdmin && (
+        <Link to="/admin" className={`${NAV_ITEM_CLASS} ${NAV_ITEM_STATE_CLASS} mt-6 text-muted`}>
+          Admin
+        </Link>
+      )}
+
       <div className="mt-2 flex items-center gap-[7px] border-t border-hairline pt-3">
         <div className="grid h-7 w-7 flex-none place-items-center rounded-full bg-accent text-[11px] font-semibold text-white">
           {me.user.avatarInitial}

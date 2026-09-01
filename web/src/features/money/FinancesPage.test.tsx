@@ -78,6 +78,8 @@ function meFixture(role: "owner" | "limited"): Me {
     },
     capabilities: role === "owner" ? ["calendar", "chores", "money", "marriage"] : ["money"],
     spaces: [],
+    isPlatformAdmin: false,
+    features: {},
   };
 }
 

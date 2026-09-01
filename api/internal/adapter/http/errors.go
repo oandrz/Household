@@ -116,6 +116,15 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, domain.ErrInvalidCredentials):
 		WriteError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "That email or password is incorrect.", nil)
+	case errors.Is(err, domain.ErrAdminLocked):
+		// Deliberately its own code and its own message, never folded into
+		// HOUSEHOLD_LOCKED below: the two locks are counted in separate
+		// ledgers on purpose (see the admin_reauth_attempts comment in
+		// 00012_admin.sql), and telling an operator their *household* is
+		// locked when only the admin surface is would send them to reset a
+		// password that is working fine.
+		WriteError(w, http.StatusLocked, "ADMIN_LOCKED",
+			"Too many failed attempts. Try again in a few minutes.", nil)
 	case errors.Is(err, domain.ErrHouseholdLocked):
 		WriteError(w, http.StatusLocked, "HOUSEHOLD_LOCKED",
 			"This household is temporarily locked after too many failed sign-in attempts.", nil)
@@ -132,6 +141,9 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 			"That capability set is not valid for this role.", nil)
 	case errors.Is(err, domain.ErrUnknownRole):
 		WriteError(w, http.StatusUnprocessableEntity, "INVALID_ROLE", "That role is not recognised.", nil)
+	case errors.Is(err, domain.ErrUnknownFlag):
+		WriteError(w, http.StatusUnprocessableEntity, "UNKNOWN_FLAG",
+			"That feature flag does not exist in this build.", nil)
 	case errors.Is(err, domain.ErrAmountOverflow):
 		// Reaching the HTTP layer means a calculation is wrong, not that the
 		// caller sent a bad request -- nothing on this API surface accepts a

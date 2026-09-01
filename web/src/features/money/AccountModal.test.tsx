@@ -42,6 +42,8 @@ function meFixture(): Me {
     },
     capabilities: ["calendar", "chores", "money", "marriage"],
     spaces: [],
+    isPlatformAdmin: false,
+    features: {},
   };
 }
 

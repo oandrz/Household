@@ -187,6 +187,20 @@ func (d *userDouble) Create(_ context.Context, email, passwordHash, displayName 
 // retry.
 func (d *userDouble) count() int { return len(d.byID) }
 
+// mustCreate creates a user with a password hash already set (Create's own
+// signature takes one, but most existing fixtures build a user with no
+// password and set it separately) and fails the test immediately if that
+// somehow errors, rather than asking every caller to check an error the
+// in-memory double can never actually return.
+func (d *userDouble) mustCreate(t *testing.T, email, passwordHash, displayName string) domain.User {
+	t.Helper()
+	u, err := d.Create(context.Background(), email, passwordHash, displayName)
+	if err != nil {
+		t.Fatalf("mustCreate(%q): %v", email, err)
+	}
+	return u
+}
+
 // setMembers completes the two doubles' mutual reference: newMembershipDouble
 // already takes a *userDouble, and CreateWithMembership needs the reverse
 // direction to create the membership half of its transaction.
@@ -344,10 +358,11 @@ func (d *membershipDouble) Delete(_ context.Context, householdID, membershipID s
 // --- SessionRepository ----------------------------------------------
 
 type sessionRow struct {
-	UserID      string
-	HouseholdID string
-	ExpiresAt   time.Time
-	Revoked     bool
+	UserID              string
+	HouseholdID         string
+	ExpiresAt           time.Time
+	Revoked             bool
+	AdminGrantExpiresAt *time.Time
 }
 
 type sessionDouble struct {
@@ -381,7 +396,12 @@ func (d *sessionDouble) ByTokenHash(_ context.Context, tokenHash []byte) (usecas
 	if !ok || row.Revoked || !row.ExpiresAt.After(d.clock.Now()) {
 		return usecase.SessionRecord{}, domain.ErrNotFound
 	}
-	return usecase.SessionRecord{UserID: row.UserID, HouseholdID: row.HouseholdID, ExpiresAt: row.ExpiresAt}, nil
+	return usecase.SessionRecord{
+		UserID:              row.UserID,
+		HouseholdID:         row.HouseholdID,
+		ExpiresAt:           row.ExpiresAt,
+		AdminGrantExpiresAt: row.AdminGrantExpiresAt,
+	}, nil
 }
 
 func (d *sessionDouble) Extend(_ context.Context, tokenHash []byte, expiresAt time.Time) error {
@@ -389,6 +409,16 @@ func (d *sessionDouble) Extend(_ context.Context, tokenHash []byte, expiresAt ti
 		row.ExpiresAt = expiresAt
 	}
 	return nil // ExtendSession is :exec — an unknown token is a silent no-op.
+}
+
+// GrantAdmin mirrors the real repository's one-column write: it must never
+// touch ExpiresAt, the same separation TestExtendingASessionKeepsItsAdminGrant
+// checks against Postgres.
+func (d *sessionDouble) GrantAdmin(_ context.Context, tokenHash []byte, expiresAt *time.Time) error {
+	if row, ok := d.rows[string(tokenHash)]; ok {
+		row.AdminGrantExpiresAt = expiresAt
+	}
+	return nil
 }
 
 func (d *sessionDouble) RevokeByToken(_ context.Context, tokenHash []byte) error {
@@ -3692,3 +3722,193 @@ func newTelegramAuthService(t *testing.T) (*usecase.TelegramAuthService, *telegr
 		signups: signups, sender: sender, tokens: tokens, clock: clock,
 	}
 }
+
+// --- Platform admin doubles: PlatformAdminRepository, FeatureFlagRepository,
+// AdminAuditRepository, AdminReauthAttemptRepository -----------------------
+//
+// The household-scoped LoginAttemptRepository double these reuse for
+// TestAdminReauthFailuresStayOutOfTheHouseholdLedger is loginAttemptDouble,
+// above -- there is no separate "fakeLoginAttemptRepo" here, because a second
+// one under a different name would be exactly the duplicate this file's
+// fakes are meant to avoid.
+
+// fakeAdminRepo is PlatformAdminRepository: a set of user ids that are
+// platform admins, keyed the same way the real admin_platform table is (by
+// user_id, its primary key).
+type fakeAdminRepo struct {
+	admins map[string]domain.PlatformAdmin
+}
+
+func newFakeAdminRepo() *fakeAdminRepo {
+	return &fakeAdminRepo{admins: map[string]domain.PlatformAdmin{}}
+}
+
+func (d *fakeAdminRepo) Get(_ context.Context, userID string) (domain.PlatformAdmin, error) {
+	a, ok := d.admins[userID]
+	if !ok {
+		return domain.PlatformAdmin{}, domain.ErrNotFound
+	}
+	return a, nil
+}
+
+func (d *fakeAdminRepo) Grant(_ context.Context, userID, note string) error {
+	d.admins[userID] = domain.PlatformAdmin{UserID: userID, Note: note}
+	return nil
+}
+
+func (d *fakeAdminRepo) Revoke(_ context.Context, userID string) error {
+	delete(d.admins, userID)
+	return nil
+}
+
+func (d *fakeAdminRepo) List(_ context.Context) ([]usecase.PlatformAdminListing, error) {
+	out := make([]usecase.PlatformAdminListing, 0, len(d.admins))
+	for _, a := range d.admins {
+		out = append(out, usecase.PlatformAdminListing{UserID: a.UserID, Note: a.Note, CreatedAt: a.CreatedAt})
+	}
+	return out, nil
+}
+
+var _ usecase.PlatformAdminRepository = (*fakeAdminRepo)(nil)
+
+// fakeFlagRepo is FeatureFlagRepository. The two layers are separate maps,
+// matching the two-table shape (feature_flags for global,
+// household_feature_flags for per-household) the real repository sits over --
+// a single map keyed by household id with a magic "" for global would hide
+// bugs a two-layer resolver like domain.ResolveFlags is specifically meant to
+// catch.
+type fakeFlagRepo struct {
+	global    map[string]bool
+	household map[string]map[string]bool // householdID -> key -> enabled
+}
+
+func newFakeFlagRepo() *fakeFlagRepo {
+	return &fakeFlagRepo{global: map[string]bool{}, household: map[string]map[string]bool{}}
+}
+
+func (d *fakeFlagRepo) OverridesFor(_ context.Context, householdID string) (map[string]bool, map[string]bool, error) {
+	return d.global, d.household[householdID], nil
+}
+
+func (d *fakeFlagRepo) GlobalOverrides(_ context.Context) (map[string]bool, error) {
+	return d.global, nil
+}
+
+func (d *fakeFlagRepo) AllHouseholdOverrides(_ context.Context) ([]usecase.HouseholdFlagOverride, error) {
+	var out []usecase.HouseholdFlagOverride
+	for householdID, overrides := range d.household {
+		for key, enabled := range overrides {
+			out = append(out, usecase.HouseholdFlagOverride{HouseholdID: householdID, Key: key, Enabled: enabled})
+		}
+	}
+	return out, nil
+}
+
+func (d *fakeFlagRepo) SetGlobal(_ context.Context, key string, enabled bool, _ string) error {
+	d.global[key] = enabled
+	return nil
+}
+
+func (d *fakeFlagRepo) SetHousehold(_ context.Context, householdID, key string, enabled bool, _ string) error {
+	if d.household[householdID] == nil {
+		d.household[householdID] = map[string]bool{}
+	}
+	d.household[householdID][key] = enabled
+	return nil
+}
+
+func (d *fakeFlagRepo) ClearHousehold(_ context.Context, householdID, key string) error {
+	delete(d.household[householdID], key)
+	return nil
+}
+
+var _ usecase.FeatureFlagRepository = (*fakeFlagRepo)(nil)
+
+// fakeAuditRepo is AdminAuditRepository. Recent sorts most-recent-first, the
+// same order the real query's ORDER BY at DESC produces, and applies limit
+// exactly as given -- it deliberately does not clamp (see
+// AdminService.RecentAudit's doc comment for why that check lives one layer
+// up).
+type fakeAuditRepo struct {
+	entries []usecase.AdminAuditEntry
+
+	// lastLimit records the exact limit this double was called with, so a
+	// test can confirm AdminService.RecentAudit clamped *before* calling
+	// Recent, not just that the returned slice happened to be short because
+	// there were few entries to return.
+	lastLimit int
+}
+
+func newFakeAuditRepo() *fakeAuditRepo { return &fakeAuditRepo{} }
+
+func (d *fakeAuditRepo) Record(_ context.Context, entry usecase.AdminAuditEntry) error {
+	d.entries = append(d.entries, entry)
+	return nil
+}
+
+func (d *fakeAuditRepo) Recent(_ context.Context, limit int) ([]usecase.AdminAuditEntry, error) {
+	d.lastLimit = limit
+	out := make([]usecase.AdminAuditEntry, len(d.entries))
+	copy(out, d.entries)
+	sort.Slice(out, func(i, j int) bool { return out[i].At.After(out[j].At) })
+	if limit <= 0 {
+		return nil, nil
+	}
+	if limit < len(out) {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+var _ usecase.AdminAuditRepository = (*fakeAuditRepo)(nil)
+
+// reauthAttemptRecord is one row of fakeReauthAttemptRepo's ledger -- the
+// admin surface's own lockout table, kept by userID rather than by
+// household, unlike attemptRecord above.
+type reauthAttemptRecord struct {
+	UserID    string
+	Succeeded bool
+	At        time.Time
+}
+
+// fakeReauthAttemptRepo is AdminReauthAttemptRepository: the same shape as
+// loginAttemptDouble, keyed by userID instead of householdID, because the
+// admin re-auth lockout is per-operator, not per-household (see
+// domain.ErrAdminLocked's doc comment).
+type fakeReauthAttemptRepo struct {
+	records []reauthAttemptRecord
+}
+
+func newFakeReauthAttemptRepo() *fakeReauthAttemptRepo { return &fakeReauthAttemptRepo{} }
+
+func (d *fakeReauthAttemptRepo) Record(_ context.Context, userID string, succeeded bool, at time.Time) error {
+	d.records = append(d.records, reauthAttemptRecord{UserID: userID, Succeeded: succeeded, At: at})
+	return nil
+}
+
+func (d *fakeReauthAttemptRepo) FailuresSince(_ context.Context, userID string, since time.Time) ([]time.Time, error) {
+	var out []time.Time
+	for _, r := range d.records {
+		if r.Succeeded || r.UserID != userID {
+			continue
+		}
+		if r.At.After(since) {
+			out = append(out, r.At)
+		}
+	}
+	return out, nil
+}
+
+func (d *fakeReauthAttemptRepo) ClearFailures(_ context.Context, userID string) error {
+	kept := make([]reauthAttemptRecord, 0, len(d.records))
+	for _, r := range d.records {
+		if r.UserID == userID && !r.Succeeded {
+			continue
+		}
+		kept = append(kept, r)
+	}
+	d.records = kept
+	return nil
+}
+
+var _ usecase.AdminReauthAttemptRepository = (*fakeReauthAttemptRepo)(nil)

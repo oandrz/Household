@@ -23,6 +23,23 @@ type Account struct {
 	CreatedAt               pgtype.Timestamptz
 }
 
+type AdminAuditLog struct {
+	ID          pgtype.UUID
+	ActorUserID pgtype.UUID
+	Action      string
+	Target      string
+	Detail      []byte
+	Ip          string
+	CreatedAt   pgtype.Timestamptz
+}
+
+type AdminReauthAttempt struct {
+	ID        pgtype.UUID
+	UserID    pgtype.UUID
+	Succeeded bool
+	At        pgtype.Timestamptz
+}
+
 type Bill struct {
 	ID                 pgtype.UUID
 	HouseholdID        pgtype.UUID
@@ -80,6 +97,13 @@ type Category struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
+type FeatureFlag struct {
+	Key       string
+	Enabled   bool
+	UpdatedAt pgtype.Timestamptz
+	UpdatedBy pgtype.UUID
+}
+
 type Goal struct {
 	ID                  pgtype.UUID
 	HouseholdID         pgtype.UUID
@@ -114,6 +138,14 @@ type Household struct {
 	SecondaryCurrency     string
 	FxRateMode            string
 	CreatedAt             pgtype.Timestamptz
+}
+
+type HouseholdFeatureFlag struct {
+	HouseholdID pgtype.UUID
+	Key         string
+	Enabled     bool
+	UpdatedAt   pgtype.Timestamptz
+	UpdatedBy   pgtype.UUID
 }
 
 type Invite struct {
@@ -165,6 +197,12 @@ type NotificationPreference struct {
 	WeeklyDigest    bool
 }
 
+type PlatformAdmin struct {
+	UserID    pgtype.UUID
+	Note      string
+	CreatedAt pgtype.Timestamptz
+}
+
 type Retro struct {
 	ID          pgtype.UUID
 	HouseholdID pgtype.UUID
@@ -194,13 +232,14 @@ type RetroActionAssignee struct {
 }
 
 type Session struct {
-	ID          pgtype.UUID
-	TokenHash   []byte
-	UserID      pgtype.UUID
-	HouseholdID pgtype.UUID
-	CreatedAt   pgtype.Timestamptz
-	ExpiresAt   pgtype.Timestamptz
-	RevokedAt   pgtype.Timestamptz
+	ID                  pgtype.UUID
+	TokenHash           []byte
+	UserID              pgtype.UUID
+	HouseholdID         pgtype.UUID
+	CreatedAt           pgtype.Timestamptz
+	ExpiresAt           pgtype.Timestamptz
+	RevokedAt           pgtype.Timestamptz
+	AdminGrantExpiresAt pgtype.Timestamptz
 }
 
 type Signup struct {

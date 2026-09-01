@@ -259,4 +259,75 @@ describe("apiFetch unauthorized handling", () => {
 
     expect(handler).not.toHaveBeenCalled();
   });
+
+  // AdminGate exists so an operator whose 30-minute grant lapsed sees a
+  // password prompt, not a bounce to /sign-in -- see middleware_admin.go's
+  // requireAdminGrant and AdminGate.tsx. That only holds if this handler
+  // stays silent for exactly this one code on this one subtree.
+  it("does not call the unauthorized handler on ADMIN_REAUTH_REQUIRED from an admin route", async () => {
+    stubFetch(401, {
+      error: { code: "ADMIN_REAUTH_REQUIRED", message: "Confirm your password." },
+    });
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+
+    await apiFetch("/api/v1/admin/flags").catch(() => {});
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  // The same reasoning as ADMIN_REAUTH_REQUIRED above: INVALID_CREDENTIALS is
+  // answered by POST /admin/session (a mistyped re-authentication password,
+  // admin_reauth.go's Verify), never by a dead session -- AdminGate shows
+  // the wrong-password state inline, on the same screen the operator was
+  // already using to get back in. ADMIN_LOCKED is not exercised here: it is
+  // always a 423, which the `response.status === 401` guard already
+  // excludes regardless of code -- a row for it in this describe block would
+  // pin that a 423 is a 423, not that the carve-out itself works.
+  it("does not call the unauthorized handler on INVALID_CREDENTIALS from POST /admin/session", async () => {
+    stubFetch(401, { error: { code: "INVALID_CREDENTIALS", message: "x" } });
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+
+    await apiFetch("/api/v1/admin/session", { method: "POST", body: "{}" }).catch(() => {});
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  // The property the admin-layer carve-out must not weaken: every 401
+  // anywhere in the /admin/* chain that means the session itself is gone
+  // carries UNAUTHENTICATED, whichever middleware or handler writes it
+  // (middleware_session.go, middleware_admin.go, admin_handlers.go) -- that
+  // 401 must still bounce the operator to /sign-in exactly like it does
+  // everywhere else, admin route or not.
+  it("still calls the unauthorized handler on UNAUTHENTICATED from an admin route", async () => {
+    stubFetch(401, { error: { code: "UNAUTHENTICATED", message: "Sign in required." } });
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+
+    await apiFetch("/api/v1/admin/flags").catch(() => {});
+
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  // Finding 1 (review round 1): ADMIN_LAYER_UNAUTHORIZED_CODES is an
+  // allowlist precisely so a 401 this file never wrote the code for --
+  // nginx sits in front of this service and can produce one of its own, and
+  // a missing or unparseable body reads the same as one -- still fails
+  // closed. A denylist keyed on "not UNAUTHENTICATED" would have let this
+  // one through: `code === undefined` is not "UNAUTHENTICATED", so it would
+  // have been silently exempted and the operator left signed in on a
+  // failure nobody's server code produced.
+  it("still calls the unauthorized handler on a 401 from an admin route with an unparseable body", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("<html>502</html>", { status: 401 })),
+    );
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+
+    await apiFetch("/api/v1/admin/flags").catch(() => {});
+
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
 });

@@ -20,6 +20,10 @@ type Scope struct {
 	UserID      string
 	HouseholdID string
 	Membership  domain.Membership
+	// Flags is this household's resolved answer for every flag this build
+	// defines -- every key present, so a reader never has to interpret an
+	// absence.
+	Flags domain.FlagSet
 }
 
 // RequestScope reads the Scope requireSession placed on r's context. The
@@ -114,8 +118,35 @@ func requireSession(deps Deps) func(http.Handler) http.Handler {
 				}
 			}
 
-			scope := Scope{UserID: record.UserID, HouseholdID: record.HouseholdID, Membership: membership}
-			next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, scopeKey{}, scope)))
+			// Flags are resolved per request, not cached. One box, few
+			// households, and a cache that is stale for a minute after the
+			// operator flips a switch is a worse defect than one indexed
+			// query. A cache belongs here when a measurement asks for one.
+			flags, err := deps.Admin.FlagsFor(ctx, record.HouseholdID)
+			if err != nil {
+				// logAndWriteInternal, not MapDomainError -- see
+				// requirePlatformAdmin's comment in middleware_admin.go for
+				// why a lookup failure must never be allowed to read as
+				// domain.ErrNotFound's 404. The stakes here are larger than
+				// they are there: after this task 404 means "this feature is
+				// hidden" on every authenticated route, not just the admin
+				// subtree, so a flags lookup that ever produced ErrNotFound
+				// through MapDomainError would tell every caller the whole
+				// product had been switched off.
+				logAndWriteInternal(w, r, err)
+				return
+			}
+
+			scope := Scope{UserID: record.UserID, HouseholdID: record.HouseholdID, Membership: membership, Flags: flags}
+			// The admin grant is put on the context from the same session
+			// record the scope is built from, so the two can never disagree
+			// about which session is speaking. It is carried separately
+			// rather than folded into Scope because it is not part of the
+			// caller's household identity: every downstream consumer of
+			// Scope (requireCapability, requireOwner, every handler) would
+			// otherwise gain a field that means nothing to it.
+			ctx = withAdminGrant(context.WithValue(ctx, scopeKey{}, scope), record.AdminGrantExpiresAt)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }

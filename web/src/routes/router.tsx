@@ -20,6 +20,21 @@
 //       /marriage/retros RequireCapability("marriage") -> Retros (Task 10; RetrosPage)
 //       /marriage/vision RequireCapability("marriage") -> Vision & goals (Task 11; VisionPage)
 //       /settings                                   -- the real Settings screen (Task 20)
+//     /admin       AdminShell (own chrome, no AppShell)  -> /admin/flags
+//       /admin/flags                                -- AdminFlagsPage
+//
+// The /admin subtree sits directly under authenticatedRoute, a sibling of
+// shellRoute rather than a child of it: the admin surface has its own
+// chrome (AdminShell says "Operator", AppShell's sidebar does not apply),
+// and RequireAuth is still the guard that matters here -- a caller with no
+// session at all gets bounced to /sign-in exactly like every other route,
+// while requirePlatformAdmin on the server is what actually decides whether
+// an authenticated caller belongs on /admin at all (a 404, indistinguishable
+// from a route that was never registered -- see AdminGate.tsx). Both
+// components are behind React.lazy, so the code never reaches a household
+// member's bundle even though the route itself is always registered
+// (adminBundleSplit.test.ts pins the second half of that: registering the
+// route must not accidentally turn the lazy import back into a static one).
 //
 // Marriage came back in Task 10, in the same change as its SPACE_PAGES entry
 // (Sidebar.tsx) and its RequireCapability guard -- 110ab0a deleted all three
@@ -44,6 +59,7 @@
 // Marriage's and nothing has rebuilt it yet, so /family/calendar still
 // genuinely falls through to rootRoute's notFoundComponent the way this file
 // used to say every Marriage URL did too.
+import { Suspense, lazy } from "react";
 import {
   Navigate,
   createRootRoute,
@@ -69,15 +85,12 @@ import { TransactionsPage } from "../features/money/TransactionsPage";
 import { OverviewPage } from "../features/overview/OverviewPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { AppShell } from "../features/shell/AppShell";
+import { NotFoundScreen } from "../features/shell/NotFoundScreen";
 import { RequireAuth } from "../features/shell/RequireAuth";
 import { RequireCapability } from "../features/shell/RequireCapability";
 
 const rootRoute = createRootRoute({
-  notFoundComponent: () => (
-    <main className="grid min-h-dvh place-items-center p-10 text-center">
-      <p className="text-sm text-muted">Page not found.</p>
-    </main>
-  ),
+  notFoundComponent: NotFoundScreen,
 });
 
 // SignInScreen (Task 18) and InviteScreen (below) both invalidate ['me'] on
@@ -293,6 +306,73 @@ const settingsRoute = createRoute({
   component: SettingsPage,
 });
 
+// Lazily loaded so no household member ever downloads the admin bundle --
+// requirePlatformAdmin on the server is what actually enforces who may use
+// these routes, this only keeps the code itself out of a tab that will
+// never be allowed to run it. `.then((m) => ({ default: m.AdminShell }))`
+// rather than a default export: both components keep the named-export
+// convention every other file in this codebase uses.
+const LazyAdminShell = lazy(() =>
+  import("../features/admin/AdminShell").then((m) => ({ default: m.AdminShell })),
+);
+const LazyAdminFlagsPage = lazy(() =>
+  import("../features/admin/AdminFlagsPage").then((m) => ({ default: m.AdminFlagsPage })),
+);
+
+// The Suspense fallback below is inlined at both call sites rather than
+// factored into its own top-level component, matching signInMagicRoute's
+// own comment on why: a named module-scope component here would trip
+// eslint-plugin-react-refresh's only-export-components rule against this
+// file's other exports (routeTree, router), even unexported. It matches
+// AdminShell's own AdminLoadingScreen -- this one covers the network
+// round-trip for the chunk itself, before AdminShell's module (and the
+// query it starts) has even arrived, so a household member watching the
+// network tab sees the identical "a page is loading" moment either place a
+// route suspends.
+const adminRoute = createRoute({
+  getParentRoute: () => authenticatedRoute,
+  path: "admin",
+  component: () => (
+    <Suspense
+      fallback={
+        <main className="grid min-h-dvh place-items-center">
+          <p className="text-sm text-muted">Loading…</p>
+        </main>
+      }
+    >
+      <LazyAdminShell />
+    </Suspense>
+  ),
+});
+
+// Bare "/admin" gets a real page the same way moneyIndexRoute and
+// marriageIndexRoute give their own space's bare URL one -- Flags is the
+// only admin page today, so it is the "first page wins" redirect target by
+// default, not a considered ranking.
+const adminIndexRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: "/",
+  beforeLoad: () => {
+    throw redirect({ to: "/admin/flags" });
+  },
+});
+
+const adminFlagsRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: "flags",
+  component: () => (
+    <Suspense
+      fallback={
+        <main className="grid min-h-dvh place-items-center">
+          <p className="text-sm text-muted">Loading…</p>
+        </main>
+      }
+    >
+      <LazyAdminFlagsPage />
+    </Suspense>
+  ),
+});
+
 // Exported (not just `router`) so a test can mount the real tree with its
 // own memory history and QueryClient instead of RouterProvider's registered
 // singleton -- see routes/router.test.tsx.
@@ -315,6 +395,10 @@ export const routeTree = rootRoute.addChildren([
       marriageGuardRoute.addChildren([marriageIndexRoute, marriageRetrosRoute, marriageVisionRoute]),
       settingsRoute,
     ]),
+    // A sibling of shellRoute, not nested inside it: the admin surface does
+    // not get AppShell's sidebar (this file's own header comment explains
+    // why).
+    adminRoute.addChildren([adminIndexRoute, adminFlagsRoute]),
   ]),
 ]);
 

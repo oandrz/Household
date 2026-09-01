@@ -56,6 +56,11 @@ export const meQuerySchema = z.object({
   membership: membershipSchema,
   capabilities: z.array(z.string()),
   spaces: z.array(spaceSchema),
+  // Defaulted rather than required: an older server that does not send these
+  // must not make the whole bundle fail to parse, which would sign everyone
+  // out. Both defaults are the closed state.
+  isPlatformAdmin: z.boolean().default(false),
+  features: z.record(z.string(), z.boolean()).default({}),
 });
 export type Me = z.infer<typeof meQuerySchema>;
 

@@ -201,4 +201,15 @@ var (
 	// household's. Indistinguishable from a goal that does not exist, the scoping
 	// rule every repository here already follows.
 	ErrVisionGoalUnknown = errors.New("a measure's goal does not belong to this household")
+
+	// ErrUnknownFlag is returned for a feature-flag key this build does not
+	// define -- from a request, or from an override row that outlived the
+	// const that named it.
+	ErrUnknownFlag = errors.New("unknown feature flag")
+
+	// ErrAdminLocked is the admin surface's own lockout, evaluated over
+	// admin_reauth_attempts. It is deliberately separate from
+	// ErrHouseholdLocked: locking the operator out of /admin must never lock
+	// their household out of the product.
+	ErrAdminLocked = errors.New("admin re-authentication is locked")
 )
