@@ -1758,17 +1758,27 @@ func (s *AdminService) Overview(ctx context.Context) ([]FlagOverview, error) {
 		})
 	}
 
+	// One row per override key this build does not define, from either layer,
+	// listed once. Sorted so the screen does not reorder itself between reads:
+	// Go's map iteration order is deliberately random.
+	orphans := map[string]bool{}
 	for key := range global {
 		if !defined[key] {
-			out = append(out, FlagOverview{Key: key, Orphaned: true, Overrides: byKey[key]})
+			orphans[key] = true
 		}
 	}
 	for key := range byKey {
-		if !defined[key] && global[key] == false {
-			if _, alreadyGlobal := global[key]; !alreadyGlobal {
-				out = append(out, FlagOverview{Key: key, Orphaned: true, Overrides: byKey[key]})
-			}
+		if !defined[key] {
+			orphans[key] = true
 		}
+	}
+	keys := make([]string, 0, len(orphans))
+	for key := range orphans {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		out = append(out, FlagOverview{Key: key, Orphaned: true, Overrides: byKey[key]})
 	}
 	return out, nil
 }
@@ -1837,26 +1847,7 @@ func asFlagMap(in map[string]bool) map[domain.Flag]bool {
 }
 ```
 
-Add `"errors"` to the import block.
-
-Simplify `Overview`'s orphan loop to this, which is what the test asserts and
-avoids the duplicated condition above:
-
-```go
-	seen := map[string]bool{}
-	for key := range global {
-		seen[key] = true
-	}
-	for key := range byKey {
-		seen[key] = true
-	}
-	for key := range seen {
-		if defined[key] {
-			continue
-		}
-		out = append(out, FlagOverview{Key: key, Orphaned: true, Overrides: byKey[key]})
-	}
-```
+Add `"errors"` and `"sort"` to the import block.
 
 - [ ] **Step 4: Write `admin_reauth.go`**
 
@@ -2286,12 +2277,11 @@ func writeNotFound(w http.ResponseWriter) {
 	WriteError(w, http.StatusNotFound, "NOT_FOUND", "That endpoint does not exist.", nil)
 }
 
-var _ = errors.Is // kept if unused after edits; remove rather than leaving dead
-var _ = domain.ErrNotFound
 ```
 
-Delete the two `var _ =` lines; they are there only to name the imports you may
-or may not need after wiring, and dead code must not ship.
+That file's import block lists what it actually uses. If `go vet` reports
+`errors` or `domain` unused after wiring, delete them from the imports — do not
+leave a blank identifier behind to silence it.
 
 In `middleware_session.go`, store the grant on the context alongside the scope:
 
@@ -2397,11 +2387,12 @@ func handleListFlags(deps Deps) http.HandlerFunc {
 		WriteJSON(w, http.StatusOK, body)
 	}
 }
-
-var _ = time.Minute // remove if unused
 ```
 
-Delete that last line.
+`handleAdminSession` builds the grant expiry with
+`deps.Clock.Now().Add(adminGrantTTL)`, so this file imports `time` for the
+`*time.Time` it passes to `GrantAdmin`; `adminGrantTTL` itself lives in
+`middleware_admin.go`.
 
 In `router.go`, add the subtree inside the existing `api.Group(func(g chi.Router) { g.Use(requireSession(deps)) ... })`:
 
@@ -2601,7 +2592,7 @@ gives dark-shipping something honest to gate:
 			// like a real route once its flag is on, or the flag proves
 			// nothing about the feature it guards.
 			g.Group(func(f chi.Router) {
-				f.Use(requireFeature(domain.FlagFamilyCalendar))
+				f.Use(requireFeature(deps, domain.FlagFamilyCalendar))
 				f.Get("/family/calendar", handleListCalendarEvents(deps))
 			})
 ```
@@ -2687,7 +2678,9 @@ import (
 // middleware plus a helper public handlers remember to call: a hand-rolled
 // check as a handler's first statement is the shape that gets forgotten on the
 // next public route, and forgetting it fails open.
-func requireFeature(flag domain.Flag) func(http.Handler) http.Handler {
+// It closes over deps rather than reaching for the request, the way every
+// other middleware in this package does.
+func requireFeature(deps Deps, flag domain.Flag) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if scope, ok := RequestScope(r); ok {
@@ -2699,7 +2692,7 @@ func requireFeature(flag domain.Flag) func(http.Handler) http.Handler {
 				return
 			}
 
-			flags, err := depsFromRequest(r).Admin.GlobalFlags(r.Context())
+			flags, err := deps.Admin.GlobalFlags(r.Context())
 			if err != nil {
 				MapDomainError(w, r, err)
 				return
@@ -2713,10 +2706,6 @@ func requireFeature(flag domain.Flag) func(http.Handler) http.Handler {
 	}
 }
 ```
-
-`depsFromRequest` does not exist and must not be invented: change the signature
-to `requireFeature(deps Deps, flag domain.Flag)` and close over `deps`, the way
-every other middleware in this package does. Update the call sites accordingly.
 
 - [ ] **Step 5: Gate the two real routes**
 
@@ -3120,9 +3109,11 @@ git commit -m "feat(api): admin routes for setting and clearing feature flags"
 // person by address, and a missing flag must say so rather than acting on
 // whoever happens to be first in the table.
 func TestGrantPlatformAdminNeedsAnEmail(t *testing.T) {
-	err := runGrantPlatformAdmin(context.Background(), nil, nil, nil)
+	// nil repositories are safe here precisely because the guard returns
+	// before touching either one -- which is the behaviour under test.
+	err := runGrantPlatformAdmin(context.Background(), nil, nil, "", "")
 	if err == nil || !strings.Contains(err.Error(), "--email") {
-		t.Fatalf("runGrantPlatformAdmin with no flags = %v, want an error naming --email", err)
+		t.Fatalf("runGrantPlatformAdmin with no --email = %v, want an error naming --email", err)
 	}
 }
 
@@ -3211,8 +3202,6 @@ func runGrantPlatformAdmin(ctx context.Context, users usecase.UserRepository,
 }
 ```
 
-Adjust the test's call to match the final signature — the plan's test above
-calls it with three arguments; use the real one.
 
 - [ ] **Step 4: Run and watch it pass**
 
@@ -3701,5 +3690,4 @@ RecordAudit/RecentAudit`; `AdminReauthService.Verify`;
 `Scope.Flags`; `requirePlatformAdmin/auditAdmin/requireAdminGrant/requireFeature`;
 `useFeature/useAdminFlags/useAdminSession/useSetGlobalFlag/useSetHouseholdFlag/
 useClearHouseholdFlag`. `requireFeature` takes `(deps Deps, flag domain.Flag)`
-everywhere — Task 6 corrects its own first draft inline, and Tasks 8 and 11 use
-the corrected form.
+at every call site.
