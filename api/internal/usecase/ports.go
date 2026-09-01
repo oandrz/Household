@@ -146,6 +146,35 @@ type MagicLinkRepository interface {
 	CountSince(ctx context.Context, email string, since time.Time) (int, error)
 }
 
+// TelegramLinkRepository stores the pending deep-link nonces that carry a
+// browser's sign-in request across to Telegram. Nonces are stored hashed,
+// never raw, like every other token in this system.
+type TelegramLinkRepository interface {
+	Create(ctx context.Context, nonceHash []byte, expiresAt time.Time) error
+	// Consume stamps the row consumed and records which chat redeemed it, in
+	// one statement. The chat is unknown when the nonce is minted -- the
+	// browser has not met Telegram yet -- so redemption is the only moment the
+	// two can be joined, and CountLinksSince depends on it happening here.
+	// Returns domain.ErrNotFound if the nonce is unknown, expired or already
+	// consumed; those three are deliberately indistinguishable to a caller.
+	Consume(ctx context.Context, nonceHash []byte, chatID int64) error
+	// CountLinksSince counts links this chat has redeemed since a point in
+	// time. It lives here rather than on TelegramAccountRepository because the
+	// per-chat limit must also bind chats that have no account yet: a stranger
+	// repeating /start has no user row to count against.
+	CountLinksSince(ctx context.Context, chatID int64, since time.Time) (int, error)
+}
+
+// TelegramAccountRepository resolves a Telegram chat to the Hearth user it is
+// bound to. The binding itself is written inside SignupRepository.Provision's
+// transaction, which is why there is no Create method here.
+type TelegramAccountRepository interface {
+	// ByChatID returns domain.ErrNotFound when the chat is bound to no user,
+	// which is the ordinary "this person has no account yet" case, not an error
+	// condition.
+	ByChatID(ctx context.Context, chatID int64) (userID string, err error)
+}
+
 type LoginAttemptRepository interface {
 	Record(ctx context.Context, householdID, userID *string, email string, succeeded bool, at time.Time) error
 	FailuresSince(ctx context.Context, householdID string, since time.Time) ([]time.Time, error)
