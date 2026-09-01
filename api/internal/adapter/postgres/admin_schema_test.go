@@ -55,7 +55,7 @@ func TestAuditRowsNeedOnlyAnActorAndAnAction(t *testing.T) {
 	}
 
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO admin_audit_log (id, actor_user_id, action) VALUES (gen_random_uuid(), $1, 'GET /admin/flags')`,
+		`INSERT INTO admin_audit_log (actor_user_id, action) VALUES ($1, 'GET /admin/flags')`,
 		userID,
 	); err != nil {
 		t.Fatalf("insert audit row: %v", err)

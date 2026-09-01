@@ -57,9 +57,13 @@ CREATE TABLE household_feature_flags (
 -- because auditAdmin writes from middleware where there is not always a target
 -- to name. detail records what was looked at, never what was seen -- no
 -- passwords, no tokens, no row values.
+--
+-- actor_user_id deliberately does not cascade: deleting a user with audit
+-- history must fail loudly rather than quietly taking the record of what they
+-- did with them.
 CREATE TABLE admin_audit_log (
     id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    actor_user_id uuid        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    actor_user_id uuid        NOT NULL REFERENCES users(id),
     action        text        NOT NULL,
     target        text        NOT NULL DEFAULT '',
     detail        jsonb       NOT NULL DEFAULT '{}'::jsonb,
