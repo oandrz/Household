@@ -18,13 +18,17 @@ needed, this says where it lives.
 | **Hetzner Cloud** | The server. CX23, Falkenstein, Ubuntu 26.04, `5.75.239.188` | ~$7.07/mo + ~$0.60 IPv4 | The site is down. Rebuild elsewhere with `deploy/PROVISION.md` and restore the newest backup. Data loss is bounded by the last nightly dump |
 | **Cloudflare R2** | Backup storage, bucket `hearth-backups` | $0 — 10 GB free tier | **No new backups, and the existing ones are gone.** The most serious entry here. Point `RCLONE_REMOTE` at any other S3-compatible store; nothing else changes |
 | **Dynu** | DNS for `oink.mywire.org` (free DDNS hostname) | $0 | The site is unreachable by name and TLS renewal fails. Also blocks mail permanently — see [ADR 3](adr/0003-mail-stays-on-the-box.md) |
+| **Telegram** (Bot API) | The second delivery channel for sign-in and sign-up links, when a bot is configured. Outbound only — the API long-polls `api.telegram.org`; there is no webhook and nothing new faces the internet | $0 — free, with no per-message charge and no domain, DNS record, business verification or legal entity required. That is the whole reason it was chosen over WhatsApp and SMS ([ADR 4](adr/0004-telegram-as-a-second-delivery-channel.md)) | **Telegram sign-in stops. Email sign-in is unaffected, and sessions already issued are unaffected** — no session depends on Telegram once it exists, because Telegram only ever carried the link. `POST /api/v1/auth/telegram/start` answers `404` and the sign-in screen hides the control, so the degradation is a missing button rather than a broken one. **Not on the box today** — the change is not deployed there, and `deploy/.env` sets neither value, so this row describes a dependency the product *can* take, not one it currently has |
 | **Let's Encrypt** | TLS certificates, via Caddy's ACME HTTP-01 | $0 | Certificates stop renewing after ~90 days. Caddy can point at another ACME CA |
 | **GitHub + GHCR** | Source, CI, and the three container images | $0 — public repo | No new deploys. The running box is unaffected; images already pulled keep serving |
 | **healthchecks.io** | "Did the backup run?" heartbeat | $0 | Backups could stop silently. They would still be *running* — you just would not be told when they stopped |
 | **UptimeRobot** | "Is the site up?" — keyword check on `/readyz` | $0 | Outages go unnoticed until someone opens the site |
 
-**Total ≈ $7.70/month.** Everything except the server is free tier, and at this
-data volume will remain so for years.
+**Total ≈ $7.70/month, unchanged by Telegram.** Everything except the server is
+free tier, and at this data volume will remain so for years. Telegram is the
+only row here with no free-tier *ceiling* to eventually cross — there is no
+per-message price to grow into, which is exactly the property WhatsApp lost on
+1 October 2026 and SMS never had.
 
 ## The credentials, and where they live
 
@@ -37,7 +41,22 @@ data volume will remain so for years.
 | `POSTGRES_PASSWORD` | `deploy/.env` on the box, mode 600 | Yes, sort of — it is only needed to talk to the *existing* database. A restore into a fresh Postgres uses a new one |
 | healthchecks.io ping URL | `/home/deploy/hearth-backup.env` on the box, mode 600 | Yes — create a new check |
 | SSH private key | The operator's laptop, `~/.ssh/hearth_prod` | Yes — replace it through Hetzner's console |
+| `TELEGRAM_BOT_TOKEN` | `deploy/.env` on the box, mode 600, beside `POSTGRES_PASSWORD` (and `.env` locally — gitignored, never committed). Placeholder lines only in `.env.example` and `deploy/.env.example` | Yes — in Telegram, `@BotFather` → `/mybots` → the bot → **API Token** → **Revoke current token** issues a new one. It travels with `TELEGRAM_BOT_USERNAME`, which is not a secret; `config.Load` refuses to boot if exactly one of the two is set |
 | Hetzner / Cloudflare / Dynu / GitHub logins | The operator's password manager | Yes — all send password resets to the operator's email |
+
+**There are two ways to turn Telegram off, and they degrade differently.**
+Reach for the second unless you are actually responding to a leaked token.
+
+1. **Revoke the token** (above). Immediate, needs no deploy, and stops the bot
+   answering anyone — but it leaves the product *looking* like the feature
+   works: `POST /auth/telegram/start` still answers `200`, the **Continue with
+   Telegram** button is still on the sign-in screen, and a person who presses it
+   gets a `t.me` link, presses Start, and is met with silence. The poller also
+   logs a warning every backoff cycle, indefinitely.
+2. **Remove both `.env` values and restart.** This is the clean switch: the
+   route answers `404`, the frontend hides the control on that response, and
+   nothing is offered that cannot work. Slower — it needs a restart — but it is
+   the one that leaves the product honest.
 
 **The hierarchy that matters:** every row above except the first can be
 recovered by someone who can read the operator's email. The `age` key cannot be
@@ -115,6 +134,21 @@ Worth knowing exactly, because the answer is short:
 2. **A heartbeat ping to healthchecks.io** — a URL fetch, no content.
 3. **Certificate requests to Let's Encrypt** — the hostname only.
 4. **Image pulls from GHCR**, on deploy.
+5. **Telegram, if and only if a bot is configured** — and this one is different
+   in kind from the four above it, so it is worth stating flatly:
+   **Telegram sees every sign-in and sign-up link sent over it.** The others
+   leak ciphertext, a hostname, or nothing. This one puts a third party on the
+   authentication and recovery path, in the same way Mailpit's inbox already
+   does for whoever can reach it — every link that travels this way grants an
+   account. It is accepted for the same reason Mailpit is: the alternative on a
+   free DDNS hostname is no delivery at all. What bounds it is that the links
+   are short-lived and single-use (15 minutes for a magic link, 24 hours for a
+   sign-up), that nothing else about the household ever crosses this channel —
+   no balances, no names, no household id, only a URL — and that the chat is
+   bound to one user, so a link Telegram delivers is one the account's own
+   owner asked for. **Nothing flows this way on the live box today** — the
+   change is not deployed there and no bot is configured — so this line
+   describes a capability rather than traffic.
 
 **Mail does not leave the box at all** ([ADR 3](adr/0003-mail-stays-on-the-box.md)).
 Sign-up links, invites and magic links land in Mailpit and are read by hand over
@@ -124,9 +158,25 @@ an account with no password.
 
 ## Known gaps
 
-- **The install is two-person.** Nobody outside can sign up or recover an account
-  without the operator relaying a link out of Mailpit by hand. ADR 3's exit
-  condition is the day a third person needs an email, and the fix is a ~US$11/year
-  domain plus four values in `.env` — no code changes.
+- **The install is two-person, and Telegram narrows that without closing it.**
+  Nobody outside can sign up or recover an account without the operator relaying
+  a link out of Mailpit by hand — *unless a Telegram bot is configured*, which
+  on this box it is not. Configuring one (two `.env` values, a restart of a
+  build carrying migration `00011`) makes **sign-up and magic-link recovery**
+  self-service for a stranger with a Telegram account. It does **not** make
+  **invites** self-service: invites deliberately stay on email in this slice,
+  and notification preferences still send nothing at all
+  ([ADR 4](adr/0004-telegram-as-a-second-delivery-channel.md)). ADR 3's exit
+  condition was amended on 2026-09-01 for exactly this reason — "a third person
+  needs an email" stopped being the trigger once a third person could arrive
+  without one. The mail fix is unchanged: a ~US$11/year domain plus four values
+  in `.env`, no code.
+- **Telegram sign-in has never been walked in a real browser.** It is
+  code-complete, reviewed and test-green, and no bot has ever been created, so
+  not one criterion has been exercised end to end. Until that walk runs, treat
+  the row above as a capability on paper. `docs/FEATURE_TRACKER.md` marks both
+  its rows 🟡 rather than ✅ for this reason, and
+  `docs/superpowers/plans/2026-09-01-telegram-sign-in-verification.md` is the
+  walk, written out and waiting for someone with a Telegram account.
 - **One box, no redundancy** — accepted; see [ADR 2](adr/0002-first-production-host.md).
   An hour of downtime is an inconvenience, not an incident.

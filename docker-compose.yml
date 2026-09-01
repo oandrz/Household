@@ -39,6 +39,21 @@ services:
       ARGON2_TIME: "3"
       ARGON2_MEMORY_KIB: "65536"
       ARGON2_THREADS: "2"
+      # The only two values in this file that come from the developer's own
+      # .env rather than being written here. A bot token is a credential, so
+      # it must never live in a committed file -- and without this passthrough
+      # a token in .env would simply never reach the container, leaving
+      # Telegram sign-in silently off with no error to read (the route just
+      # 404s and the button hides itself). `make dev-local` already sourced
+      # .env, so it worked; the Docker path did not, which is exactly the kind
+      # of gap that only shows up in a real walk.
+      #
+      # The `:-` default is what keeps a machine with no .env booting: unset
+      # becomes empty, and empty on BOTH is the "Telegram is off"
+      # configuration config.Load accepts. Setting exactly one is refused at
+      # startup, deliberately.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
     ports: ["8080:8080"]
     volumes: ["./api:/src"]
     depends_on:
