@@ -171,12 +171,14 @@ an account with no password.
   needs an email" stopped being the trigger once a third person could arrive
   without one. The mail fix is unchanged: a ~US$11/year domain plus four values
   in `.env`, no code.
-- **Telegram sign-in has never been walked in a real browser.** It is
-  code-complete, reviewed and test-green, and no bot has ever been created, so
-  not one criterion has been exercised end to end. Until that walk runs, treat
-  the row above as a capability on paper. `docs/FEATURE_TRACKER.md` marks both
-  its rows 🟡 rather than ✅ for this reason, and
-  `docs/superpowers/plans/2026-09-01-telegram-sign-in-verification.md` is the
-  walk, written out and waiting for someone with a Telegram account.
+- **Telegram sign-in was walked on 2026-09-01 and passed**, against a real
+  BotFather bot on a developer machine — both the stranger path (a household
+  created from a chat, with a NULL-email owner and a bound `chat_id`) and the
+  returning path (a bound chat receiving a magic link rather than a second
+  sign-up). `docs/FEATURE_TRACKER.md` moved both rows to ✅ on that basis, and
+  `docs/superpowers/plans/2026-09-01-telegram-sign-in-verification.md` records
+  the result per criterion. **It has not been exercised against the production
+  install**, which has no bot configured — the two `TELEGRAM_*` values in
+  `deploy/.env` are what turn it on there.
 - **One box, no redundancy** — accepted; see [ADR 2](adr/0002-first-production-host.md).
   An hour of downtime is an inconvenience, not an incident.

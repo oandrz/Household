@@ -1619,13 +1619,14 @@ at all, so the assertion that would catch one of these has nothing to read.
 **The exception is the more interesting entry, not a footnote.** The
 `window.open` bullet was found in code review, from the spec — someone knew
 WebKit gates the call on the synchronous gesture stack and went looking — and
-as of this writing it is **still unconfirmed in a real browser**, because
-Telegram sign-in's walk has never run
+the walk on 2026-09-01 **confirmed the fix in a real browser** — the control
+opened Telegram Desktop on the host and both the sign-up and sign-in paths
+completed through it
 (`docs/superpowers/plans/2026-09-01-telegram-sign-in-verification.md`). So it is
-evidence for this pattern twice over: the simulated environment could not see
-the defect, and the fix for it has not been seen by the real one either.
-Reasoning a platform gap out of the spec is how you find it; it is not how you
-confirm you closed it. Count the
+evidence for this pattern twice over, and the second half only closed once the
+walk ran: the simulated environment could not see the defect, and could not
+have confirmed the fix either. Reasoning a platform gap out of the spec is how
+you find it; it is not how you confirm you closed it. Count the
 bullets rather than trusting a number in this sentence — the list keeps
 growing. And
 when a service returns an error it did not log, stop debugging the code and
