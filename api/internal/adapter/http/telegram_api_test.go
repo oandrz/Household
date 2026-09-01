@@ -346,6 +346,42 @@ func (fakeSignupRepoForPreview) Prune(context.Context, time.Time) (int64, error)
 
 var _ usecase.SignupRepository = fakeSignupRepoForPreview{}
 
+// noFeatureFlagOverrides answers "no overrides recorded" for every flag, so
+// AdminService.GlobalFlags resolves every flag to its compile-time default --
+// signups_open defaults true (domain.AllFlags). It exists because Task 6 put
+// requireFeature in front of the sign-up preview route below, and that
+// route's pre-auth branch calls deps.Admin.GlobalFlags regardless of which
+// test is asking, so a Deps literal naming only Signups (as this file's
+// tests already did, to avoid a database) now needs a working, if minimal,
+// Admin too. The other two AdminDeps ports are left nil deliberately: this
+// route never reaches IsPlatformAdmin or RecordAudit, and wiring them would
+// only make it look like it did.
+type noFeatureFlagOverrides struct{}
+
+func (noFeatureFlagOverrides) OverridesFor(context.Context, string) (map[string]bool, map[string]bool, error) {
+	panic("noFeatureFlagOverrides: OverridesFor should not be called by these tests")
+}
+
+func (noFeatureFlagOverrides) GlobalOverrides(context.Context) (map[string]bool, error) {
+	return nil, nil
+}
+
+func (noFeatureFlagOverrides) AllHouseholdOverrides(context.Context) ([]usecase.HouseholdFlagOverride, error) {
+	panic("noFeatureFlagOverrides: AllHouseholdOverrides should not be called by these tests")
+}
+
+func (noFeatureFlagOverrides) SetGlobal(context.Context, string, bool, string) error {
+	panic("noFeatureFlagOverrides: SetGlobal should not be called by these tests")
+}
+
+func (noFeatureFlagOverrides) SetHousehold(context.Context, string, string, bool, string) error {
+	panic("noFeatureFlagOverrides: SetHousehold should not be called by these tests")
+}
+
+func (noFeatureFlagOverrides) ClearHousehold(context.Context, string, string) error {
+	panic("noFeatureFlagOverrides: ClearHousehold should not be called by these tests")
+}
+
 func TestSignUpPreviewShowsTelegramChannelWithNoEmail(t *testing.T) {
 	tokens := crypto.NewTokenGenerator()
 	raw, hash, err := tokens.NewToken()
@@ -366,7 +402,10 @@ func TestSignUpPreviewShowsTelegramChannelWithNoEmail(t *testing.T) {
 		Tokens:  tokens,
 		Clock:   clock.System{},
 	})
-	router := httpadapter.NewRouter(httpadapter.Deps{Signups: svc})
+	router := httpadapter.NewRouter(httpadapter.Deps{
+		Signups: svc,
+		Admin:   usecase.NewAdminService(usecase.AdminDeps{Flags: noFeatureFlagOverrides{}}),
+	})
 
 	rec := doOn(router, http.MethodGet, "/api/v1/auth/sign-up/"+raw, nil)
 	if rec.Code != http.StatusOK {

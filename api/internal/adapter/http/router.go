@@ -126,11 +126,21 @@ func NewRouter(deps Deps) http.Handler {
 				// defers that read to request time, when every route's Deps is
 				// actually complete.
 				now := func() time.Time { return deps.Clock.Now() }
+				// The limiter stays outermost: a closed sign-up route must
+				// not become an unmetered way to make flag lookups.
 				su.Use(rateLimitByIP(newIPRateLimiter(signUpRequestsPerIPPerHour, time.Hour, now)))
+				su.Use(requireFeature(deps, domain.FlagSignupsOpen))
 				su.Post("/sign-up", handleSignUp(deps))
 			})
-			auth.Get("/sign-up/{token}", handleSignUpPreview(deps))
-			auth.Post("/sign-up/{token}/complete", handleCompleteSignUp(deps))
+			// The two token routes stay behind the same flag as the request
+			// route above: a half-finished sign-up must not be completable
+			// after registration closes, or a token minted before the switch
+			// stays redeemable indefinitely.
+			auth.Group(func(tok chi.Router) {
+				tok.Use(requireFeature(deps, domain.FlagSignupsOpen))
+				tok.Get("/sign-up/{token}", handleSignUpPreview(deps))
+				tok.Post("/sign-up/{token}/complete", handleCompleteSignUp(deps))
+			})
 
 			// Its own limiter instance, not the sign-up group's: a person who
 			// has just signed up should not find Telegram sign-in already
@@ -138,6 +148,7 @@ func NewRouter(deps Deps) http.Handler {
 			auth.Group(func(tg chi.Router) {
 				now := func() time.Time { return deps.Clock.Now() }
 				tg.Use(rateLimitByIP(newIPRateLimiter(telegramStartsPerIPPerHour, time.Hour, now)))
+				tg.Use(requireFeature(deps, domain.FlagTelegramSignIn))
 				tg.Post("/telegram/start", handleTelegramStart(deps))
 			})
 
@@ -168,6 +179,15 @@ func NewRouter(deps Deps) http.Handler {
 			g.Get("/household/members", handleListMembers(deps))
 			g.Get("/spaces", handleListSpaces(deps))
 			g.Get("/notification-preferences", handleGetNotificationPreferences(deps))
+
+			// The Family calendar's API stub, dark behind its flag. It answers
+			// an empty list rather than 501: a flag-gated route must behave
+			// like a real route once its flag is on, or the flag proves
+			// nothing about the feature it guards.
+			g.Group(func(f chi.Router) {
+				f.Use(requireFeature(deps, domain.FlagFamilyCalendar))
+				f.Get("/family/calendar", handleListCalendarEvents(deps))
+			})
 
 			g.Group(func(m chi.Router) {
 				m.Use(requireCSRF)

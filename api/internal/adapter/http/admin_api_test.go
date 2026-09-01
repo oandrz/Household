@@ -103,10 +103,20 @@ func (failingAdminAudit) Recent(context.Context, int) ([]usecase.AdminAuditEntry
 // returning double could not tell the two orderings apart. A panic unwinds
 // straight past anything downstream to recoverer, so the row exists only if
 // it was written first.
+//
+// OverridesFor is the one method that does NOT panic. Task 6 put
+// AdminService.FlagsFor (which calls OverridesFor) on every authenticated
+// request, inside requireSession -- upstream of requirePlatformAdmin and
+// auditAdmin. A double that panicked there too would blow up before the
+// request ever reached the admin subtree this test is about, so the audit
+// row would never be written and the test would fail for a reason that has
+// nothing to do with auditAdmin's ordering. Leaving it healthy keeps the
+// panic where the test needs it: inside GET /admin/flags's own handler,
+// which calls GlobalOverrides and AllHouseholdOverrides, not OverridesFor.
 type panickingFeatureFlags struct{}
 
 func (panickingFeatureFlags) OverridesFor(context.Context, string) (map[string]bool, map[string]bool, error) {
-	panic("flags exploded")
+	return nil, nil, nil
 }
 
 func (panickingFeatureFlags) GlobalOverrides(context.Context) (map[string]bool, error) {

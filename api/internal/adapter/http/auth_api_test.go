@@ -238,8 +238,14 @@ func TestEveryProtectedRouteRejectsAnUnauthenticatedCaller(t *testing.T) {
 	// (a routing regression, a chi API change), the loop above asserts
 	// nothing and the test would pass for the wrong reason.
 	t.Logf("checked %d protected routes", checked)
-	if checked < 17 {
-		t.Fatalf("checked %d protected routes, want at least 17 -- "+
+	// 18, not the pre-calendar 17: GET /api/v1/family/calendar (Task 6) sits
+	// behind requireSession same as every other route here -- requireFeature
+	// only decides whether the flag it guards is on, never whether a session
+	// exists -- so it is one more protected route this walk must see. A
+	// floor left at 17 would still pass if that route silently lost its
+	// session guard, which is the vacuous pass this floor exists to catch.
+	if checked < 18 {
+		t.Fatalf("checked %d protected routes, want at least 18 -- "+
 			"the walk may not be enumerating routes correctly", checked)
 	}
 }
