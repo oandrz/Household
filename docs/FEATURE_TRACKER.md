@@ -13,7 +13,13 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 94 of 116 features built or partly built.
+**Where things stand:** 94 of 120 features built or partly built.
+
+> **Recounted 2026-09-02**, when the four unbuilt platform-administration
+> features were given rows (section 9). The count of *built* work does not
+> move — 77 ✅ and 17 🟡, unchanged — but the denominator does, because four
+> features that existed only as prose are now on the map: 116 → 120, ⬜ 20 →
+> 24. A number going up because the map got honest is the healthy direction.
 
 > **In production since 2026-08-15**, at <https://oink.mywire.org>. **No count
 > below changes** — deployment is not a design feature, and this file's totals
@@ -1338,12 +1344,16 @@ that exists and works is on the map whether or not the design ever drew it.
 See [ADR 5](adr/0005-platform-admin-authorization.md) for why the surface is
 shaped the way it is, and
 `docs/superpowers/plans/2026-09-02-hearth-admin-surface-verification.md` for
-the browser walk every ✅ and 🟡 below cites. **Deliberately not built in this
-slice, and not rows here as a result:** the read-only database browse, the
-outbound-mail inspector, the households/metrics screen and the `/admin/audit`
-screen itself (the log is written and readable through the repository; no
-page renders it yet) — design spec §§4–6, out of scope by the plan that built
-this slice, not an oversight.
+the browser walk every ✅ and 🟡 below cites.
+
+**The four ⬜ rows below were deliberately out of scope for the slice that
+built the rest, and are now the product's next work** (see "Suggested order").
+They were described in prose here rather than given rows until 2026-09-02, on
+the reasoning that unbuilt-and-unplanned work is not on the map. That
+reasoning expired the moment they were prioritised: a feature nobody has a row
+for is a feature the tracker cannot be asked about. Each cites the section of
+`docs/superpowers/specs/2026-09-01-hearth-admin-surface-design.md` that already
+specifies it in full — none of these needs a fresh design, only a plan.
 
 | Feature | State | Notes |
 |---|---|---|
@@ -1352,18 +1362,66 @@ this slice, not an oversight.
 | Feature flags — registry, resolution and enforcement | ✅ | Four flags at launch (`signups_open`, `telegram_sign_in`, `notification_delivery`, `family_calendar`); a household override beats a global override beats the compile-time default, resolved fresh on every authenticated request rather than cached. `requireFeature` answers `404`, not `403`, for a disabled route — on pre-auth paths too, where it resolves the global set only, so a household override can never apply before a household is known. Walked directly (criteria 9–12): turning `family_calendar` on globally opened `GET /api/v1/family/calendar`; a household override closed it for that household alone; deleting the override reopened it, proving "no opinion" differs from "explicitly off"; turning `signups_open` off answered `404` on both the public sign-up form and its token-completion route together, and restored both when turned back on |
 | Admin flags screen (`/admin/flags`) | 🟡 | Lists every flag with its description, compile-time default and current global state, and toggles the global value. **Two gaps found on the browser walk; the final fix wave (2026-09-02) closed the accessible-state half of the second, the rest remain open:** there is still no control to *create* a household override — the per-household state the flags model exists to support (a global default with a per-household exception) is reachable only by a hand-written `PUT`, never by a click. The screen's only interactive control — a segmented On/Off toggle — is still 12px muted-grey text on a transparent ground, right-aligned roughly 1900px from its own label, and did not register on a first read of the screen at all, confirmed only through the accessibility tree; placement, not contrast, is the problem (a contrast check on the same text measured roughly 5.4:1, passing WCAG AA), and placement is out of scope for this wave. What the wave did fix: the "Default" segment (no override at all) used to carry its current-ness in background colour alone, with neither it nor a screen reader having any way to say which of the three states — Default, On, Off — was current, since it is a status span rather than a button and so never carried `aria-pressed` the way On and Off do. It now carries `aria-current="true"` whenever it is the flag's current state, so the three states are distinguishable to assistive tech even though the toggle is still hard to find. A green suite proved the underlying toggle worked; it could not have shown that nobody could find it |
 | `adminctl` — `grant-platform-admin`, `revoke-platform-admin`, `list-platform-admins`, `unlock-admin` | ✅ | Four new commands, no UI — the same shape `Retention pruning (adminctl prune)` already has in Household settings, above. `unlock-admin` clears `admin_reauth_attempts` for one user, the admin surface's equivalent of a magic link; walked directly (criterion 7) |
+| Admin audit screen (`/admin/audit`) | ⬜ | The log is written, bounded and readable — `AdminService.RecentAudit` clamps a caller's limit to 500 and defaults to 50 — but nothing renders it, so the only way to read the record of what an operator did is `psql`. The smallest of the four: no new table, no new port, no new config, one route over a repository method that already exists |
+| Read-only database browse | ⬜ | Design spec §4. **The piece originally asked for.** A separate `SELECT`-only Postgres role (`hearth_readonly`) reached through its own pool from `DATABASE_READONLY_URL`, so a mistake in the adapter's SQL still cannot write; table names validated against `information_schema` rather than interpolated; `statement_timeout` and a page cap; and redaction that fails closed by column *type* (`bytea`) as well as by name, so a secret column added next year is redacted before anyone remembers the rule exists. Unset config means the panel is unavailable — never a silent fallback to the read-write pool. **The only one of the four with an infrastructure dependency:** the role is created during provisioning, not by a migration, so `deploy/PROVISION.md` changes before the feature can run anywhere real |
+| Outbound message inspector | ⬜ | Design spec §5. Proxies Mailpit's HTTP API rather than storing links: every token in this schema is stored hashed, and inventing a raw-link store to solve a convenience problem is the wrong trade. **Closes a live operational pain rather than adding a capability** — under [ADR 3](adr/0003-mail-stays-on-the-box.md) no mail leaves the box, so handing someone an invite today means opening an SSH tunnel to Mailpit and copying the link out by hand (`deploy/README.md`). Needs `MAILPIT_API_URL`; unset means the panel is unavailable. The message bodies contain working magic-link and invite URLs, so opening one is its own audit row |
+| Households and metrics | ⬜ | Design spec §6. Every household with member count, created date, last activity and primary currency; sign-ups requested versus completed; invites still pending. Reads tables that already exist — no analytics table, because a counter that can drift from the rows it counts is worse than a query. Deliberately shows accounts and roles, **not** money: financial data stays behind the database browse, so reading a customer's finances costs a deliberate second step and a second audit row. **Also the prerequisite for closing the Admin flags screen's named gap above** — a per-household override control needs a household to pick, and there is no household list anywhere in the product yet |
 
 ---
 
 ## Suggested order
 
-Dependencies, not preference:
+**Reprioritised 2026-09-02 by the product owner: the four remaining
+platform-administration features come before any further household work.**
+That is a preference, not a dependency, and it is worth naming as one — see
+"what this costs" below. The order *within* each group is still dependency.
 
-1. **Money** — largest, the design's centre of gravity, and everything it needs exists
-2. **Marriage** — independent of Money; Agreements is the interesting problem
-3. **Family** — Calendar needs Bills for the bill dates on the month grid
-4. **Overview** — last, because it only aggregates the three above. Building it
-   earlier means stubbing everything it reads
+**First — finish the operator surface (section 9).** All four are specified in
+full in `docs/superpowers/specs/2026-09-01-hearth-admin-surface-design.md`;
+none needs a fresh design, only a plan.
+
+1. **Admin audit screen** — smallest by a wide margin. No new table, no new
+   port, no new config; one route over `RecentAudit`, which already exists and
+   already clamps its own limit. Ships in a fraction of the others' time and
+   makes the log the operator can currently only reach through `psql` visible.
+2. **Households and metrics** (§6) — reads tables that already exist, and is
+   the prerequisite for closing the flags screen's named 🟡 gap: a
+   per-household override control needs a household list to pick from, and
+   there is none anywhere in the product.
+3. **Outbound message inspector** (§5) — needs `MAILPIT_API_URL` and nothing
+   else. Closes a *live* operational pain rather than adding a capability:
+   under ADR 3 handing someone an invite means an SSH tunnel to Mailpit today.
+4. **Read-only database browse** (§4) — last of the four despite being the one
+   originally asked for, because it is the only one with an infrastructure
+   dependency (`hearth_readonly` and `DATABASE_READONLY_URL` are provisioned,
+   not migrated, so `deploy/PROVISION.md` changes first) and much the largest
+   security surface. It is also the piece the other three de-risk: every one of
+   them exercises the re-auth grant and the audit log under real use before the
+   surface that can read every household's finances arrives.
+
+**Then — the household product**, dependencies as before:
+
+5. **Money's remaining 7 ⬜** — 25 of 35 rows are ✅; what is left is the tail,
+   not the slice
+6. **Marriage's remaining 6 ⬜** — 10 of 16 are ✅; Agreements is the
+   interesting problem, and it is append-only and versioned, not CRUD
+7. **Family** — the only genuinely untouched area. Calendar needs Bills for the
+   bill dates on the month grid, and Bills is ✅
+8. **Overview** — 8 of 11 already ✅ because it grew alongside Money; what
+   remains only aggregates the areas above
+
+**What this costs.** Sections 1–8 are the household product — what a customer
+buys. Section 9 is the surface the operator uses to run the install; no
+household member can see any of it. Prioritising it means the thing being sold
+stands still while the thing that runs it improves. The case for doing it
+anyway is real and it is why the reprioritisation was made: the install is
+live, sign-up is self-serve and ungated, and three of these four exist to make
+a real install operable by someone who is not sitting at its database. Family
+is the household work most visibly delayed by this choice — it is the one area
+with nothing built at all.
+
+Each area gets its own spec → plan → implementation cycle. See `docs/HANDOVER.md`
+for what to settle before the first task of the next one.
 
 Each area gets its own spec → plan → implementation cycle. See `docs/HANDOVER.md`
 for what to settle before the first task of the next one.

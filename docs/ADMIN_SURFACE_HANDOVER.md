@@ -89,8 +89,17 @@ subtree and its comment, then `usecase/admin.go`, then
 
 ## 3. What does NOT exist
 
-All three are specified in full and none is started. This is the honest gap
-between what was asked for and what shipped.
+All are specified in full and none is started. This is the honest gap between
+what was asked for and what shipped.
+
+**As of 2026-09-02 these are the product's next work**, ahead of any further
+household feature — the product owner's call, recorded with its cost in
+`docs/FEATURE_TRACKER.md`'s "Suggested order", where all four now have ⬜ rows
+in section 9. The recommended sequence is **audit screen → households and
+metrics → message inspector → database browse**: smallest first, the
+infrastructure dependency last, and the browse last of all so the grant and the
+audit log get real use before the surface that can read every household's
+finances arrives.
 
 **A read-only database browse — spec §4.** This was one of the three things
 originally asked for. The spec has the whole design: a separate `hearth_readonly`
