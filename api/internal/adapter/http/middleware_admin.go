@@ -76,12 +76,12 @@ func requirePlatformAdmin(deps Deps) func(http.Handler) http.Handler {
 // times out still leaves a trace of the attempt. detail carries the route
 // pattern's parameters -- never a body, a password or a row value.
 //
-// One request shape reaches an admin route without being audited: a mutating
-// one that fails requireCSRF, which router.go stacks outside this middleware.
-// That is deliberate. A double-submit check failing means the request was
-// never established as intentional in the first place, so there is no actor
-// whose action the row would be recording -- see router.go's own comment on
-// the /admin subtree for why CSRF sits outside the gate at all.
+// requireCSRF runs inside this middleware, not outside it, so a request
+// refused for a missing or mismatched CSRF token has already left its row.
+// That is the point rather than a side effect: a cross-site forgery aimed at
+// a real platform admin is precisely what admin_audit_log exists to make
+// visible, and refusing one silently would hide the one attack the log is
+// for. See router.go's /admin subtree for why the guards sit in that order.
 func auditAdmin(deps Deps) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
