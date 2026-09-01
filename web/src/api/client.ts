@@ -74,6 +74,15 @@ function isPreAuthRequest(path: string): boolean {
   return PRE_AUTH_API_PREFIXES.some((prefix) => path.startsWith(prefix));
 }
 
+// Not added to PRE_AUTH_API_PREFIXES above: that list is about paths
+// reachable with no session at all, and every /api/v1/admin/* request
+// requires a real, live one -- requireSession runs before
+// requirePlatformAdmin on all of them (middleware_admin.go's own doc
+// comment on requirePlatformAdmin says so, and pins it with a test). This
+// constant backs a narrower, code-aware check below instead; see the 401
+// branch's own comment for why path alone can't express it.
+const ADMIN_API_PREFIX = "/api/v1/admin/";
+
 function readCookie(name: string): string | undefined {
   const prefix = `${name}=`;
   // slice past the first "=" only -- split("=")[1] would truncate any
@@ -118,19 +127,6 @@ export async function apiFetch<T>(
   }
 
   if (!response.ok) {
-    // A 401 from anywhere other than the exempt pre-auth paths means the
-    // session this tab thought it had is no longer valid -- revoked
-    // capabilities, an expired session, a signed-out-elsewhere member -- and
-    // the spec calls for reacting immediately, not waiting for whatever
-    // queries happen to be mounted to notice on their own next refetch (see
-    // RequireAuth, which only catches this on a remount). This fires before
-    // the ApiError below is thrown, and its effect (the real handler clears
-    // the query cache and navigates to /sign-in) doesn't depend on that
-    // throw completing.
-    if (response.status === 401 && !isPreAuthRequest(path)) {
-      unauthorizedHandler?.();
-    }
-
     const envelope = parsed as
       | {
           error?: {
@@ -140,6 +136,37 @@ export async function apiFetch<T>(
           };
         }
       | undefined;
+
+    // A 401 from anywhere other than the exempt pre-auth paths means the
+    // session this tab thought it had is no longer valid -- revoked
+    // capabilities, an expired session, a signed-out-elsewhere member -- and
+    // the spec calls for reacting immediately, not waiting for whatever
+    // queries happen to be mounted to notice on their own next refetch (see
+    // RequireAuth, which only catches this on a remount). This fires before
+    // the ApiError below is thrown, and its effect (the real handler clears
+    // the query cache and navigates to /sign-in) doesn't depend on that
+    // throw completing.
+    //
+    // /api/v1/admin/* is carved out of that rule, not by path like the
+    // pre-auth prefixes above, but by code: requireSession is the only
+    // middleware anywhere in that subtree that can say the session itself is
+    // gone, and it always does so as UNAUTHENTICATED (middleware_session.go).
+    // Every other 401 there is requirePlatformAdmin's or requireAdminGrant's
+    // own layer answering on top of a session that is still perfectly good
+    // -- ADMIN_REAUTH_REQUIRED when the 30-minute grant has lapsed,
+    // INVALID_CREDENTIALS when a re-entered password is wrong
+    // (admin_handlers.go's handleAdminSession, admin_reauth.go's Verify).
+    // AdminGate exists specifically to show those inline instead of bouncing
+    // the operator to /sign-in, which a path-based exemption can't express:
+    // it would have to swallow this subtree's own UNAUTHENTICATED too, and
+    // that 401 -- a genuinely dead session -- must reach the handler exactly
+    // like it does everywhere else.
+    const isAdminLayerUnauthorized =
+      path.startsWith(ADMIN_API_PREFIX) && envelope?.error?.code !== "UNAUTHENTICATED";
+    if (response.status === 401 && !isPreAuthRequest(path) && !isAdminLayerUnauthorized) {
+      unauthorizedHandler?.();
+    }
+
     throw new ApiError(
       response.status,
       envelope?.error?.code ?? "UNKNOWN",

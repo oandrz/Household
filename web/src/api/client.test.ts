@@ -259,4 +259,54 @@ describe("apiFetch unauthorized handling", () => {
 
     expect(handler).not.toHaveBeenCalled();
   });
+
+  // AdminGate exists so an operator whose 30-minute grant lapsed sees a
+  // password prompt, not a bounce to /sign-in -- see middleware_admin.go's
+  // requireAdminGrant and AdminGate.tsx. That only holds if this handler
+  // stays silent for exactly this one code on this one subtree.
+  it("does not call the unauthorized handler on ADMIN_REAUTH_REQUIRED from an admin route", async () => {
+    stubFetch(401, {
+      error: { code: "ADMIN_REAUTH_REQUIRED", message: "Confirm your password." },
+    });
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+
+    await apiFetch("/api/v1/admin/flags").catch(() => {});
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  // The same reasoning as ADMIN_REAUTH_REQUIRED above: INVALID_CREDENTIALS
+  // and ADMIN_LOCKED are both answered by POST /admin/session (a mistyped or
+  // repeatedly wrong re-authentication password, admin_reauth.go's Verify),
+  // never by a dead session -- AdminGate shows the wrong-password or lockout
+  // state inline, on the same screen the operator was already using to get
+  // back in.
+  it.each(["INVALID_CREDENTIALS", "ADMIN_LOCKED"])(
+    "does not call the unauthorized handler on %s from POST /admin/session",
+    async (code) => {
+      stubFetch(code === "ADMIN_LOCKED" ? 423 : 401, { error: { code, message: "x" } });
+      const handler = vi.fn();
+      setUnauthorizedHandler(handler);
+
+      await apiFetch("/api/v1/admin/session", { method: "POST", body: "{}" }).catch(() => {});
+
+      expect(handler).not.toHaveBeenCalled();
+    },
+  );
+
+  // The property the admin-layer carve-out must not weaken: requireSession
+  // is the only thing in the /admin/* chain that can say the session itself
+  // is gone (middleware_session.go), and it always says so as
+  // UNAUTHENTICATED -- that 401 must still bounce the operator to /sign-in
+  // exactly like it does everywhere else, admin route or not.
+  it("still calls the unauthorized handler on UNAUTHENTICATED from an admin route", async () => {
+    stubFetch(401, { error: { code: "UNAUTHENTICATED", message: "Sign in required." } });
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+
+    await apiFetch("/api/v1/admin/flags").catch(() => {});
+
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
 });

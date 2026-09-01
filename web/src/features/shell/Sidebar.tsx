@@ -86,11 +86,6 @@ const NAV_ITEM_CLASS =
 const NAV_ITEM_STATE_CLASS =
   "transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off";
 
-// Widened to `string` so this compiles against the router's strict route
-// union before Task 11 registers /admin -- see the Admin link's own comment
-// below for why a literal here would fail tsc.
-const ADMIN_ROUTE: string = "/admin";
-
 function SpaceLink({ space }: { space: Space }) {
   const matchRoute = useMatchRoute();
   const pages = SPACE_PAGES[space.key];
@@ -212,17 +207,12 @@ export function Sidebar({ me }: { me: Me }) {
 
       {/* Not a space, so it does not go through SPACE_PAGES or me.spaces --
           this is the one person running the platform, not a household
-          feature. Rendered only for that flag; the server's own middleware
-          is what actually refuses a non-admin, this is only the courtesy of
-          not showing a door that opens onto a 403.
-          `to={ADMIN_ROUTE}` rather than a string literal: the route itself
-          doesn't exist until Task 11 adds it to router.tsx, and a literal
-          "/admin" here would fail against the strict union of routes
-          currently registered. Typed as plain `string`, the same widening
-          SPACE_PAGES's own `to: string` already relies on, so this survives
-          a route that hasn't been added yet without an `any` or a cast. */}
+          feature. Rendered only for that flag; the server's own
+          requirePlatformAdmin is what actually refuses a non-admin (with a
+          404, not a 403 -- see middleware_admin.go), this is only the
+          courtesy of not showing a door that opens onto one. */}
       {me.isPlatformAdmin && (
-        <Link to={ADMIN_ROUTE} className="mt-6 inline-flex min-h-11 items-center text-muted">
+        <Link to="/admin" className="mt-6 inline-flex min-h-11 items-center text-muted">
           Admin
         </Link>
       )}
