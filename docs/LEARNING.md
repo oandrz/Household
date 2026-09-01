@@ -3586,6 +3586,25 @@ route with a missing guard has no second line of defence.
   error path in that file a disclosure path, so the rule has to be written
   once at the top of the file rather than remembered at each `return`.
 
+- **A new file that was never `git add`ed passes every local check and fails
+  only in CI, because the local tree has it and the checkout does not.**
+  Commit `b7b2c7f` ("Add UI Icon Fix") replaced three Unicode symbols with SVG
+  components in `web/src/components/icons.tsx` and imported that module from
+  five files — but the module itself stayed untracked. `npx tsc --noEmit`,
+  `npx vitest run` and the dev server were all green locally, because all three
+  read the working directory. The images workflow builds from
+  `actions/checkout`, which has only what was committed, so `tsc` there
+  reported five `TS2307: Cannot find module './icons'` and the `hearth-web`
+  image was never pushed. The failure surfaced on the production box, one step
+  before it could do harm: `deploy.sh` refused with *"ghcr.io/oandrz/hearth-web:
+  b7b2c7f… is not in the registry"* rather than deploying a half-built release
+  — the guard doing exactly its job. **Two things follow. `git status` is part
+  of the definition of done, not tidy-up afterwards**: an untracked file is
+  invisible to `git diff`, to `git commit -a`, and to every test you run.
+  **And a green local suite says nothing about the commit** — it says something
+  about your disk. The check that matches CI is `git stash -u` (or a clone of
+  the pushed SHA) before believing the build.
+
 ### The first production deployment (2026-08-15)
 
 Nothing in the product broke. Everything below was wrong in a document, in a
@@ -3792,3 +3811,6 @@ no test suite can hold.
 5. If it accepts caller input, ask what a caller can measure.
 6. If it writes twice, ask what happens when the second write fails.
 7. Add what you learned to this file.
+8. `git status` before you push. A file you created and never `git add`ed
+   is present for every local check and absent from the commit — CI is the
+   first thing that reads what you actually pushed.
