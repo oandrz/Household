@@ -35,9 +35,26 @@ type Config struct {
 	Argon2Time      uint32
 	Argon2MemoryKiB uint32
 	Argon2Threads   uint8
+	// TelegramBotToken and TelegramBotUsername are optional and travel
+	// together: both set turns Telegram sign-in on, both empty leaves it off.
+	// One without the other is refused for the same reason SMTP_USERNAME and
+	// SMTP_PASSWORD are -- a half-configured channel misbehaves silently, and
+	// the symptom (links that are minted and never delivered) looks exactly
+	// like nobody using the feature.
+	//
+	// The username is configured rather than read from Telegram's getMe at
+	// startup: no cleverness, and no startup dependency on Telegram being
+	// reachable.
+	TelegramBotToken    string
+	TelegramBotUsername string
 }
 
 func (c Config) IsDevelopment() bool { return c.AppEnv == "development" }
+
+// TelegramEnabled reports whether Telegram sign-in is configured. When it is
+// false the route answers 404 and the poller never starts, so an install that
+// has not set up a bot behaves exactly as it did before this feature existed.
+func (c Config) TelegramEnabled() bool { return c.TelegramBotToken != "" }
 
 func Load() (Config, error) {
 	appEnv := os.Getenv("APP_ENV")
@@ -53,6 +70,9 @@ func Load() (Config, error) {
 		SMTPUsername: os.Getenv("SMTP_USERNAME"),
 		SMTPPassword: os.Getenv("SMTP_PASSWORD"),
 		AppBaseURL:   os.Getenv("APP_BASE_URL"),
+
+		TelegramBotToken:    os.Getenv("TELEGRAM_BOT_TOKEN"),
+		TelegramBotUsername: os.Getenv("TELEGRAM_BOT_USERNAME"),
 	}
 
 	switch cfg.AppEnv {
@@ -85,6 +105,9 @@ func Load() (Config, error) {
 	// send fine right up until the relay actually starts rejecting it.
 	if (cfg.SMTPUsername == "") != (cfg.SMTPPassword == "") {
 		return Config{}, fmt.Errorf("SMTP_USERNAME and SMTP_PASSWORD must both be set, or both left empty")
+	}
+	if (cfg.TelegramBotToken == "") != (cfg.TelegramBotUsername == "") {
+		return Config{}, fmt.Errorf("TELEGRAM_BOT_TOKEN and TELEGRAM_BOT_USERNAME must both be set, or both left empty")
 	}
 	defaultTLSMode := "mandatory"
 	if cfg.IsDevelopment() {

@@ -192,3 +192,42 @@ func TestLoadRejectsArgon2ThreadsOverflow(t *testing.T) {
 		t.Fatal("expected an error when ARGON2_THREADS overflows a uint8")
 	}
 }
+
+func TestTelegramValuesMustBeBothOrNeither(t *testing.T) {
+	setRequiredEnv(t) // existing helper: APP_ENV, DATABASE_URL, SMTP_*, APP_BASE_URL
+	t.Setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+	// TELEGRAM_BOT_USERNAME deliberately unset.
+
+	if _, err := config.Load(); err == nil {
+		t.Fatal("Load() with a token and no username succeeded, want an error")
+	}
+}
+
+func TestTelegramDisabledWhenBothEmpty(t *testing.T) {
+	setRequiredEnv(t)
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() = %v, want nil", err)
+	}
+	if cfg.TelegramEnabled() {
+		t.Fatal("TelegramEnabled() = true with both values empty, want false")
+	}
+}
+
+func TestTelegramEnabledWhenBothSet(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+	t.Setenv("TELEGRAM_BOT_USERNAME", "HearthBot")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() = %v, want nil", err)
+	}
+	if !cfg.TelegramEnabled() {
+		t.Fatal("TelegramEnabled() = false with both values set, want true")
+	}
+	if cfg.TelegramBotUsername != "HearthBot" {
+		t.Fatalf("TelegramBotUsername = %q, want %q", cfg.TelegramBotUsername, "HearthBot")
+	}
+}
