@@ -89,13 +89,15 @@ subtree and its comment, then `usecase/admin.go`, then
 
 ## 3. What does NOT exist
 
-All are specified in full and none is started. This is the honest gap between
-what was asked for and what shipped.
+All are specified in full. Three are not started; the fourth, the audit
+screen, was built on 2026-09-02 and descoped by the product owner the same
+day (see the end of this section). This is the honest gap between what was
+asked for and what shipped.
 
 **As of 2026-09-02 these are the product's next work**, ahead of any further
 household feature — the product owner's call, recorded with its cost in
-`docs/FEATURE_TRACKER.md`'s "Suggested order", where all four now have ⬜ rows
-in section 9. The recommended sequence is **audit screen → households and
+`docs/FEATURE_TRACKER.md`'s "Suggested order", where all four have rows in
+section 9 (three ⬜, the audit screen 🚫). The recommended sequence is **audit screen → households and
 metrics → message inspector → database browse**: smallest first, the
 infrastructure dependency last, and the browse last of all so the grant and the
 audit log get real use before the surface that can read every household's
@@ -124,8 +126,21 @@ hand.
 **Household list and metrics — spec §6.** Also the prerequisite for finding A
 below.
 
-**An `/admin/audit` screen.** The log is written and readable through the
-repository; it has no UI.
+**~~An `/admin/audit` screen.~~ Built, walked and descoped on 2026-09-02.**
+The screen existed for a few hours on branch `admin-audit-screen`: a
+`GET /admin/audit` route in the granted group, the log's rows joined to
+`users` so each named its actor, a page with limit-only "Show more" to the
+service's 500 cap, and a Flags · Audit nav in `AdminShell`. The product owner
+then decided the feature is not needed and it was removed rather than merged.
+The log is still written and still readable through the repository and
+`psql`; it has no UI, by decision now rather than by omission. Two things
+survive the removal: `useAdminFlags` no longer refetches on window focus
+(every refetch of an audited route is itself an audit row — the log showed
+the operator apparently reading flags dozens of times), and a learning-log
+entry on TanStack `Link`'s `activeProps` className being concatenated onto
+the base, which made the active nav link indistinguishable in the browser
+while a jsdom test asserting `aria-current` stayed green. Finding E above
+would have been visible on the screen as an IP with a port suffix.
 
 ## 4. Running and testing it
 

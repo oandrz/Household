@@ -490,7 +490,7 @@ that will manage it (a deferred, separate spec) so it earns real usage first
 — and a household has to be able to exist before there is anything for that
 console to administer.
 
-**That console's first slice now exists, unmerged, on branch `admin-surface`.**
+**That console's first slice is merged — `main` at `b9dfd1f`, PR #15, 2026-09-02.**
 It carries the authorization axis, the re-authentication grant, the audit log
 and feature flags end to end; the database browse, the outbound message
 inspector and household metrics are specified but unbuilt. Read
@@ -508,7 +508,12 @@ and no household member can see any of it. **Family is the household area most
 delayed by this**; it is the only one with nothing built at all. The case for
 doing it anyway is that the install is live, sign-up is self-serve and ungated,
 and three of the four exist to make a real install operable by someone who is
-not sitting at its database.
+not sitting at its database. **The first of the four, the audit screen, was
+built and walked the same day, then descoped by the product owner before
+merge** as not needed — the log stays readable through `psql`, and the
+tracker's row (section 9, now 🚫) records what existed and why it went. Three
+remain, in the order the tracker gives: households and metrics, the outbound
+message inspector, the read-only database browse.
 
 **Slice 2 (Money) is done.** Accounts, Transactions, Budget, Goals and
 Bills — all five features — are code-complete, reviewed, and now all

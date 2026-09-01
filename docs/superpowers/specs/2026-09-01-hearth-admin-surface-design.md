@@ -199,6 +199,12 @@ seen.
 The log is readable in the admin UI at `/admin/audit`, newest first, and
 reading it is itself audited.
 
+> **Amended 2026-09-02.** The `/admin/audit` screen was built to this
+> section and §7, walked in a browser, and then descoped by the product
+> owner as not needed; it was removed rather than merged. The log is read
+> through `psql`. Everything else in this section stands, including that
+> any future reader of the log is itself audited by construction.
+
 ---
 
 ## 3. Feature flags
@@ -542,7 +548,7 @@ A `/admin` branch in the existing TanStack route tree, loaded with
   /admin/db/$table           rows
   /admin/mail                outbound messages
   /admin/households          households and metrics
-  /admin/audit               the audit log
+  /admin/audit               the audit log — descoped 2026-09-02, see §2.4
 ```
 
 - **`AdminGate`** renders the re-auth password prompt when the API answers

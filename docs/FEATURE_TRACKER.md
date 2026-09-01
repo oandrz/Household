@@ -11,7 +11,7 @@ needed them to exist (see "Where things stand" below).
 | ✅ | Built and verified |
 | 🟡 | Partly built — the gap is named |
 | ⬜ | Not started |
-| 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
+| 🚫 | Out of scope — marked "· not built" by the design itself, or descoped by the product owner; the row says which |
 
 **Where things stand:** 94 of 120 features built or partly built.
 
@@ -20,6 +20,25 @@ needed them to exist (see "Where things stand" below).
 > move — 77 ✅ and 17 🟡, unchanged — but the denominator does, because four
 > features that existed only as prose are now on the map: 116 → 120, ⬜ 20 →
 > 24. A number going up because the map got honest is the healthy direction.
+>
+> **The summary table itself was not changed with that recount** — it still
+> read Platform administration 4/1/0/0 and Total ⬜ 20, summing to 116 under a
+> headline that said 120. Corrected 2026-09-02 (same day) while answering
+> "what's next": the row now reads 4/1/4/0 and the total ⬜ 24, from a fresh
+> count of the symbols in §9, not a delta.
+>
+> **The audit screen, 2026-09-02, same day — built, walked, then descoped.**
+> Section 9's `/admin/audit` row moves ⬜ → 🚫. The screen was built end to
+> end on branch `admin-audit-screen`, every suite green, and walked in
+> Chrome by the product owner and the agent together; the owner then
+> decided the feature is not needed and asked for it to be removed rather
+> than merged. The code is gone; the log stays readable through `psql`.
+> 🚫 rather than a deleted row, because a feature that was specified,
+> prioritised and then cut is a decision the map should still show — and
+> the first 🚫 that is the owner's call rather than the design's, hence the
+> legend's wording above. Recounting §9 gives 4/1/3/1; totals
+> **77/17/23/3 = 120**, Built + Partial **94**, the same headline as before
+> the day started.
 
 > **In production since 2026-08-15**, at <https://oink.mywire.org>. **No count
 > below changes** — deployment is not a design feature, and this file's totals
@@ -614,7 +633,7 @@ own header says why they are counted anyway. "88 of 111 built or partly
 built" becomes **"94 of 116"**; the gap this file exists to name for the
 flags screen sits in its own cell above, not folded into that number.
 
-| Area | Built | Partial | Not started | Design says no |
+| Area | Built | Partial | Not started | Out of scope |
 |---|---|---|---|---|
 | Entry & authentication | 12 | 1 | 2 | 0 |
 | Navigation shell | 7 | 1 | 1 | 0 |
@@ -624,8 +643,8 @@ flags screen sits in its own cell above, not folded into that number.
 | Marriage | 10 | 0 | 6 | 0 |
 | Family | 0 | 1 | 1 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| Platform administration | 4 | 1 | 0 | 0 |
-| **Total** | **77** | **17** | **20** | **2** |
+| Platform administration | 4 | 1 | 3 | 1 |
+| **Total** | **77** | **17** | **23** | **3** |
 
 ---
 
@@ -1346,8 +1365,10 @@ shaped the way it is, and
 `docs/superpowers/plans/2026-09-02-hearth-admin-surface-verification.md` for
 the browser walk every ✅ and 🟡 below cites.
 
-**The four ⬜ rows below were deliberately out of scope for the slice that
-built the rest, and are now the product's next work** (see "Suggested order").
+**The three ⬜ rows below, and the audit screen that was the fourth until the
+product owner descoped it on 2026-09-02, were deliberately out of scope for
+the slice that built the rest; the three are now the product's next work**
+(see "Suggested order").
 They were described in prose here rather than given rows until 2026-09-02, on
 the reasoning that unbuilt-and-unplanned work is not on the map. That
 reasoning expired the moment they were prioritised: a feature nobody has a row
@@ -1362,7 +1383,7 @@ specifies it in full — none of these needs a fresh design, only a plan.
 | Feature flags — registry, resolution and enforcement | ✅ | Four flags at launch (`signups_open`, `telegram_sign_in`, `notification_delivery`, `family_calendar`); a household override beats a global override beats the compile-time default, resolved fresh on every authenticated request rather than cached. `requireFeature` answers `404`, not `403`, for a disabled route — on pre-auth paths too, where it resolves the global set only, so a household override can never apply before a household is known. Walked directly (criteria 9–12): turning `family_calendar` on globally opened `GET /api/v1/family/calendar`; a household override closed it for that household alone; deleting the override reopened it, proving "no opinion" differs from "explicitly off"; turning `signups_open` off answered `404` on both the public sign-up form and its token-completion route together, and restored both when turned back on |
 | Admin flags screen (`/admin/flags`) | 🟡 | Lists every flag with its description, compile-time default and current global state, and toggles the global value. **Two gaps found on the browser walk; the final fix wave (2026-09-02) closed the accessible-state half of the second, the rest remain open:** there is still no control to *create* a household override — the per-household state the flags model exists to support (a global default with a per-household exception) is reachable only by a hand-written `PUT`, never by a click. The screen's only interactive control — a segmented On/Off toggle — is still 12px muted-grey text on a transparent ground, right-aligned roughly 1900px from its own label, and did not register on a first read of the screen at all, confirmed only through the accessibility tree; placement, not contrast, is the problem (a contrast check on the same text measured roughly 5.4:1, passing WCAG AA), and placement is out of scope for this wave. What the wave did fix: the "Default" segment (no override at all) used to carry its current-ness in background colour alone, with neither it nor a screen reader having any way to say which of the three states — Default, On, Off — was current, since it is a status span rather than a button and so never carried `aria-pressed` the way On and Off do. It now carries `aria-current="true"` whenever it is the flag's current state, so the three states are distinguishable to assistive tech even though the toggle is still hard to find. A green suite proved the underlying toggle worked; it could not have shown that nobody could find it |
 | `adminctl` — `grant-platform-admin`, `revoke-platform-admin`, `list-platform-admins`, `unlock-admin` | ✅ | Four new commands, no UI — the same shape `Retention pruning (adminctl prune)` already has in Household settings, above. `unlock-admin` clears `admin_reauth_attempts` for one user, the admin surface's equivalent of a magic link; walked directly (criterion 7) |
-| Admin audit screen (`/admin/audit`) | ⬜ | The log is written, bounded and readable — `AdminService.RecentAudit` clamps a caller's limit to 500 and defaults to 50 — but nothing renders it, so the only way to read the record of what an operator did is `psql`. The smallest of the four: no new table, no new port, no new config, one route over a repository method that already exists |
+| Admin audit screen (`/admin/audit`) | 🚫 | **Descoped by the product owner on 2026-09-02 — not the design's marking, the owner's decision.** It was built first: `GET /admin/audit?limit=N` in the granted group, `RecentAdminAudit` joined to `users` so rows named their actor, an `AdminAuditPage` with limit-only "Show more" to the service's 500 cap, and a Flags · Audit nav in `AdminShell`; every suite green, three mutation checks red, and a browser walk that found and fixed one defect (the active nav link was indistinguishable — see `docs/LEARNING.md`, Frontend). The owner then judged the screen unnecessary and asked for it to be removed rather than merged. The code is gone from the tree; the log is read through `psql` as before, and `AdminService.RecentAudit` stays in place for the tests that use it. The one thing kept is unrelated to the screen: `useAdminFlags` no longer refetches on window focus, because every refetch of an audited route is itself an audit row. A patch of the removed work was saved outside the repository at the time, but the honest statement is that reinstating it means rebuilding from the spec (§2.4, §7) |
 | Read-only database browse | ⬜ | Design spec §4. **The piece originally asked for.** A separate `SELECT`-only Postgres role (`hearth_readonly`) reached through its own pool from `DATABASE_READONLY_URL`, so a mistake in the adapter's SQL still cannot write; table names validated against `information_schema` rather than interpolated; `statement_timeout` and a page cap; and redaction that fails closed by column *type* (`bytea`) as well as by name, so a secret column added next year is redacted before anyone remembers the rule exists. Unset config means the panel is unavailable — never a silent fallback to the read-write pool. **The only one of the four with an infrastructure dependency:** the role is created during provisioning, not by a migration, so `deploy/PROVISION.md` changes before the feature can run anywhere real |
 | Outbound message inspector | ⬜ | Design spec §5. Proxies Mailpit's HTTP API rather than storing links: every token in this schema is stored hashed, and inventing a raw-link store to solve a convenience problem is the wrong trade. **Closes a live operational pain rather than adding a capability** — under [ADR 3](adr/0003-mail-stays-on-the-box.md) no mail leaves the box, so handing someone an invite today means opening an SSH tunnel to Mailpit and copying the link out by hand (`deploy/README.md`). Needs `MAILPIT_API_URL`; unset means the panel is unavailable. The message bodies contain working magic-link and invite URLs, so opening one is its own audit row |
 | Households and metrics | ⬜ | Design spec §6. Every household with member count, created date, last activity and primary currency; sign-ups requested versus completed; invites still pending. Reads tables that already exist — no analytics table, because a counter that can drift from the rows it counts is worse than a query. Deliberately shows accounts and roles, **not** money: financial data stays behind the database browse, so reading a customer's finances costs a deliberate second step and a second audit row. **Also the prerequisite for closing the Admin flags screen's named gap above** — a per-household override control needs a household to pick, and there is no household list anywhere in the product yet |
@@ -1372,18 +1393,21 @@ specifies it in full — none of these needs a fresh design, only a plan.
 ## Suggested order
 
 **Reprioritised 2026-09-02 by the product owner: the four remaining
-platform-administration features come before any further household work.**
+platform-administration features come before any further household work** —
+three, since the same day the audit screen was built, walked and then
+descoped (its row in section 9 says why).
 That is a preference, not a dependency, and it is worth naming as one — see
 "what this costs" below. The order *within* each group is still dependency.
 
-**First — finish the operator surface (section 9).** All four are specified in
-full in `docs/superpowers/specs/2026-09-01-hearth-admin-surface-design.md`;
+**First — finish the operator surface (section 9).** All three are specified
+in full in `docs/superpowers/specs/2026-09-01-hearth-admin-surface-design.md`;
 none needs a fresh design, only a plan.
 
-1. **Admin audit screen** — smallest by a wide margin. No new table, no new
-   port, no new config; one route over `RecentAudit`, which already exists and
-   already clamps its own limit. Ships in a fraction of the others' time and
-   makes the log the operator can currently only reach through `psql` visible.
+1. ~~**Admin audit screen**~~ — **removed from the roadmap 2026-09-02.**
+   Built and walked that day, then descoped by the product owner as not
+   needed; the log stays readable through `psql`. Not deferred — cut. The
+   numbering below is kept so earlier references to "item 2" still point
+   at the same thing.
 2. **Households and metrics** (§6) — reads tables that already exist, and is
    the prerequisite for closing the flags screen's named 🟡 gap: a
    per-household override control needs a household list to pick from, and

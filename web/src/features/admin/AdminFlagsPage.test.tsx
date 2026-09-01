@@ -1,6 +1,7 @@
 // Follows GoalsPage.test.tsx's own shape: renderWithRouter plus
 // stubFetchRoutes for every request, literal strings asserted rather than
 // any copy this file might one day extract into its own module.
+import { focusManager } from "@tanstack/react-query";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
@@ -209,5 +210,30 @@ describe("AdminFlagsPage", () => {
     await waitFor(() => expect(row.getByRole("button", { name: "On" })).toBeDisabled());
     await waitFor(() => expect(row.getByRole("button", { name: "On" })).not.toBeDisabled());
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
+
+describe("AdminFlagsPage and the audit log", () => {
+  // GET /admin/flags writes an audit row like every other admin request.
+  // With TanStack Query's default, every alt-tab back to this page
+  // refetched the list and wrote a row -- so the log showed the operator
+  // apparently reading flags dozens of times. Watched fail first: two
+  // fetches where one is wanted.
+  it("does not refetch the flag list when the window regains focus", async () => {
+    const fetchMock = stubFetchRoutes({
+      "GET /api/v1/admin/flags": flagsResponse([flagFixture()]),
+    });
+
+    renderWithRouter(<AdminFlagsPage />);
+    await screen.findByTestId("flag-row-family_calendar");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    focusManager.setFocused(false);
+    focusManager.setFocused(true);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    focusManager.setFocused(undefined);
   });
 });

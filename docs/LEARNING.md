@@ -3564,6 +3564,36 @@ route with a missing guard has no second line of defence.
   and disappears silently — nothing errors, nothing logs, and no test in a
   jsdom suite can see a missing glyph. Device coverage is not something a
   desktop review or a screenshot from the developer's own machine can check.
+- **A read that is also a write inherits every hidden trigger of the read.**
+  Every request under `/admin` writes an `admin_audit_log` row before its
+  handler runs — reads included, on purpose (spec §2.4). `useAdminFlags` was
+  a plain `useQuery`, and TanStack Query's default refetches a stale query
+  whenever the tab regains focus. So every alt-tab back to the flags page
+  was a logged "read flags", invisible until the audit screen existed to
+  show the operator apparently reading flags dozens of times, and the audit
+  page's own query would have done the same to itself. Found while building
+  `/admin/audit` (2026-09-02); both reads now set `refetchOnWindowFocus:
+  false`, with a test that flips `focusManager` and asserts the fetch count
+  stays at one — watched fail first (two calls) on the flags page. The audit
+  screen itself was descoped the same day; the fix to the flags read stayed,
+  because the noise it stops is in the log whether or not a screen shows it.
+  **When a GET has a side effect, list the client's implicit refetch
+  triggers — focus, reconnect, mount, interval — and decide each one
+  deliberately;** the library's defaults were chosen for reads that cost
+  nothing to repeat.
+- **TanStack Router's `Link` concatenates `activeProps.className` onto
+  `className`; it does not replace it.** A nav link written as a full base
+  class list plus an active override that repeated two of its utilities
+  (`border-transparent` → `border-accent`, `text-muted` → `text-ink`) rendered
+  both classes at once, and stylesheet order — not intent — decided the
+  colour: the active link looked identical to the inactive one. The jsdom
+  test asserting `aria-current="page"` on the active link passed throughout,
+  because it tested the router's state, not what the classes painted (pattern
+  3: the simulated environment cannot see a CSS conflict). Found on the
+  browser walk of the audit screen (2026-09-02, since descoped) and fixed by
+  splitting the looks across `activeProps` and `inactiveProps` on a shared
+  base that names neither colour. **Put a utility in exactly one of base,
+  active or inactive — never in two.**
 
 ### Tooling and infrastructure
 

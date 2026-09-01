@@ -35,8 +35,16 @@ async function fetchAdminFlags(): Promise<AdminFlagsResponse> {
   return adminFlagsResponseSchema.parse(body);
 }
 
+// refetchOnWindowFocus is off. Every request under /admin writes an
+// admin_audit_log row before its handler runs (middleware_admin.go's
+// auditAdmin), so TanStack Query's default -- refetch a stale query when
+// the tab regains focus -- turned every alt-tab back to this page into a
+// logged "read flags", burying the rows the log exists to surface. Mount
+// and reconnect refetches stay at their defaults on purpose: arriving at
+// the page is a genuine read, and a network drop that comes back is rare
+// enough that one more row is the honest record of it.
 export function useAdminFlags() {
-  return useQuery({ queryKey: adminFlagsKey, queryFn: fetchAdminFlags });
+  return useQuery({ queryKey: adminFlagsKey, queryFn: fetchAdminFlags, refetchOnWindowFocus: false });
 }
 
 // useAdminSession is the re-authentication itself -- AdminGate's password
