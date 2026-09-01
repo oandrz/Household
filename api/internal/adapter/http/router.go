@@ -65,11 +65,15 @@ type Deps struct {
 	// services. Unlike Telegram above they are never nil in a real
 	// deployment: the /admin subtree is always routed, and
 	// requirePlatformAdmin's 404 -- not conditional registration -- is what
-	// hides it. Leaving Admin nil therefore does not just disable /admin: it
-	// panics into recoverer's 500 on every auth flow too, since
-	// buildMeResponse now reads it to answer the me bundle's flags and
-	// admin bit -- sign-in, magic-link consumption and invite acceptance
-	// all resolve through buildMeResponse before ever writing a cookie.
+	// hides it. Admin is required well beyond /admin, though: requireSession
+	// resolves flags through it on every authenticated request, before Scope
+	// is even built, so a nil Admin panics into recoverer's 500 across the
+	// entire authenticated surface -- household, spaces, accounts, money,
+	// the admin subtree itself, everything requireSession gates. The
+	// pre-session auth routes need it too, through buildMeResponse -- see its
+	// own doc comment in auth_handlers.go for which callers that is and why --
+	// since they run before a session exists to hand requireSession anything
+	// to check.
 	Admin       *usecase.AdminService
 	AdminReauth *usecase.AdminReauthService
 	Users       usecase.UserRepository
