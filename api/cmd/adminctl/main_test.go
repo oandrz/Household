@@ -113,3 +113,38 @@ func TestRunPruneRefusesAWindowUnderTheFloor(t *testing.T) {
 		t.Fatalf("err = %v, want it to name the 7-day floor", err)
 	}
 }
+
+// TestGrantPlatformAdminNeedsAnEmail: every one of these commands resolves a
+// person by address, and a missing flag must say so rather than acting on
+// whoever happens to be first in the table.
+func TestGrantPlatformAdminNeedsAnEmail(t *testing.T) {
+	// nil repositories are safe here precisely because the guard returns
+	// before touching either one -- which is the behaviour under test.
+	err := runGrantPlatformAdmin(context.Background(), nil, nil, "", "")
+	if err == nil || !strings.Contains(err.Error(), "--email") {
+		t.Fatalf("runGrantPlatformAdmin with no --email = %v, want an error naming --email", err)
+	}
+}
+
+// TestRevokePlatformAdminNeedsAnEmail is grant's guard again: revoking with
+// no address would revoke nothing identifiable, so it must refuse before
+// ever calling ByEmail or Revoke -- both nil here for the same reason.
+func TestRevokePlatformAdminNeedsAnEmail(t *testing.T) {
+	err := runRevokePlatformAdmin(context.Background(), nil, nil, "")
+	if err == nil || !strings.Contains(err.Error(), "--email") {
+		t.Fatalf("runRevokePlatformAdmin with no --email = %v, want an error naming --email", err)
+	}
+}
+
+// TestUsageListsEveryAdminCommand keeps the help text honest: a command
+// nobody can discover is a command nobody uses.
+func TestUsageListsEveryAdminCommand(t *testing.T) {
+	for _, want := range []string{
+		"grant-platform-admin", "revoke-platform-admin",
+		"list-platform-admins", "unlock-admin",
+	} {
+		if !strings.Contains(usage, want) {
+			t.Fatalf("usage does not mention %q", want)
+		}
+	}
+}
