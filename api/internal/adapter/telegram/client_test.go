@@ -69,3 +69,21 @@ func TestGetUpdatesDecodesResults(t *testing.T) {
 		t.Fatalf("updates = %+v, want one update with id 7", updates)
 	}
 }
+
+// A token with a stray control character -- a trailing newline from a
+// copy-pasted secrets file is the realistic case -- makes the request URL
+// itself invalid. http.NewRequestWithContext's error in that case is a
+// url.Error, which embeds the full (rejected) URL and therefore the token;
+// it must never reach the caller unwrapped, on this path any more than on
+// the "telegram answered not ok" path above.
+func TestSendMessageDoesNotLeakTokenWhenTokenBreaksTheURL(t *testing.T) {
+	token := "secret-token\nwith-a-control-character"
+	c := newClientWithBase(token, "https://api.telegram.org")
+	err := c.SendMessage(context.Background(), 4242, "hello")
+	if err == nil {
+		t.Fatal("SendMessage() = nil, want an error for a token that breaks the URL")
+	}
+	if strings.Contains(err.Error(), token) || strings.Contains(err.Error(), "secret-token") {
+		t.Fatalf("the bot token leaked into an error message: %v", err)
+	}
+}

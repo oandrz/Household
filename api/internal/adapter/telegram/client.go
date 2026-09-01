@@ -49,7 +49,11 @@ func (c *Client) call(ctx context.Context, method string, body any, out any) err
 	url := fmt.Sprintf("%s/bot%s/%s", c.base, c.token, method)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(encoded))
 	if err != nil {
-		return fmt.Errorf("build %s request: %w", method, err)
+		// Same reason as the transport error below: NewRequestWithContext
+		// parses the URL, and a url.Error carries that URL -- which contains
+		// the bot token -- so it must not be wrapped with %w into anything
+		// that leaves this package.
+		return fmt.Errorf("build %s request: invalid request", method)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
