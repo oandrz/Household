@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -18,6 +19,9 @@ func TestSignupsRefuseBothChannels(t *testing.T) {
 	if err == nil {
 		t.Fatal("insert with both channels succeeded, want constraint violation")
 	}
+	if !strings.Contains(err.Error(), "signups_have_exactly_one_channel") {
+		t.Fatalf("err = %v, want a signups_have_exactly_one_channel violation", err)
+	}
 }
 
 func TestSignupsRefuseNeitherChannel(t *testing.T) {
@@ -29,6 +33,9 @@ func TestSignupsRefuseNeitherChannel(t *testing.T) {
 		 VALUES ('\x01', now() + interval '1 hour')`)
 	if err == nil {
 		t.Fatal("insert with no channel succeeded, want constraint violation")
+	}
+	if !strings.Contains(err.Error(), "signups_have_exactly_one_channel") {
+		t.Fatalf("err = %v, want a signups_have_exactly_one_channel violation", err)
 	}
 }
 
@@ -44,5 +51,8 @@ func TestConsumedLinkRequestsMustNameTheirChat(t *testing.T) {
 		 VALUES ('\x02', now() + interval '1 hour', now())`)
 	if err == nil {
 		t.Fatal("consumed row with no chat_id succeeded, want constraint violation")
+	}
+	if !strings.Contains(err.Error(), "consumed_rows_name_their_chat") {
+		t.Fatalf("err = %v, want a consumed_rows_name_their_chat violation", err)
 	}
 }
