@@ -140,6 +140,9 @@ type SessionRecord struct {
 	// AdminGrantExpiresAt is nil for every ordinary session. It is non-nil
 	// only between a successful POST /admin/session and that grant's expiry.
 	AdminGrantExpiresAt *time.Time
+	// LastSeenAt is nil until the first Touch after migration 00013.
+	// Readers treat nil as "use CreatedAt" -- see the migration's comment.
+	LastSeenAt *time.Time
 }
 
 type SessionRepository interface {
@@ -152,6 +155,12 @@ type SessionRepository interface {
 	// clears it. It writes one column: session extension and this must not
 	// overwrite each other.
 	GrantAdmin(ctx context.Context, tokenHash []byte, expiresAt *time.Time) error
+	// Touch records that the session was used at `at`. It writes one
+	// column, last_seen_at, and must not be folded into Extend or
+	// GrantAdmin: each of the three owns its column so none can overwrite
+	// another's. Callers throttle it (middleware_session.go); the
+	// repository does not.
+	Touch(ctx context.Context, tokenHash []byte, at time.Time) error
 }
 
 type MagicLinkRepository interface {

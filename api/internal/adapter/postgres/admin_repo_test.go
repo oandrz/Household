@@ -166,6 +166,63 @@ func TestExtendingASessionKeepsItsAdminGrant(t *testing.T) {
 	}
 }
 
+// TestTouchWritesOnlyLastSeenAt is Touch's half of the one-column rule
+// TestExtendingASessionKeepsItsAdminGrant states for Extend and GrantAdmin:
+// each of the three writes its own column and none can overwrite another's.
+func TestTouchWritesOnlyLastSeenAt(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	users := postgres.NewUserRepo(db)
+	households := postgres.NewHouseholdRepo(db)
+	sessions := postgres.NewSessionRepo(db)
+
+	household, err := households.Create(ctx, domain.Household{Name: "Test", FamilyName: "Test", PrimaryCurrency: "SGD"})
+	if err != nil {
+		t.Fatalf("create household: %v", err)
+	}
+	user, err := users.Create(ctx, "touch@example.test", "", "Touch")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	tokenHash := []byte("a-32-byte-looking-token-hash-tch")
+	expiry := time.Now().Add(time.Hour).UTC().Truncate(time.Millisecond)
+	if err := sessions.Create(ctx, tokenHash, user.ID, household.ID, expiry); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	grant := time.Now().Add(30 * time.Minute).UTC().Truncate(time.Millisecond)
+	if err := sessions.GrantAdmin(ctx, tokenHash, &grant); err != nil {
+		t.Fatalf("GrantAdmin: %v", err)
+	}
+
+	before, err := sessions.ByTokenHash(ctx, tokenHash)
+	if err != nil {
+		t.Fatalf("ByTokenHash before touch: %v", err)
+	}
+	if before.LastSeenAt != nil {
+		t.Fatalf("LastSeenAt before any touch = %v, want nil", before.LastSeenAt)
+	}
+
+	seen := time.Now().UTC().Truncate(time.Millisecond)
+	if err := sessions.Touch(ctx, tokenHash, seen); err != nil {
+		t.Fatalf("Touch: %v", err)
+	}
+
+	after, err := sessions.ByTokenHash(ctx, tokenHash)
+	if err != nil {
+		t.Fatalf("ByTokenHash after touch: %v", err)
+	}
+	if after.LastSeenAt == nil || !after.LastSeenAt.Equal(seen) {
+		t.Fatalf("LastSeenAt = %v, want %v", after.LastSeenAt, seen)
+	}
+	if !after.ExpiresAt.Equal(expiry) {
+		t.Fatalf("Touch moved expires_at: %v, want %v", after.ExpiresAt, expiry)
+	}
+	if after.AdminGrantExpiresAt == nil || !after.AdminGrantExpiresAt.Equal(grant) {
+		t.Fatalf("Touch changed the admin grant: %v, want %v", after.AdminGrantExpiresAt, grant)
+	}
+}
+
 func TestAdminAuditRepoRecordsAndReadsBack(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)

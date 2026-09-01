@@ -436,7 +436,7 @@ func (q *Queries) GetLiveInviteForEmail(ctx context.Context, arg GetLiveInviteFo
 }
 
 const getLiveSession = `-- name: GetLiveSession :one
-SELECT id, user_id, household_id, expires_at, admin_grant_expires_at FROM sessions
+SELECT id, user_id, household_id, expires_at, admin_grant_expires_at, last_seen_at FROM sessions
 WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()
 `
 
@@ -446,6 +446,7 @@ type GetLiveSessionRow struct {
 	HouseholdID         pgtype.UUID
 	ExpiresAt           pgtype.Timestamptz
 	AdminGrantExpiresAt pgtype.Timestamptz
+	LastSeenAt          pgtype.Timestamptz
 }
 
 func (q *Queries) GetLiveSession(ctx context.Context, tokenHash []byte) (GetLiveSessionRow, error) {
@@ -457,6 +458,7 @@ func (q *Queries) GetLiveSession(ctx context.Context, tokenHash []byte) (GetLive
 		&i.HouseholdID,
 		&i.ExpiresAt,
 		&i.AdminGrantExpiresAt,
+		&i.LastSeenAt,
 	)
 	return i, err
 }
@@ -860,6 +862,23 @@ type SetPasswordHashParams struct {
 
 func (q *Queries) SetPasswordHash(ctx context.Context, arg SetPasswordHashParams) error {
 	_, err := q.db.Exec(ctx, setPasswordHash, arg.ID, arg.PasswordHash)
+	return err
+}
+
+const touchSession = `-- name: TouchSession :exec
+UPDATE sessions SET last_seen_at = $2 WHERE token_hash = $1
+`
+
+type TouchSessionParams struct {
+	TokenHash  []byte
+	LastSeenAt pgtype.Timestamptz
+}
+
+// One column, the same rule ExtendSession and GrantAdminSession follow:
+// expires_at, admin_grant_expires_at and last_seen_at are each written by
+// exactly one statement, so none can silently undo another.
+func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) error {
+	_, err := q.db.Exec(ctx, touchSession, arg.TokenHash, arg.LastSeenAt)
 	return err
 }
 

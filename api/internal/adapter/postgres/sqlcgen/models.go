@@ -240,6 +240,7 @@ type Session struct {
 	ExpiresAt           pgtype.Timestamptz
 	RevokedAt           pgtype.Timestamptz
 	AdminGrantExpiresAt pgtype.Timestamptz
+	LastSeenAt          pgtype.Timestamptz
 }
 
 type Signup struct {
