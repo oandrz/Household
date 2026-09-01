@@ -11,7 +11,8 @@ surface and is deliberately self-contained.
 
 ## 1. Status
 
-**Branch `admin-surface`, 30 commits from `938f88f`. Not merged. Not
+**Branch `admin-surface`, open as
+[PR #15](https://github.com/oandrz/Household/pull/15). Not merged. Not
 deployed.** Nothing in this work has ever run in production.
 
 - `make lint` and `make test` both exit 0 on the branch head: 11 of 11 Go
