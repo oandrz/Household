@@ -274,4 +274,11 @@ func TestHandleStartSendsASignUpLinkBelowTheGlobalDailyCeiling(t *testing.T) {
 	if doubles.signups.telegramCount(889) != 1 {
 		t.Fatalf("telegram signups created = %d, want 1", doubles.signups.telegramCount(889))
 	}
+	// Same class of gap as Item 3(b): telegramSenderDouble.lastTo returns ""
+	// for "nothing was sent", so a mutation that stops sendSignUp from ever
+	// calling say() on its success path -- provisioning the row but telling
+	// nobody about it -- would leave the createCount assertion above green.
+	if sent := doubles.sender.lastTo(889); !strings.Contains(sent, "/sign-up/") {
+		t.Fatalf("message = %q, want the sign-up URL", sent)
+	}
 }
