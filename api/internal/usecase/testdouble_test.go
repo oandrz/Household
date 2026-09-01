@@ -796,11 +796,12 @@ func (d *inviteDouble) Accept(ctx context.Context, inviteID, email, passwordHash
 // --- SignupRepository -------------------------------------------------
 
 type signupRow struct {
-	ID         string
-	Email      string
-	CreatedAt  time.Time
-	ExpiresAt  time.Time
-	ConsumedAt *time.Time
+	ID             string
+	Email          string
+	TelegramChatID *int64
+	CreatedAt      time.Time
+	ExpiresAt      time.Time
+	ConsumedAt     *time.Time
 }
 
 // signupDouble plays the same role postgres's (future) SignupRepo plays over
@@ -956,13 +957,32 @@ func (d *signupDouble) CreateConsumed(_ context.Context, email string, tokenHash
 	return nil
 }
 
+// CreateForTelegram mirrors Create, except the row names a chat id instead of
+// an address -- CreateForTelegram's own doc comment in ports.go says why the
+// two are mutually exclusive per row. It shares failCreate with Create and
+// CreateConsumed, for the same reason CreateConsumed does.
+func (d *signupDouble) CreateForTelegram(_ context.Context, chatID int64, tokenHash []byte, expiresAt time.Time) error {
+	if d.failCreate != nil {
+		err := d.failCreate
+		d.failCreate = nil
+		return err
+	}
+	d.n++
+	d.rows[string(tokenHash)] = &signupRow{
+		ID: fmt.Sprintf("signup-%d", d.n), TelegramChatID: &chatID,
+		CreatedAt: d.clock.Now(), ExpiresAt: expiresAt,
+	}
+	return nil
+}
+
 func (d *signupDouble) ByTokenHash(_ context.Context, tokenHash []byte) (usecase.SignupDetails, error) {
 	row, ok := d.rows[string(tokenHash)]
 	if !ok {
 		return usecase.SignupDetails{}, domain.ErrNotFound
 	}
 	return usecase.SignupDetails{
-		ID: row.ID, Email: row.Email, ExpiresAt: row.ExpiresAt, ConsumedAt: row.ConsumedAt,
+		ID: row.ID, Email: row.Email, TelegramChatID: row.TelegramChatID,
+		ExpiresAt: row.ExpiresAt, ConsumedAt: row.ConsumedAt,
 	}, nil
 }
 

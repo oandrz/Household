@@ -47,16 +47,28 @@ func (r *SignupRepo) CreateConsumed(ctx context.Context, email string, tokenHash
 	}), "create consumed signup")
 }
 
+// CreateForTelegram is CreateSignup's Telegram twin -- see the doc comment on
+// usecase.SignupRepository.CreateForTelegram for why the two are mutually
+// exclusive per row.
+func (r *SignupRepo) CreateForTelegram(ctx context.Context, chatID int64, tokenHash []byte, expiresAt time.Time) error {
+	return translate(r.q.CreateTelegramSignup(ctx, sqlcgen.CreateTelegramSignupParams{
+		TelegramChatID: &chatID,
+		TokenHash:      tokenHash,
+		ExpiresAt:      timestamptz(expiresAt),
+	}), "create telegram signup")
+}
+
 func (r *SignupRepo) ByTokenHash(ctx context.Context, tokenHash []byte) (usecase.SignupDetails, error) {
 	row, err := r.q.GetSignupByTokenHash(ctx, tokenHash)
 	if err != nil {
 		return usecase.SignupDetails{}, translate(err, "get signup by token hash")
 	}
 	return usecase.SignupDetails{
-		ID:         uuidToString(row.ID),
-		Email:      stringOrEmpty(row.Email),
-		ExpiresAt:  timeOf(row.ExpiresAt),
-		ConsumedAt: timePtrOf(row.ConsumedAt),
+		ID:             uuidToString(row.ID),
+		Email:          stringOrEmpty(row.Email),
+		TelegramChatID: row.TelegramChatID,
+		ExpiresAt:      timeOf(row.ExpiresAt),
+		ConsumedAt:     timePtrOf(row.ConsumedAt),
 	}, nil
 }
 
@@ -162,6 +174,23 @@ func (r *SignupRepo) Provision(ctx context.Context, signupID, passwordHash strin
 	})
 	if err != nil {
 		return usecase.ProvisionedHousehold{}, translate(err, "create owner membership for signup")
+	}
+
+	// Bind the chat from the row that was just claimed, never from a caller.
+	// This is the same rule ConsumeSignup's comment states for the email: the
+	// verified value reaches the user row from the row being claimed, so no
+	// caller can substitute a different one.
+	//
+	// It is inside this transaction, not after it, because a household that
+	// exists with its chat unbound is an account its owner can never sign into
+	// again -- the token is spent and there is no other way in.
+	if claimed.TelegramChatID != nil {
+		if err := q.CreateTelegramAccount(ctx, sqlcgen.CreateTelegramAccountParams{
+			UserID: userRow.ID,
+			ChatID: *claimed.TelegramChatID,
+		}); err != nil {
+			return usecase.ProvisionedHousehold{}, translate(err, "bind telegram account for signup")
+		}
 	}
 
 	// domain.BuiltinSpaces is called here, inside the transaction, because it

@@ -241,12 +241,15 @@ type InviteRepository interface {
 		householdID string, role domain.Role, caps domain.Capabilities) (AcceptedInvite, error)
 }
 
-// SignupDetails is a pending sign-up, read back by token.
+// SignupDetails is a pending sign-up, read back by token. Exactly one of
+// Email and TelegramChatID is set -- the signups_have_exactly_one_channel
+// constraint makes that a database guarantee, not a convention.
 type SignupDetails struct {
-	ID         string
-	Email      string
-	ExpiresAt  time.Time
-	ConsumedAt *time.Time
+	ID             string
+	Email          string
+	TelegramChatID *int64
+	ExpiresAt      time.Time
+	ConsumedAt     *time.Time
 }
 
 // ProvisionedHousehold is what a successful provision produces.
@@ -273,6 +276,10 @@ type SignupRepository interface {
 	// NULL -- so it exists solely to be counted, and its token is never
 	// mailed to anyone.
 	CreateConsumed(ctx context.Context, email string, tokenHash []byte, expiresAt time.Time) error
+	// CreateForTelegram writes a signup row whose channel is a Telegram chat
+	// rather than an email address. It and Create are mutually exclusive per
+	// row, enforced by signups_have_exactly_one_channel.
+	CreateForTelegram(ctx context.Context, chatID int64, tokenHash []byte, expiresAt time.Time) error
 	ByTokenHash(ctx context.Context, tokenHash []byte) (SignupDetails, error)
 	// CountForEmailSince counts sign-up requests for one address since a
 	// cutoff, over rows written by both Create and CreateConsumed. Unlike
