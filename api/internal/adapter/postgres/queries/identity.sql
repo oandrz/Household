@@ -79,11 +79,16 @@ VALUES ($1, $2, $3, $4)
 RETURNING id;
 
 -- name: GetLiveSession :one
-SELECT id, user_id, household_id, expires_at FROM sessions
+SELECT id, user_id, household_id, expires_at, admin_grant_expires_at FROM sessions
 WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now();
 
 -- name: ExtendSession :exec
 UPDATE sessions SET expires_at = $2 WHERE token_hash = $1;
+
+-- name: GrantAdminSession :exec
+-- One column, deliberately: ExtendSession writes expires_at and this writes
+-- the grant, so neither can silently undo the other.
+UPDATE sessions SET admin_grant_expires_at = $2 WHERE token_hash = $1;
 
 -- name: RevokeSessionByToken :exec
 UPDATE sessions SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL;

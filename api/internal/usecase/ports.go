@@ -137,6 +137,9 @@ type SessionRecord struct {
 	UserID      string
 	HouseholdID string
 	ExpiresAt   time.Time
+	// AdminGrantExpiresAt is nil for every ordinary session. It is non-nil
+	// only between a successful POST /admin/session and that grant's expiry.
+	AdminGrantExpiresAt *time.Time
 }
 
 type SessionRepository interface {
@@ -145,6 +148,10 @@ type SessionRepository interface {
 	Extend(ctx context.Context, tokenHash []byte, expiresAt time.Time) error
 	RevokeByToken(ctx context.Context, tokenHash []byte) error
 	RevokeAllForUser(ctx context.Context, userID string) error
+	// GrantAdmin stamps this session's admin re-auth grant. A nil expiry
+	// clears it. It writes one column: session extension and this must not
+	// overwrite each other.
+	GrantAdmin(ctx context.Context, tokenHash []byte, expiresAt *time.Time) error
 }
 
 type MagicLinkRepository interface {
@@ -203,6 +210,66 @@ type LoginAttemptRepository interface {
 	// domain.LockoutPolicy.Window. Deleting a row still inside that window
 	// would clear a live lockout: a security regression dressed as a cleanup.
 	Prune(ctx context.Context, before time.Time) (int64, error)
+}
+
+// The platform admin ports. Platform admin is an axis orthogonal to
+// household Role and Capabilities (see domain/admin.go): these repositories
+// answer "who runs this install", never "what may this member do".
+//
+// Nothing here decides whether a caller is allowed to do something. The HTTP
+// layer's requirePlatformAdmin does that. Where a userID is passed into a
+// write below it is stored -- in updated_by, or in the audit row -- and never
+// consulted for permission.
+
+type PlatformAdminRepository interface {
+	Get(ctx context.Context, userID string) (domain.PlatformAdmin, error)
+	Grant(ctx context.Context, userID, note string) error
+	Revoke(ctx context.Context, userID string) error
+	List(ctx context.Context) ([]PlatformAdminListing, error)
+}
+
+type PlatformAdminListing struct {
+	UserID      string
+	Email       string
+	DisplayName string
+	Note        string
+	CreatedAt   time.Time
+}
+
+type FeatureFlagRepository interface {
+	OverridesFor(ctx context.Context, householdID string) (global, household map[string]bool, err error)
+	GlobalOverrides(ctx context.Context) (map[string]bool, error)
+	AllHouseholdOverrides(ctx context.Context) ([]HouseholdFlagOverride, error)
+	SetGlobal(ctx context.Context, key string, enabled bool, updatedBy string) error
+	SetHousehold(ctx context.Context, householdID, key string, enabled bool, updatedBy string) error
+	ClearHousehold(ctx context.Context, householdID, key string) error
+}
+
+type HouseholdFlagOverride struct {
+	HouseholdID   string
+	HouseholdName string
+	Key           string
+	Enabled       bool
+}
+
+type AdminAuditEntry struct {
+	ActorUserID string
+	Action      string
+	Target      string
+	Detail      map[string]any
+	IP          string
+	At          time.Time
+}
+
+type AdminAuditRepository interface {
+	Record(ctx context.Context, entry AdminAuditEntry) error
+	Recent(ctx context.Context, limit int) ([]AdminAuditEntry, error)
+}
+
+type AdminReauthAttemptRepository interface {
+	Record(ctx context.Context, userID string, succeeded bool, at time.Time) error
+	FailuresSince(ctx context.Context, userID string, since time.Time) ([]time.Time, error)
+	ClearFailures(ctx context.Context, userID string) error
 }
 
 type InviteDetails struct {

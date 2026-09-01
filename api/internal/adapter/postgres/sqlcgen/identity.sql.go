@@ -436,15 +436,16 @@ func (q *Queries) GetLiveInviteForEmail(ctx context.Context, arg GetLiveInviteFo
 }
 
 const getLiveSession = `-- name: GetLiveSession :one
-SELECT id, user_id, household_id, expires_at FROM sessions
+SELECT id, user_id, household_id, expires_at, admin_grant_expires_at FROM sessions
 WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()
 `
 
 type GetLiveSessionRow struct {
-	ID          pgtype.UUID
-	UserID      pgtype.UUID
-	HouseholdID pgtype.UUID
-	ExpiresAt   pgtype.Timestamptz
+	ID                  pgtype.UUID
+	UserID              pgtype.UUID
+	HouseholdID         pgtype.UUID
+	ExpiresAt           pgtype.Timestamptz
+	AdminGrantExpiresAt pgtype.Timestamptz
 }
 
 func (q *Queries) GetLiveSession(ctx context.Context, tokenHash []byte) (GetLiveSessionRow, error) {
@@ -455,6 +456,7 @@ func (q *Queries) GetLiveSession(ctx context.Context, tokenHash []byte) (GetLive
 		&i.UserID,
 		&i.HouseholdID,
 		&i.ExpiresAt,
+		&i.AdminGrantExpiresAt,
 	)
 	return i, err
 }
@@ -592,6 +594,22 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (GetUserByIDR
 		&i.AvatarInitial,
 	)
 	return i, err
+}
+
+const grantAdminSession = `-- name: GrantAdminSession :exec
+UPDATE sessions SET admin_grant_expires_at = $2 WHERE token_hash = $1
+`
+
+type GrantAdminSessionParams struct {
+	TokenHash           []byte
+	AdminGrantExpiresAt pgtype.Timestamptz
+}
+
+// One column, deliberately: ExtendSession writes expires_at and this writes
+// the grant, so neither can silently undo the other.
+func (q *Queries) GrantAdminSession(ctx context.Context, arg GrantAdminSessionParams) error {
+	_, err := q.db.Exec(ctx, grantAdminSession, arg.TokenHash, arg.AdminGrantExpiresAt)
+	return err
 }
 
 const listMemberships = `-- name: ListMemberships :many

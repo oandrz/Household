@@ -344,10 +344,11 @@ func (d *membershipDouble) Delete(_ context.Context, householdID, membershipID s
 // --- SessionRepository ----------------------------------------------
 
 type sessionRow struct {
-	UserID      string
-	HouseholdID string
-	ExpiresAt   time.Time
-	Revoked     bool
+	UserID              string
+	HouseholdID         string
+	ExpiresAt           time.Time
+	Revoked             bool
+	AdminGrantExpiresAt *time.Time
 }
 
 type sessionDouble struct {
@@ -381,7 +382,12 @@ func (d *sessionDouble) ByTokenHash(_ context.Context, tokenHash []byte) (usecas
 	if !ok || row.Revoked || !row.ExpiresAt.After(d.clock.Now()) {
 		return usecase.SessionRecord{}, domain.ErrNotFound
 	}
-	return usecase.SessionRecord{UserID: row.UserID, HouseholdID: row.HouseholdID, ExpiresAt: row.ExpiresAt}, nil
+	return usecase.SessionRecord{
+		UserID:              row.UserID,
+		HouseholdID:         row.HouseholdID,
+		ExpiresAt:           row.ExpiresAt,
+		AdminGrantExpiresAt: row.AdminGrantExpiresAt,
+	}, nil
 }
 
 func (d *sessionDouble) Extend(_ context.Context, tokenHash []byte, expiresAt time.Time) error {
@@ -389,6 +395,16 @@ func (d *sessionDouble) Extend(_ context.Context, tokenHash []byte, expiresAt ti
 		row.ExpiresAt = expiresAt
 	}
 	return nil // ExtendSession is :exec — an unknown token is a silent no-op.
+}
+
+// GrantAdmin mirrors the real repository's one-column write: it must never
+// touch ExpiresAt, the same separation TestExtendingASessionKeepsItsAdminGrant
+// checks against Postgres.
+func (d *sessionDouble) GrantAdmin(_ context.Context, tokenHash []byte, expiresAt *time.Time) error {
+	if row, ok := d.rows[string(tokenHash)]; ok {
+		row.AdminGrantExpiresAt = expiresAt
+	}
+	return nil
 }
 
 func (d *sessionDouble) RevokeByToken(_ context.Context, tokenHash []byte) error {

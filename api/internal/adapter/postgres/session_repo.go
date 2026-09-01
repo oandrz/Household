@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres/sqlcgen"
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
@@ -31,9 +33,10 @@ func (r *SessionRepo) ByTokenHash(ctx context.Context, tokenHash []byte) (usecas
 		return usecase.SessionRecord{}, translate(err, "get live session")
 	}
 	return usecase.SessionRecord{
-		UserID:      uuidToString(row.UserID),
-		HouseholdID: uuidToString(row.HouseholdID),
-		ExpiresAt:   timeOf(row.ExpiresAt),
+		UserID:              uuidToString(row.UserID),
+		HouseholdID:         uuidToString(row.HouseholdID),
+		ExpiresAt:           timeOf(row.ExpiresAt),
+		AdminGrantExpiresAt: timePtrOf(row.AdminGrantExpiresAt),
 	}, nil
 }
 
@@ -50,4 +53,18 @@ func (r *SessionRepo) RevokeByToken(ctx context.Context, tokenHash []byte) error
 
 func (r *SessionRepo) RevokeAllForUser(ctx context.Context, userID string) error {
 	return translate(r.q.RevokeSessionsForUser(ctx, uuid(userID)), "revoke sessions for user")
+}
+
+// GrantAdmin writes only admin_grant_expires_at. Extend writes only
+// expires_at. Keeping them to one column each is what makes extending a
+// session near its expiry safe in the middle of an admin session.
+func (r *SessionRepo) GrantAdmin(ctx context.Context, tokenHash []byte, expiresAt *time.Time) error {
+	var stamp pgtype.Timestamptz
+	if expiresAt != nil {
+		stamp = timestamptz(*expiresAt)
+	}
+	return translate(r.q.GrantAdminSession(ctx, sqlcgen.GrantAdminSessionParams{
+		TokenHash:           tokenHash,
+		AdminGrantExpiresAt: stamp,
+	}), "grant admin session")
 }
