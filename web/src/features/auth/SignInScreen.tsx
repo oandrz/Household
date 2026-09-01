@@ -15,6 +15,7 @@ import {
   apiErrorMessage,
   isPlausibleEmail,
   TELEGRAM_FALLBACK_ERROR,
+  TELEGRAM_POPUP_BLOCKED_MESSAGE,
   triesLeftPhrase,
 } from "./copy";
 import { MagicLinkSentPanel } from "./MagicLinkSentPanel";
@@ -54,6 +55,13 @@ export function SignInScreen() {
   // message is computed once in the mutation's own onError rather than
   // carried as a raw error for the render to re-derive.
   const [telegramError, setTelegramError] = useState<string | null>(null);
+  // Set only when the synchronous window.open below returned null -- the
+  // person has popups blocked. Distinct from telegramError: this isn't a
+  // failure, the request succeeded, there's just no window to point at the
+  // result, so this carries the URL itself rather than a message.
+  const [telegramFallbackUrl, setTelegramFallbackUrl] = useState<
+    string | null
+  >(null);
 
   const signIn = useSignIn();
   const requestMagicLink = useRequestMagicLink();
@@ -326,16 +334,62 @@ export function SignInScreen() {
             <>
               <button
                 type="button"
-                onClick={() =>
+                onClick={() => {
+                  // Fix round 1, Item 2 (CONTROLLER RULING R12): clear both
+                  // per-attempt banners at the start of every click, not just
+                  // on success -- otherwise a stale error (or a stale
+                  // popup-blocked link) from a previous failed attempt keeps
+                  // showing under a control that just worked. This file
+                  // already carries two earlier instances of exactly this
+                  // defect class for magicLinkError/magicLinkValidationError
+                  // ("Fix round 2, Finding 1" and "Fix round 3, Finding 1");
+                  // this would have been the third.
+                  setTelegramError(null);
+                  setTelegramFallbackUrl(null);
+                  // Fix round 1, Item 1 (CONTROLLER RULING R13): opened here,
+                  // synchronously inside the click handler, not in
+                  // onSuccess below. WebKit gates window.open on the
+                  // synchronous gesture call stack, and an awaited fetch
+                  // reliably breaks that gate -- the textbook
+                  // OAuth-popup-blocked-on-Safari failure. Chromium's
+                  // transient-activation window is looser (so a fetch-then-
+                  // open often works on a fast desktop) but degrades under
+                  // real mobile latency. Opening a blank tab now, then
+                  // pointing it at the real URL once the mutation resolves,
+                  // keeps the open() call itself inside the activation
+                  // window regardless of how long the request takes.
+                  //
+                  // No "noopener" third argument here: per spec,
+                  // window.open(url, target, "noopener") returns null, which
+                  // would leave nothing to navigate once the response
+                  // arrives. Dropping it is fine -- the URL this tab is
+                  // later pointed at is first-party and minted by this
+                  // backend, not attacker-controlled, so the opener-hijack
+                  // risk "noopener" guards against does not apply here.
+                  const popup = window.open("", "_blank");
                   startTelegram.mutate(undefined, {
-                    onSuccess: (data) =>
-                      window.open(data.url, "_blank", "noopener"),
+                    onSuccess: (data) => {
+                      if (popup) {
+                        popup.location.href = data.url;
+                        return;
+                      }
+                      // The synchronous open above still came back null --
+                      // the person has popups hard-blocked. That is exactly
+                      // the failure this whole shape exists to avoid, so
+                      // silence is not an option: surface the URL as a real
+                      // link so the flow is still completable with one more
+                      // tap.
+                      setTelegramFallbackUrl(data.url);
+                    },
                     // A 404 means this install has no bot configured (see
                     // handleTelegramStart's own comment: it answers exactly
                     // like an unrouted path, on purpose). Hide the control
                     // rather than showing an error the person can do
-                    // nothing about.
+                    // nothing about. Either way, the blank tab opened above
+                    // has nowhere useful to go, so close it rather than
+                    // leaving a bare about:blank tab behind.
                     onError: (err) => {
+                      popup?.close();
                       if (err instanceof ApiError && err.status === 404) {
                         setTelegramUnavailable(true);
                         return;
@@ -344,8 +398,8 @@ export function SignInScreen() {
                         apiErrorMessage(err, TELEGRAM_FALLBACK_ERROR),
                       );
                     },
-                  })
-                }
+                  });
+                }}
                 disabled={startTelegram.isPending}
                 className="mt-2 w-full rounded-[9px] border border-hairline py-2.5 text-center text-[13px] font-semibold text-label disabled:cursor-not-allowed disabled:opacity-60"
               >
@@ -359,6 +413,19 @@ export function SignInScreen() {
                   <span className="font-bold">!</span>
                   <span>{telegramError}</span>
                 </div>
+              )}
+              {telegramFallbackUrl && (
+                <p className="mt-2 text-xs leading-snug text-label">
+                  {TELEGRAM_POPUP_BLOCKED_MESSAGE}{" "}
+                  <a
+                    href={telegramFallbackUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-semibold text-accent"
+                  >
+                    Open Telegram
+                  </a>
+                </p>
               )}
             </>
           )}

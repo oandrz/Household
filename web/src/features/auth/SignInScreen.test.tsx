@@ -679,8 +679,80 @@ describe("SignInScreen", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("opens the returned Telegram deep link when Continue with Telegram is pressed", async () => {
-    const open = vi.fn();
+  // Fix round 1, Item 1 (CONTROLLER RULING R13): the popup must be opened
+  // synchronously, inside the click itself, not after the fetch resolves --
+  // WebKit gates window.open on the synchronous gesture call stack, and an
+  // awaited fetch reliably breaks that gate. The fetch is held open with a
+  // manually-resolved promise specifically so this test can assert the open
+  // call happened *before* anything about the request has settled, not just
+  // that it eventually happened somewhere in the sequence.
+  it("opens a blank tab synchronously in the click, then points it at the returned deep link once the request resolves", async () => {
+    const fakePopup = { location: { href: "" }, close: vi.fn() };
+    const open = vi.fn(() => fakePopup as unknown as Window);
+    vi.stubGlobal("open", open);
+
+    let resolveStart!: (response: Response) => void;
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === TELEGRAM_START_URL) {
+        return new Promise<Response>((resolve) => {
+          resolveStart = resolve;
+        });
+      }
+      throw new Error(`unexpected fetch call: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await renderSignIn();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Continue with Telegram" }),
+    );
+
+    // The fetch above is still pending (resolveStart hasn't been called
+    // yet) -- so if this assertion holds, window.open ran inside the click
+    // itself, not inside an onSuccess that waited on the network. No
+    // "noopener" argument: that makes window.open return null per spec,
+    // which would leave nothing to navigate below.
+    expect(open).toHaveBeenCalledWith("", "_blank");
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(fakePopup.location.href).toBe("");
+
+    // TanStack Query dispatches the mutation's fetch asynchronously (a
+    // microtask or two after mutate() is called), so `resolveStart` isn't
+    // assigned the instant fireEvent.click returns -- wait for the request
+    // to actually be in flight before resolving it. This waits on the
+    // network call being *dispatched*, not on anything settling, so it
+    // doesn't undercut the synchronous-open assertions above.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      resolveStart(
+        new Response(
+          JSON.stringify({
+            url: "https://t.me/HearthBot?start=abc123",
+            expiresAt: "2026-09-01T10:10:00Z",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // The same handle is pointed somewhere else -- not a second
+    // window.open call once the URL is known.
+    expect(fakePopup.location.href).toBe(
+      "https://t.me/HearthBot?start=abc123",
+    );
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  // Fix round 1, Item 1: the reviewer specifically asked for this branch --
+  // jsdom cannot model real user-activation gating, but it can return null
+  // from a stubbed window.open, which is the exact shape a hard-blocked
+  // popup takes. Silence here would be the bug the synchronous-open shape
+  // exists to prevent, so a link must appear instead.
+  it("surfaces the deep link as a tappable link when the synchronous window.open comes back null (popups blocked)", async () => {
+    const open = vi.fn(() => null);
     vi.stubGlobal("open", open);
     stubFetchRoutes({
       [`POST ${TELEGRAM_START_URL}`]: {
@@ -697,12 +769,10 @@ describe("SignInScreen", () => {
       screen.getByRole("button", { name: "Continue with Telegram" }),
     );
 
-    await waitFor(() =>
-      expect(open).toHaveBeenCalledWith(
-        "https://t.me/HearthBot?start=abc123",
-        "_blank",
-        "noopener",
-      ),
+    const link = await screen.findByRole("link", { name: "Open Telegram" });
+    expect(link).toHaveAttribute(
+      "href",
+      "https://t.me/HearthBot?start=abc123",
     );
   });
 
@@ -710,6 +780,10 @@ describe("SignInScreen", () => {
   // the endpoint answers 404 -- a button that always fails is worse than no
   // button.
   it("hides Continue with Telegram once the endpoint answers 404", async () => {
+    // Stubbed even though this test doesn't assert on it: the click handler
+    // now calls window.open synchronously on every click, regardless of the
+    // eventual outcome, so a real jsdom window.open would otherwise run.
+    vi.stubGlobal("open", vi.fn(() => ({ location: { href: "" }, close: vi.fn() })));
     stubFetchRoutes({
       [`POST ${TELEGRAM_START_URL}`]: {
         status: 404,
@@ -743,6 +817,11 @@ describe("SignInScreen", () => {
   // message when there is one, and only falls back to TELEGRAM_FALLBACK_ERROR
   // when there isn't a safe message to show at all.
   it("shows the fallback message and keeps the control when the request itself fails (not an ApiError)", async () => {
+    const popupClose = vi.fn();
+    vi.stubGlobal(
+      "open",
+      vi.fn(() => ({ location: { href: "" }, close: popupClose })),
+    );
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
       if (url === TELEGRAM_START_URL) {
@@ -765,5 +844,59 @@ describe("SignInScreen", () => {
     expect(
       screen.getByRole("button", { name: "Continue with Telegram" }),
     ).toBeInTheDocument();
+    // The blank tab opened synchronously on click has nowhere useful to go
+    // once the request fails -- it must not be left dangling on about:blank.
+    expect(popupClose).toHaveBeenCalledTimes(1);
+  });
+
+  // Fix round 1, Item 2 (CONTROLLER RULING R12): this file already carries
+  // two earlier instances of the identical defect class --
+  // magicLinkError/magicLinkValidationError not clearing across a state
+  // transition ("Fix round 2, Finding 1" and "Fix round 3, Finding 1") --
+  // so a stale telegramError surviving a successful retry would be the
+  // third. The assertion right after the second click (before the retried
+  // request even resolves) is deliberate: it pins that the banner is
+  // cleared by the click itself, not merely as an incidental side effect of
+  // the retry eventually succeeding.
+  it("clears a stale Telegram error as soon as a later attempt is started, not just once it succeeds", async () => {
+    const fakePopup = { location: { href: "" }, close: vi.fn() };
+    vi.stubGlobal("open", vi.fn(() => fakePopup as unknown as Window));
+    stubFetchRoutes({
+      [`POST ${TELEGRAM_START_URL}`]: [
+        {
+          status: 500,
+          body: {
+            error: { code: "INTERNAL", message: "Something went wrong." },
+          },
+        },
+        {
+          status: 200,
+          body: {
+            url: "https://t.me/HearthBot?start=abc123",
+            expiresAt: "2026-09-01T10:10:00Z",
+          },
+        },
+      ],
+    });
+    await renderSignIn();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Continue with Telegram" }),
+    );
+    await screen.findByText("Something went wrong.");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Continue with Telegram" }),
+    );
+
+    // Cleared immediately by the second click's own handler -- before the
+    // retried request has had any chance to resolve.
+    expect(screen.queryByText("Something went wrong.")).not.toBeInTheDocument();
+
+    await waitFor(() =>
+      expect(fakePopup.location.href).toBe(
+        "https://t.me/HearthBot?start=abc123",
+      ),
+    );
   });
 });
