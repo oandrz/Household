@@ -276,32 +276,53 @@ describe("apiFetch unauthorized handling", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  // The same reasoning as ADMIN_REAUTH_REQUIRED above: INVALID_CREDENTIALS
-  // and ADMIN_LOCKED are both answered by POST /admin/session (a mistyped or
-  // repeatedly wrong re-authentication password, admin_reauth.go's Verify),
-  // never by a dead session -- AdminGate shows the wrong-password or lockout
-  // state inline, on the same screen the operator was already using to get
-  // back in.
-  it.each(["INVALID_CREDENTIALS", "ADMIN_LOCKED"])(
-    "does not call the unauthorized handler on %s from POST /admin/session",
-    async (code) => {
-      stubFetch(code === "ADMIN_LOCKED" ? 423 : 401, { error: { code, message: "x" } });
-      const handler = vi.fn();
-      setUnauthorizedHandler(handler);
+  // The same reasoning as ADMIN_REAUTH_REQUIRED above: INVALID_CREDENTIALS is
+  // answered by POST /admin/session (a mistyped re-authentication password,
+  // admin_reauth.go's Verify), never by a dead session -- AdminGate shows
+  // the wrong-password state inline, on the same screen the operator was
+  // already using to get back in. ADMIN_LOCKED is not exercised here: it is
+  // always a 423, which the `response.status === 401` guard already
+  // excludes regardless of code -- a row for it in this describe block would
+  // pin that a 423 is a 423, not that the carve-out itself works.
+  it("does not call the unauthorized handler on INVALID_CREDENTIALS from POST /admin/session", async () => {
+    stubFetch(401, { error: { code: "INVALID_CREDENTIALS", message: "x" } });
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
 
-      await apiFetch("/api/v1/admin/session", { method: "POST", body: "{}" }).catch(() => {});
+    await apiFetch("/api/v1/admin/session", { method: "POST", body: "{}" }).catch(() => {});
 
-      expect(handler).not.toHaveBeenCalled();
-    },
-  );
+    expect(handler).not.toHaveBeenCalled();
+  });
 
-  // The property the admin-layer carve-out must not weaken: requireSession
-  // is the only thing in the /admin/* chain that can say the session itself
-  // is gone (middleware_session.go), and it always says so as
-  // UNAUTHENTICATED -- that 401 must still bounce the operator to /sign-in
-  // exactly like it does everywhere else, admin route or not.
+  // The property the admin-layer carve-out must not weaken: every 401
+  // anywhere in the /admin/* chain that means the session itself is gone
+  // carries UNAUTHENTICATED, whichever middleware or handler writes it
+  // (middleware_session.go, middleware_admin.go, admin_handlers.go) -- that
+  // 401 must still bounce the operator to /sign-in exactly like it does
+  // everywhere else, admin route or not.
   it("still calls the unauthorized handler on UNAUTHENTICATED from an admin route", async () => {
     stubFetch(401, { error: { code: "UNAUTHENTICATED", message: "Sign in required." } });
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+
+    await apiFetch("/api/v1/admin/flags").catch(() => {});
+
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  // Finding 1 (review round 1): ADMIN_LAYER_UNAUTHORIZED_CODES is an
+  // allowlist precisely so a 401 this file never wrote the code for --
+  // nginx sits in front of this service and can produce one of its own, and
+  // a missing or unparseable body reads the same as one -- still fails
+  // closed. A denylist keyed on "not UNAUTHENTICATED" would have let this
+  // one through: `code === undefined` is not "UNAUTHENTICATED", so it would
+  // have been silently exempted and the operator left signed in on a
+  // failure nobody's server code produced.
+  it("still calls the unauthorized handler on a 401 from an admin route with an unparseable body", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("<html>502</html>", { status: 401 })),
+    );
     const handler = vi.fn();
     setUnauthorizedHandler(handler);
 

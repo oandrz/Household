@@ -152,4 +152,62 @@ describe("AdminFlagsPage", () => {
       orphanedRow.getByRole("button", { name: "Remove old_retired_flag override for Oentoro household" }),
     ).toBeInTheDocument();
   });
+
+  // Review round 1, Finding 8: a failed write's banner used to persist
+  // through any number of later successful writes on the other two hooks,
+  // with no way to close it.
+  it("shows a failed write's message with a control to dismiss it", async () => {
+    const flags = [flagFixture({ key: "family_calendar", globalSet: false })];
+    stubFetchRoutes({
+      "GET /api/v1/admin/flags": flagsResponse(flags),
+      "PUT /api/v1/admin/flags/family_calendar": {
+        status: 422,
+        body: { error: { code: "UNKNOWN_FLAG", message: "That flag does not exist." } },
+      },
+    });
+
+    renderWithRouter(<AdminFlagsPage />);
+
+    const row = within(await screen.findByTestId("flag-row-family_calendar"));
+    fireEvent.click(row.getByRole("button", { name: "On" }));
+
+    const banner = await screen.findByRole("alert");
+    expect(within(banner).getByText("That flag does not exist.")).toBeInTheDocument();
+
+    fireEvent.click(within(banner).getByRole("button", { name: "Dismiss" }));
+
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+
+  // Review round 1, Finding 7: ADMIN_REAUTH_REQUIRED and NOT_FOUND are
+  // signals the whole surface should close (see useAdmin.ts's
+  // isAdminLayerFailure and AdminShell's own gate, which owns that
+  // transition) -- this page's own banner must never show them, or a write
+  // failing this way would flash a message the ambient gate is about to
+  // replace anyway.
+  it("does not show an inline banner for a write that fails with ADMIN_REAUTH_REQUIRED", async () => {
+    const flags = [flagFixture({ key: "family_calendar", globalSet: false })];
+    stubFetchRoutes({
+      "GET /api/v1/admin/flags": [
+        flagsResponse(flags),
+        {
+          status: 401,
+          body: { error: { code: "ADMIN_REAUTH_REQUIRED", message: "Confirm your password." } },
+        },
+      ],
+      "PUT /api/v1/admin/flags/family_calendar": {
+        status: 401,
+        body: { error: { code: "ADMIN_REAUTH_REQUIRED", message: "Confirm your password." } },
+      },
+    });
+
+    renderWithRouter(<AdminFlagsPage />);
+
+    const row = within(await screen.findByTestId("flag-row-family_calendar"));
+    fireEvent.click(row.getByRole("button", { name: "On" }));
+
+    await waitFor(() => expect(row.getByRole("button", { name: "On" })).toBeDisabled());
+    await waitFor(() => expect(row.getByRole("button", { name: "On" })).not.toBeDisabled());
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
 });

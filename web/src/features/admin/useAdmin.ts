@@ -67,15 +67,27 @@ function cacheRefreshedFlags(queryClient: QueryClient) {
   return (data: AdminFlagsResponse) => queryClient.setQueryData(adminFlagsKey, data);
 }
 
+// A failure that should close the *whole* admin surface rather than being
+// shown as one row's own inline error: ADMIN_REAUTH_REQUIRED (the grant
+// lapsed since the page opened) or NOT_FOUND (platform-admin revoked
+// mid-session). Exported so both closeSurfaceOnAdminLayerFailure below and
+// AdminFlagsPage's own write-error banner test the identical list -- two
+// independent copies of this check could disagree about which failures the
+// ambient gate owns, which is exactly how AdminFlagsPage's banner could
+// flash a message for a failure AdminShell's gate is about to replace
+// anyway (see AdminFlagsPage.tsx's own comment on why it filters these out
+// before choosing what to show inline).
+export function isAdminLayerFailure(error: unknown): boolean {
+  return error instanceof ApiError && (error.code === "ADMIN_REAUTH_REQUIRED" || error.code === "NOT_FOUND");
+}
+
 // A write's own onError, shared by all three mutations below. It does not
-// render anything itself: ADMIN_REAUTH_REQUIRED (the grant lapsed since the
-// page opened) and NOT_FOUND (platform-admin revoked mid-session) are both
-// signals the *whole* surface should close, not something one row's mutation
-// should show inline -- invalidating adminFlagsKey makes the query AdminShell's
-// gate already watches refetch, hit the same failure, and close it through
-// the one AdminGate this file's header comment points to. Any other failure
-// (an unknown flag key, a lookup error) is left for the caller's own
-// mutation.error to render next to the control that triggered it.
+// render anything itself -- invalidating adminFlagsKey makes the query
+// AdminShell's gate already watches refetch, hit the same failure, and
+// close the whole surface through the one AdminGate this file's header
+// comment points to. Any other failure (an unknown flag key, a lookup
+// error) is left for the caller's own mutation.error to render next to the
+// control that triggered it.
 // Typed to accept `Error`, matching TanStack Query's own default TError --
 // not `unknown`, which would widen every write mutation's own inferred
 // TError to `unknown` too (TError is inferred from every callback passed to
@@ -83,7 +95,7 @@ function cacheRefreshedFlags(queryClient: QueryClient) {
 // `mutation.error` to narrow it back down themselves.
 function closeSurfaceOnAdminLayerFailure(queryClient: QueryClient) {
   return (error: Error) => {
-    if (error instanceof ApiError && (error.code === "ADMIN_REAUTH_REQUIRED" || error.code === "NOT_FOUND")) {
+    if (isAdminLayerFailure(error)) {
       queryClient.invalidateQueries({ queryKey: adminFlagsKey });
     }
   };

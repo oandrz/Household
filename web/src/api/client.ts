@@ -83,6 +83,22 @@ function isPreAuthRequest(path: string): boolean {
 // branch's own comment for why path alone can't express it.
 const ADMIN_API_PREFIX = "/api/v1/admin/";
 
+// The only three codes that mean "the session is fine, an admin-layer guard
+// answered on top of it" rather than "the session itself is gone" --
+// requireAdminGrant's lapsed-grant 401, and the two POST /admin/session can
+// answer for a wrong or repeatedly-wrong password (admin_reauth.go's
+// Verify). Deliberately an allowlist, not "everything except
+// UNAUTHENTICATED": a 401 on an admin path with a missing or unparseable
+// body, or a code nothing here has ever written (nginx sits in front of
+// this service and can produce a 401 of its own), must fail closed -- keep
+// the operator signed out -- rather than be silently exempted because it
+// happens not to equal one specific string.
+const ADMIN_LAYER_UNAUTHORIZED_CODES = new Set([
+  "ADMIN_REAUTH_REQUIRED",
+  "INVALID_CREDENTIALS",
+  "ADMIN_LOCKED",
+]);
+
 function readCookie(name: string): string | undefined {
   const prefix = `${name}=`;
   // slice past the first "=" only -- split("=")[1] would truncate any
@@ -148,21 +164,20 @@ export async function apiFetch<T>(
     // throw completing.
     //
     // /api/v1/admin/* is carved out of that rule, not by path like the
-    // pre-auth prefixes above, but by code: requireSession is the only
-    // middleware anywhere in that subtree that can say the session itself is
-    // gone, and it always does so as UNAUTHENTICATED (middleware_session.go).
-    // Every other 401 there is requirePlatformAdmin's or requireAdminGrant's
-    // own layer answering on top of a session that is still perfectly good
-    // -- ADMIN_REAUTH_REQUIRED when the 30-minute grant has lapsed,
-    // INVALID_CREDENTIALS when a re-entered password is wrong
-    // (admin_handlers.go's handleAdminSession, admin_reauth.go's Verify).
-    // AdminGate exists specifically to show those inline instead of bouncing
-    // the operator to /sign-in, which a path-based exemption can't express:
-    // it would have to swallow this subtree's own UNAUTHENTICATED too, and
-    // that 401 -- a genuinely dead session -- must reach the handler exactly
-    // like it does everywhere else.
+    // pre-auth prefixes above, but by code: every 401 anywhere in that
+    // subtree that means the session itself is gone carries
+    // UNAUTHENTICATED, whichever middleware or handler writes it. Every
+    // other 401 there is an admin-layer guard answering on top of a session
+    // that is still perfectly good -- see ADMIN_LAYER_UNAUTHORIZED_CODES'
+    // own comment for what each of the three named codes means. AdminGate
+    // exists specifically to show those inline instead of bouncing the
+    // operator to /sign-in, which a path-based exemption can't express: it
+    // would have to swallow this subtree's own UNAUTHENTICATED too, and that
+    // 401 -- a genuinely dead session -- must reach the handler exactly like
+    // it does everywhere else.
     const isAdminLayerUnauthorized =
-      path.startsWith(ADMIN_API_PREFIX) && envelope?.error?.code !== "UNAUTHENTICATED";
+      path.startsWith(ADMIN_API_PREFIX) &&
+      ADMIN_LAYER_UNAUTHORIZED_CODES.has(envelope?.error?.code ?? "");
     if (response.status === 401 && !isPreAuthRequest(path) && !isAdminLayerUnauthorized) {
       unauthorizedHandler?.();
     }

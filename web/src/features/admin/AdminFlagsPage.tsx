@@ -12,6 +12,7 @@
 import { useState } from "react";
 import { PageContainer } from "../../components/PageContainer";
 import {
+  isAdminLayerFailure,
   useAdminFlags,
   useClearHouseholdFlag,
   useSetGlobalFlag,
@@ -242,12 +243,10 @@ function OrphanedFlagRow({ flag, onClearHousehold, pendingHouseholdId }: {
   );
 }
 
-// A plain string (or null) rather than the raw error, so the banner below
-// never has to reason about ApiError vs. a generic Error vs. whatever a
-// rejected promise happened to throw -- and so its type is unambiguously
-// renderable, unlike `unknown`.
-function writeErrorMessageFor(error: Error | null): string | null {
-  if (!error) return null;
+// A plain string, so the banner below never has to reason about ApiError vs.
+// a generic Error vs. whatever a rejected promise happened to throw -- and
+// so its type is unambiguously renderable, unlike `unknown`.
+function writeErrorMessageFor(error: Error): string {
   return error.message || "That change didn't go through.";
 }
 
@@ -265,13 +264,26 @@ export function AdminFlagsPage() {
 
   // A write's own failure that isn't an admin-layer signal (an unknown flag
   // key, a lookup error) has nowhere else to go, so it's shown here, next to
-  // the list it happened on. ADMIN_REAUTH_REQUIRED and NOT_FOUND take the
-  // different path useAdmin.ts's closeSurfaceOnAdminLayerFailure describes:
-  // this page can still flash this banner for the one render between a
-  // write failing and the invalidated flags query actually settling, but
-  // AdminShell's own gate -- watching that same query -- is what closes the
-  // whole surface once it does, not this component.
-  const writeErrorMessage = writeErrorMessageFor(setGlobal.error ?? setHousehold.error ?? clearHousehold.error);
+  // the list it happened on. ADMIN_REAUTH_REQUIRED and NOT_FOUND are
+  // filtered out with the identical isAdminLayerFailure check
+  // closeSurfaceOnAdminLayerFailure (useAdmin.ts) uses to decide whether to
+  // invalidate adminFlagsKey -- one shared predicate, so this banner can
+  // never show a message for a failure AdminShell's own gate is about to
+  // replace the whole surface for anyway.
+  //
+  // Kept as {error, reset} pairs, not just the error: the "Dismiss" button
+  // below has to clear the one mutation that actually produced the message
+  // on screen, or a failed PUT's banner would otherwise outlive any number
+  // of later successful writes on the other two hooks with no way to close
+  // it.
+  const writeFailure =
+    [
+      { error: setGlobal.error, reset: setGlobal.reset },
+      { error: setHousehold.error, reset: setHousehold.reset },
+      { error: clearHousehold.error, reset: clearHousehold.reset },
+    ].find((candidate): candidate is { error: Error; reset: () => void } =>
+      candidate.error !== null && !isAdminLayerFailure(candidate.error),
+    ) ?? null;
 
   function handleSetGlobal(key: string, enabled: boolean) {
     setPendingGlobalKey(key);
@@ -289,9 +301,20 @@ export function AdminFlagsPage() {
   return (
     <PageContainer>
       <h1 className="font-serif text-[22px] font-medium tracking-[-0.01em]">Feature flags</h1>
-      {writeErrorMessage && (
-        <div role="alert" className="rounded-lg border border-danger-border bg-danger-soft px-3.5 py-2.5 text-[12.5px] text-danger">
-          {writeErrorMessage}
+      {writeFailure && (
+        <div
+          role="alert"
+          className="flex items-start justify-between gap-3 rounded-lg border border-danger-border bg-danger-soft px-3.5 py-2.5 text-[12.5px] text-danger"
+        >
+          <span>{writeErrorMessageFor(writeFailure.error)}</span>
+          <button
+            type="button"
+            onClick={writeFailure.reset}
+            aria-label="Dismiss"
+            className="flex-none font-bold leading-none text-danger"
+          >
+            ×
+          </button>
         </div>
       )}
       {flagsQuery.isPending ? (

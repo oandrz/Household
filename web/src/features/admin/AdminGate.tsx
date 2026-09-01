@@ -6,10 +6,9 @@
 //
 // `error` is deliberately the caller's whole state, not something this
 // component fetches for itself -- AdminShell owns the request(s) that can
-// produce ADMIN_REAUTH_REQUIRED, NOT_FOUND or ADMIN_LOCKED, because the
-// three codes come from more than one endpoint (see AdminShell's own
-// comment on where each one arrives from). This file only has to know what
-// each code means once it exists.
+// produce each of the codes handled below, because they come from more than
+// one endpoint (see AdminShell's own comment on where each one arrives
+// from). This file only has to know what each code means once it exists.
 import { type FormEvent, useState } from "react";
 import { ApiError } from "../../api/client";
 import { NotFoundScreen } from "../shell/NotFoundScreen";
@@ -30,18 +29,22 @@ function AdminScreen({ title, children }: { title: string; children: React.React
   );
 }
 
-// ADMIN_REAUTH_REQUIRED and INVALID_CREDENTIALS share this one screen: both
-// come from the exact same re-authentication attempt (see AdminShell),
-// distinguished only by whether a password has been tried yet. Folding a
-// wrong password into the generic fail-closed branch below would show a
-// "not found" page for a plain typo, which is not what "fail closed" is
-// for -- the surface stays exactly this closed either way, this is only
-// which closed screen explains why.
+// ADMIN_REAUTH_REQUIRED, INVALID_CREDENTIALS, and a retried ADMIN_LOCKED
+// (see AdminGate's own ADMIN_LOCKED case) all share this one screen: every
+// one of them comes from the same re-authentication attempt (see
+// AdminShell), distinguished only by `errorMessage` -- null the first time
+// the grant lapses, the server's own message once a submission has actually
+// failed. Folding a wrong password into the generic fail-closed default
+// below would show a "not found" page for a plain typo, which is not what
+// "fail closed" is for -- the surface stays exactly this closed either way,
+// this only chooses which closed screen explains why.
 function PasswordPrompt({
-  wrongPassword,
+  errorMessage,
+  pending,
   onSubmit,
 }: {
-  wrongPassword: boolean;
+  errorMessage: string | null;
+  pending: boolean;
   onSubmit: (password: string) => void;
 }) {
   const [password, setPassword] = useState("");
@@ -69,37 +72,73 @@ function PasswordPrompt({
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             className={
-              wrongPassword
+              errorMessage
                 ? "rounded-lg border border-danger-border bg-danger-soft px-3.5 py-2.5 text-[13.5px]"
                 : "rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
             }
           />
-          {wrongPassword && (
+          {errorMessage && (
             <div role="alert" className="mt-px flex items-start gap-1.5 text-xs leading-snug text-danger">
               <span className="font-bold">!</span>
-              <span>That password is incorrect.</span>
+              <span>{errorMessage}</span>
             </div>
           )}
         </div>
         <button
           type="submit"
-          className="mt-1 rounded-[9px] bg-accent py-3 text-center text-[13.5px] font-semibold text-white"
+          disabled={pending}
+          className="mt-1 rounded-[9px] bg-accent py-3 text-center text-[13.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
         >
-          Continue
+          {pending ? "Confirming…" : "Continue"}
         </button>
       </form>
     </AdminScreen>
   );
 }
 
-function LockoutMessage({ message }: { message: string }) {
+// DefaultLockoutPolicy is three attempts before this triggers, and every
+// failure -- even one recorded while already locked -- extends it
+// (admin_reauth.go's own Verify comment). The lock expires on its own; the
+// "Try again" button is the door that costs nothing, adminctl unlock-admin
+// is the door that's faster but needs shell access. Presented as an "or",
+// not as the only way back -- an earlier version of this screen implied the
+// second was the only door, directly under the server's own "Try again in a
+// few minutes.", which read as contradicting itself.
+function LockoutMessage({ message, onTryAgain }: { message: string; onTryAgain: () => void }) {
   return (
     <AdminScreen title="Admin surface locked">
       <p className="text-[13px] leading-relaxed text-muted">{message}</p>
       <p className="mt-3 text-[13px] leading-relaxed text-muted">
-        Run <code className="rounded bg-canvas px-1 py-0.5 font-mono text-[12px]">adminctl unlock-admin</code>{" "}
-        on the box to open it again.
+        It reopens on its own once the lock expires, or an operator with
+        shell access can run{" "}
+        <code className="rounded bg-canvas px-1 py-0.5 font-mono text-[12px]">adminctl unlock-admin</code>{" "}
+        sooner.
       </p>
+      <button
+        type="button"
+        onClick={onTryAgain}
+        className="mt-4 w-full rounded-[9px] border border-hairline py-2.5 text-center text-[13px] font-semibold text-label"
+      >
+        Try again
+      </button>
+    </AdminScreen>
+  );
+}
+
+// requirePlatformAdmin's own doc comment (middleware_admin.go) is explicit
+// that a lookup failure answers 500, never the 404 it otherwise gives a
+// non-admin, "because 'the database is down' must not read as a clean 'you
+// are not an admin'". auditAdmin's 503 AUDIT_UNAVAILABLE carries its own
+// bespoke message for the identical reason. Routing either through
+// NotFoundScreen would throw away the one thing each was written to say --
+// this is where their message actually reaches the operator instead. A
+// coerced non-ApiError failure (useAdmin.ts's toAdminGateError, status 0)
+// lands here too, with its own generic message, for the same reason: a
+// network blip is not "you are not an admin" either.
+function ServerErrorScreen({ message }: { message: string }) {
+  return (
+    <AdminScreen title="Something went wrong">
+      <p className="text-[13px] leading-relaxed text-muted">{message}</p>
     </AdminScreen>
   );
 }
@@ -107,29 +146,46 @@ function LockoutMessage({ message }: { message: string }) {
 export function AdminGate({
   error,
   onSubmit,
+  pending = false,
   children,
 }: {
   error: ApiError | null;
   onSubmit: (password: string) => void;
+  pending?: boolean;
   children: React.ReactNode;
 }) {
+  // Local, not derived from `error`: `error.code` stays ADMIN_LOCKED across
+  // a retry that fails again (the lock hasn't actually expired yet), so
+  // this is the only thing that can tell "just locked" apart from "chose to
+  // try again" -- without it, clicking "Try again" and having the attempt
+  // fail again would silently snap back to the full lockout screen instead
+  // of showing the form with today's message on it, the same shared-screen
+  // treatment INVALID_CREDENTIALS already gets.
+  const [tryingAgain, setTryingAgain] = useState(false);
+
   if (error === null) return <>{children}</>;
 
   switch (error.code) {
     case "ADMIN_REAUTH_REQUIRED":
-      return <PasswordPrompt wrongPassword={false} onSubmit={onSubmit} />;
-    // A wrong password on the same re-authentication form the line above
-    // renders -- see this file's header comment on PasswordPrompt.
+      return <PasswordPrompt errorMessage={null} pending={pending} onSubmit={onSubmit} />;
     case "INVALID_CREDENTIALS":
-      return <PasswordPrompt wrongPassword onSubmit={onSubmit} />;
+      return <PasswordPrompt errorMessage={error.message} pending={pending} onSubmit={onSubmit} />;
     case "ADMIN_LOCKED":
-      return <LockoutMessage message={error.message} />;
+      return tryingAgain ? (
+        <PasswordPrompt errorMessage={error.message} pending={pending} onSubmit={onSubmit} />
+      ) : (
+        <LockoutMessage message={error.message} onTryAgain={() => setTryingAgain(true)} />
+      );
     default:
-      // NOT_FOUND lands here, and so does anything this file has never
-      // heard of -- both must be indistinguishable from a URL that was
-      // never routed at all, which is exactly what NotFoundScreen already
-      // is for rootRoute's own 404. Never widen this default to a case
-      // that returns `children`.
+      // A lookup failure and AUDIT_UNAVAILABLE both carry a message written
+      // specifically so an outage doesn't read as a refusal -- see
+      // ServerErrorScreen's own comment. NOT_FOUND, and anything else this
+      // file has never heard of, still falls to NotFoundScreen below: both
+      // must be indistinguishable from a URL that was never routed at all.
+      // Never widen either branch to return `children`.
+      if (error.status === 0 || error.status >= 500) {
+        return <ServerErrorScreen message={error.message} />;
+      }
       return <NotFoundScreen />;
   }
 }

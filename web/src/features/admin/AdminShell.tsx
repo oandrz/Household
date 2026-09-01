@@ -39,7 +39,11 @@ export function AdminShell() {
   const error = toAdminGateError(reauth.error) ?? toAdminGateError(flagsQuery.error);
 
   return (
-    <AdminGate error={error} onSubmit={(password) => reauth.mutate(password)}>
+    <AdminGate
+      error={error}
+      onSubmit={(password) => reauth.mutate(password)}
+      pending={reauth.isPending}
+    >
       <div className="min-h-dvh bg-canvas">
         <header className="flex items-center justify-between bg-ink px-6 py-3.5 text-white">
           <div className="flex items-center gap-2.5">
