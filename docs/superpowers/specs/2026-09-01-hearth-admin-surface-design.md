@@ -100,6 +100,19 @@ gets `admin_grant_expires_at = now + 30 minutes`.
 ALTER TABLE sessions ADD COLUMN admin_grant_expires_at timestamptz;
 ```
 
+`usecase.SessionRecord` gains an `AdminGrantExpiresAt *time.Time`, and
+`SessionRepository` gains one method:
+
+```go
+// GrantAdmin stamps a session's admin re-auth grant. A nil expiry clears it.
+GrantAdmin(ctx context.Context, tokenHash []byte, expiresAt *time.Time) error
+```
+
+Session extension does not clobber the grant: `ExtendSession` is
+`UPDATE sessions SET expires_at = $2 WHERE token_hash = $1` — one column, not a
+whole-row rewrite. Worth a test anyway, because the day someone widens that
+statement the grant would silently reset and nothing else would complain.
+
 The grant lives on the session row, not in a second cookie. Sign-out already
 revokes the session, so the grant dies with it for free, and there is no second
 cookie whose `Secure`/`SameSite`/`HttpOnly` flags could be got wrong
@@ -305,10 +318,15 @@ A disabled flag answers **404 NOT_FOUND**, not 403. On this install the feature
 does not exist, and 403 would confirm a route that is meant to be invisible.
 
 Public routes with no session — sign-up, Telegram start — cannot read a
-household's overrides, because there is no household yet. They resolve the
-**global** set only, via a small helper the handler calls directly. Household
-overrides are meaningless pre-authentication and must not be silently treated
-as "on".
+household's overrides, because there is no household yet. `requireFeature`
+handles them itself: with no `Scope` on the request it resolves the **global**
+set only. Household overrides are meaningless before authentication and must
+never be silently treated as "on".
+
+That fallback is why enforcement is one middleware rather than a middleware
+plus a helper that public handlers remember to call. A hand-rolled check as a
+handler's first statement is the shape that gets forgotten on the next public
+route added, and forgetting it fails *open*.
 
 Turning a flag off **never deletes data**. It hides routes and UI; the rows
 stay exactly where they were and reappear when it is turned back on.
@@ -562,6 +580,10 @@ A `/admin` branch in the existing TanStack route tree, loaded with
 - Every admin route writes exactly one audit row, reads included.
 - A route behind a disabled flag answers 404 while the flag is off and 200
   after it is turned on for that household only.
+- A **public** route behind a disabled flag (`signups_open` on
+  `POST /auth/sign-up`) answers 404 with no session at all, and ignores a
+  household override that would have enabled it.
+- Extending a session leaves `admin_grant_expires_at` untouched.
 
 **Postgres, against testcontainers:**
 - The read-only pool **fails** on an `INSERT`. This proves the role rather than
