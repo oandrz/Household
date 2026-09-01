@@ -40,6 +40,13 @@ type Mailer interface {
 	SendSignupForExistingAccount(ctx context.Context, to, signInURL string) error
 }
 
+// TelegramSender delivers a plain-text message to one Telegram chat. Same
+// shape and justification as Mailer: the usecase layer must not hold an HTTP
+// client, and the service must be testable against a double.
+type TelegramSender interface {
+	SendMessage(ctx context.Context, chatID int64, text string) error
+}
+
 // StoredUser carries the password hash, which never leaves the usecase layer.
 //
 // users.password_hash is nullable in the database, and sqlc generates *string
