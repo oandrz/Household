@@ -13,7 +13,7 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 88 of 110 features built or partly built.
+**Where things stand:** 88 of 111 features built or partly built.
 
 > **In production since 2026-08-15**, at <https://oink.mywire.org>. **No count
 > below changes** — deployment is not a design feature, and this file's totals
@@ -561,9 +561,18 @@ moved. "88 of 110 built or partly built" is up from 86 of 107 because a 🟡 and
 a ✅ count the same there — which is precisely why the gap has to be named in
 the cell rather than trusted to the headline.
 
+**Amended again, 2026-09-01, from the whole-branch fix wave.** The review that
+gated this branch found the gap named in the Telegram sign-up row above was
+worse than the row said: a Telegram-only account has no password an
+operator can reset and no address a magic link can reach, so a fourth row —
+**attach an email address to a Telegram-only account**, **⬜** — joins Entry
+and authentication to put that gap on the map rather than in a reviewer's
+notes. One row added, none moved: 71/17/20/2 = 110 becomes **71/17/21/2 =
+111**.
+
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
-| Entry & authentication | 10 | 3 | 1 | 0 |
+| Entry & authentication | 10 | 3 | 2 | 0 |
 | Navigation shell | 7 | 1 | 1 | 0 |
 | Household settings | 11 | 8 | 2 | 0 |
 | Overview (home) | 8 | 2 | 1 | 0 |
@@ -571,7 +580,7 @@ the cell rather than trusted to the headline.
 | Marriage | 10 | 0 | 6 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **71** | **17** | **20** | **2** |
+| **Total** | **71** | **17** | **21** | **2** |
 
 ---
 
@@ -648,6 +657,7 @@ The full checklist is at the end of `docs/LEARNING.md`.
 | Telegram sign-up — a stranger creates a household from a chat | 🟡 | **The gap is the browser walk, and nothing else.** Code-complete and reviewed across nine tasks: `POST /auth/telegram/start` mints a 10-minute nonce, the bot answers `/start` with a 24-hour sign-up link, and `SignupRepository.Provision` binds the chat inside the transaction that already creates the household, owner, membership, spaces and preferences — so an owner with **no email address at all** is a first-class user, the second kind after a child. `make lint && make test` green. **Not one criterion has been exercised against a real bot**, because creating one needs a Telegram account and a BotFather token nobody has made yet; the runnable walk is written out in `docs/superpowers/plans/2026-09-01-telegram-sign-in-verification.md`. Off unless configured — an install with no bot answers `404` and the sign-in screen hides the control |
 | Telegram sign-in — a returning member | 🟡 | Same gap, same reason: unwalked. The bot resolves the chat to its bound user and sends the **existing** magic link, 15 minutes, single use — no new token type and no new session-issuing code anywhere. Three limits stack: 20/hour per IP on the start route (its own bucket, not sign-up's), 3 links/hour per chat, and the shared global daily sign-up ceiling. An unknown, expired, consumed, rate-limited or ceiling-blocked `/start` all get one identical refusal, word for word, so none of them can be told apart by probing |
 | Telegram invites — a shareable `t.me/…?start=inv_<token>` link | ⬜ | **Deliberately not built in this slice**, not an oversight. Invites still go to an email address and are still relayed from Mailpit by hand on the live install, which is one person's inconvenience on a two-person install rather than a blocker. It is the natural follow-up: the delivery channel exists now, so this is a payload change to the same `/start` parsing, not new infrastructure. Recorded here so the gap is on the map — see `docs/SYSTEM_DESIGN.md` §5 and [ADR 4](adr/0004-telegram-as-a-second-delivery-channel.md)'s Out of scope |
+| Attach an email address to a Telegram-only account | ⬜ | **Not built — found in the branch's whole-branch review, 2026-09-01.** A Telegram sign-up leaves `users.email` NULL. `GetUserByEmail` is `WHERE email = $1` and NULL never matches a parameter, so the password collected at sign-up cannot sign anyone in, `POST /auth/magic-link` has no address to send to, and `adminctl reset-password --email=` cannot address the account — Telegram becomes the only door into that household with no operator recovery path today. `SignUpCompleteScreen.tsx` now says this to the person signing up. The fix is a settings-page flow that lets a signed-in Telegram user add and verify an email, giving `GetUserByEmail` something to match; until then the only recovery an operator has is `make psql` by hand (see `docs/LEARNING.md`) |
 
 ## 2 · Navigation shell
 

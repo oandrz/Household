@@ -1771,9 +1771,31 @@ protecting another is worse.**
   refuses to prune inside `domain.LockoutPolicy.Window` — deleting a row still
   inside it would clear a live lockout as a side effect of "cleanup".
 
+- Telegram sign-in, whole-branch review, 2026-09-01: `users.email` is
+  nullable for exactly the same reason as `login_attempts.household_id` above
+  — a Telegram sign-up has no address, by design. `GetUserByEmail` is `WHERE
+  email = $1` (`api/internal/adapter/postgres/queries/identity.sql`), and `$1`
+  never matches `NULL`. The sign-up screen still collected a password for
+  that account, `required minLength={12}` and all, so the form looked
+  ordinary while the password it collected could never be checked against
+  anything: `POST /auth/magic-link` has no address to send to, and `adminctl
+  reset-password --email=` has no address to match either. Telegram became
+  the *only* door into that household, with no operator recovery path, and
+  nothing in the UI said so. The fix taken was the cheap honest one, not the
+  architectural one: `SignUpCompleteScreen.tsx`'s Telegram copy now says
+  plainly that Telegram is the only way in for now and the password will not
+  work yet (letting a Telegram user attach an email later is tracked as ⬜ in
+  `docs/FEATURE_TRACKER.md`, not built in this slice). Until that ships, the
+  only recovery an operator has for a locked-out Telegram-only household is
+  `make psql` and a hand-written `UPDATE users SET email = '...' WHERE id =
+  '...'` — there is no `adminctl` command for it, because every existing one
+  keys off the email this account does not have.
+
 **When a column is nullable for a stated reason, ask what a filter on it
 silently excludes.** A cleanup query scoped the same way a lookup query is
-scoped inherits that query's blind spot for free.
+scoped inherits that query's blind spot for free. So does every other query
+built for the row shape that has the column, run against the row shape that
+doesn't.
 
 ### 10. Slicing a string by position, and "simple" case mapping, both assume one character is one unit
 

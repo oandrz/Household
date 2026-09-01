@@ -1,7 +1,8 @@
 # Telegram sign-in — verification walkthrough
 
-> **STATUS: NOT YET RUN. 0 of 12 numbered criteria exercised**, plus a setup
-> gate and an off-switch check that carry no number of their own.
+> **STATUS: NOT YET RUN. 0 of 12 numbered criteria exercised**, plus five
+> checks that carry no number of their own: the setup gate, the bot-token-log
+> check, the `/sign-up` dead end, the inert password, and the off switch.
 >
 > This is a walk *plan*, not a walk *result* — unlike
 > `2026-08-16-hearth-retros-verification.md` and
@@ -13,8 +14,8 @@
 > than ✅ for exactly this reason.
 >
 > **Fill in a PASS/FAIL and a note per criterion as you run it, in this
-> file.** When all twelve — plus the setup gate and the off-switch check —
-> pass, make the three edits listed at the bottom.
+> file.** When all twelve numbered criteria — plus the unnumbered checks
+> above — pass, make the three edits listed at the bottom.
 
 Criteria are Steps 3–6 of
 `.superpowers/sdd/2026-09-01-telegram-sign-in/task-10-brief.md`, expanded with
@@ -103,7 +104,34 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST \
 If it answers `404`, `docker compose config | grep TELEGRAM` shows exactly
 what the container is being handed.
 
+**The bot token never appears in the logs.** "Never logged in any branch" is
+a named security property with one unit test behind it
+(`TestSendMessageDoesNotLeakTokenWhenTokenBreaksTheURL` and its sibling in
+`internal/adapter/telegram/client_test.go`) — this checks the running
+container agrees, after the setup gate above has generated some real traffic
+for the token to have leaked into:
+
+```bash
+docker compose logs api | grep -c "$(cut -d: -f1 <<<"$TELEGRAM_BOT_TOKEN")"
+# expect: 0
+```
+
 **Result:** ⬜ not run
+
+---
+
+### The `/sign-up` dead end
+
+Whole-branch review, Item 7. `SignUpScreen.tsx` — "No household yet? Create
+one", directly beneath the Telegram button on the sign-in screen — only knows
+how to reach a household through a mailed link, so a stranger with no
+reachable inbox used to have nowhere to go from there. The fix is a line of
+copy pointing back to sign-in's Telegram option, not a second Telegram flow
+built onto this screen (controller ruling R17).
+
+| # | Criterion | Expect exactly | Result |
+|---|---|---|---|
+| — | **From the sign-in screen, follow "No household yet? Create one".** Note whether someone with no reachable email can get anywhere from the screen it lands on | A sentence pointing back to "Continue with Telegram" on the sign-in screen — a stranger with no inbox is never left with only an email form and no way forward | ⬜ |
 
 ---
 
@@ -149,6 +177,20 @@ has no button for.)*
 
 ---
 
+### The inert password
+
+Whole-branch review, Item 1: a Telegram sign-up still collects a password
+(`SignUpCompleteScreen.tsx`), but `users.email` is NULL for that account and
+`GetUserByEmail` can never match NULL, so the password has nowhere to be
+checked against. The walk cannot catch this on its own — nothing here fails
+loudly — so it is written out explicitly.
+
+| # | Criterion | Expect exactly | Result |
+|---|---|---|---|
+| — | **The password chosen at criterion 4 does not work.** Sign out, then on the ordinary sign-in form try the password chosen at criterion 4 (there is no email to pair it with, since the account has none — try the sign-in form's email field empty, or with any address you like) | It does not sign anyone in. There is no account `GetUserByEmail` can match, by design, until "attach an email address to a Telegram-only account" (`docs/FEATURE_TRACKER.md` §1) ships. This is not a defect to report — it is exactly what the sign-up screen's own copy now warns will happen | ⬜ |
+
+---
+
 ### The returning path
 
 | # | Criterion | Expect exactly | Result |
@@ -165,12 +207,13 @@ has no button for.)*
 |---|---|---|---|
 | 10 | **An expired nonce is refused.** Press **Continue with Telegram** and do **not** press Start. Wait **11 minutes** (the TTL is 10 — do not cut it fine). Then press Start | Word for word: *"That sign-in link has expired. Start again from the app."* | ⬜ |
 | 11 | **The per-chat limit delivers three and refuses the fourth.** Per trap 5, mint a fresh nonce for each: press **Continue with Telegram** → **Start**, four times | Links on attempts 1, 2 and 3. **No link on the fourth** — the same message as criterion 10, word for word | ⬜ |
-| 12 | **An update that arrives while the API is down is processed exactly once on restart.** `make down`, press **Start** in Telegram while the API is stopped, `make up` | **One** reply, and it is the ordinary one for that chat (a sign-in link if the chat is bound, a sign-up link if not) — **not** the refusal message, and not two replies. No panic in `docker compose logs api`, and the process still serving afterwards | ⬜ |
+| 12 | **An update that arrives while the API is down is processed exactly once on restart.** Order matters — per trap 5, `make down` first would leave no way to mint a fresh nonce, and the only nonce left to send would already be spent, which the bot correctly refuses (that refusal is not a FAIL of this criterion, it is criterion 10/11's territory reached by the wrong door). So: press **Continue with Telegram** in the browser first (mints a fresh nonce and opens the `t.me` link), *then* `make down`, *then* tap the `t.me` link in Telegram (sends the fresh `/start` while the API is stopped), *then* `make up` | **One** reply, and it is the ordinary one for that chat (a sign-in link if the chat is bound, a sign-up link if not) — **not** the refusal message, and not two replies. No panic in `docker compose logs api`, and the process still serving afterwards | ⬜ |
 
 **Criterion 12 is deliberately not the redelivery test, and that is worth
 stating so nobody records a pass for something they did not exercise.**
-`make down` → Start → `make up` never delivers the update to anyone: it sits
-pending at Telegram, and the fresh poller collects it once and handles it
+Pressing Start (or tapping the fresh `t.me` link) while the API is down never
+delivers the update to anyone: it sits pending at Telegram, and the fresh
+poller collects it once and handles it
 normally. That is genuinely worth walking — it is the "an update arrived while
 we were down" case an operator will actually meet — but it is not redelivery.
 **Real redelivery needs the process to die after receiving a batch and before
@@ -203,7 +246,7 @@ SELECT count(*) FROM telegram_link_requests
 
 | # | Criterion | Expect exactly | Result |
 |---|---|---|---|
-| — | **The feature disappears cleanly when unconfigured.** Remove both lines from `.env`, `make down && make dev`, reload the sign-in screen | The **Continue with Telegram** button is **absent entirely**, and `curl -X POST …/api/v1/auth/telegram/start` answers `404` | ⬜ |
+| — | **The feature fails closed when unconfigured, even though the button itself does not know that yet.** Remove both lines from `.env`, `make down && make dev`, reload the sign-in screen, press **Continue with Telegram** | The button **is present** on load — `SignInScreen.tsx`'s `telegramUnavailable` starts `false` and there is no mount-time probe, so nothing hides the button before it is clicked — but the click gets a `404` and the button then **disappears with no visible error message**. Reload the screen and it **returns**, because that hidden state lives only in the component instance, not in anything persisted. This is expected, not a defect: `docs/SYSTEM_DESIGN.md` §7 and the `/auth/telegram/start` row in §4's route matrix describe exactly this — "the frontend hides the control on that response" (a `404` response, i.e. after a click) — so the real off switch is `curl -X POST …/api/v1/auth/telegram/start` answering `404`, not the button's absence on load | ⬜ |
 
 Cheap, and it closes the loop on the `404` contract: an install without a bot
 gives nothing away, because `404` is the same answer any unrouted path gets.
@@ -221,10 +264,14 @@ numbers before.
    sign-in* move 🟡 → ✅, and their gap sentences are replaced with what this
    walk confirmed, and its date.
 2. **`docs/FEATURE_TRACKER.md` totals** — Entry and authentication becomes
-   `12 / 1 / 1 / 0`, the totals table `73 / 15 / 20 / 2 = 110`, and the
-   headline stays **88 of 110**, because a 🟡 and a ✅ count the same there.
-   That is precisely why the gap had to be named in the cell rather than left
-   to the headline. Add a short recount paragraph above the table, as every
+   `12 / 1 / 2 / 0`. The `2` not started is *Telegram invites* (unchanged)
+   plus the fix wave's own new row, *attach an email address to a
+   Telegram-only account* — that one stays ⬜ after this walk passes; it
+   needs a settings-page flow, not a browser walk, to close. The totals
+   table becomes `73 / 15 / 21 / 2 = 111`, and the headline stays
+   **88 of 111**, because a 🟡 and a ✅ count the same there. That is
+   precisely why the gap had to be named in the cell rather than left to
+   the headline. Add a short recount paragraph above the table, as every
    prior update in that file does.
 3. **`docs/SYSTEM_DESIGN.md`** scope paragraph and **ADR 4**'s status line —
    both currently say the feature has never been walked. Replace with what
