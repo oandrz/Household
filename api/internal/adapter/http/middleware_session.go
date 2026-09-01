@@ -124,7 +124,16 @@ func requireSession(deps Deps) func(http.Handler) http.Handler {
 			// query. A cache belongs here when a measurement asks for one.
 			flags, err := deps.Admin.FlagsFor(ctx, record.HouseholdID)
 			if err != nil {
-				MapDomainError(w, r, err)
+				// logAndWriteInternal, not MapDomainError -- see
+				// requirePlatformAdmin's comment in middleware_admin.go for
+				// why a lookup failure must never be allowed to read as
+				// domain.ErrNotFound's 404. The stakes here are larger than
+				// they are there: after this task 404 means "this feature is
+				// hidden" on every authenticated route, not just the admin
+				// subtree, so a flags lookup that ever produced ErrNotFound
+				// through MapDomainError would tell every caller the whole
+				// product had been switched off.
+				logAndWriteInternal(w, r, err)
 				return
 			}
 

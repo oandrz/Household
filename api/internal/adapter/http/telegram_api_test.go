@@ -188,9 +188,46 @@ func TestTelegramStartReturnsADeepLink(t *testing.T) {
 // that never set up Telegram behaves exactly as it did before this feature
 // -- even down to the exact answer (NOT_FOUND), the same one any unrouted
 // path gets.
+//
+// This is one of two ways this route answers 404, and the two must not be
+// conflated into "redundant" and one deleted: this test pins the pre-existing
+// gate, Deps.Telegram == nil (no bot configured at all).
+// TestTelegramSignInFlagOffAnswers404EvenWithABotConfigured below pins the
+// other -- domain.FlagTelegramSignIn switched off, with a bot properly
+// configured -- which is the one requireFeature actually adds in this task.
 func TestTelegramStartIs404WhenTheFeatureIsOff(t *testing.T) {
 	env := newTestEnv(t) // the existing helper: Deps.Telegram is nil
 	rec := env.do(http.MethodPost, "/api/v1/auth/telegram/start", nil)
+	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
+}
+
+// TestTelegramSignInFlagOffAnswers404EvenWithABotConfigured is
+// TestTelegramStartIs404WhenTheFeatureIsOff's sibling for the OTHER way this
+// route can be hidden: a bot IS configured (Deps.Telegram non-nil, via
+// telegramRouter) but domain.FlagTelegramSignIn is switched off. The two
+// produce identical wire responses -- 404 NOT_FOUND -- and it would be easy
+// to assume they exercise the same guard and drop one as redundant. They do
+// not: this one is the only test anywhere that references
+// FlagTelegramSignIn at all, so without it router.go's
+// requireFeature(deps, domain.FlagTelegramSignIn) call could be deleted, or
+// swapped for the wrong flag constant, and nothing would fail -- the flag
+// defaults to true, and the no-bot test above never touches it.
+func TestTelegramSignInFlagOffAnswers404EvenWithABotConfigured(t *testing.T) {
+	env := newTestEnv(t)
+	router := telegramRouter(env, newTelegramAuthServiceForTest())
+
+	// The flag defaults on, and a bot is configured: the route works.
+	rec := doOn(router, http.MethodPost, "/api/v1/auth/telegram/start", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("telegram_sign_in on = %d, want 200 (body = %s)", rec.Code, rec.Body.String())
+	}
+
+	if err := env.featureFlags.SetGlobal(context.Background(),
+		string(domain.FlagTelegramSignIn), false, ""); err != nil {
+		t.Fatalf("SetGlobal: %v", err)
+	}
+
+	rec = doOn(router, http.MethodPost, "/api/v1/auth/telegram/start", nil)
 	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
 }
 

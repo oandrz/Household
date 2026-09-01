@@ -2,6 +2,7 @@ package httpadapter_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -241,9 +242,14 @@ func TestEveryProtectedRouteRejectsAnUnauthenticatedCaller(t *testing.T) {
 	// 18, not the pre-calendar 17: GET /api/v1/family/calendar (Task 6) sits
 	// behind requireSession same as every other route here -- requireFeature
 	// only decides whether the flag it guards is on, never whether a session
-	// exists -- so it is one more protected route this walk must see. A
-	// floor left at 17 would still pass if that route silently lost its
-	// session guard, which is the vacuous pass this floor exists to catch.
+	// exists -- so it is one more protected route this walk must see.
+	//
+	// Raising this number is not what would catch that route losing its
+	// session guard -- chi.Walk enumerates it into checked either way. The
+	// per-route `rec.Code != http.StatusUnauthorized` assertion inside the
+	// loop above is what catches that. This floor's own job is the vacuous
+	// pass the comment above it already names: a walk that silently stopped
+	// enumerating routes at all.
 	if checked < 18 {
 		t.Fatalf("checked %d protected routes, want at least 18 -- "+
 			"the walk may not be enumerating routes correctly", checked)
@@ -492,6 +498,43 @@ func TestSignUpPassesThroughThePerIPLimiter(t *testing.T) {
 
 	rec := env.do(http.MethodPost, "/api/v1/auth/sign-up",
 		map[string]string{"email": "ip-limited@example.test"})
+	assertErrorResponse(t, rec, http.StatusTooManyRequests, "RATE_LIMITED")
+}
+
+// TestClosedSignUpsStillCountAgainstTheIPLimiter pins the ordering router.go's
+// own comment insists on: su.Use(rateLimitByIP(...)) sits OUTSIDE
+// su.Use(requireFeature(...)) in the sign-up group, not inside it, so a
+// closed sign-up route cannot become an unmetered way to make flag lookups.
+//
+// Sending signUpRequestsPerIPPerHour closed requests and checking they all
+// answer 404 would not, on its own, distinguish "the limiter still runs
+// first and hasn't tripped yet" from "requireFeature short-circuits before
+// the limiter is ever reached" -- both look identical for the first five
+// requests. The sixth request is what tells them apart: if the limiter is
+// still outermost, its counter was incremented by all five closed requests
+// and the sixth answers 429, exactly as
+// TestSignUpPassesThroughThePerIPLimiter's open-signups version does. If the
+// two .Use() lines were ever swapped, every request here -- the sixth
+// included -- would answer 404 forever, because requireFeature would refuse
+// the request before the limiter's counter ever saw it.
+func TestClosedSignUpsStillCountAgainstTheIPLimiter(t *testing.T) {
+	env := newTestEnv(t)
+	if err := env.featureFlags.SetGlobal(context.Background(),
+		string(domain.FlagSignupsOpen), false, ""); err != nil {
+		t.Fatalf("SetGlobal: %v", err)
+	}
+
+	// Same perIPLimit as TestSignUpPassesThroughThePerIPLimiter, and the same
+	// reason for repeating the unexported constant's value as a literal.
+	const perIPLimit = 5
+	for i := 0; i < perIPLimit; i++ {
+		rec := env.do(http.MethodPost, "/api/v1/auth/sign-up",
+			map[string]string{"email": "closed-ip-limited@example.test"})
+		assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
+	}
+
+	rec := env.do(http.MethodPost, "/api/v1/auth/sign-up",
+		map[string]string{"email": "closed-ip-limited@example.test"})
 	assertErrorResponse(t, rec, http.StatusTooManyRequests, "RATE_LIMITED")
 }
 
