@@ -69,6 +69,20 @@ export function useRequestMagicLink() {
   });
 }
 
+// StartTelegramSignIn mints a deep link into the bot (see
+// handleTelegramStart in telegram_handlers.go). Telegram sign-in is
+// optional: an install with no bot configured answers 404, and
+// SignInScreen hides the control on that response rather than offering a
+// button that always fails.
+export function useStartTelegramSignIn() {
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<{ url: string; expiresAt: string }>("/api/v1/auth/telegram/start", {
+        method: "POST",
+      }),
+  });
+}
+
 // ConsumeMagicLink signs the token's holder in -- see usecase/auth.go. The
 // token is single-use, so this must only ever be called once per emailed
 // link; MagicLinkConsumeScreen guards against StrictMode's double-invoke of

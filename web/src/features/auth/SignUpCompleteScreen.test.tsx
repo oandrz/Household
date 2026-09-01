@@ -9,7 +9,10 @@ import { stubFetchRoutes } from "../../test/fetchStub";
 import { SignUpCompleteScreen } from "./SignUpCompleteScreen";
 
 const preview = {
-  "GET /api/v1/auth/sign-up/tok": { status: 200, body: { email: "founder@example.test" } },
+  "GET /api/v1/auth/sign-up/tok": {
+    status: 200,
+    body: { email: "founder@example.test", channel: "email" },
+  },
   "GET /api/v1/currencies": {
     status: 200,
     body: {
@@ -201,5 +204,36 @@ describe("SignUpCompleteScreen", () => {
     ).toBeInTheDocument();
     const createHousehold = screen.getByRole("link", { name: "Create a household" });
     expect(createHousehold).toHaveAttribute("href", "/sign-up");
+  });
+
+  // A Telegram sign-up has no address to show. Rendering an empty read-only
+  // email box would look like a field someone forgot to fill in.
+  it("shows the Telegram channel instead of an empty email box", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/sign-up/tok": {
+        status: 200,
+        body: { email: "", channel: "telegram" },
+      },
+      "GET /api/v1/currencies": preview["GET /api/v1/currencies"],
+    });
+    renderWithRouter(<SignUpCompleteScreen token="tok" />);
+
+    await screen.findByText(/telegram/i);
+    expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
+  });
+
+  it("still shows the read-only address for an email sign-up", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/sign-up/tok": {
+        status: 200,
+        body: { email: "someone@example.com", channel: "email" },
+      },
+      "GET /api/v1/currencies": preview["GET /api/v1/currencies"],
+    });
+    renderWithRouter(<SignUpCompleteScreen token="tok" />);
+
+    expect(
+      await screen.findByDisplayValue("someone@example.com"),
+    ).toBeInTheDocument();
   });
 });

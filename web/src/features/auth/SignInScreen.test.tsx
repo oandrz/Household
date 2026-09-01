@@ -12,6 +12,7 @@ import { SignInScreen } from "./SignInScreen";
 
 const SIGN_IN_URL = "/api/v1/auth/sign-in";
 const MAGIC_LINK_URL = "/api/v1/auth/magic-link";
+const TELEGRAM_START_URL = "/api/v1/auth/telegram/start";
 
 // Mirrors api/internal/adapter/http/auth_handlers.go's meResponseBody -- a
 // successful sign-in answers with this shape.
@@ -676,5 +677,93 @@ describe("SignInScreen", () => {
     // sign-in either.
     expect(screen.getByLabelText("Password")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("opens the returned Telegram deep link when Continue with Telegram is pressed", async () => {
+    const open = vi.fn();
+    vi.stubGlobal("open", open);
+    stubFetchRoutes({
+      [`POST ${TELEGRAM_START_URL}`]: {
+        status: 200,
+        body: {
+          url: "https://t.me/HearthBot?start=abc123",
+          expiresAt: "2026-09-01T10:10:00Z",
+        },
+      },
+    });
+    await renderSignIn();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Continue with Telegram" }),
+    );
+
+    await waitFor(() =>
+      expect(open).toHaveBeenCalledWith(
+        "https://t.me/HearthBot?start=abc123",
+        "_blank",
+        "noopener",
+      ),
+    );
+  });
+
+  // The control must not appear on an install with no bot configured, where
+  // the endpoint answers 404 -- a button that always fails is worse than no
+  // button.
+  it("hides Continue with Telegram once the endpoint answers 404", async () => {
+    stubFetchRoutes({
+      [`POST ${TELEGRAM_START_URL}`]: {
+        status: 404,
+        body: {
+          error: {
+            code: "NOT_FOUND",
+            message: "That endpoint does not exist.",
+          },
+        },
+      },
+    });
+    await renderSignIn();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Continue with Telegram" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Continue with Telegram" }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  // A non-404 failure (e.g. the bot API itself erroring) is a different case
+  // from "no bot configured" -- the control stays, but the person sees
+  // something rather than a click that silently did nothing. Rejects with a
+  // network TypeError rather than a well-formed ApiError, matching "falls
+  // back to a generic message when sign-in rejects with something that isn't
+  // an ApiError" above: apiErrorMessage shows an ApiError's own server
+  // message when there is one, and only falls back to TELEGRAM_FALLBACK_ERROR
+  // when there isn't a safe message to show at all.
+  it("shows the fallback message and keeps the control when the request itself fails (not an ApiError)", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === TELEGRAM_START_URL) {
+        return Promise.reject(new TypeError("Failed to fetch"));
+      }
+      throw new Error(`unexpected fetch call: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await renderSignIn();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Continue with Telegram" }),
+    );
+
+    expect(
+      await screen.findByText(
+        "We could not start Telegram sign-in just now. Try again in a moment.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Continue with Telegram" }),
+    ).toBeInTheDocument();
   });
 });

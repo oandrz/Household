@@ -11,9 +11,14 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { ApiError } from "../../api/client";
-import { apiErrorMessage, isPlausibleEmail, triesLeftPhrase } from "./copy";
+import {
+  apiErrorMessage,
+  isPlausibleEmail,
+  TELEGRAM_FALLBACK_ERROR,
+  triesLeftPhrase,
+} from "./copy";
 import { MagicLinkSentPanel } from "./MagicLinkSentPanel";
-import { useRequestMagicLink, useSignIn } from "./useAuth";
+import { useRequestMagicLink, useSignIn, useStartTelegramSignIn } from "./useAuth";
 
 type Mode = "password" | "magic-sent";
 
@@ -39,9 +44,20 @@ export function SignInScreen() {
   const [magicLinkValidationError, setMagicLinkValidationError] = useState<
     string | null
   >(null);
+  // Once a 404 shows this install has no bot configured, the control stays
+  // hidden for the rest of this screen's life -- there is nothing that would
+  // make a retry succeed, so there is no path back to showing it again.
+  const [telegramUnavailable, setTelegramUnavailable] = useState(false);
+  // A string, not `unknown` like signInError/magicLinkError above: this
+  // control's only two outcomes worth distinguishing are "hide the button"
+  // (handled by telegramUnavailable) and "say something went wrong", so the
+  // message is computed once in the mutation's own onError rather than
+  // carried as a raw error for the render to re-derive.
+  const [telegramError, setTelegramError] = useState<string | null>(null);
 
   const signIn = useSignIn();
   const requestMagicLink = useRequestMagicLink();
+  const startTelegram = useStartTelegramSignIn();
 
   // Fix round 2, Finding 1: a magic-link error belongs to the mode it was
   // raised in (a failed resend belongs to the sent panel), so it must not
@@ -304,6 +320,47 @@ export function SignInScreen() {
               <span className="font-bold">!</span>
               <span>{magicLinkErrorMessage}</span>
             </div>
+          )}
+
+          {!telegramUnavailable && (
+            <>
+              <button
+                type="button"
+                onClick={() =>
+                  startTelegram.mutate(undefined, {
+                    onSuccess: (data) =>
+                      window.open(data.url, "_blank", "noopener"),
+                    // A 404 means this install has no bot configured (see
+                    // handleTelegramStart's own comment: it answers exactly
+                    // like an unrouted path, on purpose). Hide the control
+                    // rather than showing an error the person can do
+                    // nothing about.
+                    onError: (err) => {
+                      if (err instanceof ApiError && err.status === 404) {
+                        setTelegramUnavailable(true);
+                        return;
+                      }
+                      setTelegramError(
+                        apiErrorMessage(err, TELEGRAM_FALLBACK_ERROR),
+                      );
+                    },
+                  })
+                }
+                disabled={startTelegram.isPending}
+                className="mt-2 w-full rounded-[9px] border border-hairline py-2.5 text-center text-[13px] font-semibold text-label disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Continue with Telegram
+              </button>
+              {telegramError && (
+                <div
+                  role="alert"
+                  className="mt-2 flex items-start gap-1.5 text-xs leading-snug text-danger"
+                >
+                  <span className="font-bold">!</span>
+                  <span>{telegramError}</span>
+                </div>
+              )}
+            </>
           )}
 
           <div className="mt-[18px] border-t border-hairline pt-[15px] text-center text-[12.5px] text-muted">
