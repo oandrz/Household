@@ -293,15 +293,21 @@ type SignupRepository interface {
 	// so restarting the API cannot reset the ceiling.
 	CountSince(ctx context.Context, since time.Time) (int, error)
 	// Provision creates the household, the owner user, the owner membership,
-	// every builtin space and the notification preferences, and stamps the
-	// signup consumed -- all in one transaction. Either all of it happens or
-	// none of it does.
+	// every builtin space and the notification preferences, binds the
+	// Telegram chat when the signup names one, and stamps the signup
+	// consumed -- all in one transaction. Either all of it happens or none of
+	// it does.
 	//
-	// The owner's email address is read from the signup row this transaction is
-	// already touching; it is deliberately NOT a parameter. The address that
-	// gets an account must be the one the mailed token actually proved, and
-	// passing it in would let a caller substitute a different one between
-	// SignupService.Complete's read and this write.
+	// The owner's email address, or the Telegram chat id, is read from the
+	// signup row this transaction is already touching; neither is a
+	// parameter, deliberately. The identity that gets an account must be the
+	// one the token actually proved -- the mailed link for email, the chat
+	// that redeemed the sign-up for Telegram -- and passing either in would
+	// let a caller substitute a different one between SignupService.Complete's
+	// read and this write. For the chat id this is the whole point of the
+	// feature: a caller-substitutable chat id would let someone bind a
+	// household to a chat they control, not the one that actually completed
+	// the sign-up.
 	//
 	// A partial provision leaves a users row occupying users.email's unique
 	// index with no membership under it, which makes that address permanently
