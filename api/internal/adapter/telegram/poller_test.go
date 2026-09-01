@@ -123,6 +123,15 @@ func TestPollerAdvancesTheOffsetPastIgnoredUpdates(t *testing.T) {
 // TestPollerDispatchesStartCommands for why): otherwise the panicking handler
 // fires dozens of times before cancel takes effect, which is noisy and proves
 // nothing beyond what one dispatch already proves.
+//
+// The first batch carries two /start updates, and the assertion is == 2, not
+// >= 1, on purpose: with a single update, moving the recover up to wrap the
+// whole update loop -- or the whole Run body -- would still let that one
+// dispatch happen before the panic unwinds, so the test would keep passing
+// even though the poller is now dead. handlerSpy.HandleStart appends the
+// call before it panics, and its deferred unlock (line 24 above) releases
+// the mutex during the unwind, so a second dispatch only happens if recovery
+// genuinely occurs per update rather than per batch or per Run.
 func TestPollerSurvivesAPanickingHandler(t *testing.T) {
 	var mu sync.Mutex
 	delivered := false
@@ -137,7 +146,8 @@ func TestPollerSurvivesAPanickingHandler(t *testing.T) {
 			return
 		}
 		_, _ = w.Write([]byte(`{"ok":true,"result":[
-			{"update_id":40,"message":{"text":"/start boom","chat":{"id":7}}}]}`))
+			{"update_id":40,"message":{"text":"/start boom","chat":{"id":7}}},
+			{"update_id":41,"message":{"text":"/start boom-again","chat":{"id":7}}}]}`))
 	}))
 	defer srv.Close()
 
@@ -146,16 +156,23 @@ func TestPollerSurvivesAPanickingHandler(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go p.Run(ctx) // must not crash the test binary
 	defer cancel()
-	waitFor(t, func() bool { return len(spy.seen()) >= 1 })
+	waitFor(t, func() bool { return len(spy.seen()) == 2 })
 }
 
+// calls >= 2 alone proves the loop keeps going after an error, but says
+// nothing about how soon it retries -- deleting the backoff select entirely,
+// or the backoff reset, or the doubling and cap, would all still leave the
+// loop "going". So this records a timestamp per request and checks the gap
+// between the failed call and the retry is at least baseBackoff: that is the
+// one measurement an un-backed-off retry (or Run's own tight loop against an
+// unreachable Telegram) cannot pass.
 func TestPollerBacksOffAndKeepsGoingAfterAnError(t *testing.T) {
 	var mu sync.Mutex
-	calls := 0
+	var times []time.Time
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		mu.Lock()
-		calls++
-		n := calls
+		times = append(times, time.Now())
+		n := len(times)
 		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		if n == 1 {
@@ -167,11 +184,19 @@ func TestPollerBacksOffAndKeepsGoingAfterAnError(t *testing.T) {
 	defer srv.Close()
 
 	p := NewPoller(newClientWithBase("t", srv.URL), &handlerSpy{})
-	p.baseBackoff = time.Millisecond // keep the test fast
+	// Large enough to measure over real wall-clock time without scheduling
+	// jitter drowning the signal, small enough to keep the test fast.
+	p.baseBackoff = 40 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	go p.Run(ctx)
 	defer cancel()
-	waitFor(t, func() bool { mu.Lock(); defer mu.Unlock(); return calls >= 2 })
+	waitFor(t, func() bool { mu.Lock(); defer mu.Unlock(); return len(times) >= 2 })
+
+	mu.Lock()
+	defer mu.Unlock()
+	if gap := times[1].Sub(times[0]); gap < p.baseBackoff {
+		t.Fatalf("gap between the failed call and the retry = %v, want at least baseBackoff (%v) -- the poller must back off after an error, not retry immediately", gap, p.baseBackoff)
+	}
 }
 
 func TestPollerStopsWhenTheContextIsCancelled(t *testing.T) {
