@@ -361,6 +361,40 @@ func TestEveryAdminRequestIsAudited(t *testing.T) {
 	}
 }
 
+// TestAdminAuditRowRecordsTheRealRequest guards what TestEveryAdminRequestIsAudited
+// does not: that the row auditAdmin writes carries THIS request's own method
+// and path, not merely that a row of some kind exists.
+// TestAdminAuditRepoRecordsAndReadsBack next door proves the repository
+// round-trips whatever Action, Target and Detail it is given -- it says
+// nothing about what auditAdmin actually passes it. Without this test,
+// auditAdmin could go back to writing Target: "" for every row (as it did
+// for the field's entire life -- see LEARNING.md's admin-surface entries) and
+// every other admin test, including the count-only one above, would stay
+// green.
+func TestAdminAuditRowRecordsTheRealRequest(t *testing.T) {
+	env := newTestEnv(t)
+	env.makePlatformAdmin(t, env.ownerEmail)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	env.authed(t, http.MethodPost, "/api/v1/admin/session",
+		map[string]string{"password": env.ownerPassword}, session, csrf)
+
+	env.authedGet(t, "/api/v1/admin/flags", session)
+
+	entries, err := env.adminAudit.Recent(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("Recent: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("Recent(1) returned %d entries, want 1", len(entries))
+	}
+	if entries[0].Action != "GET /api/v1/admin/flags" {
+		t.Fatalf("Action = %q, want %q", entries[0].Action, "GET /api/v1/admin/flags")
+	}
+	if entries[0].Target != "/api/v1/admin/flags" {
+		t.Fatalf("Target = %q, want %q", entries[0].Target, "/api/v1/admin/flags")
+	}
+}
+
 // TestMeCarriesEveryDefinedFlag: every key is always present, so the frontend
 // never has to decide what a missing key means.
 func TestMeCarriesEveryDefinedFlag(t *testing.T) {

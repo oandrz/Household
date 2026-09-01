@@ -29,8 +29,12 @@ func TestADisabledFeatureAnswers404(t *testing.T) {
 	}
 }
 
-// TestAHouseholdOverrideEnablesOnlyThatHousehold.
-func TestAHouseholdOverrideEnablesOnlyThatHousehold(t *testing.T) {
+// TestAHouseholdOverrideEnablesTheFlagForThatHousehold proves the household
+// override side of the resolution: a household with its own override sees
+// the flag reflect it. It does NOT prove "only" -- there is no second
+// household in this harness to check is unaffected -- so its name says
+// exactly what it checks.
+func TestAHouseholdOverrideEnablesTheFlagForThatHousehold(t *testing.T) {
 	env := newTestEnv(t)
 	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
 

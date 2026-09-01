@@ -40,7 +40,7 @@ describe("AdminFlagsPage", () => {
     renderWithRouter(<AdminFlagsPage />);
 
     const noOpinionRow = within(await screen.findByTestId("flag-row-family_calendar"));
-    expect(noOpinionRow.getByText("Default")).toHaveClass("bg-canvas");
+    expect(noOpinionRow.getByText("Default")).toHaveAttribute("aria-current", "true");
     expect(noOpinionRow.getByRole("button", { name: "On" })).toHaveAttribute("aria-pressed", "false");
     expect(noOpinionRow.getByRole("button", { name: "Off" })).toHaveAttribute("aria-pressed", "false");
 

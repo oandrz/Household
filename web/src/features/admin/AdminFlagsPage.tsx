@@ -54,6 +54,7 @@ function GlobalFlagControl({
           return (
             <span
               key={segment.value}
+              aria-current={isCurrent ? "true" : undefined}
               className={`rounded-md px-2.5 py-1 text-[12px] font-semibold ${
                 isCurrent ? "bg-canvas text-ink" : "text-muted"
               }`}

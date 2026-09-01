@@ -2383,38 +2383,76 @@ case and no coordinate system to assert legibility in for the second.
   contains every value those parameters would have held), `Detail` stays an
   empty object, and the comment now explains *why* parameters can't be read
   there instead of claiming they are.
-- **An eighth instance, same branch, found the same way as the seventh and
-  still live in the tree, unfixed, at the time of writing.**
-  `migrations/00012_admin.sql`'s own comment on `admin_audit_log` says
-  `target`, `detail` and `ip` "default rather than being NOT NULL without
-  one, because auditAdmin writes from middleware where there is not always a
-  target to name." That was true when the migration was written and stopped
-  being true the moment the seventh instance's fix landed: `Target` is now
-  always `r.URL.Path`, never empty, so the reasoning the comment gives for
-  the column's own nullability is stale one file away from the code that
-  made it stale. **Known and pending, not fixed here** — this is a docs
-  task, and the comment lives in product code — carried on this branch's own
-  final fix wave. Left in the tree long enough to be caught twice, by two
-  different readers, is itself the evidence for the closing paragraph below:
-  a comment's claim does not get re-checked just because a sibling comment
-  making the identical claim was already fixed.
+- **An eighth instance, same branch, found the same way as the seventh --
+  and fixed in this branch's own final wave, which is also where a second
+  site of the identical instance turned up.** `migrations/00012_admin.sql`'s
+  own comment on `admin_audit_log` said `target`, `detail` and `ip` "default
+  rather than being NOT NULL without one, because auditAdmin writes from
+  middleware where there is not always a target to name." That was true when
+  the migration was written and stopped being true the moment the seventh
+  instance's fix landed: `Target` is now always `r.URL.Path`, never empty, so
+  the reasoning the comment gave for the column's own nullability was stale
+  one file away from the code that made it stale. Only that migration
+  comment was known when this entry was first drafted. The whole-branch
+  review that closed out the fix wave found a second copy of the identical
+  claim forty lines into `admin_schema_test.go`, on
+  `TestAuditRowsNeedOnlyAnActorAndAnAction`'s doc comment -- worse than the
+  first, because it also mis-stated what its own test proves (that the
+  schema's defaults are reachable, never a fact about the middleware).
+  Fixing the named site alone, which is what this entry originally recorded
+  as the plan, would have fixed the instance and left the class alive one
+  file over. Both now say what is actually true instead: the columns default
+  so a writer is never forced to invent a value it does not have, not
+  because of anything about one caller's current behaviour -- the durable,
+  invariant-first form this pattern's own closing paragraph already
+  prescribes. This is exactly the situation the repo's own
+  `hunting-sibling-defects` skill exists for: a fix that stops at the named
+  instance instead of asking where else the identical mistake was made.
+- **A ninth instance, the same fix wave, caught while fixing the sixth
+  instance's own siblings rather than while looking for a new one.** Two
+  route-walk floor comments in `auth_api_test.go`
+  (`TestEveryProtectedRouteRejectsAnUnauthenticatedCaller` and
+  `TestEveryMutatingRouteRequiresCSRF`) read "62, not the pre-Task-8 18" and
+  "44, not the pre-Task-8 11", naming a single task as the cause of the
+  drift and a specific number as what the floor stood at beforehand.
+  Checking the claim against the code it named -- rather than the fix
+  wave's own brief, which handed down a further wrong number for the same
+  passage, asserting the code had read `checked < 17` immediately
+  beforehand -- a direct read of the parent commit's blob
+  (`git show <parent>:api/internal/adapter/http/auth_api_test.go`) showed
+  the floor was in fact `18`, and running the walk itself against the
+  actual code from immediately before the named task's own commit returned
+  real counts of `59` and `41`, not `18` and `11`: the drift had accumulated
+  over several earlier tasks, not the one the comment named. The corrected
+  comments drop the task attribution and the specific historical tally
+  altogether, stating only the invariant the earlier version buried inside
+  a history lesson: the floor is the walk's own re-measured output, never a
+  number to nudge forward by however much the latest task seems to have
+  added. What makes this one worth its own bullet rather than a footnote on
+  the eighth: the wrong number arrived inside this very fix wave's own
+  instructions for closing out Pattern 16, proving yet again that a claim
+  about the code carries no more authority for having been written down to
+  correct a previous one.
 
 **Treat a citation the way you'd treat a test assertion: something the next
 reader can verify against the thing it names, not something to trust because
-it reads confidently.** All eight instances above cost nothing to produce
+it reads confidently.** All nine instances above cost nothing to produce
 and each would have cost under a minute to check — reading the query,
 re-finding the line, opening the mockup, grepping for the clause a comment
-claimed existed, or reading the one function (`chi`'s `routeHTTP`) whose
-order the claim depended on — against a small planning gap, a wrong number in
-a comment, a design claim nobody had opened the design to test, a line range
+claimed existed, reading the one function (`chi`'s `routeHTTP`) whose order
+the claim depended on, or reading the one commit blob a "before" claim was
+supposedly about — against a small planning gap, a wrong number in a
+comment, a design claim nobody had opened the design to test, a line range
 nobody had re-measured, a rule restated in a comment's own words rather than
 pointed at, seven checkable claims that drifted the moment the code moved
 under them on a single branch, a field silently empty for its entire life
-because its own doc comment said otherwise, and a sibling comment one file
-away making the identical claim, already proven false, that nobody had gone
-back to check. A citation checked once and never re-verified when the
-sentence around it is rewritten is not a citation any more; it is the same
-unverified claim wearing a reference.
+because its own doc comment said otherwise, a sibling comment one file away
+making the identical claim, already proven false, that nobody had gone back
+to check, and a fix wave's own instructions for closing out this exact
+pattern carrying one more unverified number into the tree. A citation
+checked once and never re-verified when the sentence around it is rewritten
+is not a citation any more; it is the same unverified claim wearing a
+reference.
 
 ---
 

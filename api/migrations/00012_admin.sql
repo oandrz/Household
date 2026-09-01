@@ -53,9 +53,9 @@ CREATE TABLE household_feature_flags (
 -- prune does not touch this table: a log the operator can edit stops meaning
 -- anything the moment the operator makes a mistake.
 --
--- target, detail and ip default rather than being NOT NULL without one,
--- because auditAdmin writes from middleware where there is not always a target
--- to name. detail records what was looked at, never what was seen -- no
+-- target, detail and ip default rather than being NOT NULL without one, so a
+-- writer never has to invent a value it does not have just to satisfy the
+-- schema. detail records what was looked at, never what was seen -- no
 -- passwords, no tokens, no row values.
 --
 -- actor_user_id deliberately does not cascade: deleting a user with audit
