@@ -159,6 +159,13 @@ and the per-chat and per-IP limits bound the rate, so this is a slow leak rather
 than a hole — but it is a real gap, recorded here and in
 `docs/SYSTEM_DESIGN.md` §6 rather than left to be discovered.
 
+**Amended 2026-09-01, same day, from the whole-branch review's fix wave.** The
+paragraph above is left standing because it records what was true when this
+ADR was written a few hours earlier — the gap it names is now closed.
+`PruneTelegramLinkRequests` joins `adminctl prune` alongside `signups` and
+`login_attempts`, mirroring `PruneSignups`'s own retention condition exactly;
+`docs/SYSTEM_DESIGN.md` §6 and §8 are updated to match.
+
 **One deliberate spec deviation, recorded rather than buried.** The design spec
 said `SignupPreview` gains a `Channel` field; the implementation also widens
 `GET /auth/sign-up/{token}`'s JSON body to carry it. The frontend cannot render

@@ -2348,14 +2348,14 @@ Notes that are not obvious from the shapes:
   would make a sign-in ambiguous — `ByChatID` would have to pick one.
   `UNIQUE(user_id)` stops one user accumulating chats, which would make a
   revocation miss one. Neither is a tidiness constraint.
-- **`telegram_link_requests` has no `Prune`, and grows forever.** `signups` and
-  `login_attempts` are the two tables a stranger can grow without holding an
-  account, and `adminctl prune` exists for exactly them; this is a third, added
-  without joining them. It is a small row (a hash, two timestamps, a bigint)
-  and the per-chat and per-IP limits bound the rate, so this is a slow leak
-  rather than a hole — but it is a real gap, named here rather than discovered
-  later. Adding it to `prune` is the fix, and it needs the same seven-day
-  floor reasoning the existing prune already carries.
+- **`telegram_link_requests` now has a `Prune`, closed in the whole-branch fix
+  wave, 2026-09-01.** `signups` and `login_attempts` are the other two tables
+  a stranger can grow without holding an account, and `adminctl prune`
+  already covered them; `PruneTelegramLinkRequests` joins them, mirroring
+  `PruneSignups`'s own retention condition (and the same seven-day floor
+  reasoning) exactly. It was a small row (a hash, two timestamps, a bigint)
+  bounded in rate by the per-chat and per-IP limits, so it was a slow leak
+  rather than a hole — but it was a real gap, and is not one any longer.
 - **Database constraints mirror the domain rules** rather than trusting the
   application: a limited member cannot hold `marriage`, an owner must hold all
   four capabilities, and capabilities must come from the known set.

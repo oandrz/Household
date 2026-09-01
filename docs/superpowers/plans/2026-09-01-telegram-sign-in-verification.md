@@ -109,9 +109,16 @@ a named security property with one unit test behind it
 (`TestSendMessageDoesNotLeakTokenWhenTokenBreaksTheURL` and its sibling in
 `internal/adapter/telegram/client_test.go`) — this checks the running
 container agrees, after the setup gate above has generated some real traffic
-for the token to have leaked into:
+for the token to have leaked into. **A false-failure trap specific to this
+check, on top of the five above:** the `echo … >> .env` step above never
+exports
+`TELEGRAM_BOT_TOKEN` into your shell, so if the variable is read unset below,
+`cut` emits an empty string and `grep -c ""` matches *every* line in the
+logs — a large, alarming number that looks exactly like a leak but is really
+just "the check never ran." Load it from `.env` first, in the same shell:
 
 ```bash
+TELEGRAM_BOT_TOKEN=$(grep '^TELEGRAM_BOT_TOKEN=' .env | cut -d= -f2)
 docker compose logs api | grep -c "$(cut -d: -f1 <<<"$TELEGRAM_BOT_TOKEN")"
 # expect: 0
 ```

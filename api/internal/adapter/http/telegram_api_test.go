@@ -194,7 +194,7 @@ func TestTelegramStartIs404WhenTheFeatureIsOff(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
 }
 
-// TestTelegramStartIs404WhenTheFeatureIsOffMatchesAGenuinelyUnroutedPathByte
+// TestTelegramStartIs404WhenTheFeatureIsOffIsByteIdenticalToAnUnroutedPath
 // pins the body itself, not only the status and code the test above already
 // checks. Status and code alone would still pass if the handler's message
 // text ever drifted from router.go's own NotFound handler -- say, to
@@ -206,7 +206,7 @@ func TestTelegramStartIs404WhenTheFeatureIsOff(t *testing.T) {
 // proves there is no distinguisher. See the mutation proof recorded in the
 // final-fix-wave report: changing the handler's message makes this test
 // fail, and restoring it makes this test pass again.
-func TestTelegramStartIs404WhenTheFeatureIsOffMatchesAGenuinelyUnroutedPathByte(t *testing.T) {
+func TestTelegramStartIs404WhenTheFeatureIsOffIsByteIdenticalToAnUnroutedPath(t *testing.T) {
 	env := newTestEnv(t) // the existing helper: Deps.Telegram is nil
 
 	telegramOff := env.do(http.MethodPost, "/api/v1/auth/telegram/start", nil)

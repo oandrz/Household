@@ -50,8 +50,9 @@ commands:
   create-invite --email= --name= --role=        invite a new member (role: owner or limited);
     [--capabilities=] [--inviter-email=]        the household is resolved from --inviter-email
                                                  (any member's address; defaults to the seeded owner)
-  prune [--older-than=30]                       delete consumed/expired signups and login attempts
-                                                 older than this many days (minimum 7)
+  prune [--older-than=30]                       delete consumed/expired signups, login attempts and
+                                                 Telegram link requests older than this many days
+                                                 (minimum 7)
 `
 
 func run(args []string) error {
