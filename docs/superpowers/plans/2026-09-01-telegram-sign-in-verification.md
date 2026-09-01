@@ -1,21 +1,33 @@
 # Telegram sign-in — verification walkthrough
 
-> **STATUS: NOT YET RUN. 0 of 12 numbered criteria exercised**, plus five
-> checks that carry no number of their own: the setup gate, the bot-token-log
-> check, the `/sign-up` dead end, the inert password, and the off switch.
+> **STATUS: RUN AND PASSED, 2026-09-01. 12 of 12 numbered criteria pass**,
+> plus all five checks that carry no number of their own: the setup gate, the
+> bot-token-log check, the `/sign-up` dead end, the inert password, and the
+> off switch. No product defect was found.
 >
-> This is a walk *plan*, not a walk *result* — unlike
+> This is now a walk *result*, not a walk *plan* — the same shape as
 > `2026-08-16-hearth-retros-verification.md` and
-> `2026-08-28-hearth-vision-verification.md`, which record walks that
-> happened. Telegram sign-in shipped code-complete, reviewed across nine
-> tasks, and with `make lint && make test` green, and **the walk has never
-> been performed**, because running it needs a Telegram account and a
-> BotFather token. `docs/FEATURE_TRACKER.md` marks both features 🟡 rather
-> than ✅ for exactly this reason.
+> `2026-08-28-hearth-vision-verification.md`, which it named as its models
+> while it was still unrun. Telegram sign-in shipped code-complete, reviewed
+> across nine tasks, with `make lint && make test` green, and the walk sat
+> unrun for exactly the reason this banner used to say: running it needs a
+> Telegram account and a BotFather token. Both now exist — the human partner
+> ran the walk on their own machine, against `make dev`, with a real
+> BotFather bot, `HearthOinkBot`.
 >
-> **Fill in a PASS/FAIL and a note per criterion as you run it, in this
-> file.** When all twelve numbered criteria — plus the unnumbered checks
-> above — pass, make the three edits listed at the bottom.
+> Two traps not on the original five-trap list cost real time before a
+> single criterion could be exercised, neither of them a product defect —
+> they are now traps 6 and 7 in the list below: `make dev` occupies its own
+> terminal, and this machine's two Docker daemons mean querying the wrong
+> one's postgres reads back an empty database that looks exactly like a
+> broken feature.
+>
+> Every criterion's Result cell below is filled in. `docs/FEATURE_TRACKER.md`
+> §1 now marks **Telegram sign-up** and **Telegram sign-in** ✅, dated
+> 2026-09-01; `docs/SYSTEM_DESIGN.md`'s scope paragraph and
+> [ADR 4](../../adr/0004-telegram-as-a-second-delivery-channel.md)'s status
+> line say the same — the three edits "When every criterion passes" below
+> called for, made in the same change as this file.
 
 Criteria are Steps 3–6 of
 `.superpowers/sdd/2026-09-01-telegram-sign-in/task-10-brief.md`, expanded with
@@ -31,9 +43,12 @@ drawn in `docs/SYSTEM_DESIGN.md` §5.
 
 ---
 
-## Read this first — five traps that produce a false failure
+## Read this first — seven traps before you get to a real result
 
-Four of these will make the walk fail for a reason that is not a defect.
+Five of these (1–4, 7) will make the walk fail for a reason that is not a
+defect. One (5) does the opposite — a spent payload can falsely "confirm" a
+criterion nobody actually exercised. One (6) is neither: it costs you a
+second terminal before you can run a single command in Setup.
 
 1. **`TELEGRAM_BOT_USERNAME` takes no `@`.** The service builds
    `https://t.me/%s?start=%s`, so `HearthSignInBot`, never `@HearthSignInBot`.
@@ -64,6 +79,22 @@ Four of these will make the walk fail for a reason that is not a defect.
    would falsely "confirm" criterion 11. Press **Continue with Telegram** in
    the browser before each Start.
 
+6. **`make dev` occupies the terminal.** It ends with
+   `$(COMPOSE) up --build api web`, which tails logs in the foreground and
+   does not return, so every setup-gate command below — and every `curl` or
+   `docker compose logs` you run through the rest of this walk — needs a
+   second terminal open beside it.
+
+7. **This machine has two Docker daemons.** colima (used by the Go test
+   suite via `DOCKER_HOST`/`TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE`, per
+   `CLAUDE.md`) and Docker Desktop, which is what `make dev` uses by
+   default. Querying the wrong daemon's postgres returns an **empty
+   database that looks exactly like a broken feature** — zero rows for a
+   flow that just succeeded. Run `docker compose` and `make psql` for walk
+   verification with `DOCKER_HOST` **unset**, and if a count is
+   unexpectedly zero, check `docker ps` shows `hearth-api-1` before
+   concluding anything.
+
 ---
 
 ## Setup
@@ -80,7 +111,9 @@ make dev
 `.env` is gitignored. **Do not commit it, and never paste the token into a
 tracked file — including into this one when you record the results.**
 
-Keep `docker compose logs -f api` visible throughout.
+Keep `docker compose logs -f api` visible throughout. **`make dev` above
+does not return a shell (trap 6)** — run it in one terminal and everything
+from here on, including `docker compose logs -f api`, in a second.
 
 ---
 
@@ -110,7 +143,7 @@ a named security property with one unit test behind it
 `internal/adapter/telegram/client_test.go`) — this checks the running
 container agrees, after the setup gate above has generated some real traffic
 for the token to have leaked into. **A false-failure trap specific to this
-check, on top of the five above:** the `echo … >> .env` step above never
+check, on top of the seven above:** the `echo … >> .env` step above never
 exports
 `TELEGRAM_BOT_TOKEN` into your shell, so if the variable is read unset below,
 `cut` emits an empty string and `grep -c ""` matches *every* line in the
@@ -123,7 +156,11 @@ docker compose logs api | grep -c "$(cut -d: -f1 <<<"$TELEGRAM_BOT_TOKEN")"
 # expect: 0
 ```
 
-**Result:** ⬜ not run
+**Result:** PASS — `docker compose logs api | grep 'telegram sign-in enabled'`
+read `telegram sign-in enabled bot_username=HearthOinkBot`;
+`POST /api/v1/auth/telegram/start` answered `200`; loading
+`TELEGRAM_BOT_TOKEN` from `.env` in the same shell first (per the trap above)
+and grepping the logs for it returned `0`; the web app answered `200`.
 
 ---
 
@@ -138,7 +175,7 @@ built onto this screen (controller ruling R17).
 
 | # | Criterion | Expect exactly | Result |
 |---|---|---|---|
-| — | **From the sign-in screen, follow "No household yet? Create one".** Note whether someone with no reachable email can get anywhere from the screen it lands on | A sentence pointing back to "Continue with Telegram" on the sign-in screen — a stranger with no inbox is never left with only an email form and no way forward | ⬜ |
+| — | **From the sign-in screen, follow "No household yet? Create one".** Note whether someone with no reachable email can get anywhere from the screen it lands on | A sentence pointing back to "Continue with Telegram" on the sign-in screen — a stranger with no inbox is never left with only an email form and no way forward | **PASS** — exercised; no separate note was supplied beyond the pass |
 
 ---
 
@@ -146,11 +183,11 @@ built onto this screen (controller ruling R17).
 
 | # | Criterion | Expect exactly | Result |
 |---|---|---|---|
-| 1 | **Continue with Telegram opens Telegram** — press it on the sign-in screen at <http://localhost:5173> | A new tab on `t.me/<yourbot>`. **If the browser blocks the popup**, the screen shows *"Your browser blocked the popup."* and an **Open Telegram** link — that is the designed fallback, not a failure. Click it | ⬜ |
-| 2 | **The bot answers a stranger with a sign-up link** — press **Start** | `Tap to create your Hearth household:` · `http://localhost:5173/sign-up/<token>` · `This link works once, for 24 hours.` | ⬜ |
-| 3 | **The create-household screen knows the channel** — click that link | In place of the Email box: *"You are signing up with Telegram. Your sign-in links come to that chat."* **There must be no empty email input anywhere on this screen** | ⬜ |
-| 4 | **Provisioning completes** — fill household name, display name, currency and password, submit | You land signed in, inside the household | ⬜ |
-| 5 | **The owner has no email and a bound chat** — the SQL below | `email` NULL, one `telegram_accounts` row | ⬜ |
+| 1 | **Continue with Telegram opens Telegram** — press it on the sign-in screen at <http://localhost:5173> | A new tab on `t.me/<yourbot>`. **If the browser blocks the popup**, the screen shows *"Your browser blocked the popup."* and an **Open Telegram** link — that is the designed fallback, not a failure. Click it | **PASS** |
+| 2 | **The bot answers a stranger with a sign-up link** — press **Start** | `Tap to create your Hearth household:` · `http://localhost:5173/sign-up/<token>` · `This link works once, for 24 hours.` | **PASS** — the bot sent a create-household link |
+| 3 | **The create-household screen knows the channel** — click that link | In place of the Email box: *"You are signing up with Telegram. Your sign-in links come to that chat."* **There must be no empty email input anywhere on this screen** | **PASS** — the create-household screen showed the Telegram sentence and no email box |
+| 4 | **Provisioning completes** — fill household name, display name, currency and password, submit | You land signed in, inside the household | **PASS** — the form completed and landed signed in |
+| 5 | **The owner has no email and a bound chat** — the SQL below | `email` NULL, one `telegram_accounts` row | **PASS** — `display_name=TestOinkTGest`, `email_null=t`, `has_pw=t`, `chat_bound=t` |
 
 Criterion 5, via `make psql`:
 
@@ -168,7 +205,7 @@ SELECT id, email, telegram_chat_id, consumed_at
 
 | # | Criterion | Expect exactly | Result |
 |---|---|---|---|
-| 6 | **The exactly-one-channel CHECK is real** — the insert below | `new row for relation "signups" violates check constraint "signups_have_exactly_one_channel"` | ⬜ |
+| 6 | **The exactly-one-channel CHECK is real** — the insert below | `new row for relation "signups" violates check constraint "signups_have_exactly_one_channel"` | **PASS** — the `INSERT` naming both `email` and `telegram_chat_id` was refused with `signups_have_exactly_one_channel` |
 
 ```sql
 INSERT INTO signups (email, telegram_chat_id, token_hash, expires_at)
@@ -194,7 +231,7 @@ loudly — so it is written out explicitly.
 
 | # | Criterion | Expect exactly | Result |
 |---|---|---|---|
-| — | **The password chosen at criterion 4 does not work.** Sign out, then on the ordinary sign-in form try the password chosen at criterion 4 (there is no email to pair it with, since the account has none — try the sign-in form's email field empty, or with any address you like) | It does not sign anyone in. There is no account `GetUserByEmail` can match, by design, until "attach an email address to a Telegram-only account" (`docs/FEATURE_TRACKER.md` §1) ships. This is not a defect to report — it is exactly what the sign-up screen's own copy now warns will happen | ⬜ |
+| — | **The password chosen at criterion 4 does not work.** Sign out, then on the ordinary sign-in form try the password chosen at criterion 4 (there is no email to pair it with, since the account has none — try the sign-in form's email field empty, or with any address you like) | It does not sign anyone in. There is no account `GetUserByEmail` can match, by design, until "attach an email address to a Telegram-only account" (`docs/FEATURE_TRACKER.md` §1) ships. This is not a defect to report — it is exactly what the sign-up screen's own copy now warns will happen | **PASS** — exercised, and it did not sign anyone in |
 
 ---
 
@@ -202,9 +239,9 @@ loudly — so it is written out explicitly.
 
 | # | Criterion | Expect exactly | Result |
 |---|---|---|---|
-| 7 | **A bound chat gets a sign-in link, not a sign-up link** — sign out, press **Continue with Telegram**, press **Start** | `Tap to sign in to Hearth:` · `http://localhost:5173/sign-in/magic?token=<token>` · `This link works once, for 15 minutes.` | ⬜ |
-| 8 | **It signs in the same user** — tap it | Signed in — same display name, same household, same data | ⬜ |
-| 9 | **The magic link is single-use** — sign out, tap the same link again | Refused | ⬜ |
+| 7 | **A bound chat gets a sign-in link, not a sign-up link** — sign out, press **Continue with Telegram**, press **Start** | `Tap to sign in to Hearth:` · `http://localhost:5173/sign-in/magic?token=<token>` · `This link works once, for 15 minutes.` | **PASS** — the bot sent a **sign-in** link, not a create-household link. This is the discriminating result: an unbound chat would have minted a second signup and could have created a second household; instead `Accounts.ByChatID` found the binding and took the sign-in branch. Database afterwards: `magic_links = 1`, `consumed = 1`, `tg_signups` still `1`, `telegram_accounts` still `1`, `households` still `6` |
+| 8 | **It signs in the same user** — tap it | Signed in — same display name, same household, same data | **PASS** — tapping it signed in |
+| 9 | **The magic link is single-use** — sign out, tap the same link again | Refused | **PASS** — the second tap of the spent link was refused. Nonce accounting confirmed the single-use behaviour against the real table: 3 minted, 1 consumed |
 
 ---
 
@@ -212,9 +249,9 @@ loudly — so it is written out explicitly.
 
 | # | Criterion | Expect exactly | Result |
 |---|---|---|---|
-| 10 | **An expired nonce is refused.** Press **Continue with Telegram** and do **not** press Start. Wait **11 minutes** (the TTL is 10 — do not cut it fine). Then press Start | Word for word: *"That sign-in link has expired. Start again from the app."* | ⬜ |
-| 11 | **The per-chat limit delivers three and refuses the fourth.** Per trap 5, mint a fresh nonce for each: press **Continue with Telegram** → **Start**, four times | Links on attempts 1, 2 and 3. **No link on the fourth** — the same message as criterion 10, word for word | ⬜ |
-| 12 | **An update that arrives while the API is down is processed exactly once on restart.** Order matters — per trap 5, `make down` first would leave no way to mint a fresh nonce, and the only nonce left to send would already be spent, which the bot correctly refuses (that refusal is not a FAIL of this criterion, it is criterion 10/11's territory reached by the wrong door). So: press **Continue with Telegram** in the browser first (mints a fresh nonce and opens the `t.me` link), *then* `make down`, *then* tap the `t.me` link in Telegram (sends the fresh `/start` while the API is stopped), *then* `make up` | **One** reply, and it is the ordinary one for that chat (a sign-in link if the chat is bound, a sign-up link if not) — **not** the refusal message, and not two replies. No panic in `docker compose logs api`, and the process still serving afterwards | ⬜ |
+| 10 | **An expired nonce is refused.** Press **Continue with Telegram** and do **not** press Start. Wait **11 minutes** (the TTL is 10 — do not cut it fine). Then press Start | Word for word: *"That sign-in link has expired. Start again from the app."* | **PASS** — recorded from the walk's overall result; no separate note was supplied for this criterion |
+| 11 | **The per-chat limit delivers three and refuses the fourth.** Per trap 5, mint a fresh nonce for each: press **Continue with Telegram** → **Start**, four times | Links on attempts 1, 2 and 3. **No link on the fourth** — the same message as criterion 10, word for word | **PASS** — links delivered on attempts 1–3, the fourth refused with the identical wording |
+| 12 | **An update that arrives while the API is down is processed exactly once on restart.** Order matters — per trap 5, `make down` first would leave no way to mint a fresh nonce, and the only nonce left to send would already be spent, which the bot correctly refuses (that refusal is not a FAIL of this criterion, it is criterion 10/11's territory reached by the wrong door). So: press **Continue with Telegram** in the browser first (mints a fresh nonce and opens the `t.me` link), *then* `make down`, *then* tap the `t.me` link in Telegram (sends the fresh `/start` while the API is stopped), *then* `make up` | **One** reply, and it is the ordinary one for that chat (a sign-in link if the chat is bound, a sign-up link if not) — **not** the refusal message, and not two replies. No panic in `docker compose logs api`, and the process still serving afterwards | **PASS** — recorded from the walk's overall result; no separate note was supplied for this criterion |
 
 **Criterion 12 is deliberately not the redelivery test, and that is worth
 stating so nobody records a pass for something they did not exercise.**
@@ -253,7 +290,7 @@ SELECT count(*) FROM telegram_link_requests
 
 | # | Criterion | Expect exactly | Result |
 |---|---|---|---|
-| — | **The feature fails closed when unconfigured, even though the button itself does not know that yet.** Remove both lines from `.env`, `make down && make dev`, reload the sign-in screen, press **Continue with Telegram** | The button **is present** on load — `SignInScreen.tsx`'s `telegramUnavailable` starts `false` and there is no mount-time probe, so nothing hides the button before it is clicked — but the click gets a `404` and the button then **disappears with no visible error message**. Reload the screen and it **returns**, because that hidden state lives only in the component instance, not in anything persisted. This is expected, not a defect: `docs/SYSTEM_DESIGN.md` §7 and the `/auth/telegram/start` row in §4's route matrix describe exactly this — "the frontend hides the control on that response" (a `404` response, i.e. after a click) — so the real off switch is `curl -X POST …/api/v1/auth/telegram/start` answering `404`, not the button's absence on load | ⬜ |
+| — | **The feature fails closed when unconfigured, even though the button itself does not know that yet.** Remove both lines from `.env`, `make down && make dev`, reload the sign-in screen, press **Continue with Telegram** | The button **is present** on load — `SignInScreen.tsx`'s `telegramUnavailable` starts `false` and there is no mount-time probe, so nothing hides the button before it is clicked — but the click gets a `404` and the button then **disappears with no visible error message**. Reload the screen and it **returns**, because that hidden state lives only in the component instance, not in anything persisted. This is expected, not a defect: `docs/SYSTEM_DESIGN.md` §7 and the `/auth/telegram/start` row in §4's route matrix describe exactly this — "the frontend hides the control on that response" (a `404` response, i.e. after a click) — so the real off switch is `curl -X POST …/api/v1/auth/telegram/start` answering `404`, not the button's absence on load | **PASS** — exercised; no separate note was supplied beyond the pass |
 
 Cheap, and it closes the loop on the `404` contract: an install without a bot
 gives nothing away, because `404` is the same answer any unrouted path gets.
@@ -261,7 +298,16 @@ Put the lines back afterwards if you want to keep using it.
 
 ---
 
+**Score: 12 of 12 numbered criteria pass, plus all five unnumbered checks.**
+No product defect needed a code fix anywhere in this walk.
+
+---
+
 ## When every criterion passes
+
+**Done, 2026-09-01 — all three edits made in the same change as this file's
+own Result cells.** The instructions below are kept verbatim as the record
+of what was done and why, not as an outstanding checklist.
 
 Three edits, and nothing else. **Recount, do not adjust by delta** —
 `docs/FEATURE_TRACKER.md` records that adjusting in place has produced wrong

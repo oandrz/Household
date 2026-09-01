@@ -1,8 +1,11 @@
 # 4. Telegram as a second delivery channel
 
-**Status:** Accepted — 2026-09-01. **Shipped unwalked** — the code is complete
-and reviewed, and no bot has ever been created, so the flow has never run
-against a real chat. See "Consequences".
+**Status:** Accepted — 2026-09-01. **Walked and passed — 2026-09-01.** The
+code shipped complete and reviewed, and stayed unwalked only until a
+BotFather bot existed to walk it against; `HearthOinkBot` now has, and every
+criterion in
+`docs/superpowers/plans/2026-09-01-telegram-sign-in-verification.md` passed
+against it. See "Consequences".
 
 ## Context
 
@@ -126,15 +129,19 @@ having rejected the webhook. If Hearth ever needs two API replicas, the poller
 has to move out first: either into a single-instance worker, or onto the webhook
 this ADR declined.
 
-**It ships unwalked, and the tracker says so.** `make lint && make test` are
-green and nine tasks of work were reviewed, but creating a bot needs a Telegram
-account and a BotFather token nobody has made, so not one criterion has been
-exercised end to end. `docs/FEATURE_TRACKER.md` marks both features 🟡, not ✅,
-and `CLAUDE.md`'s standing rule — test the product in a real browser before
-calling it done — is unmet here rather than waived. The walk is written out,
-criterion by criterion, in
-`docs/superpowers/plans/2026-09-01-telegram-sign-in-verification.md`, which is
-tracked in the repository so the gap cannot be lost with a working directory.
+**It shipped unwalked, and now it is walked, and the tracker says so.**
+`make lint && make test` were green and nine tasks of work were reviewed
+before a bot existed to walk the flow against; `HearthOinkBot`, a real
+BotFather bot, closed that gap on 2026-09-01. Every numbered criterion and
+every unnumbered check in
+`docs/superpowers/plans/2026-09-01-telegram-sign-in-verification.md` passed
+against it — a stranger's `/start` provisioned a household with no email
+address at all, and a bound chat's `/start` sent a sign-in link rather than
+a second sign-up, the discriminating case that only a correct
+`Accounts.ByChatID` lookup produces. `docs/FEATURE_TRACKER.md` now marks
+both features ✅, and `CLAUDE.md`'s standing rule — test the product in a
+real browser before calling it done — is met here, not waived. The walk
+stays tracked in the repository as the record of how, not only that.
 
 **The feature is off unless configured, and half-configured will not boot.**
 `TELEGRAM_BOT_TOKEN` and `TELEGRAM_BOT_USERNAME` must both be set or both be

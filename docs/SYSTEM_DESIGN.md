@@ -80,26 +80,30 @@ entry came back together in the same change that built `RetrosPage.tsx`
 (§4, §7) — where any of these rounds changed the shape of something drawn
 here, the change is recorded at that diagram (§7 in particular).
 
-**Telegram sign-in is code-complete and has never been walked in a browser.**
-It adds a second *delivery channel* for the sign-in and sign-up links Hearth
-already mints — a new outbound-only adapter (§2), three new ports plus one
-interface the adapter declares for itself (§3), one new public route (§4), a
-new flow (§5), two new tables and a `signups` table that now names either an
-email address or a Telegram chat (§6), and one new control on the sign-in
-screen (§7). It changes what a token *travels over*, never what a token is,
-who may hold one, or what consuming one does: no new session-issuing code
-exists anywhere in it. **It is off unless configured** —
+**Telegram sign-in is code-complete and has been walked in a browser against
+a real bot, 2026-09-01.** It adds a second *delivery channel* for the sign-in
+and sign-up links Hearth already mints — a new outbound-only adapter (§2),
+three new ports plus one interface the adapter declares for itself (§3), one
+new public route (§4), a new flow (§5), two new tables and a `signups` table
+that now names either an email address or a Telegram chat (§6), and one new
+control on the sign-in screen (§7). It changes what a token *travels over*,
+never what a token is, who may hold one, or what consuming one does: no new
+session-issuing code exists anywhere in it. **It is off unless configured** —
 `TELEGRAM_BOT_TOKEN` and `TELEGRAM_BOT_USERNAME` must both be set or both be
-empty, and both empty — which is what `deploy/.env` on the production box says, and this
-change has not been deployed there anyway — leaves the route answering `404`
-and the poller never started. What has *not* happened
-is the walk: creating a bot needs a Telegram account nobody has made yet, so
-not one criterion has been exercised against a real chat —
+empty, and both empty — which is what `deploy/.env` on the production box
+says, and this change has not been deployed there anyway — leaves the route
+answering `404` and the poller never started. Every numbered criterion and
+every unnumbered check passed against `HearthOinkBot`, a real BotFather bot,
+on `make dev`: a stranger's `/start` produced a sign-up link that provisioned
+a household with no email address at all, and — the discriminating result —
+a bound chat's `/start` produced a **sign-in** link rather than a second
+sign-up, so `Accounts.ByChatID` found the binding and took the returning-user
+branch instead of ever minting a second household.
 `docs/superpowers/plans/2026-09-01-telegram-sign-in-verification.md` is that
-walk, written out and unrun. Its rows in
-`docs/FEATURE_TRACKER.md` are 🟡 for exactly that reason, not ✅ — this
-document draws code that is built and reviewed, and says plainly where the
-verification every other feature here passed has not run.
+walk, written out and recorded as run. Its rows in
+`docs/FEATURE_TRACKER.md` are ✅ for exactly that reason — this
+document draws code that is built, reviewed, and now verified the same way
+every other feature here is.
 `docs/adr/0004-telegram-as-a-second-delivery-channel.md` carries why Telegram
 rather than WhatsApp or SMS, and why the link comes back to the device that
 taps it.
