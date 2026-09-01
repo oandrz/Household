@@ -204,12 +204,13 @@ type Session struct {
 }
 
 type Signup struct {
-	ID         pgtype.UUID
-	Email      string
-	TokenHash  []byte
-	ExpiresAt  pgtype.Timestamptz
-	ConsumedAt pgtype.Timestamptz
-	CreatedAt  pgtype.Timestamptz
+	ID             pgtype.UUID
+	Email          *string
+	TokenHash      []byte
+	ExpiresAt      pgtype.Timestamptz
+	ConsumedAt     pgtype.Timestamptz
+	CreatedAt      pgtype.Timestamptz
+	TelegramChatID *int64
 }
 
 type Space struct {
@@ -221,6 +222,22 @@ type Space struct {
 	Position           int32
 	IsBuiltin          bool
 	RequiredCapability string
+}
+
+type TelegramAccount struct {
+	ID       pgtype.UUID
+	UserID   pgtype.UUID
+	ChatID   int64
+	LinkedAt pgtype.Timestamptz
+}
+
+type TelegramLinkRequest struct {
+	ID         pgtype.UUID
+	NonceHash  []byte
+	ExpiresAt  pgtype.Timestamptz
+	ConsumedAt pgtype.Timestamptz
+	ChatID     *int64
+	CreatedAt  pgtype.Timestamptz
 }
 
 type Transaction struct {

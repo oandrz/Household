@@ -189,6 +189,20 @@ export function SignUpScreen() {
             <Link to="/sign-in" className="cursor-pointer font-semibold text-accent">
               Sign in
             </Link>
+            {/* R17: this screen collects an email address and mails a token
+                through it -- there is no other way through it. Rather than
+                building a second, Telegram-shaped version of this whole
+                screen (the synchronous-popup start, the 404-hides-the-button
+                fallback SignInScreen already carries), a stranger with no
+                reachable inbox is pointed back to the one screen that already
+                has that control. */}
+            <p className="mt-2 text-[12px] leading-relaxed">
+              No email you can check right now?{" "}
+              <Link to="/sign-in" className="cursor-pointer font-semibold text-accent">
+                Continue with Telegram
+              </Link>{" "}
+              instead, from the sign-in screen — no address needed.
+            </p>
           </div>
         </div>
 

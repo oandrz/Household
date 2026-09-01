@@ -86,8 +86,19 @@ export const acceptInviteRequestSchema = z.object({
 });
 export type AcceptInviteRequest = z.infer<typeof acceptInviteRequestSchema>;
 
-// signUpPreviewSchema is GET /auth/sign-up/:token's body.
-export const signUpPreviewSchema = z.object({ email: z.string() });
+// signUpPreviewSchema is GET /auth/sign-up/:token's body. channel is
+// "email" | "telegram" -- parsed as a union rather than a bare string so an
+// unrecognised value fails loudly here instead of silently rendering the
+// wrong screen, the same refuse-what-you-did-not-construct rule
+// signup_handlers.go's own switch over Provision.Channel follows server-side.
+// For a Telegram sign-up email is present and empty, never absent (the
+// handler builds the body with map[string]string specifically so
+// `omitempty` can't drop it), so this deliberately does not make email
+// optional.
+export const signUpPreviewSchema = z.object({
+  email: z.string(),
+  channel: z.union([z.literal("email"), z.literal("telegram")]),
+});
 export type SignUpPreview = z.infer<typeof signUpPreviewSchema>;
 
 // currencySchema mirrors currencyDTO (api/internal/adapter/http/currency_handlers.go).

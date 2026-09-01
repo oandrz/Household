@@ -19,9 +19,20 @@ import (
 	httpadapter "github.com/andreasoentoro/hearth/api/internal/adapter/http"
 	"github.com/andreasoentoro/hearth/api/internal/adapter/mail"
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres"
+	"github.com/andreasoentoro/hearth/api/internal/adapter/telegram"
 	"github.com/andreasoentoro/hearth/api/internal/config"
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
+
+// The poller is handed its service through telegram.StartHandler, an interface
+// the adapter declares rather than imports from usecase -- so the compiler
+// only checks the two signatures agree at the one place both packages are
+// visible. Today that place is the NewPoller call below, which already
+// enforces it. This assertion states the relationship independently of that
+// call site, so a signature drifting on either side fails the build naming the
+// interface, and keeps failing if construction ever moves behind a helper or a
+// conditional where the check would be easy to lose.
+var _ telegram.StartHandler = (*usecase.TelegramAuthService)(nil)
 
 func main() {
 	if err := run(); err != nil {
@@ -87,6 +98,8 @@ func run() error {
 	retroRepo := postgres.NewRetroRepo(db)
 	retroActionRepo := postgres.NewRetroActionRepo(db)
 	visionRepo := postgres.NewVisionRepo(db)
+	telegramLinks := postgres.NewTelegramLinkRepo(db)
+	telegramAccounts := postgres.NewTelegramAccountRepo(db)
 
 	hasher := crypto.NewArgon2Hasher(cfg.Argon2Time, cfg.Argon2MemoryKiB, cfg.Argon2Threads)
 	tokens := crypto.NewTokenGenerator()
@@ -142,6 +155,31 @@ func run() error {
 		SessionTTL: httpadapter.SessionTTL,
 		BaseURL:    cfg.AppBaseURL,
 	})
+	// Nil unless a bot is configured. httpadapter.Deps.Telegram being nil is
+	// what makes POST /auth/telegram/start answer 404, so "not configured" is
+	// expressed once, here, rather than re-derived by every consumer.
+	var telegramSvc *usecase.TelegramAuthService
+	var telegramPoller *telegram.Poller
+	if cfg.TelegramEnabled() {
+		client := telegram.NewClient(cfg.TelegramBotToken)
+		telegramSvc = usecase.NewTelegramAuthService(usecase.TelegramAuthDeps{
+			Links:      telegramLinks,
+			Accounts:   telegramAccounts,
+			MagicLinks: magicLinks,
+			// The same signups repository SignupService holds. Telegram mints
+			// no token type of its own -- it writes a row in the existing
+			// table, on the existing 24-hour expiry, counted by the existing
+			// global daily ceiling.
+			Signups:     signups,
+			Sender:      client,
+			Tokens:      tokens,
+			Clock:       sysClock,
+			BaseURL:     cfg.AppBaseURL,
+			BotUsername: cfg.TelegramBotUsername,
+		})
+		telegramPoller = telegram.NewPoller(client, telegramSvc)
+	}
+
 	accountSvc := usecase.NewAccountService(usecase.AccountDeps{
 		Accounts:   accountRepo,
 		Households: households,
@@ -217,6 +255,7 @@ func run() error {
 			Bills:        billSvc,
 			Retros:       retroSvc,
 			Visions:      visionSvc,
+			Telegram:     telegramSvc,
 			Users:        users,
 			Memberships:  memberships,
 			Sessions:     sessions,
@@ -255,6 +294,26 @@ func run() error {
 		}
 		serveErr <- nil
 	}()
+
+	// The poller is a bare goroutine beside the server's, cancelled by the same
+	// signal context. Nothing waits on it at shutdown, and that is a deliberate
+	// trade-off rather than an oversight: it passes ctx straight through to
+	// HandleStart, so a /start being handled when SIGTERM arrives is cancelled
+	// mid-flight. Cancelling it is safe because HandleStart holds no
+	// multi-statement transaction -- every repository call it makes is one
+	// atomic statement -- so the worst durable outcome is a nonce spent with no
+	// reply sent, which the person recovers from by pressing the button again
+	// (the bot's own refusal copy already says "Start again from the app"), or
+	// an unused magic-link row that expires in fifteen minutes. Draining it
+	// instead would need a WaitGroup the process would then have to wait on
+	// before returning from run(), and that buys completion only if the
+	// supervisor's kill timeout is longer than the in-flight send -- otherwise
+	// it trades a clean cancellation for a write racing process death. Add the
+	// WaitGroup when something in this loop starts writing more than one row.
+	if telegramPoller != nil {
+		slog.Info("telegram sign-in enabled", "bot_username", cfg.TelegramBotUsername)
+		go telegramPoller.Run(ctx)
+	}
 
 	<-ctx.Done()
 

@@ -69,6 +69,11 @@ func (l *ipRateLimiter) allow(ip string) bool {
 	return true
 }
 
+// telegramStartsPerIPPerHour is more generous than the sign-up limit because
+// this endpoint mails nothing and costs one small row -- but it is limited
+// all the same, since it is reachable without a session.
+const telegramStartsPerIPPerHour = 20
+
 // clientIP prefers the address chi's middleware.RealIP has already resolved
 // (it rewrites r.RemoteAddr from X-Forwarded-For, and the router installs it),
 // falling back to the raw RemoteAddr. The port is stripped so repeat requests

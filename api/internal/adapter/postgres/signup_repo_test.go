@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -328,6 +329,162 @@ func TestSignupRepoProvisionRefusesAnExpiredSignup(t *testing.T) {
 	if _, err := repo.Provision(ctx, signup.ID, "hashed-password", blueprint); !errors.Is(err, domain.ErrTokenExpired) {
 		t.Fatalf("error = %v, want domain.ErrTokenExpired", err)
 	}
+}
+
+// Provision binds the chat inside its own transaction, from the row it is
+// claiming -- not from anything a caller passed in. A Telegram sign-up that
+// provisioned a household but left the chat unbound would be an account its
+// owner can never sign into again.
+func TestSignupRepoProvisionBindsTheChatFromTheClaimedRow(t *testing.T) {
+	db := openTestDB(t)
+	pool := db.Pool()
+	repo := postgres.NewSignupRepo(db)
+	ctx := context.Background()
+
+	const chatID int64 = 777001
+	hash := []byte("telegram-signup-token-aaaaaaaaaa")
+	if err := repo.CreateForTelegram(ctx, chatID, hash, time.Now().Add(24*time.Hour)); err != nil {
+		t.Fatalf("CreateForTelegram: %v", err)
+	}
+	details, err := repo.ByTokenHash(ctx, hash)
+	if err != nil {
+		t.Fatalf("ByTokenHash: %v", err)
+	}
+	if details.TelegramChatID == nil || *details.TelegramChatID != chatID {
+		t.Fatalf("TelegramChatID = %v, want %d", details.TelegramChatID, chatID)
+	}
+	if details.Email != "" {
+		t.Fatalf("Email = %q, want empty for a Telegram sign-up", details.Email)
+	}
+
+	blueprint, err := usecase.NewSignupBlueprint("Telegram household", "Ade", "SGD")
+	if err != nil {
+		t.Fatalf("NewSignupBlueprint: %v", err)
+	}
+	provisioned, err := repo.Provision(ctx, details.ID, "argon2-hash", blueprint)
+	if err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+
+	var boundUser string
+	if err := pool.QueryRow(ctx,
+		`SELECT user_id::text FROM telegram_accounts WHERE chat_id = $1`, chatID).Scan(&boundUser); err != nil {
+		t.Fatalf("no telegram_accounts row after Provision: %v", err)
+	}
+	if boundUser != provisioned.UserID {
+		t.Fatalf("bound user = %q, want %q", boundUser, provisioned.UserID)
+	}
+}
+
+// An email sign-up must not gain a telegram_accounts row.
+func TestSignupRepoProvisionBindsNoChatForAnEmailSignup(t *testing.T) {
+	db := openTestDB(t)
+	pool := db.Pool()
+	repo := postgres.NewSignupRepo(db)
+	ctx := context.Background()
+
+	hash := []byte("email-signup-token-bbbbbbbbbbbbb")
+	if err := repo.Create(ctx, "someone@example.test", hash, time.Now().Add(24*time.Hour)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	details, err := repo.ByTokenHash(ctx, hash)
+	if err != nil {
+		t.Fatalf("ByTokenHash: %v", err)
+	}
+
+	blueprint, err := usecase.NewSignupBlueprint("Email household", "Ade", "SGD")
+	if err != nil {
+		t.Fatalf("NewSignupBlueprint: %v", err)
+	}
+	provisioned, err := repo.Provision(ctx, details.ID, "argon2-hash", blueprint)
+	if err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+
+	var n int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM telegram_accounts WHERE user_id = $1`, provisioned.UserID).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("telegram_accounts rows for an email sign-up = %d, want 0", n)
+	}
+}
+
+// The orphan test: if the binding insert fails, nothing survives. A
+// pre-existing row on the same chat_id makes the telegram_accounts_chat_id_key
+// unique constraint fire inside the transaction, after the household, the
+// user and the membership have already been inserted -- exactly the position
+// a partial write would occupy.
+func TestSignupRepoProvisionRollsBackWhenTheChatIsAlreadyBound(t *testing.T) {
+	db := openTestDB(t)
+	pool := db.Pool()
+	repo := postgres.NewSignupRepo(db)
+	ctx := context.Background()
+
+	const chatID int64 = 777002
+	// Bind the chat to an unrelated user first.
+	var otherUser string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO users (display_name, avatar_initial) VALUES ('Other', 'O') RETURNING id::text`).
+		Scan(&otherUser); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO telegram_accounts (user_id, chat_id) VALUES ($1, $2)`, otherUser, chatID); err != nil {
+		t.Fatalf("seed binding: %v", err)
+	}
+
+	hash := []byte("doomed-signup-token-ccccccccccccc")
+	if err := repo.CreateForTelegram(ctx, chatID, hash, time.Now().Add(24*time.Hour)); err != nil {
+		t.Fatalf("CreateForTelegram: %v", err)
+	}
+	details, err := repo.ByTokenHash(ctx, hash)
+	if err != nil {
+		t.Fatalf("ByTokenHash: %v", err)
+	}
+
+	blueprint, err := usecase.NewSignupBlueprint("Doomed telegram household", "Ade", "SGD")
+	if err != nil {
+		t.Fatalf("NewSignupBlueprint: %v", err)
+	}
+	_, provisionErr := repo.Provision(ctx, details.ID, "argon2-hash", blueprint)
+	if provisionErr == nil {
+		t.Fatal("Provision succeeded with an already-bound chat, want an error")
+	}
+
+	// The rollback properties come first and are checked unconditionally on
+	// any error shape: this is what the test's name promises, and what the
+	// task's mutation check (moving the bind outside the transaction) must
+	// break. A more specific assertion on the error text below must never
+	// gate these -- gating them would let a mutation that changes the error's
+	// shape but not its rollback behaviour hide a real regression here.
+	t.Run("no household survived", func(t *testing.T) {
+		var count int
+		if err := pool.QueryRow(ctx,
+			`SELECT count(*) FROM households WHERE name = $1`, "Doomed telegram household").Scan(&count); err != nil {
+			t.Fatalf("query households: %v", err)
+		}
+		if count != 0 {
+			t.Fatalf("found %d households, want 0", count)
+		}
+	})
+
+	t.Run("the signup is still unconsumed, so a retry is possible", func(t *testing.T) {
+		again, err := repo.ByTokenHash(ctx, hash)
+		if err != nil {
+			t.Fatalf("ByTokenHash: %v", err)
+		}
+		if again.ConsumedAt != nil {
+			t.Fatal("signup was consumed despite the rolled-back transaction")
+		}
+	})
+
+	t.Run("the error names the constraint that fired", func(t *testing.T) {
+		if !strings.Contains(provisionErr.Error(), "telegram_accounts_chat_id_key") {
+			t.Fatalf("err = %v, want a telegram_accounts_chat_id_key violation", provisionErr)
+		}
+	})
 }
 
 func TestSignupRepoPruneLeavesLiveRows(t *testing.T) {

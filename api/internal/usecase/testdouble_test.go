@@ -612,6 +612,20 @@ func (d *magicLinkDouble) CountSince(_ context.Context, email string, since time
 	return n, nil
 }
 
+// countFor counts magic-link rows minted for userID, consumed or not. It
+// exists for TelegramAuthService's tests, which mint a magic link by user id
+// directly -- there is no address involved on that path -- rather than by the
+// email CountSince joins through.
+func (d *magicLinkDouble) countFor(userID string) int {
+	n := 0
+	for _, row := range d.rows {
+		if row.UserID == userID {
+			n++
+		}
+	}
+	return n
+}
+
 // --- InviteRepository -------------------------------------------------
 
 type inviteRow struct {
@@ -796,11 +810,12 @@ func (d *inviteDouble) Accept(ctx context.Context, inviteID, email, passwordHash
 // --- SignupRepository -------------------------------------------------
 
 type signupRow struct {
-	ID         string
-	Email      string
-	CreatedAt  time.Time
-	ExpiresAt  time.Time
-	ConsumedAt *time.Time
+	ID             string
+	Email          string
+	TelegramChatID *int64
+	CreatedAt      time.Time
+	ExpiresAt      time.Time
+	ConsumedAt     *time.Time
 }
 
 // signupDouble plays the same role postgres's (future) SignupRepo plays over
@@ -866,6 +881,17 @@ type signupDouble struct {
 	// password before ever reaching the repository rather than passing it
 	// through raw.
 	lastPasswordHash string
+
+	// countSinceArg records the since argument CountSince was most recently
+	// called with. It exists so a test can confirm a caller computed the
+	// cutoff it meant to -- e.g. TelegramAuthService's R5 ceiling check must
+	// pass startOfDay(now), a calendar-day boundary, not now itself or a
+	// rolling 24-hour window (see signup.go's Request doc comment for why
+	// that distinction matters). globalCountOverride answers before since is
+	// ever inspected, so nothing about arming that override on its own would
+	// catch a caller that computed the wrong cutoff; this field is what
+	// does.
+	countSinceArg time.Time
 }
 
 func newSignupDouble(clock *fixedClock, households *householdDouble, users *userDouble,
@@ -905,6 +931,19 @@ func (d *signupDouble) markConsumed(tokenHash []byte, at time.Time) {
 
 // createCount reports how many signup rows have ever been created.
 func (d *signupDouble) createCount() int { return len(d.rows) }
+
+// telegramCount counts signup rows created for chatID via CreateForTelegram --
+// the Telegram-sign-up equivalent of createCount, scoped to one chat rather
+// than counting every row in the table.
+func (d *signupDouble) telegramCount(chatID int64) int {
+	n := 0
+	for _, row := range d.rows {
+		if row.TelegramChatID != nil && *row.TelegramChatID == chatID {
+			n++
+		}
+	}
+	return n
+}
 
 // provisionCalls is a read of provisions, the matching accessor to the
 // method-vs-field naming split provisions/failProvide use above.
@@ -956,13 +995,32 @@ func (d *signupDouble) CreateConsumed(_ context.Context, email string, tokenHash
 	return nil
 }
 
+// CreateForTelegram mirrors Create, except the row names a chat id instead of
+// an address -- CreateForTelegram's own doc comment in ports.go says why the
+// two are mutually exclusive per row. It shares failCreate with Create and
+// CreateConsumed, for the same reason CreateConsumed does.
+func (d *signupDouble) CreateForTelegram(_ context.Context, chatID int64, tokenHash []byte, expiresAt time.Time) error {
+	if d.failCreate != nil {
+		err := d.failCreate
+		d.failCreate = nil
+		return err
+	}
+	d.n++
+	d.rows[string(tokenHash)] = &signupRow{
+		ID: fmt.Sprintf("signup-%d", d.n), TelegramChatID: &chatID,
+		CreatedAt: d.clock.Now(), ExpiresAt: expiresAt,
+	}
+	return nil
+}
+
 func (d *signupDouble) ByTokenHash(_ context.Context, tokenHash []byte) (usecase.SignupDetails, error) {
 	row, ok := d.rows[string(tokenHash)]
 	if !ok {
 		return usecase.SignupDetails{}, domain.ErrNotFound
 	}
 	return usecase.SignupDetails{
-		ID: row.ID, Email: row.Email, ExpiresAt: row.ExpiresAt, ConsumedAt: row.ConsumedAt,
+		ID: row.ID, Email: row.Email, TelegramChatID: row.TelegramChatID,
+		ExpiresAt: row.ExpiresAt, ConsumedAt: row.ConsumedAt,
 	}, nil
 }
 
@@ -995,6 +1053,7 @@ func (d *signupDouble) CountSince(_ context.Context, since time.Time) (int, erro
 	if d.log != nil {
 		d.log.record("Signups.CountSince")
 	}
+	d.countSinceArg = since
 	if d.globalCountOverride != nil {
 		return *d.globalCountOverride, nil
 	}
@@ -1006,6 +1065,10 @@ func (d *signupDouble) CountSince(_ context.Context, since time.Time) (int, erro
 	}
 	return n, nil
 }
+
+// lastCountSinceArg reports the since argument CountSince was most recently
+// called with -- see countSinceArg's own doc comment for why this matters.
+func (d *signupDouble) lastCountSinceArg() time.Time { return d.countSinceArg }
 
 // Provision mirrors the real Provision's guarded consume-then-build: a
 // signup that is already consumed or expired reports domain.ErrTokenExpired,
@@ -3358,3 +3421,274 @@ func (d *goalProgressDouble) ProgressByIDs(_ context.Context, _ string, goalIDs 
 }
 
 var _ usecase.GoalProgressReader = (*goalProgressDouble)(nil)
+
+// --- TelegramLinkRepository -------------------------------------------
+
+type telegramLinkRow struct {
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+	ConsumedAt *time.Time
+	ChatID     int64
+}
+
+// telegramLinkRepoDouble plays the same role postgres's TelegramLinkRepo
+// plays over Postgres: Consume stamps a row consumed and records the
+// redeeming chat in one step, mirroring the one-statement guarantee the real
+// Consume gives (see its doc comment in ports.go and
+// adapter/postgres/telegram_link_repo.go).
+//
+// It holds a reference to the same seqTokens the fixture wires into the
+// service, rather than hashing raw nonces some other way, so hasHashOf and
+// mintLive agree with exactly what the service itself will compute when it
+// calls Tokens.HashToken(payload).
+type telegramLinkRepoDouble struct {
+	clock  *fixedClock
+	tokens *seqTokens
+	rows   map[string]*telegramLinkRow // keyed by string(nonceHash)
+	n      int
+}
+
+func newTelegramLinkRepoDouble(clock *fixedClock, tokens *seqTokens) *telegramLinkRepoDouble {
+	return &telegramLinkRepoDouble{clock: clock, tokens: tokens, rows: map[string]*telegramLinkRow{}}
+}
+
+func (d *telegramLinkRepoDouble) Create(_ context.Context, nonceHash []byte, expiresAt time.Time) error {
+	d.rows[string(nonceHash)] = &telegramLinkRow{CreatedAt: d.clock.Now(), ExpiresAt: expiresAt}
+	return nil
+}
+
+// Consume mirrors ConsumeTelegramLinkRequest's guard -- nonce_hash = $1 AND
+// consumed_at IS NULL AND expires_at > now() -- against the fixture's clock
+// rather than wall time. An unknown, expired or already-consumed nonce all
+// report domain.ErrNotFound, indistinguishably, exactly as
+// TelegramLinkRepository.Consume's doc comment requires.
+func (d *telegramLinkRepoDouble) Consume(_ context.Context, nonceHash []byte, chatID int64) error {
+	row, ok := d.rows[string(nonceHash)]
+	if !ok || row.ConsumedAt != nil || !row.ExpiresAt.After(d.clock.Now()) {
+		return domain.ErrNotFound
+	}
+	now := d.clock.Now()
+	row.ConsumedAt = &now
+	row.ChatID = chatID
+	return nil
+}
+
+// CountLinksSince mirrors CountTelegramLinksSince's SQL exactly: chat_id = $1
+// AND consumed_at >= $2 -- inclusive of the boundary, not exclusive. This
+// double is the only place that boundary is exercised (see
+// TestHandleStartRateLimitCountsARedemptionExactlyOnTheSinceBoundary in
+// telegram_auth_test.go and this task's brief note that Task 3's own
+// repository tests never covered it).
+func (d *telegramLinkRepoDouble) CountLinksSince(_ context.Context, chatID int64, since time.Time) (int, error) {
+	n := 0
+	for _, row := range d.rows {
+		if row.ConsumedAt == nil || row.ChatID != chatID {
+			continue
+		}
+		if !row.ConsumedAt.Before(since) {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// hasRaw reports whether raw itself -- not its hash -- was ever stored as a
+// row key. TestStartLinkMintsADeepLinkAndStoresTheNonceHashed relies on this
+// being a real check, not a tautology: seqTokens.HashToken produces
+// "hash:"+raw, a different string from raw itself, so a service that stored
+// the raw nonce by mistake would be caught here.
+func (d *telegramLinkRepoDouble) hasRaw(raw string) bool {
+	_, ok := d.rows[raw]
+	return ok
+}
+
+// hasHashOf reports whether a row was stored keyed by the hash the fixture's
+// own token generator would produce for raw.
+func (d *telegramLinkRepoDouble) hasHashOf(raw string) bool {
+	_, ok := d.rows[string(d.tokens.HashToken(raw))]
+	return ok
+}
+
+// mintLive writes a live (unconsumed, unexpired-per-expiresAt) row directly
+// into the double, standing in for a prior call to StartLink, and returns the
+// raw nonce a test can then hand to HandleStart. t is used only for
+// t.Helper(); it tolerates nil because two call sites in
+// TestHandleStartAnswersIdenticallyForEveryDeadNonce mint from a bare
+// function value with no *testing.T in scope.
+func (d *telegramLinkRepoDouble) mintLive(t *testing.T, expiresAt time.Time) string {
+	if t != nil {
+		t.Helper()
+	}
+	d.n++
+	raw := fmt.Sprintf("nonce-%d", d.n)
+	d.rows[string(d.tokens.HashToken(raw))] = &telegramLinkRow{CreatedAt: d.clock.Now(), ExpiresAt: expiresAt}
+	return raw
+}
+
+// markConsumed stamps the row for raw consumed by chatID, for a test that
+// needs a nonce which has already been redeemed once.
+func (d *telegramLinkRepoDouble) markConsumed(raw string, chatID int64) {
+	if row, ok := d.rows[string(d.tokens.HashToken(raw))]; ok {
+		now := d.clock.Now()
+		row.ConsumedAt = &now
+		row.ChatID = chatID
+	}
+}
+
+// isConsumed reports whether raw's row has been consumed.
+func (d *telegramLinkRepoDouble) isConsumed(raw string) bool {
+	row, ok := d.rows[string(d.tokens.HashToken(raw))]
+	return ok && row.ConsumedAt != nil
+}
+
+// recordRedemptions writes n already-consumed rows for chatID, each
+// consumed at exactly at, standing in for n prior /start redemptions --
+// TestHandleStartRateLimitsPerChatWithTheSameAnswer uses this to put a chat
+// at its hourly limit without minting and consuming n real nonces through the
+// service first.
+func (d *telegramLinkRepoDouble) recordRedemptions(chatID int64, n int, at time.Time) {
+	for i := 0; i < n; i++ {
+		d.n++
+		raw := fmt.Sprintf("redeemed-%d", d.n)
+		consumedAt := at
+		d.rows[string(d.tokens.HashToken(raw))] = &telegramLinkRow{
+			CreatedAt: at, ExpiresAt: at.Add(time.Hour), ConsumedAt: &consumedAt, ChatID: chatID,
+		}
+	}
+}
+
+// Prune mirrors PruneTelegramLinkRequests: created_at < before AND (consumed
+// or expired). A live, unexpired row is never pruned no matter how old
+// before is -- the same shape as signupDouble.Prune, for the same table
+// shape.
+func (d *telegramLinkRepoDouble) Prune(_ context.Context, before time.Time) (int64, error) {
+	var deleted int64
+	for hash, row := range d.rows {
+		expiredOrConsumed := row.ConsumedAt != nil || !row.ExpiresAt.After(d.clock.Now())
+		if row.CreatedAt.Before(before) && expiredOrConsumed {
+			delete(d.rows, hash)
+			deleted++
+		}
+	}
+	return deleted, nil
+}
+
+var _ usecase.TelegramLinkRepository = (*telegramLinkRepoDouble)(nil)
+
+// --- TelegramAccountRepository -----------------------------------------
+
+type telegramAccountRepoDouble struct {
+	byChatID map[int64]string // chatID -> userID
+}
+
+func newTelegramAccountRepoDouble() *telegramAccountRepoDouble {
+	return &telegramAccountRepoDouble{byChatID: map[int64]string{}}
+}
+
+func (d *telegramAccountRepoDouble) ByChatID(_ context.Context, chatID int64) (string, error) {
+	userID, ok := d.byChatID[chatID]
+	if !ok {
+		return "", domain.ErrNotFound
+	}
+	return userID, nil
+}
+
+// bind pre-populates a chat -> user binding, standing in for the binding
+// SignupRepository.Provision writes inside its own transaction (see
+// TelegramAccountRepository's doc comment in ports.go for why there is no
+// Create method here to call instead).
+func (d *telegramAccountRepoDouble) bind(chatID int64, userID string) {
+	d.byChatID[chatID] = userID
+}
+
+var _ usecase.TelegramAccountRepository = (*telegramAccountRepoDouble)(nil)
+
+// --- TelegramSender ------------------------------------------------------
+
+// telegramSenderDouble stands in for *telegram.Client. Unlike mailerDouble it
+// need not model an async send: TelegramAuthService.say calls it
+// synchronously on the request path (see telegram_auth.go's doc comment on
+// why HandleStart answers in-chat rather than firing a background send).
+type telegramSenderDouble struct {
+	sentTo map[int64]string // chatID -> most recently sent text
+}
+
+func newTelegramSenderDouble() *telegramSenderDouble {
+	return &telegramSenderDouble{sentTo: map[int64]string{}}
+}
+
+func (d *telegramSenderDouble) SendMessage(_ context.Context, chatID int64, text string) error {
+	d.sentTo[chatID] = text
+	return nil
+}
+
+// lastTo returns the most recent message sent to chatID, or "" if none was.
+func (d *telegramSenderDouble) lastTo(chatID int64) string {
+	return d.sentTo[chatID]
+}
+
+var _ usecase.TelegramSender = (*telegramSenderDouble)(nil)
+
+// --- TelegramAuthService fixture ----------------------------------------
+
+// telegramDoubles holds every double newTelegramAuthService wires together,
+// so a test can reach into whichever one its assertion needs.
+type telegramDoubles struct {
+	links      *telegramLinkRepoDouble
+	accounts   *telegramAccountRepoDouble
+	magicLinks *magicLinkDouble
+	signups    *signupDouble
+	sender     *telegramSenderDouble
+	tokens     *seqTokens
+	clock      *fixedClock
+}
+
+// newTelegramAuthService builds a TelegramAuthService over its own set of
+// in-memory doubles, separate from the fixtures auth_test.go and
+// signup_test.go use, because TelegramAuthService is the one caller that
+// needs a TelegramLinkRepository and TelegramAccountRepository alongside a
+// MagicLinkRepository and a SignupRepository all at once.
+//
+// The clock is seeded to real wall-clock time, not an arbitrary fixed date
+// the way this file's other fixtures seed theirs: several tests in
+// telegram_auth_test.go compute nonce expiry with time.Now() directly (two of
+// them mint from a bare function value with no *testing.T, let alone this
+// fixture, in scope), so this fixture's own notion of "now" has to agree with
+// real time for "10 minutes from now" and "1 minute ago" to land on the
+// correct side of live/expired.
+func newTelegramAuthService(t *testing.T) (*usecase.TelegramAuthService, *telegramDoubles) {
+	t.Helper()
+
+	clock := &fixedClock{now: time.Now()}
+	tokens := &seqTokens{}
+
+	users := newUserDouble()
+	members := newMembershipDouble(users)
+	users.setMembers(members)
+	households := newHouseholdDouble()
+	spaces := newSpaceDouble()
+	notifications := newNotificationDouble()
+
+	links := newTelegramLinkRepoDouble(clock, tokens)
+	accounts := newTelegramAccountRepoDouble()
+	magicLinks := newMagicLinkDouble(clock, users)
+	signups := newSignupDouble(clock, households, users, members, spaces, notifications)
+	sender := newTelegramSenderDouble()
+
+	svc := usecase.NewTelegramAuthService(usecase.TelegramAuthDeps{
+		Links:       links,
+		Accounts:    accounts,
+		MagicLinks:  magicLinks,
+		Signups:     signups,
+		Sender:      sender,
+		Tokens:      tokens,
+		Clock:       clock,
+		BaseURL:     "http://localhost:5173",
+		BotUsername: "HearthBot",
+	})
+
+	return svc, &telegramDoubles{
+		links: links, accounts: accounts, magicLinks: magicLinks,
+		signups: signups, sender: sender, tokens: tokens, clock: clock,
+	}
+}

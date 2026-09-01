@@ -13,7 +13,7 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 86 of 107 features built or partly built.
+**Where things stand:** 88 of 111 features built or partly built.
 
 > **In production since 2026-08-15**, at <https://oink.mywire.org>. **No count
 > below changes** — deployment is not a design feature, and this file's totals
@@ -32,6 +32,18 @@ needed them to exist (see "Where things stand" below).
 > built and verified; the constraint is the host's DNS, and the ADR's exit
 > condition is the day someone who is not Andreas or Christine needs to receive
 > an email.
+>
+> **Amended 2026-09-01, when Telegram sign-in was built.** Two of the four
+> flows named above now have a second delivery channel that needs no DNS, no
+> domain and no relay: **sign-up and magic-link recovery** can reach a stranger
+> over a Telegram bot, once one is configured. **Inviting a member still
+> cannot** — invites deliberately stay on email in this slice (see the ⬜ row
+> in section 1), so "inviting a third person is not self-service" remains true
+> word for word, and notification preferences still send nothing at all.
+> The caveat above is narrowed, not lifted, and it is narrowed only where a bot
+> is configured — the live install has none today. See
+> [ADR 4](adr/0004-telegram-as-a-second-delivery-channel.md) and ADR 3's own
+> amended exit condition.
 
 **The notifications correction, 2026-08-16 — four rows were ✅ for something no
 household can actually receive.** All four `Notifications — …` rows in Household
@@ -522,9 +534,60 @@ rule confirms the table below is still exactly 71/15/19/2 = 107 — a browser
 walk confirms rows already marked Built; it does not add or move one on its
 own.
 
+**The Telegram sign-in update, 2026-09-01 — three rows added, none moved, and
+two of the three are deliberately NOT ✅.** Telegram sign-in adds a second
+delivery channel for the sign-in and sign-up links Hearth already mints
+([ADR 4](adr/0004-telegram-as-a-second-delivery-channel.md)). Three rows join Entry and
+authentication: **Telegram sign-up (create a household from a chat)** and
+**Telegram sign-in (a returning member)**, both **🟡**, and **Telegram
+invites**, **⬜**, which this slice deliberately does not build. The two 🟡
+rows are the point of this entry. Both features are code-complete, reviewed
+across nine tasks, and `make lint && make test` green — and **not one criterion
+of a browser walk has been exercised**, because creating a bot needs a Telegram
+account and a BotFather token nobody has made yet. This file's own "What
+'built' means" bar requires the feature to work *and* be verified, and every
+Money feature, Retros and Vision each earned ✅ only after a fifteen-criterion
+walk. Marking these ✅ on a green suite would be claiming a bar the last five
+features were held to and these two were not, and this file records elsewhere
+(`docs/LEARNING.md` pattern 15, and the notifications correction above) exactly
+what it costs when a row claims something no household can yet experience.
+They move to ✅ the day the twelve-criterion walk in
+`docs/superpowers/plans/2026-09-01-telegram-sign-in-verification.md` is run and
+passes — it is written out step by step, including the four traps that produce
+a false failure. Recounting by this file's own rule — the first symbol in each row's own
+cell — takes Entry and authentication from 10/1/0/0 to **10/3/1/0** and the
+totals from 71/15/19/2 = 107 to **71/17/20/2 = 110**: three rows added, none
+moved. "88 of 110 built or partly built" is up from 86 of 107 because a 🟡 and
+a ✅ count the same there — which is precisely why the gap has to be named in
+the cell rather than trusted to the headline.
+
+**Amended again, 2026-09-01, from the whole-branch fix wave.** The review that
+gated this branch found the gap named in the Telegram sign-up row above was
+worse than the row said: a Telegram-only account has no password an
+operator can reset and no address a magic link can reach, so a fourth row —
+**attach an email address to a Telegram-only account**, **⬜** — joins Entry
+and authentication to put that gap on the map rather than in a reviewer's
+notes. One row added, none moved: 71/17/20/2 = 110 becomes **71/17/21/2 =
+111**.
+
+**The Telegram sign-in walk, 2026-09-01 — two rows move, none added or
+removed.** `docs/superpowers/plans/2026-09-01-telegram-sign-in-verification.md`'s
+twelve numbered criteria and its unnumbered checks all passed against a real
+BotFather bot, `HearthOinkBot`, so **Telegram sign-up** and **Telegram
+sign-in** move 🟡 → ✅ in section 1 above, dated 2026-09-01. Recounting by
+this file's own rule — the first symbol in each row's own cell, not delta
+arithmetic — takes Entry and authentication from 10/3/2/0 to **12/1/2/0**
+and the totals from 71/17/21/2 = 111 to **73/15/21/2 = 111**: two rows
+moved, none added, none removed. **Attach an email address to a
+Telegram-only account** stays ⬜ — a browser walk of the two channel rows
+above does not close it; it still needs a settings-page flow, per its own
+row. "88 of 111 built or partly built" is unchanged, because a 🟡 and a ✅
+count the same there — precisely why the gap had to be named in the cell
+rather than trusted to the headline.
+
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
-| Entry & authentication | 10 | 1 | 0 | 0 |
+| Entry & authentication | 12 | 1 | 2 | 0 |
 | Navigation shell | 7 | 1 | 1 | 0 |
 | Household settings | 11 | 8 | 2 | 0 |
 | Overview (home) | 8 | 2 | 1 | 0 |
@@ -532,7 +595,7 @@ own.
 | Marriage | 10 | 0 | 6 | 0 |
 | Family | 0 | 0 | 2 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **71** | **15** | **19** | **2** |
+| **Total** | **73** | **15** | **21** | **2** |
 
 ---
 
@@ -606,6 +669,10 @@ The full checklist is at the end of `docs/LEARNING.md`.
 | Invite acceptance | ✅ | Shows inviter, household and role; warns if you are already signed in as someone else |
 | Sign out | ✅ | From the sidebar footer, returns to sign-in |
 | "Forgot?" password recovery | 🟡 | Present, and triggers a magic link. There is no separate password-reset flow — recovery is `make reset-password` from the command line |
+| Telegram sign-up — a stranger creates a household from a chat | ✅ | Code-complete and reviewed across nine tasks: `POST /auth/telegram/start` mints a 10-minute nonce, the bot answers `/start` with a 24-hour sign-up link, and `SignupRepository.Provision` binds the chat inside the transaction that already creates the household, owner, membership, spaces and preferences — so an owner with **no email address at all** is a first-class user, the second kind after a child. `make lint && make test` green. **Walked against a real BotFather bot (`HearthOinkBot`) and passed, 2026-09-01**: a stranger's `/start` produced a sign-up link, the create-household screen showed the Telegram sentence with no email box anywhere on it, provisioning landed the new owner signed in with `email` NULL and a bound `telegram_accounts` row, and an `INSERT` naming both an email and a chat id was refused by the database's own `signups_have_exactly_one_channel` CHECK. Full record: `docs/superpowers/plans/2026-09-01-telegram-sign-in-verification.md`. Off unless configured — an install with no bot answers `404` and the sign-in screen hides the control |
+| Telegram sign-in — a returning member | ✅ | The bot resolves the chat to its bound user and sends the **existing** magic link, 15 minutes, single use — no new token type and no new session-issuing code anywhere. Three limits stack: 20/hour per IP on the start route (its own bucket, not sign-up's), 3 links/hour per chat, and the shared global daily sign-up ceiling. An unknown, expired, consumed, rate-limited or ceiling-blocked `/start` all get one identical refusal, word for word, so none of them can be told apart by probing. **Walked against the same real bot and passed, 2026-09-01**: a bound chat's `/start` sent a sign-in link rather than a second sign-up link — the discriminating result, since an unbound chat would have minted a second signup and could have created a second household, and the household count held at 6 throughout — tapping it signed the same user in, and the spent link and the fourth `/start` within the per-chat window were both refused with the identical wording. Full record: `docs/superpowers/plans/2026-09-01-telegram-sign-in-verification.md` |
+| Telegram invites — a shareable `t.me/…?start=inv_<token>` link | ⬜ | **Deliberately not built in this slice**, not an oversight. Invites still go to an email address and are still relayed from Mailpit by hand on the live install, which is one person's inconvenience on a two-person install rather than a blocker. It is the natural follow-up: the delivery channel exists now, so this is a payload change to the same `/start` parsing, not new infrastructure. Recorded here so the gap is on the map — see `docs/SYSTEM_DESIGN.md` §5 and [ADR 4](adr/0004-telegram-as-a-second-delivery-channel.md)'s Out of scope |
+| Attach an email address to a Telegram-only account | ⬜ | **Not built — found in the branch's whole-branch review, 2026-09-01.** A Telegram sign-up leaves `users.email` NULL. `GetUserByEmail` is `WHERE email = $1` and NULL never matches a parameter, so the password collected at sign-up cannot sign anyone in, `POST /auth/magic-link` has no address to send to, and `adminctl reset-password --email=` cannot address the account — Telegram becomes the only door into that household with no operator recovery path today. `SignUpCompleteScreen.tsx` now says this to the person signing up. The fix is a settings-page flow that lets a signed-in Telegram user add and verify an email, giving `GetUserByEmail` something to match; until then the only recovery an operator has is `make psql` by hand (see `docs/LEARNING.md`) |
 
 ## 2 · Navigation shell
 
@@ -644,7 +711,7 @@ The full checklist is at the end of `docs/LEARNING.md`.
 | Notifications — overspend alerts | 🟡 | Same gap as the row above: stored and editable, never sent |
 | Notifications — monthly retro reminder | 🟡 | Same gap as the two rows above: stored and editable, never sent. Retros itself is built now (section 6), so this row has something real to remind a household of — the gap is only that nothing in this codebase runs on a clock |
 | Notifications — weekly family digest | 🟡 | Same gap: stored and editable, never sent |
-| Retention pruning (`adminctl prune`) | ✅ | No UI — `cmd/adminctl prune --older-than=<days>` deletes consumed/expired `signups` and stale `login_attempts` past the cutoff. Refuses anything under a seven-day floor so it can never reach inside `domain.LockoutPolicy.Window` and clear a lockout that is still live |
+| Retention pruning (`adminctl prune`) | ✅ | No UI — `cmd/adminctl prune --older-than=<days>` deletes consumed/expired `signups`, stale `login_attempts` and consumed/expired `telegram_link_requests` past the cutoff. Refuses anything under a seven-day floor so it can never reach inside `domain.LockoutPolicy.Window` and clear a lockout that is still live |
 | Connected accounts | ⬜ | Belongs with Money. Note that automatic bank sync is not available to an app like this — see Money below |
 
 ## 4 · Overview (home)

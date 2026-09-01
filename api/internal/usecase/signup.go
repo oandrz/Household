@@ -85,10 +85,27 @@ func NewSignupService(d SignupDeps) *SignupService {
 }
 
 // SignupPreview is what the create-household screen needs before anything is
-// created: the address the token proved, so the form can show it read-only.
-// Nothing else -- there is no household yet to describe.
+// created. Channel tells the screen which identity the token proved, so it can
+// show a read-only address for an email sign-up and say "Telegram" for a
+// Telegram one -- rather than rendering an empty address box, which would look
+// like a field the person forgot to fill in.
 type SignupPreview struct {
-	Email string
+	Email   string
+	Channel string
+}
+
+// signupChannel refuses a row that names neither channel rather than guessing.
+// The database constraint should make that unreachable; this is the second
+// gate, for rows written by anything that bypasses it.
+func signupChannel(d SignupDetails) (string, error) {
+	switch {
+	case d.Email != "":
+		return "email", nil
+	case d.TelegramChatID != nil:
+		return "telegram", nil
+	default:
+		return "", fmt.Errorf("signup %s names no channel", d.ID)
+	}
 }
 
 // Request is deliberately quiet. It returns nil for a fresh address, an address
@@ -320,7 +337,11 @@ func (s *SignupService) Preview(ctx context.Context, token string) (SignupPrevie
 	if err := checkSignupLive(details, s.d.Clock.Now()); err != nil {
 		return SignupPreview{}, err
 	}
-	return SignupPreview{Email: details.Email}, nil
+	channel, err := signupChannel(details)
+	if err != nil {
+		return SignupPreview{}, err
+	}
+	return SignupPreview{Email: details.Email, Channel: channel}, nil
 }
 
 // checkSignupLive reports why a sign-up token can no longer be used, keeping

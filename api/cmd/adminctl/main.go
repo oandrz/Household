@@ -50,8 +50,9 @@ commands:
   create-invite --email= --name= --role=        invite a new member (role: owner or limited);
     [--capabilities=] [--inviter-email=]        the household is resolved from --inviter-email
                                                  (any member's address; defaults to the seeded owner)
-  prune [--older-than=30]                       delete consumed/expired signups and login attempts
-                                                 older than this many days (minimum 7)
+  prune [--older-than=30]                       delete consumed/expired signups, login attempts and
+                                                 Telegram link requests older than this many days
+                                                 (minimum 7)
 `
 
 func run(args []string) error {
@@ -141,7 +142,7 @@ func run(args []string) error {
 			return err
 		}
 		return runPrune(ctx, postgres.NewSignupRepo(db), loginAttempts,
-			time.Duration(*days)*24*time.Hour)
+			postgres.NewTelegramLinkRepo(db), time.Duration(*days)*24*time.Hour)
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", args[0], usage)
 	}
@@ -388,11 +389,12 @@ func resolveHouseholdByEmail(ctx context.Context, users usecase.UserRepository,
 // nobody can reach that state with a plausible-looking flag value.
 const pruneFloor = 7 * 24 * time.Hour
 
-// runPrune deletes consumed/expired signups and login attempts older than
-// olderThan. See pruneFloor for why a window under seven days is refused
-// rather than merely discouraged.
+// runPrune deletes consumed/expired signups, login attempts and Telegram
+// link requests older than olderThan. See pruneFloor for why a window under
+// seven days is refused rather than merely discouraged.
 func runPrune(ctx context.Context, signups usecase.SignupRepository,
-	attempts usecase.LoginAttemptRepository, olderThan time.Duration) error {
+	attempts usecase.LoginAttemptRepository, telegramLinks usecase.TelegramLinkRepository,
+	olderThan time.Duration) error {
 	if olderThan < pruneFloor {
 		return fmt.Errorf("--older-than must be at least %d days: pruning login attempts inside the "+
 			"lockout window would clear a live lockout", int(pruneFloor.Hours()/24))
@@ -414,8 +416,17 @@ func runPrune(ctx context.Context, signups usecase.SignupRepository,
 		return fmt.Errorf("prune login attempts: %w", err)
 	}
 
-	fmt.Printf("Pruned %d signups and %d login attempts older than %s.\n",
-		prunedSignups, prunedAttempts, before.Format(time.RFC3339))
+	// telegram_link_requests is the third table a stranger can grow without
+	// an account: a nonce nobody ever redeemed has no chat_id (its own CHECK
+	// enforces that), so no per-chat limit ever bounds it the way
+	// CountLinksSince bounds a redeemed one.
+	prunedTelegramLinks, err := telegramLinks.Prune(ctx, before)
+	if err != nil {
+		return fmt.Errorf("prune telegram link requests: %w", err)
+	}
+
+	fmt.Printf("Pruned %d signups, %d login attempts and %d Telegram link requests older than %s.\n",
+		prunedSignups, prunedAttempts, prunedTelegramLinks, before.Format(time.RFC3339))
 	return nil
 }
 

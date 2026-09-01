@@ -80,6 +80,34 @@ entry came back together in the same change that built `RetrosPage.tsx`
 (§4, §7) — where any of these rounds changed the shape of something drawn
 here, the change is recorded at that diagram (§7 in particular).
 
+**Telegram sign-in is code-complete and has been walked in a browser against
+a real bot, 2026-09-01.** It adds a second *delivery channel* for the sign-in
+and sign-up links Hearth already mints — a new outbound-only adapter (§2),
+three new ports plus one interface the adapter declares for itself (§3), one
+new public route (§4), a new flow (§5), two new tables and a `signups` table
+that now names either an email address or a Telegram chat (§6), and one new
+control on the sign-in screen (§7). It changes what a token *travels over*,
+never what a token is, who may hold one, or what consuming one does: no new
+session-issuing code exists anywhere in it. **It is off unless configured** —
+`TELEGRAM_BOT_TOKEN` and `TELEGRAM_BOT_USERNAME` must both be set or both be
+empty, and both empty — which is what `deploy/.env` on the production box
+says, and this change has not been deployed there anyway — leaves the route
+answering `404` and the poller never started. Every numbered criterion and
+every unnumbered check passed against `HearthOinkBot`, a real BotFather bot,
+on `make dev`: a stranger's `/start` produced a sign-up link that provisioned
+a household with no email address at all, and — the discriminating result —
+a bound chat's `/start` produced a **sign-in** link rather than a second
+sign-up, so `Accounts.ByChatID` found the binding and took the returning-user
+branch instead of ever minting a second household.
+`docs/superpowers/plans/2026-09-01-telegram-sign-in-verification.md` is that
+walk, written out and recorded as run. Its rows in
+`docs/FEATURE_TRACKER.md` are ✅ for exactly that reason — this
+document draws code that is built, reviewed, and now verified the same way
+every other feature here is.
+`docs/adr/0004-telegram-as-a-second-delivery-channel.md` carries why Telegram
+rather than WhatsApp or SMS, and why the link comes back to the device that
+taps it.
+
 **This is deployed.** Hearth has run at <https://oink.mywire.org> since
 2026-08-15, on one Hetzner CX23 in Falkenstein, serving a real household. §1
 carries the production topology; it is a drawing of something running, not a
@@ -113,12 +141,42 @@ graph TD
         Migrate["migrate — one-shot goose<br/>api waits for it to succeed"]
     end
 
+    TG["api.telegram.org<br/>outbound only, only when a bot is configured"]
+
     Browser -->|"same origin, cookies"| Web
     Web -->|"proxy /api/v1"| API
     API --> PG
     API -->|SMTP| Mail
+    API -->|"HTTPS: getUpdates long-poll, sendMessage"| TG
     Migrate --> PG
 ```
+
+**Telegram is the only arrow here that leaves the machine, and it points
+outward.** Bot updates arrive by `getUpdates` long-polling *from inside* the
+`api` process — there is no webhook, so no new route faces the internet and
+nothing has to be re-registered when the hostname changes (which on a free DDNS
+hostname is a live possibility). The alternative, `POST /telegram/webhook`,
+would have been a public unauthenticated route whose only guard is a shared
+secret header, in a codebase whose rule is that a route without its guard has
+no second line of defence.
+
+**The two Telegram values reach the container from `.env`, and they are the
+only two in `docker-compose.yml` that do.** Every other value for the dev `api`
+service is written into the compose file directly; a bot token is a credential,
+so it is passed through as `${TELEGRAM_BOT_TOKEN:-}` instead, defaulting to
+empty so a machine with no `.env` still boots with the feature off. Without that
+passthrough the Docker path would read a token in `.env` and never see it —
+`make dev-local` sources `.env` itself and would have worked, `make dev` would
+not, and the only symptom is a `404` and a button that hides itself. In
+production the same values arrive through `env_file: [.env]` on the `api`
+service, which already carried everything.
+
+**Exactly one process may long-poll.** Telegram hands each update to a single
+`getUpdates` caller, so a second `api` replica would silently steal updates and
+the symptom would be "Telegram sign-in works about half the time". That is true
+on one box today and invisible until it bites, which is why it is written both
+here and in `Poller`'s own doc comment, and why §8 carries it as an operational
+constraint rather than only as a code comment.
 
 The browser only ever talks to one origin. In development Vite proxies `/api` to
 the Go service; in production nginx serves the built bundle and proxies the same
@@ -193,6 +251,7 @@ graph TD
 
     Operator["Operator's laptop"]
     Backup[("Cloudflare R2 — nightly<br/>age-encrypted, key not on the box")]
+    TG["api.telegram.org<br/>code not deployed here yet, and<br/>no bot configured in deploy/.env"]
 
     Browser -->|HTTPS| Caddy
     Caddy -->|"HTTP, one origin"| Nginx
@@ -203,9 +262,10 @@ graph TD
     Caddy -.->|"ACME HTTP-01"| LE
     Admin -.->|"migrations, unlock, prune"| PG
     PG -.-> Backup
+    API -.->|"only once TELEGRAM_BOT_TOKEN is set"| TG
 ```
 
-Four things about this shape are not obvious from the boxes.
+Five things about this shape are not obvious from the boxes.
 
 **Mail stops at the box, and that is deliberate rather than unfinished.** There
 is no relay in this diagram because the install runs on a free DDNS hostname
@@ -274,6 +334,21 @@ no migration has been applied to a production database. That is a deployment
 gap, not a capability gap — during a lockout there *is* a recovery path, and it
 is `adminctl unlock-household`.
 
+**The Telegram node is drawn dashed because it is a capability this box has and
+does not use.** Two separate reasons, and both hold: this change has not been
+deployed to the box yet, and `deploy/.env` there sets neither
+`TELEGRAM_BOT_TOKEN` nor `TELEGRAM_BOT_USERNAME` — so even after a deploy,
+`config.Load` leaves the feature off, `POST /api/v1/auth/telegram/start` answers
+`404` and the poller is never started. Turning it on is two `.env` values and a restart of a build that
+carries migration `00011_telegram` — no code change, and no inbound port,
+because the connection is outbound. It is drawn
+rather than omitted because the shape an operator needs to know is that
+switching it on puts **a third party on the recovery path**: every sign-in and
+sign-up link sent over Telegram is readable by Telegram, exactly as every link
+in Mailpit is readable by whoever can reach that inbox.
+`docs/INFRASTRUCTURE.md` carries that as a dependency row rather than leaving
+it as a diagram footnote.
+
 ---
 
 ## 2 · Backend layers
@@ -293,6 +368,7 @@ graph TD
         PGA["postgres — repositories over sqlc"]
         Crypto["crypto — argon2id, tokens"]
         MailA["mail — SMTP"]
+        TelegramA["telegram — Bot API client,<br/>getUpdates poller, update parsing.<br/>Driven AND driving: see below"]
         Clock["clock"]
         FX["fx — static rates"]
     end
@@ -301,6 +377,7 @@ graph TD
         Auth["AuthService"]
         Invite["InviteService"]
         Signup["SignupService"]
+        TelegramAuth["TelegramAuthService — delivers the magic-link<br/>and sign-up tokens the other services already<br/>mint; mints no token type of its own"]
         Member["MemberService"]
         House["HouseholdService"]
         Account["AccountService — net worth is<br/>composed here, not stored"]
@@ -322,12 +399,14 @@ graph TD
     Main --> PGA
     Main --> Crypto
     Main --> MailA
+    Main --> TelegramA
     Admin --> usecase
     HTTP --> usecase
     usecase --> domain
     PGA -.->|implements ports| usecase
     Crypto -.-> usecase
     MailA -.-> usecase
+    TelegramA -.->|implements TelegramSender| usecase
     Clock -.-> usecase
     FX -.-> usecase
 ```
@@ -336,6 +415,18 @@ Solid arrows are compile-time dependencies. Dotted arrows are adapters
 satisfying an interface declared in `usecase/ports.go` — the dependency still
 points inward, which is why every service is testable against in-memory doubles.
 
+**One relationship in this system has no arrow here at all, and the absence is
+the point.** `adapter/telegram`'s `Poller` calls
+`TelegramAuthService.HandleStart`, but the package never imports `usecase` —
+`grep -rn "internal/usecase" api/internal/adapter/telegram/` finds nothing,
+test files included. It depends on `StartHandler`, an interface it declares
+itself (`poller.go:12`), which `*usecase.TelegramAuthService` satisfies
+structurally and which `cmd/api/main.go` alone connects. So there is no
+compile-time edge to draw between those two packages, and drawing one would
+tell a reader the compiler is already checking that relationship. It is not:
+`main.go`'s `var _ telegram.StartHandler = (*usecase.TelegramAuthService)(nil)`
+is what does. §3 carries the full reasoning.
+
 **Two rules that shape everything else:**
 
 - No `pgx`, `chi` or other infrastructure type escapes the adapter layer. A
@@ -343,6 +434,26 @@ points inward, which is why every service is testable against in-memory doubles.
   further up.
 - **No service takes an actor parameter.** Services enforce what is *valid*;
   middleware enforces who is *asking*. Authorisation exists in exactly one place.
+- **`adapter/telegram` both serves the usecase layer and drives it, and it does
+  the second one without importing it.** Its `Client` is an ordinary *driven*
+  adapter — it satisfies `usecase.TelegramSender`, declared in `ports.go`,
+  exactly as `adapter/mail` satisfies `Mailer` (the dotted arrow). Its `Poller`
+  is a *driving* adapter — an inbound `/start` is an inbound request, it simply
+  arrives over a long-poll this process opened itself rather than over a
+  listener. **But it drives differently from `adapter/http`, and the difference
+  is the thing to understand before touching it.** `adapter/http` imports
+  `usecase` and holds concrete services (`router.go`'s `Deps` names
+  `*usecase.AuthService` and thirteen others), which is the solid arrow you see
+  from `HTTP`. `adapter/telegram` imports nothing from `usecase` at all;
+  it declares `StartHandler` locally and lets `main.go` supply something that
+  fits. So the driving edge here is **inverted** — the adapter states the shape
+  it needs, and the wiring, not the compiler, connects it — which is why there
+  is no arrow between those two boxes and why the assertion in `main.go` exists.
+  `make lint-arch` passes either way, but for a stronger reason in this case:
+  the package has no inward-pointing import to check. Nothing in
+  `internal/domain` or `internal/usecase` may ever import this package or any
+  Telegram type — that is the boundary the arrows, and the one missing arrow,
+  are drawing.
 - **Which currencies are selectable is a domain rule, not an HTTP filter.**
   `domain.ParseCurrency` stays permissive — it accepts any active ISO 4217
   code, because the household `PATCH` path has always accepted arbitrary
@@ -372,10 +483,43 @@ points inward, which is why every service is testable against in-memory doubles.
 | `RetroActionRepository` | `adapter/postgres` | Eighteenth. `Add` writes the action and its assignees in one transaction, so a bad assignee id leaves no orphan action; `carriedFrom` is validated through a join back to `retros` requiring the same household before it is trusted, and a malformed id is refused rather than silently read as SQL NULL (`docs/LEARNING.md`) — "fail closed on values you did not construct" applied to a field the client supplies directly. `OpenInMonth` backs both the modal's "Still open from July" offer and Overview's `openActionCount` |
 | `VisionRepository` | `adapter/postgres` | Nineteenth. `Get` returns `domain.ErrNotFound` for a year never set, which `VisionService` turns into the empty vision the screen renders (decision 9) — the repository never invents a row. `Save` replaces the whole document — parent upserted, every child deleted and reinserted — in one transaction, under the same two-shape version guard `RetroRepository.Update` established: `version == 0` is a create, refused with `domain.ErrVisionChanged` if a row has appeared since the caller read the empty vision; `version > 0` is an update, `WHERE version = $n`, with a zero-row result re-read to tell "the vision is gone" apart from "someone saved first." The existence check runs on the transaction's own connection, never the pool-backed `Get` — calling `Get` from inside `Save`'s own `pgx.BeginFunc` would hold one pool connection while asking the pool for a second, which starves it under concurrent saves (`docs/LEARNING.md`). A measure naming a goal outside this household is refused inside the same transaction with `domain.ErrVisionGoalUnknown` — the `vision_measures` foreign key alone only proves the goal exists *somewhere* |
 | `GoalProgressReader` | `adapter/postgres` (`*GoalRepo` already satisfies it) | Unnumbered, like `AccountLookup`/`CategoryLookup` above — a narrow port, not a repository. One method wide on purpose, the same interface-segregation reasoning as those two, for a caller in the opposite direction: `VisionService` needs one thing from Goals, the progress of a handful of goal ids, not the forty-line `GoalRepository` contract. `ProgressByIDs` returns an entry only for an id that exists in the caller's own household; a missing id is a miss, not an error — a measure whose goal was deleted renders as a label with no figure (spec decision 8), not a failed page. Counts an *archived* goal as found, deliberately: archiving is not deletion anywhere else in this product, so a measure linked to an archived goal keeps its figure |
+| `TelegramLinkRepository` | `adapter/postgres` | Twentieth. Stores the pending deep-link nonces, hashed, that carry a browser's sign-in request across to Telegram. `Consume` stamps `consumed_at` **and** records the redeeming `chat_id` in one statement, because the chat is unknown when the nonce is minted — the browser has not met Telegram yet — so redemption is the only moment the two can be joined, and a redemption that failed to record its chat would be a rate limit that silently never fires. Absent, expired or already consumed all return `domain.ErrNotFound` from one guarded `UPDATE`, the same shape `MagicLinkRepository.Consume` uses. `CountLinksSince` lives here, on the *link* repository, and not on `TelegramAccountRepository`, because the per-chat limit has to bind chats that have no account yet: a stranger repeating `/start` has no user row to count against |
+| `TelegramAccountRepository` | `adapter/postgres` | Twenty-first, and one method wide. `ByChatID` resolves a chat to the user it is bound to, or `domain.ErrNotFound` — which is the entire branch key of the Telegram flow: found means "send a sign-in link", not found means "send a sign-up link" (§5). The binding is *written* by `SignupRepository.Provision`, inside its existing transaction, not by this port; there is no `Bind` method here on purpose, because a chat id a caller could pass in is exactly the substitution `Provision`'s own doc comment refuses |
+| `TelegramSender` | `adapter/telegram` | The Telegram twin of `Mailer`, and justified the same way: the usecase layer must not hold an HTTP client, and `TelegramAuthService` must be testable against a double. One method, `SendMessage(ctx, chatID, text)` — plain text, no template system, exactly as the mailer has none |
 | `PasswordHasher`, `TokenGenerator` | `adapter/crypto` | argon2id with cost from config; tokens are random, stored hashed |
 | `Mailer` | `adapter/mail` | SMTP; TLS policy and credentials from config |
 | `Clock` | `adapter/clock` | So lockout windows and expiry are deterministic in tests |
 | `FXRateProvider` | `adapter/fx` | Static table today (SGD↔IDR only); a live provider drops in behind it. `AccountService` is its second caller, converting each account into the household's primary currency before summing (§5) |
+
+**`telegram.StartHandler` is the one interface in this system declared outside
+`usecase/ports.go`, and it points the other way.** Every port in the table above
+is declared by `usecase` and implemented by an adapter. `StartHandler` —
+`HandleStart(ctx, chatID int64, payload string) error` — is declared by the
+*adapter*, in `poller.go`, and satisfied by `*usecase.TelegramAuthService`. That
+is a legal direction for a **driving** adapter, and `adapter/http` is the other
+one: it drives by *importing* `usecase` and holding concrete services, where
+this package drives without importing `usecase` at all (§2's missing arrow).
+Either shape would have been allowed; this one keeps the adapter's own tests
+free of the usecase package — `poller_test.go`'s `handlerSpy` satisfies
+`StartHandler` with a `sync.Mutex` and a slice, and that file imports nothing
+from `usecase` either. The cost is that no compiler check ties the two
+signatures together at the point either is written, so `cmd/api/main.go`
+carries `var _ telegram.StartHandler = (*usecase.TelegramAuthService)(nil)` —
+the one file where both packages are already visible — so a signature drifting
+on either side fails the build naming the interface.
+
+**`SignupRepository` gained one method and widened two behaviours**, rather than
+a Telegram-specific repository being added beside it. `CreateForTelegram` writes
+a signup row whose channel is a chat rather than an address; it and `Create` are
+mutually exclusive per row, enforced by the `signups_have_exactly_one_channel`
+database constraint (§6). `ByTokenHash` now returns `TelegramChatID *int64`
+beside `Email`, and `Provision` binds the chat as a **fifth statement inside the
+transaction it already ran** (§5). The chat id is read from the signup row that
+transaction is claiming, never taken as a parameter — the same rule that
+paragraph already stated for the email address, and here it is the whole point
+of the feature: a caller-substitutable chat id would let someone bind a
+household to a chat they control rather than the one that actually completed the
+sign-up.
 
 `BankSyncProvider` is specified but has no consumer yet. Accounts, the first
 feature built against this port table, shipped manual entry only and needed no
@@ -384,12 +528,14 @@ shape. It arrives when CSV import gives it a second implementation to
 abstract over, not automatically "with the Money slice". Automatic sync via
 SGFinDex is not available to an app like this.
 
-`LoginAttemptRepository` and `SignupRepository` both carry a `Prune(ctx,
-before)` method, added together because both back the two tables a stranger
-can grow without ever holding an account (§6 explains why). `adminctl prune`
-is their only caller, and refuses an `--older-than` under seven days so it can
-never reach inside `domain.LockoutPolicy.Window` and clear a lockout that is
-still live.
+`LoginAttemptRepository`, `SignupRepository` and `TelegramLinkRepository` all
+carry a `Prune(ctx, before)` method, because all three back the three tables a
+stranger can grow without ever holding an account (§6 explains why).
+`telegram_link_requests` is the third — the nonce table: a link nobody ever
+redeemed has no `chat_id`, so nothing else bounds how many a stranger can
+mint. `adminctl prune` is their only caller, and refuses an `--older-than`
+under seven days so it can never reach inside `domain.LockoutPolicy.Window`
+and clear a lockout that is still live.
 
 ---
 
@@ -403,7 +549,7 @@ graph TD
     Req["Request"] --> RID["RequestID · RealIP · Recoverer<br/>(recoverer writes the standard error envelope)"]
     RID --> Public{"Public route?"}
 
-    Public -->|"sign-in, magic-link,<br/>magic-link/consume,<br/>invites/{token},<br/>sign-up*, currencies"| Handler
+    Public -->|"sign-in, magic-link,<br/>magic-link/consume,<br/>invites/{token},<br/>sign-up*, telegram/start,<br/>currencies"| Handler
     Public -->|no| Session["requireSession<br/>reads hearth_session cookie,<br/>re-reads membership from the DB,<br/>extends when under a day remains"]
 
     Session --> Cap{"Capability-gated<br/>route group?"}
@@ -499,12 +645,31 @@ form their own third `requireCSRF` sub-group, for the same reason as the
 first two — Goals can grow its own route list without touching budgets',
 transactions', or categories'.
 
-`POST /auth/sign-up` is the one public route wrapped in an extra middleware,
-`rateLimitByIP` — a per-process, in-memory token bucket keyed on the request's
-resolved IP (5/hour). It is the only sign-up route that can trigger outbound
-mail without a token already proving an address, so it is the one an unbounded
-loop would hit; the preview and complete routes need a token that was mailed
-to a real address and so are not on that path.
+**Two public routes are wrapped in an extra middleware, `rateLimitByIP` — and
+they hold separate buckets on purpose.** It is a per-process, in-memory token
+bucket keyed on the request's resolved IP.
+
+- `POST /auth/sign-up` — **5/hour**. It is the only sign-up route that can
+  trigger outbound mail without a token already proving an address, so it is
+  the one an unbounded loop would hit; the preview and complete routes need a
+  token that was mailed to a real address and so are not on that path.
+- `POST /auth/telegram/start` — **20/hour**, in its own limiter *instance*, not
+  the sign-up group's. Two reasons, and the second is the one that matters:
+  the limits differ because this route sends no mail and writes only a nonce
+  row, so it is cheaper to serve; and sharing one bucket would mean a person
+  who has just signed up finds Telegram sign-in already spent, and vice versa —
+  one control silently disabling an unrelated one. Twenty is also generous
+  enough that the *real* limit on this flow is the per-chat one below, which is
+  the one that can actually be reached by a person tapping a button.
+
+Neither per-IP bucket is the whole defence. Telegram sign-in's second and
+tighter limit is per **chat**, enforced in `TelegramAuthService.HandleStart`
+against `telegram_link_requests` rather than in memory: at most **three links
+are delivered to one chat per hour**, and the fourth `/start` is refused
+(`CountLinksSince` includes the row just consumed, so `count > 3` refuses on
+the fourth redemption). Without it, a chat spamming `/start` would be a free
+path to burn magic-link and signup rows past any per-IP limit, because the IP
+that presses `/start` is Telegram's, not the person's.
 
 ### Route table
 
@@ -516,6 +681,7 @@ to a real address and so are not on that path.
 | POST | `/auth/sign-up` | none, plus a per-IP token bucket (5/hour) — always 202, the same silent contract as magic-link |
 | GET | `/auth/sign-up/{token}` | none — the token is the credential |
 | POST | `/auth/sign-up/{token}/complete` | none |
+| POST | `/auth/telegram/start` | none, plus its **own** per-IP token bucket (20/hour), separate from sign-up's — takes no body and no identifier, so there is nothing to probe; **`404` when no bot is configured**, which is the same answer any unrouted path gets, so an install without Telegram gives nothing away and the frontend hides the control on that response (§7) |
 | GET | `/auth/me` | session |
 | POST | `/auth/sign-out` | session · CSRF |
 | GET | `/invites/{token}` | none — the token is the credential |
@@ -572,6 +738,23 @@ among them (`POST /auth/sign-up`, `POST /auth/sign-up/{token}/complete`) —
 the two GETs are not mutating and so are not walked by those two matrices at
 all. A route added later under `/auth/sign-up` is therefore checked like any
 other, not silently waved through by a prefix skip.
+
+**`POST /auth/telegram/start` is named in all three matrices**, and it is worth
+seeing why it needed an entry in each rather than being covered by the sign-up
+exemptions: it does not sit under `/auth/sign-up`, so no prefix would have
+reached it, which is the naming convention above paying off the first time
+something tested it. In each matrix its exemption comment records the *reason*,
+not just the fact — it is public because no session exists yet, it is pre-CSRF
+because there is no session to fixate, and it answers `404` rather than `401` or
+`403` when no bot is configured, which each matrix would otherwise flag as a
+route that forgot its guard. `telegram_api_test.go` then walks the route's own
+behaviour in four tests: the `200` body shape
+(`TestTelegramStartReturnsADeepLink`), the `404`-when-unconfigured answer
+(`TestTelegramStartIs404WhenTheFeatureIsOff`), the per-IP bucket
+(`TestTelegramStartIsRateLimitedPerIP`), and — the one that pins the decision
+above rather than merely the behaviour —
+`TestTelegramStartHasItsOwnRateLimitBudgetSeparateFromSignUp`, which exhausts
+sign-up's budget and then asserts this route still answers.
 
 **The owner-gated matrix signs in as a second limited-member fixture** —
 `calendar`, `chores` **and** `money` — rather than the original one, which
@@ -745,6 +928,7 @@ sequenceDiagram
     R->>DB: create household
     R->>DB: create owner user
     R->>DB: create owner membership
+    R->>DB: bind telegram_accounts (only when<br/>the claimed row named a chat)
     R->>DB: create the three builtin spaces
     R->>DB: upsert notification preferences
     R->>DB: COMMIT
@@ -769,10 +953,34 @@ from the moment it existed. Delete `SelectableCurrencies` and
 until then they are what keeps the sign-up path from offering a currency the
 money path cannot render.
 
+**The `bind telegram_accounts` step is conditional on the claimed row, not on a
+parameter, and it is inside this transaction rather than after it.** A signup
+row names exactly one channel — an email address or a Telegram chat, never both
+and never neither, enforced by a database `CHECK` (§6) — and `Provision` reads
+whichever it finds on the row it is already claiming. Two consequences worth
+stating, because both are the reason this shape was chosen over the obvious one:
+
+- **`SignupService` gained no new dependency and no new branch.** It hands
+  `Provision` a signup id, and the row decides which channel it belongs to.
+  `AuthService` is untouched, `SignupDeps` is unchanged, and all four `Mailer`
+  send sites are untouched. That is what "Telegram is a delivery channel, not
+  an identity" means in code.
+- **A caller cannot substitute the chat.** The chat id reaches the `users` row
+  from the row being claimed, exactly as the email address already did — the
+  reasoning `signup_repo.go` had already written down for the address, applied
+  unchanged to the chat. A chat id passed in as an argument would let someone
+  bind a household to a chat they control instead of the one that actually
+  completed the sign-up, which is account takeover with extra steps.
+- **After the commit would be too late.** A household that exists with its chat
+  unbound is an account its owner can never sign in to again: the sign-up token
+  is spent, and for a Telegram sign-up there is no email address to fall back
+  on. That is precisely the failure the `guarding-partial-writes` skill exists
+  for, so the bind is a statement in the transaction, never a second write.
+
 A household can now come into existence three ways: `adminctl seed`
 (development only), an invite accepted into a household that already exists,
 and this — a stranger with no prior relationship to anyone provisions their
-own. `Provision` is one transaction for the same reason
+own, reached either from a mailed link or from a Telegram chat. `Provision` is one transaction for the same reason
 `InviteRepository.Accept` is: a failure partway through would leave a `users`
 row occupying `users.email`'s unique index with no membership under it, and
 that address could then never sign up again — there is no retry that could
@@ -800,6 +1008,138 @@ be sent unlimited "you already have an account" mail while a fresh address's
 mail stopped at three an hour — the exact oracle this endpoint exists to
 close, expressed as mail volume instead of a status code. See
 `docs/LEARNING.md`.
+
+### Telegram — a second delivery channel, and the link comes back to the tapper
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant H as Handler
+    participant T as TelegramAuthService
+    participant L as TelegramLinkRepo
+    participant P as Poller
+    participant TG as Telegram
+    participant C as Chat
+
+    B->>H: POST /auth/telegram/start (no body, no identifier)
+    H->>T: StartLink
+    T->>L: Create(hash(nonce), now + 10 min)
+    T-->>H: TelegramStartLink
+    H-->>B: 200 with url https://t.me/BOTNAME?start=NONCE and expiresAt
+    B->>C: opens t.me in a new tab, person presses Start
+    C->>TG: /start NONCE
+    P->>TG: getUpdates (long poll, 50s)
+    TG-->>P: Update
+    P->>T: HandleStart(chatID, payload)
+    T->>L: Consume(hash(payload), chatID) — one guarded UPDATE
+    T->>L: CountLinksSince(chatID, now - 1h)
+    alt Accounts.ByChatID finds a user
+        T->>TG: Sender.SendMessage — Tap to sign in,<br/>/sign-in/magic?token=RAW (15 min, single use)
+    else ByChatID returns ErrNotFound
+        T->>TG: Sender.SendMessage — Tap to create your household,<br/>/sign-up/RAW (24 h, single use)
+    end
+    TG->>C: the bot's reply
+    C->>B: person taps it — the EXISTING magic-link or sign-up<br/>handler runs, on the device holding Telegram
+```
+
+`T` is `TelegramAuthService` throughout: it never touches HTTP or Telegram
+itself. The `200` is written by the handler, and both replies leave through
+`Sender.SendMessage`, which in production is `adapter/telegram`'s `Client` —
+the same separation `Mailer` already draws, and the reason this service is
+testable against two in-memory doubles.
+
+**No new session-issuing code exists in this flow at all.** Step by step it
+mints a nonce, spends it, and then calls `MagicLinkRepository.Create` or
+`SignupRepository.CreateForTelegram` — the same two token types, the same two
+expiries (15 minutes, 24 hours), the same two consume handlers. A parallel
+Telegram token table would have meant two expiry rules, two rate limits and two
+oracle analyses drifting apart, and the second one would be the one nobody
+reviews.
+
+**The session lands on the device that taps, and that is the security property,
+not a limitation.** The obvious alternative — the browser starts the flow and
+polls for completion — has an account-takeover hole with no credentials
+involved: the nonce is minted by one browser and then bound to whichever chat
+redeems it, so an attacker could start a flow, send the `t.me/…` link to a
+victim ("tap this for me"), and have their own browser signed in as that
+victim. Because the link comes back *into the chat* and signs in *there*,
+forwarding it gives the forwarder nothing. The cost is that a desktop user needs
+Telegram Desktop or Telegram Web on the same machine as the browser; that is
+accepted, and `docs/adr/0004-telegram-as-a-second-delivery-channel.md` records
+what a safe cross-device version would need (a confirmation code typed back into
+the originating browser, binding both ends).
+
+**The consume happens before the rate-limit check, deliberately.** Read
+top-down it looks backwards — why spend the nonce on an attempt you are about
+to refuse? Because a refusal that left the nonce unspent would be retryable with
+the same link until the hour rolled over, which is not a limit. Spending first
+makes every refused attempt cost the caller a nonce.
+
+**One refusal message covers five different situations, word for word.**
+`telegramDeadLinkMessage` — *"That sign-in link has expired. Start again from
+the app."* — is the answer for an unknown nonce, an expired one, an
+already-consumed one, a chat over its three-per-hour limit, **and** a `/start`
+that arrives while the global daily sign-up ceiling is breached. Any wording
+that distinguished them would let a caller confirm which one they hit by
+probing; "rate-limited" and "the platform is over its daily ceiling" are both
+facts a caller should not be able to establish. This is the same silence
+`POST /auth/magic-link`'s always-`202` buys, expressed as chat copy instead of a
+status code. It also means a test asserting `strings.Contains(reply, "expired")`
+proves almost nothing — see `docs/LEARNING.md`, where doing exactly that shipped
+an oracle with the suite green.
+
+**The two *successful* replies do differ by branch, and that is safe here.** A
+sign-in link and a sign-up link are distinguishable, which is normally the exact
+tell an enumeration analysis hunts for. It is safe in this flow because the only
+recipient is the owner of the chat, who already knows whether they have an
+account, and `chat_id` is never caller-supplied — it arrives inside an `Update`
+Telegram itself delivers over the long-poll connection this process opened. No
+third party observes the difference. This paragraph exists because the next
+reader will flag it and should find the reasoning already written down; if
+`chat_id` ever became caller-suppliable — an unsigned webhook, a debug endpoint,
+a replayed update accepted without verifying its source — this reasoning would
+need revisiting *before* that change shipped.
+
+**There is no enumeration oracle on the route itself**, because
+`POST /auth/telegram/start` accepts no identifier at all. There is nothing to
+probe. That is strictly better than `POST /auth/magic-link`, which takes an
+address and needs `AuthService.decoy()` plus timing equalisation to stay quiet.
+
+**Failure modes, all of them deliberate:**
+
+- **The offset lives in memory.** After a restart Telegram redelivers updates it
+  was never acknowledged for, so one `/start` can be processed twice. That is
+  safe *because* the nonce was already consumed: the second pass takes the
+  already-consumed branch and the bot repeats the expiry message. Recorded
+  rather than left to luck.
+- **The offset advances past updates the poller ignores.** Leaving it behind an
+  update nobody acted on would make Telegram redeliver it forever and the loop
+  would never progress.
+- **Network errors back off and the loop never exits** — capped exponential
+  backoff, logged at warn. The API has to keep serving HTTP while Telegram is
+  unreachable.
+- **Each dispatch recovers from a panic.** The poller is a bare goroutine and
+  chi's `middleware.Recoverer` does not cover it, so an unrecovered panic would
+  take down the whole process and every unrelated in-flight request. The
+  `recover` wraps one update's dispatch, not the loop, so a panicking handler
+  costs one update rather than the poller. Same pattern as `sendMagicLinkAsync`.
+- **Shutdown cancels an in-flight `HandleStart`.** The poller is handed the
+  process's `signal.NotifyContext` and passes it through, and nothing waits on
+  the goroutine. Accepted: `HandleStart` holds no multi-statement transaction —
+  every repository call it makes is one atomic statement — so cancellation
+  cannot leave a half-written invariant. The worst durable outcome is a nonce
+  spent with no reply, which the person recovers from by pressing the button
+  again. `cmd/api/main.go` carries the trade-off at the line, including what
+  would have to change (a `WaitGroup`, and a supervisor timeout longer than the
+  send) if this loop ever writes more than one row.
+- **Telegram being down degrades partially.** Telegram sign-in stops; the email
+  path is unaffected; sessions already issued are unaffected.
+
+**What Telegram is *not* used for: invites.** An invite still goes to an email
+address and is still relayed from Mailpit by hand on the live install. A
+shareable `t.me/…?start=inv_<token>` link is the natural follow-up and is
+deliberately not in this slice; `docs/FEATURE_TRACKER.md` carries it as a ⬜ row
+so it is a gap on the map rather than an assumption.
 
 ### Accounts — net worth is composed on read, not stored
 
@@ -1690,6 +2030,7 @@ erDiagram
     users ||--o{ magic_links : owns
     users ||--o{ login_attempts : may_reference
     users ||--o{ invites : invited_by
+    users ||--o| telegram_accounts : "may be bound to one chat (UNIQUE both ways)"
 
     households {
         uuid id PK
@@ -1741,10 +2082,25 @@ erDiagram
     }
     signups {
         uuid id PK
-        citext email
+        citext email "nullable — NULL for a Telegram sign-up"
+        bigint telegram_chat_id "nullable — NULL for an email sign-up"
         bytea token_hash
         timestamptz expires_at
         timestamptz consumed_at "nullable"
+    }
+    telegram_accounts {
+        uuid id PK
+        uuid user_id FK "NOT NULL, UNIQUE, ON DELETE CASCADE"
+        bigint chat_id "NOT NULL, UNIQUE"
+        timestamptz linked_at
+    }
+    telegram_link_requests {
+        uuid id PK
+        bytea nonce_hash "NOT NULL, UNIQUE"
+        timestamptz expires_at
+        timestamptz consumed_at "nullable — set with chat_id, never alone"
+        bigint chat_id "nullable — CHECK ties it to consumed_at"
+        timestamptz created_at
     }
     login_attempts {
         uuid id PK
@@ -1948,7 +2304,15 @@ Notes that are not obvious from the shapes:
   `visions.household_id`, two joins deep — the same depth as
   `retro_action_assignees`, and every method on `VisionRepository` is scoped
   by `householdID` in SQL against the parent `visions` row for exactly that
-  reason). `goal_contributions` and `bill_payments` look like the same shape —
+  reason). **`telegram_link_requests` is a third shape, and the only one of
+  its kind:** it carries no `household_id`, no `user_id` and no parent to join
+  through at all — not even a nullable one — because a nonce is minted before
+  anyone is known. The browser that asks for it has no session, and the chat
+  that will redeem it has not been met yet; the row's *only* identity is the
+  hash of a secret, and `chat_id` arrives later, at redemption. Nothing may
+  ever be authorised from a row in this table on its own — its whole job is to
+  be spent once and counted.
+  `goal_contributions` and `bill_payments` look like the same shape —
   each has a parent id too — but take the *opposite*, more defensive one:
   both carry their own `household_id` despite the parent join already
   existing, because that foreign key alone carries no database-level
@@ -1963,6 +2327,41 @@ Notes that are not obvious from the shapes:
   someone else's address with a household of their own choosing. `email` is
   deliberately not unique; several live tokens for one address are fine,
   and the first one consumed wins.
+- **A `signups` row names exactly one channel, and the database is what says
+  so.** `email` stopped being `NOT NULL` and `telegram_chat_id` arrived beside
+  it, under `CHECK ((email IS NULL) <> (telegram_chat_id IS NULL))` — the
+  constraint named `signups_have_exactly_one_channel`. A row carrying both
+  channels, or neither, is refused by Postgres rather than reasoned about in
+  Go. `SignupService` still has a `default` branch that refuses a channel-less
+  row (`signupChannel`), which is not redundancy for its own sake: the
+  constraint protects the table, the `switch` protects against anything that
+  ever reaches this code past the table — a fixture, a double, a future
+  migration — and "fail closed on values you did not construct" applies to a
+  value read back from a column just as much as to one off the wire. **The
+  migration needed no backfill**, which was confirmed rather than assumed:
+  `ADD CONSTRAINT ... CHECK` validates existing rows at migration time, this is
+  the first migration here to constrain a table that already holds production
+  data, and every existing row has a non-NULL `email` and (after the
+  `ADD COLUMN`) a NULL `telegram_chat_id`, so the predicate holds for all of
+  them.
+- **`users.email` needed no change at all.** It has been nullable since
+  `00002_identity.sql`, because a limited member — typically a child — has
+  never had an address of their own. A Telegram-provisioned owner is simply the
+  second kind of user with no email, and every path that already tolerated the
+  first tolerates this one.
+- **Both `telegram_accounts` unique constraints are load-bearing, in opposite
+  directions.** `UNIQUE(chat_id)` stops two users binding the same chat, which
+  would make a sign-in ambiguous — `ByChatID` would have to pick one.
+  `UNIQUE(user_id)` stops one user accumulating chats, which would make a
+  revocation miss one. Neither is a tidiness constraint.
+- **`telegram_link_requests` now has a `Prune`, closed in the whole-branch fix
+  wave, 2026-09-01.** `signups` and `login_attempts` are the other two tables
+  a stranger can grow without holding an account, and `adminctl prune`
+  already covered them; `PruneTelegramLinkRequests` joins them, mirroring
+  `PruneSignups`'s own retention condition (and the same seven-day floor
+  reasoning) exactly. It was a small row (a hash, two timestamps, a bigint)
+  bounded in rate by the per-chat and per-IP limits, so it was a slow leak
+  rather than a hole — but it was a real gap, and is not one any longer.
 - **Database constraints mirror the domain rules** rather than trusting the
   application: a limited member cannot hold `marriage`, an owner must hold all
   four capabilities, and capabilities must come from the known set.
@@ -2201,7 +2600,37 @@ web/src/
                        401 handling
   components/          generic primitives only (Modal, on native <dialog>)
   features/
-    auth/              sign-in, invite, magic-link, sign-up screens and hooks
+    auth/              sign-in, invite, magic-link, sign-up screens and hooks.
+                       SignInScreen also carries the "Continue with Telegram"
+                       control: it opens the popup SYNCHRONOUSLY inside the
+                       click handler -- a blank tab first, pointed at the URL
+                       once POST /auth/telegram/start resolves -- because
+                       WebKit gates window.open on the synchronous gesture
+                       call stack and an awaited fetch reliably breaks that
+                       gate. Opening in onSuccess instead is the textbook
+                       OAuth-popup-blocked-on-Safari failure, and no test in
+                       this suite can see it: jsdom's window.open stub has no
+                       user-activation model at all (docs/LEARNING.md pattern
+                       3). A hard-blocked popup still returns null, so the
+                       URL is then rendered as a real link rather than
+                       swallowed. A 404 -- no bot configured on this install
+                       -- hides the control for the rest of the screen's life
+                       rather than showing an error nobody can act on, and
+                       every click clears both per-attempt banners first, not
+                       only on success: this file already documented two
+                       earlier fixes for an error banner surviving a state
+                       transition, and this control would have been the
+                       third (docs/LEARNING.md pattern 1).
+                       SignUpCompleteScreen is channel-aware: GET
+                       /auth/sign-up/{token} now returns channel alongside
+                       email, parsed as a "email" | "telegram" union rather
+                       than a bare string so an unrecognised value fails
+                       loudly instead of rendering the wrong screen. A
+                       Telegram sign-up renders a sentence saying so, never
+                       the read-only email box -- an empty read-only input
+                       reads as a field somebody forgot to fill in, which is
+                       the "looks automatic but is not" shape this product
+                       has refused twice before.
     shell/             AppShell (sidebar + the 1204px content column every
                        page renders inside), Sidebar, MobileTopBar and
                        NavDrawer (the below-lg off-canvas nav; lg:contents
@@ -2502,9 +2931,10 @@ prefix, which is what made the duplication stop being optional.
 | Sessions | opaque random token, hashed at rest, 30 days, extended on use, revocable |
 | CSRF | double-submit cookie, compared in constant time, mutating methods only |
 | Mail | Mailpit in development **and, for now, in production too** — the first install runs on a free DDNS hostname whose DNS refuses `TXT` records, so DKIM cannot be published and no hosted relay will verify it (`docs/adr/0003-mail-stays-on-the-box.md`). Mail is read by hand over an SSH tunnel; the inbox is an authentication bypass, so 8025 is bound to `127.0.0.1` only. `SMTP_TLS_MODE=none` is set explicitly, since it defaults to `mandatory` outside development and Mailpit speaks plaintext. TLS policy and credentials come from config, so a real relay is four `.env` values and no code |
+| Telegram | **Off unless configured**, and both values travel together: `config.Load` refuses a boot where exactly one of `TELEGRAM_BOT_TOKEN`/`TELEGRAM_BOT_USERNAME` is set, the same both-or-neither rule `SMTP_USERNAME`/`SMTP_PASSWORD` already follow, because a half-configured channel misbehaves silently. Both empty — which is what `deploy/.env` on the production box says, and this change is not deployed there yet in any case — means `POST /auth/telegram/start` answers `404`, the poller never starts, and `adminctl` (which runs `config.Load` before every subcommand) is unaffected. **Exactly one process may call `getUpdates`:** Telegram hands each update to a single caller, so a second `api` replica would silently steal updates and the symptom would be "sign-in works about half the time" — an operational constraint on ever scaling this service horizontally, not just a code comment (§1). Outbound only; no webhook, so nothing new faces the internet. The bot token is never logged in any branch, including error paths — `client.go` builds its errors from the method name rather than the request URL, because Telegram's own API URLs embed the token in the path and a `*url.Error` carries that URL |
 | Seeding | `adminctl seed`, refused unless `APP_ENV=development` **and** the database host is local — both checked before the connection opens |
-| Retention | `adminctl prune --older-than=<days>` (default 30, floor 7) deletes consumed/expired `signups` and stale `login_attempts`; `magic_links`, `invites` and `sessions` still grow forever |
-| Rate limiting | Per-address (3/hour) and a global daily ceiling (1000, reset at midnight, not a rolling 24 hours), both counted from `signups` so a restart cannot reset them; per-IP (5/hour) is an in-memory token bucket in the HTTP layer — process-local, spoofable in development, and keyed to the *proxy* rather than the client if a proxy is put in front of nginx without `set_real_ip_from`; Caddy is in front in production, so `web/nginx.conf` carries that directive over the compose subnet and it is verified, not assumed (both in §1). The per-IP limit binds before the global one by construction (5 × 24 = 120 ≪ 1000) so one IP alone can never exhaust the global ceiling |
+| Retention | `adminctl prune --older-than=<days>` (default 30, floor 7) deletes consumed/expired `signups`, stale `login_attempts` and — closed in the whole-branch fix wave, 2026-09-01 — consumed/expired `telegram_link_requests`, the third table a stranger can grow without an account (`PruneTelegramLinkRequests` mirrors `PruneSignups`'s own retention condition exactly). `magic_links`, `invites` and `sessions` still grow forever, a real gap rather than a decision (§6) |
+| Rate limiting | Per-address (3/hour) and a global daily ceiling (1000, reset at midnight, not a rolling 24 hours), both counted from `signups` so a restart cannot reset them — and the Telegram sign-up path counts against that **same** global ceiling, deliberately, so a flood of `/start` cannot run the shared counter up and silently stop email sign-up while having no ceiling of its own. Telegram adds two more: per-**chat**, at most 3 links delivered per hour, counted from `telegram_link_requests` (so a restart cannot reset it either), and a second per-IP bucket of 20/hour on `POST /auth/telegram/start`, in its own limiter instance so it and sign-up cannot spend each other's budget (§4). Per-IP (5/hour on sign-up) is an in-memory token bucket in the HTTP layer — process-local, spoofable in development, and keyed to the *proxy* rather than the client if a proxy is put in front of nginx without `set_real_ip_from`; Caddy is in front in production, so `web/nginx.conf` carries that directive over the compose subnet and it is verified, not assumed (both in §1). The per-IP limit binds before the global one by construction (5 × 24 = 120 ≪ 1000) so one IP alone can never exhaust the global ceiling — but that arithmetic covers only the **email** sign-up path, whose every request to `/auth/sign-up` arrives over HTTP from the stranger's own IP and passes through that 5/hour bucket on the way to the shared counter. **The Telegram sign-up path has no per-IP bound at all.** The row that actually advances the shared global counter is written by `sendSignUp` (`telegram_auth.go`), reached only from the poller processing a Telegram update — the IP on that request is Telegram's own long-poll host, not the stranger's, so no per-IP bucket sees it (the 20/hour bucket on `POST /auth/telegram/start`, above, limits only how often a *browser* can mint a nonce, a step upstream of and separate from a chat sending `/start`). What actually bounds a Telegram sign-up flood is the per-**chat** limit (3/hour, above) plus the same shared global daily ceiling the email path counts against |
 | Health | `/healthz` ignores the database; `/readyz` pings it |
 | Hosting | **Live since 2026-08-15** at <https://oink.mywire.org> — one Hetzner CX23 in Falkenstein running `deploy/docker-compose.prod.yml` (project `hearth-prod`, deliberately not the dev stack's `hearth`). `docs/adr/0002-first-production-host.md` carries the choice and its 2026-08-15 amendment: `CPX11` was renamed out of existence and Singapore does not sell the cheap `CX` line, so the region moved to the EU and the household now crosses ~195 ms of ocean — measured from the owner's network, not estimated. Follows `docs/adr/0001-optimise-for-exit-cost.md`: hosts are picked for how cheaply we can leave them |
 | Deploying | `deploy/deploy.sh <git-sha>` — one command, plus `--current` and `--rollback`. CI builds three SHA-tagged images on every push to `main`; **the box never updates itself**, by design (spec decision 3), because rollback is image-only and a bad migration needs a restore rather than a rollback. The script refuses `latest` and refuses a tag absent from the registry **before** it writes `.env`, so a typo cannot leave the file pointing at something unpullable; it records the previous tag before changing anything, so `--rollback` survives a run that dies partway; and it verifies rather than assumes — `migrate` exited `0` (checked with `ps -a`, since Compose hides exited one-shot services), nothing restart-looping, `/readyz` answering on the public domain. Every guard and a full deploy/rollback/redeploy round trip were exercised on the live box on 2026-08-15 |

@@ -354,6 +354,47 @@ func TestSignupPreview(t *testing.T) {
 		if got.Email != "founder@example.test" {
 			t.Fatalf("Email = %q, want founder@example.test", got.Email)
 		}
+		if got.Channel != "email" {
+			t.Fatalf("Channel = %q, want email", got.Channel)
+		}
+	})
+
+	t.Run("reports the Telegram channel for a Telegram sign-up", func(t *testing.T) {
+		f := newSignupFixture(t)
+		chatID := int64(4242)
+		f.signups.rows[string(f.tokens.HashToken("token"))] = &signupRow{
+			ID:             "signup-telegram",
+			TelegramChatID: &chatID,
+			CreatedAt:      f.clock.Now(),
+			ExpiresAt:      f.clock.Now().Add(time.Hour),
+		}
+
+		preview, err := f.svc.Preview(context.Background(), "token")
+		if err != nil {
+			t.Fatalf("Preview: %v", err)
+		}
+		if preview.Channel != "telegram" {
+			t.Fatalf("Channel = %q, want telegram", preview.Channel)
+		}
+		if preview.Email != "" {
+			t.Fatalf("Email = %q, want empty for a Telegram sign-up", preview.Email)
+		}
+	})
+
+	// signupChannel's fail-closed default branch. The
+	// signups_have_exactly_one_channel constraint should make this row
+	// unreachable in production; this is the second gate, for whatever
+	// bypasses the database -- Preview must refuse it, not guess a channel.
+	t.Run("a row naming no channel is refused, not guessed at", func(t *testing.T) {
+		f := newSignupFixture(t)
+		f.signups.rows[string(f.tokens.HashToken("token"))] = &signupRow{
+			ID:        "signup-channelless",
+			CreatedAt: f.clock.Now(),
+			ExpiresAt: f.clock.Now().Add(time.Hour),
+		}
+		if _, err := f.svc.Preview(context.Background(), "token"); err == nil {
+			t.Fatal("Preview accepted a signup naming neither channel, want an error")
+		}
 	})
 
 	t.Run("an expired token reports ErrTokenExpired", func(t *testing.T) {

@@ -185,6 +185,12 @@ func TestEveryProtectedRouteRejectsAnUnauthenticatedCaller(t *testing.T) {
 		"POST /api/v1/auth/sign-up/{token}/complete": true,
 		// Public: the sign-up form reads this before any session exists.
 		"GET /api/v1/currencies": true,
+		// Telegram sign-in: reached before any session exists, same as
+		// sign-up above. It answers 404 rather than 401 when no bot is
+		// configured (telegram_handlers.go's own doc comment) -- the same
+		// answer any unrouted path gets -- which this walk would otherwise
+		// flag as a route that "forgot" its 401 guard.
+		"POST /api/v1/auth/telegram/start": true,
 	}
 
 	routes, ok := env.router.(chi.Routes)
@@ -263,6 +269,9 @@ func TestEveryMutatingRouteRequiresCSRF(t *testing.T) {
 		"POST /api/v1/auth/magic-link/consume":       true,
 		"POST /api/v1/auth/sign-up":                  true,
 		"POST /api/v1/auth/sign-up/{token}/complete": true,
+		// Structurally pre-CSRF, same as the sign-up routes above -- there
+		// is no session yet to fixate before one exists.
+		"POST /api/v1/auth/telegram/start": true,
 	}
 
 	routes, ok := env.router.(chi.Routes)
@@ -501,6 +510,15 @@ func TestSignUpPreviewAndComplete(t *testing.T) {
 		}
 		if body["email"] != "founder@example.test" {
 			t.Fatalf("email = %q, want founder@example.test", body["email"])
+		}
+		// CONTROLLER RULING R3: the create-household screen needs channel
+		// alongside email (usecase.SignupPreview's own doc comment). The
+		// Telegram-channel shape -- empty email, channel "telegram" -- is
+		// covered separately by TestSignUpPreviewShowsTelegramChannelWithNoEmail
+		// (telegram_api_test.go), since building that row needs a fake
+		// SignupRepository rather than this file's real-Postgres testEnv.
+		if body["channel"] != "email" {
+			t.Fatalf("channel = %q, want email", body["channel"])
 		}
 	})
 

@@ -13,7 +13,7 @@ import { type FormEvent, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { ApiError } from "../../api/client";
 import { apiErrorMessage } from "./copy";
-import { type Currency } from "./schemas";
+import { type Currency, type SignUpPreview } from "./schemas";
 import { useCompleteSignUp, useCurrencies, useSignUpPreview } from "./useAuth";
 
 function currencyLabel(c: Currency) {
@@ -77,7 +77,15 @@ function SignUpTokenError({ error }: { error: unknown }) {
   );
 }
 
-function CompleteSignUpForm({ token, email }: { token: string; email: string }) {
+function CompleteSignUpForm({
+  token,
+  email,
+  channel,
+}: {
+  token: string;
+  email: string;
+  channel: SignUpPreview["channel"];
+}) {
   const [householdName, setHouseholdName] = useState("");
   const [currency, setCurrency] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -238,20 +246,43 @@ function CompleteSignUpForm({ token, email }: { token: string; email: string }) 
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <label htmlFor="sign-up-email" className="text-xs font-semibold text-label">
-            Email
-          </label>
-          <input
-            id="sign-up-email"
-            type="email"
-            autoComplete="email"
-            // Read-only: this is the address the mailed token proved. Letting
-            // it be edited would mean the form could create an account for an
-            // address nobody verified.
-            readOnly
-            value={email}
-            className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
-          />
+          {channel === "email" ? (
+            <>
+              <label htmlFor="sign-up-email" className="text-xs font-semibold text-label">
+                Email
+              </label>
+              <input
+                id="sign-up-email"
+                type="email"
+                autoComplete="email"
+                // Read-only: this is the address the mailed token proved.
+                // Letting it be edited would mean the form could create an
+                // account for an address nobody verified.
+                readOnly
+                value={email}
+                className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+              />
+            </>
+          ) : (
+            // A Telegram sign-up has no address to show -- `email` is "" for
+            // this channel (see signUpPreviewSchema's own comment). Rendering
+            // an empty read-only email box here would look like a field
+            // someone forgot to fill in, so this tells the person what
+            // proved their identity instead of pretending there's an address.
+            //
+            // The second sentence exists because of a real gap: without an
+            // email on the account, the password below has nowhere to be
+            // checked against (GetUserByEmail is WHERE email = $1, and NULL
+            // never matches) and there is no "forgot password" link to send.
+            // Telegram is the only door in until that account gains an
+            // email address -- see docs/FEATURE_TRACKER.md.
+            <p className="text-xs text-label">
+              You are signing up with Telegram. Your sign-in links come to
+              that chat. Telegram is the only way to sign in for now — the
+              password below is saved for later but will not sign you in
+              yet.
+            </p>
+          )}
         </div>
 
         <div className="flex flex-col gap-1.5">
@@ -333,7 +364,11 @@ export function SignUpCompleteScreen({ token }: { token: string }) {
             <p className="text-[13px] leading-relaxed text-muted">Loading…</p>
           )}
           {preview.isSuccess && (
-            <CompleteSignUpForm token={token} email={preview.data.email} />
+            <CompleteSignUpForm
+              token={token}
+              email={preview.data.email}
+              channel={preview.data.channel}
+            />
           )}
         </div>
 

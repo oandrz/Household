@@ -40,6 +40,13 @@ type Mailer interface {
 	SendSignupForExistingAccount(ctx context.Context, to, signInURL string) error
 }
 
+// TelegramSender delivers a plain-text message to one Telegram chat. Same
+// shape and justification as Mailer: the usecase layer must not hold an HTTP
+// client, and the service must be testable against a double.
+type TelegramSender interface {
+	SendMessage(ctx context.Context, chatID int64, text string) error
+}
+
 // StoredUser carries the password hash, which never leaves the usecase layer.
 //
 // users.password_hash is nullable in the database, and sqlc generates *string
@@ -146,6 +153,39 @@ type MagicLinkRepository interface {
 	CountSince(ctx context.Context, email string, since time.Time) (int, error)
 }
 
+// TelegramLinkRepository stores the pending deep-link nonces that carry a
+// browser's sign-in request across to Telegram. Nonces are stored hashed,
+// never raw, like every other token in this system.
+type TelegramLinkRepository interface {
+	Create(ctx context.Context, nonceHash []byte, expiresAt time.Time) error
+	// Consume stamps the row consumed and records which chat redeemed it, in
+	// one statement. The chat is unknown when the nonce is minted -- the
+	// browser has not met Telegram yet -- so redemption is the only moment the
+	// two can be joined, and CountLinksSince depends on it happening here.
+	// Returns domain.ErrNotFound if the nonce is unknown, expired or already
+	// consumed; those three are deliberately indistinguishable to a caller.
+	Consume(ctx context.Context, nonceHash []byte, chatID int64) error
+	// CountLinksSince counts links this chat has redeemed since a point in
+	// time. It lives here rather than on TelegramAccountRepository because the
+	// per-chat limit must also bind chats that have no account yet: a stranger
+	// repeating /start has no user row to count against.
+	CountLinksSince(ctx context.Context, chatID int64, since time.Time) (int, error)
+	// Prune deletes consumed and expired rows older than before, the same
+	// contract as SignupRepository.Prune. A nonce nobody ever redeemed has no
+	// chat_id, so nothing else ever bounds how many a stranger can mint.
+	Prune(ctx context.Context, before time.Time) (int64, error)
+}
+
+// TelegramAccountRepository resolves a Telegram chat to the Hearth user it is
+// bound to. The binding itself is written inside SignupRepository.Provision's
+// transaction, which is why there is no Create method here.
+type TelegramAccountRepository interface {
+	// ByChatID returns domain.ErrNotFound when the chat is bound to no user,
+	// which is the ordinary "this person has no account yet" case, not an error
+	// condition.
+	ByChatID(ctx context.Context, chatID int64) (userID string, err error)
+}
+
 type LoginAttemptRepository interface {
 	Record(ctx context.Context, householdID, userID *string, email string, succeeded bool, at time.Time) error
 	FailuresSince(ctx context.Context, householdID string, since time.Time) ([]time.Time, error)
@@ -212,12 +252,15 @@ type InviteRepository interface {
 		householdID string, role domain.Role, caps domain.Capabilities) (AcceptedInvite, error)
 }
 
-// SignupDetails is a pending sign-up, read back by token.
+// SignupDetails is a pending sign-up, read back by token. Exactly one of
+// Email and TelegramChatID is set -- the signups_have_exactly_one_channel
+// constraint makes that a database guarantee, not a convention.
 type SignupDetails struct {
-	ID         string
-	Email      string
-	ExpiresAt  time.Time
-	ConsumedAt *time.Time
+	ID             string
+	Email          string
+	TelegramChatID *int64
+	ExpiresAt      time.Time
+	ConsumedAt     *time.Time
 }
 
 // ProvisionedHousehold is what a successful provision produces.
@@ -244,6 +287,10 @@ type SignupRepository interface {
 	// NULL -- so it exists solely to be counted, and its token is never
 	// mailed to anyone.
 	CreateConsumed(ctx context.Context, email string, tokenHash []byte, expiresAt time.Time) error
+	// CreateForTelegram writes a signup row whose channel is a Telegram chat
+	// rather than an email address. It and Create are mutually exclusive per
+	// row, enforced by signups_have_exactly_one_channel.
+	CreateForTelegram(ctx context.Context, chatID int64, tokenHash []byte, expiresAt time.Time) error
 	ByTokenHash(ctx context.Context, tokenHash []byte) (SignupDetails, error)
 	// CountForEmailSince counts sign-up requests for one address since a
 	// cutoff, over rows written by both Create and CreateConsumed. Unlike
@@ -257,15 +304,21 @@ type SignupRepository interface {
 	// so restarting the API cannot reset the ceiling.
 	CountSince(ctx context.Context, since time.Time) (int, error)
 	// Provision creates the household, the owner user, the owner membership,
-	// every builtin space and the notification preferences, and stamps the
-	// signup consumed -- all in one transaction. Either all of it happens or
-	// none of it does.
+	// every builtin space and the notification preferences, binds the
+	// Telegram chat when the signup names one, and stamps the signup
+	// consumed -- all in one transaction. Either all of it happens or none of
+	// it does.
 	//
-	// The owner's email address is read from the signup row this transaction is
-	// already touching; it is deliberately NOT a parameter. The address that
-	// gets an account must be the one the mailed token actually proved, and
-	// passing it in would let a caller substitute a different one between
-	// SignupService.Complete's read and this write.
+	// The owner's email address, or the Telegram chat id, is read from the
+	// signup row this transaction is already touching; neither is a
+	// parameter, deliberately. The identity that gets an account must be the
+	// one the token actually proved -- the mailed link for email, the chat
+	// that redeemed the sign-up for Telegram -- and passing either in would
+	// let a caller substitute a different one between SignupService.Complete's
+	// read and this write. For the chat id this is the whole point of the
+	// feature: a caller-substitutable chat id would let someone bind a
+	// household to a chat they control, not the one that actually completed
+	// the sign-up.
 	//
 	// A partial provision leaves a users row occupying users.email's unique
 	// index with no membership under it, which makes that address permanently

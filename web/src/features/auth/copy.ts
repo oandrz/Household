@@ -13,6 +13,22 @@ export function apiErrorMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message : fallback;
 }
 
+// Deliberately says nothing about why. The person cannot act on "Telegram
+// returned 500", and this screen's other errors follow the same rule. Only
+// reached for a non-404 failure -- a 404 (no bot configured) hides the
+// control instead of showing this, see SignInScreen's onError.
+export const TELEGRAM_FALLBACK_ERROR =
+  "We could not start Telegram sign-in just now. Try again in a moment.";
+
+// Shown when SignInScreen's synchronous window.open (opened in the click
+// handler itself, before the fetch, so the browser's user-activation window
+// is still open -- see that handler's own comment) came back null: the
+// person has popups blocked. Silence here would reintroduce the exact bug
+// the synchronous-open shape exists to prevent, so this points at a real
+// link instead of a dead button.
+export const TELEGRAM_POPUP_BLOCKED_MESSAGE =
+  "Your browser blocked the popup. Open Telegram to continue:";
+
 // A deliberately loose "does this look like an email address" check, not a
 // full RFC 5322 validator: it exists only to catch an empty field and the
 // obviously-not-an-email case ("no", "andreas") before either magic-link

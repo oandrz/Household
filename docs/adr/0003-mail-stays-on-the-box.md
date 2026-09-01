@@ -1,6 +1,10 @@
 # 3. Mail stays on the box until a real domain exists
 
 **Status:** Accepted — 2026-08-12. Explicitly interim; see "Exit condition".
+**Amended 2026-09-01** — the exit condition changed, because
+[ADR 4](0004-telegram-as-a-second-delivery-channel.md) added a delivery channel
+that carries strangers without mail. The amendment is at the bottom, and the
+original text is left standing above it.
 
 ## Context
 
@@ -102,10 +106,48 @@ Changing `APP_BASE_URL` to a new domain at the same time will invalidate existin
 sessions (the cookie origin moves) and break any link already mailed. At two
 users that costs one sign-in each.
 
+### Amended 2026-09-01 — that event is no longer the trigger
+
+The original condition above is left standing because it records what was true
+when this ADR was written: "a third person arrives" and "a third person needs an
+email" were the same event. They stopped being the same event when
+[ADR 4](0004-telegram-as-a-second-delivery-channel.md) added Telegram as a
+second delivery channel for sign-up links and magic links. A stranger can now
+create a household, and an existing member can now recover an account, without
+any mail leaving this box.
+
+**This amendment qualifies three earlier passages here rather than deleting
+them:**
+
+- **Context**, "Without mail, nobody can create an account at all — not a
+  customer, not the owner." True only of an install with no bot configured.
+- **Consequences**, "The install is genuinely two-person." Narrowed the same
+  way: with a bot configured, sign-up and magic-link recovery are self-service.
+  Invites and notification preferences are not, so the install is still
+  two-person for those.
+- **The criterion-3 paragraph is untouched and still binding.** Nothing here
+  makes real mail testable; criterion 3 is still deferred, not passed.
+
+**The new exit condition: the day something Hearth must deliver cannot go over
+Telegram.** Three known candidates, and the first is already real:
+
+| Trigger | Live today? |
+|---|---|
+| **An invite to someone who is not on Telegram** | **Yes.** Invites deliberately stay on email in ADR 4's slice, so this trigger is already met the moment a third person is invited |
+| **Any notification** — bill reminders, retro reminders | No, and dormant. Nothing in this codebase sends one on any channel yet (`docs/FEATURE_TRACKER.md`'s notifications correction), so there is nothing to fail to deliver |
+| **A person who will not, or cannot, install Telegram** | Unknown until it happens. Telegram is free, but it is still an account with a third party, and "sign up for a messaging app first" is a real cost to put in front of a stranger |
+
+**Nothing about the switch itself changed** — the four `.env` values and the
+Compose edit above are still the whole of it. That is ADR 1's exit-cost
+principle paying off twice now: adding a whole second delivery channel needed no
+change to the mailer either.
+
 ## See also
 
 - [ADR 1 — optimise for exit cost](0001-optimise-for-exit-cost.md)
 - [ADR 2 — first production host](0002-first-production-host.md)
+- [ADR 4 — Telegram as a second delivery channel](0004-telegram-as-a-second-delivery-channel.md),
+  which amended this one's exit condition
 - `docs/superpowers/specs/2026-08-10-hearth-production-deployment-design.md`,
   whose decisions 6 and 11 assumed Resend and are superseded for as long as this
   ADR stands.

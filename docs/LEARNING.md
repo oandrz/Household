@@ -23,7 +23,7 @@ gets rebuilt.
 
 ### 1. Fixing an instance rarely fixes the class
 
-This happened **eighteen times** — one bullet each below, and the count is the
+This happened **nineteen times** — one bullet each below, and the count is the
 number of bullets, so recount it when you add one (it had already drifted by
 one before the UX-repair round noticed). Almost every time, the fix was
 correct and the sibling kept the bug; two of them are the variant where
@@ -373,6 +373,22 @@ writing a hook for it.
   nothing and a suite that stays green. **When you give a previously-neutral
   default a meaning, grep every caller of that endpoint in the same change**:
   a default is a value with readers, exactly like a field whose meaning moved.
+- **The same file, the same defect, a third time — and the two earlier fixes
+  were written down at the line and still did not stop it.**
+  `SignInScreen.tsx` already carried two comments naming this exact class:
+  "Fix round 2, Finding 1" (a magic-link error surviving the move into the
+  sent panel) and "Fix round 3, Finding 1" (the same thing again). Telegram's
+  "Continue with Telegram" button added a third instance the same way — it
+  cleared its error banner on success only, so a stale error, and a stale
+  popup-blocked link, both kept showing under a control that had just worked.
+  What makes this worth a bullet rather than a shrug is that **the two prior
+  fixes were documented, specific, and adjacent, and the new control still
+  reproduced them.** A comment at the site of a past fix does not protect the
+  *next* control added to the same screen; nobody reads a neighbour's comment
+  before writing a new `useState`. The habit that would have caught it is
+  mechanical, not attentive: **when you add a per-attempt banner to a screen,
+  grep that file for every other `setXError(null)` and match the moment they
+  fire** — here, "at the start of every attempt", not "on success".
 
 **And when you change what a value *means*, its readers are the class.** The
 compiler will not find them, because nothing about the type changed; only a
@@ -1144,6 +1160,56 @@ person to ask whether the test could ever have gone red in the first place.
   would *not* have worked: a count-only assertion stays green whenever both
   halves are wrong in the same direction.
 
+- **A poller test delivered one update and asserted `>= 1`, so it stayed green
+  against a poller that had stopped polling.** `TestPollerSurvivesAPanickingHandler`
+  fed one update, watched the handler panic, and checked the handler had been
+  called at least once. Moving `recover` out of the per-update dispatch so it
+  wrapped `Run` instead leaves the poller **dead after the first panic** — and
+  the test passes, because one call is at least one. The claim the name makes
+  is "the loop survives"; the only assertion that can carry it is a **second**
+  update, delivered after the panicking one, arriving at the handler. **A test
+  about surviving something must exercise the thing that comes after it.**
+- **A backoff test asserted two calls happened, so deleting the entire backoff
+  made it pass *faster*.** `TestPollerBacksOffAndKeepsGoingAfterAnError` proved
+  the loop retried, which was never in doubt; the behaviour under test was
+  *waiting* before retrying, and elapsed time was the one thing it never
+  looked at. **When the behaviour is a delay, the assertion has to be about
+  time** — a fake clock, or a measured floor on the gap between the two calls.
+  A test that a mutation makes *quicker* is measuring liveness, not the rule.
+- **A rate-limit test seeded three prior redemptions where two was the boundary,
+  so `>` could become `>=` and silently halve the limit with the suite green.**
+  The limit refuses at four redemptions in an hour; a fixture starting at three
+  is over the line under both the correct comparison and the broken one.
+  **A boundary test has to sit exactly on the boundary** — one row below and
+  one row above — because a fixture comfortably past it tests the direction of
+  the comparison and nothing about where it falls.
+- **A refusal test used `strings.Contains(got, "expired")`, so appending text to
+  the message shipped an enumeration oracle green.** Telegram's bot answers an
+  unknown, expired, consumed, rate-limited or ceiling-blocked `/start` with one
+  identical sentence, precisely so none of the five can be told apart by
+  probing. Adding "Too many attempts." to the rate-limited branch still
+  contains "expired" — the suite passes, and the product now tells an attacker
+  which branch they hit. **When the rule is "these answers are identical",
+  assert equality between the two answers, not a substring of each.** The
+  substring form tests that a message is *about* the right thing; the rule is
+  that it is the *same* thing.
+- **A double that returned `""` for "nothing was sent" let an identical-answer
+  test pass against a service that answered dead nonces with silence.** The
+  test compared the reply for a rate-limited chat with the reply for an expired
+  one; both came back `""`, which is equal, so the assertion held even though
+  one of the two branches sent no message at all. **A "no value" sentinel that
+  is also a legal value cannot represent absence** — the double needs a
+  recorded slice, or a `(string, bool)`, so "sent nothing" and "sent the
+  refusal" are different observations rather than the same empty string.
+- **A mutation check proved nothing because an earlier assertion in the same
+  test masked it.** Task 4's first-draft rollback test asserted the constraint
+  name *before* asserting the household row had survived the failed
+  transaction. Under mutation the constraint-name check fired first, the test
+  went red, and the red looked like proof — but it was proof of the incidental
+  assertion, not of the rollback. **Order assertions so the one under test
+  fails first, or split it into its own test.** A mutation is only evidence
+  when the failure it produces names the claim you meant to make.
+
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
 a different reason than the one you meant to prove, that is not yet proof
@@ -1525,10 +1591,42 @@ something only that guard can produce.
   dependency also owns, ask which of the two the code under test actually
   consults.**
 
+- **`window.open` after an awaited `fetch` is silently blocked on iOS Safari,
+  and no test in this suite could ever have seen it.** The "Continue with
+  Telegram" button first opened the popup in the mutation's `onSuccess` — the
+  natural place, since that is where the URL arrives. WebKit gates
+  `window.open` on the **synchronous user-gesture call stack**, and an awaited
+  network round trip reliably breaks that gate; this is the textbook
+  OAuth-popup-blocked-on-Safari failure. Chromium's transient-activation
+  window is looser, so on a fast desktop it usually works, which is exactly
+  what makes it ship. **jsdom's `window.open` is a stub with no user-activation
+  model at all** — there is no state for an assertion to read, so a suite of
+  green tests is blind to the feature simply not working on the phone it was
+  built for. The shape that survives: open a blank tab **synchronously inside
+  the click handler**, before the fetch, then point `popup.location.href` at
+  the URL once the response lands. And because a hard-blocked popup still
+  returns `null`, the null branch has to do something visible — here, render
+  the URL as a real link — or the failure this whole shape exists to prevent
+  comes straight back as a dead button. **Ask of any browser API: does it care
+  *when* it was called, and does jsdom model that?** For anything gated on
+  user activation — `window.open`, clipboard writes, fullscreen, autoplay,
+  Web Share — the answer to the second half is no.
+
 **If a behaviour depends on the platform, verify it in the platform.** A real
-browser is what found every frontend defect above, and nothing else could
-have: jsdom has no working `<dialog>`, no CSS cascade and no layout at all, so
-the assertion that would catch one of these has nothing to read. Count the
+browser is what found every frontend defect above **except one**, and nothing
+else could have: jsdom has no working `<dialog>`, no CSS cascade and no layout
+at all, so the assertion that would catch one of these has nothing to read.
+**The exception is the more interesting entry, not a footnote.** The
+`window.open` bullet was found in code review, from the spec — someone knew
+WebKit gates the call on the synchronous gesture stack and went looking — and
+the walk on 2026-09-01 **confirmed the fix in a real browser** — the control
+opened Telegram Desktop on the host and both the sign-up and sign-in paths
+completed through it
+(`docs/superpowers/plans/2026-09-01-telegram-sign-in-verification.md`). So it is
+evidence for this pattern twice over, and the second half only closed once the
+walk ran: the simulated environment could not see the defect, and could not
+have confirmed the fix either. Reasoning a platform gap out of the spec is how
+you find it; it is not how you confirm you closed it. Count the
 bullets rather than trusting a number in this sentence — the list keeps
 growing. And
 when a service returns an error it did not log, stop debugging the code and
@@ -1674,9 +1772,31 @@ protecting another is worse.**
   refuses to prune inside `domain.LockoutPolicy.Window` — deleting a row still
   inside it would clear a live lockout as a side effect of "cleanup".
 
+- Telegram sign-in, whole-branch review, 2026-09-01: `users.email` is
+  nullable for exactly the same reason as `login_attempts.household_id` above
+  — a Telegram sign-up has no address, by design. `GetUserByEmail` is `WHERE
+  email = $1` (`api/internal/adapter/postgres/queries/identity.sql`), and `$1`
+  never matches `NULL`. The sign-up screen still collected a password for
+  that account, `required minLength={12}` and all, so the form looked
+  ordinary while the password it collected could never be checked against
+  anything: `POST /auth/magic-link` has no address to send to, and `adminctl
+  reset-password --email=` has no address to match either. Telegram became
+  the *only* door into that household, with no operator recovery path, and
+  nothing in the UI said so. The fix taken was the cheap honest one, not the
+  architectural one: `SignUpCompleteScreen.tsx`'s Telegram copy now says
+  plainly that Telegram is the only way in for now and the password will not
+  work yet (letting a Telegram user attach an email later is tracked as ⬜ in
+  `docs/FEATURE_TRACKER.md`, not built in this slice). Until that ships, the
+  only recovery an operator has for a locked-out Telegram-only household is
+  `make psql` and a hand-written `UPDATE users SET email = '...' WHERE id =
+  '...'` — there is no `adminctl` command for it, because every existing one
+  keys off the email this account does not have.
+
 **When a column is nullable for a stated reason, ask what a filter on it
 silently excludes.** A cleanup query scoped the same way a lookup query is
-scoped inherits that query's blind spot for free.
+scoped inherits that query's blind spot for free. So does every other query
+built for the row shape that has the column, run against the row shape that
+doesn't.
 
 ### 10. Slicing a string by position, and "simple" case mapping, both assume one character is one unit
 
@@ -3373,6 +3493,27 @@ route with a missing guard has no second line of defence.
   the size of the fix, and does not change the check**: `curl` the module
   Vite is actually serving before concluding a freshly-built screen is
   broken, however much of it looks wrong.
+
+- **A secret leaked through an error nobody constructed: `http.NewRequestWithContext`
+  returns a `*url.Error` that embeds the whole request URL, and Telegram's API
+  URLs carry the bot token in the path.** `https://api.telegram.org/bot<TOKEN>/sendMessage`
+  is not an unusual shape — it is how the Bot API is addressed — so any error
+  built by wrapping the return of `NewRequestWithContext` (or of `client.Do`)
+  hands the full bot credential to whatever logs it. The trigger is not exotic
+  either: a token with a control character in it, such as the trailing newline
+  a copy-pasted secrets file leaves behind, is enough to make URL parsing fail
+  and the error fire on the very first send. **Downgrading `%w` to `%v` does
+  not help**, and that is the part worth remembering: `url.Error.Error()`
+  formats the URL into its own message, so the token is in the string under
+  *any* verb. The only fix is to not put that error in the message at all —
+  `client.go` builds its errors from the **method name** it was calling, never
+  from the request or the URL, and says so at the line. **Two habits fall out.
+  Before wrapping an error from a call you handed a URL, ask what the error
+  type prints** — `url.Error`, `net.OpError` and `pgconn.PgError` all carry
+  more than the sentence you expected. And **treat "the credential is in the
+  path" as a property of the client, not of one call site**: it makes every
+  error path in that file a disclosure path, so the rule has to be written
+  once at the top of the file rather than remembered at each `return`.
 
 ### The first production deployment (2026-08-15)
 
