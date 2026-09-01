@@ -45,14 +45,18 @@ func (s *AdminReauthService) Verify(ctx context.Context, userID, password string
 		return err
 	}
 	if state := s.d.Policy.Evaluate(failures, now); state.Locked {
-		// Record this attempt too, rather than returning before it ever
-		// reaches the ledger: continued guessing against an already-locked
-		// account must keep extending the lock and keep showing up in the
-		// audit trail, the same choice AuthService.SignIn makes for the
-		// household lock (see its own doc comment on that branch). No
-		// password is checked here -- while locked, none can succeed, so
-		// there is nothing to verify -- the attempt is simply logged as
-		// failed.
+		// Recording here is an accepted trade-off, not an oversight: it
+		// means continued guessing against an already-locked account keeps
+		// extending the lock indefinitely, the same choice AuthService.SignIn
+		// makes on its own locked branch and for the same reason -- a lock
+		// that stopped counting failures while under active attack would
+		// just expire on a schedule the attacker can wait out. Unlike that
+		// household lock, there is no in-product escape hatch here (no
+		// admin equivalent of magic-link sign-in): the way back in is
+		// `adminctl unlock-admin --email=`, run on the box (Task 9), which
+		// is an acceptable trade because the box is already the boundary
+		// that grants platform admin in the first place -- nobody without
+		// shell access could have become an admin to get locked out as one.
 		if recErr := s.d.Attempts.Record(ctx, userID, false, now); recErr != nil {
 			return recErr
 		}
@@ -74,6 +78,15 @@ func (s *AdminReauthService) Verify(ctx context.Context, userID, password string
 		return domain.ErrInvalidCredentials
 	}
 
+	// Clear before recording the success, in that order, mirroring
+	// AuthService.SignIn exactly (auth.go's ClearFailures-then-Record on its
+	// own success path): without this, two earlier mistypes followed by a
+	// success followed by one more mistype would count as three cumulative
+	// failures rather than one fresh strike, which is not the policy
+	// domain.DefaultLockoutPolicy describes.
+	if err := s.d.Attempts.ClearFailures(ctx, userID); err != nil {
+		return err
+	}
 	if err := s.d.Attempts.Record(ctx, userID, true, now); err != nil {
 		return err
 	}
