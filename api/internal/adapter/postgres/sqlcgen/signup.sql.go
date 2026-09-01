@@ -15,12 +15,13 @@ const consumeSignup = `-- name: ConsumeSignup :one
 UPDATE signups
 SET consumed_at = now()
 WHERE id = $1 AND consumed_at IS NULL AND expires_at > now()
-RETURNING id, email
+RETURNING id, email, telegram_chat_id
 `
 
 type ConsumeSignupRow struct {
-	ID    pgtype.UUID
-	Email string
+	ID             pgtype.UUID
+	Email          *string
+	TelegramChatID *int64
 }
 
 // ConsumeSignup is the transactional gate for Provision. The guard lives here,
@@ -32,7 +33,7 @@ type ConsumeSignupRow struct {
 func (q *Queries) ConsumeSignup(ctx context.Context, id pgtype.UUID) (ConsumeSignupRow, error) {
 	row := q.db.QueryRow(ctx, consumeSignup, id)
 	var i ConsumeSignupRow
-	err := row.Scan(&i.ID, &i.Email)
+	err := row.Scan(&i.ID, &i.Email, &i.TelegramChatID)
 	return i, err
 }
 
@@ -42,7 +43,7 @@ WHERE email = $1 AND created_at >= $2
 `
 
 type CountSignupsForEmailSinceParams struct {
-	Email     string
+	Email     *string
 	CreatedAt pgtype.Timestamptz
 }
 
@@ -71,7 +72,7 @@ VALUES ($1, $2, $3, now())
 `
 
 type CreateConsumedSignupParams struct {
-	Email     string
+	Email     *string
 	TokenHash []byte
 	ExpiresAt pgtype.Timestamptz
 }
@@ -96,7 +97,7 @@ VALUES ($1, $2, $3)
 `
 
 type CreateSignupParams struct {
-	Email     string
+	Email     *string
 	TokenHash []byte
 	ExpiresAt pgtype.Timestamptz
 }
@@ -106,17 +107,36 @@ func (q *Queries) CreateSignup(ctx context.Context, arg CreateSignupParams) erro
 	return err
 }
 
+const createTelegramSignup = `-- name: CreateTelegramSignup :exec
+INSERT INTO signups (telegram_chat_id, token_hash, expires_at)
+VALUES ($1, $2, $3)
+`
+
+type CreateTelegramSignupParams struct {
+	TelegramChatID *int64
+	TokenHash      []byte
+	ExpiresAt      pgtype.Timestamptz
+}
+
+// CreateTelegramSignup is CreateSignup's Telegram twin. The two are mutually
+// exclusive per row, enforced by signups_have_exactly_one_channel.
+func (q *Queries) CreateTelegramSignup(ctx context.Context, arg CreateTelegramSignupParams) error {
+	_, err := q.db.Exec(ctx, createTelegramSignup, arg.TelegramChatID, arg.TokenHash, arg.ExpiresAt)
+	return err
+}
+
 const getSignupByTokenHash = `-- name: GetSignupByTokenHash :one
-SELECT id, email, expires_at, consumed_at
+SELECT id, email, telegram_chat_id, expires_at, consumed_at
 FROM signups
 WHERE token_hash = $1
 `
 
 type GetSignupByTokenHashRow struct {
-	ID         pgtype.UUID
-	Email      string
-	ExpiresAt  pgtype.Timestamptz
-	ConsumedAt pgtype.Timestamptz
+	ID             pgtype.UUID
+	Email          *string
+	TelegramChatID *int64
+	ExpiresAt      pgtype.Timestamptz
+	ConsumedAt     pgtype.Timestamptz
 }
 
 func (q *Queries) GetSignupByTokenHash(ctx context.Context, tokenHash []byte) (GetSignupByTokenHashRow, error) {
@@ -125,6 +145,7 @@ func (q *Queries) GetSignupByTokenHash(ctx context.Context, tokenHash []byte) (G
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
+		&i.TelegramChatID,
 		&i.ExpiresAt,
 		&i.ConsumedAt,
 	)

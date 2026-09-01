@@ -29,7 +29,7 @@ func NewSignupRepo(db *DB) *SignupRepo {
 
 func (r *SignupRepo) Create(ctx context.Context, email string, tokenHash []byte, expiresAt time.Time) error {
 	return translate(r.q.CreateSignup(ctx, sqlcgen.CreateSignupParams{
-		Email:     email,
+		Email:     text(email),
 		TokenHash: tokenHash,
 		ExpiresAt: timestamptz(expiresAt),
 	}), "create signup")
@@ -41,7 +41,7 @@ func (r *SignupRepo) Create(ctx context.Context, email string, tokenHash []byte,
 // way Create advances them for a fresh one.
 func (r *SignupRepo) CreateConsumed(ctx context.Context, email string, tokenHash []byte, expiresAt time.Time) error {
 	return translate(r.q.CreateConsumedSignup(ctx, sqlcgen.CreateConsumedSignupParams{
-		Email:     email,
+		Email:     text(email),
 		TokenHash: tokenHash,
 		ExpiresAt: timestamptz(expiresAt),
 	}), "create consumed signup")
@@ -54,7 +54,7 @@ func (r *SignupRepo) ByTokenHash(ctx context.Context, tokenHash []byte) (usecase
 	}
 	return usecase.SignupDetails{
 		ID:         uuidToString(row.ID),
-		Email:      row.Email,
+		Email:      stringOrEmpty(row.Email),
 		ExpiresAt:  timeOf(row.ExpiresAt),
 		ConsumedAt: timePtrOf(row.ConsumedAt),
 	}, nil
@@ -62,7 +62,7 @@ func (r *SignupRepo) ByTokenHash(ctx context.Context, tokenHash []byte) (usecase
 
 func (r *SignupRepo) CountForEmailSince(ctx context.Context, email string, since time.Time) (int, error) {
 	n, err := r.q.CountSignupsForEmailSince(ctx, sqlcgen.CountSignupsForEmailSinceParams{
-		Email:     email,
+		Email:     text(email),
 		CreatedAt: timestamptz(since),
 	})
 	if err != nil {
@@ -137,7 +137,11 @@ func (r *SignupRepo) Provision(ctx context.Context, signupID, passwordHash strin
 	householdID := uuidToString(householdRow.ID)
 
 	userRow, err := q.CreateUser(ctx, sqlcgen.CreateUserParams{
-		Email:         nullableText(claimed.Email),
+		// claimed.Email is already the pointer sqlc's CreateUserParams.Email
+		// expects, nil for NULL -- signups.email is nullable for exactly the
+		// same reason users.email is, so no "" <-> NULL conversion is needed
+		// here the way nullableText(passwordHash) needs it below.
+		Email:         claimed.Email,
 		PasswordHash:  nullableText(passwordHash),
 		DisplayName:   b.OwnerDisplayName,
 		AvatarInitial: initialOf(b.OwnerDisplayName),

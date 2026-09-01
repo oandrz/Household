@@ -16,9 +16,15 @@ INSERT INTO signups (email, token_hash, expires_at, consumed_at)
 VALUES ($1, $2, $3, now());
 
 -- name: GetSignupByTokenHash :one
-SELECT id, email, expires_at, consumed_at
+SELECT id, email, telegram_chat_id, expires_at, consumed_at
 FROM signups
 WHERE token_hash = $1;
+
+-- CreateTelegramSignup is CreateSignup's Telegram twin. The two are mutually
+-- exclusive per row, enforced by signups_have_exactly_one_channel.
+-- name: CreateTelegramSignup :exec
+INSERT INTO signups (telegram_chat_id, token_hash, expires_at)
+VALUES ($1, $2, $3);
 
 -- name: CountSignupsForEmailSince :one
 SELECT count(*) FROM signups
@@ -38,7 +44,7 @@ WHERE created_at >= $1;
 UPDATE signups
 SET consumed_at = now()
 WHERE id = $1 AND consumed_at IS NULL AND expires_at > now()
-RETURNING id, email;
+RETURNING id, email, telegram_chat_id;
 
 -- name: PruneSignups :execrows
 DELETE FROM signups
