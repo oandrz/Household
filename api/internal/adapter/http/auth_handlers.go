@@ -109,12 +109,29 @@ type meResponseBody struct {
 	Membership   membershipDTO `json:"membership"`
 	Capabilities []string      `json:"capabilities"`
 	Spaces       []spaceDTO    `json:"spaces"`
+	// IsPlatformAdmin is what makes the sidebar's /admin link appear. It is
+	// not authorization: requirePlatformAdmin decides that, and lying here
+	// would only produce a link to a 404.
+	IsPlatformAdmin bool `json:"isPlatformAdmin"`
+	// Features carries every flag this build defines, resolved for this
+	// caller. Every key is present, so the client never interprets an
+	// absence.
+	Features map[string]bool `json:"features"`
 }
 
 // buildMeResponse assembles the GET /auth/me bundle for one caller. It is
 // read-only, which is why every one of sign-in/magic-link-consume/invite-
 // accept can call it before ever writing a cookie: an assembly failure here
 // must never leave a live session cookie sitting next to a 500 response.
+//
+// It resolves the caller's flags and admin status itself rather than reading
+// them off a Scope, even though requireSession puts the flags there: three of
+// this function's four callers (sign-in, magic-link-consume, invite-accept,
+// via completeSignIn below) run before any session -- and therefore any
+// Scope -- exists, since they are the calls that create it. Reading from
+// Scope would leave those three responses without the fields entirely. The
+// cost is one extra pair of indexed lookups on the fourth caller, GET
+// /auth/me itself.
 func buildMeResponse(ctx context.Context, deps Deps, userID, householdID string) (meResponseBody, error) {
 	user, err := deps.Users.ByID(ctx, userID)
 	if err != nil {
@@ -132,12 +149,22 @@ func buildMeResponse(ctx context.Context, deps Deps, userID, householdID string)
 	if err != nil {
 		return meResponseBody{}, err
 	}
+	flags, err := deps.Admin.FlagsFor(ctx, householdID)
+	if err != nil {
+		return meResponseBody{}, err
+	}
+	isAdmin, err := deps.Admin.IsPlatformAdmin(ctx, userID)
+	if err != nil {
+		return meResponseBody{}, err
+	}
 	return meResponseBody{
-		User:         toUserDTO(user.User),
-		Household:    toHouseholdDTO(household),
-		Membership:   toMembershipDTO(membership),
-		Capabilities: membership.Capabilities.Strings(),
-		Spaces:       toSpaceDTOs(spaces),
+		User:            toUserDTO(user.User),
+		Household:       toHouseholdDTO(household),
+		Membership:      toMembershipDTO(membership),
+		Capabilities:    membership.Capabilities.Strings(),
+		Spaces:          toSpaceDTOs(spaces),
+		IsPlatformAdmin: isAdmin,
+		Features:        flags.Strings(),
 	}, nil
 }
 

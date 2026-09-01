@@ -65,9 +65,11 @@ type Deps struct {
 	// services. Unlike Telegram above they are never nil in a real
 	// deployment: the /admin subtree is always routed, and
 	// requirePlatformAdmin's 404 -- not conditional registration -- is what
-	// hides it. Leaving them nil therefore does not disable the surface; it
-	// makes every admin request panic into recoverer's 500, which is the
-	// loud failure a silently-open admin surface would not be.
+	// hides it. Leaving Admin nil therefore does not just disable /admin: it
+	// panics into recoverer's 500 on every auth flow too, since
+	// buildMeResponse now reads it to answer the me bundle's flags and
+	// admin bit -- sign-in, magic-link consumption and invite acceptance
+	// all resolve through buildMeResponse before ever writing a cookie.
 	Admin       *usecase.AdminService
 	AdminReauth *usecase.AdminReauthService
 	Users       usecase.UserRepository

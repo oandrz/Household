@@ -2,6 +2,7 @@ package httpadapter_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -357,5 +358,50 @@ func TestEveryAdminRequestIsAudited(t *testing.T) {
 
 	if after != before+1 {
 		t.Fatalf("audit rows went %d -> %d; a read must write exactly one row", before, after)
+	}
+}
+
+// TestMeCarriesEveryDefinedFlag: every key is always present, so the frontend
+// never has to decide what a missing key means.
+func TestMeCarriesEveryDefinedFlag(t *testing.T) {
+	env := newTestEnv(t)
+	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	rec := env.authedGet(t, "/api/v1/auth/me", session)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /auth/me = %d, want 200", rec.Code)
+	}
+
+	var body struct {
+		IsPlatformAdmin bool            `json:"isPlatformAdmin"`
+		Features        map[string]bool `json:"features"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode me: %v", err)
+	}
+	if body.IsPlatformAdmin {
+		t.Fatal("an ordinary owner is not a platform admin")
+	}
+	for _, def := range domain.AllFlags() {
+		if _, present := body.Features[string(def.Flag)]; !present {
+			t.Fatalf("features is missing %q: %v", def.Flag, body.Features)
+		}
+	}
+}
+
+func TestMeMarksAPlatformAdmin(t *testing.T) {
+	env := newTestEnv(t)
+	env.makePlatformAdmin(t, env.ownerEmail)
+	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	rec := env.authedGet(t, "/api/v1/auth/me", session)
+	var body struct {
+		IsPlatformAdmin bool `json:"isPlatformAdmin"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode me: %v", err)
+	}
+	if !body.IsPlatformAdmin {
+		t.Fatal("a platform admin's me bundle does not say so")
 	}
 }
