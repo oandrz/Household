@@ -13,7 +13,7 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Marked "· not built" by the design itself — out of scope by its own decision |
 
-**Where things stand:** 88 of 111 features built or partly built.
+**Where things stand:** 94 of 116 features built or partly built.
 
 > **In production since 2026-08-15**, at <https://oink.mywire.org>. **No count
 > below changes** — deployment is not a design feature, and this file's totals
@@ -585,6 +585,29 @@ row. "88 of 111 built or partly built" is unchanged, because a 🟡 and a ✅
 count the same there — precisely why the gap had to be named in the cell
 rather than trusted to the headline.
 
+**The admin surface, 2026-09-02 — a new section added, one existing row
+moved, and this file's denominator grows for a reason none of the updates
+above needed.** `docs/superpowers/specs/2026-09-01-hearth-admin-surface-design.md`
+shipped code-complete, reviewed and walked 15 of 15 criteria against the dev
+stack
+(`docs/superpowers/plans/2026-09-02-hearth-admin-surface-verification.md`):
+a re-authenticated `/admin` surface, feature flags with a global default and
+a per-household override, an append-only audit log, and four new `adminctl`
+commands. A new **§9 · Platform administration** holds five rows for it —
+four ✅, one 🟡 (the flags screen itself, missing a control to create the
+household override the whole model exists to support, and a near-invisible
+toggle; see [ADR 5](adr/0005-platform-admin-authorization.md)). Section 7's
+**Shared month calendar with per-person filters** moves ⬜ → 🟡: the branch
+gave it an API route and a flag as a deliberate dark-shipping exercise, with
+no events and no UI behind either. Recounting by this file's own rule — the
+first symbol in each row's own cell, not delta arithmetic — takes the totals
+from 73/15/21/2 = 111 to **77/17/20/2 = 116**: five rows added, one moved,
+none removed. Unlike every earlier update in this table, the five new rows
+are not measured against `design/Household Dashboard.dc.html` at all — §9's
+own header says why they are counted anyway. "88 of 111 built or partly
+built" becomes **"94 of 116"**; the gap this file exists to name for the
+flags screen sits in its own cell above, not folded into that number.
+
 | Area | Built | Partial | Not started | Design says no |
 |---|---|---|---|---|
 | Entry & authentication | 12 | 1 | 2 | 0 |
@@ -593,9 +616,10 @@ rather than trusted to the headline.
 | Overview (home) | 8 | 2 | 1 | 0 |
 | Money | 25 | 3 | 7 | 0 |
 | Marriage | 10 | 0 | 6 | 0 |
-| Family | 0 | 0 | 2 | 1 |
+| Family | 0 | 1 | 1 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
-| **Total** | **73** | **15** | **21** | **2** |
+| Platform administration | 4 | 1 | 0 | 0 |
+| **Total** | **77** | **17** | **20** | **2** |
 
 ---
 
@@ -1283,7 +1307,7 @@ restored. That is append-only and versioned, not ordinary CRUD.
 
 | Feature | State | Notes |
 |---|---|---|
-| Shared month calendar with per-person filters | ⬜ | Needs Bills, since bill dates appear on the grid |
+| Shared month calendar with per-person filters | 🟡 | **The admin-surface branch (2026-09-02) gave this an API stub and a flag, nothing else.** `GET /api/v1/family/calendar` exists, gated behind `domain.FlagFamilyCalendar` (default off) — turning the flag on answers `200 {"events":[]}` rather than 404, walked directly against the running API. It exists to prove dark-shipping works before the feature is needed in anger, per the flags spec's own words: nothing writes an event, and no page or route reads the endpoint from the browser. Still needs Bills' own dependency satisfied (bill dates on the grid) plus the real page and the write side |
 | New event (modal) | ⬜ | |
 | Kids view | 🚫 | The design marks it "· not built" |
 
@@ -1294,13 +1318,40 @@ route back and the `SPACE_PAGES` entry in the same change. One difference
 from Marriage: Family carries **no** required capability — `domain.BuiltinSpaces`
 makes it unconditional — so its route sits directly under the shell with no
 `RequireCapability` wrapper, exactly as it did before. Settings still lists
-Family as a space for everyone.
+Family as a space for everyone. The new API stub above has no route mounted
+in the frontend at all — reaching it today needs a raw request against the
+running API, not a click anywhere in the product.
 
 ## 8 · Household extras
 
 | Feature | State | Notes |
 |---|---|---|
 | Custom space page — landing and "Add page" | 🚫 | The design marks it "· not built". Creating a space today adds the sidebar entry only |
+
+## 9 · Platform administration
+
+**Not in `design/Household Dashboard.dc.html` at all**, and never will be — this
+is the operator's own surface for running the install, not a household
+feature. Counted here anyway, the same way Bills' "Undo a payment" and Goals'
+"Archive and restore a goal" are counted without a mockup behind them: a row
+that exists and works is on the map whether or not the design ever drew it.
+See [ADR 5](adr/0005-platform-admin-authorization.md) for why the surface is
+shaped the way it is, and
+`docs/superpowers/plans/2026-09-02-hearth-admin-surface-verification.md` for
+the browser walk every ✅ and 🟡 below cites. **Deliberately not built in this
+slice, and not rows here as a result:** the read-only database browse, the
+outbound-mail inspector, the households/metrics screen and the `/admin/audit`
+screen itself (the log is written and readable through the repository; no
+page renders it yet) — design spec §§4–6, out of scope by the plan that built
+this slice, not an oversight.
+
+| Feature | State | Notes |
+|---|---|---|
+| Platform admin identity and re-authentication | ✅ | `adminctl grant-platform-admin` / `revoke-platform-admin` are the only way a `platform_admins` row is created or removed — verified by grep, not assumed: `PlatformAdminRepository.Grant` has exactly one call site outside test code, `runGrantPlatformAdmin` in `api/cmd/adminctl/main.go`. There is no HTTP route and no self-promotion path. Entering `/admin` costs the password again regardless of session age; a correct re-entry stamps `sessions.admin_grant_expires_at` thirty minutes out and is cleared by sign-out for free — not extended by activity, unlike the session itself. Failed attempts count against their own ledger, `admin_reauth_attempts`, never the household-scoped `login_attempts`: three wrong admin passwords lock the admin surface with `423` while the same browser's household sign-in keeps answering `200`, walked directly (criterion 6). **Two rough edges found on the walk, neither a criterion failure:** the wrong-password screen shows sign-in's own copy, "That email or password is incorrect.", on a screen with no email field; and a locked surface still shows the ordinary password prompt on reload rather than a lockout message — the lock is discoverable only by submitting, and a submission made while still locked extends it (ADR 5's accepted limits) |
+| Admin audit log | ✅ | Every request into `/admin/*` writes one `admin_audit_log` row before the handler runs, reads included — middleware, not a per-handler call, so a handler that forgets is not a failure mode that can happen. Append-only: no delete route anywhere in the product, and `adminctl prune` does not touch it. Walked directly (criterion 14): the row count grew by exactly one for a single page view |
+| Feature flags — registry, resolution and enforcement | ✅ | Four flags at launch (`signups_open`, `telegram_sign_in`, `notification_delivery`, `family_calendar`); a household override beats a global override beats the compile-time default, resolved fresh on every authenticated request rather than cached. `requireFeature` answers `404`, not `403`, for a disabled route — on pre-auth paths too, where it resolves the global set only, so a household override can never apply before a household is known. Walked directly (criteria 9–12): turning `family_calendar` on globally opened `GET /api/v1/family/calendar`; a household override closed it for that household alone; deleting the override reopened it, proving "no opinion" differs from "explicitly off"; turning `signups_open` off answered `404` on both the public sign-up form and its token-completion route together, and restored both when turned back on |
+| Admin flags screen (`/admin/flags`) | 🟡 | Lists every flag with its description, compile-time default and current global state, and toggles the global value. **Two gaps found on the browser walk, the first the largest gap the walk found anywhere in this surface:** there is no control to *create* a household override — the per-household state the flags model exists to support (a global default with a per-household exception) is reachable only by a hand-written `PUT`, never by a click. And the screen's only interactive control — a segmented toggle — is 12px muted-grey text on a transparent ground with no `aria-pressed`, and did not register on a first read of the screen at all; confirmed only through the accessibility tree. A green suite proved the underlying toggle worked; it could not have shown that nobody could find it |
+| `adminctl` — `grant-platform-admin`, `revoke-platform-admin`, `list-platform-admins`, `unlock-admin` | ✅ | Four new commands, no UI — the same shape `Retention pruning (adminctl prune)` already has in Household settings, above. `unlock-admin` clears `admin_reauth_attempts` for one user, the admin surface's equivalent of a magic link; walked directly (criterion 7) |
 
 ---
 

@@ -1,0 +1,294 @@
+# 5. Platform admin — a separate axis, granted only from the box
+
+**Status:** Accepted — 2026-09-02. Code-complete and reviewed across eleven
+tasks, `make lint && make test` green, and **walked against the dev stack the
+same day** — 15 of 15 criteria passed
+(`docs/superpowers/plans/2026-09-02-hearth-admin-surface-verification.md`).
+**The branch is not merged and nothing here is deployed.** The walk ran
+against `localhost:5173`, not `oink.mywire.org`.
+
+## Context
+
+Today the only way to change what this install can do, or to look at its data
+without going through the product's own screens, is a terminal and a key to
+the box: `adminctl` for support operations, `psql` for everything else.
+That is fine for one operator and painful the moment a second flag needs
+flipping, a stranger needs their sign-up unstuck, or the operator is on a
+phone with no shell in reach.
+
+This slice builds the foundation and its first tenant — a re-authenticated
+`/admin` surface, feature flags with a global default and a per-household
+override, and an append-only audit log of who looked at what. It deliberately
+does **not** build the read-only database browse or the outbound-mail
+inspector the design spec also describes (its §§4–5) — those get their own
+review once this foundation has run for a while. Nothing below should be read
+as covering them; where they matter, this ADR says so explicitly rather than
+by omission.
+
+Two things were easy to get wrong here, and both are cheaper to name than to
+undo.
+
+## Decision
+
+### 1. Platform admin is an axis orthogonal to household role and capability
+
+`domain.Role` (`owner`, `limited`) and `domain.Capability` (`calendar`,
+`chores`, `money`, `marriage`) answer **"what may this member do inside their
+own household."** Platform admin answers a different question entirely:
+**"who runs this install."** The two never merge.
+
+`internal/domain/admin.go` carries a `PlatformAdmin` type with nothing on it
+but an identity and a note:
+
+```go
+type PlatformAdmin struct {
+    UserID    string
+    Note      string
+    CreatedAt time.Time
+}
+```
+
+No `IsAdmin` field exists on `Membership`, and no admin check anywhere in the
+codebase is ever expressed as a role or a capability. **Merging the two was
+rejected** for a reason sharper than tidiness: every existing authorization
+decision in this product — `requireCapability`, `requireOwner`,
+`domain.ValidateMembershipChange` — is written on the assumption that a role
+or capability is scoped to *one household*. An `IsAdmin` capability would be
+the one flag in that whole system that, if it ever leaked past a household
+boundary (a stale cache, a copy-pasted membership fixture, a scope built from
+the wrong row), would grant install-wide reach rather than a mistake confined
+to one family's data. Keeping platform admin as its own table with its own
+lookup (`requirePlatformAdmin`, §2.3 below) means every place that decision is
+made is a place built and reviewed for exactly that question, never a
+side-effect of a household-scoped check being evaluated somewhere it
+shouldn't be.
+
+A platform admin is still an ordinary member of their own household and uses
+the product normally — this matters mechanically as well as conceptually,
+because `requireSession` resolves a membership and answers 401 without one; an
+admin with no household of their own could not sign in at all.
+
+### 2. Admins are created only by `adminctl`, never over HTTP
+
+```
+adminctl grant-platform-admin --email=<address> [--note=<why>]
+adminctl revoke-platform-admin --email=<address>
+adminctl list-platform-admins
+adminctl unlock-admin --email=<address>
+```
+
+There is no "invite an admin" endpoint, no self-promotion path, and no way to
+reach `PlatformAdminRepository.Grant` except from a command run on the box.
+**Verified by grep, not assumed:** `.Grant(` appears at exactly one production
+call site in the whole repository — `runGrantPlatformAdmin` in
+`api/cmd/adminctl/main.go` — plus the repository's own test and one HTTP test
+fixture, neither of which is a path a caller over the network can reach.
+
+The reasoning is in `runGrantPlatformAdmin`'s own doc comment, and it is
+worth repeating here because it is the load-bearing sentence of this whole
+ADR:
+
+> There is deliberately no HTTP route for this and no self-promotion path
+> anywhere in the product: an admin surface that could mint its own admins
+> would turn one stolen session into permanent access to every household's
+> data. Keeping creation here, on a command a stranger cannot reach without a
+> shell on this box, means the box itself is the boundary — not a password,
+> not a session, not a role check that a bug could get wrong.
+
+An admin surface that can create admins is a privilege-escalation engine with
+extra steps: steal one admin's session, mint a second admin, and the theft
+outlives the stolen cookie's own expiry. Requiring shell access on the box for
+every admin grant and revoke means the thing an attacker has to compromise is
+the same thing that was always the trust boundary for this install — the box
+itself — rather than a new, web-reachable one this feature would otherwise
+introduce.
+
+### 3. The re-auth grant: thirty minutes, stamped on the session row
+
+The household session cookie lives thirty days (`httpadapter.SessionTTL`) —
+right for a member doing the ordinary product, and far too long for a surface
+that can read every household's finances. Entering `/admin` therefore costs
+the password again:
+
+```
+POST /api/v1/admin/session   { "password": "..." }  → 204
+```
+
+Verified with the existing `usecase.PasswordHasher`. On success, the session
+row gets a stamped expiry:
+
+```sql
+ALTER TABLE sessions ADD COLUMN admin_grant_expires_at timestamptz;
+```
+
+**On the session row, not a second cookie**, for a reason that is really
+about what happens on sign-out: revoking the session already happens today,
+and a grant that lives inside the row it revokes dies with it for free. A
+second cookie would need its own `Secure`/`SameSite`/`HttpOnly` flags gotten
+right independently of the first, and a second place sign-out would have to
+remember to clear.
+
+**Not extended by activity, unlike the session itself.** A long admin session
+is re-authenticated, not silently renewed — thirty minutes of continuous use
+still asks again at the thirty-minute mark. `requireAdminGrant` answers `401
+ADMIN_REAUTH_REQUIRED` rather than the ordinary `UNAUTHENTICATED` specifically
+so the frontend can tell "your household session died" from "the admin
+surface wants your password again" and show a prompt instead of bouncing the
+operator out to sign-in.
+
+### 4. This narrows, rather than overturns, `adminctl`'s own written position
+
+`api/cmd/adminctl/main.go`'s package comment states plainly what the CLI is
+for:
+
+> Command adminctl is Hearth's operational CLI: the seed that gives a clean
+> checkout its bootstrap household, and the handful of support operations
+> (resetting a password, unlocking a locked-out household, inviting a new
+> member) that are genuinely operator actions and have no business behind an
+> authenticated HTTP endpoint.
+
+This slice does not overturn that position. It narrows it, in exactly two
+places, and leaves it standing everywhere else:
+
+- **Who gets to be an operator stays on the CLI, permanently.** Granting and
+  revoking platform admin — the one action that decides who can reach
+  `/admin` at all — has no HTTP route and never will under this design (§2
+  above). This is the position `adminctl`'s comment states, applied to the
+  highest-stakes mutation this feature has.
+- **A narrow, audited, reversible product-configuration change moves to the
+  web, behind re-authentication and a permanent log.** Toggling a feature
+  flag (§3 of the design spec) is a mutation, but it is not a database write
+  in the sense `adminctl`'s comment is protecting against — it flips a row in
+  a table built for exactly this, every toggle is logged, and turning a flag
+  back off restores the prior behaviour exactly. That is the shape the
+  spec's own §4 sets out for the future read-only database browse too:
+  **mutations against the database's actual rows stay in `adminctl` over
+  SSH; reads move to the web behind re-authentication and an audit log.**
+  This branch does not build that browse — it builds the pattern's first,
+  narrowest instance, and inherits its reasoning.
+
+Nothing here pretends the tension is absent. Moving *any* operator action off
+a terminal a stranger cannot reach and onto a web endpoint a stolen session
+can reach is exactly the cost `adminctl`'s comment was written to avoid. What
+bounds it, and what this ADR is on record as accepting: every such route sits
+behind a password re-entered within the last thirty minutes, and every
+request against it — reads included — leaves a permanent row in
+`admin_audit_log` that nothing in the product can delete.
+
+### 5. The separate re-auth ledger
+
+Failed re-authentication attempts get their own table:
+
+```sql
+CREATE TABLE admin_reauth_attempts (
+    id        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id   uuid        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    succeeded boolean     NOT NULL,
+    at        timestamptz NOT NULL DEFAULT now()
+);
+```
+
+This is deliberate, not incidental, and it is close enough to a real defect
+that it earns its own entry in `docs/LEARNING.md` as well as this one.
+`login_attempts`, the ledger `AuthService.SignIn` already writes to, locks
+password sign-in **per household** — three failures inside fifteen minutes
+locks every member of that household out, by design, because the recovery
+path (a magic link) does not depend on the password at all. Feeding admin
+re-auth mistypes into that same table would mean an operator fumbling their
+*own* password, on a screen nobody else in their household can even see,
+locks their entire family out of the ordinary product as a side effect.
+
+`AdminReauthService.Verify`'s own doc comment states the reasoning at the
+point a future reader would go looking for it:
+
+> Its failures are counted in their own ledger, never in `login_attempts`.
+> That table's lockout is household-scoped, so an operator's mistypes there
+> would lock their whole household out of the ordinary product — a bad
+> outcome caused by a screen nobody else can even see.
+
+The *policy* is reused even though the ledger is not: the same
+`domain.LockoutPolicy.Evaluate` runs over `admin_reauth_attempts`, keyed on
+`user_id` rather than `household_id`. A locked admin surface therefore never
+touches household sign-in, and household sign-in never locks the admin
+surface — two independent failure domains sharing one policy shape.
+
+**This is not a theoretical distinction; the walk proved it holds in the real
+system.** Criterion 6 of the browser verification: three wrong admin
+passwords answered `423 ADMIN_LOCKED`, and in the same browser session,
+household password sign-in continued to answer `200`. The separation the
+table exists to guarantee is not merely coded — it was exercised end to end
+against the running dev stack.
+
+## Consequences
+
+**The cost is real, and it is the same cost §4 of the design spec names for
+the (not-yet-built) database browse.** An admin session re-authenticated
+within the last thirty minutes can read every household's flag state and
+toggle it, globally or for one household. That is why every such request is
+audited, why the grant expires on a fixed clock rather than sliding with
+activity, and why creating the admin in the first place needed a shell on the
+box. Audit is an accountability mechanism, not a preventive one — it does not
+stop a misuse, it makes one impossible to hide afterward.
+
+**The accepted limits, stated rather than discovered by someone else later:**
+
+- **An unauthenticated caller gets `401`, not `404`, on `/api/v1/admin/*`.**
+  `requirePlatformAdmin` must run after `requireSession` — there is no
+  membership or admin status to check without one — so a stranger with no
+  credentials at all can already tell the admin subtree apart from a
+  genuinely unrouted path, by the status code alone.
+  `requirePlatformAdmin`'s own doc comment records this as an accepted limit,
+  not an oversight: `TestEveryProtectedRouteRejectsAnUnauthenticatedCaller`
+  requires exactly that 401 of every protected route in this codebase, and
+  carving out an exception for `/admin` alone would be a bigger structural
+  change than the leak justifies — especially since `GET /auth/me` puts
+  `isPlatformAdmin` on every response anyway, so the surface's *existence* was
+  never the secret. What the 404-to-a-signed-in-non-admin guard protects is
+  narrower and still real: a household member poking at the API from inside a
+  live session learns nothing.
+- **A locked admin surface stays locked under continued guessing, and the
+  lock is not visible until someone tries.** Every failed attempt —
+  including one made while already locked — extends the lock, the same
+  choice `AuthService.SignIn` makes on its own locked branch. There is no
+  in-product early exit; `adminctl unlock-admin --email=` on the box is the
+  only way back in before it expires on its own. The browser walk surfaced a
+  sharp edge of this that the design did not call out in advance: on reload
+  while locked, the admin surface answers with the ordinary
+  `ADMIN_REAUTH_REQUIRED` password prompt, not a lockout message — the lock
+  is discoverable only by *submitting* the form, and a submission made while
+  still locked is itself a recorded failure that pushes the expiry further
+  out. This is accepted for the same reason the rest of this section is: the
+  alternative (answering differently to a locked caller before they submit
+  anything) would let an unauthenticated prober distinguish "locked" from
+  "not yet tried," which is a smaller leak solved by creating a larger one.
+
+## Revisit this when
+
+- **Admin levels are wanted.** `PlatformAdmin` carries no permission field on
+  purpose — one flat set of operators today — specifically so a level, if it
+  is ever needed, is a field added here rather than a reinterpretation of
+  something that already means something else.
+- **The read-only database browse (design spec §4) is built.** That is the
+  moment the "mutations stay on the CLI, reads move to the web" narrowing in
+  decision 4 above is tested against an actual database read rather than a
+  flag toggle, and this ADR should be amended, not superseded, to record what
+  held and what didn't.
+- **A second operator exists.** Nothing here assumes exactly one; `adminctl
+  list-platform-admins` and the audit log's `actor_user_id` already support
+  more than one, but the product has only ever been run by one, and that is
+  worth re-examining the day it isn't.
+
+## See also
+
+- `docs/superpowers/specs/2026-09-01-hearth-admin-surface-design.md` — the
+  design this was built from, including the database browse and mail
+  inspector this ADR narrows the position for but does not build.
+- `docs/superpowers/plans/2026-09-02-hearth-admin-surface-verification.md` —
+  the 15-criterion browser walk, including the criterion 6 result this ADR
+  cites for the ledger separation.
+- `docs/SYSTEM_DESIGN.md` §3, §4 and §6 — the ports, the `/admin` middleware
+  chain, and the five new tables.
+- `docs/FEATURE_TRACKER.md` — what shipped in this slice and what did not
+  (the flags screen's own gaps, found on the walk).
+- `docs/LEARNING.md` — the near-miss this ADR's decision 5 avoided, and what
+  would have caught it sooner if it hadn't been.

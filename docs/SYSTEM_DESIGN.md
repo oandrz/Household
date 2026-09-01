@@ -360,7 +360,7 @@ enforces it mechanically — including in test files.
 graph TD
     subgraph cmd["cmd/"]
         Main["cmd/api — wiring"]
-        Admin["cmd/adminctl — seed, reset-password,<br/>unlock-household, create-invite, prune"]
+        Admin["cmd/adminctl — seed, reset-password,<br/>unlock-household, create-invite, prune,<br/>grant/revoke/list-platform-admin, unlock-admin"]
     end
 
     subgraph adapters["internal/adapter/ — implements the ports"]
@@ -388,11 +388,13 @@ graph TD
         Bill["BillService — MarkPaid/UndoPayment write<br/>into TransactionRepository through<br/>BillRepository, not TransactionService"]
         Retro["RetroService — Save is the shared-draft<br/>version guard; SetActionDone never<br/>touches it, a second repository entirely"]
         Vision["VisionService — Get resolves linked<br/>measures through GoalProgressReader;<br/>Save replaces the whole document,<br/>version 0 meaning create"]
+        AdminSvc["AdminService — IsPlatformAdmin, flags<br/>read/write, RecordAudit; takes no actor<br/>parameter for any permission decision"]
+        AdminReauth["AdminReauthService — Verify, against<br/>its own ledger, never login_attempts"]
         Seed["Seed"]
     end
 
     subgraph domain["internal/domain/ — rules, stdlib only"]
-        Rules["Money · Currency · Role · Capability<br/>Membership · Space · LockoutPolicy<br/>typed errors"]
+        Rules["Money · Currency · Role · Capability<br/>Membership · Space · LockoutPolicy<br/>PlatformAdmin · Flag/FlagSet<br/>typed errors"]
     end
 
     Main --> HTTP
@@ -485,6 +487,10 @@ is what does. §3 carries the full reasoning.
 | `GoalProgressReader` | `adapter/postgres` (`*GoalRepo` already satisfies it) | Unnumbered, like `AccountLookup`/`CategoryLookup` above — a narrow port, not a repository. One method wide on purpose, the same interface-segregation reasoning as those two, for a caller in the opposite direction: `VisionService` needs one thing from Goals, the progress of a handful of goal ids, not the forty-line `GoalRepository` contract. `ProgressByIDs` returns an entry only for an id that exists in the caller's own household; a missing id is a miss, not an error — a measure whose goal was deleted renders as a label with no figure (spec decision 8), not a failed page. Counts an *archived* goal as found, deliberately: archiving is not deletion anywhere else in this product, so a measure linked to an archived goal keeps its figure |
 | `TelegramLinkRepository` | `adapter/postgres` | Twentieth. Stores the pending deep-link nonces, hashed, that carry a browser's sign-in request across to Telegram. `Consume` stamps `consumed_at` **and** records the redeeming `chat_id` in one statement, because the chat is unknown when the nonce is minted — the browser has not met Telegram yet — so redemption is the only moment the two can be joined, and a redemption that failed to record its chat would be a rate limit that silently never fires. Absent, expired or already consumed all return `domain.ErrNotFound` from one guarded `UPDATE`, the same shape `MagicLinkRepository.Consume` uses. `CountLinksSince` lives here, on the *link* repository, and not on `TelegramAccountRepository`, because the per-chat limit has to bind chats that have no account yet: a stranger repeating `/start` has no user row to count against |
 | `TelegramAccountRepository` | `adapter/postgres` | Twenty-first, and one method wide. `ByChatID` resolves a chat to the user it is bound to, or `domain.ErrNotFound` — which is the entire branch key of the Telegram flow: found means "send a sign-in link", not found means "send a sign-up link" (§5). The binding is *written* by `SignupRepository.Provision`, inside its existing transaction, not by this port; there is no `Bind` method here on purpose, because a chat id a caller could pass in is exactly the substitution `Provision`'s own doc comment refuses |
+| `PlatformAdminRepository` | `adapter/postgres` | Twenty-second. `Get`/`Grant`/`Revoke`/`List` over `platform_admins`. `Grant` has exactly one call site in the whole repository outside test code — `adminctl`'s `runGrantPlatformAdmin` — which is the property [ADR 5](../adr/0005-platform-admin-authorization.md) exists to keep true; there is no `AdminService` method that calls it, on purpose, since granting is not a decision the running service ever makes |
+| `FeatureFlagRepository` | `adapter/postgres` | Twenty-third. `OverridesFor` is the one query `requireSession` runs on every authenticated request — both the global and the household layer in a single `UNION ALL` statement, never two round trips. `key` carries no foreign key to a registry table, because the registry (`domain.AllFlags`) is compile-time; a row can outlive the `const` that named it, and `SetHousehold`/`ClearHousehold` are two different operations on purpose — setting a household's override to `false` and removing the override row entirely are different states downstream (§5), not the same write with a different value |
+| `AdminAuditRepository` | `adapter/postgres` | Twenty-fourth, and append-only by convention rather than by any database privilege: `Record` and `Recent` are its only two methods, there is no `Delete`, and `adminctl prune` does not touch `admin_audit_log`. `Recent`'s own limit is unclamped at the repository — the clamp (max 500, default 50) lives one layer up, in `AdminService.RecentAudit`, the same division of labour `TransactionRepository`'s keyset paging draws between "the query can do this" and "the service decides how much of it a caller gets" |
+| `AdminReauthAttemptRepository` | `adapter/postgres` | Twenty-fifth, and the reason a fifth login-adjacent table exists at all rather than reusing `LoginAttemptRepository`: `FailuresSince`, `Record` and `ClearFailures` run against `admin_reauth_attempts`, keyed on `user_id`, never `household_id` — see §6 and [ADR 5](../adr/0005-platform-admin-authorization.md) for the blast-radius reasoning `login_attempts`' own household scoping would have carried over silently if this port had wrapped that table instead of adding its own |
 | `TelegramSender` | `adapter/telegram` | The Telegram twin of `Mailer`, and justified the same way: the usecase layer must not hold an HTTP client, and `TelegramAuthService` must be testable against a double. One method, `SendMessage(ctx, chatID, text)` — plain text, no template system, exactly as the mailer has none |
 | `PasswordHasher`, `TokenGenerator` | `adapter/crypto` | argon2id with cost from config; tokens are random, stored hashed |
 | `Mailer` | `adapter/mail` | SMTP; TLS policy and credentials from config |
@@ -521,6 +527,17 @@ of the feature: a caller-substitutable chat id would let someone bind a
 household to a chat they control rather than the one that actually completed the
 sign-up.
 
+**`SessionRepository` gained one method, `GrantAdmin`,** rather than a second
+table joined to `sessions` by its token hash. Its own doc comment states the
+one thing a future editor of `ExtendSession` must not do: "it writes one
+column: session extension and this must not overwrite each other." Both
+statements are single-column `UPDATE`s on purpose — `ExtendSession` touches
+`expires_at` only and `GrantAdmin` touches `admin_grant_expires_at` only — so
+widening either into a whole-row `UPDATE` would silently reset the other the
+next time a session extends or an admin re-authenticates. A nil expiry
+*clears* the grant rather than being a distinct "revoke" call, the same
+nullable-means-unset shape `accounts.owner_membership_id` already uses (§6).
+
 `BankSyncProvider` is specified but has no consumer yet. Accounts, the first
 feature built against this port table, shipped manual entry only and needed no
 port for it — a port with one implementation and no second caller is the wrong
@@ -549,10 +566,18 @@ graph TD
     Req["Request"] --> RID["RequestID · RealIP · Recoverer<br/>(recoverer writes the standard error envelope)"]
     RID --> Public{"Public route?"}
 
-    Public -->|"sign-in, magic-link,<br/>magic-link/consume,<br/>invites/{token},<br/>sign-up*, telegram/start,<br/>currencies"| Handler
-    Public -->|no| Session["requireSession<br/>reads hearth_session cookie,<br/>re-reads membership from the DB,<br/>extends when under a day remains"]
+    Public -->|"sign-in, magic-link,<br/>magic-link/consume,<br/>invites/{token},<br/>currencies"| Handler
+    Public -->|"sign-up*, telegram/start"| PublicFeature["requireFeature(flag)<br/>no Scope yet — resolves the<br/>GLOBAL flag set only; 404 if off"]
+    PublicFeature --> Handler
+    Public -->|no| Session["requireSession<br/>reads hearth_session cookie,<br/>re-reads membership, resolves this<br/>household's flags, extends when<br/>under a day remains"]
 
-    Session --> Cap{"Capability-gated<br/>route group?"}
+    Session --> RouteKind{"/admin subtree?"}
+    RouteKind -->|yes| AdminChain["requirePlatformAdmin → auditAdmin<br/>→ requireCSRF (mutating only)<br/>→ [requireAdminGrant, granted<br/>group only] — see the diagram below"]
+    AdminChain --> Handler
+    RouteKind -->|"no — family/calendar"| RequireFeature["requireFeature(family_calendar)<br/>404 unless Scope.Flags says on"]
+    RouteKind -->|"no — everything else"| Cap{"Capability-gated<br/>route group?"}
+    RequireFeature --> Cap
+
     Cap -->|"accounts: money"| RequireCap["requireCapability(money)<br/>403 unless the caller's membership has it"]
     Cap -->|"transactions, categories,<br/>budgets, goals, bills: money AND owner —<br/>reads included"| RequireCapTxn["requireCapability(money)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
     Cap -->|"retros, marriage/vision:<br/>marriage AND owner — reads included"| RequireCapRetro["requireCapability(marriage)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
@@ -579,6 +604,90 @@ graph TD
 **The membership is re-read on every request**, never cached in the session row.
 A capability change therefore takes effect on the caller's very next request;
 session revocation is belt-and-braces rather than the enforcement mechanism.
+
+**`requireSession` also resolves this household's feature flags on every
+authenticated request, uncached**, in the same breath as the membership
+re-read above — one extra indexed query
+(`feature_flags UNION ALL household_feature_flags WHERE household_id = $1`),
+never a cache, because one box and a handful of households make a stale flag
+after an admin toggle a worse defect than the query. The result sits on
+`Scope.Flags` beside `Membership`; a failure to resolve it answers `500`
+through `logAndWriteInternal`, deliberately not `MapDomainError` — routing it
+through the domain-error table would let a wrapped `ErrNotFound` someday turn
+a database outage into the same clean `404` a disabled flag answers, telling
+every caller the whole product had been switched off rather than reporting a
+fault.
+
+**`requireFeature` answers `404`, never `403`, and runs in two different
+places for two different reasons.** On the public routes above it — the ones
+with no session yet — it resolves the **global** flag set only: a household's
+own override is meaningless before a household is known, and treating it as
+"on" by accident would be the failure mode a fallback like this exists to
+avoid. That fallback is precisely why enforcement is one middleware rather
+than a middleware plus a helper public handlers remember to call themselves —
+a hand-rolled check as a handler's first line is the shape that gets forgotten
+on the next public route, and forgetting it fails **open**. Once a session
+exists, `requireFeature` instead reads the household-resolved `Scope.Flags`
+`requireSession` already built, which is why `family/calendar` (the flag's
+only consumer today, dark by default) needs no second database round trip of
+its own.
+
+### The `/admin` subtree
+
+```mermaid
+graph TD
+    S["requireSession<br/>(an admin is still an ordinary<br/>member of their own household)"] --> PA["requirePlatformAdmin<br/>404 to a signed-in non-admin;<br/>500 — never a clean 404 — on a lookup failure"]
+    PA --> AA["auditAdmin<br/>writes one admin_audit_log row per request,<br/>reads included, BEFORE the handler runs"]
+    AA --> CS["requireCSRF<br/>subtree root, but innermost of the three<br/>guards above it — GET passes through"]
+    CS --> Which{"POST /admin/session?"}
+    Which -->|yes| H1["handleAdminSession<br/>the one ungranted route — how a grant is obtained"]
+    Which -->|no| AG["requireAdminGrant<br/>401 ADMIN_REAUTH_REQUIRED unless<br/>admin_grant_expires_at is still in the future"]
+    AG --> H2["the granted group — GET/PUT/DELETE /flags*"]
+```
+
+Two orderings here are deliberate enough to need writing down, because both
+read as "obviously the other way round" until the failure mode each one
+prevents is named.
+
+**`requireCSRF` sits at the subtree root — covering every route added here,
+today or later — but innermost of the three guards ahead of it, not
+outermost.** Rooting it there rather than wrapping only `POST /admin/session`
+means a mutating route added to the granted group next year is CSRF-checked
+by construction, with no test able to forget it; nesting it around one route
+today would leave tomorrow's route with no guard and nothing to notice.
+Innermost, rather than ahead of `requirePlatformAdmin` and `auditAdmin`, is
+what makes a CSRF-rejected request still leave its audit row — a forgery
+aimed at a real platform admin is exactly the event `admin_audit_log` exists
+to make visible, and a CSRF check placed in front of the audit write would
+refuse such a request without a trace of it ever existing.
+
+**`auditAdmin` writes its row before the handler runs**, proven by a
+panicking test double whose panic unwinds past the middleware to `recoverer`
+— a row that only appeared *after* a successful response would prove nothing
+about a handler that panics or times out, which is the case an audit log
+exists to catch. The row's `Target` is the request's full path, `r.URL.Path`,
+never chi's per-route `{key}`/`{householdID}` parameters: `chi`'s
+`FindRoute` — the thing that would populate them — runs inside `routeHTTP`,
+after every subtree middleware including this one, so they are simply not
+yet available at the point this write happens. The path itself already
+contains every value those parameters would have held, so nothing is lost;
+`Detail` is left an empty object rather than populated with data that isn't
+there yet.
+
+**The accepted limit, named rather than left for someone to rediscover:** an
+unauthenticated caller gets `401`, not `404`, on `/api/v1/admin/*`, because
+`requireSession` necessarily runs before `requirePlatformAdmin` can look
+anything up — `TestEveryProtectedRouteRejectsAnUnauthenticatedCaller` requires
+exactly that 401 of every protected route in this codebase. So a stranger
+with no credentials at all can already tell the admin subtree apart from a
+genuinely unrouted path, by status code alone. This is accepted, not
+overlooked: `GET /auth/me` carries `isPlatformAdmin` for every caller (§5), so
+the surface's *existence* was never the secret — what the 404-to-a-signed-in-
+non-admin guard buys is narrower and still real, that a household member
+poking at the API from inside a live session learns nothing. See
+[ADR 5](../adr/0005-platform-admin-authorization.md) for the full reasoning,
+including the walk finding that a *locked* admin surface is discoverable only
+by submitting the re-auth form, which itself counts as another failure.
 
 **Accounts are the first routes `requireCapability` ever gates.** The
 middleware existed since slice 1 with no route using it, which made the
@@ -678,10 +787,10 @@ that presses `/start` is Telegram's, not the person's.
 | POST | `/auth/sign-in` | none — this *is* the credential check |
 | POST | `/auth/magic-link` | none — always 202 |
 | POST | `/auth/magic-link/consume` | none — the token is the credential |
-| POST | `/auth/sign-up` | none, plus a per-IP token bucket (5/hour) — always 202, the same silent contract as magic-link |
-| GET | `/auth/sign-up/{token}` | none — the token is the credential |
-| POST | `/auth/sign-up/{token}/complete` | none |
-| POST | `/auth/telegram/start` | none, plus its **own** per-IP token bucket (20/hour), separate from sign-up's — takes no body and no identifier, so there is nothing to probe; **`404` when no bot is configured**, which is the same answer any unrouted path gets, so an install without Telegram gives nothing away and the frontend hides the control on that response (§7) |
+| POST | `/auth/sign-up` | none, plus a per-IP token bucket (5/hour) and `requireFeature(signups_open)` (global set — no session exists) — always 202, the same silent contract as magic-link |
+| GET | `/auth/sign-up/{token}` | none, plus `requireFeature(signups_open)` — a half-finished sign-up must not be completable once registration closes |
+| POST | `/auth/sign-up/{token}/complete` | none, plus `requireFeature(signups_open)`, same group as the row above |
+| POST | `/auth/telegram/start` | none, plus its **own** per-IP token bucket (20/hour), separate from sign-up's, and `requireFeature(telegram_sign_in)` (global set) — takes no body and no identifier, so there is nothing to probe; **`404`** both when no bot is configured and when the flag is off, the same answer any unrouted path gets, so an install without Telegram gives nothing away and the frontend hides the control on that response (§7) |
 | GET | `/auth/me` | session |
 | POST | `/auth/sign-out` | session · CSRF |
 | GET | `/invites/{token}` | none — the token is the credential |
@@ -691,6 +800,11 @@ that presses `/start` is Telegram's, not the person's.
 | PATCH | `/household`, `/notification-preferences` | session · CSRF · owner |
 | POST | `/household/members/invite`, `/spaces` | session · CSRF · owner |
 | PATCH · DELETE | `/household/members/{id}` | session · CSRF · owner |
+| GET | `/family/calendar` | session · `requireFeature(family_calendar)` — no capability at all, the same as `/household`; an unbuilt page's API stub, dark by default, answering `{"events":[]}` once its flag is on rather than a stub-specific status (§7 of the design spec) |
+| POST | `/admin/session` | session · CSRF — the one admin route reachable with no grant; how a grant is obtained |
+| GET | `/admin/flags` | session · admin (`requirePlatformAdmin`) · grant |
+| PUT | `/admin/flags/{key}` | session · admin · grant · CSRF (covered by the subtree's own root-level CSRF, §4) |
+| PUT · DELETE | `/admin/flags/{key}/households/{householdID}` | session · admin · grant · CSRF, same group as the row above |
 | GET | `/accounts` | session · money |
 | POST | `/accounts` | session · money · CSRF · owner |
 | PATCH | `/accounts/{id}` | session · money · CSRF · owner |
@@ -2031,6 +2145,10 @@ erDiagram
     users ||--o{ login_attempts : may_reference
     users ||--o{ invites : invited_by
     users ||--o| telegram_accounts : "may be bound to one chat (UNIQUE both ways)"
+    users ||--o| platform_admins : "may be one (UNIQUE user_id, the PK)"
+    users ||--o{ admin_audit_log : acted_as
+    users ||--o{ admin_reauth_attempts : "attempted (own ledger, not login_attempts)"
+    households ||--o{ household_feature_flags : overrides
 
     households {
         uuid id PK
@@ -2072,6 +2190,40 @@ erDiagram
         uuid household_id FK
         timestamptz expires_at
         timestamptz revoked_at
+        timestamptz admin_grant_expires_at "nullable — the re-auth grant; not a second cookie"
+    }
+    platform_admins {
+        uuid user_id PK "also FK to users, ON DELETE CASCADE"
+        text note "NOT NULL, defaults to empty"
+        timestamptz created_at
+    }
+    feature_flags {
+        text key PK "no FK to a registry — the registry is compile-time (domain.AllFlags)"
+        bool enabled
+        timestamptz updated_at
+        uuid updated_by FK "nullable, ON DELETE SET NULL"
+    }
+    household_feature_flags {
+        uuid household_id PK "also FK to households, ON DELETE CASCADE — composite PK with key"
+        text key PK "same no-registry-FK rule as feature_flags above"
+        bool enabled
+        timestamptz updated_at
+        uuid updated_by FK "nullable, ON DELETE SET NULL"
+    }
+    admin_audit_log {
+        uuid id PK
+        uuid actor_user_id FK "NOT NULL, no ON DELETE CASCADE — see the notes below"
+        text action "method plus path, e.g. GET /api/v1/admin/flags"
+        text target "the request path — see the notes below for why, not the route pattern"
+        jsonb detail "NOT NULL, defaults empty — never a secret, never a row value"
+        text ip "trustworthy only as far as the proxy in front of this service"
+        timestamptz created_at
+    }
+    admin_reauth_attempts {
+        uuid id PK
+        uuid user_id FK "NOT NULL, ON DELETE CASCADE — own ledger, not login_attempts"
+        bool succeeded
+        timestamptz at
     }
     magic_links {
         uuid id PK
@@ -2312,6 +2464,43 @@ Notes that are not obvious from the shapes:
   hash of a secret, and `chat_id` arrives later, at redemption. Nothing may
   ever be authorised from a row in this table on its own — its whole job is to
   be spent once and counted.
+- **`platform_admins`, `feature_flags`, `admin_audit_log` and
+  `admin_reauth_attempts` carry no `household_id` at all, and it is not an
+  oversight, it is the point.** Every one of them answers a question about the
+  *install*, not about any one household — who runs it, what it can do, who
+  looked at what, who mistyped a password re-entering `/admin` — and
+  `household_feature_flags` is the one table in this group that does carry
+  `household_id`, because a per-household override is the one thing here that
+  genuinely is household-scoped. This is the schema-level expression of ADR
+  5's decision 1: platform admin is an axis orthogonal to household role and
+  capability, and a table with no `household_id` column is what "orthogonal"
+  looks like at the storage layer, not only in the Go type system.
+- **`feature_flags.key` and `household_feature_flags.key` have no foreign key
+  to a table of flag definitions, because there is no such table — the
+  registry is `domain.AllFlags()`, compile-time.** A row can therefore outlive
+  the `const` that named it, if a flag is ever deleted from the code; nothing
+  in the schema stops that row existing, and nothing needs to. `ResolveFlags`
+  builds its answer by walking the compile-time definitions and looking each
+  one up in the override maps, never the other way round, so a key neither
+  `switch` recognises is silently never consulted — an orphaned row can
+  outlive the flag it named, but it can never turn anything on.
+- **`admin_audit_log.actor_user_id` has no `ON DELETE CASCADE`, unlike almost
+  every other foreign key to `users` in this schema.** Deleting a user with
+  audit history must fail loudly rather than silently take the record of what
+  they did with them — a cascade here would be a delete route into a table
+  whose own purpose is to still mean something after someone makes a mistake.
+  There is no account-deletion feature yet to force the question; when one
+  arrives, it has to decide what happens to that user's audit rows rather than
+  having Postgres decide it by default.
+- **`admin_reauth_attempts` exists so `login_attempts` never has to know about
+  the admin surface.** Both tables record a failed password attempt and both
+  are evaluated by the same `domain.LockoutPolicy`, but `login_attempts` locks
+  by `household_id` and this one locks by `user_id` — reusing the first table
+  for admin re-auth would have meant an operator's own mistyped password
+  locking every member of their household out of the ordinary product, over a
+  screen nobody else in that household can even see. See
+  [ADR 5](../adr/0005-platform-admin-authorization.md) and `docs/LEARNING.md`
+  for the near-miss this avoided.
   `goal_contributions` and `bill_payments` look like the same shape —
   each has a parent id too — but take the *opposite*, more defensive one:
   both carry their own `household_id` despite the parent join already
@@ -2597,7 +2786,16 @@ Notes that are not obvious from the shapes:
 web/src/
   api/client.ts        apiFetch — the only way the app talks to the server:
                        CSRF header, credentials, error envelope decoding,
-                       401 handling
+                       401 handling. The 401 handler carries one carve-out,
+                       by response code rather than by path: a 401 anywhere
+                       under /api/v1/admin/ whose code is ADMIN_REAUTH_REQUIRED,
+                       INVALID_CREDENTIALS or ADMIN_LOCKED means the session
+                       is still good and an admin-layer guard answered on top
+                       of it, so it is left for AdminGate to show inline
+                       rather than triggering the global sign-out-and-redirect
+                       every other 401 does. A dead session's own 401
+                       (UNAUTHENTICATED) is deliberately not on that list and
+                       still signs the operator out like anywhere else
   components/          generic primitives only: Modal (native <dialog>),
                        PageContainer, FieldPair, ToggleSwitch, and icons.tsx --
                        every icon is an inline SVG, never a Unicode character,
@@ -2783,6 +2981,49 @@ web/src/
                        key and currentVisionYear() the same way
                        retroQueryKeys.ts does for Retros. Mounted at
                        /marriage/vision
+    admin/             the operator's own surface, loaded with React.lazy so
+                       no household member ever downloads its chunk --
+                       adminBundleSplit.test.ts asserts the admin chunk is
+                       absent from the main bundle graph. AdminGate is the
+                       single point of fail-closed decision-making: every
+                       /admin route mounts its real content as its children,
+                       and only the error === null branch may return them --
+                       ADMIN_REAUTH_REQUIRED and a wrong-password
+                       INVALID_CREDENTIALS both show the same password
+                       prompt (a re-auth attempt in progress, distinguished
+                       only by whether the server has answered yet);
+                       ADMIN_LOCKED shows the lockout screen unless a retry
+                       is already in flight; a 5xx or a network failure shows
+                       the server's own message rather than a generic one
+                       (the backend deliberately routes a lookup failure
+                       around MapDomainError so an outage does not read as
+                       "you are not an admin" -- collapsing it back into
+                       NotFoundScreen here would throw that away); anything
+                       else -- NOT_FOUND included -- falls to the app's
+                       ordinary NotFoundScreen, so a non-admin's /admin is
+                       byte-for-byte the same page as a typo. AdminShell
+                       carries the operator chrome (a distinct header
+                       treatment, an explicit "Hearth · Operator" label) so
+                       which surface you are on never depends on reading the
+                       URL. AdminFlagsPage is the one screen this branch
+                       ships behind that gate -- see docs/FEATURE_TRACKER.md
+                       §9 for what it can and cannot do yet. useAdmin.ts
+                       holds the hooks (useAdminSession, useAdminFlags,
+                       useSetGlobalFlag, useSetHouseholdFlag,
+                       useClearHouseholdFlag) and toAdminGateError, which
+                       coerces a non-ApiError failure (status 0) into the
+                       same shape AdminGate switches on, so a network blip
+                       gets the server-message screen too, not a crash.
+                       useFeature.ts lives here too, despite every screen in
+                       the app needing it, not only this one -- it reads
+                       data?.features?.[key] === true off the same useMe
+                       cache the sidebar's Admin link already reads
+                       isPlatformAdmin from, never a second fetch, and
+                       resolves an unknown key to false so a typo closes a
+                       door rather than opening one, the client-side twin of
+                       FlagSet.Enabled's own fail-closed rule. Hiding a nav
+                       item and its route together is one test, not two,
+                       because both read the one hook
     placeholder/       named stand-ins for unbuilt areas, and only for areas
                        a household can already reach. Empty of callers as of
                        this feature: / stopped using it when the interim

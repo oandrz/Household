@@ -2222,6 +2222,31 @@ catches it: for a handler wired to more than one control, assert the effect
 of each control separately, and mutate one call site's own wiring in
 isolation to confirm its test — not a sibling's — is what goes red.
 
+**A seventh instance, the admin-surface browser walk (2026-09-02), and this
+time the code was correct and the test was correct — a green suite proved
+the control worked, and it still shipped unusable.** `/admin/flags`'s only
+interactive control, a segmented toggle, was real: the right `PUT` fired, the
+right class asserted the current state in `AdminFlagsPage.test.tsx`, and
+`make test` was clean. Driving the actual screen found it anyway: 12px text
+in a muted grey on a transparent ground inside a hairline border, right-
+aligned roughly 1900px from its own label at a 2246px viewport. It did not
+register on a first read of the screen at all, and its presence had to be
+confirmed through the accessibility tree and `getBoundingClientRect` — not
+through looking at the page a household, or an operator, actually would.
+No unit test could have caught this: a jsdom render has no viewport, no
+layout, and no notion of "did a human's eye land on this," which is exactly
+what a `toHaveClass` assertion checks instead. The same walk found a sharper
+case of the pattern this section is named for, one click away: there is no
+control anywhere on the screen to *create* a household override — only a
+global toggle and a "Remove" on overrides that already exist — so the
+per-household targeting the whole two-layer flag model exists to provide is,
+today, reachable only by a hand-written `PUT` (`docs/FEATURE_TRACKER.md` §9,
+[ADR 5](../adr/0005-platform-admin-authorization.md)). **This is the standing
+argument for driving the real page rather than trusting the suite one more
+time, with fresh evidence**: nothing here was a failing assertion waiting to
+be written, because there was no code path to assert against in the first
+case and no coordinate system to assert legibility in for the second.
+
 ### 16. A claim about the code is not evidence until someone checks it against the code
 
 - **The net worth trend's plan, 2026-08-19.** `docs/FEATURE_TRACKER.md`'s own
@@ -2308,18 +2333,66 @@ isolation to confirm its test — not a sibling's — is what goes red.
   citation — name the single place the rule actually lives and point at it,
   rather than repeating it in prose that can only ever be checked by going
   and finding that place anyway.
+- **A sixth instance, the admin-surface branch (2026-09-02), and the first
+  time this shipped seven times on one branch rather than once.** Every one
+  of the seven was a doc comment asserting something checkable — an
+  ordering, a count, a list of callers — that the code had already moved out
+  from under: a middleware comment in `auditAdmin` stated the *inverse* of
+  the CSRF ordering after a review round changed it; a route-walk floor
+  comment credited the wrong mechanism for a number it had just raised; two
+  comments enumerating `buildMeResponse`'s callers undercounted them ("three
+  of four" instead of four of five — `handleCompleteSignUp` missed both
+  times it was counted); one on `Deps.Admin` in `router.go` said a nil
+  dependency broke only the admin routes, when by that point `requireSession`
+  called it on every authenticated request and a nil value panicked the
+  *whole* authenticated surface — household, spaces, accounts, money,
+  everything `requireSession` gates, not only `/admin`; one on `Sidebar.tsx`'s
+  new Admin link said the server refuses a non-admin with `403`, when it
+  answers `404` — and `useFeature.ts`, a second file in the very same commit,
+  had the right answer sitting a few lines away; and one in `client.ts` named
+  `requireSession` as the only middleware that can report a dead session, when
+  four call sites can. Every one of the seven passed `make test` clean,
+  because every one was prose, and prose is the one artifact in this
+  repository no test holds to account. **The fix that stuck was not fixing
+  the number, it was deleting the number:** "three of four" became "every
+  caller except `handleMe`," with every comment needing the caller list
+  pointed at the one function that now owns it, rather than five separate
+  places repeating a count that would only drift again. State the invariant,
+  never the enumeration — a property survives the next caller; a tally does
+  not.
+- **A seventh instance, same branch, where the drifted comment did not just
+  mislead a reader — it hid a defect for the row's entire life, silently,
+  behind a green suite.** `auditAdmin`'s own doc comment said `Detail` carries
+  the matched route's URL parameters. It never could: chi's `FindRoute` — the
+  step that actually populates a route's `{key}`/`{householdID}` values —
+  runs inside `routeHTTP`, *after* every subtree middleware including this
+  one, so every admin audit row this branch ever wrote carried `target: ""`
+  and `detail: {"*": ""}`. The one test covering the write asserted a row
+  *count*, never a value, and the comment said the field was populated, so
+  nobody went looking. Found only when a later task added the first admin
+  route with a real URL parameter in it and a reviewer, checking the claim
+  against chi's own source rather than the comment, found it false. The fix
+  matches the sixth instance's shape exactly: stop asserting a value that
+  cannot exist at that point in the chain, rather than trying to keep the
+  assertion current — `Target` became the full request path (which already
+  contains every value those parameters would have held), `Detail` stays an
+  empty object, and the comment now explains *why* parameters can't be read
+  there instead of claiming they are.
 
 **Treat a citation the way you'd treat a test assertion: something the next
 reader can verify against the thing it names, not something to trust because
-it reads confidently.** All five instances above cost nothing to produce
+it reads confidently.** All seven instances above cost nothing to produce
 and each would have cost under a minute to check — reading the query,
-re-finding the line, opening the mockup, or grepping for the clause a
-comment claimed existed — against a small planning gap, a wrong number in a
-comment, a design claim nobody had opened the design to test, a line range
-nobody had re-measured, and a rule restated in a comment's own words rather
-than pointed at. A citation checked once and never re-verified when the
-sentence around it is rewritten is not a citation any more; it is the same
-unverified claim wearing a reference.
+re-finding the line, opening the mockup, grepping for the clause a comment
+claimed existed, or reading the one function (`chi`'s `routeHTTP`) whose
+order the claim depended on — against a small planning gap, a wrong number in
+a comment, a design claim nobody had opened the design to test, a line range
+nobody had re-measured, a rule restated in a comment's own words rather than
+pointed at, seven checkable claims that drifted the moment the code moved
+under them on a single branch, and a field silently empty for its entire life
+because its own doc comment said otherwise. A citation checked once and never
+re-verified when the sentence around it is rewritten is not a citation any
+more; it is the same unverified claim wearing a reference.
 
 ---
 
@@ -2647,6 +2720,36 @@ unverified claim wearing a reference.
   an open transaction, every further read has to run on that transaction's
   own connection — reaching back out to the pool from in there is a request
   for a second connection while the first is still yours.**
+- **Admin-surface branch, a near-miss rather than a shipped defect — reusing
+  a lockout ledger silently changes whose lockout it is.** The plan's own
+  sketch for admin re-authentication would have recorded a wrong password
+  into `login_attempts`, the same table `AuthService.SignIn` already writes
+  to. That table's own lockout is *household*-scoped:
+  `domain.DefaultLockoutPolicy` locks password sign-in for every member of a
+  household after three failures in fifteen minutes, on the reasoning that a
+  household shares one front door. Feeding an operator's admin re-auth
+  mistypes into the same ledger would have quietly widened that door's
+  blast radius from "one household, on a screen every member can see" to
+  "one household, over a mistake made on a screen nobody else in it can even
+  see" — an operator fumbling their own password on `/admin` would lock
+  their family out of the ordinary product as a side effect. No code ever
+  shipped this; it was caught by reading `login_attempts`' own scope before
+  reusing the table, not by a test — there is nothing to assert against
+  until the wrong choice has already been made. The fix taken was a second
+  table, `admin_reauth_attempts`, keyed on `user_id` rather than
+  `household_id`, evaluated by the identical `domain.LockoutPolicy` so the
+  *policy* is shared even though the *ledger* is not (see [ADR
+  5](../adr/0005-platform-admin-authorization.md)). None of the sixteen named
+  patterns above fits this shape exactly — the closest is pattern 11's
+  reasoning about asymmetric blast radius between a limit that inconveniences
+  one caller and one that fails wider than intended, but that pattern is
+  about two limits composing badly, not one piece of shared infrastructure
+  carrying a scope built for a different audience than the one about to reuse
+  it. **Before writing a failure, an attempt, or a lockout into a table
+  someone else already owns, read what that table's own scope was built to
+  contain** — a `household_id` column is a decision about who a lock can
+  reach, and a new caller inherits that decision whether or not it was
+  written for them.
 
 ### HTTP layer
 

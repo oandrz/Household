@@ -182,3 +182,21 @@ an account with no password.
   `deploy/.env` are what turn it on there.
 - **One box, no redundancy** — accepted; see [ADR 2](adr/0002-first-production-host.md).
   An hour of downtime is an inconvenience, not an incident.
+- **The platform admin surface (2026-09-02) adds no new external service, and
+  this line exists so the next reader knows that was checked rather than
+  forgotten.** `platform_admins`, `feature_flags`, `household_feature_flags`,
+  `admin_audit_log` and `admin_reauth_attempts` are five tables in the same
+  Postgres this box already runs; `adminctl`'s four new commands are the same
+  binary this box already deploys. Nothing in "The services" table above
+  changes, and nothing new leaves the box. **Not on the box today** — the
+  change is not deployed there, the same caveat the Telegram row above
+  carries, for the same reason. Two panels the design spec describes but this
+  slice does not build will each cost one new value here when they ship: the
+  read-only database browse needs `DATABASE_READONLY_URL` (a second,
+  `SELECT`-only Postgres role, reached over the connection already open to
+  this same database — not a new service), and the outbound-mail inspector
+  needs `MAILPIT_API_URL` (Mailpit already runs; this reads its existing HTTP
+  API rather than adding anything). Both are free, and the design spec commits
+  each panel, when it ships, to saying plainly it is unavailable while its
+  value is unset rather than falling back to a wider connection — see
+  [ADR 5](adr/0005-platform-admin-authorization.md).
