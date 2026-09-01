@@ -171,7 +171,12 @@ func (s *TelegramAuthService) sendSignUp(ctx context.Context, chatID int64, now 
 		return fmt.Errorf("count signups since start of day: %w", err)
 	}
 	if globalCount >= SignupGlobalDailyLimit {
-		slog.Error("telegram sign-up declined by the global daily mail ceiling",
+		// Named "sign-up ceiling", not "mail ceiling": this path sends no
+		// mail at all. signup.go's own log line says "mail ceiling" because
+		// that path really does relay through SMTP; an operator grepping
+		// this line for a mail outage would otherwise chase SMTP for a
+		// Telegram request that never touched it.
+		slog.Error("telegram sign-up declined by the global daily sign-up ceiling",
 			"global_count", globalCount,
 			"global_daily_limit", SignupGlobalDailyLimit,
 		)

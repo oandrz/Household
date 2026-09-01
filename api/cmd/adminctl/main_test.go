@@ -97,15 +97,15 @@ func TestRunRefusesToSeedOutsideDevelopmentBeforeConnecting(t *testing.T) {
 }
 
 // TestRunPruneRefusesAWindowUnderTheFloor proves the seven-day floor is
-// enforced before either repository is ever touched: signups and attempts
-// are both nil here, so a Prune call reaching either one would panic on a
-// nil pointer dereference rather than merely delete the wrong rows. The
-// floor exists because domain.LockoutPolicy.Window is 15 minutes -- deleting
-// a login_attempts row still inside that window would clear a live lockout,
-// turning a cleanup command into a way to unlock a household somebody is
-// actively guessing at.
+// enforced before any repository is ever touched: signups, attempts and
+// telegramLinks are all nil here, so a Prune call reaching any of them would
+// panic on a nil pointer dereference rather than merely delete the wrong
+// rows. The floor exists because domain.LockoutPolicy.Window is 15 minutes --
+// deleting a login_attempts row still inside that window would clear a live
+// lockout, turning a cleanup command into a way to unlock a household
+// somebody is actively guessing at.
 func TestRunPruneRefusesAWindowUnderTheFloor(t *testing.T) {
-	err := runPrune(context.Background(), nil, nil, 3*24*time.Hour)
+	err := runPrune(context.Background(), nil, nil, nil, 3*24*time.Hour)
 	if err == nil {
 		t.Fatal("runPrune(3 days) = nil, want a refusal")
 	}

@@ -269,9 +269,18 @@ function CompleteSignUpForm({
             // an empty read-only email box here would look like a field
             // someone forgot to fill in, so this tells the person what
             // proved their identity instead of pretending there's an address.
+            //
+            // The second sentence exists because of a real gap: without an
+            // email on the account, the password below has nowhere to be
+            // checked against (GetUserByEmail is WHERE email = $1, and NULL
+            // never matches) and there is no "forgot password" link to send.
+            // Telegram is the only door in until that account gains an
+            // email address -- see docs/FEATURE_TRACKER.md.
             <p className="text-xs text-label">
               You are signing up with Telegram. Your sign-in links come to
-              that chat.
+              that chat. Telegram is the only way to sign in for now -- the
+              password below is saved for later but will not sign you in
+              yet.
             </p>
           )}
         </div>

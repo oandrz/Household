@@ -3425,6 +3425,7 @@ var _ usecase.GoalProgressReader = (*goalProgressDouble)(nil)
 // --- TelegramLinkRepository -------------------------------------------
 
 type telegramLinkRow struct {
+	CreatedAt  time.Time
 	ExpiresAt  time.Time
 	ConsumedAt *time.Time
 	ChatID     int64
@@ -3452,7 +3453,7 @@ func newTelegramLinkRepoDouble(clock *fixedClock, tokens *seqTokens) *telegramLi
 }
 
 func (d *telegramLinkRepoDouble) Create(_ context.Context, nonceHash []byte, expiresAt time.Time) error {
-	d.rows[string(nonceHash)] = &telegramLinkRow{ExpiresAt: expiresAt}
+	d.rows[string(nonceHash)] = &telegramLinkRow{CreatedAt: d.clock.Now(), ExpiresAt: expiresAt}
 	return nil
 }
 
@@ -3520,7 +3521,7 @@ func (d *telegramLinkRepoDouble) mintLive(t *testing.T, expiresAt time.Time) str
 	}
 	d.n++
 	raw := fmt.Sprintf("nonce-%d", d.n)
-	d.rows[string(d.tokens.HashToken(raw))] = &telegramLinkRow{ExpiresAt: expiresAt}
+	d.rows[string(d.tokens.HashToken(raw))] = &telegramLinkRow{CreatedAt: d.clock.Now(), ExpiresAt: expiresAt}
 	return raw
 }
 
@@ -3551,9 +3552,25 @@ func (d *telegramLinkRepoDouble) recordRedemptions(chatID int64, n int, at time.
 		raw := fmt.Sprintf("redeemed-%d", d.n)
 		consumedAt := at
 		d.rows[string(d.tokens.HashToken(raw))] = &telegramLinkRow{
-			ExpiresAt: at.Add(time.Hour), ConsumedAt: &consumedAt, ChatID: chatID,
+			CreatedAt: at, ExpiresAt: at.Add(time.Hour), ConsumedAt: &consumedAt, ChatID: chatID,
 		}
 	}
+}
+
+// Prune mirrors PruneTelegramLinkRequests: created_at < before AND (consumed
+// or expired). A live, unexpired row is never pruned no matter how old
+// before is -- the same shape as signupDouble.Prune, for the same table
+// shape.
+func (d *telegramLinkRepoDouble) Prune(_ context.Context, before time.Time) (int64, error) {
+	var deleted int64
+	for hash, row := range d.rows {
+		expiredOrConsumed := row.ConsumedAt != nil || !row.ExpiresAt.After(d.clock.Now())
+		if row.CreatedAt.Before(before) && expiredOrConsumed {
+			delete(d.rows, hash)
+			deleted++
+		}
+	}
+	return deleted, nil
 }
 
 var _ usecase.TelegramLinkRepository = (*telegramLinkRepoDouble)(nil)

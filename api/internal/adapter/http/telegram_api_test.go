@@ -39,6 +39,9 @@ func (fakeTelegramLinkRepo) Consume(context.Context, []byte, int64) error {
 func (fakeTelegramLinkRepo) CountLinksSince(context.Context, int64, time.Time) (int, error) {
 	panic("fakeTelegramLinkRepo: CountLinksSince should not be called by these tests")
 }
+func (fakeTelegramLinkRepo) Prune(context.Context, time.Time) (int64, error) {
+	panic("fakeTelegramLinkRepo: Prune should not be called by these tests")
+}
 
 type unusedTelegramAccountRepo struct{}
 
@@ -189,6 +192,36 @@ func TestTelegramStartIs404WhenTheFeatureIsOff(t *testing.T) {
 	env := newTestEnv(t) // the existing helper: Deps.Telegram is nil
 	rec := env.do(http.MethodPost, "/api/v1/auth/telegram/start", nil)
 	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
+}
+
+// TestTelegramStartIs404WhenTheFeatureIsOffMatchesAGenuinelyUnroutedPathByte
+// pins the body itself, not only the status and code the test above already
+// checks. Status and code alone would still pass if the handler's message
+// text ever drifted from router.go's own NotFound handler -- say, to
+// "Telegram sign-in is not configured." -- and that drift is exactly the
+// distinguisher the comment above (and the design doc) claims does not
+// exist: a caller could then tell "no such route" apart from "Telegram not
+// configured" by the message alone, even though both still answer 404
+// NOT_FOUND. Comparing the two responses byte for byte is what actually
+// proves there is no distinguisher. See the mutation proof recorded in the
+// final-fix-wave report: changing the handler's message makes this test
+// fail, and restoring it makes this test pass again.
+func TestTelegramStartIs404WhenTheFeatureIsOffMatchesAGenuinelyUnroutedPathByte(t *testing.T) {
+	env := newTestEnv(t) // the existing helper: Deps.Telegram is nil
+
+	telegramOff := env.do(http.MethodPost, "/api/v1/auth/telegram/start", nil)
+	// A path this router has never registered a handler for -- reaches
+	// router.go's own r.NotFound, not any Telegram-aware code at all.
+	genuinelyUnrouted := env.do(http.MethodGet, "/api/v1/this-route-does-not-exist", nil)
+
+	if telegramOff.Code != genuinelyUnrouted.Code {
+		t.Fatalf("status = %d, unrouted path's status = %d, want them equal",
+			telegramOff.Code, genuinelyUnrouted.Code)
+	}
+	if telegramOff.Body.String() != genuinelyUnrouted.Body.String() {
+		t.Fatalf("Telegram-off body = %s\nunrouted-path body = %s\nwant them byte-identical",
+			telegramOff.Body.String(), genuinelyUnrouted.Body.String())
+	}
 }
 
 // The route takes no identifier, so there is nothing to enumerate -- but it

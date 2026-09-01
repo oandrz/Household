@@ -90,3 +90,24 @@ func (q *Queries) GetTelegramAccountByChatID(ctx context.Context, chatID int64) 
 	err := row.Scan(&user_id)
 	return user_id, err
 }
+
+const pruneTelegramLinkRequests = `-- name: PruneTelegramLinkRequests :execrows
+DELETE FROM telegram_link_requests
+WHERE created_at < $1
+  AND (consumed_at IS NOT NULL OR expires_at <= now())
+`
+
+// PruneTelegramLinkRequests mirrors PruneSignups exactly: same retention
+// condition (created before the cutoff, and either already consumed or
+// expired), for the same reason -- a nonce nobody ever redeemed carries no
+// chat_id (see the table's own CHECK), so no per-chat limit ever bounds how
+// many a stranger can mint. This is the third of the three tables a stranger
+// can grow without an account; the other two (signups, login_attempts) are
+// already pruned by adminctl prune.
+func (q *Queries) PruneTelegramLinkRequests(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneTelegramLinkRequests, createdAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}

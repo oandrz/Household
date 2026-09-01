@@ -45,3 +45,11 @@ func (r *TelegramLinkRepo) CountLinksSince(ctx context.Context, chatID int64, si
 	}
 	return int(count), nil
 }
+
+func (r *TelegramLinkRepo) Prune(ctx context.Context, before time.Time) (int64, error) {
+	deleted, err := r.q.PruneTelegramLinkRequests(ctx, timestamptz(before))
+	if err != nil {
+		return 0, translate(err, "prune telegram link requests")
+	}
+	return deleted, nil
+}

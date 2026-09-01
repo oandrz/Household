@@ -325,6 +325,26 @@ describe("SignUpScreen", () => {
     ).toBeInTheDocument();
   });
 
+  // Whole-branch review, Item 7: this screen only knows how to reach a
+  // household through an email address, so a stranger with no reachable
+  // inbox used to dead-end here. The fix is copy, not a second form --
+  // R17 -- so this test only proves the pointer exists and lands on the
+  // screen that actually carries the Telegram control (SignInScreen), not
+  // that it duplicates any of that control's logic here.
+  it("points a stranger with no reachable email back to Telegram on the sign-in screen", async () => {
+    stubFetchRoutes({});
+    renderWithRouter(<SignUpScreen />);
+    await screen.findByText("Start your household.");
+
+    expect(
+      screen.getByText("No email you can check right now?", { exact: false }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Continue with Telegram" })).toHaveAttribute(
+      "href",
+      "/sign-in",
+    );
+  });
+
   it("does not promise to create a household from the address step", async () => {
     // This button emails a set-up link. The household is created by the second
     // screen's button, which is the one that may carry this name.

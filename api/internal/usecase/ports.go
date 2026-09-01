@@ -170,6 +170,10 @@ type TelegramLinkRepository interface {
 	// per-chat limit must also bind chats that have no account yet: a stranger
 	// repeating /start has no user row to count against.
 	CountLinksSince(ctx context.Context, chatID int64, since time.Time) (int, error)
+	// Prune deletes consumed and expired rows older than before, the same
+	// contract as SignupRepository.Prune. A nonce nobody ever redeemed has no
+	// chat_id, so nothing else ever bounds how many a stranger can mint.
+	Prune(ctx context.Context, before time.Time) (int64, error)
 }
 
 // TelegramAccountRepository resolves a Telegram chat to the Hearth user it is

@@ -70,6 +70,64 @@ func TestTelegramLinkCountsOnlyThisChatsRedemptions(t *testing.T) {
 	}
 }
 
+// TestTelegramLinkRepoPruneLeavesLiveRows mirrors
+// TestSignupRepoPruneLeavesLiveRows exactly, for the same table shape: one
+// row consumed (and therefore prunable once old), one row left live (never
+// prunable no matter how old, because it might still be redeemed). Both are
+// aged past the cutoff by the same direct UPDATE the signups test uses, so
+// only consumed-ness decides the outcome, not age alone.
+func TestTelegramLinkRepoPruneLeavesLiveRows(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	pool := db.Pool()
+	repo := postgres.NewTelegramLinkRepo(db)
+
+	liveHash := []byte("prune-live-hash")
+	consumedHash := []byte("prune-consumed-hash")
+
+	if err := repo.Create(ctx, liveHash, time.Now().Add(24*time.Hour)); err != nil {
+		t.Fatalf("Create live: %v", err)
+	}
+	if err := repo.Create(ctx, consumedHash, time.Now().Add(24*time.Hour)); err != nil {
+		t.Fatalf("Create consumed: %v", err)
+	}
+	if err := repo.Consume(ctx, consumedHash, 7777); err != nil {
+		t.Fatalf("Consume: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE telegram_link_requests SET created_at = now() - interval '40 days'`); err != nil {
+		t.Fatalf("age the rows: %v", err)
+	}
+
+	deleted, err := repo.Prune(ctx, time.Now().Add(-30*24*time.Hour))
+	if err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("Prune deleted %d, want 1 -- only the consumed row", deleted)
+	}
+
+	// Assert directly against the table rather than through Consume: a
+	// pruned row and an already-consumed-but-still-present row would both
+	// answer domain.ErrNotFound from Consume, which would prove nothing
+	// about whether the DELETE actually ran.
+	var liveCount, consumedCount int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM telegram_link_requests WHERE nonce_hash = $1`, liveHash).Scan(&liveCount); err != nil {
+		t.Fatalf("query live row: %v", err)
+	}
+	if liveCount != 1 {
+		t.Fatalf("live row count = %d, want 1 -- the live row must survive Prune", liveCount)
+	}
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM telegram_link_requests WHERE nonce_hash = $1`, consumedHash).Scan(&consumedCount); err != nil {
+		t.Fatalf("query consumed row: %v", err)
+	}
+	if consumedCount != 0 {
+		t.Fatalf("consumed row count = %d, want 0 -- Prune should have deleted it", consumedCount)
+	}
+}
+
 func TestTelegramAccountByChatIDIsNotFoundWhenUnbound(t *testing.T) {
 	ctx := context.Background()
 	repo := postgres.NewTelegramAccountRepo(openTestDB(t))
