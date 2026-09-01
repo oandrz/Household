@@ -2448,8 +2448,12 @@ pointed at, seven checkable claims that drifted the moment the code moved
 under them on a single branch, a field silently empty for its entire life
 because its own doc comment said otherwise, a sibling comment one file away
 making the identical claim, already proven false, that nobody had gone back
-to check, and a fix wave's own instructions for closing out this exact
-pattern carrying one more unverified number into the tree. A citation
+to check, and a floor comment naming a task and a number for a drift that
+had happened over several. That last one arrived with company the catalogue
+cannot count, because it never landed: the fix wave's own instructions for
+closing out this pattern handed down a further wrong number for the same
+passage, and it was caught in review rather than committed — the only reason
+it is a footnote here instead of a tenth entry. A citation
 checked once and never re-verified when the sentence around it is rewritten
 is not a citation any more; it is the same unverified claim wearing a
 reference.

@@ -242,8 +242,9 @@ func TestEveryProtectedRouteRejectsAnUnauthenticatedCaller(t *testing.T) {
 	// 62 is this walk's own re-measured output, never a number to bump by
 	// hand: tracked that way, this exact floor drifted through several
 	// tasks that each added protected routes without anyone re-running the
-	// walk, down to a stale 18 against a real count of 59 by the time
-	// anyone checked again -- the vacuous-pass risk this comment warns
+	// walk: a stale 18 against a real count that had already reached 59
+	// before the task that finally re-ran the walk, and 62 by the time it
+	// did -- the vacuous-pass risk this comment warns
 	// about, realised slowly instead of all at once. Whenever a route is
 	// added, re-run the walk and set this to what it reports, not to
 	// whatever seems like enough of an increase.
@@ -349,8 +350,9 @@ func TestEveryMutatingRouteRequiresCSRF(t *testing.T) {
 	t.Logf("checked %d mutating routes", checked)
 	// 44 is this walk's own re-measured output, never a number to bump by
 	// hand -- the identical reasoning the 62 floor above states in full:
-	// this exact floor drifted the same way, down to a stale 11 against a
-	// real count of 41 by the time anyone checked again. Whenever a route
+	// this exact floor drifted the same way: a stale 11 against a real
+	// count that had already reached 41 before the walk was finally
+	// re-run, and 44 when it was. Whenever a route
 	// is added, re-run the walk and set this to what it reports.
 	if checked < 44 {
 		t.Fatalf("checked %d mutating routes, want at least 44 -- "+
