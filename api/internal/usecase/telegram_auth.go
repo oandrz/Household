@@ -144,15 +144,27 @@ func (s *TelegramAuthService) sendSignIn(ctx context.Context, chatID int64, user
 // CreateConsumed or CreateForTelegram wrote it. Without this check, a flood
 // of /start commands could run that shared counter up and silently stop
 // email sign-up too, while Telegram sign-up itself had no ceiling of its own
-// at all -- the worst of both directions at once. This is deliberately NOT
-// the same "every read runs unconditionally, on every branch" symmetry
-// SignupService.Request enforces between its two branches: there, an
-// enumeration oracle exists (a caller can probe for which addresses are
-// registered), so the two branches must be indistinguishable from the
-// outside. HandleStart's sign-in and sign-up branches already send two
-// different messages to the one party who can observe either -- the chat
-// itself -- and StartLink takes no identifier for a third party to probe
-// with, so there is no oracle here for read symmetry to protect.
+// at all -- the worst of both directions at once.
+//
+// This is deliberately NOT the same "every read runs unconditionally, on
+// every branch" symmetry SignupService.Request enforces between its two
+// branches, and that is safe for a reason specific to the branch key, not to
+// the nonce. Request needs that symmetry because its branch key -- the email
+// address -- is supplied by the caller: whoever is guessing addresses picks
+// which branch of Request they land on, so the two branches must look and
+// cost the same from outside, or the caller learns which addresses are
+// registered. HandleStart's branch key is chat_id, and chat_id is never
+// caller-supplied: it arrives inside an Update Telegram itself delivers over
+// the authenticated long-poll connection (see adapter/telegram/poller.go and
+// Client.GetUpdates), so whoever is on the other end of this call can only
+// ever land on their own chat's branch -- there is no address to guess, only
+// the one chat that is already theirs. (StartLink taking no identifier is a
+// separate, true fact -- it means there is no enumeration surface on that
+// endpoint either -- but it is not what makes this asymmetry safe; chat_id's
+// authenticity is.) If chat_id ever became caller-suppliable -- an unsigned
+// webhook, a debug endpoint, a replayed update accepted without verifying
+// its source -- this asymmetry would need revisiting before that change
+// shipped, not after.
 func (s *TelegramAuthService) sendSignUp(ctx context.Context, chatID int64, now time.Time) error {
 	globalCount, err := s.d.Signups.CountSince(ctx, startOfDay(now))
 	if err != nil {

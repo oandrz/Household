@@ -881,6 +881,17 @@ type signupDouble struct {
 	// password before ever reaching the repository rather than passing it
 	// through raw.
 	lastPasswordHash string
+
+	// countSinceArg records the since argument CountSince was most recently
+	// called with. It exists so a test can confirm a caller computed the
+	// cutoff it meant to -- e.g. TelegramAuthService's R5 ceiling check must
+	// pass startOfDay(now), a calendar-day boundary, not now itself or a
+	// rolling 24-hour window (see signup.go's Request doc comment for why
+	// that distinction matters). globalCountOverride answers before since is
+	// ever inspected, so nothing about arming that override on its own would
+	// catch a caller that computed the wrong cutoff; this field is what
+	// does.
+	countSinceArg time.Time
 }
 
 func newSignupDouble(clock *fixedClock, households *householdDouble, users *userDouble,
@@ -1042,6 +1053,7 @@ func (d *signupDouble) CountSince(_ context.Context, since time.Time) (int, erro
 	if d.log != nil {
 		d.log.record("Signups.CountSince")
 	}
+	d.countSinceArg = since
 	if d.globalCountOverride != nil {
 		return *d.globalCountOverride, nil
 	}
@@ -1053,6 +1065,10 @@ func (d *signupDouble) CountSince(_ context.Context, since time.Time) (int, erro
 	}
 	return n, nil
 }
+
+// lastCountSinceArg reports the since argument CountSince was most recently
+// called with -- see countSinceArg's own doc comment for why this matters.
+func (d *signupDouble) lastCountSinceArg() time.Time { return d.countSinceArg }
 
 // Provision mirrors the real Provision's guarded consume-then-build: a
 // signup that is already consumed or expired reports domain.ErrTokenExpired,
