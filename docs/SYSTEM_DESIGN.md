@@ -398,7 +398,6 @@ graph TD
     Main --> TelegramA
     Admin --> usecase
     HTTP --> usecase
-    TelegramA --> usecase
     usecase --> domain
     PGA -.->|implements ports| usecase
     Crypto -.-> usecase
@@ -412,6 +411,18 @@ Solid arrows are compile-time dependencies. Dotted arrows are adapters
 satisfying an interface declared in `usecase/ports.go` — the dependency still
 points inward, which is why every service is testable against in-memory doubles.
 
+**One relationship in this system has no arrow here at all, and the absence is
+the point.** `adapter/telegram`'s `Poller` calls
+`TelegramAuthService.HandleStart`, but the package never imports `usecase` —
+`grep -rn "internal/usecase" api/internal/adapter/telegram/` finds nothing,
+test files included. It depends on `StartHandler`, an interface it declares
+itself (`poller.go:12`), which `*usecase.TelegramAuthService` satisfies
+structurally and which `cmd/api/main.go` alone connects. So there is no
+compile-time edge to draw between those two packages, and drawing one would
+tell a reader the compiler is already checking that relationship. It is not:
+`main.go`'s `var _ telegram.StartHandler = (*usecase.TelegramAuthService)(nil)`
+is what does. §3 carries the full reasoning.
+
 **Two rules that shape everything else:**
 
 - No `pgx`, `chi` or other infrastructure type escapes the adapter layer. A
@@ -419,20 +430,26 @@ points inward, which is why every service is testable against in-memory doubles.
   further up.
 - **No service takes an actor parameter.** Services enforce what is *valid*;
   middleware enforces who is *asking*. Authorisation exists in exactly one place.
-- **`adapter/telegram` is the only adapter with an arrow in each direction, and
-  that is the shape to understand before touching it.** Its `Client` is an
-  ordinary *driven* adapter — it implements `usecase.TelegramSender`, exactly
-  as `adapter/mail` implements `Mailer` (the dotted arrow). Its `Poller` is a
-  *driving* adapter — it calls into a usecase service, exactly as `adapter/http`
-  does (the solid arrow). `adapter/http` is the only other package here that
-  drives, and it is the one this poller was modelled on: an inbound `/start`
-  from Telegram is an inbound request, it simply arrives over a long-poll the
-  process opened itself instead of over a listener. Dependencies still point
-  inward in both directions, which is why `make lint-arch` passes with no rule
-  added for it: the driving edge is `adapter → usecase`, and the driven edge is
-  an interface `usecase` declared. Nothing in `internal/domain` or
-  `internal/usecase` may ever import this package or any Telegram type — that
-  is the boundary the arrows are drawing.
+- **`adapter/telegram` both serves the usecase layer and drives it, and it does
+  the second one without importing it.** Its `Client` is an ordinary *driven*
+  adapter — it satisfies `usecase.TelegramSender`, declared in `ports.go`,
+  exactly as `adapter/mail` satisfies `Mailer` (the dotted arrow). Its `Poller`
+  is a *driving* adapter — an inbound `/start` is an inbound request, it simply
+  arrives over a long-poll this process opened itself rather than over a
+  listener. **But it drives differently from `adapter/http`, and the difference
+  is the thing to understand before touching it.** `adapter/http` imports
+  `usecase` and holds concrete services (`router.go`'s `Deps` names
+  `*usecase.AuthService` and thirteen others), which is the solid arrow you see
+  from `HTTP`. `adapter/telegram` imports nothing from `usecase` at all;
+  it declares `StartHandler` locally and lets `main.go` supply something that
+  fits. So the driving edge here is **inverted** — the adapter states the shape
+  it needs, and the wiring, not the compiler, connects it — which is why there
+  is no arrow between those two boxes and why the assertion in `main.go` exists.
+  `make lint-arch` passes either way, but for a stronger reason in this case:
+  the package has no inward-pointing import to check. Nothing in
+  `internal/domain` or `internal/usecase` may ever import this package or any
+  Telegram type — that is the boundary the arrows, and the one missing arrow,
+  are drawing.
 - **Which currencies are selectable is a domain rule, not an HTTP filter.**
   `domain.ParseCurrency` stays permissive — it accepts any active ISO 4217
   code, because the household `PATCH` path has always accepted arbitrary
@@ -475,10 +492,14 @@ points inward, which is why every service is testable against in-memory doubles.
 is declared by `usecase` and implemented by an adapter. `StartHandler` —
 `HandleStart(ctx, chatID int64, payload string) error` — is declared by the
 *adapter*, in `poller.go`, and satisfied by `*usecase.TelegramAuthService`. That
-is the correct direction for a **driving** adapter: `adapter/http` depends on
-concrete services for the same reason, and a poller that imported a concrete
-service type would be no different. The cost is that no compiler check ties the
-two signatures together at the point either is written, so `cmd/api/main.go`
+is a legal direction for a **driving** adapter, and `adapter/http` is the other
+one: it drives by *importing* `usecase` and holding concrete services, where
+this package drives without importing `usecase` at all (§2's missing arrow).
+Either shape would have been allowed; this one keeps the adapter's own tests
+free of the usecase package — `poller_test.go`'s `handlerSpy` satisfies
+`StartHandler` with a `sync.Mutex` and a slice, and that file imports nothing
+from `usecase` either. The cost is that no compiler check ties the two
+signatures together at the point either is written, so `cmd/api/main.go`
 carries `var _ telegram.StartHandler = (*usecase.TelegramAuthService)(nil)` —
 the one file where both packages are already visible — so a signature drifting
 on either side fails the build naming the interface.
