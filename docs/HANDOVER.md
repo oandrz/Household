@@ -490,6 +490,14 @@ that will manage it (a deferred, separate spec) so it earns real usage first
 — and a household has to be able to exist before there is anything for that
 console to administer.
 
+**That console's first slice now exists, unmerged, on branch `admin-surface`.**
+It carries the authorization axis, the re-authentication grant, the audit log
+and feature flags end to end; the database browse, the outbound message
+inspector and household metrics are specified but unbuilt. Read
+[ADMIN_SURFACE_HANDOVER.md](ADMIN_SURFACE_HANDOVER.md) before touching it or
+planning the next slice — it carries the decisions that are load-bearing, the
+open items, and what the branch's own browser walk found.
+
 **Slice 2 (Money) is done.** Accounts, Transactions, Budget, Goals and
 Bills — all five features — are code-complete, reviewed, and now all
 **walked in a browser**, each 15 of 15. Goals' own walk ran on 2026-08-01,
