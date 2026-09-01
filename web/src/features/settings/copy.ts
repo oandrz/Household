@@ -2,7 +2,7 @@
 // module for the same reason features/auth/copy.ts is -- so eslint's
 // react-refresh/only-export-components rule never has to think about a file
 // that mixes components with other exports.
-import { limitedAccessPhrase } from "../auth/copy";
+import { limitedAccessClause } from "../auth/copy";
 
 // The Members panel's description line reads "Parent · full access" for an
 // owner and "Kid · calendar & chores only" / "Kid · calendar only" for a
@@ -18,7 +18,7 @@ export function memberRoleDescriptor(role: string): string {
 export function memberDescriptionLine(role: string, capabilities: string[]): string {
   const descriptor = memberRoleDescriptor(role);
   if (role === "owner") return `${descriptor} · full access`;
-  return `${descriptor} · ${limitedAccessPhrase(capabilities)} only`;
+  return `${descriptor} · ${limitedAccessClause(capabilities)}`;
 }
 
 // The pill at the right edge of each member row: "Owner" / "Limited",

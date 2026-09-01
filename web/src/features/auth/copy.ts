@@ -99,12 +99,27 @@ const LIMITED_CAPABILITY_LABELS: Record<string, string> = {
   money: "money",
 };
 
-export function limitedAccessPhrase(capabilities: string[]): string {
+// Returns the whole clause, not a list fragment for a caller to glue "only"
+// or "access only" onto. The earlier fragment version answered "no" for a
+// member holding nothing, which each caller then completed into something
+// that is not English: the invite screen read "Joining as Kid -- no access
+// only." and the Settings members list read "Kid · no only". That state is
+// reachable straight from the product -- InviteMemberModal's three capability
+// toggles can all be turned off -- so both were live. A helper whose result
+// only reads correctly for some inputs puts the burden on every caller to
+// know which, and the second caller did not.
+//
+// "no extra access" rather than "no access": Family carries no required
+// capability and is visible to everyone (see sharedSpaceNames above), so a
+// member holding no capabilities still shares it. Saying they have no access
+// at all would contradict the line directly above this banner on the invite
+// screen, which names Family.
+export function limitedAccessClause(capabilities: string[]): string {
   const granted = capabilities
     .filter((c) => c in LIMITED_CAPABILITY_LABELS)
     .map((c) => LIMITED_CAPABILITY_LABELS[c]);
-  if (granted.length === 0) return "no";
-  return granted.join(" & ");
+  if (granted.length === 0) return "no extra access";
+  return `${granted.join(" & ")} only`;
 }
 
 // "co-owner" is the design's own word for an owner accepting an invite (the

@@ -19,7 +19,7 @@ import { apiFetch, ApiError } from "../../api/client";
 import {
   apiErrorMessage,
   formatList,
-  limitedAccessPhrase,
+  limitedAccessClause,
   roleLabel,
   sharedSpaceNames,
 } from "./copy";
@@ -37,8 +37,17 @@ function AuthShell({ children }: { children: ReactNode }) {
       {/* w-full: main's `place-items-center` leaves this wrapper shrink-to-fit,
           so the card's `max-w-[428px]` below has no definite containing block
           to resolve its `w-full` against -- without this, the card silently
-          shrinks to its content's own width (measured 280px) at 1440. */}
-      <div className="w-full flex flex-col items-center gap-[22px]">
+          shrinks to its content's own width (measured 280px) at 1440.
+
+          min-w-0: this box is a grid item, so its `min-width` is `auto` --
+          its own min-content width -- and that floors the auto-sized track
+          it sits in. Anything inside with a wide min-content therefore
+          widens the whole page rather than being made to fit: one long
+          <option> in the sign-up screen's currency <select> ("BAM -- Bosnia
+          and Herzegovina convertible mark") held the card at its full 428px
+          on a 375px phone, and the page scrolled sideways. Zero lets the
+          track shrink to the viewport instead. */}
+      <div className="w-full min-w-0 flex flex-col items-center gap-[22px]">
         <div className="flex items-center gap-2.5">
           <div className="h-[30px] w-[30px] rounded-[9px] bg-accent" />
           <div className="text-[17px] font-semibold tracking-[-0.01em]">Hearth</div>
@@ -119,7 +128,7 @@ function AcceptInviteForm({
   const bannerDetail =
     preview.role === "owner"
       ? "full access, equal say on every agreement"
-      : `${limitedAccessPhrase(preview.capabilities)} access only`;
+      : limitedAccessClause(preview.capabilities);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -141,10 +150,14 @@ function AcceptInviteForm({
           ("2 adults, 2 kids") the invite preview response has no field for
           -- householdName is what's actually available, so that's all this
           renders. */}
-      <p className="mb-1 text-[12.5px] font-medium text-muted">
+      {/* break-words here and on the heading below: both render a name the
+          household chose, and a long one with no spaces in it is a single
+          unbreakable word that would otherwise lay itself out past the card
+          and widen the page on a phone. */}
+      <p className="mb-1 break-words text-[12.5px] font-medium text-muted">
         {preview.householdName}
       </p>
-      <h1 className="mt-0.5 mb-1 font-serif text-[27px] font-medium tracking-[-0.015em]">
+      <h1 className="mt-0.5 mb-1 break-words font-serif text-[27px] font-medium tracking-[-0.015em]">
         {preview.inviterName} invited you in.
       </h1>
       {spaces && (

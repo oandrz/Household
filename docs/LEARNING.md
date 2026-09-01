@@ -3327,6 +3327,59 @@ route with a missing guard has no second line of defence.
   rule in `index.css`'s `.tabular` comment is about figures that stack, and a
   figure that stops matching its stack has left the stack.
 
+- **A `<select>`'s widest `<option>` is a page width.** `/sign-up/$token` — the
+  screen that creates the household — drew its 428px card unchanged on a 375px
+  phone and scrolled sideways: `scrollWidth` 452 against `clientWidth` 375, and
+  452 against 305 at the 320px floor this project promises not to scroll at.
+  Nothing on the screen was wider than the card, and no rule in the file names
+  a width bigger than the viewport. The width came out of the currency
+  `<select>`: a select's min-content width is its longest option ("BAM —
+  Bosnia and Herzegovina convertible mark"), and the card's wrapper is a **grid
+  item**, whose `min-width` is `auto` — its own min-content width — which
+  floors the auto-sized track it sits in. One option in a list nobody had
+  opened set the width of the page. Blanking every option's text in the console
+  dropped `scrollWidth` from 452 to 305, which is the entire diagnosis in one
+  measurement. `min-w-0` on the grid item stops the propagation. **The trap is
+  that it fixes only track sizing:** an unbreakable string — the address echoed
+  by "Check your email", a household name on the invite screen — still lays
+  itself out past the card and still counts toward `scrollWidth` (417 in a
+  305px viewport, *after* the first fix), and needs `break-words` where that
+  string is rendered. Two unrelated mechanisms push a phone sideways, and
+  fixing one hides nothing about the other: **re-measure after the fix rather
+  than reasoning that it was the fix.** Note also what a class check would
+  have missed — `break-words` applied from the console computed to
+  `overflow-wrap: normal`, because Tailwind only emits a class it has seen in
+  the source; the browser measurement is what said so.
+- **A width-matrix walk covers the screens that existed on the day it ran.**
+  The mobile round walked 320/375/414/768/1024/1440 across every screen,
+  sign-in and sign-up included, and its results are recorded in
+  `docs/FEATURE_TRACKER.md`'s own Mobile-responsive row. The screen that broke
+  was built afterwards, by a task whose subject was self-serve sign-up, on a
+  desktop viewport; it reused the auth-card wrapper verbatim — correctly — and
+  put the first `<select>` in the family inside it. Nothing regressed: the new
+  screen was simply never in the matrix. **A completed walk is evidence about
+  a tree, not a property the codebase now has** — the screen added after it
+  needs the same widths run again, and the six copy-pasted wrappers around it
+  all took the fix, not the one that was reported (pattern 1).
+- **A copy helper that returns a fragment makes every caller responsible for
+  grammar, and the second caller will get it wrong.** `limitedAccessPhrase`
+  returned a bare list — `"calendar & chores"` — and `"no"` when a limited
+  member held nothing. Its first caller glued `" access only"` on the end, its
+  second `" only"`. For a member with no capabilities the invite screen
+  therefore read **"Joining as Kid — no access only."** and the Settings
+  members list **"Kid · no only"**, and that state is not exotic: the invite
+  modal's three capability toggles can all be switched off, so the product
+  reaches it unaided. Every test in `MembersPanel.test.tsx` asserted the
+  populated string and stayed green, because the empty list is the one case
+  nobody writes a fixture for. Fixed by making the helper return the finished
+  clause (`"calendar & chores only"` / `"no extra access"`) so neither caller
+  composes anything — and the wording matters too: "no access" would have
+  contradicted the line printed directly above it on the same screen, since
+  Family is visible to every member regardless of capability. **When a helper's
+  result only reads correctly for some inputs, the caller has to know which —
+  return the whole thing, and test the empty branch, which is where the
+  ungrammatical output always lives.**
+
 ### Tooling and infrastructure
 
 - The architecture lint **never enforced the rule it existed for**. Both branches

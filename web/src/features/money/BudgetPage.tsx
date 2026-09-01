@@ -275,7 +275,16 @@ export function BudgetPage() {
             only render once there is a budget to show history against or
             edit -- matching the design's own mockup, which has no header
             controls at all on the empty-state screen. */}
-        <div className="flex items-center gap-2">
+        {/* flex-wrap: these three controls need 360px on one line and a
+            375px phone gives this row 343, so they never fitted -- without
+            wrapping they were flex-shrunk instead, which broke "September
+            2026" and "Edit budget" each onto two lines inside their own
+            control (measured: the chip 62px tall, the button 55px) and at
+            320px still overflowed the viewport by 9px, which the mobile
+            plan's floor forbids. Wrapping moves the last control onto a
+            second row instead and leaves every label on one line. Nothing
+            moves at `sm` and above, where the row has the width it wants. */}
+        <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-3.5 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] text-muted">
             <button
               type="button"
