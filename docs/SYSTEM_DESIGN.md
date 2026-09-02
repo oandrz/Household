@@ -548,12 +548,12 @@ household to a chat they control rather than the one that actually completed the
 sign-up.
 
 **`SessionRepository` gained `GrantAdmin`, and later `Touch`,** rather than a
-second table joined to `sessions` by its token hash. Its own doc comment states
-the one thing a future editor of `ExtendSession` must not do: "it writes one
+second table joined to `sessions` by its token hash. `GrantAdmin`'s own doc
+comment states the one thing a future editor must not do: "it writes one
 column: session extension and this must not overwrite each other." All three
-statements are single-column `UPDATE`s on purpose — `ExtendSession` touches
+statements are single-column `UPDATE`s on purpose — `Extend` touches
 `expires_at` only, `GrantAdmin` touches `admin_grant_expires_at` only, and
-`TouchSession` touches `last_seen_at` only — so widening any of them into a
+`Touch` touches `last_seen_at` only — so widening any of them into a
 whole-row `UPDATE` would silently reset the others the next time a session
 extends, an admin re-authenticates, or any authenticated request arrives.
 `Touch` is the newest and the most frequently called of the three, which is
