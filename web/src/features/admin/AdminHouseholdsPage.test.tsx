@@ -1,6 +1,13 @@
 // Follows AdminFlagsPage.test.tsx: renderWithRouter plus stubFetchRoutes
 // for every request, literal strings asserted.
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes } from "../../test/fetchStub";
@@ -162,6 +169,58 @@ describe("AdminHouseholdsPage", () => {
     expect(
       within(message).getByRole("button", { name: "Clear" }),
     ).toBeInTheDocument();
+  });
+
+  // The route owns q (this file's header comment); a navigation that changes
+  // it -- the results-area Clear inside "Nothing matches", or the back
+  // button -- must be reflected in the search box even though the component
+  // itself is never unmounted. Rendered directly under QueryClientProvider
+  // (not renderWithRouter) because both stubbed responses return zero
+  // households, so <Link> never renders and no router context is needed --
+  // that keeps this rerender an honest same-instance prop update rather than
+  // a fresh mount through a swapped router, which would reset `draft` to the
+  // new q for free and hide the bug this test exists to catch.
+  it("empties the search box when the q prop changes after the page stays mounted", async () => {
+    stubFetchRoutes({
+      [`GET ${adminHouseholdsPath("zzz", 50)}`]: {
+        status: 200,
+        body: response([]),
+      },
+      [`GET ${adminHouseholdsPath("", 50)}`]: {
+        status: 200,
+        body: response([]),
+      },
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <AdminHouseholdsPage
+          q="zzz"
+          limit={50}
+          onSearch={vi.fn()}
+          onShowMore={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+    await screen.findByText("Nothing matches 'zzz'.");
+    expect(screen.getByLabelText("Search")).toHaveValue("zzz");
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <AdminHouseholdsPage
+          q=""
+          limit={50}
+          onSearch={vi.fn()}
+          onShowMore={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Search")).toHaveValue(""),
+    );
   });
 
   it("offers Show more when truncated under the cap, and says search to narrow at it", async () => {

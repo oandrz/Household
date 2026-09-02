@@ -8,7 +8,7 @@
 // Search is a form, never a keystroke listener: every request under /admin
 // is an audit row (useAdminDirectory.ts), so one submitted search is one
 // request and one row.
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { PageContainer } from "../../components/PageContainer";
 import { ApiError } from "../../api/client";
@@ -44,6 +44,15 @@ export function AdminHouseholdsPage({
   const query = useAdminHouseholds(q, limit);
   useCloseSurfaceOnReauth(query.error);
   const [draft, setDraft] = useState(q);
+
+  // The route owns q (see the header comment); a navigation that changes it
+  // from underneath this component -- the results-area Clear below, or the
+  // back button -- must be reflected in the box, not just in the fetched
+  // data. useState(q) only seeds draft once, on mount, so without this the
+  // box keeps showing whatever was last typed even after q changes.
+  useEffect(() => {
+    setDraft(q);
+  }, [q]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

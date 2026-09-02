@@ -96,8 +96,14 @@ second audit row. Behind them sit `AdminDirectoryService` and
 `AdminDirectoryRepository`, the one port in the product that reads across
 household boundaries, plus one new column: `sessions.last_seen_at`, stamped by
 `requireSession` at most once an hour, so "active in the last 7 days" means
-used rather than signed in. **Its browser walk had not run when this was
-written** — Task 11 of that spec's plan.
+used rather than signed in. **Its browser walk ran** — Task 11 of that spec's
+plan, 15 of 15 criteria pass, with two caveats: criterion 7's "Nothing
+matches" Clear left the search box showing the stale query (fixed in the same
+commit that recorded the walk), and criterion 12 was confirmed against the
+drill-in's own lockout callout through the API, with the browser's admin
+session kept alive throughout, rather than against the sign-in screen's own
+local error state
+(`docs/superpowers/plans/2026-09-02-hearth-admin-households-verification.md`).
 
 Where to start reading: `middleware_admin.go`, then `router.go`'s `/admin`
 subtree and its comment, then `usecase/admin.go` and

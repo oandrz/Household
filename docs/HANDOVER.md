@@ -493,8 +493,8 @@ console to administer.
 **That console's first slice is merged — `main` at `b9dfd1f`, PR #15, 2026-09-02.**
 It carries the authorization axis, the re-authentication grant, the audit log
 and feature flags end to end; household metrics followed on 2026-09-02 (branch
-`admin-households`, walk pending), and the database browse and the outbound
-message inspector are specified but unbuilt. Read
+`admin-households`, walked 15 of 15 with two caveats), and the database
+browse and the outbound message inspector are specified but unbuilt. Read
 [ADMIN_SURFACE_HANDOVER.md](ADMIN_SURFACE_HANDOVER.md) before touching it or
 planning the next slice — it carries the decisions that are load-bearing, the
 open items, and what the branch's own browser walk found.
@@ -517,9 +517,13 @@ second, households and metrics, was built later that same day** on branch
 `admin-households` — an operator's household list with four counters and an
 explicit search, and a read-only drill-in behind it — to its own spec,
 `docs/superpowers/specs/2026-09-02-hearth-admin-households-design.md`, which
-expands §6 of the admin-surface spec. Its browser walk had not run when this
-was written; section 9's row says so and names the file it will be recorded
-in. Two remain, in the order the tracker gives: the outbound message
+expands §6 of the admin-surface spec. Its browser walk ran the same day: 15 of
+15 criteria pass, with two caveats — the "Nothing matches" message's own Clear
+button restored the list but left the search box showing the stale query
+(fixed in the same commit that recorded the walk), and criterion 12 was
+confirmed against the drill-in's own lockout callout through the API rather
+than the sign-in screen's local error state; section 9's row carries both.
+Two remain, in the order the tracker gives: the outbound message
 inspector, then the read-only database browse.
 
 **Slice 2 (Money) is done.** Accounts, Transactions, Budget, Goals and

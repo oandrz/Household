@@ -40,8 +40,8 @@ needed them to exist (see "Where things stand" below).
 > **77/17/23/3 = 120**, Built + Partial **94**, the same headline as before
 > the day started.
 >
-> **Households and metrics, 2026-09-02, later the same day — built, not yet
-> walked.** Section 9's "Households and metrics" row moves ⬜ → ✅: an
+> **Households and metrics, 2026-09-02, later the same day — built and
+> walked.** Section 9's "Households and metrics" row moved ⬜ → ✅: an
 > operator's household list with four counters and an explicit search over
 > households *and* members, and a read-only drill-in behind it (members,
 > channel, pending invites, the household's sign-in lockout). It has its own
@@ -49,11 +49,16 @@ needed them to exist (see "Where things stand" below).
 > which expands the admin-surface spec's §6 and wins where the two differ. The
 > one schema change is `sessions.last_seen_at`, stamped by `requireSession` at
 > most once an hour, so "active in the last 7 days" means *used* rather than
-> *signed in*. **The row is ✅ ahead of its browser walk, deliberately and
-> temporarily**: the walk is Task 11 of the same plan and had not run when
-> this was written, so the row's own cell says so and names the verification
-> file it will be recorded in. Until that line changes, this row does not
-> carry the "walked in a browser" bar every other ✅ in this file carries.
+> *signed in*. **The row's browser walk ran the same day, Task 11 of the same
+> plan** (`docs/superpowers/plans/2026-09-02-hearth-admin-households-verification.md`):
+> 15 of 15 criteria pass, with two caveats — criterion 7's caveat was a real
+> defect (the "Nothing matches" message's own Clear button restored the list
+> but left the search box showing the stale query), fixed in the same commit
+> that recorded the walk; criterion 12 was confirmed against the drill-in's
+> own lockout callout through the API, with the browser's admin session kept
+> alive throughout, rather than against the sign-in screen's own local error
+> state. This row now carries the "walked in a browser" bar every other ✅ in
+> this file carries.
 >
 > **The recount was a count, not an addition.** Section 9's nine rows were
 > counted by the first status symbol in each row's own cell —
@@ -1391,10 +1396,11 @@ See [ADR 5](adr/0005-platform-admin-authorization.md) for why the surface is
 shaped the way it is, and
 `docs/superpowers/plans/2026-09-02-hearth-admin-surface-verification.md` for
 the browser walk the ✅ and 🟡 rows of that first slice cite. **One ✅ below
-cites a different walk, and it has not run yet**: "Households and metrics",
-built later on 2026-09-02, names
+cites a different walk**: "Households and metrics", built later on
+2026-09-02, names
 `docs/superpowers/plans/2026-09-02-hearth-admin-households-verification.md`
-in its own cell as the file its walk will be recorded in.
+in its own cell as the file its walk was recorded in — 15 of 15 criteria pass,
+with two caveats (see that row).
 
 **The two ⬜ rows below, the audit screen the owner descoped on 2026-09-02,
 and households and metrics, built the same day, were all deliberately out of
@@ -1417,7 +1423,7 @@ specifies it in full — none of these needs a fresh design, only a plan.
 | Admin audit screen (`/admin/audit`) | 🚫 | **Descoped by the product owner on 2026-09-02 — not the design's marking, the owner's decision.** It was built first: `GET /admin/audit?limit=N` in the granted group, `RecentAdminAudit` joined to `users` so rows named their actor, an `AdminAuditPage` with limit-only "Show more" to the service's 500 cap, and a Flags · Audit nav in `AdminShell`; every suite green, three mutation checks red, and a browser walk that found and fixed one defect (the active nav link was indistinguishable — see `docs/LEARNING.md`, Frontend). The owner then judged the screen unnecessary and asked for it to be removed rather than merged. The code is gone from the tree; the log is read through `psql` as before, and `AdminService.RecentAudit` stays in place for the tests that use it. The one thing kept is unrelated to the screen: `useAdminFlags` no longer refetches on window focus, because every refetch of an audited route is itself an audit row. A patch of the removed work was saved outside the repository at the time, but the honest statement is that reinstating it means rebuilding from the spec (§2.4, §7) |
 | Read-only database browse | ⬜ | Design spec §4. **The piece originally asked for.** A separate `SELECT`-only Postgres role (`hearth_readonly`) reached through its own pool from `DATABASE_READONLY_URL`, so a mistake in the adapter's SQL still cannot write; table names validated against `information_schema` rather than interpolated; `statement_timeout` and a page cap; and redaction that fails closed by column *type* (`bytea`) as well as by name, so a secret column added next year is redacted before anyone remembers the rule exists. Unset config means the panel is unavailable — never a silent fallback to the read-write pool. **The only one of the four with an infrastructure dependency:** the role is created during provisioning, not by a migration, so `deploy/PROVISION.md` changes before the feature can run anywhere real |
 | Outbound message inspector | ⬜ | Design spec §5. Proxies Mailpit's HTTP API rather than storing links: every token in this schema is stored hashed, and inventing a raw-link store to solve a convenience problem is the wrong trade. **Closes a live operational pain rather than adding a capability** — under [ADR 3](adr/0003-mail-stays-on-the-box.md) no mail leaves the box, so handing someone an invite today means opening an SSH tunnel to Mailpit and copying the link out by hand (`deploy/README.md`). Needs `MAILPIT_API_URL`; unset means the panel is unavailable. The message bodies contain working magic-link and invite URLs, so opening one is its own audit row |
-| Households and metrics | ✅ | Design spec §6, expanded in `docs/superpowers/specs/2026-09-02-hearth-admin-households-design.md`. Four tiles, explicit search over households and members (Telegram-only members by name, since they have no email the operator could know), most-recently-active ordering from a throttled `sessions.last_seen_at`, and a read-only drill-in with members, channel, pending invites and the household's sign-in lockout. No money on either screen, asserted by exact key sets rather than by reading the handler — financial data stays behind the database browse, so reading a customer's finances costs a deliberate second step and a second audit row. Reads tables that already exist; no analytics table, because a counter that can drift from the rows it counts is worse than a query. **Browser walk pending — it is Task 11 of the plan, and will be recorded in `docs/superpowers/plans/2026-09-02-hearth-admin-households-verification.md`** |
+| Households and metrics | ✅ | Design spec §6, expanded in `docs/superpowers/specs/2026-09-02-hearth-admin-households-design.md`. Four tiles, explicit search over households and members (Telegram-only members by name, since they have no email the operator could know), most-recently-active ordering from a throttled `sessions.last_seen_at`, and a read-only drill-in with members, channel, pending invites and the household's sign-in lockout. No money on either screen, asserted by exact key sets rather than by reading the handler — financial data stays behind the database browse, so reading a customer's finances costs a deliberate second step and a second audit row. Reads tables that already exist; no analytics table, because a counter that can drift from the rows it counts is worse than a query. **Walked 2026-09-02, Task 11 of the plan — 15 of 15 criteria pass, with two caveats** (`docs/superpowers/plans/2026-09-02-hearth-admin-households-verification.md`): criterion 7's caveat was a real defect — the "Nothing matches" message's own Clear button restored the list but left the search box showing the stale query — fixed in the same commit that recorded the walk; criterion 12 was confirmed against the drill-in's own lockout callout through the API, with the browser's admin session kept alive throughout, rather than against the sign-in screen's own local error state. **Named gap, not a criterion failure:** an expired, unaccepted invite is invisible on this screen by the spec's own "pending only" rule (both the metrics tile and the drill-in's "Pending invites" list filter on `expires_at > now()`) — an operator troubleshooting a stale invite still needs `psql` |
 
 ---
 
@@ -1445,9 +1451,10 @@ message inspector.**
 2. ~~**Households and metrics**~~ (§6) — **built 2026-09-02**, on branch
    `admin-households` and to its own spec,
    `docs/superpowers/specs/2026-09-02-hearth-admin-households-design.md`,
-   which expands §6 of the admin-surface spec. Its browser walk had not run
-   when this line was written; section 9's row carries that caveat. It read
-   tables that already existed, as predicted, plus one new column
+   which expands §6 of the admin-surface spec. Its browser walk ran the same
+   day, Task 11 of the plan — 15 of 15 criteria pass, with two caveats;
+   section 9's row carries them. It read tables that already existed, as
+   predicted, plus one new column
    (`sessions.last_seen_at`). The flags screen's named 🟡 gap is *closer*
    rather than closed: the household list a per-household override picker
    needs now exists, the picker does not. Numbering kept, as for item 1.

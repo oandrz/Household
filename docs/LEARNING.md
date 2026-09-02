@@ -2027,6 +2027,30 @@ neither of which any feature spec had a criterion for:
 criterion no spec item implies: do the thing a first-time user would
 actually do, not the thing the spec remembered to ask about.
 
+**The admin-households walk (2026-09-02) found the same shape inside a single
+session, rather than needing a separate M1-style round.** Criterion 7 asked
+only "does Clear restore the list?", and it did: `AdminHouseholdsPage.tsx` has
+two Clear controls (the search form's own, and the one inside the "Nothing
+matches" message), and both genuinely restore the household list. What the
+criterion never asked was "what does the search box say afterward?" — the
+results-area Clear left it showing the query that had just returned zero
+results, while the table underneath showed everything: a real inconsistency
+for whoever reads the screen rather than the network log. The walk passed the
+letter of criterion 7 on the first read and only caught the defect by going
+back and reading the page the way an operator would — the same discipline
+named above, just applied a paragraph later in the same walk instead of in a
+separate round. The lesson generalises past this one page: **local state that
+mirrors a value the caller owns (here, `draft` mirroring the `q` prop the
+route controls) must re-derive from that value on every change, not only on
+mount** — `useState(q)` seeds once; a `useEffect` keyed on `q` is what keeps
+it honest. The test that catches this is a prop change, not a click: a
+component test that only clicks the Clear button and checks the URL never
+exercises the case where `q` changes for a reason the component itself did
+not initiate (a sibling control, the back button). Fixed the same day, in the
+commit that recorded the walk
+(`docs/superpowers/plans/2026-09-02-hearth-admin-households-verification.md`,
+criterion 7's caveat).
+
 The walk *scripts* themselves keep proving the adjacent, smaller point: every
 walk so far has shipped with at least one criterion that could not be executed
 as written. Accounts' criterion 12 said "sign in as Kayla," who is
@@ -2501,11 +2525,13 @@ case and no coordinate system to assert legibility in for the second.
   this system constructed, and it refuses before the service, the repository
   and a database round trip. **Corrected on the branch (`617db73`), not
   shipped wrong** — but it was in the tree for one commit purely because it
-  read plausibly. The replacement carries a smaller version of the same
-  defect, still in the tree at the time of writing: it says the guard "skips
-  three SQL round-trips" when `AdminDirectoryRepo.Household` short-circuits on
-  its first query, so it skips one. A correction written to close out an
-  unverified claim is not itself verified.
+  read plausibly. The replacement carried a smaller version of the same
+  defect for a while: it said the guard "skips three SQL round-trips" when
+  `AdminDirectoryRepo.Household` short-circuits on its first query, so it
+  skips one — corrected in the households-and-metrics browser-walk fix commit
+  (2026-09-02, Task 11), the same commit this entry itself was written in. A
+  correction written to close out an unverified claim is not itself
+  verified — twice, in this case, before it stuck.
 
 **Treat a citation the way you'd treat a test assertion: something the next
 reader can verify against the thing it names, not something to trust because
@@ -3748,10 +3774,17 @@ route with a missing guard has no second line of defence.
   functions that call hooks, because the rule keys on the function's own
   name — both fixed the way `signInMagicRoute`'s existing comment in the same
   file already documents.
-- **This branch's browser walk had not run when these entries were written.**
-  It is Task 11 of `docs/superpowers/plans/2026-09-02-hearth-admin-households.md`
-  and will be recorded in that plan's verification file; whatever it finds
-  belongs here, and "it found nothing" is worth writing down too.
+- **This branch's browser walk ran 2026-09-02, Task 11 of
+  `docs/superpowers/plans/2026-09-02-hearth-admin-households-verification.md`:
+  15 of 15 criteria pass, with two caveats.** Criterion 7's caveat was a real
+  product defect — pattern 13, above, carries the full account and the fix.
+  Criterion 12's caveat was in the walk itself, not the product: its first
+  pass tested the sign-in screen's own countdown copy, local component state
+  that clears on any reload regardless of the underlying lock, rather than
+  the drill-in's lockout callout this task actually built — a verification
+  that checks the wrong surface can pass for the wrong reason, proving
+  nothing either way. The walk was redone against the callout capable of
+  failing, and it passed.
 
 ### Tooling and infrastructure
 

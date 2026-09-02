@@ -153,7 +153,7 @@ func channelString(c usecase.MemberChannel) (string, error) {
 // that leniency is also what leaves the flag override *writes* answering 500
 // for this input (ADMIN_SURFACE_HANDOVER.md, "Known, deferred"): which way a
 // malformed id degrades is a property of a helper two layers down, not of
-// this route. Refusing here also skips three SQL round-trips for input that
+// this route. Refusing here also skips one SQL round-trip for input that
 // can never match.
 func handleAdminHousehold(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
