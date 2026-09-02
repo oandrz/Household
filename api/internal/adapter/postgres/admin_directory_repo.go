@@ -102,9 +102,13 @@ func (r *AdminDirectoryRepo) SearchHouseholds(ctx context.Context, q string, lim
 			LastActiveAt:    timePtrOf(row.LastActiveAt),
 			PrimaryCurrency: row.PrimaryCurrency,
 		}
-		// The lateral join names a matching member for every row of a
-		// non-empty search; it is only a *reason the row appeared* when the
-		// household's own fields did not match.
+		// For a non-empty search the lateral join names the first member
+		// whose name or email matched, if any; it is a *reason the row
+		// appeared* only when the household's own fields did not match, so
+		// Match is set only then -- MatchName can be non-nil on a row the
+		// household's own name or family name already matched (e.g. a
+		// household and one of its members share a substring), and that row
+		// must not report a member match too.
 		if !row.HouseholdMatched && row.MatchName != nil {
 			listing.Match = &usecase.MemberMatch{Name: *row.MatchName, Email: row.MatchEmail}
 		}

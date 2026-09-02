@@ -128,6 +128,11 @@ func TestSearchHouseholdsMatchesEveryFieldCaseInsensitively(t *testing.T) {
 		{"OENTORO", h.ID, ""},
 		{"CHRISTINE@", h.ID, "Christine"},
 		{"christ", h.ID, "Christine"},
+		// "ris" hits both: the household's own name ("Kris") and a member's
+		// display name ("Christine"). The household match must win -- Match
+		// stays nil -- proving HouseholdMatched suppresses a member match
+		// rather than the two being reported together.
+		{"ris", h.ID, ""},
 		{"wei@example", other.ID, "Wei"},
 	}
 	for _, tc := range cases {
