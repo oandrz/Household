@@ -335,30 +335,39 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 		Hasher:   hasher,
 		Clock:    clk,
 	})
+	// Policy is left zero here too: the drill-in's lockout line must be
+	// computed by the identical policy sign-in applies, and both
+	// constructors fill in domain.DefaultLockoutPolicy() when handed none.
+	adminDirectorySvc := usecase.NewAdminDirectoryService(usecase.AdminDirectoryDeps{
+		Directory:     postgres.NewAdminDirectoryRepo(db),
+		LoginAttempts: loginAttempts,
+		Clock:         clk,
+	})
 
 	deps := httpadapter.Deps{
-		Pinger:       db,
-		Auth:         authSvc,
-		Invites:      inviteSvc,
-		Members:      memberSvc,
-		Households:   householdSvc,
-		Signups:      signupSvc,
-		Accounts:     accountSvc,
-		Transactions: transactionSvc,
-		Categories:   categorySvc,
-		Budgets:      budgetSvc,
-		Goals:        goalSvc,
-		Bills:        billSvc,
-		Retros:       retroSvc,
-		Visions:      visionSvc,
-		Admin:        adminSvc,
-		AdminReauth:  adminReauthSvc,
-		Users:        users,
-		Memberships:  memberships,
-		Sessions:     sessions,
-		Tokens:       tokens,
-		Clock:        clk,
-		Secure:       false,
+		Pinger:         db,
+		Auth:           authSvc,
+		Invites:        inviteSvc,
+		Members:        memberSvc,
+		Households:     householdSvc,
+		Signups:        signupSvc,
+		Accounts:       accountSvc,
+		Transactions:   transactionSvc,
+		Categories:     categorySvc,
+		Budgets:        budgetSvc,
+		Goals:          goalSvc,
+		Bills:          billSvc,
+		Retros:         retroSvc,
+		Visions:        visionSvc,
+		Admin:          adminSvc,
+		AdminReauth:    adminReauthSvc,
+		AdminDirectory: adminDirectorySvc,
+		Users:          users,
+		Memberships:    memberships,
+		Sessions:       sessions,
+		Tokens:         tokens,
+		Clock:          clk,
+		Secure:         false,
 	}
 	router := httpadapter.NewRouter(deps)
 

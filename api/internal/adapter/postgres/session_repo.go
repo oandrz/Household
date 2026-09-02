@@ -37,6 +37,7 @@ func (r *SessionRepo) ByTokenHash(ctx context.Context, tokenHash []byte) (usecas
 		HouseholdID:         uuidToString(row.HouseholdID),
 		ExpiresAt:           timeOf(row.ExpiresAt),
 		AdminGrantExpiresAt: timePtrOf(row.AdminGrantExpiresAt),
+		LastSeenAt:          timePtrOf(row.LastSeenAt),
 	}, nil
 }
 
@@ -67,4 +68,13 @@ func (r *SessionRepo) GrantAdmin(ctx context.Context, tokenHash []byte, expiresA
 		TokenHash:           tokenHash,
 		AdminGrantExpiresAt: stamp,
 	}), "grant admin session")
+}
+
+// Touch writes only last_seen_at -- see GrantAdmin's comment above for why
+// each of the session's three timestamps has its own one-column statement.
+func (r *SessionRepo) Touch(ctx context.Context, tokenHash []byte, at time.Time) error {
+	return translate(r.q.TouchSession(ctx, sqlcgen.TouchSessionParams{
+		TokenHash:  tokenHash,
+		LastSeenAt: timestamptz(at),
+	}), "touch session")
 }

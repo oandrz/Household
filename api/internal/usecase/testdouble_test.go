@@ -363,6 +363,7 @@ type sessionRow struct {
 	ExpiresAt           time.Time
 	Revoked             bool
 	AdminGrantExpiresAt *time.Time
+	LastSeenAt          *time.Time
 }
 
 type sessionDouble struct {
@@ -401,6 +402,7 @@ func (d *sessionDouble) ByTokenHash(_ context.Context, tokenHash []byte) (usecas
 		HouseholdID:         row.HouseholdID,
 		ExpiresAt:           row.ExpiresAt,
 		AdminGrantExpiresAt: row.AdminGrantExpiresAt,
+		LastSeenAt:          row.LastSeenAt,
 	}, nil
 }
 
@@ -419,6 +421,16 @@ func (d *sessionDouble) GrantAdmin(_ context.Context, tokenHash []byte, expiresA
 		row.AdminGrantExpiresAt = expiresAt
 	}
 	return nil
+}
+
+// Touch mirrors the real repository's one-column write, the same
+// separation Extend and GrantAdmin keep here.
+func (d *sessionDouble) Touch(_ context.Context, tokenHash []byte, at time.Time) error {
+	if row, ok := d.rows[string(tokenHash)]; ok {
+		seen := at
+		row.LastSeenAt = &seen
+	}
+	return nil // TouchSession is :exec -- an unknown token is a silent no-op.
 }
 
 func (d *sessionDouble) RevokeByToken(_ context.Context, tokenHash []byte) error {

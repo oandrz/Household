@@ -84,7 +84,7 @@ function staticallyReachableFrom(entry: string): Set<string> {
 }
 
 describe("the main entry point's static import graph", () => {
-  it("never statically reaches AdminShell or AdminFlagsPage from main.tsx", () => {
+  it("never statically reaches any admin page from main.tsx", () => {
     const reachable = [...staticallyReachableFrom(ENTRY)];
 
     // A regression here looks exactly like someone "simplifying" router.tsx
@@ -92,8 +92,32 @@ describe("the main entry point's static import graph", () => {
     // a plain top-level `import { AdminShell } from
     // "../features/admin/AdminShell"` -- that one-line change is precisely
     // what would put either path below back into this list.
-    expect(reachable).not.toContain(join(SRC_ROOT, "features", "admin", "AdminShell.tsx"));
-    expect(reachable).not.toContain(join(SRC_ROOT, "features", "admin", "AdminFlagsPage.tsx"));
+    expect(reachable).not.toContain(
+      join(SRC_ROOT, "features", "admin", "AdminShell.tsx"),
+    );
+    expect(reachable).not.toContain(
+      join(SRC_ROOT, "features", "admin", "AdminFlagsPage.tsx"),
+    );
+    expect(reachable).not.toContain(
+      join(SRC_ROOT, "features", "admin", "AdminHouseholdsPage.tsx"),
+    );
+    // AdminHouseholdPage.tsx arrives in Task 9; the walk only checks
+    // absence, so this assertion holds now and keeps holding.
+    expect(reachable).not.toContain(
+      join(SRC_ROOT, "features", "admin", "AdminHouseholdPage.tsx"),
+    );
+    // The same regression can arrive one layer down: router.tsx importing a
+    // constant from useAdminDirectory.ts (or useAdmin.ts) rather than from a
+    // leaf module drags the hook itself, and everything it imports, into
+    // main.tsx's static graph even though no admin *component* is imported
+    // directly. directoryLimits.ts exists so router.tsx never has to do
+    // that (see its own header comment).
+    expect(reachable).not.toContain(
+      join(SRC_ROOT, "features", "admin", "useAdminDirectory.ts"),
+    );
+    expect(reachable).not.toContain(
+      join(SRC_ROOT, "features", "admin", "useAdmin.ts"),
+    );
   });
 
   // A walk that is silently broken (a resolution bug, ENTRY pointing at the
@@ -103,7 +127,9 @@ describe("the main entry point's static import graph", () => {
   it("does reach an ordinary route's component, proving the walk itself resolves real files", () => {
     const reachable = [...staticallyReachableFrom(ENTRY)];
 
-    expect(reachable).toContain(join(SRC_ROOT, "features", "overview", "OverviewPage.tsx"));
+    expect(reachable).toContain(
+      join(SRC_ROOT, "features", "overview", "OverviewPage.tsx"),
+    );
     expect(reachable).toContain(join(SRC_ROOT, "routes", "router.tsx"));
   });
 });

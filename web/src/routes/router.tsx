@@ -22,6 +22,8 @@
 //       /settings                                   -- the real Settings screen (Task 20)
 //     /admin       AdminShell (own chrome, no AppShell)  -> /admin/flags
 //       /admin/flags                                -- AdminFlagsPage
+//       /admin/households                           -- AdminHouseholdsPage (Task 8; tiles + search + rows)
+//       /admin/households/$householdId              -- AdminHouseholdPage (Task 9; the drill-in)
 //
 // The /admin subtree sits directly under authenticatedRoute, a sibling of
 // shellRoute rather than a child of it: the admin surface has its own
@@ -66,9 +68,14 @@ import {
   createRoute,
   createRouter,
   redirect,
+  useNavigate,
   useParams,
   useSearch,
 } from "@tanstack/react-router";
+import {
+  DIRECTORY_DEFAULT_LIMIT,
+  DIRECTORY_MAX_LIMIT,
+} from "../features/admin/directoryLimits";
 import { InviteScreen } from "../features/auth/InviteScreen";
 import { MagicLinkConsumeScreen } from "../features/auth/MagicLinkConsumeScreen";
 import { SignInScreen } from "../features/auth/SignInScreen";
@@ -313,10 +320,24 @@ const settingsRoute = createRoute({
 // rather than a default export: both components keep the named-export
 // convention every other file in this codebase uses.
 const LazyAdminShell = lazy(() =>
-  import("../features/admin/AdminShell").then((m) => ({ default: m.AdminShell })),
+  import("../features/admin/AdminShell").then((m) => ({
+    default: m.AdminShell,
+  })),
 );
 const LazyAdminFlagsPage = lazy(() =>
-  import("../features/admin/AdminFlagsPage").then((m) => ({ default: m.AdminFlagsPage })),
+  import("../features/admin/AdminFlagsPage").then((m) => ({
+    default: m.AdminFlagsPage,
+  })),
+);
+const LazyAdminHouseholdsPage = lazy(() =>
+  import("../features/admin/AdminHouseholdsPage").then((m) => ({
+    default: m.AdminHouseholdsPage,
+  })),
+);
+const LazyAdminHouseholdPage = lazy(() =>
+  import("../features/admin/AdminHouseholdPage").then((m) => ({
+    default: m.AdminHouseholdPage,
+  })),
 );
 
 // The Suspense fallback below is inlined at both call sites rather than
@@ -373,6 +394,94 @@ const adminFlagsRoute = createRoute({
   ),
 });
 
+// The households list keeps its search and limit in the URL, so reload,
+// back and the audit row all agree on what was shown. The page itself
+// takes them as props and hands navigation back here -- the same split
+// signInMagicRoute makes for its token.
+const adminHouseholdsRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: "households",
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { q: string; limit: number } => ({
+    q: typeof search.q === "string" ? search.q : "",
+    limit:
+      typeof search.limit === "number" &&
+      Number.isInteger(search.limit) &&
+      search.limit > 0
+        ? search.limit
+        : DIRECTORY_DEFAULT_LIMIT,
+  }),
+  // Named, not an inline arrow, for the identical reason
+  // signInMagicRoute's own comment gives: this one calls hooks directly
+  // (useSearch, useNavigate), and eslint-plugin-react-hooks only recognises
+  // a function as a component -- and so allows it to call hooks -- by its
+  // name starting with an uppercase letter.
+  component: function AdminHouseholdsRouteComponent() {
+    // "/authenticated/admin/households", not the public "/admin/households"
+    // URL: useSearch's `from` takes a route ID, and authenticatedRoute is a
+    // pathless route (id "authenticated", no `path`) -- its id still joins
+    // the chain that identifies a route, even though it contributes nothing
+    // to the URL a caller actually types or a <Link to> resolves against.
+    const { q, limit } = useSearch({ from: "/authenticated/admin/households" });
+    const navigate = useNavigate();
+    return (
+      <Suspense
+        fallback={
+          <main className="grid min-h-dvh place-items-center">
+            <p className="text-sm text-muted">Loading…</p>
+          </main>
+        }
+      >
+        <LazyAdminHouseholdsPage
+          q={q}
+          limit={limit}
+          onSearch={(next) =>
+            navigate({
+              to: "/admin/households",
+              search: { q: next, limit: DIRECTORY_DEFAULT_LIMIT },
+            })
+          }
+          onShowMore={() =>
+            navigate({
+              to: "/admin/households",
+              search: {
+                q,
+                limit: Math.min(limit * 2, DIRECTORY_MAX_LIMIT),
+              },
+            })
+          }
+        />
+      </Suspense>
+    );
+  },
+});
+
+const adminHouseholdRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: "households/$householdId",
+  // Named for the same rules-of-hooks reason as adminHouseholdsRoute's own
+  // component just above.
+  component: function AdminHouseholdRouteComponent() {
+    // Same route-ID-vs-URL-path distinction as adminHouseholdsRoute's own
+    // useSearch above.
+    const { householdId } = useParams({
+      from: "/authenticated/admin/households/$householdId",
+    });
+    return (
+      <Suspense
+        fallback={
+          <main className="grid min-h-dvh place-items-center">
+            <p className="text-sm text-muted">Loading…</p>
+          </main>
+        }
+      >
+        <LazyAdminHouseholdPage householdId={householdId} />
+      </Suspense>
+    );
+  },
+});
+
 // Exported (not just `router`) so a test can mount the real tree with its
 // own memory history and QueryClient instead of RouterProvider's registered
 // singleton -- see routes/router.test.tsx.
@@ -392,13 +501,22 @@ export const routeTree = rootRoute.addChildren([
         moneyGoalsRoute,
         moneyBillsRoute,
       ]),
-      marriageGuardRoute.addChildren([marriageIndexRoute, marriageRetrosRoute, marriageVisionRoute]),
+      marriageGuardRoute.addChildren([
+        marriageIndexRoute,
+        marriageRetrosRoute,
+        marriageVisionRoute,
+      ]),
       settingsRoute,
     ]),
     // A sibling of shellRoute, not nested inside it: the admin surface does
     // not get AppShell's sidebar (this file's own header comment explains
     // why).
-    adminRoute.addChildren([adminIndexRoute, adminFlagsRoute]),
+    adminRoute.addChildren([
+      adminIndexRoute,
+      adminFlagsRoute,
+      adminHouseholdsRoute,
+      adminHouseholdRoute,
+    ]),
   ]),
 ]);
 

@@ -74,13 +74,14 @@ type Deps struct {
 	// own doc comment in auth_handlers.go for which callers that is and why --
 	// since they run before a session exists to hand requireSession anything
 	// to check.
-	Admin       *usecase.AdminService
-	AdminReauth *usecase.AdminReauthService
-	Users       usecase.UserRepository
-	Memberships usecase.MembershipRepository
-	Sessions    usecase.SessionRepository
-	Tokens      usecase.TokenGenerator
-	Clock       usecase.Clock
+	Admin          *usecase.AdminService
+	AdminReauth    *usecase.AdminReauthService
+	AdminDirectory *usecase.AdminDirectoryService
+	Users          usecase.UserRepository
+	Memberships    usecase.MembershipRepository
+	Sessions       usecase.SessionRepository
+	Tokens         usecase.TokenGenerator
+	Clock          usecase.Clock
 	// Secure controls the Secure flag on the session and CSRF cookies. It is
 	// !cfg.IsDevelopment(): false only in development, so cookies still work
 	// over plain http on localhost.
@@ -430,6 +431,11 @@ func NewRouter(deps Deps) http.Handler {
 					granted.Put("/flags/{key}", handleSetGlobalFlag(deps))
 					granted.Put("/flags/{key}/households/{householdID}", handleSetHouseholdFlag(deps))
 					granted.Delete("/flags/{key}/households/{householdID}", handleClearHouseholdFlag(deps))
+
+					// The operator's directory: two reads. See
+					// admin_directory_handlers.go.
+					granted.Get("/households", handleAdminHouseholds(deps))
+					granted.Get("/households/{householdID}", handleAdminHousehold(deps))
 				})
 			})
 		})

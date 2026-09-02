@@ -519,6 +519,13 @@ Message bodies contain working magic-link, invite and sign-up URLs. Therefore:
 
 ## 6. Households and metrics
 
+**Expanded in `2026-09-02-hearth-admin-households-design.md`, which wins where
+the two differ.** That spec was written when this item came up for build; it
+keeps everything below and adds the things a sketch this size could not settle
+— the search predicate, the four counters exactly, `sessions.last_seen_at` and
+why "last activity" is not `created_at`, the drill-in's lockout line, and the
+decision that this item needs no configuration of its own (see §9).
+
 `/admin/households`, reading tables that already exist. No analytics table is
 added; a counter that can drift from the rows it counts is worse than a query.
 
@@ -624,9 +631,14 @@ indistinguishable from a typo.
 5. `MAILPIT_API_URL`; then the outbound inspector.
 6. Households and metrics.
 
-Each of 4, 5 and 6 sits behind its own configuration and is unavailable without
+Each of 4 and 5 sits behind its own configuration and is unavailable without
 it, so a box provisioned halfway degrades to "this panel is off", never to
-something open.
+something open. **6 needs none and is always available to a granted admin** —
+corrected on 2026-09-02 when it was built: the database browse needs a
+Postgres role and the inspector needs a Mailpit URL, but households and
+metrics reads tables this schema already has, so there is nothing to provision
+and therefore nothing to gate on
+(`2026-09-02-hearth-admin-households-design.md`, decision 11).
 
 ---
 

@@ -204,6 +204,11 @@ $C run --rm admin /app/adminctl create-invite \
 
 # Retention: delete consumed/expired signups and Telegram link requests,
 # and stale login attempts.
+#
+# Keep this at 30 or above: /admin/households' 30-day sign-up counter reads
+# the rows this deletes. The floor the command enforces is 7, which would
+# leave that tile silently under-reporting for three weeks -- nothing errors,
+# the number is just wrong.
 $C run --rm admin /app/adminctl prune --older-than=30
 
 # Migration status. `admin` only gets GOOSE_DBSTRING from .env — GOOSE_DRIVER

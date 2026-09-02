@@ -24,6 +24,11 @@ func TestAdminRoutesAre404ToANonAdmin(t *testing.T) {
 	rec := env.authedGet(t, "/api/v1/admin/flags", session)
 	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
 
+	rec = env.authedGet(t, "/api/v1/admin/households", session)
+	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
+	rec = env.authedGet(t, "/api/v1/admin/households/"+env.householdID, session)
+	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
+
 	rec = env.authed(t, http.MethodPost, "/api/v1/admin/session",
 		map[string]string{"password": env.ownerPassword}, session, csrf)
 	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
@@ -272,6 +277,11 @@ func TestAdminRoutesNeedAGrant(t *testing.T) {
 
 	rec := env.authedGet(t, "/api/v1/admin/flags", session)
 	assertErrorResponse(t, rec, http.StatusUnauthorized, "ADMIN_REAUTH_REQUIRED")
+
+	rec = env.authedGet(t, "/api/v1/admin/households", session)
+	assertErrorResponse(t, rec, http.StatusUnauthorized, "ADMIN_REAUTH_REQUIRED")
+	rec = env.authedGet(t, "/api/v1/admin/households/"+env.householdID, session)
+	assertErrorResponse(t, rec, http.StatusUnauthorized, "ADMIN_REAUTH_REQUIRED")
 }
 
 // TestAdminSessionMintsAGrant walks the whole happy path: re-authenticate,
@@ -359,6 +369,14 @@ func TestEveryAdminRequestIsAudited(t *testing.T) {
 	if after != before+1 {
 		t.Fatalf("audit rows went %d -> %d; a read must write exactly one row", before, after)
 	}
+
+	for _, path := range []string{"/api/v1/admin/households", "/api/v1/admin/households/" + env.householdID} {
+		before = env.auditRowCount(t)
+		env.authedGet(t, path, session)
+		if after := env.auditRowCount(t); after != before+1 {
+			t.Fatalf("%s: audit rows went %d -> %d; a read must write exactly one row", path, before, after)
+		}
+	}
 }
 
 // TestAdminAuditRowRecordsTheRealRequest guards what TestEveryAdminRequestIsAudited
@@ -392,6 +410,36 @@ func TestAdminAuditRowRecordsTheRealRequest(t *testing.T) {
 	}
 	if entries[0].Target != "/api/v1/admin/flags" {
 		t.Fatalf("Target = %q, want %q", entries[0].Target, "/api/v1/admin/flags")
+	}
+}
+
+// TestAdminAuditRowRecordsTheQueryString: a search is a fact the log should
+// hold ("the operator looked for christine@"), and it is the one part of a
+// request that is available before chi has parsed route parameters -- see
+// auditAdmin's own comment on why Detail is otherwise empty.
+func TestAdminAuditRowRecordsTheQueryString(t *testing.T) {
+	env := newTestEnv(t)
+	env.makePlatformAdmin(t, env.ownerEmail)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	env.authed(t, http.MethodPost, "/api/v1/admin/session",
+		map[string]string{"password": env.ownerPassword}, session, csrf)
+
+	env.authedGet(t, "/api/v1/admin/flags?probe=1&limit=5", session)
+	entries, err := env.adminAudit.Recent(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("Recent: %v", err)
+	}
+	if got := entries[0].Detail["query"]; got != "probe=1&limit=5" {
+		t.Fatalf("Detail[query] = %v, want the raw query string", got)
+	}
+
+	env.authedGet(t, "/api/v1/admin/flags", session)
+	entries, err = env.adminAudit.Recent(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("Recent: %v", err)
+	}
+	if _, present := entries[0].Detail["query"]; present {
+		t.Fatalf("a request with no query string still wrote Detail[query] = %v", entries[0].Detail["query"])
 	}
 }
 

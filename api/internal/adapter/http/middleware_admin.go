@@ -80,8 +80,9 @@ func requirePlatformAdmin(deps Deps) func(http.Handler) http.Handler {
 // this middleware and requireCSRF have all already executed. A row written
 // here, before the handler runs, therefore cannot carry those parameters;
 // the path itself already contains every value they would have held, so
-// Detail is left an empty object rather than populated with data that isn't
-// there yet.
+// Detail therefore never carries route parameters; it carries the raw query
+// string when the URL has one (a search term is worth recording, and it is
+// parsed before routing), and is otherwise an empty object.
 //
 // requireCSRF runs inside this middleware, not outside it, so a request
 // refused for a missing or mismatched CSRF token has already left its row.
@@ -98,11 +99,21 @@ func auditAdmin(deps Deps) func(http.Handler) http.Handler {
 				return
 			}
 
+			// The query string is the one part of a request that is both
+			// meaningful to record (a search term, a limit) and available
+			// here, before chi has matched the route -- see the comment
+			// above on why route parameters are not. Absent on a URL with
+			// none, so the common row stays {}.
+			detail := map[string]any{}
+			if r.URL.RawQuery != "" {
+				detail["query"] = r.URL.RawQuery
+			}
+
 			if err := deps.Admin.RecordAudit(r.Context(), usecase.AdminAuditEntry{
 				ActorUserID: scope.UserID,
 				Action:      r.Method + " " + r.URL.Path,
 				Target:      r.URL.Path,
-				Detail:      map[string]any{},
+				Detail:      detail,
 				// r.RemoteAddr here is middleware.RealIP's rewrite of it, read
 				// from headers -- so this column is only ever as trustworthy as
 				// the proxy in front of the service. web/nginx.conf is what

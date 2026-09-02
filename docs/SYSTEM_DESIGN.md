@@ -389,6 +389,7 @@ graph TD
         Retro["RetroService — Save is the shared-draft<br/>version guard; SetActionDone never<br/>touches it, a second repository entirely"]
         Vision["VisionService — Get resolves linked<br/>measures through GoalProgressReader;<br/>Save replaces the whole document,<br/>version 0 meaning create"]
         AdminSvc["AdminService — IsPlatformAdmin, flags<br/>read/write, RecordAudit; takes no actor<br/>parameter for any permission decision"]
+        AdminDirectorySvc["AdminDirectoryService — Overview (metrics + search),<br/>Household (members, invites, lockout);<br/>reads across every household; no writes"]
         AdminReauth["AdminReauthService — Verify, against<br/>its own ledger, never login_attempts"]
         Seed["Seed"]
     end
@@ -428,6 +429,24 @@ compile-time edge to draw between those two packages, and drawing one would
 tell a reader the compiler is already checking that relationship. It is not:
 `main.go`'s `var _ telegram.StartHandler = (*usecase.TelegramAuthService)(nil)`
 is what does. §3 carries the full reasoning.
+
+**`AdminDirectoryService` is a second admin service rather than four more
+methods on `AdminService`, and it is the only thing in the product that reads
+across household boundaries.** `AdminService` is "who is a platform admin,
+feature flags, the audit log"; describing it *and* cross-household reads would
+need the word "and", which `CLAUDE.md` names as the moment to split
+(`2026-09-02-hearth-admin-households-design.md`, decision 8). Composing the
+same screen from the existing household-scoped ports was the alternative and
+was rejected: every one of them answers for exactly one household, so listing
+every household would have meant new methods on four ports and an N+1 call per
+count. It holds two ports — `AdminDirectoryRepository`, new and read-only, and
+`LoginAttemptRepository`, reused unchanged so that "this household is locked
+out of sign-in" has one definition rather than the drill-in's own copy of the
+rule (§3). Neither is drawn above, because this diagram draws services and
+adapters and never ports; §3's table is where every port in this system is
+listed. Like every other service here it takes no actor parameter — the
+`/admin` guards in §4 are the only gate, and they are the whole reason a
+cross-household read is safe to exist at all.
 
 **Two rules that shape everything else:**
 
@@ -491,6 +510,7 @@ is what does. §3 carries the full reasoning.
 | `FeatureFlagRepository` | `adapter/postgres` | Twenty-third. `OverridesFor` is the one query `requireSession` runs on every authenticated request — both the global and the household layer in a single `UNION ALL` statement, never two round trips. `key` carries no foreign key to a registry table, because the registry (`domain.AllFlags`) is compile-time; a row can outlive the `const` that named it, and `SetHousehold`/`ClearHousehold` are two different operations on purpose — setting a household's override to `false` and removing the override row entirely are different states downstream, not the same write with a different value |
 | `AdminAuditRepository` | `adapter/postgres` | Twenty-fourth, and append-only by convention rather than by any database privilege: `Record` and `Recent` are its only two methods, there is no `Delete`, and `adminctl prune` does not touch `admin_audit_log`. `Recent`'s own limit is unclamped at the repository — the clamp (max 500, default 50) lives one layer up, in `AdminService.RecentAudit`, the same division of labour `TransactionRepository`'s keyset paging draws between "the query can do this" and "the service decides how much of it a caller gets" |
 | `AdminReauthAttemptRepository` | `adapter/postgres` | Twenty-fifth, and the reason a fifth login-adjacent table exists at all rather than reusing `LoginAttemptRepository`: `FailuresSince`, `Record` and `ClearFailures` run against `admin_reauth_attempts`, keyed on `user_id`, never `household_id` — see §6 and [ADR 5](adr/0005-platform-admin-authorization.md) for the blast-radius reasoning `login_attempts`' own household scoping would have carried over silently if this port had wrapped that table instead of adding its own |
+| `AdminDirectoryRepository` | `adapter/postgres` | Twenty-sixth. `Metrics`/`SearchHouseholds`/`Household`, read-only, and the one port that reads across household boundaries — every other repository in this table answers for a single household, which is why composing this screen out of them would have meant new methods on four ports and an N+1 call per counter. Its SQL file is the only place `COALESCE(last_seen_at, created_at)` appears, so "when was this session last used" has exactly one definition (§6); `SearchHouseholds` reaches its matching member through a `LEFT JOIN` onto `users` itself rather than onto the lateral subquery, because sqlc types a column selected through a derived table as non-nullable and the scan then fails at runtime on the first household with no member match (`docs/LEARNING.md`) |
 | `TelegramSender` | `adapter/telegram` | The Telegram twin of `Mailer`, and justified the same way: the usecase layer must not hold an HTTP client, and `TelegramAuthService` must be testable against a double. One method, `SendMessage(ctx, chatID, text)` — plain text, no template system, exactly as the mailer has none |
 | `PasswordHasher`, `TokenGenerator` | `adapter/crypto` | argon2id with cost from config; tokens are random, stored hashed |
 | `Mailer` | `adapter/mail` | SMTP; TLS policy and credentials from config |
@@ -527,15 +547,20 @@ of the feature: a caller-substitutable chat id would let someone bind a
 household to a chat they control rather than the one that actually completed the
 sign-up.
 
-**`SessionRepository` gained one method, `GrantAdmin`,** rather than a second
-table joined to `sessions` by its token hash. Its own doc comment states the
-one thing a future editor of `ExtendSession` must not do: "it writes one
-column: session extension and this must not overwrite each other." Both
-statements are single-column `UPDATE`s on purpose — `ExtendSession` touches
-`expires_at` only and `GrantAdmin` touches `admin_grant_expires_at` only — so
-widening either into a whole-row `UPDATE` would silently reset the other the
-next time a session extends or an admin re-authenticates. A nil expiry
-*clears* the grant rather than being a distinct "revoke" call, the same
+**`SessionRepository` gained `GrantAdmin`, and later `Touch`,** rather than a
+second table joined to `sessions` by its token hash. `GrantAdmin`'s own doc
+comment states the one thing a future editor must not do: "it writes one
+column: session extension and this must not overwrite each other." All three
+statements are single-column `UPDATE`s on purpose — `Extend` touches
+`expires_at` only, `GrantAdmin` touches `admin_grant_expires_at` only, and
+`Touch` touches `last_seen_at` only — so widening any of them into a
+whole-row `UPDATE` would silently reset the others the next time a session
+extends, an admin re-authenticates, or any authenticated request arrives.
+`Touch` is the newest and the most frequently called of the three, which is
+what makes the rule worth restating rather than assuming: it runs on ordinary
+traffic, not on a rare admin action, so a widened `UPDATE` there would clear
+grants and expiries continuously. A nil expiry *clears* the grant rather than
+being a distinct "revoke" call, the same
 nullable-means-unset shape `accounts.owner_membership_id` already uses (§6).
 
 `BankSyncProvider` is specified but has no consumer yet. Accounts, the first
@@ -569,7 +594,7 @@ graph TD
     Public -->|"sign-in, magic-link,<br/>magic-link/consume,<br/>invites/{token},<br/>currencies"| Handler
     Public -->|"sign-up*, telegram/start"| PublicFeature["requireFeature(flag)<br/>no Scope yet — resolves the<br/>GLOBAL flag set only; 404 if off"]
     PublicFeature --> Handler
-    Public -->|no| Session["requireSession<br/>reads hearth_session cookie,<br/>re-reads membership, resolves this<br/>household's flags, extends when<br/>under a day remains"]
+    Public -->|no| Session["requireSession<br/>reads hearth_session cookie,<br/>re-reads membership, resolves this<br/>household's flags, extends when<br/>under a day remains, then touches<br/>last_seen_at when it is null or older<br/>than an hour — best-effort, like the extend"]
 
     Session --> RouteKind{"/admin subtree?"}
     RouteKind -->|yes| AdminChain["requirePlatformAdmin → auditAdmin<br/>→ requireCSRF (mutating only)<br/>→ [requireAdminGrant, granted<br/>group only] — see the diagram below"]
@@ -604,6 +629,19 @@ graph TD
 **The membership is re-read on every request**, never cached in the session row.
 A capability change therefore takes effect on the caller's very next request;
 session revocation is belt-and-braces rather than the enforcement mechanism.
+
+**`requireSession` also stamps `sessions.last_seen_at`, but at most once an
+hour per session** (`sessionTouchInterval`), and only when the column is null
+or already that stale. It is the last write in the chain and it is
+**best-effort in exactly the way the extend above is**: a failed `UPDATE` is
+logged and the request continues, because a usage timestamp that could not be
+written must never turn an already-authenticated request into a 401. The
+throttle is what makes the column affordable — without it every authenticated
+request would carry a write. It exists for one reader, the operator's "active
+in the last 7 days" tile (`2026-09-02-hearth-admin-households-design.md`,
+decision 3), and it is a *use* timestamp rather than a sign-in one on purpose:
+sessions live 30 days and are extended in place, so `sessions.created_at`
+reads a daily user on a phone as gone for a month.
 
 **`requireSession` also resolves this household's feature flags on every
 authenticated request, uncached**, in the same breath as the membership
@@ -670,9 +708,17 @@ never chi's per-route `{key}`/`{householdID}` parameters: `chi`'s
 `FindRoute` — the thing that would populate them — runs inside `routeHTTP`,
 after every subtree middleware including this one, so they are simply not
 yet available at the point this write happens. The path itself already
-contains every value those parameters would have held, so nothing is lost;
-`Detail` is left an empty object rather than populated with data that isn't
-there yet.
+contains every value those parameters would have held, so nothing is lost.
+**`Detail` now carries one thing the path does not: the request's raw query
+string, as `detail.query`, whenever there is one.** `r.URL.RawQuery` *is*
+available this early — it is parsed from the request line, not from a route
+match — and the households search is the reason it is recorded: "the operator
+searched for `christine@`" is a fact the log should hold, and a search that
+answers with a customer's household while the audit row says only
+`GET /api/v1/admin/households` is an incomplete record of what was looked at.
+It is written in the middleware, so it applies to every admin route rather
+than to the one that prompted it; `Detail` stays an empty object on a request
+with no query string.
 
 **The accepted limit, named rather than left for someone to rediscover:** an
 unauthenticated caller gets `401`, not `404`, on `/api/v1/admin/*`, because
@@ -805,6 +851,8 @@ that presses `/start` is Telegram's, not the person's.
 | GET | `/admin/flags` | session · admin (`requirePlatformAdmin`) · grant |
 | PUT | `/admin/flags/{key}` | session · admin · grant · CSRF (covered by the subtree's own root-level CSRF, §4) |
 | PUT · DELETE | `/admin/flags/{key}/households/{householdID}` | session · admin · grant · CSRF, same group as the row above |
+| GET | `/admin/households?q=&limit=` | session · admin · grant — one request answers the whole page, counters and rows together, so one page view is one audit row; the query string lands in that row's `detail.query` |
+| GET | `/admin/households/{householdID}` | session · admin · grant — read-only; a malformed id is refused by the handler before the service is called, answering the same `404` an unknown household does |
 | GET | `/accounts` | session · money |
 | POST | `/accounts` | session · money · CSRF · owner |
 | PATCH | `/accounts/{id}` | session · money · CSRF · owner |
@@ -2191,6 +2239,7 @@ erDiagram
         timestamptz expires_at
         timestamptz revoked_at
         timestamptz admin_grant_expires_at "nullable — the re-auth grant; not a second cookie"
+        timestamptz last_seen_at "nullable — last use, refreshed at most hourly; readers COALESCE with created_at"
     }
     platform_admins {
         uuid user_id PK "also FK to users, ON DELETE CASCADE"
@@ -2215,7 +2264,7 @@ erDiagram
         uuid actor_user_id FK "NOT NULL, no ON DELETE CASCADE — see the notes below"
         text action "method plus path, e.g. GET /api/v1/admin/flags"
         text target "the request path — see the notes below for why, not the route pattern"
-        jsonb detail "NOT NULL, defaults empty — never a secret, never a row value"
+        jsonb detail "NOT NULL, defaults empty — carries the raw query string as detail.query when there is one; never a secret, never a row value"
         text ip "trustworthy only as far as the proxy in front of this service"
         timestamptz created_at
     }
@@ -3015,15 +3064,44 @@ web/src/
                        carries the operator chrome (a distinct header
                        treatment, an explicit "Hearth · Operator" label) so
                        which surface you are on never depends on reading the
-                       URL. AdminFlagsPage is the one screen this branch
-                       ships behind that gate -- see docs/FEATURE_TRACKER.md
-                       §9 for what it can and cannot do yet. useAdmin.ts
-                       holds the hooks (useAdminSession, useAdminFlags,
+                       URL, and it carries the operator nav (Flags ·
+                       Households) now that there is more than one screen to
+                       move between. Three screens sit behind that gate:
+                       AdminFlagsPage at /admin/flags, AdminHouseholdsPage at
+                       /admin/households (four counters, an explicit search
+                       submitted on Enter or a button -- never on keystroke,
+                       because every admin request writes an audit row -- and
+                       one row per household), and AdminHouseholdPage at
+                       /admin/households/$householdId, the read-only drill-in
+                       (members, channel, pending invites, the household's
+                       sign-in lockout, and no money at all). All three are
+                       lazy, the same as AdminShell itself, so the chunk
+                       assertion above holds for the whole subtree. See
+                       docs/FEATURE_TRACKER.md §9 for what each can and
+                       cannot do yet. adminDirectorySchemas.ts parses both
+                       directory responses strictly, so a key the server
+                       stops sending is a failed parse rather than an
+                       undefined rendered as blank; directoryCopy.ts holds
+                       the labels and relativeTimeLabel, whose first branch
+                       must stay first -- a timestamp in the future (clock
+                       skew) has to read "just now" rather than a negative
+                       age. useAdmin.ts holds the flag hooks
+                       (useAdminSession, useAdminFlags,
                        useSetGlobalFlag, useSetHouseholdFlag,
                        useClearHouseholdFlag) and toAdminGateError, which
                        coerces a non-ApiError failure (status 0) into the
                        same shape AdminGate switches on, so a network blip
                        gets the server-message screen too, not a crash.
+                       useAdminDirectory.ts holds the two directory hooks
+                       (useAdminHouseholds, useAdminHousehold) and
+                       useCloseSurfaceOnReauth, which turns a mid-session
+                       ADMIN_REAUTH_REQUIRED into a refetch of the query
+                       AdminGate already watches, so the whole surface
+                       closes rather than one page growing a second
+                       password prompt of its own. NOT_FOUND is
+                       deliberately not routed that way: on the drill-in a
+                       404 means "no such household" and is the page's own
+                       to render.
                        useFeature.ts lives here too, despite every screen in
                        the app needing it, not only this one -- it reads
                        data?.features?.[key] === true off the same useMe

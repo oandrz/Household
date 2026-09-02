@@ -56,6 +56,14 @@ const SessionTTL = 30 * 24 * time.Hour
 // gets roughly one extension every 29 days, not one per request.
 const sessionExtendThreshold = 24 * time.Hour
 
+// sessionTouchInterval is how stale sessions.last_seen_at may be before a
+// request refreshes it. One write per session-hour rather than one per
+// request: the column answers "was this household active this week", which
+// an hour's resolution serves completely, and this middleware runs on every
+// authenticated request. Compare sessionExtendThreshold above, which bounds
+// a different write for the same reason.
+const sessionTouchInterval = time.Hour
+
 // requireSession reads the hearth_session cookie, resolves it to a live
 // session, loads the caller's membership, and stores both as a Scope on the
 // request context. A missing or unresolvable cookie -- absent, unknown,
@@ -115,6 +123,16 @@ func requireSession(deps Deps) func(http.Handler) http.Handler {
 					if csrfCookie, err := r.Cookie(csrfCookieName); err == nil {
 						setCSRFCookie(w, deps, csrfCookie.Value, newExpiry)
 					}
+				}
+			}
+
+			if record.LastSeenAt == nil || now.Sub(*record.LastSeenAt) >= sessionTouchInterval {
+				if err := deps.Sessions.Touch(ctx, hash, now); err != nil {
+					// Best-effort, exactly like Extend above: a usage
+					// timestamp that could not be written must not turn an
+					// authenticated request into a failure. The next request
+					// tries again.
+					slog.Warn("failed to touch session", "error", err)
 				}
 			}
 
