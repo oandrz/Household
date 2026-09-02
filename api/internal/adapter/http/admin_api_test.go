@@ -24,6 +24,11 @@ func TestAdminRoutesAre404ToANonAdmin(t *testing.T) {
 	rec := env.authedGet(t, "/api/v1/admin/flags", session)
 	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
 
+	rec = env.authedGet(t, "/api/v1/admin/households", session)
+	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
+	rec = env.authedGet(t, "/api/v1/admin/households/"+env.householdID, session)
+	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
+
 	rec = env.authed(t, http.MethodPost, "/api/v1/admin/session",
 		map[string]string{"password": env.ownerPassword}, session, csrf)
 	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
@@ -272,6 +277,11 @@ func TestAdminRoutesNeedAGrant(t *testing.T) {
 
 	rec := env.authedGet(t, "/api/v1/admin/flags", session)
 	assertErrorResponse(t, rec, http.StatusUnauthorized, "ADMIN_REAUTH_REQUIRED")
+
+	rec = env.authedGet(t, "/api/v1/admin/households", session)
+	assertErrorResponse(t, rec, http.StatusUnauthorized, "ADMIN_REAUTH_REQUIRED")
+	rec = env.authedGet(t, "/api/v1/admin/households/"+env.householdID, session)
+	assertErrorResponse(t, rec, http.StatusUnauthorized, "ADMIN_REAUTH_REQUIRED")
 }
 
 // TestAdminSessionMintsAGrant walks the whole happy path: re-authenticate,
@@ -358,6 +368,14 @@ func TestEveryAdminRequestIsAudited(t *testing.T) {
 
 	if after != before+1 {
 		t.Fatalf("audit rows went %d -> %d; a read must write exactly one row", before, after)
+	}
+
+	for _, path := range []string{"/api/v1/admin/households", "/api/v1/admin/households/" + env.householdID} {
+		before = env.auditRowCount(t)
+		env.authedGet(t, path, session)
+		if after := env.auditRowCount(t); after != before+1 {
+			t.Fatalf("%s: audit rows went %d -> %d; a read must write exactly one row", path, before, after)
+		}
 	}
 }
 
