@@ -59,9 +59,7 @@ const NO_SESSION = {
   body: { error: { code: "UNAUTHENTICATED", message: "Sign in required." } },
 };
 
-function invitePreviewFixture(
-  overrides: Partial<InvitePreview> = {},
-): InvitePreview {
+function invitePreviewFixture(overrides: Partial<InvitePreview> = {}): InvitePreview {
   return {
     householdName: "Andreas & Christine",
     inviterName: "Andreas",
@@ -120,9 +118,7 @@ describe("the real route tree", () => {
 
     const { router } = renderApp("/");
 
-    await waitFor(() =>
-      expect(router.state.location.pathname).toBe("/sign-in"),
-    );
+    await waitFor(() => expect(router.state.location.pathname).toBe("/sign-in"));
     expect(await screen.findByText("Welcome back.")).toBeInTheDocument();
   });
 
@@ -226,9 +222,7 @@ describe("the real route tree", () => {
       "GET /api/v1/auth/me": { status: 200, body: meFixture() },
       "GET /api/v1/currencies": {
         status: 200,
-        body: {
-          currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }],
-        },
+        body: { currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }] },
       },
       "GET /api/v1/categories": { status: 200, body: { categories: [] } },
       "GET /api/v1/household/members": { status: 200, body: [] },
@@ -238,13 +232,7 @@ describe("the real route tree", () => {
         body: {
           transactions: [],
           nextCursor: null,
-          summary: {
-            currency: "SGD",
-            month: "2026-07",
-            count: 0,
-            spentMinor: 0,
-            excludedNoRate: [],
-          },
+          summary: { currency: "SGD", month: "2026-07", count: 0, spentMinor: 0, excludedNoRate: [] },
         },
       },
     });
@@ -305,9 +293,7 @@ describe("the real route tree", () => {
       "GET /api/v1/auth/me": { status: 200, body: meFixture() },
       "GET /api/v1/currencies": {
         status: 200,
-        body: {
-          currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }],
-        },
+        body: { currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }] },
       },
       "GET /api/v1/budgets/2026-07": {
         status: 200,
@@ -389,9 +375,7 @@ describe("the real route tree", () => {
       "GET /api/v1/auth/me": { status: 200, body: meFixture() },
       "GET /api/v1/currencies": {
         status: 200,
-        body: {
-          currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }],
-        },
+        body: { currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }] },
       },
       "GET /api/v1/goals": {
         status: 200,
@@ -530,13 +514,7 @@ describe("the real route tree", () => {
       "GET /api/v1/auth/me": { status: 200, body: meFixture() },
       "GET /api/v1/retros": {
         status: 200,
-        body: {
-          retros: [],
-          mood: [],
-          doneCount: 0,
-          since: null,
-          startMonth: "2026-08",
-        },
+        body: { retros: [], mood: [], doneCount: 0, since: null, startMonth: "2026-08" },
       },
     });
 
@@ -588,14 +566,7 @@ describe("the real route tree", () => {
       "GET /api/v1/marriage/vision?year=2026": {
         status: 200,
         body: {
-          vision: {
-            year: 2026,
-            theme: "",
-            description: "",
-            version: 0,
-            pillars: [],
-            milestones: [],
-          },
+          vision: { year: 2026, theme: "", description: "", version: 0, pillars: [], milestones: [] },
         },
       },
     });
@@ -624,21 +595,13 @@ describe("the real route tree", () => {
       "GET /api/v1/auth/me": { status: 200, body: meFixture() },
       "GET /api/v1/retros": {
         status: 200,
-        body: {
-          retros: [],
-          mood: [],
-          doneCount: 0,
-          since: null,
-          startMonth: "2026-08",
-        },
+        body: { retros: [], mood: [], doneCount: 0, since: null, startMonth: "2026-08" },
       },
     });
 
     const { router } = renderApp("/marriage");
 
-    await waitFor(() =>
-      expect(router.state.location.pathname).toBe("/marriage/retros"),
-    );
+    await waitFor(() => expect(router.state.location.pathname).toBe("/marriage/retros"));
     expect(await screen.findByTestId("retros-page")).toBeInTheDocument();
     expect(screen.queryByText("Page not found.")).not.toBeInTheDocument();
   });
@@ -736,18 +699,13 @@ describe("the real route tree", () => {
   // directly never would.
   it("redirects a platform admin's bare /admin to /admin/flags", async () => {
     stubFetchRoutes({
-      "GET /api/v1/auth/me": {
-        status: 200,
-        body: meFixture({ isPlatformAdmin: true }),
-      },
+      "GET /api/v1/auth/me": { status: 200, body: meFixture({ isPlatformAdmin: true }) },
       "GET /api/v1/admin/flags": { status: 200, body: { flags: [] } },
     });
 
     const { router } = renderApp("/admin");
 
-    await waitFor(() =>
-      expect(router.state.location.pathname).toBe("/admin/flags"),
-    );
+    await waitFor(() => expect(router.state.location.pathname).toBe("/admin/flags"));
     expect(await screen.findByText("Hearth · Operator")).toBeInTheDocument();
     expect(
       await screen.findByRole("heading", { level: 1, name: "Feature flags" }),
@@ -766,20 +724,12 @@ describe("the real route tree", () => {
   // catch a mismatch between the two id spaces.
   it("mounts the households list at /admin/households, resolving useSearch's route id", async () => {
     stubFetchRoutes({
-      "GET /api/v1/auth/me": {
-        status: 200,
-        body: meFixture({ isPlatformAdmin: true }),
-      },
+      "GET /api/v1/auth/me": { status: 200, body: meFixture({ isPlatformAdmin: true }) },
       "GET /api/v1/admin/flags": { status: 200, body: { flags: [] } },
       "GET /api/v1/admin/households?limit=50": {
         status: 200,
         body: {
-          metrics: {
-            households: 0,
-            activeHouseholds7d: 0,
-            signups30d: { requested: 0, completed: 0 },
-            pendingInvites: 0,
-          },
+          metrics: { households: 0, activeHouseholds7d: 0, signups30d: { requested: 0, completed: 0 }, pendingInvites: 0 },
           households: [],
           truncated: false,
         },
@@ -788,28 +738,17 @@ describe("the real route tree", () => {
 
     renderApp("/admin/households");
 
-    expect(
-      await screen.findByRole("heading", { name: "Households" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Households" })).toBeInTheDocument();
   });
 
   it("mounts the household drill-in at /admin/households/$householdId, resolving useParams's route id", async () => {
     stubFetchRoutes({
-      "GET /api/v1/auth/me": {
-        status: 200,
-        body: meFixture({ isPlatformAdmin: true }),
-      },
+      "GET /api/v1/auth/me": { status: 200, body: meFixture({ isPlatformAdmin: true }) },
       "GET /api/v1/admin/flags": { status: 200, body: { flags: [] } },
       "GET /api/v1/admin/households/h1": {
         status: 200,
         body: {
-          household: {
-            id: "h1",
-            name: "Oentoro",
-            familyName: "Oentoro",
-            createdAt: "2026-08-15T02:11:09Z",
-            primaryCurrency: "SGD",
-          },
+          household: { id: "h1", name: "Oentoro", familyName: "Oentoro", createdAt: "2026-08-15T02:11:09Z", primaryCurrency: "SGD" },
           members: [],
           pendingInvites: [],
           lockout: null,
@@ -819,9 +758,7 @@ describe("the real route tree", () => {
 
     renderApp("/admin/households/h1");
 
-    expect(
-      await screen.findByRole("heading", { name: "Oentoro" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Oentoro" })).toBeInTheDocument();
   });
 
   // requirePlatformAdmin answers 404, not 403, to an authenticated non-admin
@@ -833,18 +770,10 @@ describe("the real route tree", () => {
   // rather than looking like nothing is there at all.
   it("shows the app's ordinary not-found page to a non-admin visiting /admin/flags", async () => {
     stubFetchRoutes({
-      "GET /api/v1/auth/me": {
-        status: 200,
-        body: meFixture({ isPlatformAdmin: false }),
-      },
+      "GET /api/v1/auth/me": { status: 200, body: meFixture({ isPlatformAdmin: false }) },
       "GET /api/v1/admin/flags": {
         status: 404,
-        body: {
-          error: {
-            code: "NOT_FOUND",
-            message: "That endpoint does not exist.",
-          },
-        },
+        body: { error: { code: "NOT_FOUND", message: "That endpoint does not exist." } },
       },
     });
 
