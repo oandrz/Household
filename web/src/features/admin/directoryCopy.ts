@@ -10,10 +10,13 @@ const DAY = 24 * HOUR;
 // relativeTimeLabel is the coarse text shown in a table cell; the exact
 // instant belongs in the element's title (exactTimeLabel). null is "never":
 // the API sends null when no session has ever existed, and "never" is the
-// honest word for it on a page whose job is "is anyone using this".
+// honest word for it on a page whose job is "is anyone using this". A
+// timestamp in the future (clock skew between browser and server) reads
+// "just now" too, because every negative elapsed value falls into the first
+// branch below -- keep that branch first.
 export function relativeTimeLabel(iso: string | null, now: Date): string {
   if (iso === null) return "never";
-  const elapsed = Math.max(0, now.getTime() - new Date(iso).getTime());
+  const elapsed = now.getTime() - new Date(iso).getTime();
   if (elapsed < MINUTE) return "just now";
   if (elapsed < HOUR) return `${Math.floor(elapsed / MINUTE)} min ago`;
   if (elapsed < DAY) return `${Math.floor(elapsed / HOUR)} h ago`;

@@ -20,9 +20,7 @@ describe("relativeTimeLabel", () => {
     expect(relativeTimeLabel(ago(45 * day), now)).toBe("1 month ago");
     expect(relativeTimeLabel(ago(400 * day), now)).toBe("1 year ago");
   });
-  it("never goes negative for a timestamp slightly in the future (clock skew)", () => {
-    expect(
-      relativeTimeLabel(new Date(now.getTime() + 5000).toISOString(), now),
-    ).toBe("just now");
+  it("reads a future timestamp as just now rather than a negative age", () => {
+    expect(relativeTimeLabel(ago(-5 * day), now)).toBe("just now");
   });
 });
