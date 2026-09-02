@@ -330,6 +330,11 @@ const LazyAdminHouseholdsPage = lazy(() =>
     default: m.AdminHouseholdsPage,
   })),
 );
+const LazyAdminHouseholdPage = lazy(() =>
+  import("../features/admin/AdminHouseholdPage").then((m) => ({
+    default: m.AdminHouseholdPage,
+  })),
+);
 
 // The Suspense fallback below is inlined at both call sites rather than
 // factored into its own top-level component, matching signInMagicRoute's
@@ -403,8 +408,18 @@ const adminHouseholdsRoute = createRoute({
         ? search.limit
         : 50,
   }),
-  component: () => {
-    const { q, limit } = useSearch({ from: "/admin/households" });
+  // Named, not an inline arrow, for the identical reason
+  // signInMagicRoute's own comment gives: this one calls hooks directly
+  // (useSearch, useNavigate), and eslint-plugin-react-hooks only recognises
+  // a function as a component -- and so allows it to call hooks -- by its
+  // name starting with an uppercase letter.
+  component: function AdminHouseholdsRouteComponent() {
+    // "/authenticated/admin/households", not the public "/admin/households"
+    // URL: useSearch's `from` takes a route ID, and authenticatedRoute is a
+    // pathless route (id "authenticated", no `path`) -- its id still joins
+    // the chain that identifies a route, even though it contributes nothing
+    // to the URL a caller actually types or a <Link to> resolves against.
+    const { q, limit } = useSearch({ from: "/authenticated/admin/households" });
     const navigate = useNavigate();
     return (
       <Suspense
@@ -430,6 +445,31 @@ const adminHouseholdsRoute = createRoute({
             })
           }
         />
+      </Suspense>
+    );
+  },
+});
+
+const adminHouseholdRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: "households/$householdId",
+  // Named for the same rules-of-hooks reason as adminHouseholdsRoute's own
+  // component just above.
+  component: function AdminHouseholdRouteComponent() {
+    // Same route-ID-vs-URL-path distinction as adminHouseholdsRoute's own
+    // useSearch above.
+    const { householdId } = useParams({
+      from: "/authenticated/admin/households/$householdId",
+    });
+    return (
+      <Suspense
+        fallback={
+          <main className="grid min-h-dvh place-items-center">
+            <p className="text-sm text-muted">Loading…</p>
+          </main>
+        }
+      >
+        <LazyAdminHouseholdPage householdId={householdId} />
       </Suspense>
     );
   },
@@ -468,6 +508,7 @@ export const routeTree = rootRoute.addChildren([
       adminIndexRoute,
       adminFlagsRoute,
       adminHouseholdsRoute,
+      adminHouseholdRoute,
     ]),
   ]),
 ]);
