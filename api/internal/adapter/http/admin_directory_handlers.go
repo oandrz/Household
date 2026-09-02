@@ -145,10 +145,16 @@ func channelString(c usecase.MemberChannel) (string, error) {
 	}
 }
 
-// handleAdminHousehold is the drill-in. The id is parsed here, before the
-// service is called, so a malformed one answers the same 404 a missing
-// household does rather than the zero-UUID 500 the flag override routes
-// still carry (ADMIN_SURFACE_HANDOVER.md, "Known, deferred").
+// handleAdminHousehold is the drill-in. A householdID that is not a UUID is
+// refused here, before the service is called: fail closed on a value we did
+// not construct. The 404 does not depend on this guard --
+// postgres/convert.go's uuid() degrades an unparseable id to the zero UUID,
+// whose SELECT matches no row and becomes domain.ErrNotFound anyway. But
+// that leniency is also what leaves the flag override *writes* answering 500
+// for this input (ADMIN_SURFACE_HANDOVER.md, "Known, deferred"): which way a
+// malformed id degrades is a property of a helper two layers down, not of
+// this route. Refusing here also skips three SQL round-trips for input that
+// can never match.
 func handleAdminHousehold(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "householdID")
