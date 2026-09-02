@@ -101,6 +101,36 @@ describe("AdminHouseholdPage", () => {
     expect(callout).toHaveTextContent("adminctl unlock-household");
   });
 
+  // Spec §4: channel is derived from the telegram_accounts join, never from
+  // email IS NULL, so a member with channel "email" and a null email is a
+  // bug in the data, not a legitimate state -- the screen must say so
+  // rather than rendering a blank cell that reads as merely empty.
+  it("renders a muted 'no email' for an email-channel member with no email", async () => {
+    stubFetchRoutes({
+      [route]: {
+        status: 200,
+        body: page({
+          members: [
+            {
+              userId: "u3",
+              name: "Broken",
+              email: null,
+              channel: "email",
+              role: "limited",
+              capabilities: ["calendar"],
+              lastActiveAt: null,
+            },
+          ],
+        }),
+      },
+    });
+    renderWithRouter(<AdminHouseholdPage householdId="h1" />);
+    const members = within(
+      await screen.findByRole("table", { name: "Members" }),
+    );
+    expect((await members.findAllByText("no email")).length).toBeGreaterThan(0);
+  });
+
   it("says none pending when there are no invites", async () => {
     stubFetchRoutes({
       [route]: { status: 200, body: page({ pendingInvites: [] }) },

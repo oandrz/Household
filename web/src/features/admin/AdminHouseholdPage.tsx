@@ -160,7 +160,11 @@ function HouseholdDetail({ data }: { data: PageData }) {
           <ul className="divide-y divide-hairline text-[12.5px]">
             {pendingInvites.map((invite) => (
               <li
-                key={invite.email}
+                // email alone is not unique: invites has no unique
+                // constraint on (household_id, email), so two pending
+                // invites to the same address in one household are
+                // possible and would collide on email-only key.
+                key={`${invite.email}:${invite.expiresAt}`}
                 className="flex flex-col gap-0.5 py-2 md:flex-row md:items-center md:gap-4"
               >
                 <span className="font-semibold text-ink">{invite.name}</span>
@@ -192,8 +196,18 @@ function MemberRow({
   member: AdminHouseholdMember;
   now: Date;
 }) {
+  // channel === "email" && email === null is spec §4's "a user with
+  // neither [channel] is a bug the screen should surface, not a state it
+  // should name" -- rendered as muted "no email" rather than a blank cell,
+  // so the operator sees the row is wrong instead of reading it as empty.
   const channel =
-    member.channel === "telegram" ? "Telegram" : (member.email ?? "");
+    member.channel === "telegram" ? (
+      "Telegram"
+    ) : member.email !== null ? (
+      member.email
+    ) : (
+      <span className="text-muted">no email</span>
+    );
   const lastActive = relativeTimeLabel(member.lastActiveAt, now);
   const badge =
     member.role === "limited"

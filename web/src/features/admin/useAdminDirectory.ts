@@ -14,12 +14,19 @@ import {
   type AdminHouseholdsResponse,
 } from "./adminDirectorySchemas";
 
-export const DIRECTORY_DEFAULT_LIMIT = 50;
-export const DIRECTORY_MAX_LIMIT = 200;
+// Re-exported, not declared here: directoryLimits.ts is the leaf router.tsx
+// imports directly so it never has to reach this file (see that file's
+// comment). Kept here too so every existing import of these two names from
+// useAdminDirectory.ts keeps working unchanged.
+export {
+  DIRECTORY_DEFAULT_LIMIT,
+  DIRECTORY_MAX_LIMIT,
+} from "./directoryLimits";
 
 // adminHouseholdsPath builds the exact URL the page requests, exported so a
 // test's fetch stub and the hook agree byte for byte. q is omitted when
-// empty so the audit row for a plain page view stays {}.
+// empty so the URL, the query key and the audit row all read the same for
+// an unfiltered view.
 export function adminHouseholdsPath(q: string, limit: number): string {
   const params = new URLSearchParams();
   if (q !== "") params.set("q", q);

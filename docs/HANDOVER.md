@@ -1050,6 +1050,29 @@ by the same index a name lookup uses):
   (see `docs/LEARNING.md`'s Task 16 entry for what the other two would need
   to assert). Cheap to close while the PATCH-translation logic is still
   fresh in mind.
+- `admin_directory_api_test.go`'s no-match search
+  (`TestAdminHouseholdsSearchByMemberEmailNamesTheMatch`) only checks the
+  *decoded* `Households` slice has length 0 -- a Go slice decodes `null` and
+  `[]` identically, so a regression that serialized `"households":null`
+  instead of `"households":[]` would pass silently. Assert the raw response
+  body contains the literal `"households":[]`. Separately,
+  `TestAdminHouseholdDrillInShowsMembersAndTheLockout` seeds a household with
+  no invites, so its `assertKeys` calls never run over a
+  `pendingInvites[0]` -- create one invite in the test so that shape gets
+  checked too.
+- The drill-in's "‹ Households" back link hard-codes `search={{ q: "", limit:
+  50 }}` (`AdminHouseholdPage.tsx`), so an operator who searched, then
+  clicked into a household, loses that search on the way back. Carrying `q`
+  through needs the row `Link` in `AdminHouseholdsPage.tsx` to pass its own
+  `search` down to the drill-in link instead of the drill-in reconstructing
+  a blank one.
+- `router.go`'s `r.Use(middleware.RealIP)` is chi's now-deprecated `RealIP`
+  (GHSA-3fxj-6jh8-hvhx: it trusts `X-Forwarded-For`/`X-Real-IP` from any
+  caller, which matters for `clientIP`'s rate-limit keying and the admin
+  audit log). `web/nginx.conf` sitting in front and setting those headers
+  itself is what keeps this safe on the current box, but the code is one
+  misconfigured proxy away from being wrong. Open an issue rather than
+  swapping it here -- it is not part of this branch's scope.
 
 ### Before this is deployed anywhere real
 

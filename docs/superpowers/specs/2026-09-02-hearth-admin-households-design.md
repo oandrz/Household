@@ -176,8 +176,11 @@ will try again.
 `GrantAdmin` carries in its doc comment: touch, extend and grant each own one
 column so none can overwrite another's.
 
-Down migration drops the column. Old code never reads it, so a rollback is
-safe in either order.
+Down migration drops the column. The new binary's `GetLiveSession` selects
+`last_seen_at`, so the down migration must run only after the binary is
+rolled back, never before it or alongside it -- running it while the new
+binary is still live fails every session lookup (sign-in, every
+authenticated request) until the binary rollback finishes.
 
 ---
 
@@ -802,15 +805,21 @@ Updated in the same change as the code, not afterwards:
 
 ## 12. Rollout
 
-1. Migration `00013_session_last_seen.sql`. Nullable column, no backfill;
-   running code ignores it, so it can go out ahead of or behind the binary.
+1. Migration `00013_session_last_seen.sql`. Nullable column, no backfill,
+   and the old binary ignores it -- but the new binary's `GetLiveSession`
+   selects `last_seen_at` unconditionally, so this migration must go out
+   ahead of the binary, never behind it. `docker-compose.prod.yml` already
+   makes `api` depend on `migrate` completing first, so a normal deploy
+   through `deploy/deploy.sh` enforces the order automatically.
 2. The binary: touch, port, service, repository, routes, pages, in one
    deploy through `deploy/deploy.sh <sha>` as usual.
 3. No configuration, no provisioning, no new secret. Nothing in
    `docs/INFRASTRUCTURE.md` changes.
 
-Rolling back is `deploy.sh --rollback` plus the down migration in either
-order.
+Rolling back is `deploy.sh --rollback` first, then the down migration --
+never the reverse. `GetLiveSession` on the new binary selects `last_seen_at`,
+so dropping the column while that binary is still serving fails every
+session lookup until the binary rollback catches up.
 
 ---
 

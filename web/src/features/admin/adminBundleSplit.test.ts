@@ -106,6 +106,18 @@ describe("the main entry point's static import graph", () => {
     expect(reachable).not.toContain(
       join(SRC_ROOT, "features", "admin", "AdminHouseholdPage.tsx"),
     );
+    // The same regression can arrive one layer down: router.tsx importing a
+    // constant from useAdminDirectory.ts (or useAdmin.ts) rather than from a
+    // leaf module drags the hook itself, and everything it imports, into
+    // main.tsx's static graph even though no admin *component* is imported
+    // directly. directoryLimits.ts exists so router.tsx never has to do
+    // that (see its own header comment).
+    expect(reachable).not.toContain(
+      join(SRC_ROOT, "features", "admin", "useAdminDirectory.ts"),
+    );
+    expect(reachable).not.toContain(
+      join(SRC_ROOT, "features", "admin", "useAdmin.ts"),
+    );
   });
 
   // A walk that is silently broken (a resolution bug, ENTRY pointing at the

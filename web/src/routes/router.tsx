@@ -75,7 +75,7 @@ import {
 import {
   DIRECTORY_DEFAULT_LIMIT,
   DIRECTORY_MAX_LIMIT,
-} from "../features/admin/useAdminDirectory";
+} from "../features/admin/directoryLimits";
 import { InviteScreen } from "../features/auth/InviteScreen";
 import { MagicLinkConsumeScreen } from "../features/auth/MagicLinkConsumeScreen";
 import { SignInScreen } from "../features/auth/SignInScreen";
