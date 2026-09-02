@@ -281,6 +281,94 @@ type AdminReauthAttemptRepository interface {
 	ClearFailures(ctx context.Context, userID string) error
 }
 
+// AdminDirectoryRepository is the operator's read-only view across every
+// household. It is the only port in the product that reads across
+// household boundaries; every other repository answers for one household.
+// Nothing on it writes. Its consumer is AdminDirectoryService and its
+// callers are guarded in the HTTP layer alone.
+type AdminDirectoryRepository interface {
+	// Metrics answers the four counters on the households page. The
+	// cutoffs are passed in rather than computed here so the service's
+	// clock is the only clock (see AdminDirectoryService).
+	Metrics(ctx context.Context, activeSince, signupsSince, now time.Time) (DirectoryMetrics, error)
+
+	// SearchHouseholds returns up to limit households matching q, most
+	// recently active first, never-active last. An empty q matches every
+	// household. The predicate is the spec's §4: case-insensitive substring
+	// over household name, family name, member display name and member
+	// email. The caller passes limit+1 to learn whether more exist.
+	SearchHouseholds(ctx context.Context, q string, limit int, now time.Time) ([]HouseholdListing, error)
+
+	// Household returns one household with its members and the invites
+	// still pending at now. A missing household is domain.ErrNotFound.
+	Household(ctx context.Context, householdID string, now time.Time) (HouseholdDetail, error)
+}
+
+type DirectoryMetrics struct {
+	Households       int
+	ActiveHouseholds int
+	SignupsRequested int
+	SignupsCompleted int
+	PendingInvites   int
+}
+
+type HouseholdListing struct {
+	ID              string
+	Name            string
+	FamilyName      string
+	MemberCount     int
+	CreatedAt       time.Time
+	LastActiveAt    *time.Time // nil when no member has ever had a session
+	PrimaryCurrency string
+	// Match names the member whose name or email matched the search when
+	// the household's own name and family name did not. Nil otherwise, and
+	// always nil for an empty search.
+	Match *MemberMatch
+}
+
+type MemberMatch struct {
+	Name  string
+	Email *string // nil for a Telegram-only member
+}
+
+type HouseholdDetail struct {
+	ID              string
+	Name            string
+	FamilyName      string
+	CreatedAt       time.Time
+	PrimaryCurrency string
+	Members         []HouseholdMember
+	PendingInvites  []PendingInvite
+}
+
+// MemberChannel is how a member signs in. The repository sets it from the
+// telegram_accounts join, never by inferring from a NULL email: a user
+// with neither is a bug the screen should surface, not a state it names.
+type MemberChannel string
+
+const (
+	ChannelEmail    MemberChannel = "email"
+	ChannelTelegram MemberChannel = "telegram"
+)
+
+type HouseholdMember struct {
+	UserID       string
+	Name         string
+	Email        *string
+	Channel      MemberChannel
+	Role         domain.Role
+	Capabilities domain.Capabilities
+	LastActiveAt *time.Time
+}
+
+type PendingInvite struct {
+	Name          string
+	Email         string
+	Role          domain.Role
+	InvitedByName string
+	ExpiresAt     time.Time
+}
+
 type InviteDetails struct {
 	ID           string
 	HouseholdID  string
