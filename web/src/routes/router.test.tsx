@@ -8,7 +8,7 @@
 // (exported from ./router alongside the `router` singleton, specifically so
 // a test can build its own instance with a fresh memory history and
 // QueryClient rather than sharing the app's one registered router).
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -739,6 +739,77 @@ describe("the real route tree", () => {
     renderApp("/admin/households");
 
     expect(await screen.findByRole("heading", { name: "Households" })).toBeInTheDocument();
+  });
+
+  // Show more's own doubling (AdminHouseholdsPage.tsx's onShowMore prop,
+  // wired here in adminHouseholdsRoute) lives entirely in this file's
+  // navigate() calls -- AdminHouseholdsPage itself only ever renders
+  // whatever `limit` it is handed as a prop, so only a test that drives the
+  // real route (not AdminHouseholdsPage.test.tsx's direct-prop rendering)
+  // can see the URL actually change on each click.
+  it("doubles the URL's limit search param on each Show more click, up to the 200 cap", async () => {
+    const household = {
+      id: "h1",
+      name: "Oentoro",
+      familyName: "Oentoro",
+      memberCount: 4,
+      createdAt: "2026-08-15T02:11:09Z",
+      lastActiveAt: "2026-09-02T07:40:12Z",
+      primaryCurrency: "SGD",
+      match: null,
+    };
+    const metrics = {
+      households: 1,
+      activeHouseholds7d: 1,
+      signups30d: { requested: 0, completed: 0 },
+      pendingInvites: 0,
+    };
+    // truncated: true at every limit -- the fixture never claims to have
+    // caught up with however many households actually exist, so the cap
+    // (not "ran out of results") is the only reason Show more disappears at
+    // 200.
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": {
+        status: 200,
+        body: meFixture({ isPlatformAdmin: true }),
+      },
+      "GET /api/v1/admin/flags": { status: 200, body: { flags: [] } },
+      "GET /api/v1/admin/households?limit=50": {
+        status: 200,
+        body: { metrics, households: [household], truncated: true },
+      },
+      "GET /api/v1/admin/households?limit=100": {
+        status: 200,
+        body: { metrics, households: [household], truncated: true },
+      },
+      "GET /api/v1/admin/households?limit=200": {
+        status: 200,
+        body: { metrics, households: [household], truncated: true },
+      },
+    });
+
+    const { router } = renderApp("/admin/households");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
+    await waitFor(() =>
+      expect((router.state.location.search as { limit: number }).limit).toBe(
+        100,
+      ),
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
+    await waitFor(() =>
+      expect((router.state.location.search as { limit: number }).limit).toBe(
+        200,
+      ),
+    );
+
+    expect(
+      await screen.findByText("Showing the first 1 — search to narrow"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Show more" }),
+    ).not.toBeInTheDocument();
   });
 
   it("mounts the household drill-in at /admin/households/$householdId, resolving useParams's route id", async () => {

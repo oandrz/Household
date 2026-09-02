@@ -72,6 +72,10 @@ import {
   useParams,
   useSearch,
 } from "@tanstack/react-router";
+import {
+  DIRECTORY_DEFAULT_LIMIT,
+  DIRECTORY_MAX_LIMIT,
+} from "../features/admin/useAdminDirectory";
 import { InviteScreen } from "../features/auth/InviteScreen";
 import { MagicLinkConsumeScreen } from "../features/auth/MagicLinkConsumeScreen";
 import { SignInScreen } from "../features/auth/SignInScreen";
@@ -406,7 +410,7 @@ const adminHouseholdsRoute = createRoute({
       Number.isInteger(search.limit) &&
       search.limit > 0
         ? search.limit
-        : 50,
+        : DIRECTORY_DEFAULT_LIMIT,
   }),
   // Named, not an inline arrow, for the identical reason
   // signInMagicRoute's own comment gives: this one calls hooks directly
@@ -435,13 +439,16 @@ const adminHouseholdsRoute = createRoute({
           onSearch={(next) =>
             navigate({
               to: "/admin/households",
-              search: { q: next, limit: 50 },
+              search: { q: next, limit: DIRECTORY_DEFAULT_LIMIT },
             })
           }
           onShowMore={() =>
             navigate({
               to: "/admin/households",
-              search: { q, limit: Math.min(limit * 2, 200) },
+              search: {
+                q,
+                limit: Math.min(limit * 2, DIRECTORY_MAX_LIMIT),
+              },
             })
           }
         />

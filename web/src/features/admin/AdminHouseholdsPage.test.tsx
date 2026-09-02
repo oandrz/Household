@@ -223,4 +223,38 @@ describe("AdminHouseholdsPage", () => {
       expect(screen.getByRole("alert")).toHaveTextContent("Something broke."),
     );
   });
+
+  // A lapsed grant (or a revoked admin) is a gate-layer failure -- AdminShell's
+  // own AdminGate is about to replace the whole surface for it, via
+  // useCloseSurfaceOnReauth invalidating adminFlagsKey. This page must not
+  // also render its own alert for the identical failure, or the operator
+  // would see two different messages for one event.
+  it("renders no inline alert for a gate-layer failure, leaving it to AdminGate", async () => {
+    stubFetchRoutes({
+      [`GET ${adminHouseholdsPath("", 50)}`]: {
+        status: 401,
+        body: {
+          error: {
+            code: "ADMIN_REAUTH_REQUIRED",
+            message: "Confirm your password.",
+          },
+        },
+      },
+    });
+    renderPage();
+    // findByTestId first, then wait for it to go away: a bare
+    // "not.toBeInTheDocument()" waitFor with nothing awaited first is
+    // vacuously true before the router has even mounted (this file's
+    // "renders a skeleton" test above hit the identical trap), so it would
+    // pass on a broken page just as readily as a correct one -- confirming
+    // the loading state actually appeared is what makes "then it went away"
+    // mean the query actually settled.
+    await screen.findByTestId("households-skeleton");
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("households-skeleton"),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
 });

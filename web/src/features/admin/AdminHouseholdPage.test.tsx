@@ -109,6 +109,41 @@ describe("AdminHouseholdPage", () => {
     expect(await screen.findByText("None pending.")).toBeInTheDocument();
   });
 
+  // A lapsed grant (or a revoked admin) is a gate-layer failure -- AdminShell's
+  // own AdminGate is about to replace the whole surface for it, via
+  // useCloseSurfaceOnReauth invalidating adminFlagsKey. This page must not
+  // also render its own alert for the identical failure, or the operator
+  // would see two different messages for one event. Distinct from the 404
+  // branch below: isNotFound/NOT_FOUND is this page's own to render, never
+  // routed through the gate.
+  it("renders no inline alert for a gate-layer failure, leaving it to AdminGate", async () => {
+    stubFetchRoutes({
+      [route]: {
+        status: 401,
+        body: {
+          error: {
+            code: "ADMIN_REAUTH_REQUIRED",
+            message: "Confirm your password.",
+          },
+        },
+      },
+    });
+    renderWithRouter(<AdminHouseholdPage householdId="h1" />);
+    // findByTestId first, then wait for it to go away: a bare
+    // "not.toBeInTheDocument()" waitFor with nothing awaited first is
+    // vacuously true before the router has even mounted, so it would pass
+    // on a broken page just as readily as a correct one -- confirming the
+    // loading state actually appeared is what makes "then it went away"
+    // mean the query actually settled.
+    await screen.findByTestId("household-skeleton");
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("household-skeleton"),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   // Reconciled against the tree: NotFoundScreen renders a <p>, not a
   // heading (features/shell/NotFoundScreen.tsx), and router.test.tsx's own
   // "shows the app's ordinary not-found page to a non-admin visiting
