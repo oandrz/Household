@@ -492,8 +492,9 @@ console to administer.
 
 **That console's first slice is merged — `main` at `b9dfd1f`, PR #15, 2026-09-02.**
 It carries the authorization axis, the re-authentication grant, the audit log
-and feature flags end to end; the database browse, the outbound message
-inspector and household metrics are specified but unbuilt. Read
+and feature flags end to end; household metrics followed on 2026-09-02 (branch
+`admin-households`, walk pending), and the database browse and the outbound
+message inspector are specified but unbuilt. Read
 [ADMIN_SURFACE_HANDOVER.md](ADMIN_SURFACE_HANDOVER.md) before touching it or
 planning the next slice — it carries the decisions that are load-bearing, the
 open items, and what the branch's own browser walk found.
@@ -511,9 +512,15 @@ and three of the four exist to make a real install operable by someone who is
 not sitting at its database. **The first of the four, the audit screen, was
 built and walked the same day, then descoped by the product owner before
 merge** as not needed — the log stays readable through `psql`, and the
-tracker's row (section 9, now 🚫) records what existed and why it went. Three
-remain, in the order the tracker gives: households and metrics, the outbound
-message inspector, the read-only database browse.
+tracker's row (section 9, now 🚫) records what existed and why it went. **The
+second, households and metrics, was built later that same day** on branch
+`admin-households` — an operator's household list with four counters and an
+explicit search, and a read-only drill-in behind it — to its own spec,
+`docs/superpowers/specs/2026-09-02-hearth-admin-households-design.md`, which
+expands §6 of the admin-surface spec. Its browser walk had not run when this
+was written; section 9's row says so and names the file it will be recorded
+in. Two remain, in the order the tracker gives: the outbound message
+inspector, then the read-only database browse.
 
 **Slice 2 (Money) is done.** Accounts, Transactions, Budget, Goals and
 Bills — all five features — are code-complete, reviewed, and now all

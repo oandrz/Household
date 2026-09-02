@@ -31,7 +31,7 @@ via `docs/superpowers/plans/2026-09-01-hearth-admin-surface.md` (the plan).
 
 ## 2. What exists
 
-Five things, in the order they depend on each other.
+Six things, in the order they depend on each other.
 
 **The authorization axis.** Platform admin is orthogonal to household `Role`
 and `Capability`: those answer "what may this member do inside their own
@@ -83,25 +83,43 @@ not-found for anything else — the only path to the children is `error === null
 `apiFetch` carries a three-code allowlist so an expired grant shows the
 password prompt instead of bouncing the operator to sign-in.
 
+**Households and metrics — built 2026-09-02, spec
+`docs/superpowers/specs/2026-09-02-hearth-admin-households-design.md`** (which
+expands §6 of the admin-surface spec and wins where the two differ).
+`/admin/households` answers the whole page in one request — four counters plus
+the matching households — with an explicit search over household name, family
+name, member display name and member email; `/admin/households/{id}` is a
+read-only drill-in showing members, channel, pending invites and the
+household's own sign-in lockout, and **no money at all**, which is the
+boundary that keeps a customer's finances behind the database browse and its
+second audit row. Behind them sit `AdminDirectoryService` and
+`AdminDirectoryRepository`, the one port in the product that reads across
+household boundaries, plus one new column: `sessions.last_seen_at`, stamped by
+`requireSession` at most once an hour, so "active in the last 7 days" means
+used rather than signed in. **Its browser walk had not run when this was
+written** — Task 11 of that spec's plan.
+
 Where to start reading: `middleware_admin.go`, then `router.go`'s `/admin`
-subtree and its comment, then `usecase/admin.go`, then
-`web/src/features/admin/`.
+subtree and its comment, then `usecase/admin.go` and
+`usecase/admin_directory.go`, then `web/src/features/admin/`.
 
 ## 3. What does NOT exist
 
-All are specified in full. Three are not started; the fourth, the audit
-screen, was built on 2026-09-02 and descoped by the product owner the same
-day (see the end of this section). This is the honest gap between what was
+All are specified in full. Two are not started; of the other two, the audit
+screen was built on 2026-09-02 and descoped by the product owner the same day
+(see the end of this section), and households and metrics was built later that
+same day and now lives in §2 above. This is the honest gap between what was
 asked for and what shipped.
 
 **As of 2026-09-02 these are the product's next work**, ahead of any further
 household feature — the product owner's call, recorded with its cost in
 `docs/FEATURE_TRACKER.md`'s "Suggested order", where all four have rows in
-section 9 (three ⬜, the audit screen 🚫). The recommended sequence is **audit screen → households and
-metrics → message inspector → database browse**: smallest first, the
-infrastructure dependency last, and the browse last of all so the grant and the
-audit log get real use before the surface that can read every household's
-finances arrives.
+section 9 (two ⬜, the audit screen 🚫, households and metrics ✅). The
+recommended sequence is now **message inspector → database browse**: the
+smallest first, and the browse last of all so the grant and the audit log get
+real use before the surface that can read every household's finances arrives.
+(The original sequence put the audit screen first and households second; the
+first was cut and the second is built.)
 
 **A read-only database browse — spec §4.** This was one of the three things
 originally asked for. The spec has the whole design: a separate `hearth_readonly`
@@ -122,9 +140,6 @@ inventing a raw-link store to solve a convenience problem is the wrong trade.
 It would close a real, documented pain: `deploy/README.md` describes handing
 someone an invite by opening an SSH tunnel to Mailpit and copying the link by
 hand.
-
-**Household list and metrics — spec §6.** Also the prerequisite for finding A
-below.
 
 **~~An `/admin/audit` screen.~~ Built, walked and descoped on 2026-09-02.**
 The screen existed for a few hours on branch `admin-audit-screen`: a
@@ -196,8 +211,11 @@ affects behaviour; they were parked rather than opening a third fix round.
   currently reachable only by a hand-written `PUT`. Judged *not* a spec
   violation (§3.6 does not require a creation control, §9 calls this slice
   shippable alone, and there is no household list yet to build a picker
-  against) and recorded as a 🟡 gap in `docs/FEATURE_TRACKER.md` §9. **It
-  closes naturally with spec §6.**
+  against) and recorded as a 🟡 gap in `docs/FEATURE_TRACKER.md` §9. **Spec §6
+  shipped on 2026-09-02 and closed half of it**: there is a household list to
+  build a picker against now (`/admin/households`). The control itself is
+  still not built, so the 🟡 stands — what changed is that the reason it was
+  parked no longer applies.
 - **B — the flags page's only interactive control is easy to miss.** 12px muted
   text on a transparent ground, right-aligned far from its label. The contrast
   itself passes AA (~5.4:1) — the problems are placement and that the "Default"

@@ -1209,6 +1209,37 @@ person to ask whether the test could ever have gone red in the first place.
   assertion, not of the rollback. **Order assertions so the one under test
   fails first, or split it into its own test.** A mutation is only evidence
   when the failure it produces names the claim you meant to make.
+- **A plan-mandated clamp was dead code, so the test written for it could not
+  fail — admin households branch, 2026-09-02.** `relativeTimeLabel`'s plan
+  called for `Math.max(0, now - iso)` to stop a clock-skewed future timestamp
+  rendering as a negative age, and for a test asserting the clamped result.
+  Both shipped in the same task. But the function's *first* branch is
+  `if (elapsed < MINUTE) return "just now"`, which any negative number
+  satisfies — so the clamp changed nothing any caller could observe, and no
+  offset and no assertion could tell clamped from unclamped behaviour. The
+  test was green against code with the clamp and green against code without
+  it. The fix was to delete the clamp, state the property in the comment
+  ("a future timestamp reads 'just now', because every negative elapsed value
+  falls into the first branch — keep that branch first"), and rewrite the test
+  as a five-day-future timestamp, which a plausible refactor
+  (`Math.abs(elapsed) < MINUTE`, "for symmetry") turns into `-7200 min ago`.
+  That mutation was run and the new test went red on it. **A guard placed
+  behind an earlier branch that already handles the case is not a guard, and
+  a test for it is a test of nothing** — the property is worth pinning, but it
+  has to be pinned to the branch that actually does the work.
+- **A mutation went red for the wrong reason and nearly passed as proof —
+  same branch, Task 1.** `TestTouchWritesOnlyLastSeenAt` exists to prove
+  `TouchSession` writes one column. The planned mutation set
+  `expires_at = $2`, the same touch-time value — which made the session
+  expire immediately, so `GetLiveSession`'s own `expires_at > now()` filter
+  dropped the row and the test failed three lines earlier, at the fetch, with
+  "ByTokenHash after touch: not found". Red, but red for a reason that never
+  reached the `ExpiresAt` assertion under test. Re-running with
+  `expires_at = now() + interval '90 days'` — tampering with the column while
+  keeping the row fetchable — produced the intended failure, and a third
+  mutation on `admin_grant_expires_at` pinned the last assertion. **When the
+  thing you tamper with is also what makes the row readable, the mutation has
+  to keep the row readable** or the test fails before it can testify.
 
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
@@ -1750,9 +1781,28 @@ to `@latest`.
   `APP_ENV=development` against a production database passed.
 - Cookies are `Secure` in production while nginx listens on plain `:80` — as
   shipped, the browser never returns the session cookie.
+- **A 30-day counter over a table a CLI flag deletes from — admin households,
+  2026-09-02.** `/admin/households`' "sign-ups in the last 30 days" tile counts
+  rows in `signups`, and `adminctl prune --older-than=N` deletes consumed and
+  expired rows from that same table. `deploy/README.md` runs it at 30, so the
+  two agree — by convention, not by construction. Set `--older-than=7` (the
+  floor) and the tile silently under-reports for three weeks with nothing
+  broken, nothing logged and no test red. The spec looked at coupling the two
+  (a shared constant, or the query reading the retention setting) and chose to
+  document instead: a counter that is at most one edge day short, and only if
+  prune ran that morning, is not worth binding a CLI flag to a query constant
+  (`2026-09-02-hearth-admin-households-design.md`, decision 10). That is a
+  defensible trade, but it is only safe while it is *written where the flag is
+  typed* — so the note lives beside the `prune` command in `deploy/README.md`,
+  not only in the spec. What would have caught it sooner: **any counter over a
+  window should name its retention dependency at the place the retention is
+  set**, because the person shortening a prune window is never reading the
+  query.
 
 **A config value that nothing reads is a lie. A guard that names one thing while
-protecting another is worse.**
+protecting another is worse. And a value that two places have to agree on, with
+nothing making them agree, is a lie waiting for someone to change one of
+them.**
 
 ### 9. A DELETE scoped to a deliberately-nullable column spares exactly the rows that column's nullability exists to create
 
@@ -2433,18 +2483,43 @@ case and no coordinate system to assert legibility in for the second.
   instructions for closing out Pattern 16, proving yet again that a claim
   about the code carries no more authority for having been written down to
   correct a previous one.
+- **A tenth instance, the admin households branch (2026-09-02) — a doc
+  comment that named the wrong failure mode for the guard it sat on, caught
+  by mutating the guard away.** `handleAdminHousehold`'s malformed-id check
+  arrived from the plan with the comment "so a malformed one answers the same
+  404 a missing household does rather than the zero-UUID 500 the flag override
+  routes still carry (`ADMIN_SURFACE_HANDOVER.md`, 'Known, deferred')".
+  Two things were checked and both contradicted it. Commenting the guard out
+  left `TestAdminHouseholdUnknownAndMalformedIDsAre404` **green**: on a
+  `SELECT`, `postgres/convert.go`'s lenient `uuid()` helper turns an
+  unparseable id into the zero `pgtype.UUID{}`, the query matches no row, and
+  `translate` answers `domain.ErrNotFound` — the same 404, guard or no guard.
+  And the 500 the comment pointed at is a *write* path (a foreign-key
+  violation on `SetHouseholdFlag`'s `ON CONFLICT`), a failure a read cannot
+  reach at all. The guard is still worth having, for two reasons the
+  replacement comment now states instead: it fails closed on a value nobody in
+  this system constructed, and it refuses before the service, the repository
+  and a database round trip. **Corrected on the branch (`617db73`), not
+  shipped wrong** — but it was in the tree for one commit purely because it
+  read plausibly. The replacement carries a smaller version of the same
+  defect, still in the tree at the time of writing: it says the guard "skips
+  three SQL round-trips" when `AdminDirectoryRepo.Household` short-circuits on
+  its first query, so it skips one. A correction written to close out an
+  unverified claim is not itself verified.
 
 **Treat a citation the way you'd treat a test assertion: something the next
 reader can verify against the thing it names, not something to trust because
-it reads confidently.** All nine instances above cost nothing to produce
+it reads confidently.** All ten instances above cost nothing to produce
 and each would have cost under a minute to check — reading the query,
 re-finding the line, opening the mockup, grepping for the clause a comment
 claimed existed, reading the one function (`chi`'s `routeHTTP`) whose order
-the claim depended on, or reading the one commit blob a "before" claim was
-supposedly about — against a small planning gap, a wrong number in a
+the claim depended on, reading the one helper (`convert.go`'s `uuid`) a
+comment's causal claim depended on, or reading the one commit blob a "before"
+claim was supposedly about — against a small planning gap, a wrong number in a
 comment, a design claim nobody had opened the design to test, a line range
 nobody had re-measured, a rule restated in a comment's own words rather than
-pointed at, seven checkable claims that drifted the moment the code moved
+pointed at, a guard whose comment named a failure mode its own route could
+not reach, seven checkable claims that drifted the moment the code moved
 under them on a single branch, a field silently empty for its entire life
 because its own doc comment said otherwise, a sibling comment one file away
 making the identical claim, already proven false, that nobody had gone back
@@ -2453,7 +2528,7 @@ had happened over several. That last one arrived with company the catalogue
 cannot count, because it never landed: the fix wave's own instructions for
 closing out this pattern handed down a further wrong number for the same
 passage, and it was caught in review rather than committed — the only reason
-it is a footnote here instead of a tenth entry. A citation
+it is a footnote here instead of an entry of its own. A citation
 checked once and never re-verified when the sentence around it is rewritten
 is not a citation any more; it is the same unverified claim wearing a
 reference.
@@ -2814,6 +2889,53 @@ reference.
   contain** — a `household_id` column is a decision about who a lock can
   reach, and a new caller inherits that decision whether or not it was
   written for them.
+- **sqlc types a column selected through a `LEFT JOIN` onto a *derived table*
+  as non-nullable, and the scan then fails at runtime — admin households,
+  2026-09-02.** `SearchHouseholds` names the member whose display name or
+  email matched the operator's search, through a `LEFT JOIN LATERAL (SELECT
+  u.display_name, u.email FROM ...) mm`. `users.display_name` is `NOT NULL` in
+  the catalogue but genuinely NULL in *this* result whenever the lateral finds
+  no match — every row of an empty search, and every household that matched by
+  its own name. sqlc generated `MatchName string`, and pgx refused the scan
+  outright: `cannot scan NULL into *string`. Not a mistyped value, a crash, on
+  essentially every real request. Casts, `CASE`, `NULLIF` and an explicit
+  column list were all tried and none changed the generated type; it is
+  sqlc-dev/sqlc#3667, unresolved. The working pattern was already in this
+  repository: `GetTransaction` selects `u.display_name AS paid_by_name`
+  through a **plain** `LEFT JOIN users u` — a real table, not a subquery — and
+  sqlc gets it right. The query was restructured so the lateral yields only
+  `m.user_id` (never an output column, so its own type is irrelevant) with a
+  second plain `LEFT JOIN users` supplying the two text columns. **A
+  generated type that disagrees with the SQL is a runtime failure waiting for
+  the first row that exercises it — check the generated struct's nullability
+  against what the join can actually produce, not against the column's
+  catalogue definition.**
+- **A test fixture whose data contained the search term it was testing
+  around — same branch, and the reason a correct implementation looked
+  wrong.** The plan's fixture created the household "Andreas & Christine" and
+  then asserted that searching `christ` finds it *through its member*
+  Christine, naming that member in `Match`. But the household's own name
+  contains `christ`, and the port's documented contract is that `Match` is nil
+  when the household itself matched — so the test demanded the opposite of
+  what `ports.go` says. It failed against correct code with
+  `SearchHouseholds("christ"): Match = <nil>, want member "Christine"`. Fixed
+  by renaming the fixture household to "Andreas & Kris", one token, with a
+  comment saying why. **A fixture that accidentally satisfies more than one
+  branch of the thing under test cannot tell those branches apart** — when a
+  search test is red, check the haystack before the needle.
+- **The SQL mutation checks on this branch, and what each one killed** (no
+  defect found; recorded because a mutation nobody wrote down is a mutation
+  the next person re-derives). Task 1, `TouchSession`: three mutations proved
+  each of `last_seen_at`, `expires_at` and `admin_grant_expires_at` is
+  independently pinned by the one-column-write test — see pattern 2 for the
+  one that first went red for the wrong reason. Task 5,
+  `CountActiveHouseholdsSince`: replacing `COALESCE(s.last_seen_at,
+  s.created_at)` with `s.created_at` produced `ActiveHouseholds = 0, want 1
+  (touched yesterday counts; signed in 10 days ago does not)` — the whole
+  reason the column exists, pinned. Task 5, `SearchHouseholds`: deleting `OR
+  u.email ILIKE ...` produced `SearchHouseholds("CHRISTINE@") = [], want
+  exactly household 7dec6137-...` — the email half of the search predicate,
+  pinned.
 
 ### HTTP layer
 
@@ -2887,6 +3009,15 @@ route with a missing guard has no second line of defence.
   for the day someone adds a second personal field to `userDTO` and the test
   still goes green. Tracked as
   [issue #1](https://github.com/oandrz/Household/issues/1).
+- **The session touch's throttle, pinned by mutation — admin households,
+  2026-09-02** (no defect; the proof-of-test record). `requireSession` stamps
+  `sessions.last_seen_at` only when it is null or at least an hour old.
+  Replacing that condition with `if true` left three of the four tests green
+  and produced exactly one failure, the discriminating one: `a request ten
+  minutes after a touch moved last_seen_at from 08:26:27 to 08:36:27; the
+  throttle is an hour`. A middleware that writes on every request is not a
+  failure any status code would show, so the negative case is the only test
+  that can hold the throttle in place.
 
 ### Frontend
 
@@ -3594,6 +3725,33 @@ route with a missing guard has no second line of defence.
   splitting the looks across `activeProps` and `inactiveProps` on a shared
   base that names neither colour. **Put a utility in exactly one of base,
   active or inactive — never in two.**
+- **TanStack Router's `from` takes a route's internal id, not its URL path,
+  and the two stop being the same the moment a pathless route joins the
+  chain — admin households, 2026-09-02.** `useSearch({ from:
+  "/admin/households" })` and `useParams({ from:
+  "/admin/households/$householdId" })` read correctly and are wrong:
+  `authenticatedRoute` is pathless (`id: "authenticated"`, no `path`), so it
+  contributes nothing to the URL — `<Link to="/admin/households">` is right —
+  but it *does* contribute to the id chain these hooks key on. The only valid
+  values are `"/authenticated/admin/households"` and
+  `"/authenticated/admin/households/$householdId"`, which
+  `tsc --noEmit --noErrorTruncation` will list for you. It compiled up to now
+  only because every earlier `from:` in the file (`/sign-in/magic`,
+  `/invite/$token`, `/sign-up/$token`) sits directly under `rootRoute` with no
+  pathless ancestor. **The type registration is what turns this into a build
+  error instead of an empty object at runtime** — keep `declare module
+  "@tanstack/react-router" { interface Register ... }` in place, and read
+  what `tsc` offers rather than pattern-matching the URL. Two smaller
+  siblings from the same task: a `<Link>` to a route whose `validateSearch`
+  returns non-optional fields requires an explicit `search` prop, and
+  `react-hooks/rules-of-hooks` fires on `component: () => {...}` arrow
+  functions that call hooks, because the rule keys on the function's own
+  name — both fixed the way `signInMagicRoute`'s existing comment in the same
+  file already documents.
+- **This branch's browser walk had not run when these entries were written.**
+  It is Task 11 of `docs/superpowers/plans/2026-09-02-hearth-admin-households.md`
+  and will be recorded in that plan's verification file; whatever it finds
+  belongs here, and "it found nothing" is worth writing down too.
 
 ### Tooling and infrastructure
 
