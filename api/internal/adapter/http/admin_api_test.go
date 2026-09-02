@@ -395,6 +395,36 @@ func TestAdminAuditRowRecordsTheRealRequest(t *testing.T) {
 	}
 }
 
+// TestAdminAuditRowRecordsTheQueryString: a search is a fact the log should
+// hold ("the operator looked for christine@"), and it is the one part of a
+// request that is available before chi has parsed route parameters -- see
+// auditAdmin's own comment on why Detail is otherwise empty.
+func TestAdminAuditRowRecordsTheQueryString(t *testing.T) {
+	env := newTestEnv(t)
+	env.makePlatformAdmin(t, env.ownerEmail)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	env.authed(t, http.MethodPost, "/api/v1/admin/session",
+		map[string]string{"password": env.ownerPassword}, session, csrf)
+
+	env.authedGet(t, "/api/v1/admin/flags?probe=1&limit=5", session)
+	entries, err := env.adminAudit.Recent(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("Recent: %v", err)
+	}
+	if got := entries[0].Detail["query"]; got != "probe=1&limit=5" {
+		t.Fatalf("Detail[query] = %v, want the raw query string", got)
+	}
+
+	env.authedGet(t, "/api/v1/admin/flags", session)
+	entries, err = env.adminAudit.Recent(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("Recent: %v", err)
+	}
+	if _, present := entries[0].Detail["query"]; present {
+		t.Fatalf("a request with no query string still wrote Detail[query] = %v", entries[0].Detail["query"])
+	}
+}
+
 // TestMeCarriesEveryDefinedFlag: every key is always present, so the frontend
 // never has to decide what a missing key means.
 func TestMeCarriesEveryDefinedFlag(t *testing.T) {
