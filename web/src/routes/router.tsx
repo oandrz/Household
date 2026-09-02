@@ -22,6 +22,8 @@
 //       /settings                                   -- the real Settings screen (Task 20)
 //     /admin       AdminShell (own chrome, no AppShell)  -> /admin/flags
 //       /admin/flags                                -- AdminFlagsPage
+//       /admin/households                           -- AdminHouseholdsPage (Task 8; tiles + search + rows)
+//       /admin/households/$householdId              -- AdminHouseholdPage (Task 9; the drill-in)
 //
 // The /admin subtree sits directly under authenticatedRoute, a sibling of
 // shellRoute rather than a child of it: the admin surface has its own
@@ -66,6 +68,7 @@ import {
   createRoute,
   createRouter,
   redirect,
+  useNavigate,
   useParams,
   useSearch,
 } from "@tanstack/react-router";
@@ -313,10 +316,19 @@ const settingsRoute = createRoute({
 // rather than a default export: both components keep the named-export
 // convention every other file in this codebase uses.
 const LazyAdminShell = lazy(() =>
-  import("../features/admin/AdminShell").then((m) => ({ default: m.AdminShell })),
+  import("../features/admin/AdminShell").then((m) => ({
+    default: m.AdminShell,
+  })),
 );
 const LazyAdminFlagsPage = lazy(() =>
-  import("../features/admin/AdminFlagsPage").then((m) => ({ default: m.AdminFlagsPage })),
+  import("../features/admin/AdminFlagsPage").then((m) => ({
+    default: m.AdminFlagsPage,
+  })),
+);
+const LazyAdminHouseholdsPage = lazy(() =>
+  import("../features/admin/AdminHouseholdsPage").then((m) => ({
+    default: m.AdminHouseholdsPage,
+  })),
 );
 
 // The Suspense fallback below is inlined at both call sites rather than
@@ -373,6 +385,56 @@ const adminFlagsRoute = createRoute({
   ),
 });
 
+// The households list keeps its search and limit in the URL, so reload,
+// back and the audit row all agree on what was shown. The page itself
+// takes them as props and hands navigation back here -- the same split
+// signInMagicRoute makes for its token.
+const adminHouseholdsRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: "households",
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { q: string; limit: number } => ({
+    q: typeof search.q === "string" ? search.q : "",
+    limit:
+      typeof search.limit === "number" &&
+      Number.isInteger(search.limit) &&
+      search.limit > 0
+        ? search.limit
+        : 50,
+  }),
+  component: () => {
+    const { q, limit } = useSearch({ from: "/admin/households" });
+    const navigate = useNavigate();
+    return (
+      <Suspense
+        fallback={
+          <main className="grid min-h-dvh place-items-center">
+            <p className="text-sm text-muted">Loading…</p>
+          </main>
+        }
+      >
+        <LazyAdminHouseholdsPage
+          q={q}
+          limit={limit}
+          onSearch={(next) =>
+            navigate({
+              to: "/admin/households",
+              search: { q: next, limit: 50 },
+            })
+          }
+          onShowMore={() =>
+            navigate({
+              to: "/admin/households",
+              search: { q, limit: Math.min(limit * 2, 200) },
+            })
+          }
+        />
+      </Suspense>
+    );
+  },
+});
+
 // Exported (not just `router`) so a test can mount the real tree with its
 // own memory history and QueryClient instead of RouterProvider's registered
 // singleton -- see routes/router.test.tsx.
@@ -392,13 +454,21 @@ export const routeTree = rootRoute.addChildren([
         moneyGoalsRoute,
         moneyBillsRoute,
       ]),
-      marriageGuardRoute.addChildren([marriageIndexRoute, marriageRetrosRoute, marriageVisionRoute]),
+      marriageGuardRoute.addChildren([
+        marriageIndexRoute,
+        marriageRetrosRoute,
+        marriageVisionRoute,
+      ]),
       settingsRoute,
     ]),
     // A sibling of shellRoute, not nested inside it: the admin surface does
     // not get AppShell's sidebar (this file's own header comment explains
     // why).
-    adminRoute.addChildren([adminIndexRoute, adminFlagsRoute]),
+    adminRoute.addChildren([
+      adminIndexRoute,
+      adminFlagsRoute,
+      adminHouseholdsRoute,
+    ]),
   ]),
 ]);
 
