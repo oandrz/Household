@@ -143,11 +143,22 @@ Two types, and the split is the whole point of decision 3.
 // because the operator needs different advice in each case.
 type MailOutbox interface {
     // Recent returns up to limit messages, newest first, with bodies left
-    // empty. A list never carries a body: see decision 7.
-    Recent(ctx context.Context, limit int) ([]OutboxMessage, error)
+    // empty. A list never carries a body: see decision 7. It returns a page
+    // rather than a slice because the screen says "showing 50 of 128", and
+    // the total is Mailpit's to report -- a caller cannot infer it from a
+    // slice that is exactly as long as the limit it asked for.
+    Recent(ctx context.Context, limit int) (OutboxPage, error)
     // Message returns one message including both body parts, exactly as the
     // outbox holds them. Extraction is the caller's job.
     Message(ctx context.Context, id string) (OutboxMessage, error)
+}
+
+// OutboxPage is one screenful of the outbox. Total is how many messages the
+// outbox holds altogether, not how many were returned; the service turns the
+// difference into Truncated.
+type OutboxPage struct {
+    Messages []OutboxMessage
+    Total    int
 }
 
 // OutboxMessage is a message as the outbox holds it. Text and HTML are
@@ -563,3 +574,4 @@ invisible to a green test suite.
 | "the panel is unavailable and says so, the same fail-closed shape as the DB browse" | Two distinct answers, `503` unconfigured and `502` unreachable, and this spec defines the shape the browse will copy | The browse is unbuilt; a spec cannot inherit a shape from something that does not exist. Decision 10 |
 | Silent on the list's contents beyond "recipient, subject and time" | Explicitly no `Snippet` | Mailpit's snippet can contain a whole link. Decision 7 |
 | Silent on durability, search, flags, read-marking | Decisions 9, 8, 14, 15 | Each is a question the implementer would otherwise answer alone |
+| `Recent` returns `([]OutboxMessage, error)` | `Recent` returns `(OutboxPage, error)` | Found while writing the plan: §6's list response promises `total` and `truncated`, and a bare slice cannot carry either. Mailpit's list response reports the total, so the port passes it through |
