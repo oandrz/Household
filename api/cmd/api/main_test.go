@@ -8,6 +8,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres"
@@ -210,12 +211,16 @@ func TestOpenBrowseAnswersEachKindOfDatabaseReadonlyURL(t *testing.T) {
 		// The log line is the only thing that says which .env line caused
 		// this: pgx builds its connect errors from `user=` and `database=`
 		// alone and never mentions the variable.
+		//
+		// This covers openBrowse's OWN log line and nothing else. The
+		// "database browse enabled" line lives in run(), not here, so this
+		// subtest cannot say anything about it -- an assertion that it is
+		// absent from this buffer would be one that can never fail.
+		// TestRunLogsTheBrowseAsEnabledOnlyWhenItActuallyOpened is where
+		// that predicate is checked, against run() itself.
 		logged := buf.String()
 		if !strings.Contains(logged, "DATABASE_READONLY_URL") {
 			t.Fatalf("the failure log never names the variable to fix\ngot: %s", logged)
-		}
-		if strings.Contains(logged, "database browse enabled") {
-			t.Fatalf("logged \"enabled\" for a browse that was never opened\ngot: %s", logged)
 		}
 	})
 
@@ -289,4 +294,108 @@ func TestRunRefusesTheBootOnAMisconfiguredReadonlyURL(t *testing.T) {
 	if strings.Contains(runErr.Error(), "listen and serve") {
 		t.Fatalf("run() reached the listener before refusing: %v", runErr)
 	}
+}
+
+// syncBuffer is a bytes.Buffer safe to write from more than one goroutine.
+// run() logs from the goroutine that owns the listener (logStartupAddresses,
+// and "server stopped" when the bind fails) as well as from the main path, so
+// a bare bytes.Buffer as the slog handler's writer here is a data race --
+// invisible today only because the suite does not run under -race.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// runWithReadonlyURL boots the whole service once against a port that is
+// already taken, so ListenAndServe fails and run() returns instead of blocking
+// until a signal. It returns everything run() logged along the way.
+//
+// The held port is the same control TestRunReturnsErrorWhenListenFails uses:
+// reaching it means run() got all the way past the browse wiring, so
+// "listen and serve" in the error is the caller's proof that the boot was not
+// refused earlier for some unrelated reason.
+func runWithReadonlyURL(t *testing.T, databaseURL, readonlyURL string) (string, error) {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatalf("failed to reserve a port: %v", err)
+	}
+	defer ln.Close()
+
+	var buf syncBuffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	t.Setenv("APP_ENV", "test")
+	t.Setenv("PORT", strconv.Itoa(ln.Addr().(*net.TCPAddr).Port))
+	t.Setenv("DATABASE_URL", databaseURL)
+	t.Setenv("SMTP_ADDR", "localhost:1025")
+	t.Setenv("SMTP_FROM", "Hearth <noreply@hearth.localhost>")
+	t.Setenv("APP_BASE_URL", "http://localhost:5173")
+	t.Setenv("DATABASE_READONLY_URL", readonlyURL)
+
+	// Two statements, not `return buf.String(), run()`: Go evaluates a return
+	// list left to right, so that one-liner reads the buffer BEFORE run() has
+	// written anything to it and every log assertion sees an empty string.
+	runErr := run()
+	return buf.String(), runErr
+}
+
+// TestRunLogsTheBrowseAsEnabledOnlyWhenItActuallyOpened pins the predicate on
+// run()'s startup line, which openBrowse's own tests cannot reach: the line is
+// in run(), and it reads readonlyDB != nil rather than adminBrowseSvc != nil.
+//
+// Those two disagree in exactly one case, and it is the case this whole round
+// was about. Since the fix, an unreachable database still produces a service
+// (so the routes answer DB_BROWSE_UNAVAILABLE rather than telling the operator
+// to set a variable that is already set) -- which means the older, obvious
+// predicate would now announce "database browse enabled" three lines under the
+// error saying it could not be opened.
+//
+// Both directions are asserted, and the positive one is what stops the
+// negative from being vacuous: "the log does not say enabled" would also pass
+// if the line were deleted outright.
+func TestRunLogsTheBrowseAsEnabledOnlyWhenItActuallyOpened(t *testing.T) {
+	adminURL := testsupport.StartPostgres(t)
+	readonlyURL := testsupport.ReadOnlyURL(t, adminURL)
+
+	const enabled = "database browse enabled"
+
+	t.Run("a live read-only pool is announced", func(t *testing.T) {
+		logged, runErr := runWithReadonlyURL(t, adminURL, readonlyURL)
+		if runErr == nil || !strings.Contains(runErr.Error(), "listen and serve") {
+			t.Fatalf("run() error = %v, want the held-port failure", runErr)
+		}
+		if !strings.Contains(logged, enabled) {
+			t.Fatalf("a browse that really opened was never announced as %q\ngot: %s", enabled, logged)
+		}
+	})
+
+	t.Run("an unreachable pool is not announced", func(t *testing.T) {
+		logged, runErr := runWithReadonlyURL(t, adminURL,
+			"postgres://hearth_readonly:pw@127.0.0.1:1/hearth?sslmode=disable")
+		if runErr == nil || !strings.Contains(runErr.Error(), "listen and serve") {
+			t.Fatalf("run() error = %v; an unreachable browse must not refuse the boot", runErr)
+		}
+		if !strings.Contains(logged, "DATABASE_READONLY_URL") {
+			t.Fatalf("the failure log never names the variable to fix\ngot: %s", logged)
+		}
+		if strings.Contains(logged, enabled) {
+			t.Fatalf("run() announced %q for a browse it could not open\ngot: %s", enabled, logged)
+		}
+	})
 }
