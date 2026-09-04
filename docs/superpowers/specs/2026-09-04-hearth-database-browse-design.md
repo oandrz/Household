@@ -291,8 +291,13 @@ see the value here" are different facts and the screen must not merge them.
 `RowPage.Rows` is `[][]string`, so a `NULL` and an empty text column would
 both arrive as `""` and a junior engineer reading the screen would conclude
 they are the same thing. They are not, and in this schema the difference is
-sometimes the bug being investigated (`users.password_hash` is `NULL` for a
-member who has only ever used a magic link).
+sometimes the bug being investigated: `users.email` is `NULL` for a
+Telegram-only account, because `UserRepo.Create` writes `NULL` when it is
+given no address, while `display_name` beside it is `text NOT NULL` and can
+legitimately be empty. **Not `users.password_hash`** — that column matches
+rule 2, so it renders `«redacted»` whatever its value, and it can never
+demonstrate `«null»` at all. An earlier draft of this decision used it, and
+the browser walk found the illustration unobservable.
 
 `NULL` renders as `«null»`, produced in SQL by `coalesce(col::text,
 '«null»')`. The empty string renders as nothing at all. The guillemets are

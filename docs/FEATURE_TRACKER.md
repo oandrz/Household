@@ -168,9 +168,10 @@ needed them to exist (see "Where things stand" below).
 > `users.password_hash`, a column that is NULL for exactly the members they
 > describe and renders `«redacted»` for every one of them. No new test: the
 > corrected claim was already asserted by `browse_repo_test.go:142`, so that
-> assertion was mutation-checked instead and went red. **Three criteria were
-> met by an interpreted rather than literal path and the record says which and
-> why.**
+> assertion was mutation-checked instead and went red. **Five things were met
+> by an interpreted rather than literal path — two substitutions the brief's
+> own text forced, two methods and one setup step — and the record names each
+> one where it occurs so the count is honest rather than flattering.**
 >
 > **The recount is a count, not an addition.** Section 9's nine rows,
 > counted by the first status symbol in each row's own State cell, now give

@@ -442,12 +442,23 @@ type RowPage struct {
 
 4. **Redaction, fail-closed.** A column is redacted when *any* of these holds,
    and redacted columns render `«redacted»`:
-   - its type is `bytea` (every token and hash in this schema is `bytea`),
+   - its type is `bytea` — read from `information_schema`'s `data_type` **and**
+     `udt_name`, because `data_type` reports a category rather than a type name
+     for two families: a `bytea[]` reads `ARRAY` and a domain or extension type
+     reads `USER-DEFINED`. Six columns of this schema already report a category
+     today,
    - its name ends in `_hash` or `_secret`, or contains `password`,
    - it appears in an explicit denylist in `internal/domain`.
 
-   The type rule is what makes this survive: a secret column added in a
-   migration next year is redacted before anyone remembers this file exists.
+   The type rule is what makes this survive, and its reach is worth stating
+   exactly rather than as an absolute: **every `bytea` and every `bytea[]`,
+   always; a domain over `bytea`, only if rule 2 or 3 catches it** — resolving
+   a domain needs `pg_type.typbasetype`, a catalogue read `internal/domain`
+   cannot make. What covers that case is a test rather than the rule: the
+   schema sweep resolves every column's base type and goes red the day a
+   migration introduces one. See decision 8 of
+   `2026-09-04-hearth-database-browse-design.md`, which expands this section
+   and wins where the two differ.
    `ColumnInfo.Redacted` is returned to the UI so the operator can see that a
    column was withheld rather than empty.
 

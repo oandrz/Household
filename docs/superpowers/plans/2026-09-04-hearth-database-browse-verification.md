@@ -38,7 +38,8 @@ one is setup:
 
 **One claim this file made and had to retract.** It originally said the brief
 was wrong about criterion 13's SQL as well. It was not; the retraction and the
-three `psql` runs that settle it are under criterion 13.
+four `psql` runs that settle it are under criterion 13 — one disproves the
+claim, three establish the mechanism behind it.
 
 ---
 

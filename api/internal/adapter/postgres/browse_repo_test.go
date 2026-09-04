@@ -751,3 +751,38 @@ func cellByName(t *testing.T, page usecase.RowPage, row []string, column string)
 	t.Fatalf("no %q column in the page", column)
 	return ""
 }
+
+// The Columns pane's type label is the one user-visible behaviour on this
+// screen that no other test touches: it is a label, so nothing about
+// redaction, ordering or paging asserts on it, and neutering displayType to
+// `return dataType` leaves every other test in this package green. It shipped
+// verified only in a browser; this is what makes it verified by the suite.
+//
+// The schema supplies both branches without any seeding, which is the point:
+// information_schema reports a category rather than a type name for arrays
+// and for citext, so an operator browsing users would otherwise read
+// "USER-DEFINED" on the one screen whose whole job is showing the schema.
+func TestColumnTypesAreShownAsTheSchemaSpellsThem(t *testing.T) {
+	f := newBrowseFixture(t)
+	ctx := context.Background()
+
+	for _, want := range []struct{ table, column, dataType string }{
+		{"users", "email", "citext"},              // information_schema: USER-DEFINED
+		{"memberships", "capabilities", "text[]"}, // information_schema: ARRAY, udt _text
+		{"users", "id", "uuid"},                   // already a type name, passed through
+	} {
+		page, err := f.repo.Rows(ctx, want.table, 1, 0)
+		if err != nil {
+			t.Fatalf("Rows(%s): %v", want.table, err)
+		}
+		got := ""
+		for _, c := range page.Columns {
+			if c.Name == want.column {
+				got = c.DataType
+			}
+		}
+		if got != want.dataType {
+			t.Errorf("%s.%s DataType = %q, want %q", want.table, want.column, got, want.dataType)
+		}
+	}
+}
