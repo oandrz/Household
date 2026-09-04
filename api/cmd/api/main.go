@@ -36,6 +36,8 @@ var _ telegram.StartHandler = (*usecase.TelegramAuthService)(nil)
 
 var _ usecase.MailOutbox = (*mail.MailpitOutbox)(nil)
 
+var _ usecase.DatabaseBrowser = (*postgres.BrowseRepo)(nil)
+
 func main() {
 	if err := run(); err != nil {
 		slog.Error("fatal", "error", err)
@@ -76,6 +78,16 @@ func run() error {
 		return err
 	}
 	defer db.Close()
+
+	adminBrowseSvc, readonlyDB, err := openBrowse(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	// Nil in all three of the outcomes that are not a live connection, so this
+	// is also the predicate the "enabled" line below reads -- see openBrowse.
+	if readonlyDB != nil {
+		defer readonlyDB.Close()
+	}
 
 	// Repositories. Each is constructed once and shared by every service (and,
 	// for Users/Memberships/Sessions, by the HTTP layer directly too) that
@@ -297,6 +309,7 @@ func run() error {
 			AdminReauth:    adminReauthSvc,
 			AdminDirectory: adminDirectorySvc,
 			AdminOutbox:    adminOutboxSvc,
+			AdminBrowse:    adminBrowseSvc,
 			Users:          users,
 			Memberships:    memberships,
 			Sessions:       sessions,
@@ -360,6 +373,18 @@ func run() error {
 		slog.Info("outbound message inspector enabled", "mailpit_api_url", cfg.MailpitAPIURL)
 	}
 
+	// The predicate is readonlyDB != nil -- "a live read-only pool was
+	// opened" -- and neither cfg.BrowseEnabled() nor adminBrowseSvc != nil.
+	// All three agree except in the case that matters: configured but
+	// unreachable, where the service exists (so the browse can answer
+	// DB_BROWSE_UNAVAILABLE rather than "you never set the variable") but
+	// nothing is enabled, and saying so here would contradict the error
+	// openBrowse already logged. No arguments: the value is a DSN carrying a
+	// password.
+	if readonlyDB != nil {
+		slog.Info("database browse enabled")
+	}
+
 	<-ctx.Done()
 
 	// If the listener itself failed to start, there is nothing to shut down
@@ -380,6 +405,67 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+// openBrowse decides what the operator's database browse is wired with, and
+// is the whole of that decision: run() only propagates the error and closes
+// the pool. It is its own function rather than a block inside run() because
+// its outcomes are the security-relevant ones on this path -- a browse served
+// through a writable connection is worse than no browse at all -- and a
+// function is something a test can call, which a block inside a function that
+// starts an HTTP server is not.
+//
+// The four outcomes are deliberately not the same:
+//
+//   - Not configured. Both returns are nil, Deps.AdminBrowse is nil, and the
+//     two /admin/db routes answer 503 naming DATABASE_READONLY_URL. The
+//     routes are registered either way, so the route tree never changes with
+//     configuration.
+//   - Misconfigured -- a DSN that cannot be parsed, or one that connects as a
+//     role which may write. Refuses the boot. Both are things a human typed,
+//     no retry fixes them, and serving a "read-only" browse through a
+//     writable connection is worse than serving nothing.
+//   - Opened but unusable -- unreachable, the pool could not be created, or
+//     the privilege check itself errored. Does NOT refuse the boot: the day
+//     that happens is the day someone is restoring this product onto a fresh
+//     box from the paper key, with the variable already in .env and the role
+//     not created yet, and taking the whole household product down over an
+//     operator panel would invert the very promise the read-only role exists
+//     to keep. The browse is wired with postgres.UnavailableBrowse so it
+//     answers 503 DB_BROWSE_UNAVAILABLE -- "the box could not open this" --
+//     rather than the "you never set the variable" 503 a nil service
+//     produces, which would send the operator to edit an .env line that is
+//     already correct.
+//   - Live. The service is real and the *ReadOnlyDB comes back so run() can
+//     close it.
+//
+// The returned *postgres.ReadOnlyDB is non-nil in exactly the last case, which
+// is why it -- and not "the service is non-nil" -- is what the startup log's
+// "database browse enabled" line is allowed to read.
+func openBrowse(ctx context.Context, cfg config.Config) (*usecase.AdminBrowseService, *postgres.ReadOnlyDB, error) {
+	if !cfg.BrowseEnabled() {
+		return nil, nil, nil
+	}
+
+	readonlyDB, err := postgres.OpenReadOnly(ctx, cfg.DatabaseReadonlyURL)
+	switch {
+	case err == nil:
+		return usecase.NewAdminBrowseService(postgres.NewBrowseRepo(readonlyDB)), readonlyDB, nil
+	case errors.Is(err, postgres.ErrReadOnlyMisconfigured):
+		return nil, nil, err
+	default:
+		// The variable is named in the message rather than left to the
+		// wrapped error's text: pgx builds its connect errors out of `user=`
+		// and `database=` alone, so without this the one log line reporting
+		// the failure would never mention the .env line that caused it. The
+		// DSN itself is still absent -- a Postgres URL carries a password,
+		// and credentials never go to a log (see logStartupAddresses).
+		slog.Error("DATABASE_READONLY_URL is set but the read-only database could not be opened; "+
+			"the database browse will answer 503 and the rest of Hearth is unaffected", "error", err)
+		// The failure travels with the stand-in, so every 503 it produces can
+		// log why the pool was never opened -- not only that it was not.
+		return usecase.NewAdminBrowseService(postgres.NewUnavailableBrowse(err)), nil, nil
+	}
 }
 
 // logStartupAddresses reports the two addresses an operator needs at the one

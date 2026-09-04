@@ -42,6 +42,7 @@ per-message price to grow into, which is exactly the property WhatsApp lost on
 | healthchecks.io ping URL | `/home/deploy/hearth-backup.env` on the box, mode 600 | Yes — create a new check |
 | SSH private key | The operator's laptop, `~/.ssh/hearth_prod` | Yes — replace it through Hetzner's console |
 | `TELEGRAM_BOT_TOKEN` | `deploy/.env` on the box, mode 600, beside `POSTGRES_PASSWORD` (and `.env` locally — gitignored, never committed). Placeholder lines only in `.env.example` and `deploy/.env.example` | Yes — in Telegram, `@BotFather` → `/mybots` → the bot → **API Token** → **Revoke current token** issues a new one. It travels with `TELEGRAM_BOT_USERNAME`, which is not a secret; `config.Load` refuses to boot if exactly one of the two is set |
+| `hearth_readonly` password (inside `DATABASE_READONLY_URL`) | `deploy/.env` on the box, mode 600, beside `POSTGRES_PASSWORD`. **Not set on the box today** — the browse ships dark; the line is commented out in `deploy/.env.example` until an operator runs `PROVISION.md` section 10 | Yes, easily — it only talks to the *existing* database, and `ALTER ROLE hearth_readonly PASSWORD '<new>'` sets a new one in one statement; losing it costs one admin panel and nothing else. **What it can do if it leaks:** `SELECT` every table in `public` — every household's accounts, balances and transactions. **What it cannot:** write anything at all, and reach the database from off the box, since Postgres is never published (the Hetzner firewall allows 22/80/443 only, and the container publishes no port). So the exposure is bounded by already having a shell here, at which point `DATABASE_URL` in the same file is the larger problem |
 | Hetzner / Cloudflare / Dynu / GitHub logins | The operator's password manager | Yes — all send password resets to the operator's email |
 
 **There are two ways to turn Telegram off, and they degrade differently.**
@@ -192,14 +193,48 @@ an account with no password.
   binary this box already deploys. Nothing in "The services" table above
   changes, and nothing new leaves the box. **Not on the box today** — the
   change is not deployed there, the same caveat the Telegram row above
-  carries, for the same reason. One panel the design spec describes but this
-  slice does not build will cost one new value here when it ships: the
-  read-only database browse needs `DATABASE_READONLY_URL` (a second,
-  `SELECT`-only Postgres role, reached over the connection already open to
-  this same database — not a new service). It is free, and the design spec
-  commits it, like the panel below, to saying plainly it is unavailable while
-  its value is unset rather than falling back to a wider connection — see
-  [ADR 5](adr/0005-platform-admin-authorization.md).
+  carries, for the same reason. This bullet used to end by promising that one
+  unbuilt panel "will cost one new value here when it ships". **It has
+  shipped, and this is that value.** The read-only database browse
+  (`admin-db-browse`, open as
+  [PR #18](https://github.com/oandrz/Household/pull/18) and not merged,
+  2026-09-04 — code-complete, reviewed, and walked 15 of
+  15, including the write refusal run against the real role rather than a stub:
+  `docs/superpowers/plans/2026-09-04-hearth-database-browse-verification.md`)
+  needs `DATABASE_READONLY_URL`: a second, `SELECT`-only
+  Postgres role, `hearth_readonly`, reached over the connection already open
+  to this same database. **No new service, no new cost** — the total above is
+  unchanged. What it does add is this product's first genuinely
+  *infrastructural* dependency, and four facts worth knowing before touching
+  it:
+  - **Unset, the browse says so and names the variable.** There is
+    deliberately no fallback to `DATABASE_URL`: a half-provisioned box
+    degrades to "you cannot use this panel", never to "you are using it
+    through the read-write connection".
+  - **A value that cannot be parsed, or one that connects as a role which
+    may write, refuses the boot** — the same shape `MAILPIT_API_URL` and the
+    Telegram pair already have, so a typo cannot present later as an
+    unexplained `503` on one admin screen.
+  - **A database that is merely *unreachable* does not refuse the boot.**
+    That is the difference from the two above and it is the deliberate one:
+    the day a set variable meets a missing role is the day someone is
+    restoring onto a fresh box, and taking the household product down over
+    an operator panel would be exactly backwards. The API starts, logs that
+    it could not open the read-only database *naming the variable*, and the
+    browse answers `503`.
+  - **The role is in no backup.** Roles are cluster-level; `backup.sh` dumps
+    one database with `--no-privileges`, which drops the grants as well. So
+    a restore that looks complete leaves the browse broken. Re-run
+    `deploy/readonly-role.sql` after restoring — it is idempotent, so that
+    is the whole instruction (`deploy/README.md`'s Restoring).
+
+  **Not on the box today either, and that one is a decision rather than a
+  schedule.** The product owner chose on 2026-09-04 to ship this dark:
+  merged and deployed with `DATABASE_READONLY_URL` unset, so production
+  shows the not-configured panel until they run `deploy/PROVISION.md`
+  section 10 themselves. See
+  [ADR 5](adr/0005-platform-admin-authorization.md), amended the same day for
+  what this feature proved about its own narrowing.
 - **The outbound message inspector merged on 2026-09-04 (`3eddbe2`, PR #17)
   and adds no new external service either.** `MAILPIT_API_URL` points the operator's
   `/admin/mail` screen at Mailpit's own HTTP API — Mailpit already runs on

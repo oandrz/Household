@@ -204,6 +204,22 @@ Compose file. No application code changes.
 
 ## Break-glass
 
+**If the question is "what is actually in the database", start at
+`/admin/database`, not here.** Sign in as a platform admin and open the
+Database tab: it lists every table with its row count, and opening one shows
+a page of rows. It reads through `hearth_readonly`, a role Postgres will not
+let write, so a bad click cannot damage anything; every table opened writes
+its own `admin_audit_log` row; and columns holding a secret are never
+selected at all — they render `«redacted»`, distinct from `«null»`, which is
+a value that is genuinely absent. It needs `DATABASE_READONLY_URL` set and
+the role created (`PROVISION.md` section 10). Unset, the screen says so and
+names the variable; it never falls back to the read-write connection.
+
+**`psql` below stays the fallback for the questions the browse cannot
+answer** — there are no filters, no sorting, no joins and no free SQL, on
+purpose. And every command in the rest of this section is a *mutation*, which
+the browse cannot do at all.
+
 The API image has no shell. These run from the admin image:
 
 ```bash
@@ -347,6 +363,33 @@ argument: `./restore.sh /tmp/b.age "<dsn>" /path/to/escrowed/hearth.key`. Omit
 it and `restore.sh` defaults to `$HOME/.config/age/hearth.key` — the box's own
 key, not the escrow, so an escrow drill must always pass this argument
 explicitly.
+
+**A restore does not bring back the `hearth_readonly` role, and nothing tells
+you.** `backup.sh` runs `pg_dump` over **one database** with
+`--no-privileges`; roles live in the *cluster*, not in a database, and
+`--no-privileges` drops the `GRANT`s as well. So neither the role nor its
+grants are in any backup this product takes. A restore that looks complete —
+every table back, every figure right — leaves the operator's database browse
+answering `503`, and the failure surfaces days later on the one day somebody
+needs it.
+
+So, **after restoring into the live `hearth` database** (the disaster-recovery
+case, not the throwaway drill above — `readonly-role.sql` grants `CONNECT ON
+DATABASE hearth` and is written for that database), run the role script
+against it again:
+
+```bash
+docker compose -f docker-compose.prod.yml exec -T postgres \
+  psql -U hearth -d hearth -v ON_ERROR_STOP=1 < readonly-role.sql
+docker compose -f docker-compose.prod.yml exec -T postgres \
+  psql -U hearth -d hearth -c "ALTER ROLE hearth_readonly PASSWORD '<the password in .env>'"
+```
+
+It is idempotent, so **"run it after every restore" is the whole
+instruction** — no checking first whether the role survived. The password
+comes from `DATABASE_READONLY_URL` in `.env`, which the restore did not
+touch; if that variable is unset on this box, there is nothing to do here at
+all. `PROVISION.md` section 10 is the same step written out in full.
 
 ## What is where
 

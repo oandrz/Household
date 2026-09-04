@@ -146,9 +146,15 @@ dig +short <hostname> @1.1.1.1     # must be the box's IP
 su - deploy
 git clone --depth=1 --filter=blob:none --sparse https://github.com/oandrz/Household.git
 cd Household && git sparse-checkout set deploy && cd deploy
-ls -A     # Caddyfile README.md PROVISION.md backup.sh crontab.example deploy.sh
-          # docker-compose.prod.yml restore.sh sshd-hardening.conf .env.example
+ls -A     # .env.example Caddyfile PROVISION.md README.md backup.sh
+          # crontab.example deploy.sh docker-compose.prod.yml
+          # hearth-backup.env.example readonly-role.sql restore.sh
+          # sshd-hardening.conf
 ```
+
+That is every tracked file in `deploy/` — `git ls-files deploy/` is the check
+if this list ever looks wrong. It goes stale the moment a file is added here,
+and a stale list is how someone concludes their sparse checkout is broken.
 
 The application source is deliberately absent. If `api/` or `web/` appear, the
 sparse checkout did not take.
@@ -171,6 +177,10 @@ install" has the details and the traps.
 `postgres://` DSNs, and base64's `/`, `+` and `=` are all significant inside a
 URL userinfo field. `openssl rand -hex 24`.
 
+Leave `DATABASE_READONLY_URL` commented out for now. It is the optional
+operator database browse, and it wants a role that does not exist yet — see
+section 10, after the first bring-up.
+
 ## 9 · First bring-up
 
 ```bash
@@ -180,7 +190,119 @@ URL userinfo field. `openssl rand -hex 24`.
 `deploy.sh` refuses `latest`, refuses a tag absent from the registry before it
 touches `.env`, and verifies `migrate` exited `0` and `/readyz` answers.
 
-## 10 · Backups
+## 10 · The read-only role
+
+**Optional — the product itself does not depend on it.** Everything above
+gets you a working Hearth. This gets you the operator's
+database browse at `/admin/database` — a read-only look at the tables from
+the admin surface, instead of `docker compose exec postgres psql` as the
+application role. Skip it and the panel says it is not configured and names
+the variable; nothing else changes. **The production box ships this way
+deliberately** — the product owner's decision on 2026-09-04.
+
+**This section is here, after the first bring-up, because the commands below
+need a running `postgres` container to `exec` into.** Nothing is up until
+section 9, so there is no earlier point in this file at which they could be
+typed. That is the whole reason for the position, and it is worth being
+precise about, because there is a plausible-sounding second reason that is
+**not** true here: `GRANT SELECT ON ALL TABLES` does only cover the tables
+that exist when it runs, but the script's `ALTER DEFAULT PRIVILEGES FOR ROLE
+hearth` line covers everything `hearth` creates afterwards — and every table
+in this schema is created by goose running as `hearth`. So running the script
+before the migrations would still be *correct*; it just cannot be run before
+there is a database to run it against.
+
+Generate a password. **Hex, not base64**, for the reason section 8 already
+gives: it goes into a `postgres://` userinfo field, where `/`, `+` and `=`
+are all significant.
+
+```bash
+openssl rand -hex 24
+```
+
+Create the role and set that password:
+
+```bash
+C="docker compose -f docker-compose.prod.yml"
+
+$C exec -T postgres \
+  psql -U hearth -d hearth -v ON_ERROR_STOP=1 < readonly-role.sql
+
+$C exec -T postgres \
+  psql -U hearth -d hearth -c "ALTER ROLE hearth_readonly PASSWORD '<the generated password>'"
+```
+
+`readonly-role.sql` sets no password itself, deliberately: `psql`'s `:'var'`
+interpolation is a client-side feature, and a file that used it could not
+also be run by the Go test suite through `pgx`. Every consumer of that file
+sets the password in its own second statement, exactly as above.
+
+The script is **idempotent** — it is written to be run repeatedly, and the
+same file provisions every test container and the development stack. Run it
+again whenever you are unsure, and **run it after every restore**: roles are
+cluster-level and `backup.sh` dumps one database with `--no-privileges`, so
+neither the role nor its grants are in any backup this product takes
+(`README.md`'s Restoring).
+
+Then uncomment `DATABASE_READONLY_URL` in `.env`, put the generated password
+in it, and restart the API:
+
+```bash
+$C up -d --force-recreate api
+```
+
+**`--force-recreate`, not a bare `up -d`.** The image tag has not changed —
+only a value inside `.env`, which reaches the container through `env_file`.
+Compose decides whether to recreate a service by comparing its configuration,
+and the surest way to be certain a new `.env` line is actually in the
+process's environment is to say so. `config.Load` reads the variable once, at
+startup; nothing re-reads it.
+
+**The role must exist before `DATABASE_READONLY_URL` is set** — otherwise the
+API logs that the read-only database could not be opened and the browse
+answers `503` until it does. That is deliberately **not fatal**: the day a
+set variable meets a missing role is the day someone is restoring onto a
+fresh box, and refusing the boot there would take the whole household product
+down over an operator panel. So the order here is a convenience, not a
+requirement. Two things *are* fatal, and both are things a human typed: a
+value the DSN parser cannot read, and a value that connects as a role which
+may write. The API refuses to start on either, rather than serve a
+"read-only" browse through a connection that is not.
+
+Check it before you trust it — as `hearth_readonly`, a `SELECT` must work and
+an `INSERT` must not:
+
+```bash
+$C exec -T postgres env PGPASSWORD='<the generated password>' \
+  psql -U hearth_readonly -d hearth -c "select count(*) from households"
+#   expected: a number
+
+$C exec -T postgres env PGPASSWORD='<the generated password>' \
+  psql -U hearth_readonly -d hearth -c "insert into households (name) values ('x')"
+#   expected: ERROR, and WHICH error tells you something -- see below
+```
+
+**Either refusal is a pass, and they mean different things.** The role is
+read-only twice over, by two guards that fail independently, and whichever
+one Postgres reaches first is the one you see:
+
+- `ERROR: cannot execute INSERT in a read-only transaction` — the expected
+  message, and the better one. Postgres checks the transaction's read-only
+  setting before it checks table privileges, so this is
+  `default_transaction_read_only = on` firing. It tells you the `ALTER ROLE`
+  lines ran; the grants are what the `SELECT` above already proved.
+- `ERROR: permission denied for table households` — also a pass, but a
+  *narrower* one. It means the second guard is the only one there:
+  `default_transaction_read_only` is not set on this role, so a box
+  provisioned from an older copy of this file is still safe, but has one
+  guard where it should have two. Re-run `readonly-role.sql` — it is
+  idempotent, and the two `ALTER ROLE` lines are what you are missing.
+
+Anything that is **not** an error — a row inserted, or a complaint about
+`family_name` being NULL — means the role can write and the browse must not
+be pointed at it.
+
+## 11 · Backups
 
 Create the R2 bucket and a **scoped Account API token** (see
 `../docs/INFRASTRUCTURE.md`), then, **as `deploy`** — `rclone` reads
@@ -219,7 +341,7 @@ env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/home/deploy SHELL=/bin/sh \
   /bin/sh -c 'set -a; . /home/deploy/hearth-backup.env; set +a; /home/deploy/Household/deploy/backup.sh'
 ```
 
-## 11 · Monitors
+## 12 · Monitors
 
 - **healthchecks.io** — period 1 day, grace 3 hours. Answers *did the backup
   run*. Its URL goes in `hearth-backup.env`.
@@ -230,7 +352,7 @@ env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/home/deploy SHELL=/bin/sh \
 **Both, not one.** Only having the first is a gap that survived an entire
 twelve-criterion walk.
 
-## 12 · Prove it, do not assume it
+## 13 · Prove it, do not assume it
 
 Work through
 `docs/superpowers/plans/2026-08-10-hearth-production-verification.md`. At

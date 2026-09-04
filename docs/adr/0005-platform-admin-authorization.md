@@ -1,8 +1,10 @@
 # 5. Platform admin — a separate axis, granted only from the box
 
-**Status:** Accepted — 2026-09-02. Code-complete and reviewed across eleven
-tasks, `make lint && make test` green, and **walked against the dev stack the
-same day** — 15 of 15 criteria passed
+**Status:** Accepted — 2026-09-02. **Amended 2026-09-04** — see the amendment
+below, which records what decision 4's narrowing looked like when the
+read-only database browse finally tested it. Code-complete and reviewed
+across eleven tasks, `make lint && make test` green, and **walked against the
+dev stack the same day** — 15 of 15 criteria passed
 (`docs/superpowers/plans/2026-09-02-hearth-admin-surface-verification.md`).
 **The branch is not merged and nothing here is deployed.** The walk ran
 against `localhost:5173`, not `oink.mywire.org`.
@@ -263,17 +265,162 @@ stop a misuse, it makes one impossible to hide afterward.
   anything) would let an unauthenticated prober distinguish "locked" from
   "not yet tried," which is a smaller leak solved by creating a larger one.
 
+## Amendment — 2026-09-04: what the database browse proved
+
+**Amended, not superseded.** Everything above stands. The "Revisit this when"
+list below named the read-only database browse as the moment decision 4's
+narrowing — *mutations against the database's actual rows stay in `adminctl`
+over SSH; reads move to the web behind re-authentication and an audit log* —
+would first be tested against a real database read rather than a flag toggle.
+It has been built (branch `admin-db-browse`, spec
+`docs/superpowers/specs/2026-09-04-hearth-database-browse-design.md`). This
+is what held and what did not.
+
+**The status of the work, stated plainly, because this ADR's own header sets
+the bar:** code-complete and reviewed, `make lint && make test` green, and
+**its fifteen-criterion browser walk ran on 2026-09-04 and passed 15 of 15**
+(`docs/superpowers/plans/2026-09-04-hearth-database-browse-verification.md`)
+— so it now meets the same bar as the walk this ADR's Status line cites for
+the first slice, and what follows is a claim about a browse that was driven
+in a browser.
+
+The walk mattered to *this* ADR's central claim more than to most, because
+the narrowing below rests on a guard that is Postgres's rather than this
+codebase's, and a guard is a claim until someone attacks it. It was attacked:
+the write refusal was run as `hearth_readonly` against the live role, and
+**both of its guards were proven to hold independently** — a plain `INSERT`
+is refused by `default_transaction_read_only` (`cannot execute INSERT in a
+read-only transaction`), and `BEGIN; SET TRANSACTION READ WRITE`, the one
+statement that switches that guard off, then meets the `GRANT`
+(`permission denied for table households`). `UPDATE`, `DELETE`, `DROP TABLE`
+and `CREATE TABLE` were all refused too, and nothing was written.
+
+**What the walk did not change, and must not be read as changing:**
+production ships with `DATABASE_READONLY_URL` unset by the product owner's
+decision on 2026-09-04. The narrowing is verified; it is not yet exercised on
+the live box, and will not be until an operator runs `deploy/PROVISION.md`
+section 10.
+
+### 1. The narrowing held, and the guard turned out not to be this codebase's
+
+No write reaches the web. The browse has two routes and both are `GET`s; the
+port it depends on, `usecase.DatabaseBrowser`, has two methods and neither
+can mutate anything; and every statement the adapter issues is a `SELECT` —
+over the household tables, over `information_schema`, and (for the ordering
+key) over `pg_index`, `pg_attribute` and `to_regclass`. The catalogue it
+reads from is wider than `information_schema` alone; what matters is that all
+of it is reads. But the load-bearing part is not any of that, and this is the sentence worth
+carrying forward: **the guard is Postgres's, not ours.** The browse reads
+through its own connection pool as `hearth_readonly`, a role granted `SELECT`
+on `public` and nothing else, with `default_transaction_read_only` set on the
+role itself. A write attempted through that pool — by a bug, a bad refactor,
+or someone who did not read this file — is refused by the database before
+anything in this repository has an opinion about it.
+
+That is a stronger position than decision 4 was written from. Decision 4
+bounded the risk with *process* (re-authentication, an audit row). Here the
+process is still there, and underneath it is a mechanism that does not depend
+on anyone's care. The API even refuses to start if the read-only pool turns
+out to be able to write — checked on every connection the pool opens, not
+once at boot — because serving a "read-only" browse through a writable
+connection is worse than serving no browse at all.
+
+**One line in Consequences above needs qualifying because of this.** It says
+audit "is an accountability mechanism, not a preventive one — it does not
+stop a misuse, it makes one impossible to hide afterward". That is exactly
+right for the feature flags it was written about, where the only thing
+standing between an admin session and a changed row is the operator's own
+judgement. It is not the whole story for the browse: here the *primary*
+guard is preventive, and the audit log is the second layer rather than the
+only one. Reading is still only accountable-after-the-fact — see §3 below —
+but writing is genuinely prevented.
+
+### 2. What this ADR did not anticipate: a role is not schema, and not backup
+
+The thing decision 4 got wrong was not the direction of the narrowing. It
+was assuming that "reads move to the web" is a change to this codebase.
+
+`hearth_readonly` is a **cluster-level** object, and that is what puts it
+outside the migration path. Not "because migrations are only for tables" —
+goose runs arbitrary SQL, and this repository's own
+`api/migrations/00002_identity.sql` opens with `CREATE EXTENSION IF NOT
+EXISTS citext;`, which is not a table either. The real reason is privilege:
+`CREATE ROLE` requires the `CREATEROLE` attribute, and the role migrations
+run as need not hold it — making every migration able to mint roles, so that
+one of them can, is a larger grant than the feature is worth. So it is
+created by `deploy/readonly-role.sql`, run during provisioning, by hand, by a
+person with a shell on the box. And because roles live in the cluster rather than in
+a database, `deploy/backup.sh` — one `pg_dump` of one database, with
+`--no-privileges` — captures neither the role nor its grants. **A restore
+that looks complete leaves the browse broken**, and the failure surfaces days
+later, on the one day somebody needs it. The instruction is to re-run the
+script after every restore; it is idempotent, which is what makes that a
+whole instruction rather than a checklist (`deploy/README.md`).
+
+**This makes the browse the admin surface's first genuinely infrastructural
+dependency.** Every earlier feature in this surface was code and tables:
+`platform_admins`, `feature_flags`, `admin_audit_log`, `sessions.last_seen_at`,
+and — for the mail inspector — a container that was already running. All of
+those arrive with a deploy. This one does not. Turning it on in production
+is a provisioning step (`deploy/PROVISION.md` §10), not a release, and the
+product owner's decision on 2026-09-04 was to ship it **dark**: merged and
+deployed with `DATABASE_READONLY_URL` unset, so the deployed panel says it is
+not configured and names the variable until someone chooses otherwise.
+
+Nothing in this ADR predicted that, and the reason it matters beyond this one
+feature is the shape: the admin surface can now grow a dependency that a
+deploy does not satisfy and a backup does not preserve. The next such
+dependency should be recognised as one on the day it is proposed.
+
+### 3. The accepted cost, restated in its sharpest form
+
+Consequences above says an admin session re-authenticated within the last
+thirty minutes "can read every household's flag state and toggle it". That
+was the true statement when it was written. This is the true statement now:
+
+> **A re-authenticated admin session can read every household's finances —
+> every account, balance, transaction and goal — one page at a time, with an
+> `admin_audit_log` row per page.**
+
+Not one household's, not on request, not with anyone's consent. That is not a
+new decision; it is the cost §4 of the design spec named and this ADR agreed
+to in advance. It is stated here in those words because the earlier phrasing
+is about a feature-flag screen, and someone reading only that would
+underestimate by an order of magnitude what a stolen admin session is now
+worth.
+
+What bounds it is unchanged and is worth re-reading as a set rather than as
+five separate mechanisms: the admin must have been granted from a shell on
+the box (§2); the grant costs the password again within the last thirty
+minutes and does not slide with activity (§3); every page view — reads
+included — writes an audit row before the handler runs, carrying the table in
+`Target` and the offset in `detail.query` (which is why paging lives in the
+URL); columns holding secrets are never selected at all, so `password_hash`,
+every `bytea` and every `bytea[]` render `«redacted»` and their bytes never
+leave Postgres — with one gap that is named rather than glossed, because an
+overstated guarantee is the thing that stops being maintained: a *domain*
+over `bytea` is caught by its name or not at all, since resolving a domain to
+its base type needs a catalogue read the stdlib-only `internal/domain` cannot
+make (design spec decision 8, and the schema sweep in
+`browse_repo_test.go` that goes red the day a migration adds one); and there
+is no SQL box, no filter, no join and no export — a page of rows on a screen,
+and `psql` over SSH for anything more. **The bound that is most
+easily lost is the last one.** Each of the missing features is individually
+reasonable to ask for, and the first one added turns a bounded read into an
+arbitrary one.
+
 ## Revisit this when
 
 - **Admin levels are wanted.** `PlatformAdmin` carries no permission field on
   purpose — one flat set of operators today — specifically so a level, if it
   is ever needed, is a field added here rather than a reinterpretation of
   something that already means something else.
-- **The read-only database browse (design spec §4) is built.** That is the
-  moment the "mutations stay on the CLI, reads move to the web" narrowing in
-  decision 4 above is tested against an actual database read rather than a
-  flag toggle, and this ADR should be amended, not superseded, to record what
-  held and what didn't.
+- ~~**The read-only database browse (design spec §4) is built.**~~ **Done —
+  2026-09-04.** This was the moment the "mutations stay on the CLI, reads
+  move to the web" narrowing in decision 4 above was tested against an actual
+  database read rather than a flag toggle. The amendment above is that
+  record; the bullet is kept rather than deleted so the trigger and its
+  outcome sit together.
 - **A second operator exists.** Nothing here assumes exactly one; `adminctl
   list-platform-admins` and the audit log's `actor_user_id` already support
   more than one, but the product has only ever been run by one, and that is
@@ -284,6 +431,13 @@ stop a misuse, it makes one impossible to hide afterward.
 - `docs/superpowers/specs/2026-09-01-hearth-admin-surface-design.md` — the
   design this was built from, including the database browse and mail
   inspector this ADR narrows the position for but does not build.
+- `docs/superpowers/specs/2026-09-04-hearth-database-browse-design.md` — the
+  browse's own design, which the 2026-09-04 amendment above records the
+  outcome of. Its decisions 1–4 are where "the guard is Postgres's" is
+  argued in full.
+- `docs/INFRASTRUCTURE.md` — `DATABASE_READONLY_URL`, the `hearth_readonly`
+  password, and what breaks without either; `deploy/PROVISION.md` §10 is how
+  the role is created.
 - `docs/superpowers/plans/2026-09-02-hearth-admin-surface-verification.md` —
   the 15-criterion browser walk, including the criterion 6 result this ADR
   cites for the ledger separation.

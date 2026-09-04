@@ -130,6 +130,20 @@ describe("the main entry point's static import graph", () => {
     expect(reachable).not.toContain(
       join(SRC_ROOT, "features", "admin", "useAdminOutbox.ts"),
     );
+    // The database browse. Unlike the outbox, its table route does need two
+    // constants from router.tsx (validateSearch bounds the limit and offset
+    // a hand-typed URL asks for) -- browseLimits.ts is the leaf module that
+    // exists so router.tsx can have them without importing the hook file,
+    // exactly as directoryLimits.ts does. useAdminDatabase.ts re-exports the
+    // same two constants, so this assertion is what stands between a
+    // convenient-looking import swap and the whole browse query layer
+    // landing in every household member's bundle.
+    expect(reachable).not.toContain(
+      join(SRC_ROOT, "features", "admin", "AdminDatabasePage.tsx"),
+    );
+    expect(reachable).not.toContain(
+      join(SRC_ROOT, "features", "admin", "useAdminDatabase.ts"),
+    );
   });
 
   // A walk that is silently broken (a resolution bug, ENTRY pointing at the

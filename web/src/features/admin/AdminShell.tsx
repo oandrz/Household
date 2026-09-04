@@ -34,6 +34,7 @@ function OperatorNav() {
     { to: "/admin/flags", label: "Flags" },
     { to: "/admin/mail", label: "Mail" },
     { to: "/admin/households", label: "Households" },
+    { to: "/admin/database", label: "Database" },
   ] as const;
   return (
     <nav

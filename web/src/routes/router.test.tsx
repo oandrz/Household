@@ -832,6 +832,93 @@ describe("the real route tree", () => {
     expect(await screen.findByRole("heading", { name: "Oentoro" })).toBeInTheDocument();
   });
 
+  it("mounts the database table list at /admin/database", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture({ isPlatformAdmin: true }) },
+      "GET /api/v1/admin/flags": { status: 200, body: { flags: [] } },
+      "GET /api/v1/admin/db/tables": { status: 200, body: { tables: [] } },
+    });
+
+    renderApp("/admin/database");
+
+    expect(await screen.findByRole("heading", { name: "Database" })).toBeInTheDocument();
+  });
+
+  // The row viewer is the first route in this file to call BOTH useParams
+  // and useSearch with the same two-pathless-routes-deep `from` id, and the
+  // reason it needs mounting through the real routeTree is the one the
+  // households list's own comment above gives: tsc cannot prove the string
+  // resolves, TanStack looks it up in the live match array and throws if it
+  // cannot find it, and AdminDatabasePage.test.tsx renders the component
+  // directly, bypassing the route entirely. The stubbed URL carries
+  // ?limit=50&offset=0 because validateSearch fills both in for a bare URL
+  // -- so this also pins that a hand-typed /admin/database/sessions asks the
+  // API a bounded question rather than an open one.
+  it("mounts the row viewer at /admin/database/$table, resolving useParams's and useSearch's route ids", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture({ isPlatformAdmin: true }) },
+      "GET /api/v1/admin/flags": { status: 200, body: { flags: [] } },
+      "GET /api/v1/admin/db/tables/sessions?limit=50&offset=0": {
+        status: 200,
+        body: {
+          table: "sessions",
+          columns: [{ name: "id", dataType: "uuid", redacted: false }],
+          rows: [["01H8ZK"]],
+          total: 1,
+          limit: 50,
+          offset: 0,
+        },
+      },
+    });
+
+    renderApp("/admin/database/sessions");
+
+    expect(await screen.findByRole("heading", { name: "sessions" })).toBeInTheDocument();
+  });
+
+  // A 404 from the rows query is a table name that does not exist -- an
+  // operator's typo in a URL they typed by hand -- and it must leave the
+  // operator surface exactly where it was.
+  //
+  // Mounted through the real tree because that is the only place both halves
+  // are observable at once: AdminDatabasePage.test.tsx renders the component
+  // in a one-route tree with no AdminShell, so it can show the copy but
+  // cannot show that the chrome survived, and an assertion there about
+  // AdminGate not appearing could never fail.
+  //
+  // The copy assertion is the one with teeth, and it carries both halves:
+  // it fails if the 404 is filtered through isAdminLayerFailure (the page
+  // then renders nothing under the heading), and it fails if the surface
+  // closes, because AdminGate replaces AdminShell's children wholesale and
+  // takes this copy with them. Both were checked by mutation. The nav
+  // assertion cannot fail on its own -- a blank page still sits inside the
+  // header -- so it is here to say which of the two happened, not to catch a
+  // third thing.
+  //
+  // One thing this does NOT catch, checked rather than assumed: adding
+  // NOT_FOUND to useCloseSurfaceOnReauth's list on its own leaves this green,
+  // because the invalidated flags query refetches and answers cleanly, so the
+  // gate never closes. Closing the surface from a read-path 404 needs that
+  // refetch to fail too.
+  it("keeps the operator surface open when a browsed table does not exist", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture({ isPlatformAdmin: true }) },
+      "GET /api/v1/admin/flags": { status: 200, body: { flags: [] } },
+      "GET /api/v1/admin/db/tables/sessionz?limit=50&offset=0": {
+        status: 404,
+        body: { error: { code: "NOT_FOUND", message: "That could not be found." } },
+      },
+    });
+
+    renderApp("/admin/database/sessionz");
+
+    expect(await screen.findByText(/no table called/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("navigation", { name: "Operator" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Hearth · Operator")).toBeInTheDocument();
+  });
+
   // requirePlatformAdmin answers 404, not 403, to an authenticated non-admin
   // (middleware_admin.go's own doc comment: "to everyone else the whole
   // surface must look like a typo") -- AdminGate's fail-closed default is

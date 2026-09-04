@@ -52,6 +52,7 @@ ps: ## Show container status
 
 migrate: ## Apply pending migrations
 	$(COMPOSE) run --rm migrate
+	$(COMPOSE) run --rm readonly-role
 
 migrate-down: ## Roll back the most recent migration
 	$(COMPOSE) run --rm migrate sh -c \

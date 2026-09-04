@@ -48,7 +48,7 @@ function renderShell() {
 }
 
 describe("AdminShell's operator nav", () => {
-  it("renders Flags, Mail and Households, in that order, plus Back to Hearth", async () => {
+  it("renders Flags, Mail, Households and Database, in that order, plus Back to Hearth", async () => {
     renderShell();
 
     const nav = await screen.findByRole("navigation", { name: "Operator" });
@@ -57,8 +57,15 @@ describe("AdminShell's operator nav", () => {
     // Source order in AdminShell.tsx's own `items` array -- this is the
     // order the browser walk's criterion 2 confirmed the running app
     // actually shows, settling the one place the task's own framing
-    // disagreed with itself about which order was correct.
-    expect(labels).toEqual(["Flags", "Mail", "Households", "Back to Hearth"]);
+    // disagreed with itself about which order was correct. Database joins it
+    // last so the three the walk confirmed keep the order it confirmed.
+    expect(labels).toEqual([
+      "Flags",
+      "Mail",
+      "Households",
+      "Database",
+      "Back to Hearth",
+    ]);
   });
 
   it("lets the nav wrap onto a second line instead of forcing the page wider than the viewport", async () => {
@@ -72,7 +79,9 @@ describe("AdminShell's operator nav", () => {
     // check -- adding a third link (`Mail`) was what pushed it over. This
     // assertion is the tripwire for that regression coming back: with
     // `flex-wrap` in place, a narrow viewport wraps the row instead of
-    // overflowing it, and this class is what makes that possible.
+    // overflowing it, and this class is what makes that possible. Database
+    // is the fourth link, so the nav is now further past the width that
+    // overflowed without it, not closer to fitting.
     expect(nav.className).toContain("flex-wrap");
   });
 });

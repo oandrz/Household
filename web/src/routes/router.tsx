@@ -26,6 +26,8 @@
 //       /admin/mail/$messageId                      -- AdminMailMessagePage (Task 7; one message)
 //       /admin/households                           -- AdminHouseholdsPage (Task 8; tiles + search + rows)
 //       /admin/households/$householdId              -- AdminHouseholdPage (Task 9; the drill-in)
+//       /admin/database                             -- AdminDatabasePage (the table list)
+//       /admin/database/$table                      -- AdminDatabaseTablePage (one page of one table; ?limit=&offset=)
 //
 // The /admin subtree sits directly under authenticatedRoute, a sibling of
 // shellRoute rather than a child of it: the admin surface has its own
@@ -74,6 +76,14 @@ import {
   useParams,
   useSearch,
 } from "@tanstack/react-router";
+// Both limit pairs come from their own leaf modules, never from the hook
+// files that also re-export them: a static import of an admin hook here
+// would drag the whole admin query layer into main.tsx's bundle, which
+// adminBundleSplit.test.ts exists to prevent.
+import {
+  BROWSE_DEFAULT_LIMIT,
+  BROWSE_MAX_LIMIT,
+} from "../features/admin/browseLimits";
 import {
   DIRECTORY_DEFAULT_LIMIT,
   DIRECTORY_MAX_LIMIT,
@@ -351,6 +361,16 @@ const LazyAdminHouseholdPage = lazy(() =>
     default: m.AdminHouseholdPage,
   })),
 );
+const LazyAdminDatabasePage = lazy(() =>
+  import("../features/admin/AdminDatabasePage").then((m) => ({
+    default: m.AdminDatabasePage,
+  })),
+);
+const LazyAdminDatabaseTablePage = lazy(() =>
+  import("../features/admin/AdminDatabasePage").then((m) => ({
+    default: m.AdminDatabaseTablePage,
+  })),
+);
 
 // The Suspense fallback below is inlined at both call sites rather than
 // factored into its own top-level component, matching signInMagicRoute's
@@ -537,6 +557,94 @@ const adminHouseholdRoute = createRoute({
   },
 });
 
+// The table list takes no URL state (one fixed page size, no search), so
+// like adminMailRoute it needs neither validateSearch nor a route component
+// of its own beyond the Suspense boundary every lazy admin route repeats.
+const adminDatabaseRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: "database",
+  component: () => (
+    <Suspense
+      fallback={
+        <main className="grid min-h-dvh place-items-center">
+          <p className="text-sm text-muted">Loading…</p>
+        </main>
+      }
+    >
+      <LazyAdminDatabasePage />
+    </Suspense>
+  ),
+});
+
+// The row viewer keeps its page in the URL, so reload, Back and the audit
+// row all agree on what was shown -- the households list's own reasoning,
+// and it matters more here: this route's audit row is the record that
+// somebody read a particular page of a particular table.
+//
+// validateSearch is the only thing standing between a hand-typed URL and a
+// request the service would have to refuse: a non-integer, a zero or a
+// negative limit becomes the default, an oversized one is clamped to
+// BROWSE_MAX_LIMIT (the service's own cap, mirrored in browseLimits.ts), and
+// a negative offset becomes 0. TanStack parses ?limit=50 as the number 50,
+// so `typeof === "number"` is the real check, not a string coercion.
+const adminDatabaseTableRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: "database/$table",
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { limit: number; offset: number } => ({
+    limit:
+      typeof search.limit === "number" &&
+      Number.isInteger(search.limit) &&
+      search.limit > 0
+        ? Math.min(search.limit, BROWSE_MAX_LIMIT)
+        : BROWSE_DEFAULT_LIMIT,
+    offset:
+      typeof search.offset === "number" &&
+      Number.isInteger(search.offset) &&
+      search.offset >= 0
+        ? search.offset
+        : 0,
+  }),
+  // Named, not an inline arrow, for the identical rules-of-hooks reason
+  // adminHouseholdsRoute's own component gives above.
+  component: function AdminDatabaseTableRouteComponent() {
+    // Route IDs, not the public URL path -- same distinction
+    // adminHouseholdsRoute's own useSearch comment draws.
+    const { table } = useParams({
+      from: "/authenticated/admin/database/$table",
+    });
+    const { limit, offset } = useSearch({
+      from: "/authenticated/admin/database/$table",
+    });
+    const navigate = useNavigate();
+    return (
+      <Suspense
+        fallback={
+          <main className="grid min-h-dvh place-items-center">
+            <p className="text-sm text-muted">Loading…</p>
+          </main>
+        }
+      >
+        <LazyAdminDatabaseTablePage
+          table={table}
+          limit={limit}
+          offset={offset}
+          onPage={(nextOffset) =>
+            navigate({
+              to: "/admin/database/$table",
+              params: { table },
+              // limit travels with the offset: dropping it would silently
+              // reset a clamped or widened page size on every page turn.
+              search: { limit, offset: nextOffset },
+            })
+          }
+        />
+      </Suspense>
+    );
+  },
+});
+
 // Exported (not just `router`) so a test can mount the real tree with its
 // own memory history and QueryClient instead of RouterProvider's registered
 // singleton -- see routes/router.test.tsx.
@@ -573,6 +681,8 @@ export const routeTree = rootRoute.addChildren([
       adminMailMessageRoute,
       adminHouseholdsRoute,
       adminHouseholdRoute,
+      adminDatabaseRoute,
+      adminDatabaseTableRoute,
     ]),
   ]),
 ]);
