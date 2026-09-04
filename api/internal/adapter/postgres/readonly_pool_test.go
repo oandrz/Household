@@ -28,10 +28,14 @@ func TestOpenReadOnlyRefusesAConnectionThatCanWrite(t *testing.T) {
 	if !strings.Contains(err.Error(), "DATABASE_READONLY_URL") {
 		t.Fatalf("error does not name the variable: %v", err)
 	}
-	// main.go decides whether to refuse the boot by matching this sentinel,
-	// and the error travels out through pgxpool's own wrapping of
-	// AfterConnect. If this assertion fails, that chain is broken and
-	// main.go would degrade instead of refusing -- exactly backwards.
+	// main.go decides whether to refuse the boot by matching this sentinel.
+	// It survives out through Ping only because assertCannotWrite and
+	// OpenReadOnly each wrap it with %w -- pgxpool v5.10.0 and puddle v2.2.2
+	// pass an AfterConnect error straight through unwrapped at every hop
+	// (the pool's Constructor, puddle's acquire, and Pool.Ping all just
+	// `return err`), so nothing outside this file has to preserve the
+	// chain. If this assertion fails, one of this file's two %w wraps broke,
+	// and main.go would degrade instead of refusing -- exactly backwards.
 	if !errors.Is(err, postgres.ErrReadOnlyMisconfigured) {
 		t.Fatalf("error does not carry ErrReadOnlyMisconfigured: %v", err)
 	}
