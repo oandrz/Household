@@ -275,3 +275,47 @@ func TestLoadRefusesAnUnusableMailpitAPIURL(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadAcceptsAnAbsentDatabaseReadonlyURL(t *testing.T) {
+	setRequiredEnv(t)
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DatabaseReadonlyURL != "" {
+		t.Fatalf("DatabaseReadonlyURL = %q, want empty", cfg.DatabaseReadonlyURL)
+	}
+	if cfg.BrowseEnabled() {
+		t.Fatal("BrowseEnabled() = true with no URL set")
+	}
+}
+
+func TestLoadAcceptsADatabaseReadonlyURL(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("DATABASE_READONLY_URL", "postgres://hearth_readonly:pw@postgres:5432/hearth?sslmode=disable")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.BrowseEnabled() {
+		t.Fatal("BrowseEnabled() = false with a URL set")
+	}
+}
+
+// Unlike MAILPIT_API_URL, Load does NOT reject an unusable value here, and
+// that is deliberate rather than an omission: net/url cannot tell a broken
+// DSN from a legal keyword/value one, and pgxpool.ParseConfig -- which can --
+// belongs to the adapter layer. postgres.OpenReadOnly is where a bad value
+// refuses the boot; TestOpenReadOnlyRefusesAnUnparseableURL is its test. This
+// test exists to record that the omission was decided, so that nobody
+// "fixes" it later with a url.Parse that rejects a legal DSN.
+func TestLoadDoesNotItselfValidateTheReadonlyDSN(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("DATABASE_READONLY_URL", "host=postgres user=hearth_readonly dbname=hearth")
+
+	if _, err := config.Load(); err != nil {
+		t.Fatalf("Load rejected a legal keyword/value DSN: %v", err)
+	}
+}

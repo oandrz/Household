@@ -58,6 +58,24 @@ type Config struct {
 	// the box as a 502 on one admin screen, with nothing pointing back at the
 	// .env line that caused it.
 	MailpitAPIURL string
+	// DatabaseReadonlyURL is the DSN for hearth_readonly, the SELECT-only
+	// role the operator's database browse reads through
+	// (deploy/readonly-role.sql creates it). Optional: empty means the
+	// browse is unavailable and says which variable is missing.
+	//
+	// There is deliberately no fallback to DatabaseURL. A half-provisioned
+	// box degrades to "you cannot use this panel", never to "you are using
+	// it through the read-write connection".
+	//
+	// It is NOT validated here, unlike every other optional value in this
+	// file. net/url cannot tell a broken DSN from a legal keyword/value one
+	// ("host=db user=x" parses fine and is valid), and the only honest
+	// parser is pgxpool.ParseConfig, which belongs to the adapter layer --
+	// this package imports the standard library and nothing else, and that
+	// is worth more than moving one error message. postgres.OpenReadOnly
+	// refuses the boot on a value it cannot parse, and on one that connects
+	// as a role which can write.
+	DatabaseReadonlyURL string
 }
 
 func (c Config) IsDevelopment() bool { return c.AppEnv == "development" }
@@ -73,6 +91,13 @@ func (c Config) TelegramEnabled() bool { return c.TelegramBotToken != "" }
 // proved they are a platform admin with a live grant, and hiding the route
 // from them would cost them the one fact that tells them what to fix.
 func (c Config) OutboxEnabled() bool { return c.MailpitAPIURL != "" }
+
+// BrowseEnabled reports whether the operator's database browse is configured.
+// When it is false the admin routes answer 503 and name the variable -- never
+// 404, because everyone who can reach them has already proved they are a
+// platform admin with a live grant, and hiding the route from them would cost
+// them the one fact that says what to fix.
+func (c Config) BrowseEnabled() bool { return c.DatabaseReadonlyURL != "" }
 
 func Load() (Config, error) {
 	appEnv := os.Getenv("APP_ENV")
@@ -92,6 +117,7 @@ func Load() (Config, error) {
 		TelegramBotToken:    os.Getenv("TELEGRAM_BOT_TOKEN"),
 		TelegramBotUsername: os.Getenv("TELEGRAM_BOT_USERNAME"),
 		MailpitAPIURL:       os.Getenv("MAILPIT_API_URL"),
+		DatabaseReadonlyURL: os.Getenv("DATABASE_READONLY_URL"),
 	}
 
 	switch cfg.AppEnv {
