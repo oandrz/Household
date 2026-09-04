@@ -2782,11 +2782,17 @@ case and no coordinate system to assert legibility in for the second.
   the guarantee is actually **stronger** than the comment claimed — it
   depends on this file alone and cannot be broken by a pgxpool upgrade — but
   the stated reason was false, and a future reader trusting it would have
-  believed a dependency was holding something up for them. Worth noting the
-  one place pgx *does* embed a connection string, `ParseConfigError`: it
-  redacts the password, and it carries `ErrReadOnlyMisconfigured`, so it
-  refuses the boot and never reaches a log line — which is *why* the browse
-  cannot leak a DSN, rather than a hope that it will not. What would have
+  believed a dependency was holding something up for them. Worth being
+  equally precise about the one place pgx *does* embed a connection string,
+  because the careless version of that sentence is the same defect again:
+  `ParseConfigError` carries the DSN, and it **does** reach a log line —
+  `OpenReadOnly` wraps it, `run()` returns it, and `main()` prints it with
+  `slog.Error("fatal", …)`. What stops the leak is not that the error is
+  swallowed; it is that `ParseConfigError.Error()` **redacts the password
+  itself**, in pgx's own code. (The sentinel that makes that path refuse the
+  boot, `ErrReadOnlyMisconfigured`, is added by `readonly_pool.go`'s own
+  `%w` — pgx knows nothing about it. Same trap as the paragraph above:
+  crediting the library with something this file does.) What would have
   caught it sooner: **an error-handling comment that credits a library is a
   claim about that library's source** — ten minutes reading it is the check,
   and it is the same check as reading a query before believing a note about
@@ -2852,9 +2858,15 @@ wrong number for the same passage, and it was caught in review rather than
 committed — the only reason it is a footnote here instead of an entry of its
 own. **Two of them cost ten minutes reading a vendor's source instead of a
 minute rereading this repository's own comment** — Mailpit's `link-check`,
-and pgx's own error-wrapping — and both are instances where the check ran
-before the claim could ever ship: the same discipline, aimed at an API's
-implied promise instead of a comment already in the tree. A citation checked
+and pgx's own error-wrapping — the same discipline, aimed at an API's
+implied promise instead of a comment already in the tree. **They are not
+equally good outcomes, and the difference is the whole point of this
+pattern.** The `link-check` claim was checked while the design was being
+written and never entered a file. The pgx claim was written into a comment,
+committed, and only then read against the source — by the implementer, who
+had first reported the opposite and went back to check, and then
+independently by the reviewer. It cost a fix round. A wrong claim in a
+commit has shipped, whatever a later commit does about it. A citation checked
 once and never re-verified when the sentence around it is rewritten is not a
 citation any more; it is the same unverified claim wearing a reference.
 Neither is a name an endpoint gives itself.

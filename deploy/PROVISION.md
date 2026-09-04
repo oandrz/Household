@@ -183,8 +183,8 @@ section 9, which is run after the first bring-up.
 
 ## 9 · The read-only role
 
-**Optional, and the only step in this file the box does not need to run.**
-Everything above gets you a working Hearth. This gets you the operator's
+**Optional — the product itself does not depend on it.** Everything above
+gets you a working Hearth. This gets you the operator's
 database browse at `/admin/database` — a read-only look at the tables from
 the admin surface, instead of `docker compose exec postgres psql` as the
 application role. Skip it and the panel says it is not configured and names
@@ -262,10 +262,32 @@ an `INSERT` must not:
 ```bash
 $C exec -T postgres env PGPASSWORD='<the generated password>' \
   psql -U hearth_readonly -d hearth -c "select count(*) from households"
+#   expected: a number
+
 $C exec -T postgres env PGPASSWORD='<the generated password>' \
   psql -U hearth_readonly -d hearth -c "insert into households (name) values ('x')"
-#   expected: ERROR ... permission denied for table households
+#   expected: ERROR, and WHICH error tells you something -- see below
 ```
+
+**Either refusal is a pass, and they mean different things.** The role is
+read-only twice over, by two guards that fail independently, and whichever
+one Postgres reaches first is the one you see:
+
+- `ERROR: cannot execute INSERT in a read-only transaction` — the expected
+  message, and the better one. Postgres checks the transaction's read-only
+  setting before it checks table privileges, so this is
+  `default_transaction_read_only = on` firing. It tells you the `ALTER ROLE`
+  lines ran; the grants are what the `SELECT` above already proved.
+- `ERROR: permission denied for table households` — also a pass, but a
+  *narrower* one. It means the second guard is the only one there:
+  `default_transaction_read_only` is not set on this role, so a box
+  provisioned from an older copy of this file is still safe, but has one
+  guard where it should have two. Re-run `readonly-role.sql` — it is
+  idempotent, and the two `ALTER ROLE` lines are what you are missing.
+
+Anything that is **not** an error — a row inserted, or a complaint about
+`family_name` being NULL — means the role can write and the browse must not
+be pointed at it.
 
 ## 10 · First bring-up
 

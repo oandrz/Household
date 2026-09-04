@@ -1600,11 +1600,12 @@ this group is no longer "then": it is next**, and item 6 is where it starts.
    not the slice
 6. **Marriage's remaining 6 ⬜** — 10 of 16 are ✅; Agreements is the
    interesting problem, and it is append-only and versioned, not CRUD.
-   **This is the next work.** It is taken ahead of item 5 for the reason
-   this list has always ordered by: Money's remainder is a tail of small,
-   independent rows that can be picked up any time, where Agreements is a
-   whole capability with a design question in front of it — and Marriage is
-   where the product's differentiator lives
+   **This is the next work** — a direction, not a dependency, the same kind
+   of call the 2026-09-02 reprioritisation was. Nothing in item 5 blocks it
+   and nothing in it blocks item 5; what distinguishes them is that Money's
+   remainder is a tail of small independent rows that can be picked up in
+   any order at any time, while Agreements is a whole capability with a
+   design question in front of it, so it wants a spec before it wants a plan
 7. **Family** — the only genuinely untouched area. Calendar needs Bills for the
    bill dates on the month grid, and Bills is ✅
 8. **Overview** — 8 of 11 already ✅ because it grew alongside Money; what
@@ -1621,11 +1622,11 @@ is the household work most visibly delayed by this choice — it is the one area
 with nothing built at all, and it is item 7, still behind Marriage.
 
 **That bill is now paid, and it is worth writing down what it bought and what
-it did not.** Section 9's ⬜ column is zero. The three updates that got it
-there — households and metrics, the outbound message inspector, the database
-browse — each moved exactly one row, all three inside section 9, and the ✅
-column of the household product did not move once. The operator surface went
-from nothing to complete; what a customer buys is where it was. The next
+it did not.** Section 9's ⬜ column is zero. Every update that got it there —
+the audit screen cut, households and metrics, the outbound message inspector,
+the database browse — moved a row inside section 9 and nowhere else, and the
+✅ column of the household product did not move at all. The operator surface
+went from nothing to complete; what a customer buys is where it was. The next
 update to this file should be a household row, and if it is not, this
 paragraph is the one to re-read.
 
