@@ -4,6 +4,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"math"
 	"time"
 
@@ -1331,4 +1332,59 @@ type VisionRepository interface {
 	// is this household's -- the same hole validateLineCategories closes for
 	// budget lines.
 	Save(ctx context.Context, v domain.Vision) (domain.Vision, error)
+}
+
+// ErrOutboxUnavailable means the outbox itself could not be read: it is
+// unreachable, it timed out, or it answered something this code cannot map.
+// It is declared here rather than in an adapter because it is part of the
+// port's contract -- every implementation must be able to say "the store is
+// there, I just could not reach it", and the HTTP layer answers 502 for it.
+//
+// It is deliberately distinct from domain.ErrNotFound, which means the outbox
+// answered and does not hold that message. An operator needs different advice
+// in each case: one is "Mailpit is down", the other is "that message has aged
+// out of a store with no volume".
+var ErrOutboxUnavailable = errors.New("the message outbox could not be read")
+
+// MailOutbox reads messages the product has sent. It exists so the operator
+// can hand someone a link that mail cannot deliver (see ADR 3). The only
+// implementation today reads Mailpit; when mail leaves the box this port gets
+// a second one instead of a rewrite.
+//
+// Message reports domain.ErrNotFound for a message the outbox does not hold.
+// Both methods report ErrOutboxUnavailable when the outbox itself cannot be
+// read.
+//
+// Neither method extracts anything: an implementation hands back the body
+// parts exactly as the store gave them, and AdminOutboxService turns those
+// into what a screen shows. That split is what keeps "which strings are
+// links" testable without an HTTP server.
+type MailOutbox interface {
+	// Recent returns up to limit messages, newest first, with both body
+	// fields left empty -- a list never carries a body, because a body can
+	// contain a live single-use link and listing must not be the act that
+	// reveals one.
+	Recent(ctx context.Context, limit int) (OutboxPage, error)
+	// Message returns one message including both body parts.
+	Message(ctx context.Context, id string) (OutboxMessage, error)
+}
+
+// OutboxPage is one screenful of the outbox. Total is how many messages the
+// outbox holds altogether, not how many were returned -- the screen says
+// "showing 50 of 128", and a caller cannot infer that from a slice exactly as
+// long as the limit it asked for.
+type OutboxPage struct {
+	Messages []OutboxMessage
+	Total    int
+}
+
+// OutboxMessage is a message as the outbox holds it. Text and HTML are
+// populated by Message and empty in Recent.
+type OutboxMessage struct {
+	ID      string
+	To      string
+	Subject string
+	SentAt  time.Time
+	Text    string
+	HTML    string
 }
