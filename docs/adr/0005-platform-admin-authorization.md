@@ -277,10 +277,29 @@ It has been built (branch `admin-db-browse`, spec
 is what held and what did not.
 
 **The status of the work, stated plainly, because this ADR's own header sets
-the bar:** code-complete and reviewed, `make lint && make test` green — and
-**its fifteen-criterion browser walk has not run yet**, unlike the walk this
-ADR's Status line cites for the first slice. Nothing below is a claim that
-the browse was verified in a browser.
+the bar:** code-complete and reviewed, `make lint && make test` green, and
+**its fifteen-criterion browser walk ran on 2026-09-04 and passed 15 of 15**
+(`docs/superpowers/plans/2026-09-04-hearth-database-browse-verification.md`)
+— so it now meets the same bar as the walk this ADR's Status line cites for
+the first slice, and what follows is a claim about a browse that was driven
+in a browser.
+
+The walk mattered to *this* ADR's central claim more than to most, because
+the narrowing below rests on a guard that is Postgres's rather than this
+codebase's, and a guard is a claim until someone attacks it. It was attacked:
+the write refusal was run as `hearth_readonly` against the live role, and
+**both of its guards were proven to hold independently** — a plain `INSERT`
+is refused by `default_transaction_read_only` (`cannot execute INSERT in a
+read-only transaction`), and `BEGIN; SET TRANSACTION READ WRITE`, the one
+statement that switches that guard off, then meets the `GRANT`
+(`permission denied for table households`). `UPDATE`, `DELETE`, `DROP TABLE`
+and `CREATE TABLE` were all refused too, and nothing was written.
+
+**What the walk did not change, and must not be read as changing:**
+production ships with `DATABASE_READONLY_URL` unset by the product owner's
+decision on 2026-09-04. The narrowing is verified; it is not yet exercised on
+the live box, and will not be until an operator runs `deploy/PROVISION.md`
+section 10.
 
 ### 1. The narrowing held, and the guard turned out not to be this codebase's
 

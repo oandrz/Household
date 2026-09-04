@@ -505,9 +505,14 @@ same day and passed 15 of 15, finding and fixing one real defect — the
 third nav link this feature added pushed the shared operator header 14px
 past a 305px viewport on every `/admin/*` route, fixed with `flex-wrap` on
 `AdminShell.tsx`'s nav. **The read-only database browse is built too, on
-branch `admin-db-browse` (2026-09-04) — code-complete and reviewed, and the
-only feature of this surface whose fifteen-criterion browser walk has not
-run.** A `SELECT`-only Postgres role reached through a *second* connection
+branch `admin-db-browse` (2026-09-04) — code-complete, reviewed, and walked:
+its fifteen-criterion walk ran the same day and passed 15 of 15**
+(`docs/superpowers/plans/2026-09-04-hearth-database-browse-verification.md`),
+finding and fixing one defect of its own — two comments explained the
+`«null»` marker with a column that always renders `«redacted»` — and sweeping
+the class across all 241 columns of the schema without finding a second. **So
+all four features of this surface are now verified, not merely reviewed.** A
+`SELECT`-only Postgres role reached through a *second* connection
 pool, a `DatabaseBrowser` port with two implementations, two granted routes
 and the `/admin/database` screen. It ships dark: `DATABASE_READONLY_URL` is
 unset in production by the product owner's decision, so the panel is off on
@@ -554,9 +559,14 @@ was added).
 last of the four because it was the only one with an infrastructure dependency
 and much the largest security surface, and the other three existed in part to
 give the re-auth grant and the audit log real use before it arrived — which
-paid off concretely: it needed no audit change at all. Its row in section 9 is
-🟡 rather than ✅ for two reasons stated there: the browser walk has not run,
-and production ships with the feature switched off by the owner's decision.
+paid off concretely: it needed no audit change at all. **Its browser walk ran
+2026-09-04 and passed 15 of 15**
+(`docs/superpowers/plans/2026-09-04-hearth-database-browse-verification.md`),
+which moved its row in section 9 from 🟡 to ✅ — that row carried a 🟡 for two
+reasons, and the walk closed the first. The second still holds and is not a
+gap the walk could close: production ships with the feature switched off by
+the owner's decision, so it is verified everywhere and running nowhere real
+until an operator runs `deploy/PROVISION.md` section 10.
 **So none of the four remains, and `docs/FEATURE_TRACKER.md`'s "Suggested
 order" has moved on to the household product — item 6, Marriage's Agreements.**
 

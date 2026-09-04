@@ -132,9 +132,14 @@ mutation-checked `AdminShell.test.tsx`. See
 `docs/superpowers/plans/2026-09-04-hearth-outbound-inspector-verification.md`.
 
 **The operator's read-only database browse is on branch `admin-db-browse`,
-2026-09-04 — code-complete and reviewed, and unlike every other feature this
-preamble names, its fifteen-criterion browser walk has NOT run yet.** Read
-the diagrams it touches with that caveat attached. It is the platform admin
+2026-09-04 — code-complete, reviewed, and walked: its fifteen-criterion
+browser walk ran the same day and passed 15 of 15**
+(`docs/superpowers/plans/2026-09-04-hearth-database-browse-verification.md`),
+so the diagrams it touches carry no caveat that the other features' do not.
+The one thing that is still true and is *not* about verification: production
+ships with `DATABASE_READONLY_URL` unset, so these structures exist on the
+live box but the panel behind them answers `503 DB_BROWSE_NOT_CONFIGURED`
+until an operator runs `deploy/PROVISION.md` section 10. It is the platform admin
 surface's fourth and last feature, and the only one with a dependency
 outside this repository: a `SELECT`-only Postgres role, `hearth_readonly`,
 created by `deploy/readonly-role.sql` during provisioning rather than by a

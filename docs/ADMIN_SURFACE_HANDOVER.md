@@ -33,8 +33,10 @@ via `docs/superpowers/plans/2026-09-01-hearth-admin-surface.md` (the plan).
 above, which describes only the first slice.** That slice merged as PR #15,
 households and metrics as PR #16, and the outbound message inspector as PR
 #17 (`3eddbe2`). The read-only database browse is the fourth and last, on
-branch `admin-db-browse`, code-complete and reviewed with its browser walk
-**not yet run**. **The operator surface is finished** — §3 below has no
+branch `admin-db-browse`, code-complete, reviewed, and **walked 2026-09-04:
+15 of 15 criteria pass**
+(`docs/superpowers/plans/2026-09-04-hearth-database-browse-verification.md`).
+**The operator surface is finished** — §3 below has no
 unbuilt item left in it for the first time. One thing is finished in code and
 unfinished in the world: production ships with `DATABASE_READONLY_URL`
 **unset**, the product owner's decision on 2026-09-04, so the database panel
@@ -157,10 +159,19 @@ mutation-checked `AdminShell.test.tsx`. Recorded in
 **A read-only database browse — built 2026-09-04, spec
 `docs/superpowers/specs/2026-09-04-hearth-database-browse-design.md`** (which
 expands §4 of the admin-surface spec and wins where the two differ). The
-fourth and last of the four, and **the only one whose fifteen-criterion
-browser walk has not run** — everything below is code-complete and reviewed,
-`make lint && make test` green, every task mutation-checked, and unverified in
-a browser. `/admin/database` lists every table the browse's role can see with
+fourth and last of the four. **Its fifteen-criterion browser walk ran
+2026-09-04 and passed 15 of 15**
+(`docs/superpowers/plans/2026-09-04-hearth-database-browse-verification.md`),
+so like the other three it is verified and not merely reviewed — `make lint
+&& make test` green, every task mutation-checked, and now driven in a real
+browser. Five things in that walk were met by an interpreted rather than
+literal path and the record labels each; one defect was found and fixed in
+the walk itself (two comments explained `«null»` with a column that always
+renders `«redacted»`), and the class was swept across all 241 columns of the
+schema, finding no second instance. **What the walk does not change is where
+this feature runs:** production still ships with `DATABASE_READONLY_URL`
+unset, so the panel is off on the live box — see the paragraph on that below.
+`/admin/database` lists every table the browse's role can see with
 its row and column counts, and `/admin/database/$table` is the deliberate
 second click that reads one page of one table, with its own `admin_audit_log`
 row. **The guard is Postgres's, not this codebase's**, and that is the whole
@@ -223,15 +234,23 @@ next reader needs; an empty section would only look like nobody had checked.
 
 **What changed on 2026-09-04.** The read-only database browse — the last item
 this section carried, and one of the three things originally asked for — was
-built. It moved to §2 above, which has the design and the reading order. Two
-things about it are more honest to leave here than to bury in a feature
-description: **its fifteen-criterion browser walk has not run**, so it is
-built and reviewed rather than verified, and it is 🟡 in
-`docs/FEATURE_TRACKER.md` §9 for that reason and one more — **production
-ships with it switched off**, `DATABASE_READONLY_URL` unset by the owner's
-decision, until an operator runs `deploy/PROVISION.md` section 10. Neither is
-unfinished work in this repository. Both are things a reader would otherwise
-assume the other way.
+built. It moved to §2 above, which has the design and the reading order. One
+thing about it is more honest to leave here than to bury in a feature
+description: **production ships with it switched off**,
+`DATABASE_READONLY_URL` unset by the owner's decision on 2026-09-04, until an
+operator runs `deploy/PROVISION.md` section 10. That is a decision, not
+unfinished work in this repository, and it is the thing a reader would
+otherwise assume the other way — "verified" is not "running".
+
+**The second thing this paragraph used to say is no longer true, and is
+recorded rather than deleted so the change is legible.** It said the
+fifteen-criterion browser walk had not run, and that the feature was
+therefore 🟡 in `docs/FEATURE_TRACKER.md` §9. **The walk ran on 2026-09-04
+and passed 15 of 15**
+(`docs/superpowers/plans/2026-09-04-hearth-database-browse-verification.md`);
+that row is now ✅, and §9 stands at 7 ✅ / 1 🟡 / 0 ⬜ / 1 🚫. The walk found
+and fixed one defect — a prose one, in the two comments explaining `«null»` —
+and swept the class across the whole schema without finding a second.
 
 It was always last of the four and the sequencing held up: it was the only
 one with an infrastructure dependency (`hearth_readonly` is cluster-level, so
@@ -396,7 +415,7 @@ These were each argued and are load-bearing. Changing one is fine; changing one
 | What building it taught (the `link-check` trap, and a mutation check that couldn't fail) | `docs/LEARNING.md`, patterns 2 and 16 |
 | The database browse's own design | `docs/superpowers/specs/2026-09-04-hearth-database-browse-design.md` |
 | Its implementation plan | `docs/superpowers/plans/2026-09-04-hearth-database-browse.md` |
-| Its browser walk | **Has not run.** When it does, its record belongs here and in `docs/FEATURE_TRACKER.md` §9's row, which stays 🟡 until then |
+| Its browser walk, 15 of 15 | `docs/superpowers/plans/2026-09-04-hearth-database-browse-verification.md` — ran 2026-09-04; §9's row is ✅ as a result. Five criteria met by an interpreted path, each labelled there; one defect found and fixed in the walk |
 | What building it taught (five tests and mutations that could not have failed, and one `default:` arm that swallowed three boot failures) | `docs/LEARNING.md`, patterns 2, 8 and 16 |
 | How the role is created, and why it is in no backup | `deploy/PROVISION.md` §10, `deploy/README.md`'s Restoring, `docs/INFRASTRUCTURE.md` |
 
