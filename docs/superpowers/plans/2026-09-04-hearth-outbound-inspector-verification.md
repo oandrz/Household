@@ -116,11 +116,14 @@ in this repository.
 
 **Result:** PASS.
 
-**Caveats:** The task framing's own inconsistency about the nav order is
-worth a line so nobody "fixes" the code to match a brief that disagrees with
-itself: the code (`Flags`, `Mail`, `Households`) is treated here as the
-source of truth, matching one of the two conflicting descriptions and not
-the other.
+**Caveats:** The task framing's own inconsistency about the nav order traced
+back further than the brief: `docs/SYSTEM_DESIGN.md` §7 itself documented
+"Flags · Households · Mail" — stale relative to the code it describes, from
+the same task (Task 8, per its own report) that added the `Mail` link.
+Fixed here rather than left as a footnote, since keeping this document true
+is this branch's own standing rule, not a separate task: `SYSTEM_DESIGN.md`
+now reads "Flags · Mail · Households", matching `AdminShell.tsx`'s `items`
+array, which is the code the running app actually uses.
 
 ---
 

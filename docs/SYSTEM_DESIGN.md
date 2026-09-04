@@ -3146,8 +3146,8 @@ web/src/
                        carries the operator chrome (a distinct header
                        treatment, an explicit "Hearth · Operator" label) so
                        which surface you are on never depends on reading the
-                       URL, and it carries the operator nav (Flags ·
-                       Households · Mail, in that order, OperatorNav
+                       URL, and it carries the operator nav (Flags · Mail ·
+                       Households, in that order, OperatorNav
                        computing its own active state with useMatchRoute --
                        never activeProps, see docs/LEARNING.md's Frontend
                        section) now that there is more than one screen to
