@@ -2998,11 +2998,13 @@ It was never written. Grepping the 3349-line plan built from that spec for the
 paragraph's wording returns nothing: **the plan never carried the requirement
 forward.** From there the outcome was determined. Eleven implementers worked
 from task briefs cut from the plan; eleven task reviewers checked each task
-against the plan; eight fix rounds and a fifteen-criterion browser walk ran on
-top of that. Every one of those checks was looking at an artifact the
-requirement was not in, so all of them were blind in exactly the same place —
-not eleven independent chances to catch it, one chance repeated eleven times.
-It surfaced only in the final whole-branch review, which read the spec.
+against the plan; a fix round followed every review that asked for one, and a
+fifteen-criterion browser walk ran on top of all of it. Every one of those
+checks was looking at an artifact the requirement was not in, so all of them
+were blind in exactly the same place — not eleven independent chances to catch
+it, one chance repeated eleven times, and each fix round scoped to the finding
+that produced it. It surfaced only in the final whole-branch review, which
+read the spec.
 
 **The omission was load-bearing twice, and that is the part worth keeping.**
 The test that was dropped is the one thing that would have caught the same

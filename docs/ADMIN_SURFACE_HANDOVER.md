@@ -198,8 +198,10 @@ turns *fixed* SQL into typed Go, and this repository's whole job is a
 than a second code path. A table name is matched against the catalogue
 through that same pool first (making it a privilege check as well as an
 existence check) and quoted with `pgx.Identifier` second, never
-concatenated. Redaction fails closed by column **type** (`bytea`) as well as
-by name, and is emitted as a literal inside the `SELECT` list, so a secret
+concatenated. Redaction fails closed by column **type** (`bytea` and
+`bytea[]` — the rule reads `udt_name` as well as `data_type`, because
+`data_type` reports only a category for arrays and for domains) as well as by
+name, and is emitted as a literal inside the `SELECT` list, so a secret
 column is never fetched at all — `«redacted»` on screen and the bytes never
 leave Postgres; `«null»` is a separate marker, because "you may not see this"
 and "there is nothing here" are different facts. Paging is `ORDER BY` the
