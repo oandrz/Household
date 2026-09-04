@@ -23,6 +23,23 @@ that exist to explain what `«null»` means. Both cited an example the feature
 makes impossible to observe. Details under criterion 7 and in "The defect"
 below. Nothing about the running behaviour was wrong.
 
+**Five things were met by an interpreted rather than literal path**, each
+labelled where it occurs so the count is honest rather than flattering. Two
+are substitutions the brief's own text made necessary, two are methods, and
+one is setup:
+
+| Where | Interpreted how |
+|---|---|
+| Criterion 7 | On `goal_contributions` and `users.email`, because the brief's `users.password_hash` is redacted and can never render `«null»` |
+| Criterion 9 | No-repeat proof on a static `categories?limit=5`; the write-between-pages case a browser cannot stage is cited to the repository test that covers it |
+| Criterion 2 | Timings from the Performance Timeline, not devtools' Network tab |
+| Criterion 6 | Response body read with `fetch(...).text()`, not devtools' Network tab |
+| Setup | Stack brought up detached, not through a foreground `make dev` |
+
+**One claim this file made and had to retract.** It originally said the brief
+was wrong about criterion 13's SQL as well. It was not; the retraction and the
+three `psql` runs that settle it are under criterion 13.
+
 ---
 
 ## How the stack was brought up, and what was not run
@@ -131,6 +148,16 @@ Against the 3000 ms `statement_timeout` that is **1.4 % cold and ~0.2 % warm**
 660 rows in total. Transfer size 16.8 KB. Decision 11's "revisit when it times
 out" clause now has a number to be revisited against instead of a guess.
 
+**Interpreted rather than literal, and labelled as such:** the brief says to
+record the wall-clock time "from devtools' Network tab". These figures come
+from the Performance Timeline instead — `performance.getEntriesByType('resource')`
+for the cold sample, which is the browser's own timing for the request the
+page itself made and is the same number the Network panel displays, and
+`performance.now()` around five in-page `fetch`es for the warm ones. The warm
+samples are additionally *not* what the panel would show for a page load: they
+are five extra requests issued deliberately to get a stable figure, and each
+one left its own audit row.
+
 **Result: PASS.**
 
 ---
@@ -212,6 +239,15 @@ commit 47abd1f ("one word for a withheld column, not three") settled.
 from the page's own context, which is the same bytes the Network panel shows
 (and the same request Playwright's network log records as `[200] OK`).
 Searched it for every shape a `bytea` could have leaked in.
+
+**Interpreted rather than literal, and labelled as such:** the brief says to
+read the body in devtools' Network tab. `fetch(...).text()` from the page's
+own context returns the identical bytes — the response is read before any
+JSON parsing or React rendering can touch it — and unlike squinting at a
+panel it can be searched exhaustively, which is what the checks below do. The
+same request appears in Playwright's own network log, so the page really did
+issue it. The property the criterion is about holds either way; the *method*
+is not the one the brief names.
 
 **Seen** (7866 bytes):
 
@@ -330,7 +366,23 @@ during the walk. Clicked Next twice, collecting every `id`:
 
 **13 ids, all distinct, strictly ascending across page boundaries** — the
 primary-key `ORDER BY` doing its job. None repeated, none skipped, and the
-count matches `psql`'s 13 exactly.
+count matches `psql`'s 13 exactly. The *ascending* part is the load-bearing
+half rather than merely "no duplicates": `categories.id` is
+`gen_random_uuid()`, so key order is uncorrelated with heap order, and three
+pages arriving in strict key order is positive evidence that an `ORDER BY` was
+applied — not just that nothing happened to be returned twice.
+
+**What a browser cannot prove here, and where it is proven instead.** The
+failure this `ORDER BY` actually exists to prevent is a **write between two
+pages**: on a table that is only read, one connection at a time, an unordered
+`LIMIT/OFFSET` returns the same heap order to every page and the defect stays
+invisible at any row count. Reproducing that from a browser means racing a
+write against two clicks, which this walk did not attempt. It is covered at
+the repository level by `TestRowsPagesWithoutRepeatingOrSkipping`
+(`api/internal/adapter/postgres/browse_repo_test.go:160`), whose own comment
+says the write between the pages "is the point, and it is why this read-only
+test writes at all". Recorded as the one gap in this criterion that the layer
+below closes rather than this one.
 
 **(b) `admin_audit_log` at the default limit — the >50-rows case.**
 `?limit=50&offset=100` rendered exactly 50 rows, "Rows 101–150 of 196".
@@ -526,13 +578,66 @@ ERROR:  cannot execute CREATE TABLE in a read-only transaction  (create table ev
 Afterwards: `households` = 2, `sessions` = 28, users named `pwned` = 0.
 Nothing was written, updated, deleted or dropped.
 
-**One correction to the brief, so nobody records a meaningless pass here.**
-The task brief's SQL is `insert into households (id, name) values (…, 'nope')`
-and the parent prompt's adds `family_name`. Only the second is runnable:
-`households.family_name` is `NOT NULL` with no default. Postgres resolves
-column names before it checks permissions, so the brief's version would have
-answered a `NOT NULL` violation — a refusal that proves nothing about the
-role. The three-column form above is what was run.
+**A correction this file made about the brief, and then had to retract —
+recorded rather than quietly deleted, because the retraction is the more
+useful half.**
+
+This section originally claimed that the task brief's two-column SQL,
+`insert into households (id, name) values (…, 'nope')`, was not runnable:
+`households.family_name` is `NOT NULL` with no default, so — the claim went —
+Postgres would answer a `NOT NULL` violation and the pass would prove nothing
+about the role. The three-column form (the parent prompt's) was run instead.
+
+**That claim is false, and it was never checked before being written down.**
+Review caught it; the brief's exact statement was then run as
+`hearth_readonly` against this same stack:
+
+```
+$ psql -U hearth_readonly -d hearth -c "insert into households (id, name) values (gen_random_uuid(), 'nope')"
+ERROR:  cannot execute INSERT in a read-only transaction
+```
+
+It produces the criterion's own refusal. `households` was still 2 afterwards.
+The brief's SQL was fine as written and needed no correction at all.
+
+**Why, checked three ways rather than asserted.** Both of this role's guards
+run in `ExecutorStart` — `PreventCommandIfReadOnly` for
+`default_transaction_read_only` and `ExecCheckPermissions` for the `GRANT` —
+while `NOT NULL` is enforced by `ExecConstraints` during `ExecutorRun`. The
+statement is refused before a row is ever built, so the missing column is
+never reached. Run as the *owner*, where neither guard applies, the same
+statement does exactly what the retracted claim predicted:
+
+```
+$ psql -U hearth -d hearth -c "insert into households (id, name) values (gen_random_uuid(), 'nope')"
+ERROR:  null value in column "family_name" of relation "households" violates not-null constraint
+```
+
+And guard 2 alone also precedes it — bypassing only the read-only guard, with
+the two-column form still missing `family_name`:
+
+```
+$ psql -U hearth_readonly -d hearth -c "BEGIN; SET TRANSACTION READ WRITE; insert into households (id, name) values (gen_random_uuid(), 'nope');"
+ERROR:  permission denied for table households
+```
+
+So the brief's two-column statement proves **both** guards independently,
+exactly as the three-column form this walk actually ran does.
+
+**The conflation that produced the false claim**, which is the part worth
+keeping: an *unknown column name* really does fail before the guards, because
+it fails at parse analysis, before the executor starts at all —
+
+```
+$ psql -U hearth_readonly -d hearth -c "insert into households (id, nosuchcolumn) values (gen_random_uuid(), 'nope')"
+ERROR:  column "nosuchcolumn" of relation "households" does not exist
+```
+
+— but an *omitted* NOT NULL column is a runtime check that the guards never
+let the statement reach. Two different failures at two different stages, and
+this file collapsed them into one. **The criterion's own pass is unaffected**:
+the three-column form that was run is a valid write attempt, and guard 2 was
+proven independently by the bypass above.
 
 **Result: PASS.**
 
@@ -763,12 +868,14 @@ observed in criteria 5 and 6.
 
 ## Differences from the brief, found while walking it
 
-Both are worth carrying back rather than discovering twice.
+**One, not two.** This section originally listed a second — a claim that
+criterion 13's SQL was not runnable — which review found to be false and which
+is retracted in full under criterion 13 above, with the three `psql` runs that
+disprove it. The brief's criterion 13 was correct as written.
 
 | The brief says | What is true | Consequence |
 |---|---|---|
 | Criterion 7: "`users.password_hash` is `NULL` for a magic-link-only member; seed one if the seeded household has none" | It is NULL, and it renders `«redacted»` — redaction is decided in the `SELECT` list and wins over NULL unconditionally | Following it literally produces a `«redacted»` where the criterion expects `«null»`, and looks like a product defect. Use `users.email` or `goal_contributions` |
-| Criterion 13: `insert into households (id, name) values (gen_random_uuid(), 'nope')` | `households.family_name` is `NOT NULL` with no default, and Postgres resolves column names before checking permissions | The brief's statement answers a `NOT NULL` violation, not a permission refusal — a recorded pass that proves nothing about the role. The parent prompt's three-column form is the runnable one |
 
 ---
 

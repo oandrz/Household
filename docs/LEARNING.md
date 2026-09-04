@@ -2837,12 +2837,46 @@ case and no coordinate system to assert legibility in for the second.
   corollary is worth as much: when a test near a comment asserts something
   the comment contradicts, the test is the one to believe, and the
   disagreement is the defect report.
-  The same walk also found the *brief* wrong in the same way, twice, which
-  is why walks are scripted from criteria and not trusted as oracles (see
-  pattern 13): criterion 7 told the walker to use this very column, and
-  criterion 13's `INSERT` omitted a `NOT NULL` column, so following it
-  literally would have recorded a `NOT NULL` violation as proof that a
-  read-only role cannot write.
+  The same walk also found the *brief* wrong in the same way — criterion 7
+  told the walker to use this very column — which is why walks are scripted
+  from criteria and not trusted as oracles (see pattern 13).
+- **The same walk's own correction to that brief was itself an unchecked
+  claim, and it was filed under this very pattern before anyone ran it.**
+  The verification file went on to say the brief was wrong a *second* time:
+  that criterion 13's `insert into households (id, name)` omits a `NOT NULL`
+  column, so it "would have answered a `NOT NULL` violation — a refusal that
+  proves nothing about the role", and that only the three-column form was
+  runnable. Review ran the brief's exact statement as `hearth_readonly`:
+  `ERROR:  cannot execute INSERT in a read-only transaction`. It produces the
+  criterion's own refusal, and nothing was written. **The brief was right and
+  the correction was wrong** — a false claim about verification, written into
+  the entry about false claims, in the same commit that added the entry.
+  What the mistake actually was, and this is the reusable part: **both of
+  this role's guards run before any constraint is checked.**
+  `PreventCommandIfReadOnly` (for `default_transaction_read_only`) and
+  `ExecCheckPermissions` (for the `GRANT`) both fire in `ExecutorStart`,
+  while `NOT NULL` is `ExecConstraints` during `ExecutorRun` — the statement
+  is refused before a row is ever built, so the missing column is never
+  reached. Checked three ways rather than asserted: as the *owner*, where
+  neither guard applies, the identical statement does give
+  `null value in column "family_name" … violates not-null constraint`; and
+  with only the read-only guard bypassed (`BEGIN; SET TRANSACTION READ
+  WRITE;`) the same two-column form still gives
+  `permission denied for table households`. So the brief's SQL proves both
+  guards independently, exactly as the three-column form does.
+  **The conflation was between two failures at two different stages**: an
+  unknown *column name* really does beat both guards, because it fails at
+  parse analysis before the executor starts at all
+  (`column "nosuchcolumn" of relation "households" does not exist`), whereas
+  an *omitted* NOT NULL column is a runtime check the guards never let the
+  statement reach. Plausible-sounding, adjacent, and opposite. What would
+  have caught it sooner is embarrassingly cheap and is this pattern's whole
+  thesis: **the claim was that a specific SQL statement fails a specific
+  way, and running it takes one command.** A correction is not exempt from
+  the rule it is correcting — this is now the third time in this pattern
+  (see the `account.go:167` line number and the `AdminHouseholdPage`
+  round-trip count above) that a fix written to close out an unverified
+  claim shipped unverified itself.
 
 - **Two rules in one file whose examples contradicted each other — database
   browse, Task 5, 2026-09-04.** The redaction predicate matches by column
