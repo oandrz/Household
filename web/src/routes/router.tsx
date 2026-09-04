@@ -22,6 +22,8 @@
 //       /settings                                   -- the real Settings screen (Task 20)
 //     /admin       AdminShell (own chrome, no AppShell)  -> /admin/flags
 //       /admin/flags                                -- AdminFlagsPage
+//       /admin/mail                                 -- AdminMailPage (Task 7; the outbound mail list)
+//       /admin/mail/$messageId                      -- AdminMailMessagePage (Task 7; one message)
 //       /admin/households                           -- AdminHouseholdsPage (Task 8; tiles + search + rows)
 //       /admin/households/$householdId              -- AdminHouseholdPage (Task 9; the drill-in)
 //
@@ -329,6 +331,16 @@ const LazyAdminFlagsPage = lazy(() =>
     default: m.AdminFlagsPage,
   })),
 );
+const LazyAdminMailPage = lazy(() =>
+  import("../features/admin/AdminMailPage").then((m) => ({
+    default: m.AdminMailPage,
+  })),
+);
+const LazyAdminMailMessagePage = lazy(() =>
+  import("../features/admin/AdminMailPage").then((m) => ({
+    default: m.AdminMailMessagePage,
+  })),
+);
 const LazyAdminHouseholdsPage = lazy(() =>
   import("../features/admin/AdminHouseholdsPage").then((m) => ({
     default: m.AdminHouseholdsPage,
@@ -392,6 +404,49 @@ const adminFlagsRoute = createRoute({
       <LazyAdminFlagsPage />
     </Suspense>
   ),
+});
+
+// The list takes no URL state (decision 8: no search, one fixed page size),
+// so unlike adminHouseholdsRoute below it needs neither validateSearch nor a
+// route component of its own beyond the Suspense boundary every lazy admin
+// route repeats.
+const adminMailRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: "mail",
+  component: () => (
+    <Suspense
+      fallback={
+        <main className="grid min-h-dvh place-items-center">
+          <p className="text-sm text-muted">Loading…</p>
+        </main>
+      }
+    >
+      <LazyAdminMailPage />
+    </Suspense>
+  ),
+});
+
+const adminMailMessageRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: "mail/$messageId",
+  // Named, not an inline arrow, for the identical rules-of-hooks reason
+  // adminHouseholdRoute's own component gives below.
+  component: function AdminMailMessageRouteComponent() {
+    const { messageId } = useParams({
+      from: "/authenticated/admin/mail/$messageId",
+    });
+    return (
+      <Suspense
+        fallback={
+          <main className="grid min-h-dvh place-items-center">
+            <p className="text-sm text-muted">Loading…</p>
+          </main>
+        }
+      >
+        <LazyAdminMailMessagePage messageId={messageId} />
+      </Suspense>
+    );
+  },
 });
 
 // The households list keeps its search and limit in the URL, so reload,
@@ -514,6 +569,8 @@ export const routeTree = rootRoute.addChildren([
     adminRoute.addChildren([
       adminIndexRoute,
       adminFlagsRoute,
+      adminMailRoute,
+      adminMailMessageRoute,
       adminHouseholdsRoute,
       adminHouseholdRoute,
     ]),

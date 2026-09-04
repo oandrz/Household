@@ -34,6 +34,8 @@ import (
 // conditional where the check would be easy to lose.
 var _ telegram.StartHandler = (*usecase.TelegramAuthService)(nil)
 
+var _ usecase.MailOutbox = (*mail.MailpitOutbox)(nil)
+
 func main() {
 	if err := run(); err != nil {
 		slog.Error("fatal", "error", err)
@@ -265,6 +267,13 @@ func run() error {
 		LoginAttempts: loginAttempts,
 		Clock:         sysClock,
 	})
+	// Nil unless MAILPIT_API_URL is set. httpadapter.Deps.AdminOutbox being
+	// nil is what makes the two /admin/mail routes answer 503 and name the
+	// variable; the routes themselves are registered either way.
+	var adminOutboxSvc *usecase.AdminOutboxService
+	if cfg.OutboxEnabled() {
+		adminOutboxSvc = usecase.NewAdminOutboxService(mail.NewMailpitOutbox(cfg.MailpitAPIURL))
+	}
 
 	srv := &http.Server{
 		Addr: fmt.Sprintf(":%d", cfg.Port),
@@ -287,6 +296,7 @@ func run() error {
 			Admin:          adminSvc,
 			AdminReauth:    adminReauthSvc,
 			AdminDirectory: adminDirectorySvc,
+			AdminOutbox:    adminOutboxSvc,
 			Users:          users,
 			Memberships:    memberships,
 			Sessions:       sessions,
@@ -344,6 +354,10 @@ func run() error {
 	if telegramPoller != nil {
 		slog.Info("telegram sign-in enabled", "bot_username", cfg.TelegramBotUsername)
 		go telegramPoller.Run(ctx)
+	}
+
+	if cfg.OutboxEnabled() {
+		slog.Info("outbound message inspector enabled", "mailpit_api_url", cfg.MailpitAPIURL)
 	}
 
 	<-ctx.Done()

@@ -145,8 +145,27 @@ first: `exited (0)` is success, any other exit code is the answer. Roll
 ## Reading mail
 
 Mail does not leave this box. `docs/adr/0003-mail-stays-on-the-box.md` has the
-reasoning; operationally it means every sign-up link, invite and magic link lands
-in Mailpit, and you read it by hand.
+reasoning; operationally it means every sign-up link, invite and magic link
+lands in Mailpit.
+
+**The normal way to read it is the operator's outbound message inspector,
+`/admin/mail`, not the tunnel below.** Sign in as a platform admin, open the
+screen, and copy the link you need — it lists what Hearth has sent, newest
+first, and opening one message is a deliberate second click that writes its
+own row to `admin_audit_log`. It needs `MAILPIT_API_URL` set on `api`
+(`deploy/.env.example` has the value; no Compose change is needed, `api`
+already shares the network with `mailpit` and already depends on it). If
+that variable is unset the screen says so and names it; if Mailpit itself is
+unreachable it says that instead, without ever falling back to an empty
+list — an empty list would read as "Hearth has sent no mail" rather than as
+"the reader is broken".
+
+### Fallback: an SSH tunnel to Mailpit's own UI
+
+Reach for this only when the API itself is what is broken — `/admin/mail`
+answering `502 MAIL_UPSTREAM_UNAVAILABLE`, or the whole API being down —
+because this path talks to Mailpit directly and does not go through the API
+or its audit log at all.
 
 Mailpit is bound to loopback, so open a tunnel from your laptop:
 
@@ -173,9 +192,10 @@ curl -s http://localhost:8025/api/v1/messages?limit=1
 curl -s http://localhost:8025/api/v1/message/<ID>
 ```
 
-To send someone else their link — Christine, or anyone you invite — copy it out
-of Mailpit and pass it to them however you normally talk. The link is
-single-use and time-limited, so treat it like a password while it is in transit.
+To send someone else their link — Christine, or anyone you invite — copy it
+out, whichever door you used to reach it, and pass it to them however you
+normally talk. The link is single-use and time-limited, so treat it like a
+password while it is in transit.
 
 **When a real domain arrives**, four values in `.env` change together
 (`SMTP_ADDR`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`), the

@@ -231,3 +231,47 @@ func TestTelegramEnabledWhenBothSet(t *testing.T) {
 		t.Fatalf("TelegramBotUsername = %q, want %q", cfg.TelegramBotUsername, "HearthBot")
 	}
 }
+
+func TestLoadAcceptsAnAbsentMailpitAPIURL(t *testing.T) {
+	setRequiredEnv(t)
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MailpitAPIURL != "" {
+		t.Fatalf("MailpitAPIURL = %q, want empty", cfg.MailpitAPIURL)
+	}
+	if cfg.OutboxEnabled() {
+		t.Fatal("OutboxEnabled() = true with no URL set")
+	}
+}
+
+func TestLoadAcceptsAMailpitAPIURL(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("MAILPIT_API_URL", "http://mailpit:8025")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.OutboxEnabled() {
+		t.Fatal("OutboxEnabled() = false with a URL set")
+	}
+}
+
+// A typo in .env must stop the boot, not present on the box as a 502 with
+// nothing pointing at the line that caused it -- docs/LEARNING.md pattern 8,
+// "configuration that lies".
+func TestLoadRefusesAnUnusableMailpitAPIURL(t *testing.T) {
+	for _, value := range []string{"mailpit:8025", "://mailpit", "ftp://mailpit:8025", "http:/mailpit:8025"} {
+		t.Run(value, func(t *testing.T) {
+			setRequiredEnv(t)
+			t.Setenv("MAILPIT_API_URL", value)
+
+			if _, err := config.Load(); err == nil {
+				t.Fatalf("Load accepted MAILPIT_API_URL=%q", value)
+			}
+		})
+	}
+}

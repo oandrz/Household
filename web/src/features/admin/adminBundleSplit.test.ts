@@ -118,6 +118,18 @@ describe("the main entry point's static import graph", () => {
     expect(reachable).not.toContain(
       join(SRC_ROOT, "features", "admin", "useAdmin.ts"),
     );
+    // Task 7: AdminMailPage takes no props, so router.tsx never needs a
+    // constant from useAdminOutbox.ts the way it needs
+    // DIRECTORY_DEFAULT_LIMIT/DIRECTORY_MAX_LIMIT for the households route --
+    // there is no leaf module for it to fall back on, so this assertion is
+    // the one thing standing between a future route change and dragging the
+    // whole outbox hook (and its schemas) into main.tsx's bundle.
+    expect(reachable).not.toContain(
+      join(SRC_ROOT, "features", "admin", "AdminMailPage.tsx"),
+    );
+    expect(reachable).not.toContain(
+      join(SRC_ROOT, "features", "admin", "useAdminOutbox.ts"),
+    );
   });
 
   // A walk that is silently broken (a resolution bug, ENTRY pointing at the

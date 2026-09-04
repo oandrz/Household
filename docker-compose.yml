@@ -34,6 +34,11 @@ services:
       PORT: "8080"
       DATABASE_URL: postgres://hearth:hearth@postgres:5432/hearth?sslmode=disable
       SMTP_ADDR: mailpit:1025
+      # Mailpit always runs at this address in the dev stack and its API port
+      # is fixed; hardcoding it here means the admin mail inspector works
+      # without configuration, and developers won't find a non-existent bug in
+      # the screen when it says it is not configured.
+      MAILPIT_API_URL: http://mailpit:8025
       SMTP_FROM: "Hearth <noreply@hearth.localhost>"
       APP_BASE_URL: http://localhost:5173
       ARGON2_TIME: "3"

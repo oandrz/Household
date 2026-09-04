@@ -109,7 +109,7 @@ test driving the three transactions write routes without a CSRF token.
 | 1 — Household & identity | Sign-in, magic link, invite acceptance, lockout, members, roles, capabilities, spaces, Settings | **Done** |
 | — Self-serve sign-up | Sign-up, household provisioning, an ISO 4217 currency allowlist and list endpoint, `adminctl prune`, a per-IP rate limiter | **Done, browser walk 15/15** (2026-07-30) |
 | 2 — Money | **Accounts**: manual entry, net worth, assets/liabilities breakdown, archive and restore — **done, browser walk 15/15**. **Transactions**: ledger, categories, filters, keyset paging, month-to-date spend — **done, browser walk 15/15**. **Budget**: envelope per category with pace, empty state and templates, Edit-budget modal with category create/rename/archive, History modal and month picker — **done, browser walk 15/15** (2026-07-31, two defects found at criterion 9 and fixed mid-walk; see `docs/superpowers/plans/2026-07-30-hearth-budget-verification.md`). **Goals**: savings targets whose progress is a contributions ledger (not an account balance), the New/Edit goal modal, contributions add/delete/list by source, the Monthly contributions card, and Budget's own manual rollover into a goal — **done, browser walk 15/15** (2026-08-01, one defect found at criterion 12 and fixed mid-walk: archive and restore shipped with no way to *archive* — every layer existed and no screen called `useGoals.archiveGoal`, so "Show archived" and every Restore button led out of a state no household could enter, `82453ff`; see `docs/superpowers/plans/2026-08-01-hearth-goals-verification.md` and `docs/LEARNING.md` pattern 15). **Bills**: recurring bills on a one-off/monthly/quarterly/yearly cadence, Mark paid writing a real expense transaction and its undo reversing all three writes, archive and restore, a subscriptions rollup — **done, browser walk 15/15** (2026-08-10, one defect found at criterion 14 and swept for the class rather than fixed as one instance: `BillsPage.tsx` answered a limited member's routine "not the owner" 403 with the same red alert a genuine server failure gets, where sibling `GoalsPage.tsx` already distinguishes the two — and the identical gap turned out to be sitting in `BudgetPage.tsx` and `TransactionsPage.tsx` too, fixed the same walk; see `docs/superpowers/plans/2026-08-09-hearth-bills-verification.md` and `docs/LEARNING.md` pattern 1). Accounts, Transactions, Budget, Goals, Bills all built and walked; **slice 2 (Money) is done** | **Done** |
-| 3 — Marriage | Retros, Vision, Agreements | **Retros**: code-complete and reviewed clean across fifteen code tasks, `docs/FEATURE_TRACKER.md`'s Marriage rows updated — **its own browser walk has run and passed, 15 of 15** (2026-08-18, Task 17), recorded in `docs/superpowers/plans/2026-08-16-hearth-retros-verification.md`. **Vision**: real end to end — `VisionPage.tsx` (task 11 of a 15-task plan) renders the theme, pillars and milestones `useVision` exposes, and `VisionModal.tsx` (task 12) is the whole-document editor all three of its entry points now open (the header's Edit vision button, "+ Add milestone" and the empty state's own call to action), so a household can set a year's vision, not only see it. **Vision's own browser walk (task 15) has run and passed, 15 of 15** (2026-08-29), recorded in `docs/superpowers/plans/2026-08-28-hearth-vision-verification.md`; no product defect needed a code fix, and one latent defect the final whole-branch review re-classified out of "accepted trade-off" is recorded rather than fixed here — editing a vision whose linked goal was deleted resets that measure to a typed `0 of 1`, dormant only because Goals has no `DELETE` route to reach it through the product, so the fix belongs to whoever builds that route. Merged as `6c48f6f`. **Agreements: not started — Marriage's last feature, and the next work.** |
+| 3 — Marriage | Retros, Vision, Agreements | **Retros**: code-complete and reviewed clean across fifteen code tasks, `docs/FEATURE_TRACKER.md`'s Marriage rows updated — **its own browser walk has run and passed, 15 of 15** (2026-08-18, Task 17), recorded in `docs/superpowers/plans/2026-08-16-hearth-retros-verification.md`. **Vision**: real end to end — `VisionPage.tsx` (task 11 of a 15-task plan) renders the theme, pillars and milestones `useVision` exposes, and `VisionModal.tsx` (task 12) is the whole-document editor all three of its entry points now open (the header's Edit vision button, "+ Add milestone" and the empty state's own call to action), so a household can set a year's vision, not only see it. **Vision's own browser walk (task 15) has run and passed, 15 of 15** (2026-08-29), recorded in `docs/superpowers/plans/2026-08-28-hearth-vision-verification.md`; no product defect needed a code fix, and one latent defect the final whole-branch review re-classified out of "accepted trade-off" is recorded rather than fixed here — editing a vision whose linked goal was deleted resets that measure to a typed `0 of 1`, dormant only because Goals has no `DELETE` route to reach it through the product, so the fix belongs to whoever builds that route. Merged as `6c48f6f`. **Agreements: not started — Marriage's last feature.** It was the next work until 2026-09-02, when the product owner put the remaining platform-administration features ahead of all household work (§4 and `docs/FEATURE_TRACKER.md`'s "Suggested order" carry the reason and the cost). Still blocked on the same question either way: what "both sign" means in a household with one owner (§4). |
 | 4 — Family | Calendar | Not started — its own dependency on Bills (bill dates on the month grid) is now satisfied |
 | 5 — Overview | Read-only aggregation across 2–4 | **Interim page built** (2026-08-01, grown 2026-08-10, 2026-08-16) — `/` carries five of the design's **seven** cards (counted off `design/Household Dashboard.dc.html`'s own Overview screen — the money row of four, Marriage's "Next retro", "This week" and "Vision 2026"; its header "+ Add" is a button, not a card) that Money and Marriage can supply (net worth, this month's budget, goals on track, the next bill due, and — added by Retros — the next retro with its open action count), a setup checklist and a four-entry "+ Add" (Transaction, Account, Savings goal, Bill). The M2 walk on the first two cards and the two-entry menu ran **14 of 14**, one real defect found and fixed mid-walk; the goals card and its menu entry were covered by Goals' own walk at its criterion 11 (2026-08-01); the next-bill card by Bills' own Task 18 walk. **The next-retro card is new since and has now been checked for overflow, not for content** — Retros' own Task 17 walk (2026-08-18, 15/15) verified it at all four widths (criterion 15: 305/305, 360/360, 768/768, 1440/1440, no overflow), but unlike Goals' criterion 11 and Bills' Task 18 walk, no criterion in Task 17 exercised the card's own figures — `openActionCount` was already pinned by its own fix and test beforehand, not by this walk. **Vision's own two surfaces shipped 2026-08-29** (Vision task 13): the `Vision 2026` card (`VisionCard.tsx`, one line per pillar showing that pillar's first measure with live figures) and the Vision check-in strip inside `NextRetroCard.tsx`, both covered by Vision's own 15/15 walk — so `/` now carries **six** of the seven, not five. The one remaining card ("This week" agenda) needs Family; the page grows into the designed one rather than being replaced |
 
@@ -493,11 +493,21 @@ console to administer.
 **That console's first slice is merged — `main` at `b9dfd1f`, PR #15, 2026-09-02.**
 It carries the authorization axis, the re-authentication grant, the audit log
 and feature flags end to end; household metrics followed on 2026-09-02 (branch
-`admin-households`, walked 15 of 15 with two caveats), and the database
-browse and the outbound message inspector are specified but unbuilt. Read
-[ADMIN_SURFACE_HANDOVER.md](ADMIN_SURFACE_HANDOVER.md) before touching it or
-planning the next slice — it carries the decisions that are load-bearing, the
-open items, and what the branch's own browser walk found.
+`admin-households`, walked 15 of 15 with two caveats). **The outbound message
+inspector is code-complete on branch `admin-outbox`** (2026-09-04, not yet
+merged): a `MailOutbox` port and `AdminOutboxService` in `usecase`, a Mailpit
+adapter that speaks to exactly two upstream endpoints, `MAILPIT_API_URL` in
+config, two granted routes and the `/admin/mail` screen. Its own fifteen-
+criterion browser walk (Task 9 of
+`docs/superpowers/plans/2026-09-04-hearth-outbound-inspector.md`) ran the
+same day and passed 15 of 15, finding and fixing one real defect — the
+third nav link this feature added pushed the shared operator header 14px
+past a 305px viewport on every `/admin/*` route, fixed with `flex-wrap` on
+`AdminShell.tsx`'s nav. **The read-only database browse remains specified
+but unbuilt.** Read
+[ADMIN_SURFACE_HANDOVER.md](ADMIN_SURFACE_HANDOVER.md) before touching either
+or planning the next slice — it carries the decisions that are load-bearing,
+the open items, and what each branch's own browser walk found.
 
 **The build order changed a second time on 2026-09-02.** The product owner
 reprioritised the four remaining platform-administration features ahead of any
@@ -523,8 +533,15 @@ button restored the list but left the search box showing the stale query
 (fixed in the same commit that recorded the walk), and criterion 12 was
 confirmed against the drill-in's own lockout callout through the API rather
 than the sign-in screen's local error state; section 9's row carries both.
-Two remain, in the order the tracker gives: the outbound message
-inspector, then the read-only database browse.
+**The third, the outbound message inspector, is code-complete on branch
+`admin-outbox` (2026-09-04)** — see above. Its browser walk ran the same
+day and passed 15 of 15, finding and fixing one real defect (the shared
+operator header's nav overflowing at 305px once this feature's third link
+was added).
+**One remains: the read-only database browse** (§4), last of the four
+because it is the only one with an infrastructure dependency and much the
+largest security surface; the other three exist in part to give the re-auth
+grant and the audit log real use before it arrives.
 
 **Slice 2 (Money) is done.** Accounts, Transactions, Budget, Goals and
 Bills — all five features — are code-complete, reviewed, and now all
@@ -665,9 +682,12 @@ newcomer as what has not.
    when there is one. The SPF/DKIM/DMARC half is **cancelled for now** —
    `docs/adr/0003-mail-stays-on-the-box.md` records why. Dynu refuses `TXT`
    records on free third-level hostnames under 30 days old, so DKIM cannot be
-   published, so no hosted relay will verify the domain. Mail runs on Mailpit,
-   on the box, read over an SSH tunnel. Caddy is unaffected: its ACME challenge
-   is HTTP-01 over port 80 and needs no DNS record.
+   published, so no hosted relay will verify the domain. Mail runs on
+   Mailpit, on the box; the operator reads it through `/admin/mail` once
+   `admin-outbox` deploys, or over an SSH tunnel to Mailpit's own UI as the
+   fallback for when the API itself is broken (`deploy/README.md`, "Reading
+   mail"). Caddy is unaffected: its ACME challenge is HTTP-01 over port 80
+   and needs no DNS record.
 7. **A browser walk against the deployed install**, to the same standard every
    feature here has been held to. First-run is exactly where these walks have
    found things before. **Two of its twelve criteria cannot run under ADR 3**

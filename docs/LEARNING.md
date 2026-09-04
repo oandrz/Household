@@ -1241,6 +1241,35 @@ person to ask whether the test could ever have gone red in the first place.
   thing you tamper with is also what makes the row readable, the mutation has
   to keep the row readable** or the test fails before it can testify.
 
+- **A mutation-check recipe told an implementer to remove behaviour without
+  saying what to do with the import it orphaned — outbound message
+  inspector, Task 3, 2026-09-04.** The plan's own mutation step for
+  `MailpitOutbox.Message` read "drop the escaping — change
+  `url.PathEscape(id)` to `id`", to prove
+  `TestMailpitOutboxEscapesTheMessageID` actually pins escaping. Applied
+  literally, `net/url` becomes an unused import and the package fails to
+  *build*: `go test` printed `FAIL`, but for
+  `"net/url" imported and not used`, with zero test functions having run —
+  not even the six unrelated ones in the same file. This is the same shape
+  as the `-run TestHousehold` filter above (a command that prints `FAIL` or
+  "no tests to run" is not evidence a test executed), sharper here because a
+  *build* failure is even easier to mistake for the test doing its job: the
+  implementer asked for red, saw red, and the wrong kind of red still reads
+  as success unless someone checks which line produced it. Caught by
+  reading the failure's own text rather than trusting the exit code — it
+  named an import, not the assertion the mutation was supposed to break.
+  Fixed by keeping `net/url` referenced (`_ = url.PathEscape`, commented as
+  existing only to hold the import for this check) while changing the real
+  call to `"/api/v1/message/" + id`, which reproduced the intended, isolated
+  failure at the escaping test's own assertion, with the other six tests
+  still green. Recorded as a finding rather than smoothed over, and Task 4
+  and Task 5's own mutation checks each recorded a line noting no
+  import-orphan risk applied to their own mutations, rather than repeating
+  the mistake unchecked. **A mutation-check recipe has to say what happens
+  to the import it orphans, not only what to change** — a build failure and
+  a targeted test failure can print the same word, and only one of them
+  proves the test does its job.
+
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
 a different reason than the one you meant to prove, that is not yet proof
@@ -2532,32 +2561,62 @@ case and no coordinate system to assert legibility in for the second.
   (2026-09-02, Task 11), the same commit this entry itself was written in. A
   correction written to close out an unverified claim is not itself
   verified — twice, in this case, before it stuck.
+- **An eleventh instance, the outbound message inspector spec, 2026-09-04 —
+  the one entry here where the discipline caught the trap before any code
+  existed to drift, rather than after.** Mailpit's
+  `GET /api/v1/message/{id}/link-check` reads, from its name and its place
+  next to `GET /api/v1/message/{id}`, like the obvious way to answer "is
+  this link still good" for the exact screen this spec was designing.
+  Reading Mailpit v1.30.5's actual source instead of trusting what the name
+  implies (`internal/linkcheck/status.go`) found it issues a real HTTP
+  request — a `doHead` — to every URL it reports on, and every URL in a
+  Hearth email is a live single-use token on a public host: calling it
+  would spend the very links the screen exists to hand out. The same read
+  of the same source turned up a second fact nobody had gone looking for:
+  `GET /api/v1/message/{id}`, the endpoint the design keeps, marks the
+  message read in Mailpit's own store as a side effect of a plain GET —
+  accepted rather than avoided (decision 15; avoiding it means parsing raw
+  MIME by hand) but written down at the point someone would notice the
+  discrepancy, rather than left for them to find by comparing Mailpit's
+  unread count before and after. Nothing here would have gone red: no test
+  was failing, no code called either endpoint yet, and the design would
+  have read as clean without the source ever being opened. What holds the
+  rule in the code that shipped is not the discovery itself, it is an
+  adapter test asserting only two upstream paths are ever requested — it
+  fails on any third path, so a later refactor reaching for `link-check`
+  because it looks like a gift fails a test instead of shipping, which is
+  where the ten instances above eventually landed.
 
 **Treat a citation the way you'd treat a test assertion: something the next
 reader can verify against the thing it names, not something to trust because
-it reads confidently.** All ten instances above cost nothing to produce
-and each would have cost under a minute to check — reading the query,
-re-finding the line, opening the mockup, grepping for the clause a comment
-claimed existed, reading the one function (`chi`'s `routeHTTP`) whose order
-the claim depended on, reading the one helper (`convert.go`'s `uuid`) a
-comment's causal claim depended on, or reading the one commit blob a "before"
-claim was supposedly about — against a small planning gap, a wrong number in a
-comment, a design claim nobody had opened the design to test, a line range
-nobody had re-measured, a rule restated in a comment's own words rather than
-pointed at, a guard whose comment named a failure mode its own route could
-not reach, seven checkable claims that drifted the moment the code moved
-under them on a single branch, a field silently empty for its entire life
-because its own doc comment said otherwise, a sibling comment one file away
-making the identical claim, already proven false, that nobody had gone back
-to check, and a floor comment naming a task and a number for a drift that
-had happened over several. That last one arrived with company the catalogue
-cannot count, because it never landed: the fix wave's own instructions for
-closing out this pattern handed down a further wrong number for the same
-passage, and it was caught in review rather than committed — the only reason
-it is a footnote here instead of an entry of its own. A citation
-checked once and never re-verified when the sentence around it is rewritten
-is not a citation any more; it is the same unverified claim wearing a
-reference.
+it reads confidently.** Ten of these eleven instances cost nothing to
+produce and each would have cost under a minute to check — reading the
+query, re-finding the line, opening the mockup, grepping for the clause a
+comment claimed existed, reading the one function (`chi`'s `routeHTTP`)
+whose order the claim depended on, reading the one helper (`convert.go`'s
+`uuid`) a comment's causal claim depended on, or reading the one commit blob
+a "before" claim was supposedly about — against a small planning gap, a
+wrong number in a comment, a design claim nobody had opened the design to
+test, a line range nobody had re-measured, a rule restated in a comment's
+own words rather than pointed at, a guard whose comment named a failure mode
+its own route could not reach, seven checkable claims that drifted the
+moment the code moved under them on a single branch, a field silently empty
+for its entire life because its own doc comment said otherwise, a sibling
+comment one file away making the identical claim, already proven false, that
+nobody had gone back to check, and a floor comment naming a task and a
+number for a drift that had happened over several. That last one arrived
+with company the catalogue cannot count, because it never landed: the fix
+wave's own instructions for closing out this pattern handed down a further
+wrong number for the same passage, and it was caught in review rather than
+committed — the only reason it is a footnote here instead of an entry of its
+own. **The eleventh cost ten minutes reading a vendor's source instead of a
+minute rereading this repository's own comment**, and it is the one instance
+in the catalogue where the check ran before the claim could ever ship — the
+same discipline, aimed at an API's implied promise instead of a comment
+already in the tree. A citation checked once and never re-verified when the
+sentence around it is rewritten is not a citation any more; it is the same
+unverified claim wearing a reference. Neither is a name an endpoint gives
+itself.
 
 ---
 
@@ -3685,6 +3744,28 @@ route with a missing guard has no second line of defence.
   a tree, not a property the codebase now has** — the screen added after it
   needs the same widths run again, and the six copy-pasted wrappers around it
   all took the fix, not the one that was reported (pattern 1).
+- **A shared header measured once does not stay measured as its own content
+  grows.** The admin-households walk (2026-09-02) ran the operator header
+  down to 320px and found no overflow — correct, for the two links (`Flags`,
+  `Households`) `OperatorNav` carried that day. This task's own diff added a
+  third (`Mail`) to that same shared header in `AdminShell.tsx`, and the
+  outbound-mail walk's brief asked for one width narrower, 305px, which the
+  earlier walk never ran. The header overflowed by 14px, on every
+  `/admin/*` route — not only the two screens this task shipped — proved by
+  turning `Mail`'s `display` off in the live page and watching
+  `document.documentElement.scrollWidth` drop from 319 to exactly 305. This
+  is the sign-up `<select>` lesson from the other direction: there the width
+  came from one wide option nobody had opened; here it came from one more
+  short link in a list that used to fit. **A shared component's fit is a
+  property of its content at the moment it was last measured, and adding one
+  more item to a list a nav renders is exactly the kind of change no
+  class-level check (`make lint`, a component snapshot test) can see,
+  because nothing about the new item is individually wrong — only the sum.**
+  Fixed with `flex-wrap` on the nav (`gap-x-4 gap-y-1`, `justify-end` so a
+  wrapped second row still hugs the right edge), trading "always one line"
+  for "never wider than the viewport" — the shape that survives a fourth nav
+  item arriving later without needing to be re-measured again, unlike a
+  fixed width or a manually-verified gap value would.
 - **A copy helper that returns a fragment makes every caller responsible for
   grammar, and the second caller will get it wrong.** `limitedAccessPhrase`
   returned a bare list — `"calendar & chores"` — and `"no"` when a limited
@@ -3785,6 +3866,23 @@ route with a missing guard has no second line of defence.
   that checks the wrong surface can pass for the wrong reason, proving
   nothing either way. The walk was redone against the callout capable of
   failing, and it passed.
+- **The outbound-mail inspector's browser walk ran 2026-09-04,**
+  `docs/superpowers/plans/2026-09-04-hearth-outbound-inspector-verification.md`:
+  **15 of 15 criteria pass, one real defect found and fixed during the walk
+  (criterion 14 — see the shared-header entry earlier in this section for
+  the full account and the fix), one caveat.** Criterion 8's caveat: the
+  exact hyphen/underscore trailing-character case `outbox_links.go`'s own
+  comment names as the actual risk could not be forced live, because this
+  same walk's earlier magic-link requests had already spent
+  `andreas@hearth.family`'s hourly rate limit (`magicLinkPerHourLimit = 3`)
+  — verified instead at the unit level, where the domain test file already
+  carries both cases by name. Also required a real-environment fix outside
+  the product before the walk could safely start: `andreas@hearth.family`'s
+  password on the shared dev box did not match the documented default,
+  left over from an earlier walk's own password change — one more failed
+  guess would have locked the household for 15 minutes, so it was reset
+  through the sanctioned `make reset-password` path rather than guessed
+  again.
 
 ### Tooling and infrastructure
 
@@ -3992,6 +4090,39 @@ route with a missing guard has no second line of defence.
   **And a green local suite says nothing about the commit** — it says something
   about your disk. The check that matches CI is `git stash -u` (or a clone of
   the pushed SHA) before believing the build.
+- **The dev `web` container's file watcher can silently stop noticing edits
+  to a file it already served.** Mid-fix during the outbound-mail browser
+  walk, saving `AdminShell.tsx` produced no Vite HMR log line at all, and
+  `curl`ing the module's own dev-server URL
+  (`/src/features/admin/AdminShell.tsx`) kept returning the pre-edit
+  transformed source — confirmed the file on disk, and inside the
+  container, already had the new content, so this was the watcher, not the
+  bind mount. `docker compose restart web` fixed it, at the cost of the
+  container's entrypoint re-running `npm install` before `vite` came back
+  (about 80 seconds) — a plain process restart would not have been enough,
+  since `npm install && npm run dev` is the whole entrypoint. **A source
+  edit with no matching HMR log line is a stale dev server, not a wrong
+  fix** — check the served module directly before spending time doubting
+  the diff.
+- **A screenshot tool can lie about what a page renders, and the lie can
+  look exactly like the bug you are hunting for.** Claude in Chrome's
+  `computer` screenshot/`zoom` actions, on this box, rendered the operator
+  header's nav showing only its first item — `Flags` — with the other three
+  links entirely absent, even after their color was forced to opaque red
+  with a yellow outline directly in the page and re-captured. Every other
+  signal available (`getBoundingClientRect`, computed styles, the
+  accessibility tree) said all four links were present, laid out, and
+  correctly styled. The tab's `window.devicePixelRatio` read `2.5` against
+  an `outerWidth` of `594` — an inconsistent scaling setup particular to
+  this sandboxed display. Confirmed as a capture bug, not a render bug, by
+  opening the same signed-in route in a second, independent tool
+  (Playwright MCP): all four links appeared normally there. **A visual
+  defect this convenient — matching a known prior bug shape exactly (see
+  criterion 2 in `docs/superpowers/plans/2026-09-02-hearth-admin-households-
+  verification.md`) — is worth one cross-check in a second tool before it is
+  written down as a repeat**, especially on an unusual display
+  configuration; the deciding evidence here was a second screenshot
+  pipeline, not more scrutiny of the first one.
 
 ### The first production deployment (2026-08-15)
 

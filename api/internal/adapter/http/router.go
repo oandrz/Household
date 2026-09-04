@@ -77,11 +77,17 @@ type Deps struct {
 	Admin          *usecase.AdminService
 	AdminReauth    *usecase.AdminReauthService
 	AdminDirectory *usecase.AdminDirectoryService
-	Users          usecase.UserRepository
-	Memberships    usecase.MembershipRepository
-	Sessions       usecase.SessionRepository
-	Tokens         usecase.TokenGenerator
-	Clock          usecase.Clock
+	// AdminOutbox is nil when MAILPIT_API_URL is unset, the same shape
+	// Telegram above has: the routes are registered either way so the tree
+	// does not change with configuration, and the handlers' nil check is the
+	// one place that decision lives. Unlike Telegram's 404, an unconfigured
+	// outbox answers 503 and names the variable -- see the handlers.
+	AdminOutbox *usecase.AdminOutboxService
+	Users       usecase.UserRepository
+	Memberships usecase.MembershipRepository
+	Sessions    usecase.SessionRepository
+	Tokens      usecase.TokenGenerator
+	Clock       usecase.Clock
 	// Secure controls the Secure flag on the session and CSRF cookies. It is
 	// !cfg.IsDevelopment(): false only in development, so cookies still work
 	// over plain http on localhost.
@@ -436,6 +442,11 @@ func NewRouter(deps Deps) http.Handler {
 					// admin_directory_handlers.go.
 					granted.Get("/households", handleAdminHouseholds(deps))
 					granted.Get("/households/{householdID}", handleAdminHousehold(deps))
+
+					// The operator's outbound mail: two reads. See
+					// admin_outbox_handlers.go.
+					granted.Get("/mail", handleAdminMail(deps))
+					granted.Get("/mail/{messageID}", handleAdminMailMessage(deps))
 				})
 			})
 		})
