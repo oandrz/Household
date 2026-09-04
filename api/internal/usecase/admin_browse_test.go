@@ -113,3 +113,22 @@ func TestTablesNeverReturnsNil(t *testing.T) {
 		t.Fatal("Tables returned a nil slice")
 	}
 }
+
+// Same contract as TestTablesNeverReturnsNil, for the Rows path: a nil Rows
+// or Columns slice marshals to JSON null, not [], and the frontend's table
+// view breaks on null.
+func TestRowsNeverReturnsNilRowsOrColumns(t *testing.T) {
+	stub := &browserStub{page: usecase.RowPage{Rows: nil, Columns: nil}}
+	svc := usecase.NewAdminBrowseService(stub)
+
+	page, err := svc.Rows(context.Background(), "accounts", 50, 0)
+	if err != nil {
+		t.Fatalf("Rows: %v", err)
+	}
+	if page.Rows == nil {
+		t.Fatal("Rows returned a nil Rows slice")
+	}
+	if page.Columns == nil {
+		t.Fatal("Rows returned a nil Columns slice")
+	}
+}
