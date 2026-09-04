@@ -280,8 +280,15 @@ function ColumnsPane({ columns }: { columns: AdminDatabaseColumn[] }) {
 // The two markers, named in one line above the grid they appear in. Without
 // it a reader has no way to tell a value they may not see from a value that
 // is not there, and in this schema that difference is sometimes the bug being
-// investigated (users.password_hash is NULL for a member who has only ever
-// used a magic link).
+// investigated (users.email is NULL for a member who has only ever used a
+// magic link; goal_contributions carries a NULL date beside an empty-string
+// note, which is where the two read differently on one row).
+//
+// A redacted column never shows «null», whatever it holds -- the server
+// substitutes the marker in the SELECT list rather than fetching the value,
+// so NULL never survives to be seen. Do not use users.password_hash as the
+// «null» example: it is NULL for those same magic-link members and still
+// renders «redacted».
 function Legend() {
   return (
     <p data-testid="browse-legend" className="text-[12px] text-muted">

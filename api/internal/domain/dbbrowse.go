@@ -10,8 +10,16 @@ import "strings"
 // [][]string: without it, a SQL NULL and an empty text column would both
 // arrive as "" and a reader would conclude they are the same thing. In this
 // schema they are not, and the difference is sometimes the bug being
-// investigated (users.password_hash is NULL for a member who has only ever
-// signed in with a magic link).
+// investigated (users.email is NULL for a member who has only ever signed in
+// with a magic link, and empty on nobody).
+//
+// The two markers never compete for the same cell: redaction is decided in
+// the SELECT list, so a redacted column's value is never fetched and a NULL
+// in one still reads RedactedCell. users.password_hash is the example to
+// avoid reaching for here -- it is NULL for exactly those magic-link members,
+// and it renders RedactedCell for every one of them, because ColumnIsRedacted
+// matches its _hash suffix. Pick a nullable column that is NOT redacted when
+// looking for NullCell on a real screen.
 const (
 	RedactedCell = "«redacted»"
 	NullCell     = "«null»"
