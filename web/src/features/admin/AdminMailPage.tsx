@@ -155,8 +155,16 @@ function MailRow({ message }: { message: AdminMailSummary }) {
 // NOT_FOUND as "the admin surface is gone, let AdminGate handle it", which is
 // right on a list and wrong here. On this route a 404 means Mailpit no longer
 // holds the message -- ordinary, expected (its store has no volume), and the
-// screen has its own copy for it. So the miss is checked FIRST, before the
-// gate filter, exactly as the households drill-in does.
+// screen has its own copy for it.
+//
+// So the miss is tested against query.error itself, never against the
+// gate-filtered inlineError below. That is the invariant, and it is not the
+// same claim as "the check comes first": inlineError is a const, so moving
+// the two lines past each other changes nothing. What would break the screen
+// is reading isNotFound(inlineError) -- the filter has already dropped every
+// NOT_FOUND, so that test is false every single time and this branch would
+// never run. AdminDatabasePage.tsx's row viewer carries the same invariant
+// for the same reason.
 export function AdminMailMessagePage({ messageId }: { messageId: string }) {
   const query = useAdminMailMessage(messageId);
   useCloseSurfaceOnReauth(query.error);
