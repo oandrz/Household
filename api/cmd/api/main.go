@@ -34,6 +34,8 @@ import (
 // conditional where the check would be easy to lose.
 var _ telegram.StartHandler = (*usecase.TelegramAuthService)(nil)
 
+var _ usecase.MailOutbox = (*mail.MailpitOutbox)(nil)
+
 func main() {
 	if err := run(); err != nil {
 		slog.Error("fatal", "error", err)
