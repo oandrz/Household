@@ -32,6 +32,7 @@ function OperatorNav() {
   const matchRoute = useMatchRoute();
   const items = [
     { to: "/admin/flags", label: "Flags" },
+    { to: "/admin/mail", label: "Mail" },
     { to: "/admin/households", label: "Households" },
   ] as const;
   return (
