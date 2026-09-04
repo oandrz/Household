@@ -370,6 +370,58 @@ type PendingInvite struct {
 	ExpiresAt     time.Time
 }
 
+// DatabaseBrowser is a read-only, structural view of the database, for the
+// operator's admin surface.
+//
+// Every value it returns is already rendered as text: no driver type, no
+// `any`, and nothing a caller could accidentally write through. That is not
+// only the clean-architecture rule -- it is what lets the implementation
+// render a redacted column as a constant inside its own SELECT list, so the
+// secret bytes never leave Postgres at all (the spec's decision 7).
+//
+// An implementation must:
+//   - answer domain.ErrNotFound for a table it cannot see, whether because
+//     the name does not exist or because its own role has no privilege on it;
+//   - answer ErrBrowseUnavailable for anything else that is a failure of the
+//     connection rather than of the request;
+//   - never write, and never be reachable through a connection that could.
+type DatabaseBrowser interface {
+	Tables(ctx context.Context) ([]TableInfo, error)
+	Rows(ctx context.Context, table string, limit, offset int) (RowPage, error)
+}
+
+// TableInfo is one table as the list screen shows it.
+type TableInfo struct {
+	Name     string
+	RowCount int64
+	Columns  []ColumnInfo
+}
+
+// ColumnInfo describes one column. Redacted is returned to the screen rather
+// than being kept private to the implementation, so the operator can see that
+// a column was withheld rather than empty -- "there is no value here" and
+// "you may not see the value here" are different facts and the screen must
+// not merge them.
+type ColumnInfo struct {
+	Name     string
+	DataType string
+	Redacted bool
+}
+
+// RowPage is one page of one table.
+//
+// Rows is column-ordered text, parallel to Columns: a Postgres table may
+// carry two columns whose names differ only in ways a JSON object key would
+// not preserve, and the column list is being sent anyway. A cell is never a
+// bare empty string where the value was absent -- see domain.NullCell.
+type RowPage struct {
+	Columns []ColumnInfo
+	Rows    [][]string
+	Total   int64
+	Limit   int
+	Offset  int
+}
+
 type InviteDetails struct {
 	ID           string
 	HouseholdID  string
@@ -1333,6 +1385,12 @@ type VisionRepository interface {
 	// budget lines.
 	Save(ctx context.Context, v domain.Vision) (domain.Vision, error)
 }
+
+// ErrBrowseUnavailable is the database browse's "I could not reach the
+// store", as distinct from domain.ErrNotFound's "the store answered, and
+// there is no such table". The operator needs different advice in each case:
+// the first is something to fix on the box, the second is a typo in a URL.
+var ErrBrowseUnavailable = errors.New("database browse unavailable")
 
 // ErrOutboxUnavailable means the outbox itself could not be read: it is
 // unreachable, it timed out, or it answered something this code cannot map.
