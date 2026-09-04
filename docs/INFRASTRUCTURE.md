@@ -42,7 +42,7 @@ per-message price to grow into, which is exactly the property WhatsApp lost on
 | healthchecks.io ping URL | `/home/deploy/hearth-backup.env` on the box, mode 600 | Yes — create a new check |
 | SSH private key | The operator's laptop, `~/.ssh/hearth_prod` | Yes — replace it through Hetzner's console |
 | `TELEGRAM_BOT_TOKEN` | `deploy/.env` on the box, mode 600, beside `POSTGRES_PASSWORD` (and `.env` locally — gitignored, never committed). Placeholder lines only in `.env.example` and `deploy/.env.example` | Yes — in Telegram, `@BotFather` → `/mybots` → the bot → **API Token** → **Revoke current token** issues a new one. It travels with `TELEGRAM_BOT_USERNAME`, which is not a secret; `config.Load` refuses to boot if exactly one of the two is set |
-| `hearth_readonly` password (inside `DATABASE_READONLY_URL`) | `deploy/.env` on the box, mode 600, beside `POSTGRES_PASSWORD`. **Not set on the box today** — the browse ships dark; the line is commented out in `deploy/.env.example` until an operator runs `PROVISION.md` section 9 | Yes, easily — it only talks to the *existing* database, and `ALTER ROLE hearth_readonly PASSWORD '<new>'` sets a new one in one statement; losing it costs one admin panel and nothing else. **What it can do if it leaks:** `SELECT` every table in `public` — every household's accounts, balances and transactions. **What it cannot:** write anything at all, and reach the database from off the box, since Postgres is never published (the Hetzner firewall allows 22/80/443 only, and the container publishes no port). So the exposure is bounded by already having a shell here, at which point `DATABASE_URL` in the same file is the larger problem |
+| `hearth_readonly` password (inside `DATABASE_READONLY_URL`) | `deploy/.env` on the box, mode 600, beside `POSTGRES_PASSWORD`. **Not set on the box today** — the browse ships dark; the line is commented out in `deploy/.env.example` until an operator runs `PROVISION.md` section 10 | Yes, easily — it only talks to the *existing* database, and `ALTER ROLE hearth_readonly PASSWORD '<new>'` sets a new one in one statement; losing it costs one admin panel and nothing else. **What it can do if it leaks:** `SELECT` every table in `public` — every household's accounts, balances and transactions. **What it cannot:** write anything at all, and reach the database from off the box, since Postgres is never published (the Hetzner firewall allows 22/80/443 only, and the container publishes no port). So the exposure is bounded by already having a shell here, at which point `DATABASE_URL` in the same file is the larger problem |
 | Hetzner / Cloudflare / Dynu / GitHub logins | The operator's password manager | Yes — all send password resets to the operator's email |
 
 **There are two ways to turn Telegram off, and they degrade differently.**
@@ -228,7 +228,7 @@ an account with no password.
   schedule.** The product owner chose on 2026-09-04 to ship this dark:
   merged and deployed with `DATABASE_READONLY_URL` unset, so production
   shows the not-configured panel until they run `deploy/PROVISION.md`
-  section 9 themselves. See
+  section 10 themselves. See
   [ADR 5](adr/0005-platform-admin-authorization.md), amended the same day for
   what this feature proved about its own narrowing.
 - **The outbound message inspector merged on 2026-09-04 (`3eddbe2`, PR #17)

@@ -133,7 +133,7 @@ An `A` record for the hostname → the box's IPv4, short TTL (120).
 driven by the provider's update client, or it drifts back and takes the TLS
 certificate with it.
 
-Confirm before step 10 — Caddy requests a certificate the moment it starts, and
+Confirm before step 9 — Caddy requests a certificate the moment it starts, and
 failed ACME validations count against a per-hostname limit:
 
 ```bash
@@ -178,10 +178,19 @@ install" has the details and the traps.
 URL userinfo field. `openssl rand -hex 24`.
 
 Leave `DATABASE_READONLY_URL` commented out for now. It is the optional
-operator database browse and it wants a role that does not exist yet — see
-section 9, which is run after the first bring-up.
+operator database browse, and it wants a role that does not exist yet — see
+section 10, after the first bring-up.
 
-## 9 · The read-only role
+## 9 · First bring-up
+
+```bash
+./deploy.sh <git sha of a build the images workflow finished>
+```
+
+`deploy.sh` refuses `latest`, refuses a tag absent from the registry before it
+touches `.env`, and verifies `migrate` exited `0` and `/readyz` answers.
+
+## 10 · The read-only role
 
 **Optional — the product itself does not depend on it.** Everything above
 gets you a working Hearth. This gets you the operator's
@@ -191,13 +200,17 @@ application role. Skip it and the panel says it is not configured and names
 the variable; nothing else changes. **The production box ships this way
 deliberately** — the product owner's decision on 2026-09-04.
 
-**Run it after section 10, not before.** `GRANT SELECT ON ALL TABLES` grants
-on the tables that exist *at the moment it runs*, so running it against an
-empty database would grant on nothing. The script's
-`ALTER DEFAULT PRIVILEGES` line covers tables `hearth` creates afterwards, so
-running it early would *mostly* work — which is worse than failing, because
-the one table it silently missed is invisible to the browse with no error
-anywhere. Run it once the migrations have.
+**This section is here, after the first bring-up, because the commands below
+need a running `postgres` container to `exec` into.** Nothing is up until
+section 9, so there is no earlier point in this file at which they could be
+typed. That is the whole reason for the position, and it is worth being
+precise about, because there is a plausible-sounding second reason that is
+**not** true here: `GRANT SELECT ON ALL TABLES` does only cover the tables
+that exist when it runs, but the script's `ALTER DEFAULT PRIVILEGES FOR ROLE
+hearth` line covers everything `hearth` creates afterwards — and every table
+in this schema is created by goose running as `hearth`. So running the script
+before the migrations would still be *correct*; it just cannot be run before
+there is a database to run it against.
 
 Generate a password. **Hex, not base64**, for the reason section 8 already
 gives: it goes into a `postgres://` userinfo field, where `/`, `+` and `=`
@@ -288,15 +301,6 @@ one Postgres reaches first is the one you see:
 Anything that is **not** an error — a row inserted, or a complaint about
 `family_name` being NULL — means the role can write and the browse must not
 be pointed at it.
-
-## 10 · First bring-up
-
-```bash
-./deploy.sh <git sha of a build the images workflow finished>
-```
-
-`deploy.sh` refuses `latest`, refuses a tag absent from the registry before it
-touches `.env`, and verifies `migrate` exited `0` and `/readyz` answers.
 
 ## 11 · Backups
 

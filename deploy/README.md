@@ -212,7 +212,7 @@ let write, so a bad click cannot damage anything; every table opened writes
 its own `admin_audit_log` row; and columns holding a secret are never
 selected at all — they render `«redacted»`, distinct from `«null»`, which is
 a value that is genuinely absent. It needs `DATABASE_READONLY_URL` set and
-the role created (`PROVISION.md` section 9). Unset, the screen says so and
+the role created (`PROVISION.md` section 10). Unset, the screen says so and
 names the variable; it never falls back to the read-write connection.
 
 **`psql` below stays the fallback for the questions the browse cannot
@@ -389,7 +389,7 @@ It is idempotent, so **"run it after every restore" is the whole
 instruction** — no checking first whether the role survived. The password
 comes from `DATABASE_READONLY_URL` in `.env`, which the restore did not
 touch; if that variable is unset on this box, there is nothing to do here at
-all. `PROVISION.md` section 9 is the same step written out in full.
+all. `PROVISION.md` section 10 is the same step written out in full.
 
 ## What is where
 

@@ -286,8 +286,11 @@ the browse was verified in a browser.
 
 No write reaches the web. The browse has two routes and both are `GET`s; the
 port it depends on, `usecase.DatabaseBrowser`, has two methods and neither
-can mutate anything; the SQL is `SELECT` and `information_schema` only. But
-the load-bearing part is not any of that, and this is the sentence worth
+can mutate anything; and every statement the adapter issues is a `SELECT` —
+over the household tables, over `information_schema`, and (for the ordering
+key) over `pg_index`, `pg_attribute` and `to_regclass`. The catalogue it
+reads from is wider than `information_schema` alone; what matters is that all
+of it is reads. But the load-bearing part is not any of that, and this is the sentence worth
 carrying forward: **the guard is Postgres's, not ours.** The browse reads
 through its own connection pool as `hearth_readonly`, a role granted `SELECT`
 on `public` and nothing else, with `default_transaction_read_only` set on the
@@ -318,11 +321,16 @@ but writing is genuinely prevented.
 The thing decision 4 got wrong was not the direction of the narrowing. It
 was assuming that "reads move to the web" is a change to this codebase.
 
-`hearth_readonly` is a **cluster-level** object. It is not a table, so it
-cannot be a goose migration — and `CREATE ROLE` needs the `CREATEROLE`
-attribute, which the role migrations run as need not hold. So it is created
-by `deploy/readonly-role.sql`, run during provisioning, by hand, by a person
-with a shell on the box. And because roles live in the cluster rather than in
+`hearth_readonly` is a **cluster-level** object, and that is what puts it
+outside the migration path. Not "because migrations are only for tables" —
+goose runs arbitrary SQL, and this repository's own
+`api/migrations/00002_identity.sql` opens with `CREATE EXTENSION IF NOT
+EXISTS citext;`, which is not a table either. The real reason is privilege:
+`CREATE ROLE` requires the `CREATEROLE` attribute, and the role migrations
+run as need not hold it — making every migration able to mint roles, so that
+one of them can, is a larger grant than the feature is worth. So it is
+created by `deploy/readonly-role.sql`, run during provisioning, by hand, by a
+person with a shell on the box. And because roles live in the cluster rather than in
 a database, `deploy/backup.sh` — one `pg_dump` of one database, with
 `--no-privileges` — captures neither the role nor its grants. **A restore
 that looks complete leaves the browse broken**, and the failure surfaces days
@@ -335,7 +343,7 @@ dependency.** Every earlier feature in this surface was code and tables:
 `platform_admins`, `feature_flags`, `admin_audit_log`, `sessions.last_seen_at`,
 and — for the mail inspector — a container that was already running. All of
 those arrive with a deploy. This one does not. Turning it on in production
-is a provisioning step (`deploy/PROVISION.md` §9), not a release, and the
+is a provisioning step (`deploy/PROVISION.md` §10), not a release, and the
 product owner's decision on 2026-09-04 was to ship it **dark**: merged and
 deployed with `DATABASE_READONLY_URL` unset, so the deployed panel says it is
 not configured and names the variable until someone chooses otherwise.
@@ -403,7 +411,7 @@ arbitrary one.
   outcome of. Its decisions 1–4 are where "the guard is Postgres's" is
   argued in full.
 - `docs/INFRASTRUCTURE.md` — `DATABASE_READONLY_URL`, the `hearth_readonly`
-  password, and what breaks without either; `deploy/PROVISION.md` §9 is how
+  password, and what breaks without either; `deploy/PROVISION.md` §10 is how
   the role is created.
 - `docs/superpowers/plans/2026-09-02-hearth-admin-surface-verification.md` —
   the 15-criterion browser walk, including the criterion 6 result this ADR

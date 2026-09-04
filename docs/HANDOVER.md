@@ -511,7 +511,7 @@ run.** A `SELECT`-only Postgres role reached through a *second* connection
 pool, a `DatabaseBrowser` port with two implementations, two granted routes
 and the `/admin/database` screen. It ships dark: `DATABASE_READONLY_URL` is
 unset in production by the product owner's decision, so the panel is off on
-the box until an operator runs `deploy/PROVISION.md` section 9 — and the role
+the box until an operator runs `deploy/PROVISION.md` section 10 — and the role
 is cluster-level, so it is provisioned rather than migrated and is in no
 backup (`deploy/README.md`'s Restoring). **The operator surface is now
 complete.** Read

@@ -1988,8 +1988,12 @@ to `@latest`.
   it, because the next person to grant a read-only role will write the
   incomplete version and nothing will tell them. `GRANT SELECT ON ALL TABLES
   IN SCHEMA public TO hearth_readonly` is a one-time act over the current
-  catalogue, not a standing rule: the table migration `00015` adds next year
-  is simply not covered. Nothing reports it — no error, no log line, no
+  catalogue, not a standing rule: the table the **next** migration creates is
+  simply not covered. (Deliberately no migration number here. An earlier draft
+  said `00015` while `readonly-role.sql`'s own comment said `00014` — two
+  hypotheticals written in the same change, disagreeing, and both destined to
+  go stale the day that migration lands. The invariant is "the next one",
+  whatever it is numbered.) Nothing reports it — no error, no log line, no
   failing test; `information_schema` is filtered per role, so the browse's
   own "does this table exist" lookup answers *no such table*, which is the
   same answer a typo gets. A table silently missing from a list nobody counts
