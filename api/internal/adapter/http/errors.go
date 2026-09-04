@@ -208,6 +208,16 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 		// something else". Deliberately a different code from
 		// DB_BROWSE_NOT_CONFIGURED: "no value set" and "the value is set and
 		// the connection is broken" send the operator to different places.
+		//
+		// Logged for the same reason the outbox branch above is, and it
+		// matters more here: the response body is deliberately generic, so
+		// this line is the ONLY place the cause survives. browseErr in
+		// browse_repo.go wraps both the failing operation and the pg error
+		// into this sentinel (`%w: %s: %v`) precisely so this layer can
+		// record them -- dropping the log would throw away the only thing
+		// that distinguishes a dead connection from a statement timeout
+		// from a revoked privilege.
+		slog.Error("database browse unavailable", "error", err, "request_id", middleware.GetReqID(r.Context()))
 		WriteError(w, http.StatusServiceUnavailable, "DB_BROWSE_UNAVAILABLE",
 			"The database browse cannot reach its read-only connection.", nil)
 	case errors.Is(err, usecase.ErrInvalidOffset):

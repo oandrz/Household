@@ -1,8 +1,11 @@
 package httpadapter_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
@@ -295,18 +298,44 @@ func TestAdminDatabaseAnswers503WhenUnconfigured(t *testing.T) {
 // different code: "no value set" sends the operator to .env, "the value is
 // set and the connection is broken" sends them to the box and the
 // hearth_readonly role. Collapsing the two would send them to the wrong one.
+//
+// The log assertion is the other half, and it is not decoration. The response
+// body is deliberately generic, so the log line is the ONLY place the cause
+// survives -- browse_repo.go's browseErr wraps the failing operation and the
+// pg error into this sentinel precisely so this layer can record them. The
+// stub's error carries an operation phrase for exactly that reason: asserting
+// only that "something was logged" would still pass if the branch logged the
+// bare sentinel and threw the cause away.
 func TestAdminDatabaseAnswers503WhenTheBrowseIsBroken(t *testing.T) {
 	env := newTestEnv(t)
 	session := grantedAdmin(t, env)
-	router := env.browseRouter(&stubBrowser{err: usecase.ErrBrowseUnavailable})
+	broken := fmt.Errorf("%w: count rows: dial tcp 127.0.0.1:5432: connection refused",
+		usecase.ErrBrowseUnavailable)
+	router := env.browseRouter(&stubBrowser{err: broken})
 
 	for _, path := range []string{
 		"/api/v1/admin/db/tables",
 		"/api/v1/admin/db/tables/accounts",
 	} {
 		t.Run(path, func(t *testing.T) {
+			var buf bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+
 			rec := get(t, router, path, session)
 			assertErrorResponse(t, rec, http.StatusServiceUnavailable, "DB_BROWSE_UNAVAILABLE")
+
+			logged := buf.String()
+			if !strings.Contains(logged, "database browse unavailable") {
+				t.Fatalf("nothing was logged for a 503 whose body carries no cause\ngot: %s", logged)
+			}
+			if !strings.Contains(logged, "count rows") {
+				t.Fatalf("the log dropped the operation the adapter wrapped in for it\ngot: %s", logged)
+			}
+			if !strings.Contains(logged, "connection refused") {
+				t.Fatalf("the log dropped the underlying cause\ngot: %s", logged)
+			}
 		})
 	}
 }
