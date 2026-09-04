@@ -2798,6 +2798,48 @@ case and no coordinate system to assert legibility in for the second.
   and it is the same check as reading a query before believing a note about
   it.
 
+- **A comment whose motivating example the feature makes impossible to
+  observe — database browse, Task 11's browser walk, 2026-09-04. The test
+  sitting next to it had the truth the whole time.** `domain.NullCell` and
+  the screen's `Legend()` both explained why `«null»` needs to exist as a
+  separate marker from `«redacted»`, and both reached for the same example:
+  "the difference is sometimes the bug being investigated (`users.password_hash`
+  is NULL for a member who has only ever signed in with a magic link)". The
+  first half is true — `password_hash` really is NULL for the household's
+  two children. The implication is false: `ColumnIsRedacted` matches the
+  `_hash` suffix, so `BrowseRepo.Rows` substitutes the marker **into the
+  `SELECT` list** rather than fetching the column, and a NULL in it renders
+  `«redacted»`. Redaction wins over nullness unconditionally, by
+  construction. The one example offered for what `«null»` is *for* is the
+  one column in this schema where it can never appear — confirmed on screen
+  during the walk, where both children show `«redacted»`.
+  **Nothing was broken and no test was failing**, which is exactly why it
+  survived a spec, a plan, an implementation and a code review: the code was
+  right, only the sentence explaining it was wrong, and a wrong sentence
+  compiles. What makes this one sharper than the ten instances above is
+  where the truth already lived. `TestRowsDistinguishesNullFromEmpty`
+  asserts all three facts correctly, including, at
+  `browse_repo_test.go:142`, that a NULL in a redacted column renders
+  `«redacted»`. **The test knew; the prose beside it drifted.** So the fix
+  needed no new test — the corrected claim was already pinned — and the
+  honest move was to mutation-check the existing assertion instead of adding
+  a ceremonial one: making the old comment's implicit claim true (a `CASE
+  WHEN … IS NULL THEN NullCell ELSE RedactedCell END`) turned it red with
+  "a NULL in a redacted column rendered as `«null»`, want `«redacted»`".
+  What would have caught it sooner: **an example in a comment is a claim
+  that can be run.** When a comment says "for instance, column X shows
+  marker Y", open the screen and look at column X — this one costs one page
+  view, and the walk that finally did it took under a minute. The
+  corollary is worth as much: when a test near a comment asserts something
+  the comment contradicts, the test is the one to believe, and the
+  disagreement is the defect report.
+  The same walk also found the *brief* wrong in the same way, twice, which
+  is why walks are scripted from criteria and not trusted as oracles (see
+  pattern 13): criterion 7 told the walker to use this very column, and
+  criterion 13's `INSERT` omitted a `NOT NULL` column, so following it
+  literally would have recorded a `NOT NULL` violation as proof that a
+  read-only role cannot write.
+
 - **Two rules in one file whose examples contradicted each other — database
   browse, Task 5, 2026-09-04.** The redaction predicate matches by column
   type (`bytea`) and by name (`_hash`, `_secret`, anything containing
