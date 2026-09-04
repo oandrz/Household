@@ -147,6 +147,9 @@ func TestAdminMailMessageIsANotFoundWhenMailpitHasDroppedIt(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}
+	if code := errorCode(t, rec.Body.Bytes()); code != "NOT_FOUND" {
+		t.Fatalf("code = %q, want NOT_FOUND", code)
+	}
 }
 
 // Fail closed on a value we did not construct. Mailpit ids are exactly 22

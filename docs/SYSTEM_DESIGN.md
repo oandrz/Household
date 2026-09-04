@@ -121,9 +121,14 @@ adapter deliberately never calls Mailpit's `link-check` endpoint, which
 issues a real request to every URL it reports on and would spend the very
 single-use tokens this screen exists to hand out. `MAILPIT_API_URL` unset
 means the two routes answer `503` rather than an empty list. **Its own
-fifteen-criterion browser walk has not run** — unlike Telegram and every
-other feature this preamble names, this one cannot yet claim to be
-verified, only built and reviewed.
+fifteen-criterion browser walk ran 2026-09-04 and passed 15 of 15** — like
+Telegram and every other feature this preamble names, it is now verified
+against the running app, not only built and reviewed. The walk found and
+fixed one real defect: adding this feature's third nav link pushed the
+shared operator header 14px past a 305px viewport on every `/admin/*`
+route, fixed with `flex-wrap` on `AdminShell.tsx`'s nav and pinned by a
+mutation-checked `AdminShell.test.tsx`. See
+`docs/superpowers/plans/2026-09-04-hearth-outbound-inspector-verification.md`.
 
 **This is deployed.** Hearth has run at <https://oink.mywire.org> since
 2026-08-15, on one Hetzner CX23 in Falkenstein, serving a real household. §1
@@ -398,7 +403,11 @@ Compose entry, because `api` already shares this network with `mailpit` and
 already depends on it. It does not replace the SSH tunnel above — that stays
 the fallback for when the API itself is what is unreachable — it only
 removes the tunnel as the *only* way to hand someone their link. Its own
-fifteen-criterion browser walk has not run.
+fifteen-criterion browser walk ran 2026-09-04 and passed 15 of 15, finding
+and fixing one real defect — the third nav link this feature added pushed
+the shared operator header 14px past a 305px viewport on every `/admin/*`
+route, fixed with `flex-wrap` on `AdminShell.tsx`'s nav (see
+`docs/superpowers/plans/2026-09-04-hearth-outbound-inspector-verification.md`).
 
 ---
 

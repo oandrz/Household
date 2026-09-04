@@ -498,14 +498,16 @@ inspector is code-complete on branch `admin-outbox`** (2026-09-04, not yet
 merged): a `MailOutbox` port and `AdminOutboxService` in `usecase`, a Mailpit
 adapter that speaks to exactly two upstream endpoints, `MAILPIT_API_URL` in
 config, two granted routes and the `/admin/mail` screen. Its own fifteen-
-criterion browser walk is Task 9 of
-`docs/superpowers/plans/2026-09-04-hearth-outbound-inspector.md` and has not
-run yet — treat it as unverified until that walk lands. **The read-only
-database browse remains specified but unbuilt.** Read
+criterion browser walk (Task 9 of
+`docs/superpowers/plans/2026-09-04-hearth-outbound-inspector.md`) ran the
+same day and passed 15 of 15, finding and fixing one real defect — the
+third nav link this feature added pushed the shared operator header 14px
+past a 305px viewport on every `/admin/*` route, fixed with `flex-wrap` on
+`AdminShell.tsx`'s nav. **The read-only database browse remains specified
+but unbuilt.** Read
 [ADMIN_SURFACE_HANDOVER.md](ADMIN_SURFACE_HANDOVER.md) before touching either
 or planning the next slice — it carries the decisions that are load-bearing,
-the open items, and what each branch's own browser walk found (or, for the
-inspector, has not yet found).
+the open items, and what each branch's own browser walk found.
 
 **The build order changed a second time on 2026-09-02.** The product owner
 reprioritised the four remaining platform-administration features ahead of any
@@ -532,7 +534,10 @@ button restored the list but left the search box showing the stale query
 confirmed against the drill-in's own lockout callout through the API rather
 than the sign-in screen's local error state; section 9's row carries both.
 **The third, the outbound message inspector, is code-complete on branch
-`admin-outbox` (2026-09-04)** — see above. Its browser walk has not run.
+`admin-outbox` (2026-09-04)** — see above. Its browser walk ran the same
+day and passed 15 of 15, finding and fixing one real defect (the shared
+operator header's nav overflowing at 305px once this feature's third link
+was added).
 **One remains: the read-only database browse** (§4), last of the four
 because it is the only one with an infrastructure dependency and much the
 largest security surface; the other three exist in part to give the re-auth

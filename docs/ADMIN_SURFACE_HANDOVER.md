@@ -131,13 +131,15 @@ any upstream request is made. It closes a real, previously documented pain:
 `deploy/README.md`'s "Reading mail" section used to describe handing
 someone an invite only by opening an SSH tunnel to Mailpit and copying the
 link out by hand; that tunnel is now the fallback for when the API itself is
-what is broken, not the only way. **Its browser walk has not run yet —
-unlike every other feature in this section, this one is not yet confirmed
-against the running app.** The fifteen-criterion walk is Task 9 of
-`docs/superpowers/plans/2026-09-04-hearth-outbound-inspector.md`; this
-paragraph will name
-`docs/superpowers/plans/2026-09-04-hearth-outbound-inspector-verification.md`
-once that walk is recorded there.
+what is broken, not the only way. **Its browser walk ran 2026-09-04 and
+passed 15 of 15 — like every other feature in this section, it is now
+confirmed against the running app.** The walk (Task 9 of
+`docs/superpowers/plans/2026-09-04-hearth-outbound-inspector.md`) found and
+fixed one real defect: adding this feature's third nav link (`Mail`) pushed
+the shared operator header 14px past a 305px viewport on every `/admin/*`
+route, fixed with `flex-wrap` on `AdminShell.tsx`'s nav and pinned by a
+mutation-checked `AdminShell.test.tsx`. Recorded in
+`docs/superpowers/plans/2026-09-04-hearth-outbound-inspector-verification.md`.
 
 Where to start reading: `middleware_admin.go`, then `router.go`'s `/admin`
 subtree and its comment, then `usecase/admin.go` and
@@ -317,7 +319,7 @@ These were each argued and are load-bearing. Changing one is fine; changing one
 | The tables, ports and middleware chain | `docs/SYSTEM_DESIGN.md` |
 | The outbound message inspector's own design | `docs/superpowers/specs/2026-09-04-hearth-outbound-inspector-design.md` |
 | Its implementation plan | `docs/superpowers/plans/2026-09-04-hearth-outbound-inspector.md` |
-| Its browser walk, when Task 9 runs | `docs/superpowers/plans/2026-09-04-hearth-outbound-inspector-verification.md` |
+| Its browser walk, 15 of 15 | `docs/superpowers/plans/2026-09-04-hearth-outbound-inspector-verification.md` |
 | What building it taught (the `link-check` trap, and a mutation check that couldn't fail) | `docs/LEARNING.md`, patterns 2 and 16 |
 
 ## 8. If you are picking this up

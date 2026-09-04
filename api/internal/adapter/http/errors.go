@@ -187,12 +187,17 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, usecase.ErrInvalidFXRateMode):
 		WriteError(w, http.StatusUnprocessableEntity, "INVALID_FX_RATE_MODE", "That FX rate mode is not valid.", nil)
 	case errors.Is(err, usecase.ErrOutboxUnavailable):
-		// 502 rather than 500: the failure is upstream of this service and
-		// the operator's next step is to look at Mailpit, not at the API's
-		// own logs. Deliberately distinct from the 503 an unconfigured
-		// inspector answers -- one means "set the variable", the other means
-		// "the container is down", and collapsing them would send the
-		// operator to fix the wrong thing.
+		// 502 rather than 500: the failure is upstream of this service, not
+		// a bug in it. That is not always "go look at Mailpit, not here",
+		// though -- a stray path segment in MAILPIT_API_URL surfaces as this
+		// same sentinel (see the 404-on-list case in mailpit_outbox.go's
+		// Recent), and the wrapped cause logged below is the only thing
+		// that names the .env line to fix in that case. Deliberately
+		// distinct from the 503 an unconfigured inspector answers -- one
+		// means "set the variable", the other means "the container is
+		// down", and collapsing them would send the operator to fix the
+		// wrong thing.
+		slog.Error("mail outbox unavailable", "error", err, "request_id", middleware.GetReqID(r.Context()))
 		WriteError(w, http.StatusBadGateway, "MAIL_UPSTREAM_UNAVAILABLE",
 			"Mailpit is not answering. The messages are not lost — the reader is.", nil)
 	case errors.Is(err, usecase.ErrInviteeAlreadyRegistered):
