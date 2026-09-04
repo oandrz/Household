@@ -504,8 +504,17 @@ criterion browser walk (Task 9 of
 same day and passed 15 of 15, finding and fixing one real defect — the
 third nav link this feature added pushed the shared operator header 14px
 past a 305px viewport on every `/admin/*` route, fixed with `flex-wrap` on
-`AdminShell.tsx`'s nav. **The read-only database browse remains specified
-but unbuilt.** Read
+`AdminShell.tsx`'s nav. **The read-only database browse is built too, on
+branch `admin-db-browse` (2026-09-04) — code-complete and reviewed, and the
+only feature of this surface whose fifteen-criterion browser walk has not
+run.** A `SELECT`-only Postgres role reached through a *second* connection
+pool, a `DatabaseBrowser` port with two implementations, two granted routes
+and the `/admin/database` screen. It ships dark: `DATABASE_READONLY_URL` is
+unset in production by the product owner's decision, so the panel is off on
+the box until an operator runs `deploy/PROVISION.md` section 9 — and the role
+is cluster-level, so it is provisioned rather than migrated and is in no
+backup (`deploy/README.md`'s Restoring). **The operator surface is now
+complete.** Read
 [ADMIN_SURFACE_HANDOVER.md](ADMIN_SURFACE_HANDOVER.md) before touching either
 or planning the next slice — it carries the decisions that are load-bearing,
 the open items, and what each branch's own browser walk found.
@@ -539,10 +548,17 @@ PR #17 (2026-09-04)** — see above. Its browser walk ran the same
 day and passed 15 of 15, finding and fixing one real defect (the shared
 operator header's nav overflowing at 305px once this feature's third link
 was added).
-**One remains: the read-only database browse** (§4), last of the four
-because it is the only one with an infrastructure dependency and much the
-largest security surface; the other three exist in part to give the re-auth
-grant and the audit log real use before it arrives.
+**The fourth and last, the read-only database browse, was built the same day**
+(§4, branch `admin-db-browse`, to its own spec
+`docs/superpowers/specs/2026-09-04-hearth-database-browse-design.md`). It was
+last of the four because it was the only one with an infrastructure dependency
+and much the largest security surface, and the other three existed in part to
+give the re-auth grant and the audit log real use before it arrived — which
+paid off concretely: it needed no audit change at all. Its row in section 9 is
+🟡 rather than ✅ for two reasons stated there: the browser walk has not run,
+and production ships with the feature switched off by the owner's decision.
+**So none of the four remains, and `docs/FEATURE_TRACKER.md`'s "Suggested
+order" has moved on to the household product — item 6, Marriage's Agreements.**
 
 **Slice 2 (Money) is done.** Accounts, Transactions, Budget, Goals and
 Bills — all five features — are code-complete, reviewed, and now all

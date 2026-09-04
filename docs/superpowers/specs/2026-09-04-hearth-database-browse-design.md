@@ -330,6 +330,19 @@ own promise that a half-provisioned box degrades to "you cannot use this",
 never to something worse. A misconfiguration a human typed is refused; an
 environment that is not ready yet is waited out.
 
+**Corrected 2026-09-04, while the code was being written: that row needs a
+mechanism, and "leave `Deps.AdminBrowse` nil" is not it.** A nil service is
+how decision 13 produces `DB_BROWSE_NOT_CONFIGURED`, so wiring the
+unreachable case the same way answers the wrong code — it tells the operator
+to set a variable that is already set, on precisely the restore-day scenario
+the paragraph above is about. `cmd/api/main.go`'s `openBrowse` therefore
+wires a stand-in browser, `postgres.UnavailableBrowse`, for every arm of
+`OpenReadOnly` that does not carry `ErrReadOnlyMisconfigured`: the database
+unreachable, the pool failing to construct, and the write self-check itself
+erroring. It answers `ErrBrowseUnavailable` from both port methods, carrying
+the boot failure as its cause, so every one of those `503`s can log *why*.
+The table above was always right; only the mechanism was missing.
+
 Neither unavailability answers `404`. `requirePlatformAdmin` and
 `requireFeature` both use `404` to hide a route's *existence*; everyone who
 reaches this handler has already proved they are an admin with a live grant,
@@ -342,7 +355,12 @@ does.
 
 The same shape `Telegram` and `AdminOutbox` already have: the route tree does
 not change with configuration, so every test builds the same tree, and the
-handler's nil check is the one place the decision lives.
+handler's nil check is the one place *this* decision lives.
+
+Read it narrowly: nil means **unconfigured**, and nothing else. It is not the
+general "the browse does not work" signal — decision 12's stand-in browser
+covers the configured-but-unopenable cases, and they must stay
+distinguishable, because the two send an operator to different places.
 
 ### Decision 14 — A second pool, sized for one operator
 

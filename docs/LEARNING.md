@@ -1291,6 +1291,74 @@ person to ask whether the test could ever have gone red in the first place.
   the file changed, so the cache will hand back the old answer and call it
   passing.
 
+- **An assertion against a list of absolute paths, written with relative
+  paths — database browse, Task 9, 2026-09-04.** `adminBundleSplit.test.ts`
+  walks `main.tsx`'s import graph and asserts the admin chunk is not
+  reachable from it; the whole point is that no household member downloads
+  the operator surface. The task's brief added two new guards using bare
+  strings — `"features/admin/AdminDatabasePage.tsx"` — against a `reachable`
+  set whose every entry is an absolute path built with
+  `join(SRC_ROOT, …)`, which is what all eight pre-existing assertions in
+  that file already do. A relative string can never equal an absolute one,
+  so the new guards would have passed **forever, whatever `main.tsx`
+  imported**: the day someone statically imported the admin page into the
+  entry bundle, the test protecting against exactly that would have stayed
+  green. Caught by the implementer noticing the shape mismatch against the
+  file's own convention, then proved by making the assertion fire. What
+  would have caught it sooner: **when adding an assertion to an existing
+  test file, construct the expected value the way that file already
+  constructs it** — the eight neighbours were the specification, and the new
+  lines were the only two that did not follow it.
+
+- **A paging test that could not be made to fail by adding rows — database
+  browse, Task 5, 2026-09-04.** `Rows` orders by the primary key (`ctid`
+  when a table has none) because `LIMIT`/`OFFSET` without `ORDER BY` lets
+  Postgres return rows in any order it likes, so page 2 can repeat a row
+  from page 1 and skip another with nothing raising an error. The mutation
+  was "delete the `ORDER BY` clause, watch the two-page test go red." It
+  stayed green — and the controller's instruction to fix that by raising the
+  row count was **wrong**, which is the part worth writing down. Measured: 5
+  rows and 500 rows both pass with `ORDER BY` deleted. A static heap read by
+  one connection comes back in the same physical order at any size, and the
+  one thing that would shuffle it, a synchronized sequential scan, needs a
+  table larger than `shared_buffers / 4` — a size this schema will never
+  reach. **The discriminator is not size, it is a write between the two
+  pages.** An `UPDATE` writes a new row version and allocates a new line
+  pointer *after* the existing ones, so an unordered sequential scan then
+  returns `[a3, a4, a5, a1', a2']`, and `offset=2 limit=2` yields
+  `a5, a1'` — the exact "a row appeared on two pages" failure, deterministic
+  and at five rows. That is also what a live operator screen actually meets:
+  the product is writing to these tables while somebody is paging through
+  them. What would have caught it sooner: **when a mutation stays green, ask
+  what physically produces the behaviour under test, not how to produce more
+  of the input** — more rows was more of the same evidence, and the answer
+  was a different kind of event entirely.
+
+- **The line position of a guard is not what makes it correct — database
+  browse, Task 9, 2026-09-04.** The row viewer must render "no such table"
+  for a 404, and `isAdminLayerFailure` counts `NOT_FOUND` among the failures
+  `AdminGate` owns, so the filtered error is null for a 404. The plan stated
+  the rule as *ordering* — "`isNotFound` must be checked **before**
+  `isAdminLayerFailure`" — and wrote the mutation to match: move the
+  `isNotFound` block below the const and expect red. It cannot go red, **by
+  construction rather than by luck**: `isAdminLayerFailure` only computes a
+  `const`, and the `isNotFound` block already early-returns, so moving one
+  past the other changes nothing a test can observe. The real invariant is
+  about the *operand*, not the line: `isNotFound` is evaluated against the
+  raw `query.error` and never against the gate-filtered value. Mutating to
+  *that* — swapping the argument — went red on exactly one case. The same
+  branch had a second inert assertion beside it: the test asserted no
+  password prompt appears, inside a render tree where `AdminGate` is never
+  mounted, so no password prompt could ever have appeared. Both were
+  replaced. `AdminMailPage.tsx` carried the identical "checked FIRST"
+  wording one file away, inviting the next reader into the same
+  misunderstanding, and was reworded in the same change (pattern 1: fixing
+  an instance is not fixing the class). What would have caught it sooner:
+  **write the invariant as a sentence about values, then check the mutation
+  actually violates that sentence** — "checked first" describes the source
+  file, "reads the raw error, never the filtered one" describes the
+  program, and only the second one can be broken on purpose.
+
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
 a different reason than the one you meant to prove, that is not yet proof
@@ -1300,6 +1368,12 @@ is pinned to neither** — mutate the guard that does the work, or assert
 something only that guard can produce. **And if the code under test reads a
 non-Go file at runtime, re-run with `-count=1`** — Go's test cache does not
 know that file is an input, and will hand back the previous result.
+**And if the mutation is written as "move this line", suspect it before you
+run it**: position is a property of the file, and a test can only observe
+properties of the program. Three of the mutations in this section's newest
+entries were unfalsifiable for that family of reason — a string compared
+against a differently-shaped string, an assertion about a component that was
+never mounted, and a reordering of two statements that do not interact.
 
 ### 3. The simulated environment lied
 
@@ -1778,9 +1852,36 @@ time a reviewer found it by building a probe rather than reading the diff.
   `null -> ""` translation on the update path only, and a dedicated test now
   asserts the PATCH body itself carries `""`.
 
+- **A backup that restores every table and none of the roles — database
+  browse, 2026-09-04.** Written before anyone has tripped it, because the day
+  it bites is the worst possible day to discover it. `deploy/backup.sh` runs
+  `pg_dump -U hearth -d hearth --no-owner --no-privileges`: **one database**,
+  with the `GRANT`s stripped. `hearth_readonly` is a **role**, and roles live
+  in the cluster, not in a database — `pg_dumpall --roles-only` is the tool
+  that would capture one, and this product does not run it. So neither the
+  role nor its grants are in any backup this product takes. A restore
+  therefore *succeeds*: every table back, every monetary value exact, the
+  product working — and the operator's database browse answering `503`
+  against a role that no longer exists. There is no error at restore time,
+  nothing in the log, and no reason for anyone to look. The failure arrives
+  days or weeks later, on the day somebody opens the panel because something
+  else is wrong. The mitigation is deliberately not a smarter backup: it is
+  that `deploy/readonly-role.sql` is **idempotent**, so "run it again after
+  every restore" is a whole instruction with no condition to evaluate, and
+  it is written in `deploy/README.md`'s Restoring section rather than only in
+  a spec — beside the command someone will actually be typing. What would
+  have caught it sooner: **when a feature depends on state outside the thing
+  that gets backed up, say so where the restore is documented** — asking
+  "what does `pg_dump` not contain" is a question with a short, checkable
+  answer, and nobody asked it until the role existed.
+
 **Any two writes that must both happen need a transaction or a loud failure.**
 And a function that accepts a field must persist it or refuse it — silently
-keeping the old value is the same failure wearing a 200.
+keeping the old value is the same failure wearing a 200. **And a recovery
+procedure that restores less than it appears to is the same defect at the
+scale of a whole install** — the entry above is not about a repository
+method, but it is the identical shape: an operation that reports success for
+work it only partly did.
 
 ### 6. Enumeration oracles are rarely in the error code
 
@@ -1851,10 +1952,65 @@ to `@latest`.
   set**, because the person shortening a prune window is never reading the
   query.
 
+- **One `default:` arm answered three different failures with the same wrong
+  advice — database browse, Task 7, 2026-09-04.** `main.go`'s boot switch
+  refuses to start on `ErrReadOnlyMisconfigured` and, in its `default:` arm,
+  left `Deps.AdminBrowse` nil and carried on. But nil is how the *handler*
+  says `DB_BROWSE_NOT_CONFIGURED` — "you never set this variable" — and three
+  distinct failures fell into that arm: the database being unreachable,
+  `pgxpool.NewWithConfig` failing, and `assertCannotWrite`'s own privilege
+  lookup erroring (which deliberately does *not* wrap the misconfiguration
+  sentinel, so "I could not tell whether this role can write" degraded to
+  "not configured" instead of refusing the boot). All three told the operator
+  to set a variable that was already set — **on precisely the restore-day
+  scenario the design was written for**: `.env` already carries the value,
+  the role does not exist yet, and the person reading the message is
+  rebuilding the box. The design's own decision table had always said that
+  row must answer `503 DB_BROWSE_UNAVAILABLE`; the plan's wiring could not
+  produce it, and the spec's prose never named a mechanism, so nothing
+  contradicted anything until the code existed. Fixed with a second
+  implementation of the port, `postgres.UnavailableBrowse`, which answers
+  `ErrBrowseUnavailable` and carries the boot failure so the 503 can log
+  *why*; the startup log's "enabled" line moved to `readonlyDB != nil`, since
+  "the service is non-nil" had stopped meaning "a live pool was opened". A
+  second half of the same defect: the failure log printed a pgx
+  `ConnectError`, whose text is built from `user=` and `database=` only
+  (`pgconn/errors.go`), so the string `DATABASE_READONLY_URL` appeared
+  nowhere in the one line reporting the problem — no amount of wrapping would
+  have added it, the message has to name the variable itself. What would have
+  caught it sooner: **a `default:` arm is a claim that every remaining case
+  wants the same answer** — enumerate them out loud before writing one, and
+  if a nil value doubles as a user-facing message, it can only mean one
+  thing.
+
+- **`GRANT SELECT ON ALL TABLES` grants on the tables that exist when it
+  runs — database browse, 2026-09-04.** Written whether or not anyone trips
+  it, because the next person to grant a read-only role will write the
+  incomplete version and nothing will tell them. `GRANT SELECT ON ALL TABLES
+  IN SCHEMA public TO hearth_readonly` is a one-time act over the current
+  catalogue, not a standing rule: the table migration `00015` adds next year
+  is simply not covered. Nothing reports it — no error, no log line, no
+  failing test; `information_schema` is filtered per role, so the browse's
+  own "does this table exist" lookup answers *no such table*, which is the
+  same answer a typo gets. A table silently missing from a list nobody counts
+  is not a failure anyone notices. The fix is one more statement in the same
+  file — `ALTER DEFAULT PRIVILEGES FOR ROLE hearth IN SCHEMA public GRANT
+  SELECT ON TABLES TO hearth_readonly` — and it is easy to leave out because
+  the incomplete version works perfectly on the day it is written. Note the
+  `FOR ROLE hearth`: default privileges attach to the role that *creates* the
+  object, so this covers tables goose creates as `hearth` and would not cover
+  a table created by anyone else. What would have caught it sooner: **a
+  grant that enumerates today's objects needs a rule for tomorrow's, or a
+  test that adds an object and re-checks** — the browse's schema-driven
+  redaction test is that shape for a different rule, written for exactly this
+  reason.
+
 **A config value that nothing reads is a lie. A guard that names one thing while
 protecting another is worse. And a value that two places have to agree on, with
 nothing making them agree, is a lie waiting for someone to change one of
-them.**
+them. And an error message that tells someone to fix a thing that is already
+correct costs more than no message at all** — it spends the one minute they
+had on the wrong file, on the day they can least afford it.
 
 ### 9. A DELETE scoped to a deliberately-nullable column spares exactly the rows that column's nullability exists to create
 
@@ -2610,9 +2766,71 @@ case and no coordinate system to assert legibility in for the second.
   because it looks like a gift fails a test instead of shipping, which is
   where the ten instances above eventually landed.
 
+- **A comment crediting a vendor library with a guarantee it does not
+  provide — database browse, Task 4, 2026-09-04.** The read-only pool's
+  self-check runs in `pgxpool`'s `AfterConnect` hook and returns
+  `ErrReadOnlyMisconfigured`; `main.go` matches that sentinel with
+  `errors.Is` to decide whether to refuse the boot. The brief's comment
+  explained why that works: "the error travels out through pgxpool's own
+  wrapping of `AfterConnect`". The implementer first reported the same thing,
+  then went and read the source — pinned `pgx v5.10.0` and `puddle v2.2.2` —
+  and corrected itself. **pgxpool wraps nothing.** The error is passed
+  through raw at every hop from the `Constructor` closure to
+  `initResourceValue` to `Pool.Ping`; there is no `fmt.Errorf` anywhere on
+  that path. `errors.Is` succeeds only because the two `%w` wraps inside
+  `readonly_pool.go` *are* the entire chain. The conclusion is unchanged and
+  the guarantee is actually **stronger** than the comment claimed — it
+  depends on this file alone and cannot be broken by a pgxpool upgrade — but
+  the stated reason was false, and a future reader trusting it would have
+  believed a dependency was holding something up for them. Worth noting the
+  one place pgx *does* embed a connection string, `ParseConfigError`: it
+  redacts the password, and it carries `ErrReadOnlyMisconfigured`, so it
+  refuses the boot and never reaches a log line — which is *why* the browse
+  cannot leak a DSN, rather than a hope that it will not. What would have
+  caught it sooner: **an error-handling comment that credits a library is a
+  claim about that library's source** — ten minutes reading it is the check,
+  and it is the same check as reading a query before believing a note about
+  it.
+
+- **Two rules in one file whose examples contradicted each other — database
+  browse, Task 5, 2026-09-04.** The redaction predicate matches by column
+  type (`bytea`) and by name (`_hash`, `_secret`, anything containing
+  `password`). The plan's adapter test then chose `users.password_hash` as
+  its demonstration that a `NULL` renders `«null»`. That column matches the
+  name rule twice over, so it can only ever render `«redacted»` — **the
+  assertion the plan wrote could never have passed**, whatever the code did.
+  Both rules were written in the same document, days apart, and neither was
+  checked against the other. Replaced with `users.email` (`citext`,
+  genuinely nullable — a Telegram-only account has none) for `NULL` and
+  `display_name` for the empty string, and the test additionally now asserts
+  the stronger property: `password_hash` renders `«redacted»` *even when it
+  is NULL*, which is the case where redaction and absence could have been
+  confused. What would have caught it sooner: **when a document defines a
+  rule and later picks an example, run the rule over the example** — it is a
+  one-line check, and the example is the part a reader will copy.
+
+- **A comment, a test and a mutation all built on a consequence that this
+  codebase cannot produce — database browse, Task 9, 2026-09-04.** The
+  planning claim was that swallowing a 404 on the row viewer would "close the
+  entire operator surface" — a password prompt where a missing table should
+  be. It is false here, and the reviewer established it by tracing rather
+  than reasoning: `useCloseSurfaceOnReauth` is the only thing on these
+  screens that invalidates the flags query `AdminGate` watches, and it fires
+  on `ADMIN_REAUTH_REQUIRED` alone; `adminFlagsKey` has exactly three
+  writers, none on a read path; and `main.tsx`'s `QueryCache` has no
+  `onError`. The real consequence of getting it wrong is a **blank page** —
+  the heading, nothing under it, no error and no data — which is a worse
+  screen but not a closed surface. The wrong belief had already produced a
+  "why" comment shipped knowingly, a test asserting the absence of a prompt
+  that could not have appeared (pattern 2 above), and a severity rating one
+  level too high. All three were corrected. What would have caught it
+  sooner: **before writing "and then X happens", find the code that would
+  make X happen** — here that was three greps, and the answer was that
+  nothing did.
+
 **Treat a citation the way you'd treat a test assertion: something the next
 reader can verify against the thing it names, not something to trust because
-it reads confidently.** Ten of these eleven instances cost nothing to
+it reads confidently.** Nearly every instance above cost nothing to
 produce and each would have cost under a minute to check — reading the
 query, re-finding the line, opening the mockup, grepping for the clause a
 comment claimed existed, reading the one function (`chi`'s `routeHTTP`)
@@ -2632,14 +2850,21 @@ with company the catalogue cannot count, because it never landed: the fix
 wave's own instructions for closing out this pattern handed down a further
 wrong number for the same passage, and it was caught in review rather than
 committed — the only reason it is a footnote here instead of an entry of its
-own. **The eleventh cost ten minutes reading a vendor's source instead of a
-minute rereading this repository's own comment**, and it is the one instance
-in the catalogue where the check ran before the claim could ever ship — the
-same discipline, aimed at an API's implied promise instead of a comment
-already in the tree. A citation checked once and never re-verified when the
-sentence around it is rewritten is not a citation any more; it is the same
-unverified claim wearing a reference. Neither is a name an endpoint gives
-itself.
+own. **Two of them cost ten minutes reading a vendor's source instead of a
+minute rereading this repository's own comment** — Mailpit's `link-check`,
+and pgx's own error-wrapping — and both are instances where the check ran
+before the claim could ever ship: the same discipline, aimed at an API's
+implied promise instead of a comment already in the tree. A citation checked
+once and never re-verified when the sentence around it is rewritten is not a
+citation any more; it is the same unverified claim wearing a reference.
+Neither is a name an endpoint gives itself.
+
+**This paragraph used to open by counting its own list, and that number was
+wrong within one branch of being written.** It now says "nearly every" and
+names only the exceptions, deliberately: a closing summary that enumerates is
+the identical defect the whole pattern is about, one level up. State the
+invariant, not the enumeration — the same rule the admin surface's handover
+distilled from nine of its own comments.
 
 ---
 
@@ -3044,6 +3269,23 @@ itself.
   u.email ILIKE ...` produced `SearchHouseholds("CHRISTINE@") = [], want
   exactly household 7dec6137-...` — the email half of the search predicate,
   pinned.
+- **`LIMIT`/`OFFSET` without `ORDER BY` is not "unsorted", it is
+  *unrepeatable*, and a small test table will never show you** (database
+  browse, 2026-09-04). Postgres is free to return rows in any order, so page
+  2 may repeat a row from page 1 and skip another, with no error anywhere.
+  What makes it visible is not table size — a static heap read by one
+  connection comes back in the same physical order at 5 rows and at 500, and
+  the one thing that would shuffle it, a synchronized sequential scan, needs
+  a table larger than `shared_buffers / 4`. What makes it visible is **a
+  write between the two pages**: an `UPDATE` writes a new row version and
+  allocates a new line pointer after the existing ones, so an unordered scan
+  then returns `[a3, a4, a5, a1', a2']` and `offset=2 limit=2` yields
+  `a5, a1'`. That is the shape a live operator screen actually meets, since
+  the product is writing to these tables while somebody pages through them.
+  `BrowseRepo.Rows` therefore orders by the primary key, falling back to
+  `ctid` for a table that has none — arbitrary but stable within one read,
+  and honest about being arbitrary. Pattern 2 carries the mutation-check
+  story; this is the mechanism.
 
 ### HTTP layer
 
@@ -3906,6 +4148,21 @@ route with a missing guard has no second line of defence.
   guess would have locked the household for 15 minutes, so it was reset
   through the sanctioned `make reset-password` path rather than guessed
   again.
+- **An admin screen that owns its own 404 must read the RAW query error, not
+  the gate-filtered one** — the invariant, stated as a value rule because the
+  ordering rule it used to be stated as cannot be tested (pattern 2, 2026-09-04).
+  `isAdminLayerFailure` counts `NOT_FOUND` among the failures `AdminGate`
+  owns, so the filtered error is `null` for every 404: `isNotFound(inlineError)`
+  is false every single time, and the screen's own "no such thing" branch
+  never runs. Three screens depend on this — `AdminHouseholdPage`,
+  `AdminMailMessagePage` and `AdminDatabasePage`'s row viewer — and on all
+  three a 404 is the ordinary case ("no such household", "Mailpit no longer
+  holds this message", "no table by that name"), not a sign the operator
+  surface is gone. Getting it wrong renders a heading with nothing under it,
+  no error and no data. `AdminMailPage.tsx` carried a comment saying the
+  check comes *first* — true of the file and irrelevant to the program — and
+  was reworded in the same change that added the third screen, which is the
+  only one of the three whose comment stated the value rule from the start.
 
 ### Tooling and infrastructure
 
