@@ -494,8 +494,9 @@ console to administer.
 It carries the authorization axis, the re-authentication grant, the audit log
 and feature flags end to end; household metrics followed on 2026-09-02 (branch
 `admin-households`, walked 15 of 15 with two caveats). **The outbound message
-inspector is code-complete on branch `admin-outbox`** (2026-09-04, not yet
-merged): a `MailOutbox` port and `AdminOutboxService` in `usecase`, a Mailpit
+inspector is merged to `main` as `3eddbe2`, PR #17** (2026-09-04; it is
+deployed to the box only once `deploy/deploy.sh` runs with that SHA):
+a `MailOutbox` port and `AdminOutboxService` in `usecase`, a Mailpit
 adapter that speaks to exactly two upstream endpoints, `MAILPIT_API_URL` in
 config, two granted routes and the `/admin/mail` screen. Its own fifteen-
 criterion browser walk (Task 9 of
@@ -533,8 +534,8 @@ button restored the list but left the search box showing the stale query
 (fixed in the same commit that recorded the walk), and criterion 12 was
 confirmed against the drill-in's own lockout callout through the API rather
 than the sign-in screen's local error state; section 9's row carries both.
-**The third, the outbound message inspector, is code-complete on branch
-`admin-outbox` (2026-09-04)** — see above. Its browser walk ran the same
+**The third, the outbound message inspector, is merged as `3eddbe2`,
+PR #17 (2026-09-04)** — see above. Its browser walk ran the same
 day and passed 15 of 15, finding and fixing one real defect (the shared
 operator header's nav overflowing at 305px once this feature's third link
 was added).
@@ -684,7 +685,7 @@ newcomer as what has not.
    records on free third-level hostnames under 30 days old, so DKIM cannot be
    published, so no hosted relay will verify the domain. Mail runs on
    Mailpit, on the box; the operator reads it through `/admin/mail` once
-   `admin-outbox` deploys, or over an SSH tunnel to Mailpit's own UI as the
+   `3eddbe2` is deployed to the box, or over an SSH tunnel to Mailpit's own UI as the
    fallback for when the API itself is broken (`deploy/README.md`, "Reading
    mail"). Caddy is unaffected: its ACME challenge is HTTP-01 over port 80
    and needs no DNS record.

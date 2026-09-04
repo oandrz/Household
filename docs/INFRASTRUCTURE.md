@@ -152,7 +152,7 @@ Worth knowing exactly, because the answer is short:
 
 **Mail does not leave the box at all** ([ADR 3](adr/0003-mail-stays-on-the-box.md)).
 Sign-up links, invites and magic links land in Mailpit and are read either
-through the operator's `/admin/mail` (once `admin-outbox` deploys — see below)
+through the operator's `/admin/mail` (once `3eddbe2` is deployed — see below)
 or, as the fallback for when that reader itself is broken, by hand over an SSH
 tunnel. Mailpit's UI is bound to `127.0.0.1:8025` and never `0.0.0.0`,
 because that inbox is a complete authentication bypass — every link in it grants
@@ -200,9 +200,8 @@ an account with no password.
   commits it, like the panel below, to saying plainly it is unavailable while
   its value is unset rather than falling back to a wider connection — see
   [ADR 5](adr/0005-platform-admin-authorization.md).
-- **The outbound message inspector is code-complete since 2026-09-04
-  (branch `admin-outbox`, not yet merged) and adds no new external service
-  either.** `MAILPIT_API_URL` points the operator's
+- **The outbound message inspector merged on 2026-09-04 (`3eddbe2`, PR #17)
+  and adds no new external service either.** `MAILPIT_API_URL` points the operator's
   `/admin/mail` screen at Mailpit's own HTTP API — Mailpit already runs on
   this box for SMTP, and this reads the same store rather than opening
   anything new; nothing new leaves the box. **Unset**, `config.OutboxEnabled()`

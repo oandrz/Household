@@ -108,8 +108,9 @@ every other feature here is.
 rather than WhatsApp or SMS, and why the link comes back to the device that
 taps it.
 
-**The operator's outbound message inspector is code-complete on branch
-`admin-outbox`, 2026-09-04, and not yet deployed.** It is the platform admin
+**The operator's outbound message inspector is merged to `main` as
+`3eddbe2` (PR #17), 2026-09-04, and reaches the box only when
+`deploy/deploy.sh` runs with that SHA.** It is the platform admin
 surface's third feature (after the authorization axis, flags and audit log
 in PR #15, and households and metrics in PR #16): a new port and its one
 adapter (§2, §3), two new routes in the existing `/admin` granted group
@@ -390,8 +391,8 @@ in Mailpit is readable by whoever can reach that inbox.
 `docs/INFRASTRUCTURE.md` carries that as a dependency row rather than leaving
 it as a diagram footnote.
 
-**The new `api -.-> Mailpit` arrow is code-complete on branch `admin-outbox`
-(2026-09-04) and not deployed to this box yet**, the same "capability, not
+**The new `api -.-> Mailpit` arrow is merged as `3eddbe2` (PR #17,
+2026-09-04) and not deployed to this box yet**, the same "capability, not
 yet traffic" shape the Telegram arrow already has above. It is the operator's
 outbound message inspector: `GET /admin/mail` and `GET /admin/mail/{id}`
 read Mailpit's own HTTP API — `/api/v1/messages` and `/api/v1/message/{id}`,
