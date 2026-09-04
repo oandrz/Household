@@ -258,7 +258,10 @@ function ColumnsPane({ columns }: { columns: AdminDatabaseColumn[] }) {
             <span className="font-medium text-ink">{column.name}</span>
             <span className="block text-muted">
               {column.dataType}
-              {column.redacted ? " · withheld" : ""}
+              {/* "redacted", the same word the grid's own header uses and the
+                  same word inside the legend's marker -- a third synonym for
+                  one concept reads as a fourth thing to work out. */}
+              {column.redacted ? " · redacted" : ""}
             </span>
           </li>
         ))}
