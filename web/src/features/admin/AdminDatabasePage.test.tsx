@@ -221,11 +221,18 @@ describe("AdminDatabaseTablePage", () => {
     await waitFor(() => expect(onLastPage).toHaveBeenCalledWith(2));
   });
 
-  // isNotFound(query.error) is checked BEFORE isAdminLayerFailure, which
-  // counts NOT_FOUND among the failures AdminGate owns. Checked the other way
-  // round, a mistyped table name would close the whole operator surface and
-  // answer a typo with a password prompt.
-  it("says there is no such table without closing the operator surface", async () => {
+  // isNotFound is evaluated against the raw query.error. isAdminLayerFailure
+  // counts NOT_FOUND, so a 404 filtered through it first would leave this
+  // screen with no error to render and no data to render -- a blank page
+  // under the heading, which reads as broken rather than as "no such table".
+  //
+  // This case asserts only what it can: that the copy is on screen. The
+  // surface staying open cannot be shown here, because renderWithRouter
+  // mounts this component in a one-route tree with no AdminShell and so no
+  // AdminGate -- router.test.tsx's "keeps the operator surface open when a
+  // browsed table does not exist" mounts the real tree and is where that
+  // half is actually proved.
+  it("says there is no such table", async () => {
     stubFetchRoutes({
       [`GET ${adminDatabaseRowsPath("sessionz", BROWSE_DEFAULT_LIMIT, 0)}`]: {
         status: 404,
@@ -235,9 +242,5 @@ describe("AdminDatabaseTablePage", () => {
     renderTable({ table: "sessionz" });
 
     expect(await screen.findByText(/no table called/i)).toBeInTheDocument();
-    expect(
-      screen.queryByText("Confirm your password"),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
   });
 });

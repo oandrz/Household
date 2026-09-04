@@ -169,14 +169,21 @@ export function AdminDatabaseTablePage({
   const query = useAdminDatabaseRows(table, limit, offset);
   useCloseSurfaceOnReauth(query.error);
 
-  // Checked against query.error itself, and BEFORE the gate filter below --
-  // never against the filtered inlineError. isAdminLayerFailure counts
-  // NOT_FOUND among the failures AdminGate owns, which is right when the
-  // admin grant itself has gone and wrong here: on this route a 404 is a
-  // table name that does not exist, an ordinary typo in a URL an operator
-  // typed by hand. Letting the filter see it first would swallow the miss,
-  // leave this screen with nothing to say, and answer a typo with a password
-  // prompt. AdminMailMessagePage.tsx makes the same call for the same reason.
+  // Evaluated against query.error itself, never against the gate-filtered
+  // inlineError below. isAdminLayerFailure counts NOT_FOUND among the
+  // failures AdminGate owns, so inlineError is null for a 404 and
+  // isNotFound(inlineError) would be false every single time -- the miss
+  // would be swallowed by the filter and this branch would never run.
+  //
+  // The consequence is a blank page, not a password prompt: nothing on a
+  // read path can close the operator surface. useCloseSurfaceOnReauth is the
+  // only thing here that invalidates the flags query AdminShell's gate
+  // watches, and it fires on ADMIN_REAUTH_REQUIRED alone. So an operator who
+  // mistypes a table name in the URL gets the heading and nothing under it,
+  // with no error and no data -- a screen that looks broken rather than one
+  // that says the table does not exist. Which is why the branch is here and
+  // why it reads the raw error; the line's position relative to the const
+  // below is not what makes it work.
   if (isNotFound(query.error)) {
     return (
       <PageContainer>
