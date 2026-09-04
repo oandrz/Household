@@ -237,10 +237,12 @@ running `make migrate` explicitly before it starts anything; `make up` and a
 bare `docker compose up` do not. See `docs/HANDOVER.md`.
 
 **`readonly-role` is provisioning, not schema, and runs the same one-shot
-shape as `migrate` for that reason** — a superuser-only `CREATE ROLE` cannot
-be a goose migration, and creating a role is not a change to the shape of
-the data. It runs `deploy/readonly-role.sql` against Postgres as `hearth`,
-after `migrate` completes, creating `hearth_readonly`: a role that can
+shape as `migrate` for that reason** — a `CREATE ROLE` needs the
+`CREATEROLE` attribute, a privilege the role migrations run as need not
+hold, so it cannot be a goose migration, and creating a role is not a
+change to the shape of the data. It runs `deploy/readonly-role.sql`
+against Postgres as `hearth`, after `migrate` completes, creating
+`hearth_readonly`: a role that can
 `SELECT` every table in `public` (including tables migrated in later, via
 `ALTER DEFAULT PRIVILEGES FOR ROLE hearth`) and nothing else, with
 `default_transaction_read_only` and a 3-second `statement_timeout` set on
