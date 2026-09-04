@@ -36,6 +36,8 @@ var _ telegram.StartHandler = (*usecase.TelegramAuthService)(nil)
 
 var _ usecase.MailOutbox = (*mail.MailpitOutbox)(nil)
 
+var _ usecase.DatabaseBrowser = (*postgres.BrowseRepo)(nil)
+
 func main() {
 	if err := run(); err != nil {
 		slog.Error("fatal", "error", err)
@@ -76,6 +78,36 @@ func run() error {
 		return err
 	}
 	defer db.Close()
+
+	// Nil unless DATABASE_READONLY_URL is set. httpadapter.Deps.AdminBrowse
+	// being nil is what makes the two /admin/db routes answer 503 and name
+	// the variable; the routes themselves are registered either way.
+	//
+	// The three outcomes are deliberately not the same. A value that cannot
+	// be parsed, or one that connects as a role which may write, refuses the
+	// boot: both are things a human typed and no retry fixes them, and
+	// serving a "read-only" browse through a writable connection is worse
+	// than serving nothing. A database that is merely unreachable does NOT
+	// refuse the boot -- the day that happens is the day someone is
+	// restoring this product onto a fresh box from the paper key, with the
+	// variable already in .env and the role not created yet, and taking the
+	// whole household product down over an operator panel would invert the
+	// very promise the read-only role exists to keep.
+	var adminBrowseSvc *usecase.AdminBrowseService
+	if cfg.BrowseEnabled() {
+		readonlyDB, err := postgres.OpenReadOnly(ctx, cfg.DatabaseReadonlyURL)
+		switch {
+		case err == nil:
+			defer readonlyDB.Close()
+			adminBrowseSvc = usecase.NewAdminBrowseService(postgres.NewBrowseRepo(readonlyDB))
+		case errors.Is(err, postgres.ErrReadOnlyMisconfigured):
+			return err
+		default:
+			// No DSN in the message: a Postgres URL carries a password, and
+			// credentials never go to a log (see logStartupAddresses).
+			slog.Error("the database browse is unavailable; the rest of Hearth is unaffected", "error", err)
+		}
+	}
 
 	// Repositories. Each is constructed once and shared by every service (and,
 	// for Users/Memberships/Sessions, by the HTTP layer directly too) that
@@ -297,6 +329,7 @@ func run() error {
 			AdminReauth:    adminReauthSvc,
 			AdminDirectory: adminDirectorySvc,
 			AdminOutbox:    adminOutboxSvc,
+			AdminBrowse:    adminBrowseSvc,
 			Users:          users,
 			Memberships:    memberships,
 			Sessions:       sessions,
@@ -358,6 +391,14 @@ func run() error {
 
 	if cfg.OutboxEnabled() {
 		slog.Info("outbound message inspector enabled", "mailpit_api_url", cfg.MailpitAPIURL)
+	}
+
+	// The predicate is adminBrowseSvc != nil, not cfg.BrowseEnabled(). They
+	// differ in exactly the case that matters -- configured but unreachable
+	// -- and logging "enabled" there would contradict the error already
+	// logged above. No arguments: the value is a DSN carrying a password.
+	if adminBrowseSvc != nil {
+		slog.Info("database browse enabled")
 	}
 
 	<-ctx.Done()

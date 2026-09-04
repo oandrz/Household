@@ -83,6 +83,12 @@ type Deps struct {
 	// one place that decision lives. Unlike Telegram's 404, an unconfigured
 	// outbox answers 503 and names the variable -- see the handlers.
 	AdminOutbox *usecase.AdminOutboxService
+	// AdminBrowse is the operator's read-only database browse. Nil when
+	// DATABASE_READONLY_URL is unset, which is what makes the two /admin/db
+	// routes answer 503 and name the variable; the routes are registered
+	// either way, so the route tree never changes with configuration and
+	// every test builds the same one.
+	AdminBrowse *usecase.AdminBrowseService
 	Users       usecase.UserRepository
 	Memberships usecase.MembershipRepository
 	Sessions    usecase.SessionRepository
@@ -447,6 +453,11 @@ func NewRouter(deps Deps) http.Handler {
 					// admin_outbox_handlers.go.
 					granted.Get("/mail", handleAdminMail(deps))
 					granted.Get("/mail/{messageID}", handleAdminMailMessage(deps))
+
+					// The operator's database browse: two reads. See
+					// admin_browse_handlers.go.
+					granted.Get("/db/tables", handleAdminDatabaseTables(deps))
+					granted.Get("/db/tables/{table}", handleAdminDatabaseRows(deps))
 				})
 			})
 		})

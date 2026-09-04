@@ -200,6 +200,22 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 		slog.Error("mail outbox unavailable", "error", err, "request_id", middleware.GetReqID(r.Context()))
 		WriteError(w, http.StatusBadGateway, "MAIL_UPSTREAM_UNAVAILABLE",
 			"Mailpit is not answering. The messages are not lost — the reader is.", nil)
+	case errors.Is(err, usecase.ErrBrowseUnavailable):
+		// 503 rather than 502: unlike the mail inspector, the failure is not
+		// upstream of this service in another process -- it is this
+		// install's own second connection, and the advice is "look at
+		// DATABASE_READONLY_URL and the hearth_readonly role", not "look at
+		// something else". Deliberately a different code from
+		// DB_BROWSE_NOT_CONFIGURED: "no value set" and "the value is set and
+		// the connection is broken" send the operator to different places.
+		WriteError(w, http.StatusServiceUnavailable, "DB_BROWSE_UNAVAILABLE",
+			"The database browse cannot reach its read-only connection.", nil)
+	case errors.Is(err, usecase.ErrInvalidOffset):
+		// Defence in depth: the handler already refuses a negative offset
+		// with the same code, and this covers any other caller of the
+		// service.
+		WriteError(w, http.StatusBadRequest, "INVALID_RANGE",
+			"offset must not be negative.", nil)
 	case errors.Is(err, usecase.ErrInviteeAlreadyRegistered):
 		WriteError(w, http.StatusConflict, "EMAIL_ALREADY_REGISTERED",
 			"An account with that email address already exists.", nil)
