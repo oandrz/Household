@@ -186,6 +186,15 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 		WriteError(w, http.StatusUnprocessableEntity, "SPACE_NAME_REQUIRED", "A space name is required.", nil)
 	case errors.Is(err, usecase.ErrInvalidFXRateMode):
 		WriteError(w, http.StatusUnprocessableEntity, "INVALID_FX_RATE_MODE", "That FX rate mode is not valid.", nil)
+	case errors.Is(err, usecase.ErrOutboxUnavailable):
+		// 502 rather than 500: the failure is upstream of this service and
+		// the operator's next step is to look at Mailpit, not at the API's
+		// own logs. Deliberately distinct from the 503 an unconfigured
+		// inspector answers -- one means "set the variable", the other means
+		// "the container is down", and collapsing them would send the
+		// operator to fix the wrong thing.
+		WriteError(w, http.StatusBadGateway, "MAIL_UPSTREAM_UNAVAILABLE",
+			"Mailpit is not answering. The messages are not lost — the reader is.", nil)
 	case errors.Is(err, usecase.ErrInviteeAlreadyRegistered):
 		WriteError(w, http.StatusConflict, "EMAIL_ALREADY_REGISTERED",
 			"An account with that email address already exists.", nil)

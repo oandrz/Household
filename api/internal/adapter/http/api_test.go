@@ -183,7 +183,7 @@ func (env *testEnv) routerWithMemberships(m usecase.MembershipRepository) http.H
 
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
-	return newTestEnvWithClock(t, clock.System{})
+	return newTestEnvWith(t, clock.System{}, nil)
 }
 
 // newTestEnvWithClock is newTestEnv's more general form, used by the two
@@ -193,6 +193,20 @@ func newTestEnv(t *testing.T) *testEnv {
 // and TestOwnerSeesTheTwelveMonthTrend pins the clock so its twelve-month
 // window is a fixed, assertable range.
 func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
+	t.Helper()
+	return newTestEnvWith(t, clk, nil)
+}
+
+// newTestEnvWithOutbox builds an env whose admin surface has a configured
+// message inspector. Passing nil (what the two constructors above do) is the
+// unconfigured install, which is the state most of this package's tests want
+// and the state a real install has until MAILPIT_API_URL is set.
+func newTestEnvWithOutbox(t *testing.T, outbox usecase.MailOutbox) *testEnv {
+	t.Helper()
+	return newTestEnvWith(t, clock.System{}, outbox)
+}
+
+func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) *testEnv {
 	t.Helper()
 
 	dbURL := testsupport.StartPostgres(t)
@@ -344,6 +358,11 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 		Clock:         clk,
 	})
 
+	var adminOutboxSvc *usecase.AdminOutboxService
+	if outbox != nil {
+		adminOutboxSvc = usecase.NewAdminOutboxService(outbox)
+	}
+
 	deps := httpadapter.Deps{
 		Pinger:         db,
 		Auth:           authSvc,
@@ -362,6 +381,7 @@ func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 		Admin:          adminSvc,
 		AdminReauth:    adminReauthSvc,
 		AdminDirectory: adminDirectorySvc,
+		AdminOutbox:    adminOutboxSvc,
 		Users:          users,
 		Memberships:    memberships,
 		Sessions:       sessions,
