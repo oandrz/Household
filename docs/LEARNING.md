@@ -1241,6 +1241,35 @@ person to ask whether the test could ever have gone red in the first place.
   thing you tamper with is also what makes the row readable, the mutation has
   to keep the row readable** or the test fails before it can testify.
 
+- **A mutation-check recipe told an implementer to remove behaviour without
+  saying what to do with the import it orphaned — outbound message
+  inspector, Task 3, 2026-09-04.** The plan's own mutation step for
+  `MailpitOutbox.Message` read "drop the escaping — change
+  `url.PathEscape(id)` to `id`", to prove
+  `TestMailpitOutboxEscapesTheMessageID` actually pins escaping. Applied
+  literally, `net/url` becomes an unused import and the package fails to
+  *build*: `go test` printed `FAIL`, but for
+  `"net/url" imported and not used`, with zero test functions having run —
+  not even the six unrelated ones in the same file. This is the same shape
+  as the `-run TestHousehold` filter above (a command that prints `FAIL` or
+  "no tests to run" is not evidence a test executed), sharper here because a
+  *build* failure is even easier to mistake for the test doing its job: the
+  implementer asked for red, saw red, and the wrong kind of red still reads
+  as success unless someone checks which line produced it. Caught by
+  reading the failure's own text rather than trusting the exit code — it
+  named an import, not the assertion the mutation was supposed to break.
+  Fixed by keeping `net/url` referenced (`_ = url.PathEscape`, commented as
+  existing only to hold the import for this check) while changing the real
+  call to `"/api/v1/message/" + id`, which reproduced the intended, isolated
+  failure at the escaping test's own assertion, with the other six tests
+  still green. Recorded as a finding rather than smoothed over, and Task 4
+  and Task 5's own mutation checks each recorded a line noting no
+  import-orphan risk applied to their own mutations, rather than repeating
+  the mistake unchecked. **A mutation-check recipe has to say what happens
+  to the import it orphans, not only what to change** — a build failure and
+  a targeted test failure can print the same word, and only one of them
+  proves the test does its job.
+
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
 a different reason than the one you meant to prove, that is not yet proof
@@ -2532,32 +2561,62 @@ case and no coordinate system to assert legibility in for the second.
   (2026-09-02, Task 11), the same commit this entry itself was written in. A
   correction written to close out an unverified claim is not itself
   verified — twice, in this case, before it stuck.
+- **An eleventh instance, the outbound message inspector spec, 2026-09-04 —
+  the one entry here where the discipline caught the trap before any code
+  existed to drift, rather than after.** Mailpit's
+  `GET /api/v1/message/{id}/link-check` reads, from its name and its place
+  next to `GET /api/v1/message/{id}`, like the obvious way to answer "is
+  this link still good" for the exact screen this spec was designing.
+  Reading Mailpit v1.30.5's actual source instead of trusting what the name
+  implies (`internal/linkcheck/status.go`) found it issues a real HTTP
+  request — a `doHead` — to every URL it reports on, and every URL in a
+  Hearth email is a live single-use token on a public host: calling it
+  would spend the very links the screen exists to hand out. The same read
+  of the same source turned up a second fact nobody had gone looking for:
+  `GET /api/v1/message/{id}`, the endpoint the design keeps, marks the
+  message read in Mailpit's own store as a side effect of a plain GET —
+  accepted rather than avoided (decision 15; avoiding it means parsing raw
+  MIME by hand) but written down at the point someone would notice the
+  discrepancy, rather than left for them to find by comparing Mailpit's
+  unread count before and after. Nothing here would have gone red: no test
+  was failing, no code called either endpoint yet, and the design would
+  have read as clean without the source ever being opened. What holds the
+  rule in the code that shipped is not the discovery itself, it is an
+  adapter test asserting only two upstream paths are ever requested — it
+  fails on any third path, so a later refactor reaching for `link-check`
+  because it looks like a gift fails a test instead of shipping, which is
+  where the ten instances above eventually landed.
 
 **Treat a citation the way you'd treat a test assertion: something the next
 reader can verify against the thing it names, not something to trust because
-it reads confidently.** All ten instances above cost nothing to produce
-and each would have cost under a minute to check — reading the query,
-re-finding the line, opening the mockup, grepping for the clause a comment
-claimed existed, reading the one function (`chi`'s `routeHTTP`) whose order
-the claim depended on, reading the one helper (`convert.go`'s `uuid`) a
-comment's causal claim depended on, or reading the one commit blob a "before"
-claim was supposedly about — against a small planning gap, a wrong number in a
-comment, a design claim nobody had opened the design to test, a line range
-nobody had re-measured, a rule restated in a comment's own words rather than
-pointed at, a guard whose comment named a failure mode its own route could
-not reach, seven checkable claims that drifted the moment the code moved
-under them on a single branch, a field silently empty for its entire life
-because its own doc comment said otherwise, a sibling comment one file away
-making the identical claim, already proven false, that nobody had gone back
-to check, and a floor comment naming a task and a number for a drift that
-had happened over several. That last one arrived with company the catalogue
-cannot count, because it never landed: the fix wave's own instructions for
-closing out this pattern handed down a further wrong number for the same
-passage, and it was caught in review rather than committed — the only reason
-it is a footnote here instead of an entry of its own. A citation
-checked once and never re-verified when the sentence around it is rewritten
-is not a citation any more; it is the same unverified claim wearing a
-reference.
+it reads confidently.** Ten of these eleven instances cost nothing to
+produce and each would have cost under a minute to check — reading the
+query, re-finding the line, opening the mockup, grepping for the clause a
+comment claimed existed, reading the one function (`chi`'s `routeHTTP`)
+whose order the claim depended on, reading the one helper (`convert.go`'s
+`uuid`) a comment's causal claim depended on, or reading the one commit blob
+a "before" claim was supposedly about — against a small planning gap, a
+wrong number in a comment, a design claim nobody had opened the design to
+test, a line range nobody had re-measured, a rule restated in a comment's
+own words rather than pointed at, a guard whose comment named a failure mode
+its own route could not reach, seven checkable claims that drifted the
+moment the code moved under them on a single branch, a field silently empty
+for its entire life because its own doc comment said otherwise, a sibling
+comment one file away making the identical claim, already proven false, that
+nobody had gone back to check, and a floor comment naming a task and a
+number for a drift that had happened over several. That last one arrived
+with company the catalogue cannot count, because it never landed: the fix
+wave's own instructions for closing out this pattern handed down a further
+wrong number for the same passage, and it was caught in review rather than
+committed — the only reason it is a footnote here instead of an entry of its
+own. **The eleventh cost ten minutes reading a vendor's source instead of a
+minute rereading this repository's own comment**, and it is the one instance
+in the catalogue where the check ran before the claim could ever ship — the
+same discipline, aimed at an API's implied promise instead of a comment
+already in the tree. A citation checked once and never re-verified when the
+sentence around it is rewritten is not a citation any more; it is the same
+unverified claim wearing a reference. Neither is a name an endpoint gives
+itself.
 
 ---
 

@@ -151,8 +151,10 @@ Worth knowing exactly, because the answer is short:
    describes a capability rather than traffic.
 
 **Mail does not leave the box at all** ([ADR 3](adr/0003-mail-stays-on-the-box.md)).
-Sign-up links, invites and magic links land in Mailpit and are read by hand over
-an SSH tunnel. Mailpit's UI is bound to `127.0.0.1:8025` and never `0.0.0.0`,
+Sign-up links, invites and magic links land in Mailpit and are read either
+through the operator's `/admin/mail` (once `admin-outbox` deploys — see below)
+or, as the fallback for when that reader itself is broken, by hand over an SSH
+tunnel. Mailpit's UI is bound to `127.0.0.1:8025` and never `0.0.0.0`,
 because that inbox is a complete authentication bypass — every link in it grants
 an account with no password.
 
@@ -190,13 +192,27 @@ an account with no password.
   binary this box already deploys. Nothing in "The services" table above
   changes, and nothing new leaves the box. **Not on the box today** — the
   change is not deployed there, the same caveat the Telegram row above
-  carries, for the same reason. Two panels the design spec describes but this
-  slice does not build will each cost one new value here when they ship: the
+  carries, for the same reason. One panel the design spec describes but this
+  slice does not build will cost one new value here when it ships: the
   read-only database browse needs `DATABASE_READONLY_URL` (a second,
   `SELECT`-only Postgres role, reached over the connection already open to
-  this same database — not a new service), and the outbound-mail inspector
-  needs `MAILPIT_API_URL` (Mailpit already runs; this reads its existing HTTP
-  API rather than adding anything). Both are free, and the design spec commits
-  each panel, when it ships, to saying plainly it is unavailable while its
-  value is unset rather than falling back to a wider connection — see
+  this same database — not a new service). It is free, and the design spec
+  commits it, like the panel below, to saying plainly it is unavailable while
+  its value is unset rather than falling back to a wider connection — see
   [ADR 5](adr/0005-platform-admin-authorization.md).
+- **The outbound message inspector is code-complete since 2026-09-04
+  (branch `admin-outbox`, not yet merged) and adds no new external service
+  either.** `MAILPIT_API_URL` points the operator's
+  `/admin/mail` screen at Mailpit's own HTTP API — Mailpit already runs on
+  this box for SMTP, and this reads the same store rather than opening
+  anything new; nothing new leaves the box. **Unset**, `config.OutboxEnabled()`
+  is false, `Deps.AdminOutbox` is nil, and both admin routes answer
+  `503 MAIL_INSPECTOR_NOT_CONFIGURED` naming the variable — never a silent
+  empty list, which would read as "Hearth has sent no mail" rather than as
+  "this panel is off". **A value that is set but unusable refuses the boot**,
+  the same as a half-set Telegram pair, so a typo cannot present later as an
+  unexplained `502` on one admin screen. **Not on the box today** — the
+  branch is not deployed there yet; when it is, `deploy/.env.example`'s
+  `MAILPIT_API_URL=http://mailpit:8025` needs no Compose change, because
+  `api` already shares the `hearth` network with `mailpit` and already
+  declares `depends_on: mailpit`.

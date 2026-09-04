@@ -105,27 +105,62 @@ session kept alive throughout, rather than against the sign-in screen's own
 local error state
 (`docs/superpowers/plans/2026-09-02-hearth-admin-households-verification.md`).
 
+**An outbound message inspector — built 2026-09-04, spec
+`docs/superpowers/specs/2026-09-04-hearth-outbound-inspector-design.md`**
+(which expands §5 of the admin-surface spec and wins where the two differ).
+`/admin/mail` lists the messages Hearth has sent — recipient, subject, time,
+and deliberately no body or snippet — and `/admin/mail/{id}` is the
+deliberate second click that shows one message's links and plain text, each
+with its own `admin_audit_log` row. It proxies Mailpit's HTTP API rather
+than storing links, because every token in this schema is stored hashed and
+inventing a raw-link store to solve a convenience problem is the wrong
+trade: `domain.ExtractLinks` (stdlib only) pulls URLs out of a body already
+fetched, and `usecase.AdminOutboxService` is the one place the HTML part is
+read, so it never reaches the HTTP layer. `adapter/mail/mailpit_outbox.go`
+is deliberately narrow — exactly two upstream paths, `GET /api/v1/messages`
+and `GET /api/v1/message/{id}` — because Mailpit's own
+`GET /api/v1/message/{id}/link-check` issues a real HTTP request to every
+URL it finds, and every URL in a Hearth email is a live single-use token: an
+adapter test fails on any third path requested. `MAILPIT_API_URL` unset
+means `Deps.AdminOutbox` is nil and both routes answer `503
+MAIL_INSPECTOR_NOT_CONFIGURED`; Mailpit unreachable answers `502
+MAIL_UPSTREAM_UNAVAILABLE`; a message id Mailpit no longer holds — its store
+has no volume, so a restart loses it — answers `404`; anything that is not
+Mailpit's own 22-character id shape is refused with `400 INVALID_ID` before
+any upstream request is made. It closes a real, previously documented pain:
+`deploy/README.md`'s "Reading mail" section used to describe handing
+someone an invite only by opening an SSH tunnel to Mailpit and copying the
+link out by hand; that tunnel is now the fallback for when the API itself is
+what is broken, not the only way. **Its browser walk has not run yet —
+unlike every other feature in this section, this one is not yet confirmed
+against the running app.** The fifteen-criterion walk is Task 9 of
+`docs/superpowers/plans/2026-09-04-hearth-outbound-inspector.md`; this
+paragraph will name
+`docs/superpowers/plans/2026-09-04-hearth-outbound-inspector-verification.md`
+once that walk is recorded there.
+
 Where to start reading: `middleware_admin.go`, then `router.go`'s `/admin`
 subtree and its comment, then `usecase/admin.go` and
 `usecase/admin_directory.go`, then `web/src/features/admin/`.
 
 ## 3. What does NOT exist
 
-All are specified in full. Two are not started; of the other two, the audit
-screen was built on 2026-09-02 and descoped by the product owner the same day
-(see the end of this section), and households and metrics was built later that
-same day and now lives in §2 above. This is the honest gap between what was
-asked for and what shipped.
+All are specified in full. Three are built; the fourth is not started. This
+is the honest gap between what was asked for and what shipped.
 
 **As of 2026-09-02 these are the product's next work**, ahead of any further
 household feature — the product owner's call, recorded with its cost in
 `docs/FEATURE_TRACKER.md`'s "Suggested order", where all four have rows in
-section 9 (two ⬜, the audit screen 🚫, households and metrics ✅). The
-recommended sequence is now **message inspector → database browse**: the
-smallest first, and the browse last of all so the grant and the audit log get
-real use before the surface that can read every household's finances arrives.
-(The original sequence put the audit screen first and households second; the
-first was cut and the second is built.)
+section 9 (one ⬜, the audit screen 🚫, households and metrics ✅, the
+outbound message inspector ✅). **Only the database browse remains.** It was
+always last of the four, and stays last for the reason it always was: it is
+the only one with an infrastructure dependency (`hearth_readonly` and
+`DATABASE_READONLY_URL` are provisioned, not migrated, so
+`deploy/PROVISION.md` changes first) and much the largest security surface —
+the other three exist in part to give the re-auth grant and the audit log
+real use before it arrives. (The original sequence put the audit screen
+first and households second; the first was cut, the second and third are
+both built now.)
 
 **A read-only database browse — spec §4.** This was one of the three things
 originally asked for. The spec has the whole design: a separate `hearth_readonly`
@@ -139,13 +174,6 @@ The role is created during provisioning, not by a migration.
 
 This is the natural next slice, and it is the reason the previous three exist:
 it cannot be built safely without the re-auth grant and the audit log.
-
-**An outbound message inspector — spec §5.** Proxies Mailpit's HTTP API rather
-than storing links, because every token in this schema is stored hashed and
-inventing a raw-link store to solve a convenience problem is the wrong trade.
-It would close a real, documented pain: `deploy/README.md` describes handing
-someone an invite by opening an SSH tunnel to Mailpit and copying the link by
-hand.
 
 **~~An `/admin/audit` screen.~~ Built, walked and descoped on 2026-09-02.**
 The screen existed for a few hours on branch `admin-audit-screen`: a
@@ -287,6 +315,10 @@ These were each argued and are load-bearing. Changing one is fine; changing one
 | What this work taught | `docs/LEARNING.md`, pattern 16 and the entries around it |
 | What exists and what is still 🟡 | `docs/FEATURE_TRACKER.md` §9 |
 | The tables, ports and middleware chain | `docs/SYSTEM_DESIGN.md` |
+| The outbound message inspector's own design | `docs/superpowers/specs/2026-09-04-hearth-outbound-inspector-design.md` |
+| Its implementation plan | `docs/superpowers/plans/2026-09-04-hearth-outbound-inspector.md` |
+| Its browser walk, when Task 9 runs | `docs/superpowers/plans/2026-09-04-hearth-outbound-inspector-verification.md` |
+| What building it taught (the `link-check` trap, and a mutation check that couldn't fail) | `docs/LEARNING.md`, patterns 2 and 16 |
 
 ## 8. If you are picking this up
 

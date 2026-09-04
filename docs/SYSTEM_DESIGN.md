@@ -108,6 +108,23 @@ every other feature here is.
 rather than WhatsApp or SMS, and why the link comes back to the device that
 taps it.
 
+**The operator's outbound message inspector is code-complete on branch
+`admin-outbox`, 2026-09-04, and not yet deployed.** It is the platform admin
+surface's third feature (after the authorization axis, flags and audit log
+in PR #15, and households and metrics in PR #16): a new port and its one
+adapter (§2, §3), two new routes in the existing `/admin` granted group
+(§4), and a new screen, `/admin/mail` (§7). It adds no table. `MailOutbox`
+reads Mailpit's own HTTP API rather than storing anything — `AdminOutboxService`
+extracts links from a body the port already fetched (`domain.ExtractLinks`,
+stdlib only, §2), so the HTML part never reaches the HTTP layer, and the
+adapter deliberately never calls Mailpit's `link-check` endpoint, which
+issues a real request to every URL it reports on and would spend the very
+single-use tokens this screen exists to hand out. `MAILPIT_API_URL` unset
+means the two routes answer `503` rather than an empty list. **Its own
+fifteen-criterion browser walk has not run** — unlike Telegram and every
+other feature this preamble names, this one cannot yet claim to be
+verified, only built and reviewed.
+
 **This is deployed.** Hearth has run at <https://oink.mywire.org> since
 2026-08-15, on one Hetzner CX23 in Falkenstein, serving a real household. §1
 carries the production topology; it is a drawing of something running, not a
@@ -147,9 +164,28 @@ graph TD
     Web -->|"proxy /api/v1"| API
     API --> PG
     API -->|SMTP| Mail
+    API -.->|"HTTP GET, the operator's outbound<br/>message inspector — env var not<br/>wired into this compose file yet"| Mail
     API -->|"HTTPS: getUpdates long-poll, sendMessage"| TG
     Migrate --> PG
 ```
+
+**`api` can now both write to Mailpit and read from it, over two different
+protocols — but `docker-compose.yml` only wires the first one.**
+`SMTP_ADDR` is hardcoded for the dev `api` service; `MAILPIT_API_URL`,
+unlike it and unlike the two Telegram values (passed through with
+`${VAR:-}`), has **no entry at all** in this file's `api` service. A
+developer following Task 9's own walk brief ("set `MAILPIT_API_URL` in the
+development environment the API reads") cannot do it by exporting a shell
+variable before `make dev` the way the Telegram pair works — there is
+nothing in this compose file for Compose to substitute it into. It has to
+be added to the `environment:` block here (or in a
+`docker-compose.override.yml`) before the arrow carries any traffic. Once
+wired, it reads Mailpit's own HTTP API through
+`adapter/mail/mailpit_outbox.go` (`GET /api/v1/messages` and
+`GET /api/v1/message/{id}` — never `link-check`, see §3's `MailOutbox` row)
+so a platform admin can retrieve a link at `/admin/mail` without opening the
+container. Unset, the arrow simply does not fire: `Deps.AdminOutbox` is nil
+and the two routes it backs answer `503`.
 
 **Telegram is the only arrow here that leaves the machine, and it points
 outward.** Bot updates arrive by `getUpdates` long-polling *from inside* the
@@ -258,14 +294,15 @@ graph TD
     Nginx -->|"/api/v1, /healthz, /readyz"| API
     API --> PG
     API -->|"SMTP, plaintext, never leaves the host"| Mailpit
-    Operator -.->|"SSH tunnel, port 8025"| Mailpit
+    API -.->|"HTTP GET, /admin/mail —<br/>code not deployed here yet"| Mailpit
+    Operator -.->|"SSH tunnel, port 8025 — the fallback<br/>for when the API itself is broken"| Mailpit
     Caddy -.->|"ACME HTTP-01"| LE
     Admin -.->|"migrations, unlock, prune"| PG
     PG -.-> Backup
     API -.->|"only once TELEGRAM_BOT_TOKEN is set"| TG
 ```
 
-Five things about this shape are not obvious from the boxes.
+Six things about this shape are not obvious from the boxes.
 
 **Mail stops at the box, and that is deliberate rather than unfinished.** There
 is no relay in this diagram because the install runs on a free DDNS hostname
@@ -349,6 +386,21 @@ in Mailpit is readable by whoever can reach that inbox.
 `docs/INFRASTRUCTURE.md` carries that as a dependency row rather than leaving
 it as a diagram footnote.
 
+**The new `api -.-> Mailpit` arrow is code-complete on branch `admin-outbox`
+(2026-09-04) and not deployed to this box yet**, the same "capability, not
+yet traffic" shape the Telegram arrow already has above. It is the operator's
+outbound message inspector: `GET /admin/mail` and `GET /admin/mail/{id}`
+read Mailpit's own HTTP API — `/api/v1/messages` and `/api/v1/message/{id}`,
+never `/api/v1/message/{id}/link-check`, which issues a real request to
+every link it reports on and would spend the very single-use tokens this
+screen exists to hand out (§3's `MailOutbox` row). `MAILPIT_API_URL` unset leaves
+`Deps.AdminOutbox` nil and both routes answer `503`; set, it needs no new
+Compose entry, because `api` already shares this network with `mailpit` and
+already depends on it. It does not replace the SSH tunnel above — that stays
+the fallback for when the API itself is what is unreachable — it only
+removes the tunnel as the *only* way to hand someone their link. Its own
+fifteen-criterion browser walk has not run.
+
 ---
 
 ## 2 · Backend layers
@@ -367,7 +419,7 @@ graph TD
         HTTP["http — chi router, middleware,<br/>handlers, error table"]
         PGA["postgres — repositories over sqlc"]
         Crypto["crypto — argon2id, tokens"]
-        MailA["mail — SMTP"]
+        MailA["mail — SMTP, and MailOutbox<br/>(reads Mailpit's own HTTP API)"]
         TelegramA["telegram — Bot API client,<br/>getUpdates poller, update parsing.<br/>Driven AND driving: see below"]
         Clock["clock"]
         FX["fx — static rates"]
@@ -391,6 +443,7 @@ graph TD
         AdminSvc["AdminService — IsPlatformAdmin, flags<br/>read/write, RecordAudit; takes no actor<br/>parameter for any permission decision"]
         AdminDirectorySvc["AdminDirectoryService — Overview (metrics + search),<br/>Household (members, invites, lockout);<br/>reads across every household; no writes"]
         AdminReauth["AdminReauthService — Verify, against<br/>its own ledger, never login_attempts"]
+        AdminOutbox["AdminOutboxService — List/Message;<br/>the only place domain.ExtractLinks runs,<br/>so HTML never reaches the HTTP layer"]
         Seed["Seed"]
     end
 
@@ -447,6 +500,20 @@ adapters and never ports; §3's table is where every port in this system is
 listed. Like every other service here it takes no actor parameter — the
 `/admin` guards in §4 are the only gate, and they are the whole reason a
 cross-household read is safe to exist at all.
+
+**`AdminOutboxService` is its own service too, following the same reasoning
+as `AdminDirectoryService` rather than becoming five more methods on
+`AdminService`.** It holds one port, `MailOutbox`, and does exactly two
+things: clamps the list's limit (default 50, maximum 200 — its own
+constants, not the directory's, because the two limits answer different
+questions), and, on `Message` only, calls `domain.ExtractLinks` on the body
+`MailOutbox.Message` returned. That second point is where "the HTML part
+never leaves the usecase layer" is enforced — `OutboxMessageView`, the type
+the HTTP layer receives, has no `HTML` field at all, so adding it back would
+be the first step of building the rendered-email view the design spec
+rejected. `MailOutbox` and `MailpitOutbox`, its one implementation, are not
+drawn above for the same reason `AdminDirectoryRepository` is not: this
+diagram draws services and adapters, never ports.
 
 **Two rules that shape everything else:**
 
@@ -514,6 +581,7 @@ cross-household read is safe to exist at all.
 | `TelegramSender` | `adapter/telegram` | The Telegram twin of `Mailer`, and justified the same way: the usecase layer must not hold an HTTP client, and `TelegramAuthService` must be testable against a double. One method, `SendMessage(ctx, chatID, text)` — plain text, no template system, exactly as the mailer has none |
 | `PasswordHasher`, `TokenGenerator` | `adapter/crypto` | argon2id with cost from config; tokens are random, stored hashed |
 | `Mailer` | `adapter/mail` | SMTP; TLS policy and credentials from config |
+| `MailOutbox` | `adapter/mail` (`MailpitOutbox`, its only implementation) | Reads what `Mailer` sent, rather than what it is about to — the operator's outbound message inspector, added 2026-09-04. `Recent(ctx, limit) (OutboxPage, error)` and `Message(ctx, id) (OutboxMessage, error)` hand back the body exactly as Mailpit holds it, unprocessed: extraction is `AdminOutboxService`'s job (§2), not the adapter's, so "which strings are links" stays testable without an HTTP server. Two Mailpit endpoints only, `GET /api/v1/messages` and `GET /api/v1/message/{id}` — a test asserts no third path is ever requested, because `GET /api/v1/message/{id}/link-check` looks like the obvious third and is not: it issues a real HTTP request to every URL it finds, and every URL in a Hearth email is a live single-use token. `Message` reports `domain.ErrNotFound` for an id Mailpit's own store no longer holds (it keeps no volume, so a restart empties it) and both methods report `usecase.ErrOutboxUnavailable` — a distinct error, because an operator needs different advice for "no such message" than for "Mailpit is down" — when the upstream cannot be reached, times out, or answers a body the adapter cannot map (a message with no recipient, since every Hearth template addresses exactly one). A 5-second timeout and no retries, the same reasoning `TokenGenerator`'s neighbours use for a same-host dependency: a slow answer means something is wrong, not far away |
 | `Clock` | `adapter/clock` | So lockout windows and expiry are deterministic in tests |
 | `FXRateProvider` | `adapter/fx` | Static table today (SGD↔IDR only); a live provider drops in behind it. `AccountService` is its second caller, converting each account into the household's primary currency before summing (§5) |
 
@@ -680,7 +748,7 @@ graph TD
     CS --> Which{"POST /admin/session?"}
     Which -->|yes| H1["handleAdminSession<br/>the one ungranted route — how a grant is obtained"]
     Which -->|no| AG["requireAdminGrant<br/>401 ADMIN_REAUTH_REQUIRED unless<br/>admin_grant_expires_at is still in the future"]
-    AG --> H2["the granted group — GET/PUT/DELETE /flags*"]
+    AG --> H2["the granted group — GET/PUT/DELETE /flags*,<br/>GET /households*, GET /mail*"]
 ```
 
 Two orderings here are deliberate enough to need writing down, because both
@@ -719,6 +787,19 @@ answers with a customer's household while the audit row says only
 It is written in the middleware, so it applies to every admin route rather
 than to the one that prompted it; `Detail` stays an empty object on a request
 with no query string.
+
+**The outbound message inspector's audit row is the same shape, with one
+consequence worth spelling out because it is easy to miss.**
+`/admin/mail/{messageID}`'s id is part of the path, so `Target` names the
+exact message that was opened — but the row never carries who received it.
+`auditAdmin` cannot look the recipient up: it writes before chi has matched
+the route, so nothing about what `{messageID}` *means* is known yet, only
+the raw path string it sits inside. Recovering the recipient costs opening
+the same message again, for as long as Mailpit still holds it — accepted,
+because the alternative is either a second audit row per view (double-
+counting the one action this log exists to make countable) or a new
+handler-to-middleware channel built to carry a single fact that is one click
+away.
 
 **The accepted limit, named rather than left for someone to rediscover:** an
 unauthenticated caller gets `401`, not `404`, on `/api/v1/admin/*`, because
@@ -853,6 +934,8 @@ that presses `/start` is Telegram's, not the person's.
 | PUT · DELETE | `/admin/flags/{key}/households/{householdID}` | session · admin · grant · CSRF, same group as the row above |
 | GET | `/admin/households?q=&limit=` | session · admin · grant — one request answers the whole page, counters and rows together, so one page view is one audit row; the query string lands in that row's `detail.query` |
 | GET | `/admin/households/{householdID}` | session · admin · grant — read-only; a malformed id is refused by the handler before the service is called, answering the same `404` an unknown household does |
+| GET | `/admin/mail?limit=` | session · admin · grant — the outbound message inspector's list, no body or snippet in the response; `503 MAIL_INSPECTOR_NOT_CONFIGURED` when `MAILPIT_API_URL` is unset (`Deps.AdminOutbox` is nil, the route tree unchanged either way — the `Telegram` shape), `502 MAIL_UPSTREAM_UNAVAILABLE` when Mailpit itself cannot be reached |
+| GET | `/admin/mail/{messageID}` | session · admin · grant — read-only, the deliberate second click that reveals one message's links and plain text; its own audit row, distinct from the list's. `messageID` is checked against Mailpit's own 22-character id shape *before* any upstream request, refusing `400 INVALID_ID` rather than letting a typo reach Mailpit's literal `latest` id or a path-escape trick; `404` when Mailpit's own store no longer holds the id (it keeps no volume), the same two unavailability codes as the row above otherwise |
 | GET | `/accounts` | session · money |
 | POST | `/accounts` | session · money · CSRF · owner |
 | PATCH | `/accounts/{id}` | session · money · CSRF · owner |
@@ -3065,27 +3148,55 @@ web/src/
                        treatment, an explicit "Hearth · Operator" label) so
                        which surface you are on never depends on reading the
                        URL, and it carries the operator nav (Flags ·
-                       Households) now that there is more than one screen to
-                       move between. Three screens sit behind that gate:
+                       Households · Mail, in that order, OperatorNav
+                       computing its own active state with useMatchRoute --
+                       never activeProps, see docs/LEARNING.md's Frontend
+                       section) now that there is more than one screen to
+                       move between. Five screens sit behind that gate:
                        AdminFlagsPage at /admin/flags, AdminHouseholdsPage at
                        /admin/households (four counters, an explicit search
                        submitted on Enter or a button -- never on keystroke,
                        because every admin request writes an audit row -- and
-                       one row per household), and AdminHouseholdPage at
+                       one row per household), AdminHouseholdPage at
                        /admin/households/$householdId, the read-only drill-in
                        (members, channel, pending invites, the household's
-                       sign-in lockout, and no money at all). All three are
-                       lazy, the same as AdminShell itself, so the chunk
-                       assertion above holds for the whole subtree. See
+                       sign-in lockout, and no money at all), AdminMailPage
+                       at /admin/mail (the outbound message inspector's
+                       list -- recipient, subject, sent time, and
+                       deliberately no body or snippet), and
+                       AdminMailMessagePage at /admin/mail/$messageId, a
+                       route rather than a modal because it is a distinct
+                       audited request: the message's extracted links, each
+                       with a copy control, and its plain-text body below
+                       them -- nothing on either mail screen ever renders
+                       HTML from a message. `AdminMailMessagePage` checks
+                       for a 404 before the admin-layer-failure filter, the
+                       same order the household drill-in already uses and
+                       for the same reason: here a 404 means "Mailpit no
+                       longer holds this message" (its store has no
+                       volume), which is this screen's own ordinary case,
+                       not a sign that the admin surface itself is gone.
+                       All five are lazy, the same as AdminShell itself, so the
+                       chunk assertion above holds for the whole subtree --
+                       adminBundleSplit.test.ts is what proves the mail
+                       screens landed in the same chunk rather than a new
+                       one Vite would fetch outside the gate. See
                        docs/FEATURE_TRACKER.md §9 for what each can and
                        cannot do yet. adminDirectorySchemas.ts parses both
                        directory responses strictly, so a key the server
                        stops sending is a failed parse rather than an
-                       undefined rendered as blank; directoryCopy.ts holds
-                       the labels and relativeTimeLabel, whose first branch
-                       must stay first -- a timestamp in the future (clock
-                       skew) has to read "just now" rather than a negative
-                       age. useAdmin.ts holds the flag hooks
+                       undefined rendered as blank; adminOutboxSchemas.ts
+                       does the same for the two mail responses, and here
+                       .strict() is load-bearing rather than tidy -- the
+                       list must never carry body text and a message must
+                       never carry an HTML part, so a backend change adding
+                       either fails the parse instead of quietly reaching a
+                       screen. directoryCopy.ts holds the labels and
+                       relativeTimeLabel, whose first branch must stay first
+                       -- a timestamp in the future (clock skew) has to read
+                       "just now" rather than a negative age; AdminMailPage
+                       reuses exactTimeLabel from the same file rather than
+                       inventing its own. useAdmin.ts holds the flag hooks
                        (useAdminSession, useAdminFlags,
                        useSetGlobalFlag, useSetHouseholdFlag,
                        useClearHouseholdFlag) and toAdminGateError, which
@@ -3101,7 +3212,19 @@ web/src/
                        password prompt of its own. NOT_FOUND is
                        deliberately not routed that way: on the drill-in a
                        404 means "no such household" and is the page's own
-                       to render.
+                       to render -- AdminMailMessagePage takes the identical
+                       exception for the identical reason (above).
+                       useAdminOutbox.ts holds the two mail hooks
+                       (useAdminMail, useAdminMailMessage) and the same two
+                       rules useAdminDirectory.ts's hooks already follow:
+                       refetchOnWindowFocus is off, because every request
+                       under /admin is itself an audit row and the default
+                       would turn an alt-tab into a logged read; and neither
+                       hook sets its own retry, because main.tsx already
+                       sets retry: false globally, and a retried 503 would
+                       be four audit rows and several seconds of spinner
+                       before the unavailability copy this screen exists to
+                       show ever appears.
                        useFeature.ts lives here too, despite every screen in
                        the app needing it, not only this one -- it reads
                        data?.features?.[key] === true off the same useMe
@@ -3263,7 +3386,7 @@ prefix, which is what made the duplication stop being optional.
 | Generated SQL | sqlc, from `internal/adapter/postgres/queries/*.sql` — `make sqlc` |
 | Sessions | opaque random token, hashed at rest, 30 days, extended on use, revocable |
 | CSRF | double-submit cookie, compared in constant time, mutating methods only |
-| Mail | Mailpit in development **and, for now, in production too** — the first install runs on a free DDNS hostname whose DNS refuses `TXT` records, so DKIM cannot be published and no hosted relay will verify it (`docs/adr/0003-mail-stays-on-the-box.md`). Mail is read by hand over an SSH tunnel; the inbox is an authentication bypass, so 8025 is bound to `127.0.0.1` only. `SMTP_TLS_MODE=none` is set explicitly, since it defaults to `mandatory` outside development and Mailpit speaks plaintext. TLS policy and credentials come from config, so a real relay is four `.env` values and no code |
+| Mail | Mailpit in development **and, for now, in production too** — the first install runs on a free DDNS hostname whose DNS refuses `TXT` records, so DKIM cannot be published and no hosted relay will verify it (`docs/adr/0003-mail-stays-on-the-box.md`). **Read two ways now:** the operator's `/admin/mail` (code-complete on branch `admin-outbox`, 2026-09-04, not yet deployed here), which reads Mailpit's HTTP API and writes an audit row per message opened; and by hand over an SSH tunnel, which stays the fallback for when the API itself is unreachable — the inbox is an authentication bypass either way, so 8025 is bound to `127.0.0.1` only. `SMTP_TLS_MODE=none` is set explicitly, since it defaults to `mandatory` outside development and Mailpit speaks plaintext. TLS policy and credentials come from config, so a real relay is four `.env` values and no code |
 | Telegram | **Off unless configured**, and both values travel together: `config.Load` refuses a boot where exactly one of `TELEGRAM_BOT_TOKEN`/`TELEGRAM_BOT_USERNAME` is set, the same both-or-neither rule `SMTP_USERNAME`/`SMTP_PASSWORD` already follow, because a half-configured channel misbehaves silently. Both empty — which is what `deploy/.env` on the production box says, and this change is not deployed there yet in any case — means `POST /auth/telegram/start` answers `404`, the poller never starts, and `adminctl` (which runs `config.Load` before every subcommand) is unaffected. **Exactly one process may call `getUpdates`:** Telegram hands each update to a single caller, so a second `api` replica would silently steal updates and the symptom would be "sign-in works about half the time" — an operational constraint on ever scaling this service horizontally, not just a code comment (§1). Outbound only; no webhook, so nothing new faces the internet. The bot token is never logged in any branch, including error paths — `client.go` builds its errors from the method name rather than the request URL, because Telegram's own API URLs embed the token in the path and a `*url.Error` carries that URL |
 | Seeding | `adminctl seed`, refused unless `APP_ENV=development` **and** the database host is local — both checked before the connection opens |
 | Retention | `adminctl prune --older-than=<days>` (default 30, floor 7) deletes consumed/expired `signups`, stale `login_attempts` and — closed in the whole-branch fix wave, 2026-09-01 — consumed/expired `telegram_link_requests`, the third table a stranger can grow without an account (`PruneTelegramLinkRequests` mirrors `PruneSignups`'s own retention condition exactly). `magic_links`, `invites` and `sessions` still grow forever, a real gap rather than a decision (§6) |
