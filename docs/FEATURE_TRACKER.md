@@ -96,6 +96,25 @@ needed them to exist (see "Where things stand" below).
 > '| X |'` for each symbol — gives **6 ✅ / 1 🟡 / 1 ⬜ / 1 🚫**. The Total
 > row is re-summed from the nine section rows, not adjusted by delta:
 > **79/17/21/3 = 120**, Built + Partial **96**.
+>
+> **The outbound message inspector's browser walk ran 2026-09-04, later the
+> same day — Task 9 of the same plan
+> (`docs/superpowers/plans/2026-09-04-hearth-outbound-inspector-verification.md`):
+> 15 of 15 criteria pass.** One real defect was found and fixed during the
+> walk itself, not shipped: adding the `Mail` link to the shared operator
+> header (`AdminShell.tsx`) pushed it 14px past a 305px viewport on every
+> `/admin/*` route (the two links that header carried before this task fit
+> at that width; a third did not) — fixed with `flex-wrap` on the nav and
+> re-verified across four widths, on this feature's own two screens and the
+> two sibling admin screens the same header serves. One caveat, on
+> criterion 8: the exact hyphen/underscore trailing-token case
+> `outbox_links.go`'s own comment names as the real risk could not be
+> forced against a live link within the walk's own hour (the test
+> account's magic-link rate limit was already spent), and was confirmed
+> instead at the unit-test level, where it already has a dedicated case.
+> The row's own symbol does not change — it was already ✅ — so this is not
+> a recount, the same way "Households and metrics" carried no recount when
+> its own walk landed the same way.
 
 > **In production since 2026-08-15**, at <https://oink.mywire.org>. **No count
 > below changes** — deployment is not a design feature, and this file's totals
@@ -1435,10 +1454,11 @@ cites a different walk**: "Households and metrics", built later on
 2026-09-02, names
 `docs/superpowers/plans/2026-09-02-hearth-admin-households-verification.md`
 in its own cell as the file its walk was recorded in — 15 of 15 criteria pass,
-with two caveats (see that row). **A second ✅ below cites no walk at all,
-yet**: "Outbound message inspector", built 2026-09-04, is code-complete and
-has not been walked in a browser — its own cell says so plainly rather than
-implying the bar every other ✅ here meets.
+with two caveats (see that row). **A second ✅ below now cites its own walk
+too**: "Outbound message inspector", built 2026-09-04, was walked the same
+day, Task 9 of `docs/superpowers/plans/2026-09-04-hearth-outbound-inspector.md`
+— 15 of 15 criteria pass, one defect found and fixed in the same walk (not
+shipped), one caveat (see that row).
 
 **The one ⬜ row below, the audit screen the owner descoped on 2026-09-02,
 households and metrics (built the same day) and the outbound message
@@ -1464,7 +1484,7 @@ households and metrics needed one for §6).
 | `adminctl` — `grant-platform-admin`, `revoke-platform-admin`, `list-platform-admins`, `unlock-admin` | ✅ | Four new commands, no UI — the same shape `Retention pruning (adminctl prune)` already has in Household settings, above. `unlock-admin` clears `admin_reauth_attempts` for one user, the admin surface's equivalent of a magic link; walked directly (criterion 7) |
 | Admin audit screen (`/admin/audit`) | 🚫 | **Descoped by the product owner on 2026-09-02 — not the design's marking, the owner's decision.** It was built first: `GET /admin/audit?limit=N` in the granted group, `RecentAdminAudit` joined to `users` so rows named their actor, an `AdminAuditPage` with limit-only "Show more" to the service's 500 cap, and a Flags · Audit nav in `AdminShell`; every suite green, three mutation checks red, and a browser walk that found and fixed one defect (the active nav link was indistinguishable — see `docs/LEARNING.md`, Frontend). The owner then judged the screen unnecessary and asked for it to be removed rather than merged. The code is gone from the tree; the log is read through `psql` as before, and `AdminService.RecentAudit` stays in place for the tests that use it. The one thing kept is unrelated to the screen: `useAdminFlags` no longer refetches on window focus, because every refetch of an audited route is itself an audit row. A patch of the removed work was saved outside the repository at the time, but the honest statement is that reinstating it means rebuilding from the spec (§2.4, §7) |
 | Read-only database browse | ⬜ | Design spec §4. **The piece originally asked for.** A separate `SELECT`-only Postgres role (`hearth_readonly`) reached through its own pool from `DATABASE_READONLY_URL`, so a mistake in the adapter's SQL still cannot write; table names validated against `information_schema` rather than interpolated; `statement_timeout` and a page cap; and redaction that fails closed by column *type* (`bytea`) as well as by name, so a secret column added next year is redacted before anyone remembers the rule exists. Unset config means the panel is unavailable — never a silent fallback to the read-write pool. **The only one of the four with an infrastructure dependency:** the role is created during provisioning, not by a migration, so `deploy/PROVISION.md` changes before the feature can run anywhere real |
-| Outbound message inspector | ✅ | Design spec `docs/superpowers/specs/2026-09-04-hearth-outbound-inspector-design.md`, expanding §5 of the admin-surface spec. Proxies Mailpit's HTTP API rather than storing links: every token in this schema is stored hashed, and inventing a raw-link store to solve a convenience problem is the wrong trade. `domain.ExtractLinks` (stdlib only) pulls URLs out of a body already fetched; `usecase.MailOutbox`/`AdminOutboxService` keep the HTML part from ever reaching the HTTP layer; `adapter/mail/mailpit_outbox.go` speaks to exactly two upstream paths — `GET /api/v1/messages` and `GET /api/v1/message/{id}` — proven by a test that fails on any third, because Mailpit's own `link-check` endpoint issues a real request to every link it finds and would spend the very tokens this screen exists to hand out (see `docs/LEARNING.md`). Two granted routes, `GET /api/v1/admin/mail` and `GET /api/v1/admin/mail/{id}`, answer `503 MAIL_INSPECTOR_NOT_CONFIGURED` when `MAILPIT_API_URL` is unset, `502 MAIL_UPSTREAM_UNAVAILABLE` when Mailpit itself cannot be reached, `404` for a message Mailpit no longer holds (its store has no volume — a container restart loses it), and `400 INVALID_ID` for anything that is not Mailpit's own 22-character id shape. The list carries no body or snippet, so seeing a live link stays a deliberate second click with its own audit row. **Closes a live operational pain rather than adding a capability** — under [ADR 3](adr/0003-mail-stays-on-the-box.md) no mail leaves the box, so handing someone an invite used to mean opening an SSH tunnel to Mailpit and copying the link out by hand (`deploy/README.md`); the tunnel is now the fallback for when the API itself is what is broken, not the only way. **Unlike every other ✅ row in this file, this one has not yet been walked in a browser.** The fifteen-criterion walk is Task 9 of `docs/superpowers/plans/2026-09-04-hearth-outbound-inspector.md` and has not run — this cell will name `docs/superpowers/plans/2026-09-04-hearth-outbound-inspector-verification.md` once it does |
+| Outbound message inspector | ✅ | Design spec `docs/superpowers/specs/2026-09-04-hearth-outbound-inspector-design.md`, expanding §5 of the admin-surface spec. Proxies Mailpit's HTTP API rather than storing links: every token in this schema is stored hashed, and inventing a raw-link store to solve a convenience problem is the wrong trade. `domain.ExtractLinks` (stdlib only) pulls URLs out of a body already fetched; `usecase.MailOutbox`/`AdminOutboxService` keep the HTML part from ever reaching the HTTP layer; `adapter/mail/mailpit_outbox.go` speaks to exactly two upstream paths — `GET /api/v1/messages` and `GET /api/v1/message/{id}` — proven by a test that fails on any third, because Mailpit's own `link-check` endpoint issues a real request to every link it finds and would spend the very tokens this screen exists to hand out (see `docs/LEARNING.md`). Two granted routes, `GET /api/v1/admin/mail` and `GET /api/v1/admin/mail/{id}`, answer `503 MAIL_INSPECTOR_NOT_CONFIGURED` when `MAILPIT_API_URL` is unset, `502 MAIL_UPSTREAM_UNAVAILABLE` when Mailpit itself cannot be reached, `404` for a message Mailpit no longer holds (its store has no volume — a container restart loses it), and `400 INVALID_ID` for anything that is not Mailpit's own 22-character id shape. The list carries no body or snippet, so seeing a live link stays a deliberate second click with its own audit row. **Closes a live operational pain rather than adding a capability** — under [ADR 3](adr/0003-mail-stays-on-the-box.md) no mail leaves the box, so handing someone an invite used to mean opening an SSH tunnel to Mailpit and copying the link out by hand (`deploy/README.md`); the tunnel is now the fallback for when the API itself is what is broken, not the only way. **Walked 2026-09-04, Task 9 of the plan — 15 of 15 criteria pass, one caveat** (`docs/superpowers/plans/2026-09-04-hearth-outbound-inspector-verification.md`): a real defect was found and fixed during the walk itself, not shipped — adding the `Mail` link to the shared operator header (`AdminShell.tsx`) pushed it 14px past a 305px viewport on every `/admin/*` route, fixed with `flex-wrap` on the nav and re-verified across four widths on both screens, plus the two sibling admin screens the same header serves. Criterion 8's caveat: the exact hyphen/underscore trailing-character case the domain code's own comment names as the real risk could not be forced against a live link within the walk's own hour (the account's magic-link rate limit was already spent by then) and was instead confirmed at the unit-test level, where it already has a dedicated case |
 | Households and metrics | ✅ | Design spec §6, expanded in `docs/superpowers/specs/2026-09-02-hearth-admin-households-design.md`. Four tiles, explicit search over households and members (Telegram-only members by name, since they have no email the operator could know), most-recently-active ordering from a throttled `sessions.last_seen_at`, and a read-only drill-in with members, channel, pending invites and the household's sign-in lockout. No money on either screen, asserted by exact key sets rather than by reading the handler — financial data stays behind the database browse, so reading a customer's finances costs a deliberate second step and a second audit row. Reads tables that already exist; no analytics table, because a counter that can drift from the rows it counts is worse than a query. **Walked 2026-09-02, Task 11 of the plan — 15 of 15 criteria pass, with two caveats** (`docs/superpowers/plans/2026-09-02-hearth-admin-households-verification.md`): criterion 7's caveat was a real defect — the "Nothing matches" message's own Clear button restored the list but left the search box showing the stale query — fixed in the same commit that recorded the walk; criterion 12 was confirmed against the drill-in's own lockout callout through the API, with the browser's admin session kept alive throughout, rather than against the sign-in screen's own local error state. **Named gap, not a criterion failure:** an expired, unaccepted invite is invisible on this screen by the spec's own "pending only" rule (both the metrics tile and the drill-in's "Pending invites" list filter on `expires_at > now()`) — an operator troubleshooting a stale invite still needs `psql` |
 
 ---
@@ -1506,10 +1526,13 @@ database browse.**
    nothing else. Closed a *live* operational pain rather than adding a
    capability: under ADR 3, handing someone an invite used to mean an SSH
    tunnel to Mailpit; `/admin/mail` now does the same job over Mailpit's own
-   HTTP API, audited. **Code-complete, not yet walked** — the fifteen-criterion
-   browser walk is Task 9 of the plan and has not run; section 9's row names
-   the verification file it will carry once it does. Numbering kept, as for
-   items 1 and 2.
+   HTTP API, audited. **Walked 2026-09-04, later the same day, Task 9 of the
+   plan — 15 of 15 criteria pass**, one defect found and fixed in the walk
+   itself (the shared operator header's nav overflowed at 305px once this
+   task's `Mail` link was added; fixed with `flex-wrap`), one caveat on
+   criterion 8 (confirmed at the unit-test level instead of live, once the
+   test account's own magic-link rate limit was spent); section 9's row
+   names the verification file. Numbering kept, as for items 1 and 2.
 4. **Read-only database browse** (§4) — the one item that remains, last of
    the four despite being the one originally asked for, because it is the
    only one with an infrastructure dependency (`hearth_readonly` and

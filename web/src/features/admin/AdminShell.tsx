@@ -36,7 +36,10 @@ function OperatorNav() {
     { to: "/admin/households", label: "Households" },
   ] as const;
   return (
-    <nav aria-label="Operator" className="flex items-center gap-4">
+    <nav
+      aria-label="Operator"
+      className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1"
+    >
       {items.map((item) => {
         const active = Boolean(matchRoute({ to: item.to, fuzzy: true }));
         return (

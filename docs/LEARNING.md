@@ -3744,6 +3744,28 @@ route with a missing guard has no second line of defence.
   a tree, not a property the codebase now has** — the screen added after it
   needs the same widths run again, and the six copy-pasted wrappers around it
   all took the fix, not the one that was reported (pattern 1).
+- **A shared header measured once does not stay measured as its own content
+  grows.** The admin-households walk (2026-09-02) ran the operator header
+  down to 320px and found no overflow — correct, for the two links (`Flags`,
+  `Households`) `OperatorNav` carried that day. This task's own diff added a
+  third (`Mail`) to that same shared header in `AdminShell.tsx`, and the
+  outbound-mail walk's brief asked for one width narrower, 305px, which the
+  earlier walk never ran. The header overflowed by 14px, on every
+  `/admin/*` route — not only the two screens this task shipped — proved by
+  turning `Mail`'s `display` off in the live page and watching
+  `document.documentElement.scrollWidth` drop from 319 to exactly 305. This
+  is the sign-up `<select>` lesson from the other direction: there the width
+  came from one wide option nobody had opened; here it came from one more
+  short link in a list that used to fit. **A shared component's fit is a
+  property of its content at the moment it was last measured, and adding one
+  more item to a list a nav renders is exactly the kind of change no
+  class-level check (`make lint`, a component snapshot test) can see,
+  because nothing about the new item is individually wrong — only the sum.**
+  Fixed with `flex-wrap` on the nav (`gap-x-4 gap-y-1`, `justify-end` so a
+  wrapped second row still hugs the right edge), trading "always one line"
+  for "never wider than the viewport" — the shape that survives a fourth nav
+  item arriving later without needing to be re-measured again, unlike a
+  fixed width or a manually-verified gap value would.
 - **A copy helper that returns a fragment makes every caller responsible for
   grammar, and the second caller will get it wrong.** `limitedAccessPhrase`
   returned a bare list — `"calendar & chores"` — and `"no"` when a limited
@@ -3844,6 +3866,23 @@ route with a missing guard has no second line of defence.
   that checks the wrong surface can pass for the wrong reason, proving
   nothing either way. The walk was redone against the callout capable of
   failing, and it passed.
+- **The outbound-mail inspector's browser walk ran 2026-09-04,**
+  `docs/superpowers/plans/2026-09-04-hearth-outbound-inspector-verification.md`:
+  **15 of 15 criteria pass, one real defect found and fixed during the walk
+  (criterion 14 — see the shared-header entry earlier in this section for
+  the full account and the fix), one caveat.** Criterion 8's caveat: the
+  exact hyphen/underscore trailing-character case `outbox_links.go`'s own
+  comment names as the actual risk could not be forced live, because this
+  same walk's earlier magic-link requests had already spent
+  `andreas@hearth.family`'s hourly rate limit (`magicLinkPerHourLimit = 3`)
+  — verified instead at the unit level, where the domain test file already
+  carries both cases by name. Also required a real-environment fix outside
+  the product before the walk could safely start: `andreas@hearth.family`'s
+  password on the shared dev box did not match the documented default,
+  left over from an earlier walk's own password change — one more failed
+  guess would have locked the household for 15 minutes, so it was reset
+  through the sanctioned `make reset-password` path rather than guessed
+  again.
 
 ### Tooling and infrastructure
 
@@ -4051,6 +4090,39 @@ route with a missing guard has no second line of defence.
   **And a green local suite says nothing about the commit** — it says something
   about your disk. The check that matches CI is `git stash -u` (or a clone of
   the pushed SHA) before believing the build.
+- **The dev `web` container's file watcher can silently stop noticing edits
+  to a file it already served.** Mid-fix during the outbound-mail browser
+  walk, saving `AdminShell.tsx` produced no Vite HMR log line at all, and
+  `curl`ing the module's own dev-server URL
+  (`/src/features/admin/AdminShell.tsx`) kept returning the pre-edit
+  transformed source — confirmed the file on disk, and inside the
+  container, already had the new content, so this was the watcher, not the
+  bind mount. `docker compose restart web` fixed it, at the cost of the
+  container's entrypoint re-running `npm install` before `vite` came back
+  (about 80 seconds) — a plain process restart would not have been enough,
+  since `npm install && npm run dev` is the whole entrypoint. **A source
+  edit with no matching HMR log line is a stale dev server, not a wrong
+  fix** — check the served module directly before spending time doubting
+  the diff.
+- **A screenshot tool can lie about what a page renders, and the lie can
+  look exactly like the bug you are hunting for.** Claude in Chrome's
+  `computer` screenshot/`zoom` actions, on this box, rendered the operator
+  header's nav showing only its first item — `Flags` — with the other three
+  links entirely absent, even after their color was forced to opaque red
+  with a yellow outline directly in the page and re-captured. Every other
+  signal available (`getBoundingClientRect`, computed styles, the
+  accessibility tree) said all four links were present, laid out, and
+  correctly styled. The tab's `window.devicePixelRatio` read `2.5` against
+  an `outerWidth` of `594` — an inconsistent scaling setup particular to
+  this sandboxed display. Confirmed as a capture bug, not a render bug, by
+  opening the same signed-in route in a second, independent tool
+  (Playwright MCP): all four links appeared normally there. **A visual
+  defect this convenient — matching a known prior bug shape exactly (see
+  criterion 2 in `docs/superpowers/plans/2026-09-02-hearth-admin-households-
+  verification.md`) — is worth one cross-check in a second tool before it is
+  written down as a repeat**, especially on an unusual display
+  configuration; the deciding evidence here was a second screenshot
+  pipeline, not more scrutiny of the first one.
 
 ### The first production deployment (2026-08-15)
 
