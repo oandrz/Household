@@ -683,7 +683,7 @@ Screenshots, in
 
 ## The defect
 
-**Three comments explained `«null»` with an example this feature makes
+**Two comments explained `«null»` with an example this feature makes
 impossible to observe.**
 
 `domain/dbbrowse.go`'s comment on `NullCell` and `AdminDatabasePage.tsx`'s
