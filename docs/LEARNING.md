@@ -4596,6 +4596,48 @@ route with a missing guard has no second line of defence.
   configuration; the deciding evidence here was a second screenshot
   pipeline, not more scrutiny of the first one.
 
+### Provisioning the read-only role on the box (2026-09-05)
+
+**A runbook command that wraps with a trailing `\` does not survive being
+pasted into an SSH session.** `PROVISION.md` section 10 gave the two `psql`
+calls that create `hearth_readonly` and set its password, each wrapped across
+two lines the way the rest of that file wraps prose. The operator pasted them
+into a terminal on the box, both lines arrived as one, and the shell read the
+backslash and the newline as an **escaped space** — so `psql` received a
+literal `" -c"` as a positional argument rather than an option. It warned
+`extra command-line argument " -c" ignored`, exited 0, and did nothing.
+
+The symptom is the part worth remembering: **it looked like it had worked.**
+There is no error, the prompt comes back, and the next step — putting the
+password into `.env` — succeeds too. The failure only surfaces two commands
+later, as an API that cannot authenticate as a role that visibly exists,
+which reads like a password typo rather than a command that never ran.
+
+What would have caught it sooner: a verification step immediately after, of
+the kind every other section of that file has. `readonly-role.sql` creates the
+role with `LOGIN` and no password, so `psql -U hearth_readonly -c "select
+count(*) …"` is the one command that proves the `ALTER` landed, and it was
+missing. Section 10 now carries it, and both `psql` calls are one line each
+with a note saying not to re-wrap them.
+
+The general rule, for any runbook in this repository: **a line someone will
+paste over SSH gets no continuation backslash, however long it becomes.**
+Prose wraps; commands do not.
+
+Two smaller things the same session surfaced, both fixed:
+
+- `adminctl grant-platform-admin` appeared in seven files under `docs/` and
+  none under `deploy/`. It is the command without which the entire admin
+  surface answers `404` — `requirePlatformAdmin` hides the surface rather than
+  refusing it, production is never seeded, so nobody holds a `platform_admins`
+  row on a fresh box. The runbook an operator actually has open did not
+  mention it. It is now in `README.md`'s Break-glass, first in the list.
+- The root `.env.example` had neither `DATABASE_READONLY_URL` nor
+  `MAILPIT_API_URL`, so `make dev-local` — which runs the API natively and
+  sources that file rather than the Compose environment — booted with both
+  operator panels dark, including against a `hearth_readonly` role that
+  `make migrate` had just created for it. Both added.
+
 ### The first production deployment (2026-08-15)
 
 Nothing in the product broke. Everything below was wrong in a document, in a

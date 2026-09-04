@@ -225,12 +225,26 @@ Create the role and set that password:
 ```bash
 C="docker compose -f docker-compose.prod.yml"
 
-$C exec -T postgres \
-  psql -U hearth -d hearth -v ON_ERROR_STOP=1 < readonly-role.sql
-
-$C exec -T postgres \
-  psql -U hearth -d hearth -c "ALTER ROLE hearth_readonly PASSWORD '<the generated password>'"
+$C exec -T postgres psql -U hearth -d hearth -v ON_ERROR_STOP=1 < readonly-role.sql
+$C exec -T postgres psql -U hearth -d hearth -c "ALTER ROLE hearth_readonly PASSWORD '<the generated password>'"
 ```
+
+**Both are deliberately on one line each.** An earlier draft wrapped them with
+a trailing `\`, and the first operator to follow it pasted the two lines into
+an SSH session as one: the backslash and the newline collapsed into an escaped
+space, so `psql` received a literal `" -c"` as a positional argument, warned
+`extra command-line argument " -c" ignored`, and did nothing. The `ALTER` looked
+like it had run. Do not reintroduce the wrap.
+
+Check the second one took, because a silent failure here is the shape above:
+
+```bash
+$C exec -T postgres psql -U hearth_readonly -d hearth -c "select count(*) from households"
+```
+
+`readonly-role.sql` creates the role with `LOGIN` and no password, so this
+command is the one that proves the `ALTER` landed — without it the role exists
+and cannot authenticate. A row count means you are ready for `.env`.
 
 `readonly-role.sql` sets no password itself, deliberately: `psql`'s `:'var'`
 interpolation is a client-side feature, and a file that used it could not
