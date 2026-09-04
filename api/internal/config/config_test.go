@@ -264,7 +264,7 @@ func TestLoadAcceptsAMailpitAPIURL(t *testing.T) {
 // nothing pointing at the line that caused it -- docs/LEARNING.md pattern 8,
 // "configuration that lies".
 func TestLoadRefusesAnUnusableMailpitAPIURL(t *testing.T) {
-	for _, value := range []string{"mailpit:8025", "://mailpit", "ftp://mailpit:8025"} {
+	for _, value := range []string{"mailpit:8025", "://mailpit", "ftp://mailpit:8025", "http:/mailpit:8025"} {
 		t.Run(value, func(t *testing.T) {
 			setRequiredEnv(t)
 			t.Setenv("MAILPIT_API_URL", value)
