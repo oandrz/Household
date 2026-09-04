@@ -534,8 +534,14 @@ column list is already being sent.
 `DATABASE_URL` and `MAILPIT_API_URL`.
 
 - Empty means the feature is off and `Deps.AdminBrowse` is nil (decision 13).
-- Set but unparseable **refuses the boot**, as `config.go` already refuses a
-  half-set Telegram pair.
+- Set but unparseable **refuses the boot** — but from `postgres.OpenReadOnly`,
+  not from `config.Load`. `config.go` imports the standard library only, and
+  `net/url` cannot validate a Postgres DSN: `url.Parse("host=db user=x")`
+  succeeds with an empty scheme and host, and that keyword/value form is a
+  legal DSN. A `url.Parse` check in `Load` would either reject a legal DSN or
+  accept nonsense, and `pgxpool.ParseConfig` — the only honest parser —
+  belongs to the adapter layer. The outcome is unchanged: `run()` returns the
+  error and the process does not start.
 - Set and parseable but pointing at a connection that can write **refuses the
   boot** (decision 4).
 
@@ -697,3 +703,5 @@ Three criteria that walk badly from a script and must be written carefully:
 | "Unavailable" as one state | Three: `503` unconfigured, refuse-to-boot misconfigured, `503` unavailable | Matches the shape the mail inspector defined and §5.2 predicted the browse would copy. Decision 12 |
 | Both routes "audited with the table name and offset" | No audit change; the existing middleware already records both | The path and query string are what `auditAdmin` writes, before routing. Decision 17 |
 | Silent on pool size | Its own constructor, `MaxConns = 3` | `Open`'s 10 is sized for request traffic, not for one operator. Decision 14 |
+| `RowPage.Columns []string` | `RowPage.Columns []ColumnInfo` | The row viewer marks a redacted column's *header*, and a bare name cannot carry that. Found while writing the plan |
+| Decision 5's three consumers | Four call sites: `make migrate` and `make dev-local` bypass `api`'s `depends_on` and need the one-shot run explicitly | `make migrate` is `run --rm migrate`, which starts no siblings, and `dev-local` runs the API natively. Without this a developer's boot self-check fails on a role nothing created. Found while writing the plan |
