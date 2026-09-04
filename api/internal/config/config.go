@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 )
@@ -47,6 +48,16 @@ type Config struct {
 	// reachable.
 	TelegramBotToken    string
 	TelegramBotUsername string
+	// MailpitAPIURL is Mailpit's HTTP API, http://mailpit:8025 in both
+	// Compose stacks. Optional: empty means the operator's outbound message
+	// inspector is unavailable and says so, rather than showing an empty
+	// list -- an empty list would read as "Hearth has sent no mail".
+	//
+	// A value that is set but unusable refuses the boot, for the same reason
+	// the SMTP and Telegram pairs do: a typo here would otherwise present on
+	// the box as a 502 on one admin screen, with nothing pointing back at the
+	// .env line that caused it.
+	MailpitAPIURL string
 }
 
 func (c Config) IsDevelopment() bool { return c.AppEnv == "development" }
@@ -55,6 +66,13 @@ func (c Config) IsDevelopment() bool { return c.AppEnv == "development" }
 // false the route answers 404 and the poller never starts, so an install that
 // has not set up a bot behaves exactly as it did before this feature existed.
 func (c Config) TelegramEnabled() bool { return c.TelegramBotToken != "" }
+
+// OutboxEnabled reports whether the outbound message inspector is configured.
+// When it is false the admin routes answer 503 and say which variable is
+// missing -- never 404, because everyone who can reach them has already
+// proved they are a platform admin with a live grant, and hiding the route
+// from them would cost them the one fact that tells them what to fix.
+func (c Config) OutboxEnabled() bool { return c.MailpitAPIURL != "" }
 
 func Load() (Config, error) {
 	appEnv := os.Getenv("APP_ENV")
@@ -73,6 +91,7 @@ func Load() (Config, error) {
 
 		TelegramBotToken:    os.Getenv("TELEGRAM_BOT_TOKEN"),
 		TelegramBotUsername: os.Getenv("TELEGRAM_BOT_USERNAME"),
+		MailpitAPIURL:       os.Getenv("MAILPIT_API_URL"),
 	}
 
 	switch cfg.AppEnv {
@@ -108,6 +127,12 @@ func Load() (Config, error) {
 	}
 	if (cfg.TelegramBotToken == "") != (cfg.TelegramBotUsername == "") {
 		return Config{}, fmt.Errorf("TELEGRAM_BOT_TOKEN and TELEGRAM_BOT_USERNAME must both be set, or both left empty")
+	}
+	if cfg.MailpitAPIURL != "" {
+		parsed, err := url.Parse(cfg.MailpitAPIURL)
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return Config{}, fmt.Errorf(`MAILPIT_API_URL must be an http or https URL, got %q`, cfg.MailpitAPIURL)
+		}
 	}
 	defaultTLSMode := "mandatory"
 	if cfg.IsDevelopment() {
