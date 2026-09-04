@@ -234,14 +234,41 @@ the rendering the operator already knows.
 
 A column is redacted when **any** of these holds:
 
-1. its `data_type` is `bytea`,
+1. its type is `bytea` or `bytea[]` — read as `data_type = 'bytea'` **or**
+   `udt_name` in (`bytea`, `_bytea`),
 2. its name ends in `_hash` or `_secret`, or contains `password`,
 3. it appears in `domain`'s explicit denylist.
 
 Rule 1 is the one that survives. Every token in this schema is stored as
-`token_hash bytea` (`sessions`, `magic_links`, `invites`, `signups`,
-`telegram_link_nonces`), so a secret column added by a migration in 2027 is
-redacted before its author has heard of this file.
+`token_hash bytea` (`sessions`, `magic_links`, `invites`, `signups`, and
+`telegram_link_requests.nonce_hash`), so a `bytea` column — or an array of
+them — added by a migration years from now is redacted before its author has
+heard of this file.
+
+**Rule 1 reads two columns, and that is not belt-and-braces.**
+`information_schema.data_type` is not always a type name: for two families it
+reports the *category* instead. A `bytea[]` reads `ARRAY` and a domain or an
+extension type reads `USER-DEFINED`. `udt_name` carries the real name in both
+cases (`_bytea` for `bytea[]`, the domain's own name for a domain), so a rule
+written on `data_type` alone would miss an array of hashes — one of the two
+most plausible shapes a future secret takes. Six columns of the schema as it
+stands already report a category rather than a type
+(`invites.capabilities` and `memberships.capabilities` are `ARRAY`; four
+`email` columns are `USER-DEFINED` over `citext`), so this is a shape the
+schema has today, not a hypothetical.
+
+**Where rule 1 stops, stated rather than glossed.** A *domain* over `bytea`
+(`CREATE DOMAIN token AS bytea`) reports its own name in `udt_name`, and
+resolving that back to `bytea` needs `pg_type.typbasetype` — a catalogue read
+that `internal/domain` cannot do, since it imports the standard library and
+nothing else. Such a column is redacted only if rule 2 or rule 3 catches it.
+Closing that in the predicate was considered and refused: it would move a
+catalogue query into the domain layer to cover a shape this schema has never
+used. What covers it instead is a **test**, not the rule — see section 9: the
+schema sweep resolves every column's base type through `pg_type` and goes red
+the day a migration introduces one. The guarantee is therefore "every `bytea`
+and every `bytea[]`, always; a domain over `bytea`, loudly, at the moment
+someone adds one".
 
 Rule 2 catches the one credential that is not `bytea`:
 `users.password_hash` is `text`, because an Argon2 encoded hash is a
@@ -612,13 +639,38 @@ widths rather than assuming it.
 At least one test per task is mutation-checked, per `CLAUDE.md`.
 
 **The test that must exist and would be easy to omit**: a schema-driven
-redaction test. It reads every column of every table from a migrated
-container's `information_schema` and asserts that each one whose type is
-`bytea`, or whose name matches rule 2, is reported `Redacted: true` by
-`Tables()`. It is written against the live schema rather than a fixture list,
-so migration `00014` adding `webhook_secret bytea` is covered by a test
-written today. Decision 8 is the kind of rule that survives review and dies
-in a later refactor unless a test holds it against the real schema.
+redaction test. It reads every column of every table of a migrated container
+and asserts that each one whose type is `bytea`, or whose name matches rule 2,
+is reported `Redacted: true` by `Tables()`. It is written against the live
+schema rather than a fixture list, so migration `00014` adding
+`webhook_secret bytea` is covered by a test written today. Decision 8 is the
+kind of rule that survives review and dies in a later refactor unless a test
+holds it against the real schema.
+
+*(It was omitted. The plan built from this spec never carried the paragraph
+forward, so eleven task reviews were blind to it identically; it was written
+in the final fix wave as
+`TestEveryColumnTheCatalogueCallsSecretIsRedacted`.)*
+
+**Two things about that test which this paragraph originally got wrong, and
+which cost nothing to state now that they are known.**
+
+*Its oracle must not be `information_schema.data_type`* — the obvious reading
+of "reads every column from `information_schema`", and the wrong one. That
+column reports `ARRAY` for `bytea[]` and `USER-DEFINED` for a domain, which
+are exactly the shapes decision 8's gap lives in, so an oracle built on it
+passes forever while they go unredacted: it would certify the blind spot
+rather than find it. The oracle is the catalogue instead — walk `pg_type`
+from each column's declared type through `typelem` (arrays) and `typbasetype`
+(domains) and ask whether `pg_catalog.bytea` is anywhere in the chain. That
+resolves domains, which the predicate cannot, so it is a genuinely
+independent check and not a restatement of the code.
+
+*The migrated schema alone cannot carry it.* All five `bytea` columns in this
+schema are also named `*_hash`, so rule 2 covers every one of them and a sweep
+over the real tables stays green with rule 1 deleted outright. The test
+creates a table of its own carrying `bytea` and `bytea[]` under names no name
+rule matches, which is what makes rule 1 load-bearing in it.
 
 Its sibling, equally easy to omit: an assertion that **no test in the suite
 opens the browse against `DATABASE_URL`**. The `postgres` package tests must

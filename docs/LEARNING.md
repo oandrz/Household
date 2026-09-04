@@ -2914,6 +2914,29 @@ case and no coordinate system to assert legibility in for the second.
   make X happen** — here that was three greps, and the answer was that
   nothing did.
 
+- **The fix changed the sentence's subject and carried its predicate over
+  unchanged — database browse, final review, 2026-09-04. Fifth instance of
+  the same wrong clause, and the fourth fix is what produced it.** Four
+  commits on this branch went into correcting the `«null»` example above:
+  the comments on `domain.NullCell` and the screen's `Legend()` had used
+  `users.password_hash`, a column that can only ever render `«redacted»`.
+  The fix swapped the column to `users.email`, which is right, and left the
+  clause after it exactly as it stood — so both files now read "`users.email`
+  is NULL for a member who has only ever signed in with a magic link". A
+  magic link is **sent to** an email address. A member who has one
+  necessarily has an address; the account shape that leaves `email` NULL is
+  Telegram-only. The subject moved and the predicate did not move with it,
+  and the sentence went from true-about-the-wrong-column to false.
+  As with the instance it grew out of, the branch's own test had the answer
+  already: `browse_repo_test.go:122` says "email is NULL for a Telegram-only
+  account (`UserRepo.Create` writes NULL when it is given no address)", which
+  is correct, and it was correct in the same commit that made the comments
+  wrong. What would have caught it sooner: **when you change what a sentence
+  is about, re-read the rest of the sentence** — a clause written for the old
+  subject is not automatically true of the new one, and a search-and-replace
+  fix is exactly the shape that leaves it behind. See also pattern 1: this
+  is a class fix that seeded the next instance of its own class.
+
 **Treat a citation the way you'd treat a test assertion: something the next
 reader can verify against the thing it names, not something to trust because
 it reads confidently.** Nearly every instance above cost nothing to
@@ -2957,6 +2980,81 @@ names only the exceptions, deliberately: a closing summary that enumerates is
 the identical defect the whole pattern is about, one level up. State the
 invariant, not the enumeration — the same rule the admin surface's handover
 distilled from nine of its own comments.
+
+---
+
+### 17. A requirement the plan drops is invisible to every review that reads the plan
+
+The database browse's design spec has a paragraph in its Testing section
+headed, in as many words, **"The test that must exist and would be easy to
+omit"**: a schema-driven redaction sweep that reads every column of every
+table of a migrated container and asserts that each one whose type is `bytea`,
+or whose name matches the name rule, comes back `Redacted: true`. The spec
+even says why it must be schema-driven rather than a fixture list — so that a
+migration adding `webhook_secret bytea` next year is covered by a test written
+today.
+
+It was never written. Grepping the 3349-line plan built from that spec for the
+paragraph's wording returns nothing: **the plan never carried the requirement
+forward.** From there the outcome was determined. Eleven implementers worked
+from task briefs cut from the plan; eleven task reviewers checked each task
+against the plan; eight fix rounds and a fifteen-criterion browser walk ran on
+top of that. Every one of those checks was looking at an artifact the
+requirement was not in, so all of them were blind in exactly the same place —
+not eleven independent chances to catch it, one chance repeated eleven times.
+It surfaced only in the final whole-branch review, which read the spec.
+
+**The omission was load-bearing twice, and that is the part worth keeping.**
+The test that was dropped is the one thing that would have caught the same
+branch's largest finding: `information_schema.data_type` does not carry the
+type name for arrays or domains (`bytea[]` reports `ARRAY`, a domain over
+`bytea` reports `USER-DEFINED`), so the redaction rule's "type first" promise
+was false for the two likeliest shapes a future secret takes. The check and
+the thing it checks went missing in the same act, which is why nothing
+downstream noticed either.
+
+**Two traps found while finally writing it, both of which would have produced
+a green test that proved nothing:**
+
+- *Written to the spec's literal words, it would have certified the blind
+  spot.* "Reads every column … from a migrated container's
+  `information_schema`" invites an oracle built on `data_type` — the same
+  column the code was wrong about. Oracle and code would have agreed forever
+  while `bytea[]` went unredacted, and the branch would have shipped with a
+  test whose name claimed the opposite. The oracle has to be independent of
+  the thing under test: here that meant walking `pg_type` through `typelem`
+  and `typbasetype` and asking whether `pg_catalog.bytea` is anywhere in the
+  chain — which also resolves domains, so the test covers a case the
+  predicate deliberately does not.
+- *The real schema alone could not carry it.* All five `bytea` columns in
+  this database are also named `*_hash`, so the name rule covers every one of
+  them: a sweep over the migrated tables passes with the type rule **deleted
+  outright**. The test creates a table of its own holding `bytea` and
+  `bytea[]` under names no name rule matches, and only then does deleting the
+  type rule turn it red. A schema-driven test is only as strong as the
+  schema's own variety, and a schema can be uniform by accident.
+
+What would have caught it sooner, and it is a thirty-second check:
+**before execution starts, diff the spec against the plan.** Every test the
+spec names — by the words the spec names it with — has to appear somewhere in
+the plan's task list, and a `grep` per named test is the whole procedure. The
+spec is the binding authority (`CLAUDE.md` says so); the plan is a derived
+artifact, and derivation loses things silently.
+
+The second half is about reviews rather than plans. **A review scoped to a
+task can only ever check that task.** Something the plan never contained
+cannot be found by any number of task reviews, however careful each one is —
+only by a review that reads the source document. "Eleven task reviews passed"
+and "the spec is satisfied" are different claims, and this branch is the
+evidence that the first does not imply the second. That is the job a final
+whole-branch review against the spec exists to do, and it is worth budgeting
+for on every plan rather than treating as a formality at the end.
+
+Pattern 13 is this one's sibling from the other direction: there, the walk
+faithfully executed a spec that was itself wrong. Here the spec was right and
+the derivation dropped it. Both say the same thing about derived artifacts —
+**check the derivation against its source, not only the work against the
+derivation.**
 
 ---
 

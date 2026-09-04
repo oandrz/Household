@@ -395,10 +395,16 @@ the box (§2); the grant costs the password again within the last thirty
 minutes and does not slide with activity (§3); every page view — reads
 included — writes an audit row before the handler runs, carrying the table in
 `Target` and the offset in `detail.query` (which is why paging lives in the
-URL); columns holding secrets are never selected at all, so `password_hash`
-and every `bytea` render `«redacted»` and their bytes never leave Postgres;
-and there is no SQL box, no filter, no join and no export — a page of rows on
-a screen, and `psql` over SSH for anything more. **The bound that is most
+URL); columns holding secrets are never selected at all, so `password_hash`,
+every `bytea` and every `bytea[]` render `«redacted»` and their bytes never
+leave Postgres — with one gap that is named rather than glossed, because an
+overstated guarantee is the thing that stops being maintained: a *domain*
+over `bytea` is caught by its name or not at all, since resolving a domain to
+its base type needs a catalogue read the stdlib-only `internal/domain` cannot
+make (design spec decision 8, and the schema sweep in
+`browse_repo_test.go` that goes red the day a migration adds one); and there
+is no SQL box, no filter, no join and no export — a page of rows on a screen,
+and `psql` over SSH for anything more. **The bound that is most
 easily lost is the last one.** Each of the missing features is individually
 reasonable to ask for, and the first one added turns a bounded read into an
 arbitrary one.

@@ -870,8 +870,12 @@ observed in criteria 5 and 6.
 
 **One, not two.** This section originally listed a second — a claim that
 criterion 13's SQL was not runnable — which review found to be false and which
-is retracted in full under criterion 13 above, with the three `psql` runs that
-disprove it. The brief's criterion 13 was correct as written.
+is retracted in full under criterion 13 above, with the four `psql` runs
+recorded there: one disproves the claim outright, and the other three show why
+it was wrong (the owner meeting the `NOT NULL` constraint the read-only role
+never reaches, the `GRANT` refusing the same statement with only the read-only
+guard bypassed, and an unknown column name failing at parse analysis before
+either guard). The brief's criterion 13 was correct as written.
 
 | The brief says | What is true | Consequence |
 |---|---|---|
