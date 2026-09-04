@@ -402,6 +402,12 @@ type TableInfo struct {
 // a column was withheld rather than empty -- "there is no value here" and
 // "you may not see the value here" are different facts and the screen must
 // not merge them.
+//
+// DataType is a type name for a human to read, not a catalogue value to
+// branch on: "citext", "text[]", "timestamp with time zone". An
+// implementation reading information_schema must not put data_type here
+// unexamined, because that column reports a category rather than a name for
+// arrays and for domains -- see adapter/postgres's displayType.
 type ColumnInfo struct {
 	Name     string
 	DataType string

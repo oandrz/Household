@@ -86,9 +86,12 @@ func OpenReadOnly(ctx context.Context, databaseURL string) (*ReadOnlyDB, error) 
 //
 // users is the probe table because it exists in migration 00002, is never
 // dropped, and holds credentials: if this connection can write *there*,
-// nothing else about the configuration matters. The check is a privilege
-// lookup and not an attempted write, so it leaves nothing behind even on the
-// connection it rejects.
+// nothing else about the configuration matters. It is named public.users and
+// not users so that the guard cannot be pointed at some other relation that
+// happens to come first on search_path -- the same reason browse_repo.go
+// qualifies every relation it reads. The check is a privilege lookup and not
+// an attempted write, so it leaves nothing behind even on the connection it
+// rejects.
 //
 // All three outcomes are distinct and only one of them is a pass. An error
 // reading the privilege is a refusal too -- "I could not tell" is not
@@ -97,7 +100,7 @@ func OpenReadOnly(ctx context.Context, databaseURL string) (*ReadOnlyDB, error) 
 func assertCannotWrite(ctx context.Context, conn *pgx.Conn) error {
 	var canWrite bool
 	err := conn.QueryRow(ctx,
-		`SELECT has_table_privilege(current_user, 'users', 'INSERT')`).Scan(&canWrite)
+		`SELECT has_table_privilege(current_user, 'public.users', 'INSERT')`).Scan(&canWrite)
 	if err != nil {
 		return fmt.Errorf("could not check whether DATABASE_READONLY_URL is read-only: %w", err)
 	}

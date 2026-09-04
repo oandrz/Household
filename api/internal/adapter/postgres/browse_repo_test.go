@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -203,8 +204,20 @@ func TestRowsOrdersByWhateverKeyTheTableHas(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("a composite primary key", func(t *testing.T) {
-		seedFeatureFlags(t, f.admin, "budgets", "chores", "money")
-		assertEveryRowIsPagedOnce(t, f.repo, "household_feature_flags", "key", 3)
+		// Seeded out of key order deliberately. household_feature_flags is
+		// keyed (household_id, key) and there is one household here, so the
+		// ordering the array_position expression has to produce is the keys
+		// alphabetically -- and only an insert that disagrees with it can
+		// tell that apart from doing nothing. Seeded in key order (which is
+		// what this subtest used to do) a static heap reads back in insertion
+		// order with or without the ORDER BY, so it proved that the
+		// int2vector cast is valid SQL and nothing about ordering.
+		seedFeatureFlags(t, f.admin, "money", "budgets", "chores")
+
+		got := assertEveryRowIsPagedOnce(t, f.repo, "household_feature_flags", "key", 3)
+		if want := []string{"budgets", "chores", "money"}; !slices.Equal(got, want) {
+			t.Fatalf("keys came back in the order %v, want %v", got, want)
+		}
 	})
 
 	t.Run("no primary key at all", func(t *testing.T) {
@@ -247,8 +260,19 @@ func TestRowsAnswersAnEmptyPagePastTheEnd(t *testing.T) {
 // Nothing is hidden from the list: the migration bookkeeping and the audit
 // log are tables like any other. admin_audit_log matters twice over, because
 // descoping the /admin/audit screen left this browse as its only UI.
+//
+// The counts are asserted by value, not merely read. rowCounts sends one
+// SELECT holding a count per table and binds the answers back to the names
+// POSITIONALLY, so nothing but a value check can tell a correct binding from
+// a shifted one -- every count would still be an int64 and the call would
+// still succeed. Three distinct expected numbers are needed for that: two
+// tables the seed filled to different depths, and one it did not touch.
 func TestTablesListsEverythingIncludingTheBookkeeping(t *testing.T) {
 	f := newBrowseFixture(t)
+
+	// One household holding three accounts, so households and accounts carry
+	// counts that differ from each other and from the empty tables around them.
+	seedAccounts(t, f.admin, 3)
 
 	tables, err := f.repo.Tables(context.Background())
 	if err != nil {
@@ -261,6 +285,126 @@ func TestTablesListsEverythingIncludingTheBookkeeping(t *testing.T) {
 	for _, want := range []string{"households", "users", "admin_audit_log", "goose_db_version"} {
 		if _, ok := byName[want]; !ok {
 			t.Fatalf("%s is missing from the table list", want)
+		}
+	}
+	for _, want := range []struct {
+		table string
+		count int64
+	}{
+		{"accounts", 3},
+		{"households", 1},
+		{"sessions", 0},
+	} {
+		if got := byName[want.table]; got != want.count {
+			t.Errorf("%s RowCount = %d, want %d (a count bound to the wrong table name?)",
+				want.table, got, want.count)
+		}
+	}
+}
+
+// The test the design spec named as the one that must exist and would be easy
+// to omit (spec section 9): a redaction sweep driven by the schema itself,
+// not by a list somebody typed. domain/dbbrowse_test.go is that typed list,
+// and a typed list can only ever be as complete as its author's memory --
+// it says nothing about the column a migration adds next year.
+//
+// The oracle is the CATALOGUE, read on the admin connection, and it is
+// deliberately not the same expression the code under test uses. It resolves
+// each column's type through pg_type -- an array to its element type, a
+// domain to its base type, repeatedly -- and asks whether pg_catalog.bytea is
+// anywhere in that chain. That matters twice:
+//
+//   - information_schema.data_type would have been the obvious oracle and is
+//     the wrong one. It reports a CATEGORY rather than a name for exactly the
+//     shapes this test exists to catch: bytea[] reads "ARRAY" and a domain
+//     over bytea reads "USER-DEFINED". An oracle built on it would pass
+//     forever while those went unredacted, certifying the blind spot instead
+//     of finding it.
+//   - the chain resolves domains, which ColumnIsRedacted cannot (it is
+//     stdlib-only and pg_type.typbasetype is a catalogue read). No column in
+//     this schema is a domain over bytea today, so the oracle and the code
+//     agree and this test is green. The day a migration introduces one, this
+//     test goes red and names it -- which is the whole reason the doc comment
+//     on ColumnIsRedacted is allowed to describe that gap rather than close
+//     it.
+//
+// The migrated schema alone cannot carry this test: all five of its bytea
+// columns are also named *_hash, so the name rule covers every one of them
+// and deleting the type rule outright would leave a schema-wide sweep green.
+// type_shapes is what makes the type rule load-bearing -- two bytea columns
+// under names no name rule matches.
+func TestEveryColumnTheCatalogueCallsSecretIsRedacted(t *testing.T) {
+	f := newBrowseFixture(t)
+	ctx := context.Background()
+
+	seedTypeShapes(t, f.admin, []byte{0xC0, 0xFF, 0xEE, 0x01}, []byte{0xC0, 0xFF, 0xEE, 0x02})
+
+	reported := map[string]map[string]usecase.ColumnInfo{}
+	tables, err := f.repo.Tables(ctx)
+	if err != nil {
+		t.Fatalf("Tables: %v", err)
+	}
+	for _, tbl := range tables {
+		byColumn := map[string]usecase.ColumnInfo{}
+		for _, c := range tbl.Columns {
+			byColumn[c.Name] = c
+		}
+		reported[tbl.Name] = byColumn
+	}
+
+	onlyTheTypeRuleCatchesIt := 0
+	for _, col := range secretColumnsFromCatalogue(t, f.admin) {
+		byColumn, ok := reported[col.table]
+		if !ok {
+			t.Errorf("%s is in the catalogue but not in the browse's table list", col.table)
+			continue
+		}
+		got, ok := byColumn[col.column]
+		if !ok {
+			t.Errorf("%s.%s is in the catalogue but not in the browse's column list", col.table, col.column)
+			continue
+		}
+		mustRedact := col.isBytea || col.nameSaysSecret
+		if mustRedact && !got.Redacted {
+			t.Errorf("%s.%s (%s) is not redacted, and it must be: bytea in its type chain = %v, name says secret = %v",
+				col.table, col.column, col.resolved, col.isBytea, col.nameSaysSecret)
+		}
+		if col.isBytea && !col.nameSaysSecret {
+			onlyTheTypeRuleCatchesIt++
+		}
+	}
+
+	// Without this the sweep could pass by finding nothing to check -- an
+	// oracle whose SQL quietly matched no rows would look exactly like a
+	// clean schema. These two columns are the ones the type rule alone
+	// carries, so they are also what makes deleting it show up here.
+	if onlyTheTypeRuleCatchesIt < 2 {
+		t.Fatalf("the sweep found %d columns that only the type rule catches, want at least 2 "+
+			"(type_shapes.raw and type_shapes.blobs) -- the oracle is matching nothing",
+			onlyTheTypeRuleCatchesIt)
+	}
+	// A column that is neither bytea nor named like a secret must NOT be
+	// withheld: over-redaction on this screen looks like data loss.
+	if note := reported["type_shapes"]["note"]; note.Redacted {
+		t.Error("type_shapes.note is redacted, and nothing about it is secret")
+	}
+
+	// The same two columns through the other path. Tables() reads its columns
+	// with allColumns and Rows() reads them with columnsOf, and only a check
+	// on both keeps the two from drifting -- it is columnsOf that decides
+	// what the SELECT list withholds, so it is the one whose mistake would
+	// put real bytes on a screen.
+	page, err := f.repo.Rows(ctx, "type_shapes", 10, 0)
+	if err != nil {
+		t.Fatalf("Rows(type_shapes): %v", err)
+	}
+	whole := strings.ToLower(strings.Join(flatten(page.Rows), "|"))
+	if strings.Contains(whole, "c0ffee") {
+		t.Fatalf("the page carries the seeded bytes: %q", whole)
+	}
+	for _, column := range []string{"raw", "blobs"} {
+		if cell := cellOf(t, page, column, 0); cell != domain.RedactedCell {
+			t.Errorf("type_shapes.%s cell = %q, want %q", column, cell, domain.RedactedCell)
 		}
 	}
 }
@@ -372,6 +516,123 @@ func seedUserWithoutAPassword(t *testing.T, db *postgres.DB) {
 	}
 }
 
+// seedTypeShapes creates the table the schema sweep needs the migrations not
+// to have: bytea in the two wrappings information_schema cannot name, under
+// column names no name rule matches.
+//
+// raw is the plain case with an innocent name -- every bytea the migrations
+// declare is also called *_hash, so without this one the name rule alone
+// would carry the whole sweep. blobs is bytea[], the shape a careful author
+// reaches for when a row holds several hashes, and the one data_type reports
+// only as "ARRAY". note is the control: nothing about it is secret and it
+// must come back visible.
+func seedTypeShapes(t *testing.T, db *postgres.DB, raw, blob []byte) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := db.Pool().Exec(ctx, `
+		CREATE TABLE type_shapes (
+			id     bigint PRIMARY KEY,
+			raw    bytea,
+			blobs  bytea[],
+			note   text
+		)`); err != nil {
+		t.Fatalf("create type_shapes: %v", err)
+	}
+	tag, err := db.Pool().Exec(ctx,
+		`INSERT INTO type_shapes (id, raw, blobs, note) VALUES (1, $1, ARRAY[$2::bytea], 'ordinary')`,
+		raw, blob)
+	if err != nil {
+		t.Fatalf("fill type_shapes: %v", err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("fill type_shapes wrote %d rows, want 1", tag.RowsAffected())
+	}
+}
+
+// catalogueColumn is one column as the catalogue itself describes it,
+// independently of anything the browse believes about it.
+type catalogueColumn struct {
+	table, column string
+	// resolved is the type chain the oracle walked, e.g. "bytea[] -> bytea",
+	// so a failure says WHY the column should have been redacted rather than
+	// only that it was not.
+	resolved       string
+	isBytea        bool
+	nameSaysSecret bool
+}
+
+// secretColumnsFromCatalogue reads every column of every table in public and
+// answers, for each, the two questions the redaction rule is supposed to
+// answer -- read on the admin connection, so it is a statement about the
+// database rather than about the pool under test.
+//
+// The recursive term is the whole point. A column's declared type may wrap
+// the interesting one: an array wraps its element (typelem), a domain wraps
+// its base (typbasetype), and either can wrap the other. Walking that chain
+// and asking whether pg_catalog.bytea appears anywhere in it is a different
+// question from "what does data_type say", and it is the question decision 8
+// meant.
+//
+// typcategory = 'A' guards the array step because typelem is non-zero on
+// several types that are not arrays at all (name, point, int2vector), and
+// following it there would walk into nonsense.
+func secretColumnsFromCatalogue(t *testing.T, db *postgres.DB) []catalogueColumn {
+	t.Helper()
+	rows, err := db.Pool().Query(context.Background(), `
+		WITH RECURSIVE chain AS (
+			SELECT c.relname AS table_name, a.attname AS column_name,
+			       a.atttypid AS type_oid, 0 AS hops
+			FROM pg_attribute a
+			JOIN pg_class c ON c.oid = a.attrelid
+			JOIN pg_namespace n ON n.oid = c.relnamespace
+			WHERE n.nspname = 'public'
+			  AND c.relkind IN ('r', 'p')
+			  AND a.attnum > 0
+			  AND NOT a.attisdropped
+			UNION ALL
+			SELECT ch.table_name, ch.column_name,
+			       CASE WHEN t.typtype = 'd' THEN t.typbasetype ELSE t.typelem END,
+			       ch.hops + 1
+			FROM chain ch
+			JOIN pg_type t ON t.oid = ch.type_oid
+			WHERE ch.hops < 8
+			  AND (t.typtype = 'd' OR (t.typcategory = 'A' AND t.typelem <> 0))
+		)
+		SELECT ch.table_name,
+		       ch.column_name,
+		       string_agg(format_type(ch.type_oid, NULL), ' -> ' ORDER BY ch.hops),
+		       bool_or(t.typname = 'bytea' AND t.typnamespace = 'pg_catalog'::regnamespace),
+		       lower(ch.column_name) LIKE '%\_hash'
+		         OR lower(ch.column_name) LIKE '%\_secret'
+		         OR lower(ch.column_name) LIKE '%password%'
+		FROM chain ch
+		JOIN pg_type t ON t.oid = ch.type_oid
+		GROUP BY ch.table_name, ch.column_name
+		ORDER BY ch.table_name, ch.column_name`)
+	if err != nil {
+		t.Fatalf("read the catalogue: %v", err)
+	}
+	defer rows.Close()
+
+	var out []catalogueColumn
+	for rows.Next() {
+		var c catalogueColumn
+		if err := rows.Scan(&c.table, &c.column, &c.resolved, &c.isBytea, &c.nameSaysSecret); err != nil {
+			t.Fatalf("scan a catalogue column: %v", err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read the catalogue: %v", err)
+	}
+	// A sweep over nothing is not a sweep. The schema has thirty-odd tables;
+	// a handful of rows here means the query stopped matching.
+	if len(out) < 100 {
+		t.Fatalf("the catalogue sweep found %d columns, which is far too few to be the whole schema", len(out))
+	}
+	return out
+}
+
 // seedAccounts inserts n accounts under one household, filling every NOT NULL
 // column 00004_accounts.sql declares.
 func seedAccounts(t *testing.T, db *postgres.DB, n int) {
@@ -410,10 +671,14 @@ func seedFeatureFlags(t *testing.T, db *postgres.DB, keys ...string) {
 }
 
 // assertEveryRowIsPagedOnce reads a table two rows at a time and fails unless
-// each row shows up on exactly one page, identified by the named column.
-func assertEveryRowIsPagedOnce(t *testing.T, repo *postgres.BrowseRepo, table, idColumn string, want int) {
+// each row shows up on exactly one page, identified by the named column. It
+// returns those identifiers in the order the pages handed them over, so a
+// caller that cares about the ordering itself -- and not only about rows not
+// repeating -- can assert on it.
+func assertEveryRowIsPagedOnce(t *testing.T, repo *postgres.BrowseRepo, table, idColumn string, want int) []string {
 	t.Helper()
 	seen := map[string]bool{}
+	var order []string
 	for offset := 0; offset <= want; offset += 2 {
 		page, err := repo.Rows(context.Background(), table, 2, offset)
 		if err != nil {
@@ -425,11 +690,13 @@ func assertEveryRowIsPagedOnce(t *testing.T, repo *postgres.BrowseRepo, table, i
 				t.Fatalf("%s row %s appeared on two pages", table, id)
 			}
 			seen[id] = true
+			order = append(order, id)
 		}
 	}
 	if len(seen) != want {
 		t.Fatalf("saw %d of %d %s rows across the pages", len(seen), want, table)
 	}
+	return order
 }
 
 // rewriteAccount updates one account in place, the way the product does while

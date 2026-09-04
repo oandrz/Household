@@ -72,7 +72,13 @@ func (r *BrowseRepo) Rows(ctx context.Context, table string, limit, offset int) 
 	if err != nil {
 		return usecase.RowPage{}, err
 	}
-	quoted := pgx.Identifier{table}.Sanitize()
+	// Schema-qualified, because columnsOf above pinned table_schema = 'public'
+	// and orderBy below resolves to_regclass('public.' || ...). An unqualified
+	// name here would resolve through search_path instead, so two references
+	// to "the same table" three lines apart could name different relations --
+	// and the symptom would be an ORDER BY on a column the relation actually
+	// read does not have, a 503 that reads like a driver bug.
+	quoted := pgx.Identifier{"public", table}.Sanitize()
 
 	var total int64
 	if err := r.pool.QueryRow(ctx, `SELECT count(*) FROM `+quoted).Scan(&total); err != nil {
@@ -148,7 +154,7 @@ func (r *BrowseRepo) Rows(ctx context.Context, table string, limit, offset int) 
 // a raw Postgres permission error the operator has to interpret.
 func (r *BrowseRepo) columnsOf(ctx context.Context, table string) ([]usecase.ColumnInfo, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT c.column_name, c.data_type
+		SELECT c.column_name, c.data_type, c.udt_name
 		FROM information_schema.columns c
 		JOIN information_schema.tables t
 		  ON t.table_schema = c.table_schema AND t.table_name = c.table_name
@@ -163,14 +169,14 @@ func (r *BrowseRepo) columnsOf(ctx context.Context, table string) ([]usecase.Col
 
 	var columns []usecase.ColumnInfo
 	for rows.Next() {
-		var name, dataType string
-		if err := rows.Scan(&name, &dataType); err != nil {
+		var name, dataType, udtName string
+		if err := rows.Scan(&name, &dataType, &udtName); err != nil {
 			return nil, browseErr(err, "scan column")
 		}
 		columns = append(columns, usecase.ColumnInfo{
 			Name:     name,
-			DataType: dataType,
-			Redacted: domain.ColumnIsRedacted(name, dataType),
+			DataType: displayType(dataType, udtName),
+			Redacted: domain.ColumnIsRedacted(name, dataType, udtName),
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -246,7 +252,7 @@ func (r *BrowseRepo) tableNames(ctx context.Context) ([]string, error) {
 
 func (r *BrowseRepo) allColumns(ctx context.Context) (map[string][]usecase.ColumnInfo, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT table_name, column_name, data_type
+		SELECT table_name, column_name, data_type, udt_name
 		FROM information_schema.columns
 		WHERE table_schema = 'public'
 		ORDER BY table_name, ordinal_position`)
@@ -257,17 +263,44 @@ func (r *BrowseRepo) allColumns(ctx context.Context) (map[string][]usecase.Colum
 
 	byTable := map[string][]usecase.ColumnInfo{}
 	for rows.Next() {
-		var table, name, dataType string
-		if err := rows.Scan(&table, &name, &dataType); err != nil {
+		var table, name, dataType, udtName string
+		if err := rows.Scan(&table, &name, &dataType, &udtName); err != nil {
 			return nil, browseErr(err, "scan column")
 		}
 		byTable[table] = append(byTable[table], usecase.ColumnInfo{
 			Name:     name,
-			DataType: dataType,
-			Redacted: domain.ColumnIsRedacted(name, dataType),
+			DataType: displayType(dataType, udtName),
+			Redacted: domain.ColumnIsRedacted(name, dataType, udtName),
 		})
 	}
 	return byTable, browseErr(rows.Err(), "list columns")
+}
+
+// displayType is the type name the Columns pane shows an operator.
+//
+// information_schema.data_type is a spelled-out SQL name for the built-in
+// types ("timestamp with time zone"), which is what an operator wants to
+// read. For two families it is not a name at all but a category: an array
+// reports "ARRAY" and a domain or an extension type reports "USER-DEFINED".
+// On the one screen whose job is showing the schema, "USER-DEFINED" where the
+// migration says citext is the wrong word, so those two take udt_name
+// instead -- with the leading underscore Postgres uses for an array's
+// internal name ("_text") turned back into the [] the migration was written
+// with.
+//
+// The default arm passes data_type through rather than refusing, and that is
+// not a hole in CLAUDE.md's fail-closed rule: this decides a LABEL, never
+// whether a value may be seen. Redaction is decided separately, on the raw
+// data_type and udt_name, by domain.ColumnIsRedacted.
+func displayType(dataType, udtName string) string {
+	switch dataType {
+	case "ARRAY":
+		return strings.TrimPrefix(udtName, "_") + "[]"
+	case "USER-DEFINED":
+		return udtName
+	default:
+		return dataType
+	}
 }
 
 // rowCounts counts every table in one statement rather than one round trip
@@ -285,7 +318,10 @@ func (r *BrowseRepo) rowCounts(ctx context.Context, names []string) ([]int64, er
 	}
 	parts := make([]string, 0, len(names))
 	for _, name := range names {
-		parts = append(parts, "(SELECT count(*) FROM "+pgx.Identifier{name}.Sanitize()+")")
+		// Schema-qualified for the same reason Rows is: the names came from
+		// information_schema filtered to 'public', so the count must be of
+		// that relation and not of whatever search_path finds first.
+		parts = append(parts, "(SELECT count(*) FROM "+pgx.Identifier{"public", name}.Sanitize()+")")
 	}
 
 	counts := make([]int64, len(names))
