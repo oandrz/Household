@@ -164,28 +164,27 @@ graph TD
     Web -->|"proxy /api/v1"| API
     API --> PG
     API -->|SMTP| Mail
-    API -.->|"HTTP GET, the operator's outbound<br/>message inspector — env var not<br/>wired into this compose file yet"| Mail
+    API -->|"HTTP GET, the operator's<br/>outbound message inspector"| Mail
     API -->|"HTTPS: getUpdates long-poll, sendMessage"| TG
     Migrate --> PG
 ```
 
-**`api` can now both write to Mailpit and read from it, over two different
-protocols — but `docker-compose.yml` only wires the first one.**
-`SMTP_ADDR` is hardcoded for the dev `api` service; `MAILPIT_API_URL`,
-unlike it and unlike the two Telegram values (passed through with
-`${VAR:-}`), has **no entry at all** in this file's `api` service. A
-developer following Task 9's own walk brief ("set `MAILPIT_API_URL` in the
-development environment the API reads") cannot do it by exporting a shell
-variable before `make dev` the way the Telegram pair works — there is
-nothing in this compose file for Compose to substitute it into. It has to
-be added to the `environment:` block here (or in a
-`docker-compose.override.yml`) before the arrow carries any traffic. Once
-wired, it reads Mailpit's own HTTP API through
-`adapter/mail/mailpit_outbox.go` (`GET /api/v1/messages` and
-`GET /api/v1/message/{id}` — never `link-check`, see §3's `MailOutbox` row)
-so a platform admin can retrieve a link at `/admin/mail` without opening the
-container. Unset, the arrow simply does not fire: `Deps.AdminOutbox` is nil
-and the two routes it backs answer `503`.
+**`api` now both writes to Mailpit and reads from it, over two different
+protocols.** `MAILPIT_API_URL` is hardcoded in this file's `api` service,
+`http://mailpit:8025`, the same way `SMTP_ADDR` is — Mailpit's address on
+the dev network is fixed, not a secret, so there is nothing here for the
+Telegram pair's `${VAR:-}` passthrough treatment to protect; hardcoding it
+means the inspector works out of the box on every developer's machine
+rather than defaulting to "not configured" and inviting someone to go
+looking for a bug in the screen that is not there. It reads Mailpit's own
+HTTP API through `adapter/mail/mailpit_outbox.go` (`GET /api/v1/messages`
+and `GET /api/v1/message/{id}` — never `link-check`, see §3's `MailOutbox`
+row) so a platform admin can retrieve a link at `/admin/mail` without
+opening the container. In production, by contrast, `MAILPIT_API_URL` is a
+value in `.env` rather than something hardcoded here (§1's production
+topology diagram, below), so it stays capable of being left unset: unset,
+the arrow simply does not fire, `Deps.AdminOutbox` is nil, and the two
+routes it backs answer `503`.
 
 **Telegram is the only arrow here that leaves the machine, and it points
 outward.** Bot updates arrive by `getUpdates` long-polling *from inside* the
