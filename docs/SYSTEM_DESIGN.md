@@ -162,6 +162,7 @@ graph TD
         PG[("postgres :5432")]
         Mail["mailpit :8025 / :1025"]
         Migrate["migrate — one-shot goose<br/>api waits for it to succeed"]
+        Readonly["readonly-role — one-shot psql<br/>api waits for it to succeed"]
     end
 
     TG["api.telegram.org<br/>outbound only, only when a bot is configured"]
@@ -173,6 +174,7 @@ graph TD
     API -->|"HTTP GET, the operator's<br/>outbound message inspector"| Mail
     API -->|"HTTPS: getUpdates long-poll, sendMessage"| TG
     Migrate --> PG
+    Readonly --> PG
 ```
 
 **`api` now both writes to Mailpit and reads from it, over two different
@@ -233,6 +235,30 @@ left running across a newly added migration keeps its already-succeeded
 stack silently misses new migrations. `make dev-local` sidesteps this by
 running `make migrate` explicitly before it starts anything; `make up` and a
 bare `docker compose up` do not. See `docs/HANDOVER.md`.
+
+**`readonly-role` is provisioning, not schema, and runs the same one-shot
+shape as `migrate` for that reason** — a superuser-only `CREATE ROLE` cannot
+be a goose migration, and creating a role is not a change to the shape of
+the data. It runs `deploy/readonly-role.sql` against Postgres as `hearth`,
+after `migrate` completes, creating `hearth_readonly`: a role that can
+`SELECT` every table in `public` (including tables migrated in later, via
+`ALTER DEFAULT PRIVILEGES FOR ROLE hearth`) and nothing else, with
+`default_transaction_read_only` and a 3-second `statement_timeout` set on
+the role itself rather than per-connection. The same file is what the Go
+test suite runs against every disposable test container
+(`testsupport.StartPostgres`), so both environments provision the identical
+role from one script — see `docs/superpowers/specs/2026-09-04-hearth-database-browse-design.md`
+decision 5. `api` gets `DATABASE_READONLY_URL` pointed at this role
+unconditionally, the same hardcoding reasoning as `MAILPIT_API_URL` above,
+and `depends_on: readonly-role` with `service_completed_successfully` next
+to its `migrate` dependency — so it carries the same staleness gap noted
+above: a stack left running across a newly added `deploy/readonly-role.sql`
+change keeps its already-succeeded `readonly-role` container and never
+reruns it. **Nothing reads `DATABASE_READONLY_URL` yet** — this is
+provisioning for the admin database browse (`docs/FEATURE_TRACKER.md`),
+which is not yet built; the role exists and is proven read-only by
+`TestReadOnlyRoleCanReadAndCannotWrite`, but the second pool and the routes
+that would open it are future work.
 
 **Production differs in three ways that matter:** the `web` container is nginx
 serving static files; TLS termination in front is mandatory — cookies are

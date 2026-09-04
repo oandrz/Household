@@ -27,12 +27,51 @@ services:
       postgres: { condition: service_healthy }
     restart: "no"
 
+  # The read-only role the admin database browse reads through. A one-shot,
+  # like migrate, because a role is provisioning rather than schema:
+  # migrations do not run as a superuser and creating a role is not a change
+  # to the shape of the data.
+  #
+  # postgres:17-alpine rather than the api image: this needs psql, and the api
+  # dev image carries goose. Not docker-entrypoint-initdb.d either -- that
+  # runs only when the data directory is created, and hearth-pgdata already
+  # exists on every machine that has run this stack, so a developer would get
+  # a not-configured panel whose only fix is destroying their database.
+  readonly-role:
+    image: postgres:17-alpine
+    environment:
+      PGHOST: postgres
+      PGUSER: hearth
+      PGPASSWORD: hearth
+      PGDATABASE: hearth
+      # The dev password, written here rather than in readonly-role.sql: that
+      # file is also executed by the Go suite through pgx, and psql's :'var'
+      # interpolation is client-side syntax pgx would reject.
+      READONLY_PASSWORD: hearth-readonly
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        psql -v ON_ERROR_STOP=1 -f /sql/readonly-role.sql
+        psql -v ON_ERROR_STOP=1 -c "ALTER ROLE hearth_readonly PASSWORD '$$READONLY_PASSWORD'"
+    volumes: ["./deploy/readonly-role.sql:/sql/readonly-role.sql:ro"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    restart: "no"
+
   api:
     build: { context: ./api, target: dev }
     environment:
       APP_ENV: development
       PORT: "8080"
       DATABASE_URL: postgres://hearth:hearth@postgres:5432/hearth?sslmode=disable
+      # The database browse's own connection: hearth_readonly, created by the
+      # readonly-role one-shot above. Hardcoded here for the same reason
+      # MAILPIT_API_URL is -- a developer must not have to configure the
+      # feature to discover it exists. Unset means the panel says it is not
+      # configured, and there is no fallback to DATABASE_URL.
+      DATABASE_READONLY_URL: postgres://hearth_readonly:hearth-readonly@postgres:5432/hearth?sslmode=disable
       SMTP_ADDR: mailpit:1025
       # Mailpit always runs at this address in the dev stack and its API port
       # is fixed; hardcoding it here means the admin mail inspector works
@@ -64,6 +103,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       migrate: { condition: service_completed_successfully }
+      readonly-role: { condition: service_completed_successfully }
 
   web:
     image: node:22-alpine

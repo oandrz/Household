@@ -5,11 +5,14 @@ package testsupport
 import (
 	"context"
 	"database/sql"
+	"net/url"
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 	"github.com/testcontainers/testcontainers-go"
@@ -47,6 +50,7 @@ func StartPostgres(t *testing.T) string {
 	}
 
 	applyMigrations(t, url)
+	createReadOnlyRole(t, url)
 	return url
 }
 
@@ -76,4 +80,63 @@ func migrationsDir(t *testing.T) string {
 		t.Fatal("cannot determine the caller path")
 	}
 	return filepath.Join(filepath.Dir(thisFile), "..", "..", "migrations")
+}
+
+// readOnlyPassword is the role's password in tests only. It is set here
+// rather than in deploy/readonly-role.sql because psql's :'var' syntax is
+// client-side and unusable from pgx -- the spec's decision 5.
+const readOnlyPassword = "hearth-readonly"
+
+// createReadOnlyRole runs deploy/readonly-role.sql against the freshly
+// migrated database, so every test in this repository sees the same role
+// production will have. A test that opened the browse against DATABASE_URL
+// would prove nothing about the guard that matters.
+func createReadOnlyRole(t *testing.T, url string) {
+	t.Helper()
+
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("connect to create the read-only role: %v", err)
+	}
+	defer conn.Close(ctx)
+
+	script, err := os.ReadFile(readOnlyRoleScript(t))
+	if err != nil {
+		t.Fatalf("read deploy/readonly-role.sql: %v", err)
+	}
+	// No arguments, so pgx uses the simple protocol and the whole file --
+	// DO block included -- goes in one round trip.
+	if _, err := conn.Exec(ctx, string(script)); err != nil {
+		t.Fatalf("run deploy/readonly-role.sql: %v", err)
+	}
+	if _, err := conn.Exec(ctx,
+		`ALTER ROLE hearth_readonly PASSWORD '`+readOnlyPassword+`'`); err != nil {
+		t.Fatalf("set the read-only role's password: %v", err)
+	}
+}
+
+// readOnlyRoleScript resolves deploy/readonly-role.sql from this file's own
+// location, the same way migrationsDir does, so tests pass regardless of the
+// working directory they run from.
+func readOnlyRoleScript(t *testing.T) string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot determine the caller path")
+	}
+	return filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "deploy", "readonly-role.sql")
+}
+
+// ReadOnlyURL is the same database as adminURL, reached as hearth_readonly.
+// Use it for anything that exercises the database browse: opening the browse
+// against the read-write URL would test the SQL and none of the guard.
+func ReadOnlyURL(t *testing.T, adminURL string) string {
+	t.Helper()
+	parsed, err := url.Parse(adminURL)
+	if err != nil {
+		t.Fatalf("parse the container url: %v", err)
+	}
+	parsed.User = url.UserPassword("hearth_readonly", readOnlyPassword)
+	return parsed.String()
 }

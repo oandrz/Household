@@ -1270,13 +1270,36 @@ person to ask whether the test could ever have gone red in the first place.
   a targeted test failure can print the same word, and only one of them
   proves the test does its job.
 
+- **A mutation check silently reused Go's test cache and reported a false
+  green — `hearth_readonly` role, Task 1 of the database browse,
+  2026-09-04.** The mutation step was "delete the `GRANT SELECT ON ALL
+  TABLES` line from `deploy/readonly-role.sql`, re-run, expect the `reads`
+  subtest to fail." The re-run command was the same `go test -run
+  TestReadOnlyRole -v` used for the original green — no `-count=1` — and it
+  printed `PASS` with `ok ... (cached)`. That was not evidence the mutation
+  did nothing: `deploy/readonly-role.sql` is read from disk with
+  `os.ReadFile` at test *runtime*, not compiled in, so it is invisible to
+  the Go toolchain's build-graph cache key — editing it looks, to `go test`,
+  like editing nothing. Caught only because the cached-result line
+  (`(cached)`) was read rather than just the `PASS`/`FAIL` word — the same
+  discipline pattern 2's `-run TestHousehold` and import-orphan entries
+  already name, one layer further down the stack. Re-run with `-count=1`
+  and the same mutation correctly failed the `reads` subtest with "households
+  not visible to hearth_readonly; the GRANT did not run." **A mutation check
+  against a file the test reads at runtime rather than imports needs
+  `-count=1` on the re-run, every time** — the build graph has no way to know
+  the file changed, so the cache will hand back the old answer and call it
+  passing.
+
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
 a different reason than the one you meant to prove, that is not yet proof
 either; sharpen the mutation until the failure names the claim. **And if the
 mutation cannot go red because a second guard covers for the first, the test
 is pinned to neither** — mutate the guard that does the work, or assert
-something only that guard can produce.
+something only that guard can produce. **And if the code under test reads a
+non-Go file at runtime, re-run with `-count=1`** — Go's test cache does not
+know that file is an input, and will hand back the previous result.
 
 ### 3. The simulated environment lied
 
