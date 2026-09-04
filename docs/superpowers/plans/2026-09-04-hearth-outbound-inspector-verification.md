@@ -3,11 +3,17 @@
 Walked 2026-09-04 against the running dev stack (`hearth-api-1`, `hearth-web-1`,
 `hearth-postgres-1`, `hearth-mailpit-1`) at <http://localhost:5173>, on branch
 `admin-outbox`. Browser tool: Claude in Chrome connected on the first attempt
-and was used for the whole walk (no Playwright fallback needed), with
-`javascript_tool` used in place of `form_input`/coordinate clicks for filling
-text fields — `form_input` calls were mis-issued from this session's harness
-and the same malformed payload kept resurfacing verbatim across retries,
-which is recorded here as a tooling note, not a product defect.
+and was used for setup (sign-in, the magic-link request, sending the invite)
+and criterion 1. Its own screenshot capture then proved unreliable on this
+box partway through criterion 2 (see the tooling caveat below), so every
+criterion from 2 onward — every screenshot, click, `fetch` and `evaluate`
+call, the incognito-equivalent contexts, and the viewport matrix — used the
+Playwright MCP tools instead, per the brief's standing permission to fall
+back. `form_input` calls were also mis-issued from this session's harness,
+the same malformed payload resurfacing verbatim across retries; worked
+around with `javascript_tool` (setting values via the native property setter
+plus an `input` event) rather than spending more attempts on it — recorded
+here as a tooling note, not a product defect.
 
 **Environment note found before the walk began, fixed without touching
 product code:** `andreas@hearth.family`'s password did not match the
@@ -58,9 +64,11 @@ route in the Playwright MCP browser (a separate, unscaled context) and
 screenshotting it there: all four links render normally, cleanly
 distinguishable, in the same DOM order the source defines
 (`AdminShell.tsx`'s `items` array — Flags, Mail, Households). From here on,
-Claude in Chrome is used for interaction (clicks, JS execution, DOM/style
-inspection) and Playwright is used for every screenshot that must be
-trusted by eye, per the brief's standing permission to fall back to it.
+Playwright MCP is used for the rest of the walk in full — navigation,
+clicks, `evaluate`, and every screenshot — rather than splitting interaction
+and screenshotting across two tools, per the brief's standing permission to
+fall back to it once the Chrome extension stopped being trustworthy for
+this purpose.
 
 ---
 
@@ -369,11 +377,14 @@ response appears anywhere in the row.
 `AdminMailPage` through the UI to fire this request naturally — the request
 itself has to be made directly, the same way the households walk used `curl`
 for its own guard checks. Requested a fresh magic link for
-`jamie@example.test` (an accepted, non-platform-admin "limited" member of
-the seeded household — confirmed via `platform_admins`/`memberships` before
-the walk began), consumed it in a fresh cookie-less context to get her real
-session, confirmed her identity via `GET /api/v1/auth/me`, then called
-`GET /api/v1/admin/mail` in that same context.
+`jamie@example.test` (an accepted, "limited"-role member of the seeded
+household, per an earlier `users`/`memberships` query run at the top of the
+walk), consumed it in a fresh cookie-less context to get her real session,
+then confirmed her identity — including that she is not a platform admin —
+via `GET /api/v1/auth/me` before calling `GET /api/v1/admin/mail` in that
+same context. `/auth/me`'s own `isPlatformAdmin` field is the stronger
+claim here than a `platform_admins` row count would have been: it is
+exactly what `requirePlatformAdmin` itself checks, not a proxy for it.
 
 **Seen:** `/auth/me` confirmed `"isPlatformAdmin": false`, role `"limited"`.
 `GET /api/v1/admin/mail` answered:
@@ -520,9 +531,12 @@ confirmed it came back **empty** (`"total": 0`) — Mailpit's dev container
 carries no volume, so a stop/start (not just an unreachable blip) cleared
 every message this walk had generated, exactly what the page's own
 durability line warns about. This is the line proving itself true, not a
-defect: recorded here rather than treated as one, and mail was regenerated
-afterward where a later step still needed it (see "State changed on the dev
-box" below).
+defect: recorded here rather than treated as one. No later criterion still
+needed a message present to pass (10, 14 and 15 had already run against
+real content while it existed; criterion 12 only needs the API's own
+configured/unconfigured behaviour, not Mailpit's contents), so none was
+regenerated — the walk finished with Mailpit's store empty (see "State
+changed on the dev box" below).
 
 **Result:** PASS.
 
@@ -632,10 +646,11 @@ broken.
 - **`sessions` holds 24 rows** — normal accumulation from this walk's own
   sign-ins (each fresh incognito-equivalent context for criteria 7 and 13
   created one) plus whatever the box already carried; none were deleted.
-- **Mailpit's message store is currently empty.** It was cleared twice by
-  this walk's own destructive criteria (11's stop/start, and criterion 12's
-  API-only restart happening to follow it before mail was regenerated) —
-  the durability line's own claim, proven rather than merely stated. Nobody
+- **Mailpit's message store is currently empty.** Criterion 11's stop/start
+  cleared it (Mailpit's dev container has no volume), and no later criterion
+  needed content back — criterion 12 restarts only the `api` container, not
+  Mailpit, so the store stayed empty from criterion 11 onward. This is the
+  durability line's own claim, proven rather than merely stated. Nobody
   after this walk should expect to find `walk-2026-09-04@example.test`'s
   invite email sitting in Mailpit; the invite itself is still live in
   Postgres (see above), only its email copy is gone.
@@ -671,10 +686,11 @@ clean; `go vet ./...` clean.
 - Go suite (`go test ./... -count=1 -timeout=5m`, testcontainers against the
   colima Docker socket): every package `ok`, including
   `internal/adapter/http` (216.7s) and `internal/adapter/postgres` (242.3s),
-  the two that carry the outbound-mail route and repository tests.
-- Frontend (`npx vitest run`): **78 test files, 756 tests, all passed** —
-  77/754 before this walk's one new file
-  (`AdminShell.test.tsx`, two tests) was added.
+  the two that carry the outbound-mail route and repository tests. Timings
+  are from the run before `AdminShell.test.tsx` existed — a frontend-only
+  file, so this is unaffected by it, not re-run afterward.
+- Frontend (`npx vitest run`), run again after adding the new file:
+  **78 test files, 756 tests, all passed** — 77/754 immediately before.
 
 Both green. `docker-compose.yml` confirmed unchanged one more time,
 immediately before this section was written:
