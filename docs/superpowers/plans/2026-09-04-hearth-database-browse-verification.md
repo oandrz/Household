@@ -945,3 +945,42 @@ $ git diff --exit-code docker-compose.yml
 $ echo $?
 0
 ```
+
+---
+
+## Independently re-checked, 2026-09-05, before the PR
+
+The walk above was run by the agent that built the last task of the feature.
+The product owner asked whether the feature had actually been driven, and the
+honest answer at that moment was that the coordinating session had relayed
+this file rather than opened the app. So a second pass ran against the same
+dev stack, by a different reader, before
+[PR #18](https://github.com/oandrz/Household/pull/18) was opened. It is
+recorded here because a walk nobody re-read is worth less than one somebody
+did.
+
+Not a second full walk — six claims, chosen because each is one a reader would
+act on:
+
+| Claim | What was seen |
+|---|---|
+| The role cannot write | `insert into households …` as `hearth_readonly` → `ERROR: cannot execute INSERT in a read-only transaction`; `households` still 2 rows afterwards |
+| The re-auth grant gates the surface | `/admin/database` stopped at "Confirm your password" with a live household session already in place — the grant was what was missing, not the sign-in |
+| A row count is real | The list showed `households · 2 rows`, matching `select count(*)` run separately through `psql` |
+| **Redaction reaches the wire, not just the screen** | The endpoint's own response: 200, 7868 bytes, 28 rows, **28** `«redacted»` markers, and **no hex at all** — no `\x`, no run of 32 hex characters. Non-redacted values still arrive (`user_id` renders as a uuid). A `bytea` rendered as text would read `\x…`; there is none |
+| `displayType` (which had no test at the time) | `email=citext`, `capabilities=text[]` in both `memberships` and `invites`, `password_hash=text [redacted]`. The behaviour was right; the missing test was written afterwards and mutation-checked |
+| One audit row per page view | `admin_audit_log` went 254 → 255 for one page view, and the row read action `GET /api/v1/admin/db/tables/accounts`, target the same path, detail `{"query": "limit=10&offset=20"}` — the table and the offset, with no middleware change |
+
+**One thing this pass could not do, stated rather than glossed.** Chrome's
+window minimum floored the viewport at `innerWidth` 1210, so 305 px could not
+be reached by resizing. What was verified at 1210 is the mechanism criterion
+15 is about: `document.body` does not scroll sideways, and the only
+sideways-scrolling element is the `overflow-x-auto` container — a 2044 px
+table inside a 916 px box. For 305 px itself, `db-rows-305.png` in this
+directory was opened and read rather than trusted: the nav wraps to two rows,
+the Columns pane stacks above the grid, and nothing overflows. That is the
+evidence for that width; it was captured during the walk above, not here.
+
+The remaining criteria stand on the walk above and on its own review, which
+re-ran the 241-column redaction sweep and reproduced the `psql` refusals
+independently.

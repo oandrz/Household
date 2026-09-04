@@ -196,8 +196,10 @@ an account with no password.
   carries, for the same reason. This bullet used to end by promising that one
   unbuilt panel "will cost one new value here when it ships". **It has
   shipped, and this is that value.** The read-only database browse
-  (`admin-db-browse`, 2026-09-04 — code-complete, reviewed, and walked 15 of
-  15, including the write refusal run against the live role itself:
+  (`admin-db-browse`, open as
+  [PR #18](https://github.com/oandrz/Household/pull/18) and not merged,
+  2026-09-04 — code-complete, reviewed, and walked 15 of
+  15, including the write refusal run against the real role rather than a stub:
   `docs/superpowers/plans/2026-09-04-hearth-database-browse-verification.md`)
   needs `DATABASE_READONLY_URL`: a second, `SELECT`-only
   Postgres role, `hearth_readonly`, reached over the connection already open

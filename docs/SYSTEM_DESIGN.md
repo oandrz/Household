@@ -132,6 +132,7 @@ mutation-checked `AdminShell.test.tsx`. See
 `docs/superpowers/plans/2026-09-04-hearth-outbound-inspector-verification.md`.
 
 **The operator's read-only database browse is on branch `admin-db-browse`,
+open as [PR #18](https://github.com/oandrz/Household/pull/18) and not merged,
 2026-09-04 — code-complete, reviewed, and walked: its fifteen-criterion
 browser walk ran the same day and passed 15 of 15**
 (`docs/superpowers/plans/2026-09-04-hearth-database-browse-verification.md`),

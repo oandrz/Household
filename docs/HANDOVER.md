@@ -505,7 +505,9 @@ same day and passed 15 of 15, finding and fixing one real defect — the
 third nav link this feature added pushed the shared operator header 14px
 past a 305px viewport on every `/admin/*` route, fixed with `flex-wrap` on
 `AdminShell.tsx`'s nav. **The read-only database browse is built too, on
-branch `admin-db-browse` (2026-09-04) — code-complete, reviewed, and walked:
+branch `admin-db-browse`, open as
+[PR #18](https://github.com/oandrz/Household/pull/18) and not yet merged
+(2026-09-04) — code-complete, reviewed, and walked:
 its fifteen-criterion walk ran the same day and passed 15 of 15**
 (`docs/superpowers/plans/2026-09-04-hearth-database-browse-verification.md`),
 finding and fixing one defect of its own — two comments explained the
@@ -554,7 +556,8 @@ day and passed 15 of 15, finding and fixing one real defect (the shared
 operator header's nav overflowing at 305px once this feature's third link
 was added).
 **The fourth and last, the read-only database browse, was built the same day**
-(§4, branch `admin-db-browse`, to its own spec
+(§4, branch `admin-db-browse`, open as
+[PR #18](https://github.com/oandrz/Household/pull/18), to its own spec
 `docs/superpowers/specs/2026-09-04-hearth-database-browse-design.md`). It was
 last of the four because it was the only one with an infrastructure dependency
 and much the largest security surface, and the other three existed in part to
