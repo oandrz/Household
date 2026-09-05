@@ -13,7 +13,7 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Out of scope — marked "· not built" by the design itself, or descoped by the product owner; the row says which |
 
-**Where things stand:** 97 of 120 features built or partly built.
+**Where things stand:** 97 of 121 features built or partly built.
 
 > **Recounted 2026-09-02**, when the four unbuilt platform-administration
 > features were given rows (section 9). The count of *built* work does not
@@ -181,6 +181,23 @@ needed them to exist (see "Where things stand" below).
 > move, because a 🟡 becoming a ✅ travels *within* "built or partly built".
 > That is the whole difference, and it is the difference this file exists to
 > record: the operator surface is now not merely complete but verified.
+>
+> **A row added 2026-09-05, before any code — Agreements' locked state.** The
+> product owner settled the question Agreements' spec was blocked on (§6's
+> prose carries it in full): a household with fewer than two owners does not
+> see Agreements at all. What that household sees *instead* is a screen
+> somebody has to design and build, and no row covered it, so section 6 gains
+> **"Agreements locked until a second owner"** as ⬜. The design does not draw
+> it — the design draws Agreements for a two-owner household only — which is
+> the same reason Bills' "Undo a payment" and Goals' "Archive and restore"
+> have rows: a thing that has to exist is on the map whether or not it was
+> drawn. **Recounted rather than incremented**, by the first status symbol in
+> each row's own State cell across all nine sections: 12/1/2/0, 7/1/1/0,
+> 11/8/2/0, 8/2/1/0, 25/3/7/0, **10/0/7/0**, 0/1/1/1, 0/0/0/1, 7/1/0/1 —
+> **80/17/21/3 = 121**, Built + Partial **97**. Only section 6 moved. The
+> denominator goes up and the numerator does not, so "97 of 120" becomes "97
+> of 121": the map got one square more honest, which is the direction it
+> should move in.
 
 > **In production since 2026-08-15**, at <https://oink.mywire.org>. **No count
 > below changes** — deployment is not a design feature, and this file's totals
@@ -792,11 +809,11 @@ flags screen sits in its own cell above, not folded into that number.
 | Household settings | 11 | 8 | 2 | 0 |
 | Overview (home) | 8 | 2 | 1 | 0 |
 | Money | 25 | 3 | 7 | 0 |
-| Marriage | 10 | 0 | 6 | 0 |
+| Marriage | 10 | 0 | 7 | 0 |
 | Family | 0 | 1 | 1 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
 | Platform administration | 7 | 1 | 0 | 1 |
-| **Total** | **80** | **17** | **20** | **3** |
+| **Total** | **80** | **17** | **21** | **3** |
 
 ---
 
@@ -1439,6 +1456,7 @@ for Money.
 | Propose a change — add, edit, remove (modal) | ⬜ |
 | New agreement section (modal) | ⬜ |
 | Version history (modal) | ⬜ |
+| Agreements locked until a second owner | ⬜ *(not in `design/Household Dashboard.dc.html` — the design draws Agreements for a two-owner household only. Added 2026-09-05 when the product owner settled that a household with fewer than two owners does not see the section at all (prose above): what that household sees instead has to be designed and built, so it is a feature, not an absence. It is the whole of Agreements for every household that signs up today, since sign-up provisions exactly one owner)* |
 
 **The first two rows landed in task 11**, both reading off the one `GET
 /retros` fetch `RetrosPage.tsx` already makes — neither adds a request of its
@@ -1479,6 +1497,23 @@ task's brief ever named one, so this is a decision, recorded in
 Agreements are the unusual one: every change goes through **propose → both
 sign**, and history is preserved so a removed agreement can still be seen and
 restored. That is append-only and versioned, not ordinary CRUD.
+
+**Settled 2026-09-05 by the product owner, before Agreements' spec is
+written: a household with fewer than two owners does not see Agreements at
+all.** The signing set is exactly the household's owners —
+`domain.ValidateMembershipChange` refuses `CapMarriage` to a limited member,
+and self-serve sign-up provisions one owner, with a partner arriving later, if
+at all, through an accepted invite. Three answers were put to the owner: let a
+single owner's own signature complete a proposal, let proposals pend until a
+second owner exists, or hide the section until there are two. The third was
+chosen, so **"both sign" means two and never one** — no self-signing path, and
+no proposal can be created that nothing can ever complete. The costs are
+accepted rather than discovered: the designed empty state with starter sets is
+unreachable for a one-owner household, so the four Agreements rows below are
+only reachable once a second owner accepts an invite, and Marriage shows a
+locked section — which the spec must design, because a blank screen with no
+explanation is the failure mode this choice invites. The locked state is not
+one of the rows below and needs one; it is added as ⬜ in the same table.
 
 ## 7 · Family
 
@@ -1636,8 +1671,12 @@ this group is no longer "then": it is next**, and item 6 is where it starts.
 
 5. **Money's remaining 7 ⬜** — 25 of 35 rows are ✅; what is left is the tail,
    not the slice
-6. **Marriage's remaining 6 ⬜** — 10 of 16 are ✅; Agreements is the
-   interesting problem, and it is append-only and versioned, not CRUD.
+6. **Marriage's remaining 7 ⬜** — 10 of 17 are ✅; Agreements is the
+   interesting problem, and it is append-only and versioned, not CRUD. **The
+   signing question that stood in front of it is settled (§6, 2026-09-05):
+   fewer than two owners, no Agreements.** It still wants a spec before a
+   plan — for the locked state that decision creates, and for the versioning
+   shape, which no other feature here has.
    **This is the next work** — a direction, not a dependency, the same kind
    of call the 2026-09-02 reprioritisation was. Nothing in item 5 blocks it
    and nothing in it blocks item 5; what distinguishes them is that Money's
