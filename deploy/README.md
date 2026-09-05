@@ -225,6 +225,16 @@ The API image has no shell. These run from the admin image:
 ```bash
 C="docker compose -f docker-compose.prod.yml"
 
+# Make someone a platform admin. WITHOUT THIS THE ADMIN SURFACE DOES NOT EXIST
+# FOR THEM: requirePlatformAdmin answers 404, not 403, so /admin is
+# indistinguishable from a typo -- including to you, on a box that has just
+# been provisioned. Production is never seeded, so nobody holds this row until
+# someone runs this command. It is the first thing to reach for when "the admin
+# surface didn't deploy".
+$C run --rm admin /app/adminctl grant-platform-admin --email=someone@example.com
+$C run --rm admin /app/adminctl list-platform-admins
+$C run --rm admin /app/adminctl revoke-platform-admin --email=someone@example.com
+
 # Clear a household's lockout without waiting 15 minutes.
 $C run --rm admin /app/adminctl unlock-household --email=someone@example.com
 
