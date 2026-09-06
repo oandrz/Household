@@ -5022,6 +5022,60 @@ no test suite can hold.
   say so in the UI, not only in a code comment** — a household editing an
   unrelated field should not be able to fabricate a number by omission.
 
+### Agreements' fifteen-criterion browser walk (2026-09-06)
+
+- **`make down` does not drop the database volume, so "a freshly seeded
+  household" can be a lie the moment a stack is reused across sessions.**
+  Task 18's own brief is explicit that criterion 1's fixture *is* a freshly
+  seeded, one-owner-plus-pending-invite household — but `make down && make
+  up && make seed` on a volume a previous session had already run `make
+  seed` against (and then accepted the invite in) reseeded on top of the
+  OLD data: `adminctl seed` reported "Christine has already accepted her
+  invite," not a pending one, because `docker compose down` (no `-v`) never
+  touches `hearth-pgdata`. The fix was `docker volume rm
+  hearth_hearth-pgdata` between `down` and the next `up`. This is the same
+  shape as the two-Docker-engines and stale-Vite traps this task's own
+  brief already names as costing previous walks real time — add it to
+  `docs/HANDOVER.md` alongside them: whenever a criterion's own fixture
+  depends on the household being *genuinely* new, drop the volume first,
+  don't trust a re-seed to produce it.
+- **A JS closure captured in one `browser_run_code_unsafe` call does not
+  survive into the next one, but the live Playwright objects it created
+  do.** `globalThis.__foo = ...` set in one call read back as `undefined` in
+  the next (confirmed empirically before relying on it either way) — the
+  harness evaluates each call in a fresh scope. `page.context().browser()
+  .contexts()` and any property written directly onto a `BrowserContext` or
+  `Page` object (e.g. `pageB.__owner = "christine1"`), by contrast, persist
+  perfectly, because those are the same underlying objects the browser
+  process is still holding open. For any multi-call walk driving more than
+  one browser context, tag the objects themselves and re-derive them by
+  that tag each call — never rely on a variable surviving between calls.
+- **Chromium's own automation-controlled pages never report
+  `document.hasFocus() === false`,** even across genuinely separate
+  `BrowserContext`s, a same-context decoy tab brought to the front, and a
+  synthetic `visibilitychange`/`focus` dispatch. This closed off one
+  otherwise-plausible way to reproduce a suspected staleness defect in
+  `ProposeAgreementModal.tsx` live (see the walk's own "Findings, not
+  defects" section in
+  `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md`) —
+  worth knowing before a future walk spends time chasing a
+  `refetchOnWindowFocus` path through Playwright the same way.
+- **A native `<dialog>`'s own Tab-order wraparound is not perfectly
+  seamless in Chromium: the last focusable control inside a modal opened
+  via `showModal()` sends a forward Tab to `document.body` for exactly one
+  keypress before the next Tab correctly lands back on the dialog's first
+  control.** Reproduced in a bare, zero-application-code test page (a
+  `<dialog>` with two `<button>`s and nothing else), so this is the
+  platform's own behaviour, not `Modal.tsx`'s — but it is a real,
+  momentary, visible-focus-ring gap for a keyboard user tabbing forward
+  past the last control in ANY modal in this codebase, since every one of
+  them shares `Modal.tsx`. Outside content stays properly inert throughout
+  (confirmed: a direct `.focus()` call on a real button behind the open
+  dialog was refused), so this is not a trap failure, only a one-frame
+  detour — recorded here as a browser fact worth knowing before assuming a
+  future keyboard-walk finding of "focus briefly left the dialog" is this
+  codebase's own bug rather than Chromium's.
+
 ---
 
 ## Before you call something done

@@ -199,33 +199,47 @@ needed them to exist (see "Where things stand" below).
 > of 121": the map got one square more honest, which is the direction it
 > should move in.
 
-> **Agreements, 2026-09-06 — code-complete and reviewed across eighteen
-> tasks (`915edba`); browser walk not yet run.** Section 6's five ⬜ rows
-> named in the design (Agreements by section, its empty state, Propose,
-> New section, Version history) and the locked-state row added 2026-09-05
-> all move ⬜ → **🟡**, and two rows the design never drew join them as 🟡 —
-> parking a proposal for the next retro, and restoring a removed one from
-> version history — the same treatment Goals' contributions and Accounts'
-> archive/restore rows already have. A ninth row, "'Popular starting
-> points' — tapping a card," is added as ⬜: the design draws the four
-> cards but gives them no `onClick`, and every agreement has to arrive
-> through propose → sign, so this is drawn-but-not-built like the ⌘K chip
-> and the "45 min" retro duration, not a gap. **None of the eight reads
-> ✅.** This file's own legend defines ✅ as built **and verified**, and the
-> feature's fifteen-criterion browser walk is Task 18 of the same plan —
-> it has not run, so every cell that would otherwise read ✅ names that one
-> gap instead and reads 🟡, the same choice the read-only database browse
-> made on 2026-09-04 while its own walk was still outstanding. **Recounted
-> rather than incremented**, by the first status symbol in each row's own
-> State cell across all nine sections: 12/1/2/0, 7/1/1/0, 11/8/2/0, 8/2/1/0,
-> 25/3/7/0, **10/8/2/0**, 0/1/1/1, 0/0/0/1, 7/1/0/1 — **80/25/16/3 = 124**,
-> Built + Partial **105**. Only section 6 moved: eight ⬜ became 🟡 and one
-> ⬜ was added, so the ✅ column does not move, the 🟡 column absorbs all
-> eight, and the denominator rises by one exactly as it did for the
-> locked-state row a day earlier. "97 of 121" becomes **"105 of 124."**
-> This paragraph will be the one to correct, not append to, once Task 18's
-> walk turns these 🟡s to ✅ — the tracker's own rule for a symbol that
-> moves without a code change (see "Households and metrics" above).
+> **Agreements, 2026-09-05 — code-complete and reviewed across eighteen
+> tasks (`915edba`).** Section 6's five ⬜ rows named in the design
+> (Agreements by section, its empty state, Propose, New section, Version
+> history) and the locked-state row added 2026-09-05 all moved ⬜ → 🟡, and
+> two rows the design never drew joined them as 🟡 — parking a proposal for
+> the next retro, and restoring a removed one from version history — the
+> same treatment Goals' contributions and Accounts' archive/restore rows
+> already have. A ninth row, "'Popular starting points' — tapping a card,"
+> was added as ⬜: the design draws the four cards but gives them no
+> `onClick`, and every agreement has to arrive through propose → sign, so
+> this is drawn-but-not-built like the ⌘K chip and the "45 min" retro
+> duration, not a gap.
+>
+> **Corrected here, not appended to — the tracker's own rule for a symbol
+> that moves without a further code change (see "Households and metrics"
+> above): the feature's own fifteen-criterion browser walk, Task 18 of the
+> same plan, has now run and passed, 15 of 15, on 2026-09-06** — recorded in
+> `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md`. No
+> product defect needed a code fix; one genuine Chromium platform behaviour
+> (a native `<dialog>`'s Tab order visits `document.body` for one keypress
+> at its tail before self-correcting) was found and confirmed, via an
+> isolated zero-Hearth-code repro, to be the browser's own, not this
+> feature's — recorded in that file's "Findings, not defects" rather than
+> fixed, since `Modal.tsx` deliberately relies on the platform's native
+> focus trap and every modal in this codebase shares it, not only
+> Agreements'. Criterion 10 (two edit proposals racing the same target) was
+> walked by two paths rather than one, since the brief's own wording could
+> not tell in advance which the running code would take: an interpreted
+> propose-time refusal (the code's actual conflict check, confirmed by
+> reading `agreement_write_repo.go`) and a literal sign-time one (two
+> proposals genuinely coexisting against one target, then one signed out
+> from under the other) — both real, both pass, named separately in the
+> walk record. All eight rows above now read ✅. **Recounted rather than
+> incremented**, by the first status symbol in each row's own State cell
+> across all nine sections: 12/1/2/0, 7/1/1/0, 11/8/2/0, 8/2/1/0, 25/3/7/0,
+> **18/0/2/0**, 0/1/1/1, 0/0/0/1, 7/1/0/1 — **88/17/16/3 = 124**, Built +
+> Partial **105**, unchanged from the moment before this walk ran, since
+> moving eight rows from 🟡 to ✅ moves neither the denominator nor Built +
+> Partial, only which of the two columns each sits in. "105 of 124" reads
+> the same as it did before this correction — the number that changes here
+> is the built-and-*verified* count, 80 → 88, not the headline above.
 
 > **In production since 2026-08-15**, at <https://oink.mywire.org>. **No count
 > below changes** — deployment is not a design feature, and this file's totals
@@ -837,11 +851,11 @@ flags screen sits in its own cell above, not folded into that number.
 | Household settings | 11 | 8 | 2 | 0 |
 | Overview (home) | 8 | 2 | 1 | 0 |
 | Money | 25 | 3 | 7 | 0 |
-| Marriage | 10 | 8 | 2 | 0 |
+| Marriage | 18 | 0 | 2 | 0 |
 | Family | 0 | 1 | 1 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
 | Platform administration | 7 | 1 | 0 | 1 |
-| **Total** | **80** | **25** | **16** | **3** |
+| **Total** | **88** | **17** | **16** | **3** |
 
 ---
 
@@ -1479,14 +1493,14 @@ for Money.
 | Vision — pillars with measures | ✅ *(`PillarCard.tsx`, Vision spec's task 11 — numbered "Pillar 1", "Pillar 2"…, name, description and every measure. A measure with `hasFigure: false` (a linked goal deleted, a link that failed to resolve, or an unrecognised kind) renders its label and no number at all, never "0 of 0" or "0%" — the same "blank the figure and say why" rule Accounts applies when a primary-currency change leaves net worth uncomputable)* |
 | Vision — longer-horizon milestones | ✅ *(`MilestoneGrid.tsx`, Vision spec's task 11 — one card per milestone, in order, with year, title and note; an empty note renders nothing. The dashed "+ Add milestone" tile opens the Edit-vision modal (Vision spec's task 12), the same as the header's own Edit vision button)* |
 | Edit vision (modal) | ✅ *(`VisionModal.tsx`, Vision spec's task 12 — the whole-document editor: theme, a year select offering only the previous/current/next calendar year, description, every pillar's name, description and measures, and every milestone, saved together in one `PUT`. Adds the two fields the design's own modal never drew at all (spec decision 7) — a pillar's own description and a measure editor per pillar (a label, then either a typed current/target pair or a linked-goal picker, never both; switching modes clears the other's inputs rather than leaving a hidden stale value that would still submit). All three of `onEdit`'s call sites open it — the header's Edit vision button, the "+ Add milestone" tile, and the empty state's own call to action, the one every household with no vision yet sees first. A stale `version` (409) latches a one-way conflict banner decided from the response's own error code (RetroModal.tsx's precedent, for the same staleness reason); its only action reloads the year and discards the local draft outright, rather than trying to resume editing in place)* |
-| Agreements by section | 🟡 *(`AgreementSectionCard.tsx` renders each section's name, live count and the `01..N` numbering that runs continuously across sections; an empty section is invisible in the document (decision 8). Every Agreements date label — the proposal card's timestamp, the header's "updated" clause, and Version history's entries — uses `toLocaleDateString`, which renders in the **viewer's** timezone rather than the ISO string's own offset, so a change stamped late at night in Singapore can read as one date to one partner and the next day to another in Indonesia; cosmetic, does not touch signing, recorded rather than fixed — `docs/HANDOVER.md`, "Worth doing when convenient". **Code-complete and reviewed across Tasks 1–16** (`915edba`); the feature's own fifteen-criterion browser walk is Task 18 and has not run, which is the whole of why this reads 🟡 rather than ✅)* |
-| Agreements empty state with starter sets | 🟡 *("Use starter set" seeds the four section labels — Money, Conflict, Home & kids, Us — and **no agreements** (spec decision 17). Every agreement without exception arrives through propose → sign, so "everything on this page is here because you both agreed" stays literally true, with no bulk-signed exception to explain. An empty section is invisible in the document (decision 8), so the screen names the four it just created rather than showing four empty headings. Code-complete and reviewed; browser walk (Task 18) not yet run)* |
-| Propose a change — add, edit, remove (modal) | 🟡 *(`ProposeAgreementModal.tsx`, three shapes behind one submit — add needs a section, edit and remove need a target and its current wording, pre-filled. A target that has moved since the modal opened answers `409 AGREEMENT_CHANGED` without losing what was typed, and the send control stays disabled after the refetch rather than inviting a second identical failure. Code-complete and reviewed; browser walk (Task 18) not yet run)* |
-| New agreement section (modal) | 🟡 *(`NewSectionModal.tsx` — a name field plus five suggestion chips (In-laws & family, Faith & values, Health, Careers, Screens & tech, distinct from the starter set's own four) that **fill** the field rather than submit it — a chip that created the section directly would turn one click into a write nobody got to rename; a duplicate name is refused under the field by the unique-constraint mapping (decision 19), with the typed text kept and the modal still open. Code-complete and reviewed; browser walk (Task 18) not yet run)* |
-| Version history (modal) | 🟡 *(`VersionHistoryModal.tsx` reads the accepted-proposal log already carried on the document the page already fetched — no second request — newest first, exactly the design's "Added #12 …. Agreed by Andreas & Christine."; a signer who no longer resolves is omitted from the name list rather than joined as blank. Each removal's entry offers Restore (decision 18). Code-complete and reviewed; browser walk (Task 18) not yet run)* |
-| Agreements locked until a second owner | 🟡 *(both halves built: a household that has **never** had two owners gets the explanation and an "Invite your partner" deep link into the existing Settings invite flow, and one that **had** two owners keeps its whole document, read-only, with the proposals still listed and named as waiting (decision 3). The write controls are hidden, not disabled — a disabled control that cannot say why is the defect the admin flags screen already carries. Code-complete and reviewed; browser walk (Task 18) not yet run)* |
-| Park a proposal for the next retro (no mockup — see below) | 🟡 *(Discuss moves a proposal to `parked`, where it stays open and answerable, and it appears in a read-only "To discuss" block on the Retros page — decision 7. **No writes into retro tables and no foreign key to a retro row**: the next retro usually does not exist yet, and the block is frontend composition off the same `GET /marriage/agreements` document, sharing one query key so agreeing in either place refreshes both. The block lists parked proposals only, and offers Agree but neither Discuss nor Withdraw — a reminder of what the retro should cover, not a second editing surface. Code-complete and reviewed; browser walk (Task 18) not yet run)* |
-| Restore a removed agreement from version history (no mockup — see below) | 🟡 *(the history entry for a removal offers Restore, which opens Propose in add mode pre-filled with the removed wording — an ordinary proposal every owner still has to agree, decision 18. Anything else would let one owner put back alone what two owners agreed to take out. It works because nothing is ever deleted: a removal is a stamp on the row, decision 9. Code-complete and reviewed; browser walk (Task 18) not yet run)* |
+| Agreements by section | ✅ *(`AgreementSectionCard.tsx` renders each section's name, live count and the `01..N` numbering that runs continuously across sections; an empty section is invisible in the document (decision 8). Every Agreements date label — the proposal card's timestamp, the header's "updated" clause, and Version history's entries — uses `toLocaleDateString`, which renders in the **viewer's** timezone rather than the ISO string's own offset, so a change stamped late at night in Singapore can read as one date to one partner and the next day to another in Indonesia; cosmetic, does not touch signing, recorded rather than fixed — `docs/HANDOVER.md`, "Worth doing when convenient", and demonstrated with real before/after strings in the walk below. **Code-complete and reviewed across Tasks 1–16** (`915edba`); **the feature's own fifteen-criterion browser walk (Task 18) has now run and passed, 15 of 15** (2026-09-06), recorded in `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md` — criterion 7 read this row's own numbering, count and header `v{n}` together in one script and confirmed all three move in step)* |
+| Agreements empty state with starter sets | ✅ *("Use starter set" seeds the four section labels — Money, Conflict, Home & kids, Us — and **no agreements** (spec decision 17). Every agreement without exception arrives through propose → sign, so "everything on this page is here because you both agreed" stays literally true, with no bulk-signed exception to explain. An empty section is invisible in the document (decision 8), so the screen names the four it just created rather than showing four empty headings. Code-complete and reviewed; **the feature's own fifteen-criterion browser walk (Task 18) has now run and passed, 15 of 15** (2026-09-06) — criterion 4 confirmed the screen genuinely changes on click and the propose picker offers all four, in `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md`)* |
+| Propose a change — add, edit, remove (modal) | ✅ *(`ProposeAgreementModal.tsx`, three shapes behind one submit — add needs a section, edit and remove need a target and its current wording, pre-filled. A target that has moved since the modal opened answers `409 AGREEMENT_CHANGED` without losing what was typed, and the send control stays disabled after the refetch rather than inviting a second identical failure. Code-complete and reviewed; **the feature's own fifteen-criterion browser walk (Task 18) has now run and passed, 15 of 15** (2026-09-06) — criterion 10 walked the conflict two ways, an interpreted propose-time race and a literal sign-time one, both against a real second signed-in owner, named in full in `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md`)* |
+| New agreement section (modal) | ✅ *(`NewSectionModal.tsx` — a name field plus five suggestion chips (In-laws & family, Faith & values, Health, Careers, Screens & tech, distinct from the starter set's own four) that **fill** the field rather than submit it — a chip that created the section directly would turn one click into a write nobody got to rename; a duplicate name is refused under the field by the unique-constraint mapping (decision 19), with the typed text kept and the modal still open. Code-complete and reviewed; **the feature's own fifteen-criterion browser walk (Task 18) has now run and passed, 15 of 15** (2026-09-06) — criterion 13 confirmed the duplicate-name refusal and surviving typed text, and the walk separately confirmed a successful creation hands off cleanly into Propose with no stacked dialog, in `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md`)* |
+| Version history (modal) | ✅ *(`VersionHistoryModal.tsx` reads the accepted-proposal log already carried on the document the page already fetched — no second request — newest first, exactly the design's "Added #12 …. Agreed by Andreas & Christine."; a signer who no longer resolves is omitted from the name list rather than joined as blank. Each removal's entry offers Restore (decision 18). Code-complete and reviewed; **the feature's own fifteen-criterion browser walk (Task 18) has now run and passed, 15 of 15** (2026-09-06) — criterion 11 read a real removed entry and its Restore handoff into Propose, in `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md`)* |
+| Agreements locked until a second owner | ✅ *(both halves built: a household that has **never** had two owners gets the explanation and an "Invite your partner" deep link into the existing Settings invite flow, and one that **had** two owners keeps its whole document, read-only, with the proposals still listed and named as waiting (decision 3). The write controls are hidden, not disabled — a disabled control that cannot say why is the defect the admin flags screen already carries. Code-complete and reviewed; **the feature's own fifteen-criterion browser walk (Task 18) has now run and passed, 15 of 15** (2026-09-06) — criteria 1-3 walked the never-had-two-owners half (including the `?invite=maybe` deep-link guard) and criterion 12 walked the had-two-owners half (proposals still listed, zero buttons on the card, not merely disabled), both against a real database wiped clean first so criterion 1's own fixture was genuine, in `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md`)* |
+| Park a proposal for the next retro (no mockup — see below) | ✅ *(Discuss moves a proposal to `parked`, where it stays open and answerable, and it appears in a read-only "To discuss" block on the Retros page — decision 7. **No writes into retro tables and no foreign key to a retro row**: the next retro usually does not exist yet, and the block is frontend composition off the same `GET /marriage/agreements` document, sharing one query key so agreeing in either place refreshes both. The block lists parked proposals only, and offers Agree but neither Discuss nor Withdraw — a reminder of what the retro should cover, not a second editing surface. Code-complete and reviewed; **the feature's own fifteen-criterion browser walk (Task 18) has now run and passed, 15 of 15** (2026-09-06) — criteria 8 and 9 walked this live, together, on a household that genuinely had never started a retro yet, with a real park note typed rather than left blank, and confirmed both Agreements and Retros reflect an Agree with no manual reload, in `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md`)* |
+| Restore a removed agreement from version history (no mockup — see below) | ✅ *(the history entry for a removal offers Restore, which opens Propose in add mode pre-filled with the removed wording — an ordinary proposal every owner still has to agree, decision 18. Anything else would let one owner put back alone what two owners agreed to take out. It works because nothing is ever deleted: a removal is a stamp on the row, decision 9. Code-complete and reviewed; **the feature's own fifteen-criterion browser walk (Task 18) has now run and passed, 15 of 15** (2026-09-06) — criterion 11 proposed a remove, agreed it, opened Version history, and clicked Restore: exactly one dialog was open at any time, seeded correctly, focus moved inside it, and the now-empty section was genuinely offered by the picker, in `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md`)* |
 | "Popular starting points" — tapping a card | ⬜ *(drawn, deliberately not built. The four cards ship as read-only illustration on the first empty state: the design draws hover styling, gives them no `onClick`, and nothing says what tapping one would propose — and every agreement has to arrive through propose → sign, so a card that added one silently would be the one exception to the promise this page makes. Same treatment as the ⌘K chip and the "45 min" retro duration)* |
 
 **The first two rows landed in task 11**, both reading off the one `GET
@@ -1552,11 +1566,19 @@ eighteen tasks** (`915edba`): the four tables above, the port, the service,
 the seven routes and both screens, including the two rows the design never
 drew — parking a proposal for the next retro and restoring a removed one from
 history. The locked-state row above and every other Agreements row now name
-both of their halves, where the design has more than one to name. **None of
-them reads ✅** — the feature's own fifteen-criterion browser walk is Task 18
-and has not run yet, and this file's legend makes ✅ mean built **and**
-verified, not built alone — so they read 🟡, each cell naming the same single
-gap, until that walk passes.
+both of their halves, where the design has more than one to name. **The
+feature's own fifteen-criterion browser walk has now run and passed, 15 of
+15** (2026-09-06), the same bar every other feature in this file is held to
+before its rows read ✅ rather than 🟡 — this file's legend makes ✅ mean
+built **and** verified, not built alone, and every row above now reads ✅
+because both halves are now true. `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md`
+has the full record, including two criteria (2 and 3) walked out of their
+brief's own numeric order for a dependency reason named there, and criterion
+10 walked by two separate paths since the code's own conflict check could
+answer either way. No product defect needed a code fix; the walk's one real
+finding is a Chromium platform behaviour, not application code, and is named
+in that file's own "Findings, not defects" rather than folded into any row
+above.
 
 ## 7 · Family
 
@@ -1662,19 +1684,18 @@ the interesting one:** it is append-only and versioned rather than CRUD,
 which makes it a design question before it is an implementation one. Items 5,
 7 and 8 follow it in the same dependency order they always had.
 
-**Item 6 is settled, 2026-09-06 — code-complete and reviewed, walk pending.**
+**Item 6 is done, 2026-09-06 — built, reviewed and walked.**
 Agreements turned out to be exactly the design question this section
 predicted: its own spec
 (`docs/superpowers/specs/2026-09-05-hearth-agreements-design.md`) settled it
-in 22 numbered decisions, and eighteen tasks later the four tables, the
-service, the seven routes and both screens are built and reviewed (`915edba`).
-It reads 🟡 rather than ✅ in the table above for one reason only — the
-feature's own fifteen-criterion browser walk is Task 18 and has not run —
-and item 6 needs no further design or planning work either way: its two
-remaining ⬜ rows (Vision's marriage-duration row and "Popular starting
-points") are permanent decisions, not open work, so item 6 will never reach
-"every row ✅" the way section 9's items did even once the walk passes.
-**So item 7, Family, is where the next spec opens.**
+in 22 numbered decisions, eighteen tasks later the four tables, the
+service, the seven routes and both screens were built and reviewed
+(`915edba`), and Task 18's own fifteen-criterion browser walk then ran and
+passed, 15 of 15, on 2026-09-06 — every row above now reads ✅. Item 6 will
+never reach "every row ✅ in the whole section" the way section 9's items
+did, though: its two remaining ⬜ rows (Vision's marriage-duration row and
+"Popular starting points") are permanent, drawn-but-not-built decisions,
+not open work. **So item 7, Family, is where the next spec opens.**
 
 1. ~~**Admin audit screen**~~ — **removed from the roadmap 2026-09-02.**
    Built and walked that day, then descoped by the product owner as not
@@ -1728,14 +1749,15 @@ this group is no longer "then": it is next**, and item 6 is where it starts.
 
 5. **Money's remaining 7 ⬜** — 25 of 35 rows are ✅; what is left is the tail,
    not the slice
-6. ~~**Marriage's remaining ⬜**~~ — **code-complete and reviewed, 2026-09-06**
-   (`915edba`, eighteen tasks): Agreements' four tables, service, seven
-   routes and both screens, to its own spec. Of Marriage's now twenty rows,
-   10 are ✅ and 8 are 🟡, each naming the one gap a walk closes — Task 18,
-   not yet run. The 2 remaining ⬜ (Vision's marriage-duration row,
-   "Popular starting points") are permanent design decisions, not open
-   work, unlike items 1–4 above this item never reaches "every row ✅."
-   Numbering kept, as for items 1–4.
+6. ~~**Marriage's remaining ⬜**~~ — **built, reviewed and walked, 2026-09-06**
+   (`915edba`, eighteen tasks, walk in
+   `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md`,
+   15 of 15): Agreements' four tables, service, seven routes and both
+   screens, to its own spec. Of Marriage's now twenty rows, 18 are ✅. The
+   2 remaining ⬜ (Vision's marriage-duration row, "Popular starting
+   points") are permanent design decisions, not open work, unlike items
+   1–4 above this item never reaches "every row ✅." Numbering kept, as for
+   items 1–4.
 7. **Family** — the only genuinely untouched area. Calendar needs Bills for the
    bill dates on the month grid, and Bills is ✅
 8. **Overview** — 8 of 11 already ✅ because it grew alongside Money; what
