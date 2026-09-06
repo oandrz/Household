@@ -361,6 +361,19 @@ silently wins host ports 5173/8080/8025 out from under colima's stack, so
 browser and every `curl` still talk to whatever Docker Desktop published —
 check `docker ps` on both engines before concluding the code is broken.
 
+**`make down` does not drop the Postgres volume.** It stops the containers but
+leaves `hearth-pgdata` in place, so a re-seed after `make down && make up` can
+silently carry forward old membership rows — a household that should start as
+one owner plus a pending invite instead comes back with the invite already
+accepted. Drop the volume explicitly for a truly fresh seed:
+
+```bash
+docker volume rm hearth_hearth-pgdata
+```
+
+Task 18's Agreements walk lost time to this before recognising the seeded
+fixture was stale data, not a product regression.
+
 **Host edits to `web/src/**` do not reliably reach the running dev server.**
 Vite runs inside `hearth-web-1` against a bind mount, and chokidar misses the
 host's filesystem events, so a change simply never arrives: the browser shows
