@@ -57,6 +57,7 @@ type Deps struct {
 	Bills        *usecase.BillService
 	Retros       *usecase.RetroService
 	Visions      *usecase.VisionService
+	Agreements   *usecase.AgreementService
 	// Telegram is nil when no bot is configured. The route checks for nil
 	// rather than being conditionally registered, so the router's shape does
 	// not change with configuration and every test builds the same tree.
@@ -369,6 +370,7 @@ func NewRouter(deps Deps) http.Handler {
 				m.Get("/retros", handleListRetros(deps))
 				m.Get("/retros/{month}", handleGetRetro(deps))
 				m.Get("/marriage/vision", handleGetVision(deps))
+				m.Get("/marriage/agreements", handleGetAgreements(deps))
 
 				// Every write joins its own CSRF sub-group, the same shape
 				// this file already uses for goals and bills above: the two
