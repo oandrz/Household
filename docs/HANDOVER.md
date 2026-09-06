@@ -109,7 +109,7 @@ test driving the three transactions write routes without a CSRF token.
 | 1 — Household & identity | Sign-in, magic link, invite acceptance, lockout, members, roles, capabilities, spaces, Settings | **Done** |
 | — Self-serve sign-up | Sign-up, household provisioning, an ISO 4217 currency allowlist and list endpoint, `adminctl prune`, a per-IP rate limiter | **Done, browser walk 15/15** (2026-07-30) |
 | 2 — Money | **Accounts**: manual entry, net worth, assets/liabilities breakdown, archive and restore — **done, browser walk 15/15**. **Transactions**: ledger, categories, filters, keyset paging, month-to-date spend — **done, browser walk 15/15**. **Budget**: envelope per category with pace, empty state and templates, Edit-budget modal with category create/rename/archive, History modal and month picker — **done, browser walk 15/15** (2026-07-31, two defects found at criterion 9 and fixed mid-walk; see `docs/superpowers/plans/2026-07-30-hearth-budget-verification.md`). **Goals**: savings targets whose progress is a contributions ledger (not an account balance), the New/Edit goal modal, contributions add/delete/list by source, the Monthly contributions card, and Budget's own manual rollover into a goal — **done, browser walk 15/15** (2026-08-01, one defect found at criterion 12 and fixed mid-walk: archive and restore shipped with no way to *archive* — every layer existed and no screen called `useGoals.archiveGoal`, so "Show archived" and every Restore button led out of a state no household could enter, `82453ff`; see `docs/superpowers/plans/2026-08-01-hearth-goals-verification.md` and `docs/LEARNING.md` pattern 15). **Bills**: recurring bills on a one-off/monthly/quarterly/yearly cadence, Mark paid writing a real expense transaction and its undo reversing all three writes, archive and restore, a subscriptions rollup — **done, browser walk 15/15** (2026-08-10, one defect found at criterion 14 and swept for the class rather than fixed as one instance: `BillsPage.tsx` answered a limited member's routine "not the owner" 403 with the same red alert a genuine server failure gets, where sibling `GoalsPage.tsx` already distinguishes the two — and the identical gap turned out to be sitting in `BudgetPage.tsx` and `TransactionsPage.tsx` too, fixed the same walk; see `docs/superpowers/plans/2026-08-09-hearth-bills-verification.md` and `docs/LEARNING.md` pattern 1). Accounts, Transactions, Budget, Goals, Bills all built and walked; **slice 2 (Money) is done** | **Done** |
-| 3 — Marriage | Retros, Vision, Agreements | **Retros**: code-complete and reviewed clean across fifteen code tasks, `docs/FEATURE_TRACKER.md`'s Marriage rows updated — **its own browser walk has run and passed, 15 of 15** (2026-08-18, Task 17), recorded in `docs/superpowers/plans/2026-08-16-hearth-retros-verification.md`. **Vision**: real end to end — `VisionPage.tsx` (task 11 of a 15-task plan) renders the theme, pillars and milestones `useVision` exposes, and `VisionModal.tsx` (task 12) is the whole-document editor all three of its entry points now open (the header's Edit vision button, "+ Add milestone" and the empty state's own call to action), so a household can set a year's vision, not only see it. **Vision's own browser walk (task 15) has run and passed, 15 of 15** (2026-08-29), recorded in `docs/superpowers/plans/2026-08-28-hearth-vision-verification.md`; no product defect needed a code fix, and one latent defect the final whole-branch review re-classified out of "accepted trade-off" is recorded rather than fixed here — editing a vision whose linked goal was deleted resets that measure to a typed `0 of 1`, dormant only because Goals has no `DELETE` route to reach it through the product, so the fix belongs to whoever builds that route. Merged as `6c48f6f`. **Agreements: not started — Marriage's last feature.** It was the next work until 2026-09-02, when the product owner put the remaining platform-administration features ahead of all household work (§4 and `docs/FEATURE_TRACKER.md`'s "Suggested order" carry the reason and the cost); **all four of those shipped by 2026-09-04, so it is the next work again.** The question it was blocked on — what "both sign" means in a household with one owner — is **settled 2026-09-05: fewer than two owners, no Agreements** (§4). |
+| 3 — Marriage | Retros, Vision, Agreements | **Retros**: code-complete and reviewed clean across fifteen code tasks, `docs/FEATURE_TRACKER.md`'s Marriage rows updated — **its own browser walk has run and passed, 15 of 15** (2026-08-18, Task 17), recorded in `docs/superpowers/plans/2026-08-16-hearth-retros-verification.md`. **Vision**: real end to end — `VisionPage.tsx` (task 11 of a 15-task plan) renders the theme, pillars and milestones `useVision` exposes, and `VisionModal.tsx` (task 12) is the whole-document editor all three of its entry points now open (the header's Edit vision button, "+ Add milestone" and the empty state's own call to action), so a household can set a year's vision, not only see it. **Vision's own browser walk (task 15) has run and passed, 15 of 15** (2026-08-29), recorded in `docs/superpowers/plans/2026-08-28-hearth-vision-verification.md`; no product defect needed a code fix, and one latent defect the final whole-branch review re-classified out of "accepted trade-off" is recorded rather than fixed here — editing a vision whose linked goal was deleted resets that measure to a typed `0 of 1`, dormant only because Goals has no `DELETE` route to reach it through the product, so the fix belongs to whoever builds that route. Merged as `6c48f6f`. **Agreements, Marriage's last feature, is code-complete and reviewed across eighteen tasks** (`915edba`), on branch `agreements-spec`: four tables (`agreement_sections`, `agreement_proposals`, `agreements`, `agreement_signatures`, the last two naming each other in a cycle closed by an `ALTER TABLE`), `AgreementRepository` and `AgreementService`, seven routes joining Retros' and Vision's own route group, and the frontend — `AgreementsPage.tsx`, its three modals, and the read-only "To discuss" block `RetrosPage.tsx` now mounts unconditionally. The propose → sign lifecycle is the first flow in this product with two authors and a gap in time between them: every change needs every **current** owner's signature (decision 4), the proposer signs implicitly in the same transaction that writes the proposal (decision 5), and signing locks the target agreement row, not the proposal (decision 12) — see `docs/SYSTEM_DESIGN.md` §5. Nothing is ever deleted (decision 9): a removal is a stamp, and Restore is an ordinary add proposal pre-filled with the removed wording (decision 18). It was blocked until 2026-09-05 on what "both sign" means in a household with one owner — **settled: fewer than two owners, no Agreements** — and the spec written the same day carries 22 numbered decisions in full. **What remains is the walk**: its own fifteen-criterion browser check is a separate task and has not run, so `docs/FEATURE_TRACKER.md`'s Agreements rows read 🟡, not ✅, until it does — **slice 3 (Marriage) closes when it passes.** |
 | 4 — Family | Calendar | Not started — its own dependency on Bills (bill dates on the month grid) is now satisfied |
 | 5 — Overview | Read-only aggregation across 2–4 | **Interim page built** (2026-08-01, grown 2026-08-10, 2026-08-16) — `/` carries five of the design's **seven** cards (counted off `design/Household Dashboard.dc.html`'s own Overview screen — the money row of four, Marriage's "Next retro", "This week" and "Vision 2026"; its header "+ Add" is a button, not a card) that Money and Marriage can supply (net worth, this month's budget, goals on track, the next bill due, and — added by Retros — the next retro with its open action count), a setup checklist and a four-entry "+ Add" (Transaction, Account, Savings goal, Bill). The M2 walk on the first two cards and the two-entry menu ran **14 of 14**, one real defect found and fixed mid-walk; the goals card and its menu entry were covered by Goals' own walk at its criterion 11 (2026-08-01); the next-bill card by Bills' own Task 18 walk. **The next-retro card is new since and has now been checked for overflow, not for content** — Retros' own Task 17 walk (2026-08-18, 15/15) verified it at all four widths (criterion 15: 305/305, 360/360, 768/768, 1440/1440, no overflow), but unlike Goals' criterion 11 and Bills' Task 18 walk, no criterion in Task 17 exercised the card's own figures — `openActionCount` was already pinned by its own fix and test beforehand, not by this walk. **Vision's own two surfaces shipped 2026-08-29** (Vision task 13): the `Vision 2026` card (`VisionCard.tsx`, one line per pillar showing that pillar's first measure with live figures) and the Vision check-in strip inside `NextRetroCard.tsx`, both covered by Vision's own 15/15 walk — so `/` now carries **six** of the seven, not five. The one remaining card ("This week" agenda) needs Family; the page grows into the designed one rather than being replaced |
 
@@ -629,9 +629,9 @@ there are two) the third was chosen, so "both sign" means two and never one.
 The two accepted costs are named in `docs/FEATURE_TRACKER.md` §6 rather than
 left to be discovered: the designed empty state with starter sets is
 unreachable for a one-owner household, and Marriage shows a locked section
-that the spec must design — which is now its own ⬜ row, "Agreements locked
-until a second owner", because for every household that signs up today it is
-the whole of Agreements. The reasoning behind the question stands: `domain.ValidateMembershipChange` refuses
+that the spec must design — which entered the tracker that day as its own
+⬜ row, "Agreements locked until a second owner", because for every household
+that signs up today it is the whole of Agreements. The reasoning behind the question stands: `domain.ValidateMembershipChange` refuses
 `CapMarriage` to a limited member, so the signing set for any agreement is
 exactly the household's owners — and self-serve sign-up provisions exactly
 one owner per household, with a partner arriving later, if at all, only
@@ -639,6 +639,25 @@ through an accepted invite. A design that requires two signatures has
 nothing to compare the first one against until a second owner exists — which
 is exactly why the screen a one-owner household sees is a feature to build
 rather than a case to handle.
+
+**Agreements is code-complete, 2026-09-06 — Marriage's last feature is
+finished, not just unblocked.** The spec settled above was written the same
+day, in 22 numbered decisions
+(`docs/superpowers/specs/2026-09-05-hearth-agreements-design.md`), and
+eighteen tasks later the four tables, `AgreementRepository`,
+`AgreementService`, all seven routes and both screens (`AgreementsPage.tsx`
+and the "To discuss" block on Retros) are built and reviewed clean (`915edba`
+on `agreements-spec`). `docs/FEATURE_TRACKER.md`'s Agreements rows carry the
+locked state's both halves, the propose → sign lifecycle, and two rows the
+design never drew — parking a proposal for the next retro, restoring a
+removed one from history — each reading 🟡 rather than ✅ for one reason: the
+feature's own fifteen-criterion browser walk is a separate task and has not
+run. **What remains on Marriage is that walk, and slice 3 closes when it
+passes.** Nothing in it needs more design or a further conversation with the
+product owner — the two rows still ⬜ (Vision's marriage-duration row, the
+"Popular starting points" cards) are permanent decisions, not open work.
+`docs/FEATURE_TRACKER.md`'s "Suggested order" reflects this: item 6 needs no
+further build, and **item 7, Family, is where the next spec opens.**
 
 Once Retros' walk closes it out, the production deployment remains the other
 settled item: ten of twelve criteria pass, backups run nightly and the
@@ -1133,6 +1152,20 @@ by the same index a name lookup uses):
   itself is what keeps this safe on the current box, but the code is one
   misconfigured proxy away from being wrong. Open an issue rather than
   swapping it here -- it is not part of this branch's scope.
+- **Agreements' date labels render in the viewer's timezone, not the
+  timestamp's own offset.** `agreementDateLabel`/`historyDateLabel`
+  (`web/src/features/marriage/agreementCopy.ts`) both call
+  `toLocaleDateString` on the browser's local clock. A proposal or a
+  signature stamped at, say, 23:30 in Singapore reads as one calendar date
+  on the proposer's own screen and the next day's on a partner's, if that
+  partner is somewhere with an earlier local time — and this design's own
+  household is Singapore with family in Indonesia, so it is a real everyday
+  case, not a hypothetical one. It never touches the signing logic itself
+  (`previous_body`, the lock, the accepted timestamp are all still exact),
+  only what a household is shown, so it is recorded here as a known limit
+  rather than fixed in this branch — verbatim brief code, a spec-level call
+  rather than an implementation defect, worth a look whenever Agreements is
+  next open.
 
 ### Before this is deployed anywhere real
 

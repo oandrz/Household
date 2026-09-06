@@ -1359,6 +1359,70 @@ person to ask whether the test could ever have gone red in the first place.
   file, "reads the raw error, never the filtered one" describes the
   program, and only the second one can be broken on purpose.
 
+- **Agreements produced six more instances of this pattern on one branch —
+  the highest count for any single feature so far — and every one was
+  caught before merge, three by review reading rather than by a test going
+  red.** A repository test built a fixture in one household and never
+  proved a second household's row was unreachable, the gap ten sibling
+  repositories in this same package already close the same way
+  (`bill_repo_test.go:599`); the brief omitted it and the gap entered the
+  fix loop as a spec requirement, not a nice-to-have. A starvation test
+  written to prove the lock decision 12 exists used only an `add` proposal,
+  so it never reached `LockAgreementTarget` at all — the whole property the
+  task existed to pin stayed unobserved while the suite stayed green,
+  discovered by asking what row the test's own fixture actually touched,
+  not by a mutation going the wrong way. The same task's suite stayed green
+  with `remove()` deleted from the `ProposalRemove` branch — nothing had
+  ever driven an edit or a remove through to completion — which is the
+  exact half of decision 9 ("a household that agreed to one edit ends up
+  with two live agreements") a defect there would produce. A route-guard
+  walk (`TestOwnerOnlyRoutesRejectALimitedMember`) proved *a* guard refused
+  a limited member on every marriage-group route, never that `requireOwner`
+  specifically did, because no fixture can hold `CapMarriage` as a limited
+  member without also refusing at `requireCapability` first — the identical
+  shape this pattern's own accounts-spec entry above names for a different
+  route group, recurring here because the fixture that would isolate the
+  second guard already existed for the GET and nobody had pointed it at a
+  write. Dropping `canAgree` from `everyoneAgreed`'s conjunction left all
+  twenty-six existing tests green, because every one of them constructed a
+  proposal where the awaiting list was already non-empty; the one case a
+  locked household's awaiting list has already emptied — where the
+  sentence must read "Agree once more" with no button under it — had never
+  been built. And a chip that fills the new-section field rather than
+  submitting it had its own first mutation come back **green**: the stale
+  closure the mutation exposed fires the write with `name=""`, which
+  synchronously disables Create before the test's second click, so exactly
+  one `POST` lands whether the code is correct or broken, and a test that
+  only counts requests cannot tell those two worlds apart. **None of these
+  six needed a new kind of check, only the same one aimed at what the code
+  actually does under the condition the test claims to cover** — a fixture
+  that reaches the lock the test is about, a write that runs to completion
+  rather than stopping at its first statement, a caller that holds the
+  narrower guard without the broader one already refusing it, a starting
+  state where the property being tested has already become true, and an
+  assertion on the value that changed rather than on how many times
+  something happened.
+- **Count-based assertions cannot distinguish identity, which is the
+  sharper lesson inside the chip instance above.** Asserting *how many*
+  `POST`s a chip click produced passed on both the correct code and the
+  code that silently posted an empty name — the mutated path still fired
+  exactly once. Asserting the *posted names* (`expected [''] to deeply
+  equal ['Faith & values']`) caught it, and that was the fix taken. Review
+  went one step further and found even that assertion catches this
+  mutation through a side effect of its particular shape rather than
+  through the property it claims to guard: the stale closure happens to
+  post an empty string, which is what the names assertion sees, but a chip
+  that posted the *correct* name via some other broken path would still
+  pass both the count and the names check. What would actually discriminate
+  any "chip submits" defect is asserting the Create button stays
+  **enabled** immediately after a chip click — shipped code leaves it
+  enabled, the mutation disables it synchronously, and that is the one
+  observable the bug and only the bug produces. **When a count goes green
+  under a mutation, the next fix is not "assert a bigger count," it is
+  "assert the identity of what happened" — and even then, ask whether the
+  assertion proves the property or merely happens to catch this one
+  mutation's particular shape.**
+
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
 a different reason than the one you meant to prove, that is not yet proof
@@ -1384,6 +1448,26 @@ never mounted, and a reordering of two statements that do not interact.
   the fallback path ever ran.
 - Fixing that exposed a second bug that had been unreachable: the dialog never
   stretched to the viewport, so there was **no backdrop area to click**.
+- **A close-one-open-another dialog handoff is unexercised in either
+  direction under jsdom, and this project has already shipped a modal that
+  threw on every single open in production while all five of its tests
+  passed — the entry directly above.** jsdom's `HTMLDialogElement` has
+  neither `showModal()` nor `close()`, so a test that swaps
+  `NewSectionModal` for `ProposeAgreementModal` (Agreements, "Create & add
+  first agreement") or `VersionHistoryModal` for `ProposeAgreementModal`
+  (Restore) can assert the state transition — one modal's open flag flips
+  to `false`, the other's to `true` — without ever exercising a real
+  `close()` call, the focus it is supposed to restore to the trigger that
+  opened the first dialog, or the focus-trap entry the second dialog's own
+  `showModal()` is supposed to perform. Both handoffs exist in Agreements,
+  and both were closed by clicking through them in a real browser rather
+  than trusted to the suite: Restore's own task drove it in two independent
+  browser tools after creating a genuine `remove` entry through propose and
+  agree, confirming Version History closed instantly and Propose opened
+  seeded per decision 18. **When a component swaps one `<dialog>` for
+  another on the same trigger, the suite proves the state change and a real
+  browser has to prove the handoff** — jsdom cannot fail this test in
+  either direction, which means it cannot pass it either.
 - The 401 redirect handler bounced every invitee off the invite screen. Green
   suite — because the handler defaults to null and every test installed a stub
   instead of the real wiring.
@@ -1851,6 +1935,24 @@ time a reviewer found it by building a probe rather than reading the diff.
   through both sides of the same field, not by a failing test; fixed with a
   `null -> ""` translation on the update path only, and a dedicated test now
   asserts the PATCH body itself carries `""`.
+
+- **A proposal without its own proposer's signature is one nobody has agreed
+  to, including its author — Agreements, decision 5.** The design's pending
+  card reads "needs Christine," never "needs both," so proposing has to *be*
+  agreeing: `CreateProposal` writes `agreement_proposals` **and**
+  `agreement_signatures` for the proposer in one transaction, not a service
+  calling the repository twice. Splitting it into two calls would put a
+  window between them where a proposal exists that nothing has signed, and
+  the card would render it exactly the same as one that had — the awaiting
+  list is computed off the owners who have *not* signed, so a proposal with
+  zero signatures reads no differently from one with one. Nothing exercises
+  this by going red on a torn write, the same gap the repository test
+  catalogue below names for `CreateSection`/`CreateSections`: no test in this
+  codebase kills a connection mid-transaction, so the property rests on
+  `pgx.BeginFunc`'s own commit-or-rollback guarantee being trusted rather
+  than proven per feature. Another instance for this pattern's own list, and
+  the reason the write is one repository method running one transaction
+  rather than a service orchestrating two.
 
 - **A backup that restores every table and none of the roles — database
   browse, 2026-09-04.** Written before anyone has tripped it, because the day
@@ -2937,6 +3039,32 @@ case and no coordinate system to assert legibility in for the second.
   fix is exactly the shape that leaves it behind. See also pattern 1: this
   is a class fix that seeded the next instance of its own class.
 
+- **A twelfth instance, Agreements, and the ninth instance's own lesson
+  proving itself needed twice more on the same feature.** Task 7's guard-walk
+  floor for the unauthenticated-route matrix was believed to read 63; the
+  implementer re-measured from the walk's own `t.Logf` rather than doing
+  arithmetic on the number in the test file and got 69 — three protected
+  surfaces (admin households and metrics, the outbound message inspector, the
+  read-only database browse) had landed on this branch's ancestry since the
+  floor was last set, and nobody had gone back to raise it. Task 8 repeated
+  the shape three floors in the same task: unauthenticated 69→75, CSRF
+  44→50, and `TestOwnerOnlyRoutesRejectALimitedMember` 10→45 — the last one
+  sharper than the other two, because 10 was never a real count to begin
+  with. It counts every mutating non-admin, non-allowlisted route in the
+  whole router, not just this feature's six, so the jump decomposes as 6
+  points this task's own routes added and **29 points of drift that had
+  already happened before this task started**, sitting behind a floor
+  comment that read as though the whole 35-point rise were new. Review
+  reconciled all three independently against `router.go` itself rather than
+  accepting the re-measurement, and the number both sides landed on matched
+  exactly — the floor is not evidence until someone counts the routes it
+  claims to bound, whichever side is doing the counting. **The floor is the
+  walk's own re-measured output, never a number to nudge forward by however
+  much the latest task seems to have added** — the ninth instance's own
+  closing sentence, needed twice more within one feature because a route
+  landing on a branch between the floor's last measurement and its next one
+  is invisible to arithmetic and visible only to a re-run.
+
 **Treat a citation the way you'd treat a test assertion: something the next
 reader can verify against the thing it names, not something to trust because
 it reads confidently.** Nearly every instance above cost nothing to
@@ -3478,6 +3606,27 @@ derivation.**
   `ctid` for a table that has none — arbitrary but stable within one read,
   and honest about being arbitrary. Pattern 2 carries the mutation-check
   story; this is the mechanism.
+- **A row lock only serialises the row it takes — Agreements, decision 12,
+  found in design review, not by a test.** `Sign`'s first sketch locked the
+  `agreement_proposals` row `FOR UPDATE`, which orders two signatures on
+  *that proposal* and nothing else. Two different proposals against the
+  *same* agreement — one editing it, one removing it — each pass their own
+  `previous_body` check independently and each apply: a household that
+  agreed to one edit ends up with two live agreements, or a removal recorded
+  against wording nobody actually agreed to remove. The lock has to be on
+  the target `agreements` row instead, so a second proposal against the same
+  agreement blocks behind the first and re-reads `previous_body` after it
+  wakes, inside the same transaction that re-counts current owners — and
+  the fix is a doc comment on `ports.go` naming the earlier, wrong sketch
+  explicitly, since the mistake is exactly the shape a future editor would
+  reach for by habit ("lock the row you're about to update," which is the
+  proposal, not the agreement it points at). No test in this codebase drives
+  real concurrent database load, which is the same reason the pool-starvation
+  entry above it (`VisionRepo.Save`) was found by reading rather than by
+  going red: **when a lock's job is to order two writers against each
+  other, ask which row the second writer actually reads before deciding
+  which one to lock** — the row being written and the row that would prove
+  the collision are not always the same row.
 
 ### HTTP layer
 
@@ -4522,6 +4671,24 @@ route with a missing guard has no second line of defence.
   the size of the fix, and does not change the check**: `curl` the module
   Vite is actually serving before concluding a freshly-built screen is
   broken, however much of it looks wrong.
+  **A fifth instance, Agreements task 15, is not a new shape of the trap —
+  it is the same trap costing most of a task despite this section already
+  documenting it almost word for word.** The implementer met the identical
+  symptom (a change that reads exactly like it did not compile) and
+  diagnosed it correctly — comparing `curl` against the running dev server
+  with `docker exec … cat` against the file on disk — but arrived there the
+  slow way, treating it as a fresh discovery rather than opening this
+  document first. `CLAUDE.md` says to consult the docs when something
+  breaks oddly, and this trap is exactly the kind of oddness the four
+  instances above exist to name. **Task 16, one task later on the same
+  branch, hit the identical trap and spent none of that time**: it applied
+  `docker restart hearth-web-1` immediately, because it had read what task
+  15 (and this section) already knew, rather than re-diagnosing correct
+  code as broken. Four instances of the mechanism were already on record
+  before task 15 started; what task 15 and task 16 add is the contrast
+  itself — the fix for a documented trap is not writing it down a sixth
+  time, it is reading it before the first `docker exec` of the next task
+  that meets it.
 
 - **A secret leaked through an error nobody constructed: `http.NewRequestWithContext`
   returns a `*url.Error` that embeds the whole request URL, and Telegram's API
@@ -4595,6 +4762,31 @@ route with a missing guard has no second line of defence.
   written down as a repeat**, especially on an unusual display
   configuration; the deciding evidence here was a second screenshot
   pipeline, not more scrutiny of the first one.
+- **Reach for the product's own flow before writing to its database to get a
+  second session — Agreements tasks 13 and 15, one commit apart, doing the
+  same job two different ways.** Both tasks needed a second real, signed-in
+  owner to drive a two-actor browser check. Task 13 read the second owner's
+  magic link straight out of Mailpit's own HTTP API and signed in through it
+  — the product's real path, no side effect, nothing to clean up afterwards.
+  Task 15, one commit later, needed the identical thing and instead copied
+  the first owner's `password_hash` onto the second owner's seeded account so
+  it could sign in with a password — a write straight to a column this
+  codebase treats as security-sensitive, to a row a later reader would have
+  no reason to suspect had been touched. It said afterwards that it withdrew
+  the test proposal to leave the household clean, but never restored the
+  hash; the two accounts stayed byte-identical until review caught it by
+  reading the row directly, and the fix was to set the column back to `NULL`
+  — the correct state for a magic-link-only member — because the original
+  hash was already gone and could not be recovered. **The zero-side-effect
+  path had already been proven one task earlier, in the same feature, and
+  the report that chose the database write never mentions it or says why it
+  was not used** — the justification given was that `adminctl
+  reset-password` needs a TTY, which is true and beside the point, since the
+  alternative on the table was never that command. Before writing to a row a
+  test does not own to manufacture a state the product can produce on its
+  own, check whether an earlier task in the same run already solved the
+  identical problem through the product's real path — the answer was one
+  commit away.
 
 ### Provisioning the read-only role on the box (2026-09-05)
 
