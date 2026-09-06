@@ -216,22 +216,36 @@ needed them to exist (see "Where things stand" below).
 > that moves without a further code change (see "Households and metrics"
 > above): the feature's own fifteen-criterion browser walk, Task 18 of the
 > same plan, has now run and passed, 15 of 15, on 2026-09-06** — recorded in
-> `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md`. No
-> product defect needed a code fix; one genuine Chromium platform behaviour
-> (a native `<dialog>`'s Tab order visits `document.body` for one keypress
-> at its tail before self-correcting) was found and confirmed, via an
-> isolated zero-Hearth-code repro, to be the browser's own, not this
-> feature's — recorded in that file's "Findings, not defects" rather than
-> fixed, since `Modal.tsx` deliberately relies on the platform's native
-> focus trap and every modal in this codebase shares it, not only
-> Agreements'. Criterion 10 (two edit proposals racing the same target) was
-> walked by two paths rather than one, since the brief's own wording could
-> not tell in advance which the running code would take: an interpreted
-> propose-time refusal (the code's actual conflict check, confirmed by
-> reading `agreement_write_repo.go`) and a literal sign-time one (two
-> proposals genuinely coexisting against one target, then one signed out
-> from under the other) — both real, both pass, named separately in the
-> walk record. All eight rows above now read ✅. **Recounted rather than
+> `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md`.
+> **One product defect was found and fixed**, off the fifteen criteria's
+> own literal path: a deeper investigation, run after the walk's first pass
+> had already (wrongly) written the concern up as "investigated, not
+> reproduced," found that `ProposeAgreementModal.tsx` computed
+> `previousBody` — the wording an edit or a remove compares against, to
+> know whether its target has moved — by reading the `sections` prop live
+> at send time rather than snapshotting it when the target was chosen. An
+> edit or a remove always retires its target's row and inserts a new one
+> (decision 9), so the first background refetch reaching an open modal
+> after any such change made that live read resolve to `""` — a shape the
+> domain's own CHECK refuses outright, surfacing as a dead-end generic
+> error rather than the conflict banner this exact situation should show.
+> Fixed by snapshotting `previousBody` into its own state, the same
+> pattern `body` and `targetId` already used; a mutation-checked regression
+> test covers it (`docs/LEARNING.md` pattern 18 has the full account and
+> the sibling sweep). A second, separate finding — a native `<dialog>`'s
+> Tab order visits `document.body` for one keypress at its tail before
+> self-correcting — was found and confirmed, via an isolated
+> zero-Hearth-code repro, to be Chromium's own behaviour, not this
+> feature's, and stays unfixed for that reason, recorded in the walk's own
+> "Findings, not defects" rather than folded into any row. Criterion 10
+> (two edit proposals racing the same target) was walked by two paths
+> rather than one, since the brief's own wording could not tell in advance
+> which the running code would take: an interpreted propose-time refusal
+> (the code's actual conflict check, confirmed by reading
+> `agreement_write_repo.go`) and a literal sign-time one (two proposals
+> genuinely coexisting against one target, then one signed out from under
+> the other) — both real, both pass, named separately in the walk record.
+> All eight rows above now read ✅. **Recounted rather than
 > incremented**, by the first status symbol in each row's own State cell
 > across all nine sections: 12/1/2/0, 7/1/1/0, 11/8/2/0, 8/2/1/0, 25/3/7/0,
 > **18/0/2/0**, 0/1/1/1, 0/0/0/1, 7/1/0/1 — **88/17/16/3 = 124**, Built +
@@ -1495,7 +1509,7 @@ for Money.
 | Edit vision (modal) | ✅ *(`VisionModal.tsx`, Vision spec's task 12 — the whole-document editor: theme, a year select offering only the previous/current/next calendar year, description, every pillar's name, description and measures, and every milestone, saved together in one `PUT`. Adds the two fields the design's own modal never drew at all (spec decision 7) — a pillar's own description and a measure editor per pillar (a label, then either a typed current/target pair or a linked-goal picker, never both; switching modes clears the other's inputs rather than leaving a hidden stale value that would still submit). All three of `onEdit`'s call sites open it — the header's Edit vision button, the "+ Add milestone" tile, and the empty state's own call to action, the one every household with no vision yet sees first. A stale `version` (409) latches a one-way conflict banner decided from the response's own error code (RetroModal.tsx's precedent, for the same staleness reason); its only action reloads the year and discards the local draft outright, rather than trying to resume editing in place)* |
 | Agreements by section | ✅ *(`AgreementSectionCard.tsx` renders each section's name, live count and the `01..N` numbering that runs continuously across sections; an empty section is invisible in the document (decision 8). Every Agreements date label — the proposal card's timestamp, the header's "updated" clause, and Version history's entries — uses `toLocaleDateString`, which renders in the **viewer's** timezone rather than the ISO string's own offset, so a change stamped late at night in Singapore can read as one date to one partner and the next day to another in Indonesia; cosmetic, does not touch signing, recorded rather than fixed — `docs/HANDOVER.md`, "Worth doing when convenient", and demonstrated with real before/after strings in the walk below. **Code-complete and reviewed across Tasks 1–16** (`915edba`); **the feature's own fifteen-criterion browser walk (Task 18) has now run and passed, 15 of 15** (2026-09-06), recorded in `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md` — criterion 7 read this row's own numbering, count and header `v{n}` together in one script and confirmed all three move in step)* |
 | Agreements empty state with starter sets | ✅ *("Use starter set" seeds the four section labels — Money, Conflict, Home & kids, Us — and **no agreements** (spec decision 17). Every agreement without exception arrives through propose → sign, so "everything on this page is here because you both agreed" stays literally true, with no bulk-signed exception to explain. An empty section is invisible in the document (decision 8), so the screen names the four it just created rather than showing four empty headings. Code-complete and reviewed; **the feature's own fifteen-criterion browser walk (Task 18) has now run and passed, 15 of 15** (2026-09-06) — criterion 4 confirmed the screen genuinely changes on click and the propose picker offers all four, in `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md`)* |
-| Propose a change — add, edit, remove (modal) | ✅ *(`ProposeAgreementModal.tsx`, three shapes behind one submit — add needs a section, edit and remove need a target and its current wording, pre-filled. A target that has moved since the modal opened answers `409 AGREEMENT_CHANGED` without losing what was typed, and the send control stays disabled after the refetch rather than inviting a second identical failure. Code-complete and reviewed; **the feature's own fifteen-criterion browser walk (Task 18) has now run and passed, 15 of 15** (2026-09-06) — criterion 10 walked the conflict two ways, an interpreted propose-time race and a literal sign-time one, both against a real second signed-in owner, named in full in `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md`)* |
+| Propose a change — add, edit, remove (modal) | ✅ *(`ProposeAgreementModal.tsx`, three shapes behind one submit — add needs a section, edit and remove need a target and its current wording, pre-filled. A target that has moved since the modal opened answers `409 AGREEMENT_CHANGED` without losing what was typed, and the send control stays disabled after the refetch rather than inviting a second identical failure. Code-complete and reviewed; **the feature's own fifteen-criterion browser walk (Task 18) has now run and passed, 15 of 15** (2026-09-06) — criterion 10 walked the conflict two ways, an interpreted propose-time race and a literal sign-time one, both against a real second signed-in owner. **One defect surfaced in the same walk, off the criteria's own literal path**: `previousBody` was read live off the `sections` prop at send time rather than snapshotted when the target was chosen, so the first background refetch reaching an open modal after ANY edit landed on its target (an edit or a remove always retires the row's id, decision 9) made that read resolve to `""` — a shape the domain's own CHECK refuses, surfacing as a dead-end generic error instead of the conflict banner this exact situation should show. Fixed: `previousBody` is now its own snapshot, never re-read from the prop; a mutation-checked regression test covers it. Full account and the sibling sweep in `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md` and `docs/LEARNING.md` pattern 18)* |
 | New agreement section (modal) | ✅ *(`NewSectionModal.tsx` — a name field plus five suggestion chips (In-laws & family, Faith & values, Health, Careers, Screens & tech, distinct from the starter set's own four) that **fill** the field rather than submit it — a chip that created the section directly would turn one click into a write nobody got to rename; a duplicate name is refused under the field by the unique-constraint mapping (decision 19), with the typed text kept and the modal still open. Code-complete and reviewed; **the feature's own fifteen-criterion browser walk (Task 18) has now run and passed, 15 of 15** (2026-09-06) — criterion 13 confirmed the duplicate-name refusal and surviving typed text, and the walk separately confirmed a successful creation hands off cleanly into Propose with no stacked dialog, in `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md`)* |
 | Version history (modal) | ✅ *(`VersionHistoryModal.tsx` reads the accepted-proposal log already carried on the document the page already fetched — no second request — newest first, exactly the design's "Added #12 …. Agreed by Andreas & Christine."; a signer who no longer resolves is omitted from the name list rather than joined as blank. Each removal's entry offers Restore (decision 18). Code-complete and reviewed; **the feature's own fifteen-criterion browser walk (Task 18) has now run and passed, 15 of 15** (2026-09-06) — criterion 11 read a real removed entry and its Restore handoff into Propose, in `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md`)* |
 | Agreements locked until a second owner | ✅ *(both halves built: a household that has **never** had two owners gets the explanation and an "Invite your partner" deep link into the existing Settings invite flow, and one that **had** two owners keeps its whole document, read-only, with the proposals still listed and named as waiting (decision 3). The write controls are hidden, not disabled — a disabled control that cannot say why is the defect the admin flags screen already carries. Code-complete and reviewed; **the feature's own fifteen-criterion browser walk (Task 18) has now run and passed, 15 of 15** (2026-09-06) — criteria 1-3 walked the never-had-two-owners half (including the `?invite=maybe` deep-link guard) and criterion 12 walked the had-two-owners half (proposals still listed, zero buttons on the card, not merely disabled), both against a real database wiped clean first so criterion 1's own fixture was genuine, in `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md`)* |
@@ -1575,10 +1589,14 @@ because both halves are now true. `docs/superpowers/plans/2026-09-05-hearth-agre
 has the full record, including two criteria (2 and 3) walked out of their
 brief's own numeric order for a dependency reason named there, and criterion
 10 walked by two separate paths since the code's own conflict check could
-answer either way. No product defect needed a code fix; the walk's one real
-finding is a Chromium platform behaviour, not application code, and is named
-in that file's own "Findings, not defects" rather than folded into any row
-above.
+answer either way. One real defect surfaced, not on any criterion's own
+literal path but in a deeper investigation the walk ran after it — the
+Propose modal's `previousBody` was read live off a prop that can move
+under an open draft — and was fixed and re-verified in the same task, with
+a mutation-checked regression test; the Propose row above names it. A
+second finding, Chromium's own native `<dialog>` focus-cycling behaviour,
+is not application code and stays unfixed, named in that file's own
+"Findings, not defects."
 
 ## 7 · Family
 

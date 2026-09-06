@@ -3190,6 +3190,67 @@ derivation.**
 
 ---
 
+### 18. A value a form must "remember what it saw" has to be a snapshot, not a live re-read of the same prop the form still renders from
+
+`ProposeAgreementModal.tsx`'s own header comment states the rule plainly:
+"wording the proposer never saw must never be what gets compared." The field
+that carries that promise, `previousBody`, was nonetheless computed by
+calling `bodyOf(targetId)` — a lookup against `targets`, itself derived from
+the `sections` **prop** — fresh, at the moment `handleSend` ran, rather than
+once, when the target was chosen. A prop is exactly the value that changes
+out from under an open form: `sections` updates on every refetch the shared
+`useAgreements()` query receives, and this modal stays open on purpose after
+a conflict (`hadConflict`'s own comment: "nothing typed is lost"), so a
+refetch reaching it while it waits is not a hypothetical, it is the state
+the modal is designed to survive.
+
+**The walk that found this (Task 18, Agreements) initially concluded the
+opposite of what was actually true, on a first, code-only reading.** The
+worry going in was that a live re-read would silently return the *new*
+wording, making a stale edit succeed unnoticed. Live reproduction attempts
+using window-focus events, `document.hasFocus()`, and `visibilitychange`
+all failed to trigger a background refetch inside Playwright's automation
+harness (see the walk's own record), and the finding was provisionally
+written up as "investigated, not reproduced." **A stronger reviewer's
+suggestion to trigger the SAME queryClient's own invalidation from inside
+the open tab — an unrelated pending card's Agree button, clicked behind the
+modal's own backdrop via a script, the same invalidation path a real
+window-focus refetch would also take — reproduced it in one call.** The
+actual failure mode was worse than the one hypothesised, not milder: an
+`edit` or a `remove` doesn't just change an agreement's *body*, it retires
+the row's id outright and inserts a new one (decision 9's append-only
+design, `applyAgreementChange`'s own `remove()` then `add()`), so the very
+first background refetch after ANY edit landed made `bodyOf(targetId)`
+return `""` for a `targetId` that no longer resolved to anything — and an
+empty `previous_body` on an edit or a remove is a shape the database's own
+`agreement_proposals_shape` CHECK refuses outright. The household saw
+"Could not send that for agreement. Try again." — a dead end with no hint
+that the target had moved, not a silently wrong write, but a defect either
+way: the one screen built specifically to explain this exact situation
+never got the chance to.
+
+**A confirmed-clean code reading is not confirmation the runtime is clean,
+and a failed reproduction attempt is not confirmation there is nothing to
+find** — it can mean the reproduction path was wrong, not that the concern
+was. Two things narrowed the gap between them, in order: reasoning about
+what the code's OWN comment promised versus what it actually did (a live
+prop read cannot keep a "what you saw" promise, on its face), and then a
+second, cheaper trigger for the same underlying mechanism once the first
+one didn't fire. **The fix is the general one, not specific to this field**:
+anything a form's own contract says must "stay as you first saw it" needs
+its own `useState`, set once at the moment of selection and never
+recomputed from a prop afterward — `VisionModal.tsx`'s closing-the-modal-
+outright strategy on conflict (rather than trying to keep a draft alive
+across a version bump) is the sibling precedent for the same underlying
+worry, solved by a different, equally valid route (discard rather than
+snapshot). A grep across every modal in this codebase for a `.find(...)`
+lookup called directly inside its own submit handler, rather than only
+inside a state setter, found no second instance of this exact shape — the
+other candidates (`BillModal`, `BudgetModal`, `TransactionModal`) all look
+up a value to *display*, never one a server compares for staleness.
+
+---
+
 ## Catalogue by area
 
 ### Domain and money
@@ -5053,13 +5114,19 @@ no test suite can hold.
 - **Chromium's own automation-controlled pages never report
   `document.hasFocus() === false`,** even across genuinely separate
   `BrowserContext`s, a same-context decoy tab brought to the front, and a
-  synthetic `visibilitychange`/`focus` dispatch. This closed off one
-  otherwise-plausible way to reproduce a suspected staleness defect in
-  `ProposeAgreementModal.tsx` live (see the walk's own "Findings, not
-  defects" section in
-  `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md`) —
-  worth knowing before a future walk spends time chasing a
-  `refetchOnWindowFocus` path through Playwright the same way.
+  synthetic `visibilitychange`/`focus` dispatch — closing off
+  `refetchOnWindowFocus` specifically as a way to trigger a background
+  refetch inside Playwright. **This is a real limitation of the harness,
+  not evidence the underlying concern was unfounded**: the suspected
+  defect it was chasing (a stale value read live from a prop inside an open
+  `ProposeAgreementModal.tsx`) turned out to be real and was reproduced
+  by a cheaper, different trigger a stronger reviewer suggested — an
+  unrelated pending card's own Agree, clicked from inside the same tab,
+  which reaches the identical `queryClient.invalidateQueries` a real
+  window-focus refetch would also call. Fixed; see pattern 18 above. Worth
+  remembering the distinction the next time a walk reports "investigated,
+  not reproduced" against one specific trigger: that closes off the
+  trigger, not the concern.
 - **A native `<dialog>`'s own Tab-order wraparound is not perfectly
   seamless in Chromium: the last focusable control inside a modal opened
   via `showModal()` sends a forward Tab to `document.body` for exactly one
