@@ -1360,10 +1360,11 @@ person to ask whether the test could ever have gone red in the first place.
   program, and only the second one can be broken on purpose.
 
 - **Agreements produced six more instances of this pattern on one branch —
-  the highest count for any single feature so far — and every one was
-  caught before merge, three by review reading rather than by a test going
-  red.** A repository test built a fixture in one household and never
-  proved a second household's row was unreachable, the gap ten sibling
+  second only to Transactions' own nine, the entry above dated Tasks 5
+  through 17 — and every one was caught before merge, three by review
+  reading rather than by a test going red.** A repository test built a
+  fixture in one household and never proved a second household's row was
+  unreachable, the gap ten sibling
   repositories in this same package already close the same way
   (`bill_repo_test.go:599`); the brief omitted it and the gap entered the
   fix loop as a spec requirement, not a nice-to-have. A starvation test
