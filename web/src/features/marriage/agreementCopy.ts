@@ -209,4 +209,44 @@ export const AGREEMENT_COPY = {
   agreeError: "Couldn't agree that just now.",
   parkError: "Couldn't park that for the retro just now.",
   withdrawError: "Couldn't withdraw that just now.",
+
+  // --- Propose modal (Task 13) ---
+  proposeTitle: "Propose a change",
+  changeTypeLabel: "Change type",
+  modeAdd: "Add new",
+  modeEdit: "Edit existing",
+  modeRemove: "Remove",
+  // `cancel` is NOT repeated here: Task 12 already added it to this object and a
+  // duplicate key is a TypeScript error. `grep -n 'cancel:' agreementCopy.ts`
+  // before typing, which is the rule for every key this task appends.
+  addSectionLabel: "Add to section",
+  newSectionLink: "+ New section",
+  addBodyLabel: "New agreement",
+  addBodyPlaceholder: "e.g. Screens off during family meals, no exceptions.",
+  editTargetLabel: "Which agreement to edit",
+  editBodyLabel: "New wording",
+  removeTargetLabel: "Which agreement to remove",
+  proposeNoteLabel: "Why (optional)",
+  proposeSend: "Send for agreement",
+  // "will be asked" agrees with any count, so this one needs no branch.
+  proposeSubtitle: (names: string[]) =>
+    `${joinNames(names)} will be asked to agree before it takes effect`,
+  proposeNotePlaceholder: (names: string[]) => `Add a note for ${joinNames(names)}…`,
+  // The design's warning verbatim but for the names. This is the one place
+  // the verb has to agree with the count, because joinNames alone yields
+  // "…Christine agree".
+  removeWarning: (names: string[]) =>
+    `This will be removed once ${joinNames(names)} ${names.length === 1 ? "agrees" : "agree"}. ` +
+    "It stays in Version history, so you can always see it was there and restore it later.",
+  // Rendered only when the seed pre-filled an add body. Version history's
+  // Restore is the one entry point that does (decision 18).
+  restoreNote: "Restoring is an ordinary proposal — it takes effect once everyone agrees.",
+  proposeConflict:
+    "This agreement changed while you were writing, so nothing was saved. " +
+    "Close this and start again from the current wording.",
+  proposeFallbackError: "Could not send that for agreement. Try again.",
+  // The full body, never truncated: the design truncates but names no rule,
+  // and inventing one risks two agreements sharing a label. The zero padding
+  // is presentation, which is why the wire carries an integer (decision 11).
+  targetOption: (number: number, body: string) => `${String(number).padStart(2, "0")} · ${body}`,
 } as const;

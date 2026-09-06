@@ -16,22 +16,9 @@ import { PageContainer } from "../../components/PageContainer";
 import { useMe } from "../auth/useAuth";
 import { AgreementSectionCard } from "./AgreementSectionCard";
 import { ProposalCard } from "./ProposalCard";
+import { ProposeAgreementModal, type AgreementProposeSeed } from "./ProposeAgreementModal";
 import { AGREEMENT_COPY, agreementDateLabel } from "./agreementCopy";
-import type { AgreementKind } from "./agreementSchemas";
 import { handleWriteError, useAgreements } from "./useAgreements";
-
-// One seed for all four of the Propose modal's entry points -- the header
-// button, the New-section modal's "Create & add first agreement", a section
-// card's own add, and version history's Restore. Every field is a pre-fill,
-// so the modal never has to know which door the caller came through. `mode`
-// reuses the wire's own kind enum rather than restating the union: two literal
-// unions for one server enum is how the two drift apart.
-//
-// Written inline rather than as an exported type, because the name belongs to
-// ProposeAgreementModal.tsx (Task 13) and this file already imports that one:
-// exporting a second name here would either duplicate the union or make the
-// modal import the page back. Task 13 replaces this annotation with the
-// imported `AgreementProposeSeed`.
 
 const PANEL = "rounded-xl border border-hairline bg-card p-[22px]";
 // min-h-11 is the 44px touch-target floor (CLAUDE.md); inline-flex
@@ -53,21 +40,16 @@ export function AgreementsPage() {
   // same query for one sentence.
   const me = useMe();
 
-  // The three modal slots. The VALUES are elided here because nothing reads
-  // them until their modal exists -- tsconfig has noUnusedLocals, so a bound
-  // name with no reader would not compile. Each task below binds its own:
-  //   Task 13 -> const [proposeSeed, setProposeSeed]
+  // The three modal slots. Task 13 (this task) binds proposeSeed; the other
+  // two VALUES stay elided because nothing reads them until their modal
+  // exists -- tsconfig has noUnusedLocals, so a bound name with no reader
+  // would not compile:
   //   Task 14 -> const [newSectionOpen, setNewSectionOpen]
   //   Task 15 -> const [historyOpen, setHistoryOpen]
   // and mounts its modal at the marked point at the bottom of this file. The
   // buttons, the state and its setters land here so a modal task adds a modal
   // and nothing else.
-  const [, setProposeSeed] = useState<{
-    mode: AgreementKind;
-    sectionId?: string;
-    targetAgreementId?: string;
-    body?: string;
-  } | null>(null);
+  const [proposeSeed, setProposeSeed] = useState<AgreementProposeSeed | null>(null);
   const [, setNewSectionOpen] = useState(false);
   const [, setHistoryOpen] = useState(false);
 
@@ -127,6 +109,12 @@ export function AgreementsPage() {
   }
 
   const doc = agreements.data;
+  // Whose names the modal prints, and nothing more. Permission is the server's:
+  // Agree and Withdraw read the stamped canAgree/canWithdraw, never a membership
+  // id compared in the browser (docs/LEARNING.md pattern 1).
+  const coOwnerNames = doc.owners
+    .filter((owner) => owner.membershipId !== me.data?.membership.id)
+    .map((owner) => owner.name);
   // Every write refuses while the household is locked (decision 22), so a
   // proposal, a history row or a live agreement PROVES this household once had
   // two owners. Sections alone do not: a section is a label, not a promise
@@ -350,6 +338,21 @@ export function AgreementsPage() {
             </div>
           ))}
         </div>
+      )}
+
+      {proposeSeed && (
+        <ProposeAgreementModal
+          seed={proposeSeed}
+          coOwnerNames={coOwnerNames}
+          sections={doc.sections}
+          onOpenNewSection={() => {
+            // Close, then open: nothing here stacks <dialog>s, and closing this one
+            // is also what discards its draft and its latch.
+            setProposeSeed(null);
+            setNewSectionOpen(true);
+          }}
+          onClose={() => setProposeSeed(null)}
+        />
       )}
     </PageContainer>
   );
