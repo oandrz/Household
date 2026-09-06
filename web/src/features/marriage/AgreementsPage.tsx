@@ -15,6 +15,7 @@ import { ApiError } from "../../api/client";
 import { PageContainer } from "../../components/PageContainer";
 import { useMe } from "../auth/useAuth";
 import { AgreementSectionCard } from "./AgreementSectionCard";
+import { ProposalCard } from "./ProposalCard";
 import { AGREEMENT_COPY, agreementDateLabel } from "./agreementCopy";
 import type { AgreementKind } from "./agreementSchemas";
 import { handleWriteError, useAgreements } from "./useAgreements";
@@ -146,6 +147,15 @@ export function AgreementsPage() {
   // there is something to read. A household that never had two owners has an
   // empty history and no rows behind the button.
   const showHistory = !doc.locked || hasContent;
+
+  // The display number of whatever an edit or a remove targets, as the
+  // document numbers it right now -- null when no live agreement carries that
+  // id, which is the targetChanged case and the reason the card can say so.
+  // Composed here, from the same array the grid renders, so a card and a row
+  // can never disagree about what "Money 02" means.
+  const liveAgreements = doc.sections.flatMap((section) => section.agreements);
+  const targetNumberOf = (targetAgreementId: string) =>
+    liveAgreements.find((agreement) => agreement.id === targetAgreementId)?.number ?? null;
 
   // `visible` is the server's own flag (decision 8), never a rule re-derived
   // here; the propose picker (Task 13) is handed doc.sections whole, empty
@@ -294,11 +304,41 @@ export function AgreementsPage() {
         </section>
       )}
 
-      {/* Mount point. Task 12 renders doc.proposals as one block HERE, above
-          the grid, for every state except the locked-invite one. Tasks 13, 14
-          and 15 mount their modals at the very end, each binding the state
-          slot reserved for it at the top of this file. All four states above
-          stay exactly as they are. */}
+      {/* One block above the sections, not the design's right column: below
+          `lg` there is one column, and a household with no sections at all
+          still has to see what is waiting for it. Every write goes through
+          handleWriteError, which owns the refetch that turns a 409 into a
+          card that explains itself -- so each handler resolves to null when
+          the write landed, or to the sentence the card shows. */}
+      {doc.proposals.length > 0 && (
+        <div data-testid="agreements-proposals" className="flex flex-col gap-4">
+          {doc.proposals.map((proposal) => (
+            <ProposalCard
+              key={proposal.id}
+              proposal={proposal}
+              targetNumber={targetNumberOf(proposal.targetAgreementId)}
+              onAgree={(id) =>
+                agreements
+                  .agree(id)
+                  .then(() => null)
+                  .catch((err: unknown) => handleWriteError(err, agreements.reload, AGREEMENT_COPY.agreeError))
+              }
+              onPark={(id, note) =>
+                agreements
+                  .park(id, note)
+                  .then(() => null)
+                  .catch((err: unknown) => handleWriteError(err, agreements.reload, AGREEMENT_COPY.parkError))
+              }
+              onWithdraw={(id) =>
+                agreements
+                  .withdraw(id)
+                  .then(() => null)
+                  .catch((err: unknown) => handleWriteError(err, agreements.reload, AGREEMENT_COPY.withdrawError))
+              }
+            />
+          ))}
+        </div>
+      )}
 
       {visible.length > 0 && (
         <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">

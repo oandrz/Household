@@ -3,6 +3,7 @@
 // visionCopy.ts:1-5 gives (eslint's react-refresh/only-export-components
 // never has to think about a file that mixes components with other exports,
 // and every user-facing string lives in exactly one place).
+import type { AgreementProposal } from "./agreementSchemas";
 
 // "Christine"; "Andreas and Christine"; "Andreas, Bev and Christine". One
 // function for four call sites -- the proposal card's "needs …", version
@@ -14,6 +15,43 @@ export function joinNames(names: string[]): string {
   if (names.length === 0) return "";
   if (names.length === 1) return names[0];
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+// The card's one-line summary, composed from the fields that exist because
+// there is no summary column on the wire. The target reads "Money 02" when the
+// document still numbers it and just "Money" when it does not (targetChanged),
+// since the number is the document's and derived at render (decision 11).
+//
+// Attribution falls back to "Proposed ..." when proposedByName is "" -- the
+// membership no longer resolves, which decision 20 makes ordinary for any
+// household a partner has left, not a corruption.
+//
+// The default is fail-closed with no guess: agreementProposalSchema's z.enum
+// already refused any other kind one layer up, and `const refused: never` is
+// the compile-time proof that this switch covers the enum. It returns "" for
+// that unreachable row rather than inventing a user-visible sentence -- and
+// therefore invents no copy key either.
+export function proposalSummary(
+  kind: AgreementProposal["kind"],
+  proposedByName: string,
+  sectionName: string,
+  targetNumber: number | null,
+): string {
+  const target = targetNumber === null ? sectionName : `${sectionName} ${String(targetNumber).padStart(2, "0")}`;
+  const opening = (verb: string) => (proposedByName === "" ? `Proposed: ${verb}` : `${proposedByName} proposed ${verb}`);
+  switch (kind) {
+    case "add":
+      return `${opening("adding to")} ${sectionName}:`;
+    case "edit":
+      return `${opening("changing")} ${target}:`;
+    case "remove":
+      return `${opening("removing")} ${target}:`;
+    default: {
+      const refused: never = kind;
+      void refused;
+      return "";
+    }
+  }
 }
 
 // "2026-06-28T21:18:52+08:00" -> "28 Jun", the design's header wording. The
@@ -132,4 +170,43 @@ export const AGREEMENT_COPY = {
   // its breakdown that apply different filters quietly stop reconciling, which
   // browser criterion 7 exists to catch.
   sectionCount: (n: number) => (n === 1 ? "1 agreement" : `${n} agreements`),
+
+  // --- ProposalCard (Task 12) ---------------------------------------------
+  // The awaiting clause is dropped rather than left dangling: decision 16's
+  // household has an empty list, and "Pending change — needs " is not a
+  // sentence. joinNames generalises the design's literal "needs Christine" to
+  // any number of owners (decision 4). Both dashes are em dashes (U+2014).
+  pendingTitle: (awaiting: string[]) =>
+    awaiting.length === 0 ? "Pending change" : `Pending change — needs ${joinNames(awaiting)}`,
+  parkedTitle: (awaiting: string[]) =>
+    awaiting.length === 0 ? "Parked for the next retro" : `Parked for the next retro — needs ${joinNames(awaiting)}`,
+  everyoneAgreed: "Everyone still here has agreed — Agree once more to make it final.",
+  toDiscuss: "To discuss",
+  // Decision 14's three sentences. Which one shows is decided by canWithdraw,
+  // never by "did I propose this": canWithdraw already carries decision 15's
+  // fallback, so a household whose proposer has left is not told to ask a
+  // ghost. staleNoName is that household's own case -- proposedByName is ""
+  // when the membership no longer resolves (decision 20).
+  staleMine:
+    "This no longer matches the agreement it was written against, so it can't be agreed. Withdraw it and propose the change again.",
+  staleTheirs: (proposer: string) =>
+    `Ask ${proposer} to withdraw it and propose it again against the current wording.`,
+  staleNoName: "This needs withdrawing and proposing again against the current wording.",
+  agree: "Agree",
+  discuss: "Discuss",
+  withdraw: "Withdraw",
+  // Introduced here and reused by Tasks 13-15 rather than redeclared: one
+  // object, and a duplicate key is a TypeScript error.
+  cancel: "Cancel",
+  parkNoteLabel: "What you want to talk through (optional)",
+  parkAction: "Park for next retro",
+  withdrawConfirmBody:
+    "Withdraw this proposal? It stops waiting for anyone, and nothing in the document changes.",
+  withdrawConfirmAction: "Withdraw it",
+  // The three fallbacks the page passes to handleWriteError -- shown only when
+  // the failure is a genuine server failure rather than one of the refusals
+  // the hook names.
+  agreeError: "Couldn't agree that just now.",
+  parkError: "Couldn't park that for the retro just now.",
+  withdrawError: "Couldn't withdraw that just now.",
 } as const;

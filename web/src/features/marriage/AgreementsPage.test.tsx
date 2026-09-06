@@ -234,4 +234,90 @@ describe("AgreementsPage", () => {
     expect(headingsIn("agreements-column-0")).toEqual(["Money"]);
     expect(screen.getByTestId("agreement-row-Money-0")).toHaveTextContent("One shared account");
   });
+
+  // Above the sections grid, not the right column the design draws: below `lg`
+  // there is one column, and this card must render on a household with no
+  // sections at all. targetNumber is the document's own numbering, derived
+  // here at render (decision 11) -- the wire carries none.
+  it("mounts a card per open proposal above the grid, numbering the target as the document numbers it", async () => {
+    renderPage({
+      [`GET ${DOC_URL}`]: {
+        status: 200,
+        body: {
+          agreements: documentFixture({
+            sections: [sectionFixture("Money", 1, ["One shared account", "Each gets S$200/mo. no questions asked."])],
+            proposals: [
+              proposalFixture({
+                id: "p-9",
+                kind: "edit",
+                targetAgreementId: "Money-1",
+                previousBody: "Each gets S$200/mo. no questions asked.",
+                body: "Each gets S$250/mo. no questions asked.",
+                canAgree: true,
+              }),
+            ],
+          }),
+        },
+      },
+    });
+
+    const card = await screen.findByTestId("agreement-proposal-p-9");
+    expect(card).toHaveTextContent("Andreas proposed changing Money 02:");
+    // The block, not the card, is what must precede the grid -- so this stays
+    // true if a card is ever nested one level deeper inside it.
+    const grid = screen.getByTestId("agreements-column-0");
+    const block = screen.getByTestId("agreements-proposals");
+    expect(block.compareDocumentPosition(grid) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  // The wiring this case exists for: agree -> the hook -> handleWriteError.
+  // handleWriteError is synchronous -- it fires reload() and returns the
+  // sentence without awaiting the refetch -- so the alert lands before the
+  // second GET does, and the disabled Agree needs a wait of its own. That
+  // second GET comes from reload(), NOT from the hook's afterWrite(): the
+  // mutation failed, so its onSuccess never ran.
+  it("a refused agree shows the refusal in the card, and the refetched document disables Agree", async () => {
+    const open = proposalFixture({ id: "p-9", canAgree: true });
+    renderPage({
+      [`GET ${DOC_URL}`]: [
+        { status: 200, body: { agreements: documentFixture({ proposals: [open] }) } },
+        { status: 200, body: { agreements: documentFixture({ proposals: [{ ...open, targetChanged: true }] }) } },
+      ],
+      [`POST ${DOC_URL}/proposals/p-9/agree`]: {
+        status: 409,
+        body: { error: { code: "AGREEMENT_CHANGED", message: "The target changed." } },
+      },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Agree" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This no longer matches the agreement it was written against, so nothing was signed.",
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Agree" })).toBeDisabled());
+  });
+
+  // Decision 3's other half: the locked document keeps its frozen proposals and
+  // offers no write control at all -- Agree, Discuss and Withdraw are gone, not
+  // disabled. canAgree/canWithdraw are the server's own flags, and a one-owner
+  // household's awaiting set is empty because the other owner has left.
+  it("a locked household lists its frozen proposals with no write control", async () => {
+    renderPage({
+      [`GET ${DOC_URL}`]: {
+        status: 200,
+        body: {
+          agreements: documentFixture({
+            locked: true,
+            owners: ONE_OWNER,
+            proposals: [proposalFixture({ id: "p-9", awaitingNames: [], canAgree: false, canWithdraw: false })],
+          }),
+        },
+      },
+    });
+
+    expect(await screen.findByTestId("agreement-proposal-p-9")).toHaveTextContent("Pending change");
+    expect(screen.queryByRole("button", { name: "Agree" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Discuss" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Withdraw" })).not.toBeInTheDocument();
+  });
 });
