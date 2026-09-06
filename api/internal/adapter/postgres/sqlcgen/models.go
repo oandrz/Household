@@ -40,6 +40,46 @@ type AdminReauthAttempt struct {
 	At        pgtype.Timestamptz
 }
 
+type Agreement struct {
+	ID                  pgtype.UUID
+	HouseholdID         pgtype.UUID
+	SectionID           pgtype.UUID
+	Body                string
+	AddedByProposalID   pgtype.UUID
+	RemovedByProposalID pgtype.UUID
+	RemovedAt           pgtype.Timestamptz
+	CreatedAt           pgtype.Timestamptz
+}
+
+type AgreementProposal struct {
+	ID                     pgtype.UUID
+	HouseholdID            pgtype.UUID
+	Kind                   string
+	Status                 string
+	SectionID              pgtype.UUID
+	TargetAgreementID      pgtype.UUID
+	Body                   string
+	PreviousBody           string
+	Note                   string
+	ParkNote               string
+	ProposedByMembershipID pgtype.UUID
+	CreatedAt              pgtype.Timestamptz
+	ResolvedAt             pgtype.Timestamptz
+}
+
+type AgreementSection struct {
+	ID          pgtype.UUID
+	HouseholdID pgtype.UUID
+	Name        string
+	CreatedAt   pgtype.Timestamptz
+}
+
+type AgreementSignature struct {
+	ProposalID   pgtype.UUID
+	MembershipID pgtype.UUID
+	SignedAt     pgtype.Timestamptz
+}
+
 type Bill struct {
 	ID                 pgtype.UUID
 	HouseholdID        pgtype.UUID
