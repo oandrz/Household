@@ -190,12 +190,13 @@ func TestOwnerOnlyRoutesRejectALimitedMember(t *testing.T) {
 		t.Fatalf("checked %d admin routes, want at least 4 -- "+
 			"the walk is no longer reaching the admin subtree", adminChecked)
 	}
-	// 10, not the pre-accounts 6: the four accounts write routes are mutating
-	// and owner-gated too, and a floor left at the old count would still pass
-	// if all four vanished from the walk -- exactly the vacuous pass this
-	// guard exists to catch.
-	if checked < 10 {
-		t.Fatalf("checked %d routes, want at least 10 -- "+
+	// 45, not the pre-accounts 6 or the pre-agreements 10: this walk's own
+	// re-measured output, whenever a mutating route joins the surface --
+	// the six Agreements writes are the latest, and a floor left at the old
+	// count would still pass if all six vanished from the walk -- exactly
+	// the vacuous pass this guard exists to catch.
+	if checked < 45 {
+		t.Fatalf("checked %d routes, want at least 45 -- "+
 			"the walk may not be enumerating routes correctly", checked)
 	}
 }

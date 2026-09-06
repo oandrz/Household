@@ -239,18 +239,18 @@ func TestEveryProtectedRouteRejectsAnUnauthenticatedCaller(t *testing.T) {
 	// (a routing regression, a chi API change), the loop above asserts
 	// nothing and the test would pass for the wrong reason.
 	t.Logf("checked %d protected routes", checked)
-	// 69 is this walk's own re-measured output, never a number to bump by
+	// 75 is this walk's own re-measured output, never a number to bump by
 	// hand: tracked that way, this exact floor drifted through several
 	// tasks that each added protected routes without anyone re-running the
 	// walk: a stale 18 against a real count that had already reached 59
 	// before the task that finally re-ran the walk, 62 by the time it did,
-	// and 69 once three more protected routes (admin households/metrics,
-	// the outbound message inspector, and read-only database browse) had
-	// landed between that measurement and Agreements' own GET -- the
-	// vacuous-pass risk this comment warns about, realised slowly instead
-	// of all at once. Whenever a route is added, re-run the walk and set
-	// this to what it reports, not to whatever seems like enough of an
-	// increase.
+	// 69 once three more protected routes (admin households/metrics, the
+	// outbound message inspector, and read-only database browse) had landed
+	// between that measurement and Agreements' own GET, and 75 once the six
+	// Agreements write routes joined the GET -- the vacuous-pass risk this
+	// comment warns about, realised slowly instead of all at once. Whenever
+	// a route is added, re-run the walk and set this to what it reports,
+	// not to whatever seems like enough of an increase.
 	//
 	// Raising this number is not what would catch a single route losing its
 	// session guard -- chi.Walk enumerates it into checked either way. The
@@ -258,8 +258,8 @@ func TestEveryProtectedRouteRejectsAnUnauthenticatedCaller(t *testing.T) {
 	// loop above is what catches that. This floor's own job is the vacuous
 	// pass the comment above it already names: a walk that silently stopped
 	// enumerating routes at all.
-	if checked < 69 {
-		t.Fatalf("checked %d protected routes, want at least 69 -- "+
+	if checked < 75 {
+		t.Fatalf("checked %d protected routes, want at least 75 -- "+
 			"the walk may not be enumerating routes correctly", checked)
 	}
 }
@@ -351,14 +351,15 @@ func TestEveryMutatingRouteRequiresCSRF(t *testing.T) {
 		t.Fatalf("chi.Walk: %v", err)
 	}
 	t.Logf("checked %d mutating routes", checked)
-	// 44 is this walk's own re-measured output, never a number to bump by
-	// hand -- the identical reasoning the 62 floor above states in full:
+	// 50 is this walk's own re-measured output, never a number to bump by
+	// hand -- the identical reasoning the 75 floor above states in full:
 	// this exact floor drifted the same way: a stale 11 against a real
 	// count that had already reached 41 before the walk was finally
-	// re-run, and 44 when it was. Whenever a route
-	// is added, re-run the walk and set this to what it reports.
-	if checked < 44 {
-		t.Fatalf("checked %d mutating routes, want at least 44 -- "+
+	// re-run, 44 when it was, and 50 once the six Agreements writes joined
+	// the mutating surface. Whenever a route is added, re-run the walk and
+	// set this to what it reports.
+	if checked < 50 {
+		t.Fatalf("checked %d mutating routes, want at least 50 -- "+
 			"the walk may not be enumerating routes correctly", checked)
 	}
 }

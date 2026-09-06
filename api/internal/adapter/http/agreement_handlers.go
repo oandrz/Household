@@ -5,6 +5,9 @@ import (
 	"slices"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
+	"github.com/andreasoentoro/hearth/api/internal/domain"
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
@@ -257,5 +260,205 @@ func handleGetAgreements(deps Deps) http.HandlerFunc {
 		WriteJSON(w, http.StatusOK, agreementsResponse{
 			Agreements: toAgreementsDTO(doc, scope.Membership.ID),
 		})
+	}
+}
+
+// respondProposal answers the body every proposal write shares: the row the
+// write touched at the status it now holds, plus the whole freshly composed
+// document, because each write moves the version, the 01..N numbering, the
+// history list and which proposals are open.
+//
+// The document is composed AFTER the write and outside its transaction, so a
+// concurrent agree may already have overtaken it. That is accepted rather than
+// worked around: the frontend's refetch stays the authority, and a response
+// that tried to be authoritative would need the read inside the write's
+// transaction for no gain the screen can see.
+func respondProposal(w http.ResponseWriter, viewer string, status int,
+	p usecase.AgreementProposalView, doc usecase.AgreementsView) {
+	WriteJSON(w, status, agreementProposalWriteResponse{
+		Proposal:   toAgreementProposalDTO(p, doc, viewer),
+		Agreements: toAgreementsDTO(doc, viewer),
+	})
+}
+
+// handleProposeAgreementChange parses the kind itself and answers 422 from
+// here (decision 21), the way parseVisionYear answers a bad year. A kind
+// arrives from two places -- a request body, where a bad value is the caller's
+// mistake, and a database column, where a bad value is a corrupt row -- and one
+// sentinel serving both jobs would make a broken row indistinguishable from a
+// typo. So domain.ErrUnknownAgreementProposalKind deliberately has no
+// MapDomainError case: anything reaching the mapper with it came from a column.
+//
+// SectionID is blanked for anything but an add, because the modal still holds
+// one from add mode and on an edit or a remove the server copies the section
+// from the target anyway. Validate's refusal of a caller-supplied section on
+// those two kinds stays the fail-closed backstop behind that.
+func handleProposeAgreementChange(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope, _ := RequestScope(r)
+		var req proposeAgreementChangeRequest
+		if !decodeJSONBodyLimit(w, r, &req, maxAgreementRequestBodyBytes) {
+			return
+		}
+		kind, err := domain.ParseAgreementProposalKind(req.Kind)
+		if err != nil {
+			WriteError(w, http.StatusUnprocessableEntity, "AGREEMENT_KIND_INVALID",
+				"That is not a change we can propose.", nil)
+			return
+		}
+		sectionID := req.SectionID
+		if kind != domain.ProposalAdd {
+			sectionID = ""
+		}
+		// HouseholdID and ProposedByMembershipID are left zero in the struct on
+		// purpose: the service stamps both from the two arguments below -- the
+		// route and the session -- so a body carrying either is ignored rather
+		// than trusted. Filling them in here from req would be the mistake.
+		p, doc, err := deps.Agreements.Propose(r.Context(), scope.HouseholdID, scope.Membership.ID,
+			domain.AgreementProposal{
+				Kind:              string(kind),
+				SectionID:         sectionID,
+				TargetAgreementID: req.TargetAgreementID,
+				Body:              req.Body,
+				PreviousBody:      req.PreviousBody,
+				Note:              req.Note,
+			}, deps.Clock.Now())
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		respondProposal(w, scope.Membership.ID, http.StatusCreated, p, doc)
+	}
+}
+
+// handleWithdrawAgreementProposal owns the refusal order 404 -> 403 -> 409
+// (decision 22). It must read the proposal before it can know whose it is, so
+// the order is a property of THIS handler and not of the guards, and without
+// it "every write refuses 409 when the household is locked" is false on the
+// wire.
+//
+// The proposer is compared against the LIVE owner set, never a column: once
+// they are no longer an owner, any owner may withdraw it (decision 15), or a
+// proposal left behind by a departed partner could never be removed by anyone
+// -- the permanently-stuck state this codebase already shipped once, in
+// invites. That is a "who is asking" question, which is why it lives here and
+// no service takes an actor parameter for it. AgreementRepository.Withdraw's
+// own SQL clause is the backstop behind this, and it never branches on $by.
+func handleWithdrawAgreementProposal(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope, _ := RequestScope(r)
+		proposalID := chi.URLParam(r, "id")
+
+		record, err := deps.Agreements.Proposal(r.Context(), scope.HouseholdID, proposalID)
+		if err != nil {
+			MapDomainError(w, r, err) // an unknown or foreign id is ErrNotFound -> 404
+			return
+		}
+		members, err := deps.Memberships.List(r.Context(), scope.HouseholdID)
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		all := make([]domain.Membership, 0, len(members))
+		for _, m := range members {
+			all = append(all, m.Membership)
+		}
+		if record.ProposedByMembershipID != scope.Membership.ID &&
+			slices.Contains(domain.RequiredSigners(all), record.ProposedByMembershipID) {
+			WriteError(w, http.StatusForbidden, "AGREEMENT_NOT_PROPOSER",
+				"Only the owner who proposed this can withdraw it.", nil)
+			return
+		}
+
+		p, doc, err := deps.Agreements.Withdraw(r.Context(), scope.HouseholdID,
+			proposalID, scope.Membership.ID, deps.Clock.Now())
+		if err != nil {
+			MapDomainError(w, r, err) // a locked household refuses here, 409, and only here
+			return
+		}
+		respondProposal(w, scope.Membership.ID, http.StatusOK, p, doc)
+	}
+}
+
+// handleCreateAgreementSection answers 201, because a section creates a row --
+// and creating one is immediate and unsigned, since a heading is not a promise
+// (decision 8). decodeJSONBody's 1 KiB default is right here: the body is one
+// name, capped at 60 runes.
+func handleCreateAgreementSection(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope, _ := RequestScope(r)
+		var req createAgreementSectionRequest
+		if !decodeJSONBody(w, r, &req) {
+			return
+		}
+		section, doc, err := deps.Agreements.CreateSection(r.Context(), scope.HouseholdID,
+			req.Name, deps.Clock.Now())
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		WriteJSON(w, http.StatusCreated, agreementSectionWriteResponse{
+			Section:    toAgreementSectionDTO(section),
+			Agreements: toAgreementsDTO(doc, scope.Membership.ID),
+		})
+	}
+}
+
+// handleSeedStarterAgreementSections answers 200, not 201: the starter set is
+// idempotent (decision 17) and a second click may create nothing. It answers
+// the bare document rather than a row plus a document because nothing renders
+// from the four rows' order -- render order is always the document's.
+func handleSeedStarterAgreementSections(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope, _ := RequestScope(r)
+		doc, err := deps.Agreements.SeedStarterSections(r.Context(), scope.HouseholdID, deps.Clock.Now())
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		WriteJSON(w, http.StatusOK, agreementsResponse{
+			Agreements: toAgreementsDTO(doc, scope.Membership.ID),
+		})
+	}
+}
+
+// handleAgreeAgreementProposal records one Agree. A repeat Agree is an
+// idempotent 200 that may complete the set (decision 16) -- the signature write
+// is an upsert -- while an Agree on a proposal already accepted or withdrawn is
+// 409 AGREEMENT_PROPOSAL_RESOLVED from the service. Every count and comparison
+// that decides the outcome lives inside the repository's transaction; nothing
+// is decided here.
+func handleAgreeAgreementProposal(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope, _ := RequestScope(r)
+		p, doc, err := deps.Agreements.Sign(r.Context(), scope.HouseholdID,
+			chi.URLParam(r, "id"), scope.Membership.ID, deps.Clock.Now())
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		respondProposal(w, scope.Membership.ID, http.StatusOK, p, doc)
+	}
+}
+
+// handleParkAgreementProposal is Discuss: the proposal stays open, stays
+// answerable, and is rendered in the read-only To-discuss block on the Retros
+// page (decision 7). Nothing here touches a retro table and there is no
+// foreign key to a retro row -- the next retro usually does not exist yet,
+// which is exactly when a couple parks something.
+func handleParkAgreementProposal(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope, _ := RequestScope(r)
+		var req parkAgreementProposalRequest
+		if !decodeJSONBodyLimit(w, r, &req, maxAgreementRequestBodyBytes) {
+			return
+		}
+		p, doc, err := deps.Agreements.Park(r.Context(), scope.HouseholdID,
+			chi.URLParam(r, "id"), req.Note, deps.Clock.Now())
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		respondProposal(w, scope.Membership.ID, http.StatusOK, p, doc)
 	}
 }

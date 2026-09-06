@@ -389,6 +389,18 @@ func NewRouter(deps Deps) http.Handler {
 					w.Patch("/retros/{month}/actions/{id}", handleSetRetroActionDone(deps))
 					w.Delete("/retros/{month}/actions/{id}", handleRemoveRetroAction(deps))
 					w.Put("/marriage/vision/{year}", handleSaveVision(deps))
+
+					// Each action is its own POST, not a patchable status, or
+					// saving a note could withdraw a proposal. Nothing is ever
+					// deleted (decision 9), so there is no DELETE, no restore
+					// route -- Restore is a propose with kind "add" (decision
+					// 18) -- and no 204 anywhere in this feature.
+					w.Post("/marriage/agreements/sections", handleCreateAgreementSection(deps))
+					w.Post("/marriage/agreements/starter-set", handleSeedStarterAgreementSections(deps))
+					w.Post("/marriage/agreements/proposals", handleProposeAgreementChange(deps))
+					w.Post("/marriage/agreements/proposals/{id}/agree", handleAgreeAgreementProposal(deps))
+					w.Post("/marriage/agreements/proposals/{id}/park", handleParkAgreementProposal(deps))
+					w.Post("/marriage/agreements/proposals/{id}/withdraw", handleWithdrawAgreementProposal(deps))
 				})
 			})
 
