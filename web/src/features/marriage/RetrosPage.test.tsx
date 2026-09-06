@@ -97,12 +97,25 @@ const EMPTY_GOALS = {
   },
 };
 
+// RetrosPage mounts AgreementsToDiscuss unconditionally (Task 16), which fires
+// this GET on every render below. Nothing parked, so the block renders nothing
+// -- AgreementsToDiscuss.test.tsx owns the assertions about it. Wrapped in its
+// envelope, like every other agreements fixture: the hook parses
+// { agreements: … } and an unwrapped body fails inside Zod.
+const NO_AGREEMENTS = {
+  agreements: {
+    locked: false, owners: [], version: 1, updatedAt: null,
+    sections: [], proposals: [], history: [],
+  },
+};
+
 function renderPage(
   response: RetrosResponse,
   extraRoutes: Record<string, RouteResponse | RouteResponse[]> = {},
 ) {
   const fetchMock = stubFetchRoutes({
     "GET /api/v1/retros": { status: 200, body: response },
+    "GET /api/v1/marriage/agreements": { status: 200, body: NO_AGREEMENTS },
     ...extraRoutes,
   });
   return { fetchMock, ...renderWithRouter(<RetrosPage />) };
@@ -226,6 +239,7 @@ describe("RetrosPage", () => {
   it("a limited member is told this is owner-only, not that something broke", async () => {
     stubFetchRoutes({
       "GET /api/v1/retros": { status: 403, body: { error: { code: "FORBIDDEN", message: "Owner only." } } },
+      "GET /api/v1/marriage/agreements": { status: 200, body: NO_AGREEMENTS },
     });
     renderWithRouter(<RetrosPage />);
 
@@ -241,6 +255,7 @@ describe("RetrosPage", () => {
   it("a non-403 failure renders the generic load error, not the owner-only explanation", async () => {
     stubFetchRoutes({
       "GET /api/v1/retros": { status: 500, body: { error: { code: "INTERNAL", message: "Something broke." } } },
+      "GET /api/v1/marriage/agreements": { status: 200, body: NO_AGREEMENTS },
     });
     renderWithRouter(<RetrosPage />);
 

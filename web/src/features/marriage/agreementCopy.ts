@@ -289,4 +289,9 @@ export const AGREEMENT_COPY = {
   historySignedBy: (signedByNames: string[]) => `Agreed by ${joinNames(signedByNames)}`,
   historyShowOlder: (lowest: number, highest: number) =>
     lowest === highest ? `Show v${lowest} ↓` : `Show v${lowest}–v${highest} ↓`,
+
+  // --- To discuss, on the Retros page (Task 16) ---
+  toDiscussTitle: "To discuss at the next retro",
+  toDiscussSubtitle: "Parked from Agreements. Agree one here once you have talked it through.",
+  toDiscussLoadError: "Couldn't load anything parked for this retro.",
 } as const;

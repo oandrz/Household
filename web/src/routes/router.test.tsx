@@ -59,6 +59,20 @@ const NO_SESSION = {
   body: { error: { code: "UNAUTHENTICATED", message: "Sign in required." } },
 };
 
+// RetrosPage mounts AgreementsToDiscuss unconditionally (Task 16), which fires
+// this GET on every render of that page below. Nothing parked, so the block
+// renders nothing -- AgreementsToDiscuss.test.tsx owns the assertions about
+// it. Wrapped in its envelope, like every other agreements fixture.
+const NO_AGREEMENTS = {
+  status: 200,
+  body: {
+    agreements: {
+      locked: false, owners: [], version: 1, updatedAt: null,
+      sections: [], proposals: [], history: [],
+    },
+  },
+};
+
 function invitePreviewFixture(overrides: Partial<InvitePreview> = {}): InvitePreview {
   return {
     householdName: "Andreas & Christine",
@@ -516,6 +530,7 @@ describe("the real route tree", () => {
         status: 200,
         body: { retros: [], mood: [], doneCount: 0, since: null, startMonth: "2026-08" },
       },
+      "GET /api/v1/marriage/agreements": NO_AGREEMENTS,
     });
 
     const { router } = renderApp("/marriage/retros");
@@ -672,6 +687,7 @@ describe("the real route tree", () => {
         status: 200,
         body: { retros: [], mood: [], doneCount: 0, since: null, startMonth: "2026-08" },
       },
+      "GET /api/v1/marriage/agreements": NO_AGREEMENTS,
     });
 
     const { router } = renderApp("/marriage");
