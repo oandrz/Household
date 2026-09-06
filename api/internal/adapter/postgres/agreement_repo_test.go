@@ -257,3 +257,28 @@ func TestCreateSectionsIsIdempotentAndEverySliceIsNonNil(t *testing.T) {
 			doc.Sections == nil, doc.Agreements == nil, doc.Open == nil, doc.Accepted == nil)
 	}
 }
+
+// Proposal is the one method in this task that takes an id scoped to
+// something other than the household itself (a proposal id, not a
+// household id) -- exactly the shape that leaks across households if the
+// WHERE clause is ever wrong. TestGetHidesABillFromAnotherHousehold
+// (bill_repo_test.go:599) is the same test for BillRepository.Get; this is
+// its AgreementRepo counterpart. A row belonging to another household must
+// be indistinguishable from one that does not exist, so the answer is
+// ErrNotFound, never a different sentinel and never the row itself.
+func TestProposalHidesAnotherHouseholdsProposal(t *testing.T) {
+	ctx := context.Background()
+	repo, db, mine, _ := newAgreementRepo(t)
+	theirs := insertTestHousehold(t, db)
+	theirSection, err := repo.CreateSection(ctx, theirs, "Money", at(0))
+	if err != nil {
+		t.Fatalf("CreateSection (theirs): %v", err)
+	}
+	them := insertTestMembership(t, db, theirs, "Them")
+	foreign := insertTestProposal(t, db, theirs, theirSection.ID, them, "pending", "X", at(1), nil)
+
+	_, err = repo.Proposal(ctx, mine, foreign)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Proposal across households = %v, want ErrNotFound (not forbidden, not a row)", err)
+	}
+}
