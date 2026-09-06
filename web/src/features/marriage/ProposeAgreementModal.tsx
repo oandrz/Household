@@ -98,6 +98,27 @@ export function ProposeAgreementModal({
   const [body, setBody] = useState(
     seed.body ?? (seed.mode === "edit" ? bodyOf(initialTargetId) : ""),
   );
+  // SNAPSHOTTED here and in chooseMode/chooseTarget below -- never read live
+  // from `targets` again at send time. `targets` is derived from the
+  // `sections` PROP, which can change while this modal stays open (another
+  // owner's edit landing via the same background refetch that eventually
+  // shows up here too): handleSend used to call bodyOf(targetId) fresh,
+  // which returns "" the instant the target's OWN id is retired -- an edit
+  // or a remove replaces the live row with a brand-new id (decision 9,
+  // agreement_write_repo.go's applyAgreementChange: remove() then add()) --
+  // and an empty previousBody on an edit or a remove is a shape the
+  // domain's own CHECK refuses outright (agreement_proposals_shape),
+  // landing on the generic "Could not send that for agreement" fallback
+  // instead of the conflict banner this exact situation should show. The
+  // fix is the same rule the file's own header comment already states for
+  // this whole component: "wording the proposer never saw must never be
+  // what gets compared" -- previousBody is what THIS session actually saw
+  // when the target was chosen, so a target that has since moved (or been
+  // replaced) is caught by the server's own staleness check and answers
+  // 409 AGREEMENT_CHANGED, which this modal already knows how to show.
+  const [previousBody, setPreviousBody] = useState(
+    seed.mode === "add" ? "" : bodyOf(initialTargetId),
+  );
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   // One-way, component-local, set from err.code -- never useAgreements' own
@@ -115,12 +136,19 @@ export function ProposeAgreementModal({
     setMode(next);
     setTargetId(nextTargetId);
     setBody(next === "edit" ? bodyOf(nextTargetId) : "");
+    // Re-snapshotted here too: switching mode picks a (possibly different)
+    // default target, so the wording this session has now seen changes with
+    // it.
+    setPreviousBody(next === "add" ? "" : bodyOf(nextTargetId));
   }
 
   function chooseTarget(nextTargetId: string) {
     setTargetId(nextTargetId);
     // Only an edit pre-fills; a remove sends no body at all.
     if (mode === "edit") setBody(bodyOf(nextTargetId));
+    // mode is never "add" here -- the target select only renders for edit
+    // and remove (JSX below) -- so this is always the wording just chosen.
+    setPreviousBody(bodyOf(nextTargetId));
   }
 
   // An edit or a remove with no target selects nothing to change, and an add
@@ -144,7 +172,9 @@ export function ProposeAgreementModal({
         sectionId: mode === "add" ? sectionId : "",
         targetAgreementId: mode === "add" ? "" : targetId,
         body: mode === "remove" ? "" : body.trim(),
-        previousBody: mode === "add" ? "" : bodyOf(targetId),
+        // The snapshot, not a fresh bodyOf(targetId) -- see that state's own
+        // comment for why a live re-read here was the bug.
+        previousBody,
         note: note.trim(),
       });
       onClose();

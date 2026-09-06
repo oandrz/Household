@@ -3,11 +3,13 @@
 // ever grows a <Link>). Every fixture below is WRAPPED -- the wire is
 // { "agreements": {…} } and { "proposal": {…}, "agreements": {…} } -- because
 // the schemas parse the envelope and return the inner object.
+import { useState } from "react";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
 import { ProposeAgreementModal, type AgreementProposeSeed } from "./ProposeAgreementModal";
+import type { AgreementSection } from "./agreementSchemas";
 
 const SECTIONS = [
   {
@@ -58,6 +60,36 @@ function renderModal(
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+
+// A real parent re-render with a NEW `sections` array, not a fake rerender
+// hack -- this is what AgreementsPage actually does the instant its own
+// useAgreements() query refetches (a background invalidation from another
+// owner's write landing, or the household's own periodic refetch) while
+// this modal stays open and mounted. The button is the test's own trigger,
+// standing in for "a refetch just landed."
+function HarnessWithSwappableSections({
+  seed,
+  initialSections,
+  movedSections,
+}: {
+  seed: AgreementProposeSeed;
+  initialSections: AgreementSection[];
+  movedSections: AgreementSection[];
+}) {
+  const [sections, setSections] = useState(initialSections);
+  return (
+    <>
+      <button onClick={() => setSections(movedSections)}>simulate a landed refetch</button>
+      <ProposeAgreementModal
+        seed={seed}
+        coOwnerNames={["Christine"]}
+        sections={sections}
+        onOpenNewSection={() => {}}
+        onClose={() => {}}
+      />
+    </>
+  );
+}
 
 describe("ProposeAgreementModal", () => {
   // Real radios, checked from the seed and never from a hardcoded "edit"
@@ -194,6 +226,93 @@ describe("ProposeAgreementModal", () => {
     // Nothing typed is lost -- criterion 10's half that jsdom can express.
     expect(screen.getByLabelText("New wording")).toHaveValue(
       "Each gets S$250/mo no-questions-asked",
+    );
+  });
+
+  // The Task 18 walk's own finding: a background refetch reaching this
+  // modal while it stays open must never change what `previousBody` sends,
+  // because previousBody's whole job is "the wording this session actually
+  // saw" (this file's own comment on `bodyOf`). Before the fix, `handleSend`
+  // called `bodyOf(targetId)` fresh at send time -- reading straight off the
+  // `sections` PROP -- so once a target's own id was retired (exactly what
+  // an edit or a remove does to it, decision 9) that call silently returned
+  // "", which the server's own shape CHECK refuses outright rather than
+  // answering the staleness conflict this exact situation should raise.
+  it("previousBody is the wording seen when the target was chosen, not re-read from a sections prop that moved under an open modal", async () => {
+    let sent: unknown;
+    stubFetchRoutes({
+      "GET /api/v1/marriage/agreements": { status: 200, body: doc(2) },
+      "POST /api/v1/marriage/agreements/proposals": {
+        status: 201,
+        body: {
+          proposal: {
+            id: "p-1",
+            kind: "edit",
+            status: "pending",
+            sectionId: "s-money",
+            sectionName: "Money",
+            targetAgreementId: "a-2",
+            body: "My own new wording",
+            previousBody: "Each gets S$200/mo no-questions-asked",
+            note: "",
+            parkNote: "",
+            proposedByMembershipId: "m-a",
+            proposedByName: "Andreas",
+            proposedAt: "2026-09-05T09:00:00Z",
+            awaitingNames: ["Christine"],
+            targetChanged: false,
+            canAgree: false,
+            canWithdraw: true,
+          },
+          agreements: doc(2).agreements,
+        },
+        capture: (body) => {
+          sent = body;
+        },
+      },
+    });
+
+    renderWithRouter(
+      <HarnessWithSwappableSections
+        seed={{ mode: "edit", targetAgreementId: "a-1" }}
+        initialSections={SECTIONS}
+        // Same position, same display number, a DIFFERENT id and body --
+        // exactly what applyAgreementChange's remove()-then-add() leaves an
+        // edit or a remove looking like from the outside.
+        movedSections={[
+          {
+            id: "s-money",
+            name: "Money",
+            count: 1,
+            visible: true,
+            agreements: [{ id: "a-2", number: 1, body: "Someone else's landed wording" }],
+          },
+        ]}
+      />,
+    );
+
+    expect(await screen.findByLabelText("New wording")).toHaveValue(
+      "Each gets S$200/mo no-questions-asked",
+    );
+
+    // The refetch lands while this modal stays open and untouched.
+    fireEvent.click(screen.getByRole("button", { name: "simulate a landed refetch" }));
+
+    // The typed draft is unaffected by the prop swap -- still the original
+    // pre-fill, not the newly-landed wording and not blanked either.
+    expect(screen.getByLabelText("New wording")).toHaveValue(
+      "Each gets S$200/mo no-questions-asked",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Send for agreement" }));
+
+    await waitFor(() =>
+      expect(sent).toMatchObject({
+        // The id this session actually chose, not the section's new one --
+        // targetId is untouched by the prop swap, same as body.
+        targetAgreementId: "a-1",
+        previousBody: "Each gets S$200/mo no-questions-asked",
+      }),
     );
   });
 });
