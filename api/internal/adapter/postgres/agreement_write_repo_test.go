@@ -544,3 +544,171 @@ func TestParkAndWithdrawRefuseAnotherHouseholdsProposal(t *testing.T) {
 			still.Status, still.ParkNote)
 	}
 }
+
+// TestSignIsOneTransactionOnItsOwnConnection's own starvation only exercises
+// an ADD proposal, so step 2's LockAgreementTarget is skipped entirely --
+// that call is never proven to run on the transaction's own connection.
+// Moved to r.q, it would run its FOR UPDATE in its own autocommit
+// transaction, releasing the target lock the instant it is taken, which
+// destroys decision 12's whole property while every existing test stays
+// green. This is a second starvation leg for an EDIT proposal, which reaches
+// LockAgreementTarget, and a THIRD owner so Casey's Agree is deliberately
+// NON-completing -- unlike the other starvation test, this call must
+// SUCCEED under nine held connections. That success is what exercises the
+// final GetAgreementProposal read-back too: both statements were mutation-
+// checked against this exact test (moved to r.q one at a time), and both
+// turned the call into a context-deadline failure -- recorded in the task 6
+// fix-round report, not repeated here as a third live mutation.
+func TestSignOnAnEditReachesTheTargetLockOnItsOwnConnection(t *testing.T) {
+	ctx := context.Background()
+	f := newAgreementFixture(t)
+	target := f.landAdd(t, "we save 20%")      // two owners here, so this lands as usual
+	insertTestMembership(t, f.db, f.h, "Drew") // now three: Casey's Agree below is 2 of 3
+
+	edit, err := f.repo.CreateProposal(ctx, usecase.AgreementProposalWrite{
+		HouseholdID:            f.h,
+		Kind:                   "edit",
+		TargetAgreementID:      target.ID,
+		Body:                   "we save 25%",
+		PreviousBody:           "we save 20%",
+		ProposedByMembershipID: f.alex,
+		CreatedAt:              at(3),
+	})
+	if err != nil {
+		t.Fatalf("CreateProposal(edit): %v", err)
+	}
+
+	var hold []*pgxpool.Conn
+	for i := 0; i < 9; i++ {
+		c, err := f.db.Pool().Acquire(ctx)
+		if err != nil {
+			t.Fatalf("acquire %d: %v", i, err)
+		}
+		hold = append(hold, c)
+	}
+	signCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	got, err := f.repo.Sign(signCtx, usecase.AgreementSignatureWrite{
+		HouseholdID: f.h, ProposalID: edit.ID, MembershipID: f.casey, At: at(4),
+	})
+	for _, c := range hold {
+		c.Release()
+	}
+
+	// The positive claim: this call needs only the ONE connection its own
+	// transaction holds. If LockAgreementTarget (or the read-back after it)
+	// reached back into the pool, nine held connections plus the
+	// transaction's own would leave nothing free, and the call would hang
+	// until signCtx's deadline instead of returning cleanly.
+	if err != nil {
+		t.Fatalf("Sign under starvation: %v -- a statement reached back to the pool", err)
+	}
+	if got.Status != "pending" {
+		t.Fatalf("status = %q, want pending -- only 2 of 3 owners have signed", got.Status)
+	}
+	if held := heldConns(f.db); held != 0 {
+		t.Fatalf("%d connection(s) still checked out, want 0", held)
+	}
+}
+
+// Finding 2's gap: nothing in the brief's own test list ever lets an edit or
+// a remove actually COMPLETE. Every "edit" and "remove" kind elsewhere in
+// this file hits a refusal path before applyAgreementChange ever runs, so
+// RemoveAgreement is never executed, the edit's remove-then-add ordering is
+// never exercised, and InsertAgreementProposal never runs kind = 'remove'
+// against the agreement_proposals_shape CHECK. This is decision 9's "removal
+// is a stamp, not a delete" and decision 12's target lock, both exercised
+// end to end: the old row is stamped removed (never deleted) and exactly one
+// new live row takes its place.
+func TestSignCompletesAnEditRemovingTheOldRowAndAddingTheNew(t *testing.T) {
+	ctx := context.Background()
+	f := newAgreementFixture(t)
+	target := f.landAdd(t, "we save 20%")
+
+	edit, err := f.repo.CreateProposal(ctx, usecase.AgreementProposalWrite{
+		HouseholdID:            f.h,
+		Kind:                   "edit",
+		TargetAgreementID:      target.ID,
+		Body:                   "we save 25%",
+		PreviousBody:           "we save 20%",
+		ProposedByMembershipID: f.alex,
+		CreatedAt:              at(3),
+	})
+	if err != nil {
+		t.Fatalf("CreateProposal(edit): %v", err)
+	}
+	done, err := f.repo.Sign(ctx, usecase.AgreementSignatureWrite{
+		HouseholdID: f.h, ProposalID: edit.ID, MembershipID: f.casey, At: at(4),
+	})
+	if err != nil {
+		t.Fatalf("Sign(edit): %v", err)
+	}
+	if done.Status != "accepted" || done.ResolvedAt == nil || !done.ResolvedAt.Equal(at(4)) {
+		t.Fatalf("status = %q resolvedAt = %v, want accepted at %s", done.Status, done.ResolvedAt, at(4))
+	}
+
+	doc, err := f.repo.Document(ctx, f.h)
+	if err != nil {
+		t.Fatalf("Document: %v", err)
+	}
+	if len(doc.Agreements) != 1 || doc.Agreements[0].Body != "we save 25%" || doc.Agreements[0].AddedByProposalID != edit.ID {
+		t.Fatalf("live agreements = %v, want exactly one, body %q, added by the edit %s",
+			doc.Agreements, "we save 25%", edit.ID)
+	}
+	// Stamped removed, never deleted: the row still exists, and points at the
+	// edit that removed it -- decision 9's "it stays in Version history".
+	if n := countRow(t, f.db,
+		`SELECT count(*) FROM agreements WHERE id = $1 AND removed_at IS NOT NULL AND removed_by_proposal_id = $2`,
+		target.ID, edit.ID); n != 1 {
+		t.Fatalf("%d rows show the old agreement stamped removed by the edit, want 1", n)
+	}
+	if n := countRow(t, f.db, `SELECT count(*) FROM agreements WHERE household_id = $1`, f.h); n != 2 {
+		t.Fatalf("%d agreement rows total, want 2 -- the old one stamped removed plus the new one, never a delete", n)
+	}
+}
+
+// The remove kind's own completion: RemoveAgreement stamps the target and
+// nothing takes its place, so the household ends with the row still present
+// (removed, not deleted) and zero live agreements.
+func TestSignCompletesARemoveStampingTheAgreementWithNoNewRow(t *testing.T) {
+	ctx := context.Background()
+	f := newAgreementFixture(t)
+	target := f.landAdd(t, "we save 20%")
+
+	remove, err := f.repo.CreateProposal(ctx, usecase.AgreementProposalWrite{
+		HouseholdID:            f.h,
+		Kind:                   "remove",
+		TargetAgreementID:      target.ID,
+		PreviousBody:           "we save 20%",
+		ProposedByMembershipID: f.alex,
+		CreatedAt:              at(3),
+	})
+	if err != nil {
+		t.Fatalf("CreateProposal(remove): %v", err)
+	}
+	done, err := f.repo.Sign(ctx, usecase.AgreementSignatureWrite{
+		HouseholdID: f.h, ProposalID: remove.ID, MembershipID: f.casey, At: at(4),
+	})
+	if err != nil {
+		t.Fatalf("Sign(remove): %v", err)
+	}
+	if done.Status != "accepted" || done.ResolvedAt == nil || !done.ResolvedAt.Equal(at(4)) {
+		t.Fatalf("status = %q resolvedAt = %v, want accepted at %s", done.Status, done.ResolvedAt, at(4))
+	}
+
+	doc, err := f.repo.Document(ctx, f.h)
+	if err != nil {
+		t.Fatalf("Document: %v", err)
+	}
+	if len(doc.Agreements) != 0 {
+		t.Fatalf("live agreements = %v, want none -- the only agreement was just removed", doc.Agreements)
+	}
+	if n := countRow(t, f.db,
+		`SELECT count(*) FROM agreements WHERE id = $1 AND removed_at IS NOT NULL AND removed_by_proposal_id = $2`,
+		target.ID, remove.ID); n != 1 {
+		t.Fatalf("%d rows show the agreement stamped removed by the remove proposal, want 1", n)
+	}
+	if n := countRow(t, f.db, `SELECT count(*) FROM agreements WHERE household_id = $1`, f.h); n != 1 {
+		t.Fatalf("%d agreement rows total, want 1 -- stamped removed, never deleted, and no replacement row", n)
+	}
+}
