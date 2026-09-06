@@ -53,6 +53,18 @@ export function AgreementsToDiscuss() {
     doc?.sections.flatMap((s) => s.agreements).find((a) => a.id === targetAgreementId)?.number ??
     null;
 
+  // ProposalCard.tsx's own staleNote, decision 14's three sentences -- copied
+  // rather than shared because there is no third caller yet to justify a
+  // helper, but the STRINGS must be the one set agreementCopy.ts already
+  // names: this block and the Agreements page must never disagree about what
+  // a stale parked proposal is told it is.
+  const staleNoteFor = (p: (typeof parked)[number]): string =>
+    p.canWithdraw
+      ? AGREEMENT_COPY.staleMine
+      : p.proposedByName === ""
+        ? AGREEMENT_COPY.staleNoName
+        : AGREEMENT_COPY.staleTheirs(p.proposedByName);
+
   return (
     <section
       data-testid="agreements-to-discuss"
@@ -85,17 +97,32 @@ export function AgreementsToDiscuss() {
               {p.body !== "" && <p className="mt-0.5 text-[12.5px] text-ink">{p.body}</p>}
               {/* An empty park note is ordinary: Discuss is a bare button. */}
               {p.parkNote !== "" && <p className="mt-1 text-[12.5px] text-muted">{p.parkNote}</p>}
+              {/* A parked proposal can go stale exactly like a pending one --
+                  the section's live wording keeps moving while it waits for a
+                  retro. Without this, Agree stayed enabled here even though
+                  ProposalCard.tsx disables the identical button on the
+                  Agreements page, and clicking it could only ever answer 409
+                  AGREEMENT_CHANGED: decision 14's own refusal against "a live
+                  button that always 409s". */}
+              {p.targetChanged && (
+                <p data-testid="to-discuss-stale-note" className="mt-1 text-[12.5px] text-danger">
+                  {staleNoteFor(p)}
+                </p>
+              )}
             </div>
             {/* canAgree is the server's own flag (!locked && …), so a locked
                 household loses this button with no second rule in the browser to
                 disagree with it (decisions 3 and 16). No Discuss and no
                 Withdraw: a reminder, not a second editing surface. min-h-11 is
-                the 44px touch floor. */}
+                the 44px touch floor. targetChanged disables it on top of
+                canAgree -- the server flag says the viewer MAY act, not that
+                the target still exists to agree to (agreement_handlers.go's
+                CanAgree carries no targetChanged term). */}
             {p.canAgree && (
               <button
                 type="button"
                 onClick={() => handleAgree(p.id)}
-                disabled={agreeingId === p.id}
+                disabled={p.targetChanged || agreeingId === p.id}
                 className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
               >
                 {AGREEMENT_COPY.agree}

@@ -126,6 +126,38 @@ describe("AgreementsToDiscuss", () => {
     expect(within(block).queryByRole("button", { name: "Agree" })).not.toBeInTheDocument();
   });
 
+  // The composition gap the whole-branch review found: ProposalCard.tsx
+  // disables Agree on targetChanged and explains why (decision 14); this
+  // block never read that field at all, so a parked proposal whose target had
+  // moved rendered a live, enabled Agree that could only ever answer 409
+  // AGREEMENT_CHANGED. Same three sentences as ProposalCard.test.tsx's own
+  // "addresses a stale proposal to whoever is reading", because decision 14
+  // names exactly three and both surfaces must agree on all of them.
+  it.each([
+    [{ canWithdraw: true }, "Withdraw it and propose the change again."],
+    [
+      { canWithdraw: false, proposedByName: "Andreas" },
+      "Ask Andreas to withdraw it and propose it again against the current wording.",
+    ],
+    [
+      { canWithdraw: false, proposedByName: "" },
+      "This needs withdrawing and proposing again against the current wording.",
+    ],
+  ] as [Partial<AgreementProposal>, string][])(
+    "disables Agree on a stale parked proposal and names why (%#)",
+    async (overrides, sentence) => {
+      renderBlock(
+        documentFixture({
+          proposals: [parkedFixture({ targetChanged: true, canAgree: true, ...overrides })],
+        }),
+      );
+
+      const block = await screen.findByTestId("agreements-to-discuss");
+      expect(within(block).getByTestId("to-discuss-stale-note")).toHaveTextContent(sentence);
+      expect(within(block).getByRole("button", { name: "Agree" })).toBeDisabled();
+    },
+  );
+
   it("shows the write failure in place and keeps the row, rather than emptying the block", async () => {
     renderBlock(documentFixture({ proposals: [parkedFixture()] }), {
       [AGREE_URL]: {
