@@ -5,54 +5,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../api/client";
 import { stubFetchRoutes } from "../../test/fetchStub";
 import { AGREEMENT_COPY } from "./agreementCopy";
-import type { AgreementProposal, AgreementsDocument } from "./agreementSchemas";
+import { DOC_URL, documentFixture, proposalFixture } from "./agreementFixtures";
+import type { AgreementsDocument } from "./agreementSchemas";
 import { handleWriteError, useAgreements } from "./useAgreements";
-
-// These four are lifted into web/src/features/marriage/agreementFixtures.tsx
-// by Task 10, which needs the same shapes for the page tests and for the
-// Retros block in Task 16; this file's copies are deleted in that same task.
-// Keep the names identical so that edit is an import, not a rewrite.
-const DOC_URL = "/api/v1/marriage/agreements";
-const OWNERS = [
-  { membershipId: "m-1", name: "Andreas" },
-  { membershipId: "m-2", name: "Christine" },
-];
-
-function documentFixture(o: Partial<AgreementsDocument> = {}): AgreementsDocument {
-  return {
-    locked: false,
-    owners: OWNERS,
-    version: 1,
-    updatedAt: null,
-    sections: [],
-    proposals: [],
-    history: [],
-    ...o,
-  };
-}
-
-function proposalFixture(o: Partial<AgreementProposal> = {}): AgreementProposal {
-  return {
-    id: "p-1",
-    kind: "add",
-    status: "pending",
-    sectionId: "s-1",
-    sectionName: "Money",
-    targetAgreementId: "",
-    body: "One shared account for bills",
-    previousBody: "",
-    note: "",
-    parkNote: "",
-    proposedByMembershipId: "m-1",
-    proposedByName: "Andreas",
-    proposedAt: "2026-09-05T10:00:00+08:00",
-    awaitingNames: ["Christine"],
-    targetChanged: false,
-    canAgree: true,
-    canWithdraw: false,
-    ...o,
-  };
-}
 
 function renderUseAgreements() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

@@ -226,11 +226,17 @@ function MemberRow({
   );
 }
 
-export function MembersPanel() {
+export function MembersPanel({ openInvite = false }: { openInvite?: boolean }) {
   const me = useMe();
   const members = useHouseholdMembers();
   const updateMember = useUpdateMember();
-  const [inviteOpen, setInviteOpen] = useState(false);
+  // SEEDED, not bound. useState(openInvite) reads the prop once, on the first
+  // render, and this panel owns the modal from then on. Binding it --
+  // open={openInvite} on the modal at :335 -- would reopen it on every later
+  // render for as long as the URL still carries ?invite=true, so closing it
+  // would appear to do nothing the moment anything else on this page
+  // re-rendered.
+  const [inviteOpen, setInviteOpen] = useState(openInvite);
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [rowWarnings, setRowWarnings] = useState<Record<string, string>>({});
   // Which members currently have a mutation in flight -- a Set, not a

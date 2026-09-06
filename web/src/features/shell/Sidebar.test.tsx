@@ -134,7 +134,7 @@ describe("Sidebar", () => {
   // already handles any page count identically (SPACE_PAGES's own comment
   // on `length === 1` vs `length > 1`), so this needed no new rendering
   // logic, only the entry.
-  it("renders a Marriage group with Retros and Vision & goals links for a member holding the capability", async () => {
+  it("renders a Marriage group with Retros, Vision & goals and Agreements links for a member holding the capability", async () => {
     renderWithRouter(<Sidebar me={meFixture([marriageSpace])} />);
 
     expect(await screen.findByTestId("sidebar-space-label")).toHaveTextContent("Marriage");
@@ -142,6 +142,8 @@ describe("Sidebar", () => {
     expect(retros).toHaveAttribute("href", "/marriage/retros");
     const vision = screen.getByRole("link", { name: "Vision & goals" });
     expect(vision).toHaveAttribute("href", "/marriage/vision");
+    const agreementsLink = screen.getByRole("link", { name: "Agreements" });
+    expect(agreementsLink).toHaveAttribute("href", "/marriage/agreements");
   });
 
   // The server -- not this component -- decides who sees Marriage at all:
@@ -157,6 +159,7 @@ describe("Sidebar", () => {
     expect(screen.queryByText("Marriage")).toBeNull();
     expect(screen.queryByRole("link", { name: "Retros" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Vision & goals" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Agreements" })).not.toBeInTheDocument();
   });
 
   it("still renders a space the household created, which has no built pages either", async () => {

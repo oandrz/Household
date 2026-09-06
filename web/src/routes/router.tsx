@@ -94,6 +94,7 @@ import { SignInScreen } from "../features/auth/SignInScreen";
 import { SignUpScreen } from "../features/auth/SignUpScreen";
 import { SignUpCompleteScreen } from "../features/auth/SignUpCompleteScreen";
 import { useMe } from "../features/auth/useAuth";
+import { AgreementsPage } from "../features/marriage/AgreementsPage";
 import { RetrosPage } from "../features/marriage/RetrosPage";
 import { VisionPage } from "../features/marriage/VisionPage";
 import { BillsPage } from "../features/money/BillsPage";
@@ -288,9 +289,9 @@ const marriageGuardRoute = createRoute({
   component: () => <RequireCapability cap="marriage" />,
 });
 // Retros is Marriage's first page (Task 10). Vision & goals is its second
-// (Task 11) -- Agreements (docs/FEATURE_TRACKER.md section 6) will get its
-// own sibling route under marriageGuardRoute when it's built, the same way
-// moneyBudgetRoute and moneyGoalsRoute joined moneyIndexRoute one at a time.
+// (Task 11), and Agreements (docs/FEATURE_TRACKER.md section 6) is its third
+// and last, the same way moneyBudgetRoute and moneyGoalsRoute joined
+// moneyIndexRoute one at a time.
 const marriageRetrosRoute = createRoute({
   getParentRoute: () => marriageGuardRoute,
   path: "retros",
@@ -300,6 +301,15 @@ const marriageVisionRoute = createRoute({
   getParentRoute: () => marriageGuardRoute,
   path: "vision",
   component: VisionPage,
+});
+// Marriage's third and last page. A sibling of retros and vision under
+// marriageGuardRoute, so RequireCapability("marriage") runs before it mounts;
+// the server stacks requireOwner behind that, which is what the page's own 403
+// branch answers.
+const marriageAgreementsRoute = createRoute({
+  getParentRoute: () => marriageGuardRoute,
+  path: "agreements",
+  component: AgreementsPage,
 });
 
 // Task 10 left marriageGuardRoute with one child and no index, so bare
@@ -319,10 +329,32 @@ const marriageIndexRoute = createRoute({
 const settingsRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "settings",
-  // Task 20 replaces the placeholder with the real screen -- Members,
-  // Spaces, Currency & region and Notifications; Connected accounts is a
-  // later slice.
-  component: SettingsPage,
+  // ?invite=true opens the Members panel's invite modal on arrival -- the
+  // Agreements page's locked state links here rather than growing a second
+  // invite implementation (spec decision 2). TanStack's default search parser
+  // JSON-parses each value, so a link built by <Link search={{ invite: true }}>
+  // arrives as the boolean; a hand-typed or copied URL may still deliver the
+  // string. Anything else -- ?invite=maybe, ?invite=1 -- makes this route
+  // contribute nothing (returns {} rather than echoing the bad value back).
+  // That does NOT scrub the raw value out of the URL or out of
+  // router.state.location.search -- TanStack's own parentSearch/strictSearch
+  // merge keeps whatever the URL carried, regardless of what a child route
+  // returns (router.test.tsx has the source citation). What this guards is
+  // the consumer: SettingsRouteComponent below only ever treats the search as
+  // "open" on strict `invite === true`, so a leaked "maybe" string still
+  // fails closed at the one place that acts on it.
+  validateSearch: (search: Record<string, unknown>): { invite?: true } =>
+    search.invite === true || search.invite === "true" ? { invite: true } : {},
+  // Named, not an inline arrow, for the rules-of-hooks reason
+  // adminHouseholdsRoute's own component gives at :476 -- it calls useSearch
+  // directly, and eslint-plugin-react-hooks only recognises a function as a
+  // component by its name starting with an uppercase letter. `from` is the
+  // route ID, not the URL: authenticatedRoute and shellRoute are pathless but
+  // still join the chain that identifies this route.
+  component: function SettingsRouteComponent() {
+    const { invite } = useSearch({ from: "/authenticated/shell/settings" });
+    return <SettingsPage openInvite={invite === true} />;
+  },
 });
 
 // Lazily loaded so no household member ever downloads the admin bundle --
@@ -668,6 +700,7 @@ export const routeTree = rootRoute.addChildren([
         marriageIndexRoute,
         marriageRetrosRoute,
         marriageVisionRoute,
+        marriageAgreementsRoute,
       ]),
       settingsRoute,
     ]),

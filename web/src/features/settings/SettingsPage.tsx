@@ -9,7 +9,10 @@ import { MembersPanel } from "./MembersPanel";
 import { NotificationsPanel } from "./NotificationsPanel";
 import { SpacesPanel } from "./SpacesPanel";
 
-export function SettingsPage() {
+// openInvite arrives from settingsRoute's validated ?invite=true and is passed
+// straight through to the panel that owns the modal. Defaulted, so every
+// existing `render(<SettingsPage />)` keeps compiling.
+export function SettingsPage({ openInvite = false }: { openInvite?: boolean }) {
   return (
     <PageContainer>
       <div>
@@ -28,7 +31,7 @@ export function SettingsPage() {
       </div>
 
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
-        <MembersPanel />
+        <MembersPanel openInvite={openInvite} />
         <SpacesPanel />
         <CurrencyPanel />
       </div>
