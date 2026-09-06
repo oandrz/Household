@@ -145,6 +145,10 @@ type AgreementProposalView struct {
     ProposedByMembershipID, ProposedByName                      string
     ProposedAt                                                  time.Time
     AwaitingNames                                               []string
+    // Every membership id that has signed, so the HTTP layer can decide the
+    // viewer's own canAgree. It never reaches the wire: a browser comparing
+    // membership ids is the thing canAgree exists to replace.
+    SignedByMembershipIDs                                       []string
     TargetChanged                                               bool
 }
 type AgreementHistoryEntry struct {
@@ -2925,7 +2929,23 @@ Expected: `TestAgreementWritesAreRefusedOnAOneOwnerHouseholdBeforeAnyRepositoryC
 
 - [ ] **Step 6: Mutation-check the park note's rune cap** — in `Park`, change `utf8.RuneCountInString(note)` to `len(note)`. Expected: `TestAgreementParkCapsItsOwnNoteSeparatelyFromTheProposalNote` red on the note that must be **accepted**, not on the over-long one — the first `t.Fatalf`, `Park at the cap: <ErrAgreementParkNoteTooLong's text> -- 500 runes is inside MaxAgreementParkNoteLen whatever it is in bytes` — because 500 Chinese runes are 1500 bytes. Being a `Fatalf`, it stops the test there and the over-long leg never runs; that leg would refuse under a byte cap too, which is exactly why the boundary fixture is multi-byte. An ASCII fixture would pass a byte cap and see nothing at all. A test failure. Restore.
 
-- [ ] **Step 7: Mutation-check that `Withdraw` does not decide** — in `Withdraw`, insert a proposer check above the repository call:
+- [ ] **Step 7: Mutation-check the proposer's implicit signature** (the spec's own
+mutation 2) — in `CreateProposal`'s double, delete the line that records the
+proposer's own signature, leaving the proposal row written.
+
+Expected: a **test** failure on the awaiting list, not on the proposal:
+
+```
+--- FAIL: TestAgreementProposeSignsTheProposerAndTheAwaitingListFollowsTheOwners
+    agreement_test.go:2384: awaitingNames = [Andreas Christine], want [Christine]
+    -- the proposer is waiting for their own proposal
+```
+
+If the atomicity test in Task 6 reddens instead, the two rows are being written
+but not together, which is a different defect with a different fix. Restore the
+line.
+
+- [ ] **Step 8: Mutation-check that `Withdraw` does not decide** — in `Withdraw`, insert a proposer check above the repository call:
 
 ```go
 	if rec, err := s.agreements.Proposal(ctx, householdID, proposalID); err == nil &&
@@ -2936,7 +2956,7 @@ Expected: `TestAgreementWritesAreRefusedOnAOneOwnerHouseholdBeforeAnyRepositoryC
 
 Expected: `TestAgreementWithdrawHandsTheProposerCheckToTheStore` stays green on the `errors.Is(err, domain.ErrForbidden)` line — the answer is identical — and goes red on `the repository saw byMembershipID "", want "m2" -- the service decided instead of asking`. That is the whole point of the test: it pins **where** the refusal was made, not what it said, and a check moved up here would silently break decision 22's `404` → `403` → `409` order the moment a proposal did not exist. A test failure. Restore.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add api/internal/usecase/agreement.go api/internal/usecase/agreement_test.go
@@ -3857,7 +3877,7 @@ func execSQL(t *testing.T, db *postgres.DB, sql string, args ...any) {
 	}
 }
 
-// heldConns is bill_repo_test.go:517-536's inline loop lifted into a function,
+// heldConns is bill_repo_test.go:525-536's inline loop lifted into a function,
 // because this file makes the same assertion three times. Polled rather than
 // sampled once: pgxpool runs a background health check on a 500ms timer that
 // briefly acquires an idle connection, so a single sample can catch an
@@ -4770,7 +4790,7 @@ Then add one line to `convert.go`'s compile-time block, after `_ usecase.RetroAc
 
 Run: `cd api && go test ./internal/adapter/postgres/ -run 'TestCreateProposal|TestSign|TestPark|TestWithdraw' -count=1 -v`
 
-Expected: PASS — **eight** test functions, ten cases counting `TestSignRefusesAChangedTarget`'s three subtests, which `-v` names individually as `TestSignRefusesAChangedTarget/target_in_another_household` and so on. Each boots its own container, so budget around a minute.
+Expected: PASS — **nine** test functions, eleven cases counting `TestSignRefusesAChangedTarget`'s three subtests, which `-v` names individually as `TestSignRefusesAChangedTarget/target_in_another_household` and so on. Each boots its own container, so budget around a minute.
 
 - [ ] **Step 8: Mutation-check the connection and the target lock**
 
@@ -4785,6 +4805,25 @@ Expected: a **test** failure. The pool-backed call waits for a connection that t
 
 Nothing else reddens: every other test leaves the pool alone. Restore the line.
 
+**Third — the status read that precedes the signature upsert** (the spec's own
+mutation 4, and the reason a three-owner fixture exists at all). In `Sign` step 1,
+delete the `if !status.IsOpen()` refusal, leaving the `SELECT … FOR UPDATE` that
+takes the lock.
+
+Expected: a **test** failure in exactly one place. Every two-owner test stays
+green, because there the only non-proposer signature is also the completing one,
+and the apply path refuses a resolved proposal on its own:
+
+```
+--- FAIL: TestSignOnAWithdrawnProposalIsRefusedAndWritesNothing (3.28s)
+    agreement_write_repo_test.go:4164: signatures = 2, want 1 -- a non-completing
+    signature landed on a withdrawn proposal
+```
+
+If that test stays green too, the fixture has fewer than three owners and the
+mutation is invisible; check the fixture before believing the code. Restore the
+refusal.
+
 **Second — the body predicate in the target lock.** In `LockAgreementTarget`, change `AND body = $3` to `AND (body = $3 OR true)`. Not `AND $3::text = $3::text`, and not deleting the clause: with no column reference left, sqlc renames the parameter (`Column3` / `Dollar_3`) and drops `Body` from `LockAgreementTargetParams`, which gives you a build failure instead of the test failure this check is for. `make sqlc`, then rerun.
 
 Expected: a **test** failure in exactly two places, because `CreateProposal` and `Sign` share this one query — the propose-time check and the sign-time check are the same statement, and this mutation neuters both:
@@ -4793,6 +4832,18 @@ Expected: a **test** failure in exactly two places, because `CreateProposal` and
 --- FAIL: TestSignRefusesAChangedTarget/target_reworded (3.11s)
 --- FAIL: TestCreateProposalRefusesAStaleTarget (3.04s)
 ```
+
+**This knowingly overrides the spec's watch-for on this mutation.** The spec says
+that if both go red, "decision 13's two claims are checked in one place and the
+split into two tests is fictional" — written when the two checks were assumed to
+be two statements. They are one: `LockAgreementTarget` is a single query with two
+callers, which is decision 13's own "one lock, one check" applied honestly, and
+duplicating the SQL to make a mutation discriminate would be writing code for the
+test rather than for the household. So the two reds are expected here, and what
+still discriminates is the other two legs of the same test: `target_in_another_household`
+and `target_removed` **must stay green** under this mutation, because they turn on
+`household_id` and `removed_at IS NULL`, which this edit leaves alone. If either of
+those reddens, the lock predicate has lost more than the body comparison.
 
 The discriminating claim is the other two legs: `TestSignRefusesAChangedTarget/target_in_another_household` and `/target_removed` must stay **green**, because `household_id = $1` and `removed_at IS NULL` are untouched. If all three legs redden, the three predicates are not being checked separately and the split into three subtests is fictional. Restore and run `make sqlc` again.
 
@@ -6828,6 +6879,9 @@ export const AGREEMENT_COPY = {
   // string, so the caller chooses which of the two date labels applies.
   versionClause: (version: number, updated: string) => `v${version}, updated ${updated}`,
   loading: "Loading…",
+  // Task 14 renders the button this names, in both unlocked empty states. The
+  // key lands here because every string in this feature lives in one object.
+  addFirstAgreement: "Add your first agreement",
 
   loadError: "Couldn't load your agreements.",
   // The routine "not the owner" refusal, told plainly and never as a red
@@ -7153,12 +7207,10 @@ Produces:
 
 ```tsx
 // AgreementsPage.tsx
-export type ProposeSeed = {
-  mode: AgreementKind          // "add" | "edit" | "remove" -- the wire's enum, not a second union
-  sectionId?: string
-  targetAgreementId?: string
-  body?: string
-}
+// No seed type is declared or exported here. The page holds one in state, but
+// the type belongs to ProposeAgreementModal.tsx, which Task 13 creates: the
+// page imports the modal, so the modal must not import the page back. Until
+// that file exists, this useState carries the shape inline.
 export function AgreementsPage(): JSX.Element
 
 // agreementFixtures.tsx -- the shared test helpers every later frontend task reuses
@@ -7559,14 +7611,11 @@ import { handleWriteError, useAgreements } from "./useAgreements";
 // reuses the wire's own kind enum rather than restating the union: two literal
 // unions for one server enum is how the two drift apart.
 //
-// Declared here, not in ProposeAgreementModal.tsx, because the state it types
-// lives here; Task 13 imports this type rather than declaring a second one.
-export type ProposeSeed = {
-  mode: AgreementKind;
-  sectionId?: string;
-  targetAgreementId?: string;
-  body?: string;
-};
+// Written inline rather than as an exported type, because the name belongs to
+// ProposeAgreementModal.tsx (Task 13) and this file already imports that one:
+// exporting a second name here would either duplicate the union or make the
+// modal import the page back. Task 13 replaces this annotation with the
+// imported `AgreementProposeSeed`.
 
 const PANEL = "rounded-xl border border-hairline bg-card p-[22px]";
 // min-h-11 is the 44px touch-target floor (CLAUDE.md); inline-flex
@@ -7597,7 +7646,12 @@ export function AgreementsPage() {
   // and mounts its modal at the marked point at the bottom of this file. The
   // buttons, the state and its setters land here so a modal task adds a modal
   // and nothing else.
-  const [, setProposeSeed] = useState<ProposeSeed | null>(null);
+  const [, setProposeSeed] = useState<{
+    mode: AgreementKind;
+    sectionId?: string;
+    targetAgreementId?: string;
+    body?: string;
+  } | null>(null);
   const [, setNewSectionOpen] = useState(false);
   const [, setHistoryOpen] = useState(false);
 
@@ -7919,7 +7973,7 @@ And in `web/src/features/settings/MembersPanel.test.tsx` — the defect this des
 ```tsx
   it("openInvite seeds the modal open, and closing it survives a re-render", async () => {
     stubFetchRoutes({
-      [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
+      [`GET ${ME_URL}`]: { status: 200, body: meFixture() },
       [`GET ${MEMBERS_URL}`]: { status: 200, body: [andreas, kayla, ethan] },
     });
     const queryClient = new QueryClient({
@@ -8104,7 +8158,7 @@ export const AGREEMENT_COPY          // ONE object; this task appends one key to
 
 // AgreementsPage.test.tsx (Task 10) -- the shared frontend test helpers
 const DOC_URL = "/api/v1/marriage/agreements";
-function renderPage(routes: Record<string, RouteResponse | RouteResponse[]>): void;
+function renderPage(routes: Record<string, RouteResponse | RouteResponse[]>): { stub: ReturnType<typeof stubFetchRoutes> } & ReturnType<typeof renderWithRouter>;
 // renderPage registers `GET /api/v1/auth/me` itself, merges the caller's routes
 // over that map, calls stubFetchRoutes and renders <AgreementsPage /> through
 // renderWithRouter. The page calls useMe(), and stubFetchRoutes throws on an
@@ -8471,7 +8525,7 @@ export function useAgreements(): {
 
 // AgreementsPage.test.tsx -- shared test helpers (Task 10, plus Task 11's sectionFixture)
 const DOC_URL = "/api/v1/marriage/agreements";
-function renderPage(routes: Record<string, RouteResponse | RouteResponse[]>): void;
+function renderPage(routes: Record<string, RouteResponse | RouteResponse[]>): { stub: ReturnType<typeof stubFetchRoutes> } & ReturnType<typeof renderWithRouter>;
 // renderPage registers `GET /api/v1/auth/me` itself, merges the caller's routes
 // over that map, calls stubFetchRoutes and renders <AgreementsPage /> through
 // renderWithRouter. The page calls useMe() and stubFetchRoutes throws on an
@@ -8711,7 +8765,7 @@ Expected: FAIL — `Error: Failed to resolve import "./ProposalCard" from "src/f
 
 - [ ] **Step 3: Append the copy and the kind switch**
 
-Fifteen keys **inside the existing `AGREEMENT_COPY` object literal** — one copy module, one object; a duplicate key is a TypeScript error, so read what Task 9 left there before typing. `cancel` is introduced here and Tasks 13–15 reuse it rather than declaring their own.
+Eighteen keys **inside the existing `AGREEMENT_COPY` object literal** — one copy module, one object; a duplicate key is a TypeScript error, so read what Task 9 left there before typing. `cancel` is introduced here and Tasks 13-15 reuse it rather than declaring their own. `cancel` is introduced here and Tasks 13–15 reuse it rather than declaring their own.
 
 ```ts
   // The awaiting clause is dropped rather than left dangling: decision 16's
@@ -8737,6 +8791,8 @@ Fifteen keys **inside the existing `AGREEMENT_COPY` object literal** — one cop
   agree: "Agree",
   discuss: "Discuss",
   withdraw: "Withdraw",
+  // Introduced here and reused by Tasks 13-15 rather than redeclared: one
+  // object, and a duplicate key is a TypeScript error.
   cancel: "Cancel",
   parkNoteLabel: "What you want to talk through (optional)",
   parkAction: "Park for next retro",
@@ -9042,7 +9098,7 @@ export function ProposalCard({ proposal, targetNumber, onAgree, onPark, onWithdr
 cd web && npx vitest run src/features/marriage/ProposalCard.test.tsx
 ```
 
-Expected: PASS — **13 cases** (5 matrix rows + the refusing status + the pending title and edit wordings + the everyone-agreed sentence + the park note + 3 stale rows + Discuss + Withdraw).
+Expected: PASS — **14 cases** (5 matrix rows + the refusing status + the pending title and edit wordings + the everyone-agreed sentence + the park note + 3 stale rows + Discuss + Withdraw).
 
 - [ ] **Step 6: Write the failing page tests for the mount**
 
@@ -9563,6 +9619,9 @@ Before typing, run `grep -n "cancel:" web/src/features/marriage/agreementCopy.ts
   modeAdd: "Add new",
   modeEdit: "Edit existing",
   modeRemove: "Remove",
+  // `cancel` is NOT repeated here: Task 12 already added it to this object and a
+  // duplicate key is a TypeScript error. `grep -n 'cancel:' agreementCopy.ts`
+  // before typing, which is the rule for every key this task appends.
   addSectionLabel: "Add to section",
   newSectionLink: "+ New section",
   addBodyLabel: "New agreement",
@@ -9572,7 +9631,6 @@ Before typing, run `grep -n "cancel:" web/src/features/marriage/agreementCopy.ts
   removeTargetLabel: "Which agreement to remove",
   proposeNoteLabel: "Why (optional)",
   proposeSend: "Send for agreement",
-  cancel: "Cancel",
   // "will be asked" agrees with any count, so this one needs no branch.
   proposeSubtitle: (names: string[]) =>
     `${joinNames(names)} will be asked to agree before it takes effect`,
@@ -9620,7 +9678,9 @@ import type { AgreementSection } from "./agreementSchemas";
 // three optional fields are whatever the caller already knows. AgreementsPage
 // holds one of these in state; Tasks 14 and 15 hand it one.
 export type AgreementProposeSeed = {
-  mode: "add" | "edit" | "remove";
+  // AgreementKind, not a second literal union: two unions for one server enum
+  // is how the two drift apart.
+  mode: AgreementKind;
   sectionId?: string;
   targetAgreementId?: string;
   body?: string;
@@ -10097,11 +10157,11 @@ Modal, ApiError
 // web/src/features/marriage/AgreementsPage.test.tsx (Task 10's shared helpers)
 renderPage(routes: Record<string, RouteResponse | RouteResponse[]>): ReturnType<typeof renderWithRouter>
 documentFixture(overrides?: Partial<AgreementsDocument>): AgreementsDocument
-emptyDoc(): AgreementsDocument    // two owners, no sections
-seededDoc(): AgreementsDocument   // two owners, the four starter sections, each count 0 / visible false
+emptyDoc(o?: Partial<AgreementsDocument>): { agreements: AgreementsDocument }   // WRAPPED — two owners, no sections
+seededDoc(o?: Partial<AgreementsDocument>): { agreements: AgreementsDocument }  // WRAPPED — two owners, the four starter sections, each count 0 / visible false
 ```
 
-`emptyDoc()` and `seededDoc()` return the **document**, so a stub wraps it: `body: { agreements: emptyDoc() }`. That is the same envelope `documentFixture` is used inside (plan header, Conventions). If Task 10's `renderPage` does not already register `GET /api/v1/auth/me`, add it to the map you pass — the page calls `useMe()` and `stubFetchRoutes` throws on an unregistered request rather than failing quietly.
+`emptyDoc()` and `seededDoc()` return the response **already wrapped** — Task 10 built them that way, and the `// WRAPPED` note above is there because wrapping them a second time is the mistake that costs an afternoon: `{agreements:{agreements:{…}}}` fails the Zod parse, `apiFetch` throws, and the test times out on a `findByRole` instead of naming the cause. So the stub is `body: emptyDoc()`. That is the same envelope `documentFixture` is used inside (plan header, Conventions). If Task 10's `renderPage` does not already register `GET /api/v1/auth/me`, add it to the map you pass — the page calls `useMe()` and `stubFetchRoutes` throws on an unregistered request rather than failing quietly.
 
 Produces:
 
@@ -10220,7 +10280,7 @@ Then add to `AgreementsPage.test.tsx`, reusing Task 10's helpers by name. These 
 // end docs/LEARNING.md records, on the first screen anyone sees.
 it("with no sections, Add your first agreement opens the New section modal", async () => {
   renderPage({
-    "GET /api/v1/marriage/agreements": { status: 200, body: { agreements: emptyDoc() } },
+    "GET /api/v1/marriage/agreements": { status: 200, body: emptyDoc() },
   });
 
   fireEvent.click(await screen.findByRole("button", { name: "Add your first agreement" }));
@@ -10237,7 +10297,7 @@ it("with no sections, Add your first agreement opens the New section modal", asy
 it("with sections seeded, Add your first agreement opens Propose on the first section", async () => {
   const seeded = seededDoc();
   renderPage({
-    "GET /api/v1/marriage/agreements": { status: 200, body: { agreements: seeded } },
+    "GET /api/v1/marriage/agreements": { status: 200, body: seeded },
   });
 
   fireEvent.click(await screen.findByRole("button", { name: "Add your first agreement" }));
@@ -10246,7 +10306,7 @@ it("with sections seeded, Add your first agreement opens Propose on the first se
   // button carries the same string, and getByText would find two elements.
   expect(await screen.findByRole("heading", { name: "Propose a change" })).toBeInTheDocument();
   expect(screen.getByRole("radio", { name: "Add new" })).toBeChecked();
-  expect(screen.getByLabelText("Add to section")).toHaveValue(seeded.sections[0].id);
+  expect(screen.getByLabelText("Add to section")).toHaveValue(seeded.agreements.sections[0].id);
 });
 ```
 
@@ -10265,7 +10325,7 @@ grep -n "sectionNameTaken\|starterSet\|addFirstAgreement\|sectionsReady\|seeded\
   web/src/features/marriage/agreementCopy.ts
 ```
 
-`sectionNameTaken`, "Use starter set", "Add your first agreement" and the seeded-state headline and body **already exist** from Task 9 — Task 10's empty states render them. Reuse those keys; a second key for the same string is at best noise and at worst a duplicate key, which is a TypeScript error. Only the modal's own strings are new:
+`sectionNameTaken`, `useStarterSet`, `addFirstAgreement` and the seeded-state headline and body **already exist in `AGREEMENT_COPY`** from Task 9. Task 10 rendered "Use starter set" and both empty panels but deliberately left "Add your first agreement" out, because it opens a modal and every modal-opening control lands with its modal — so **this task adds that button**, in both panels. Reuse those keys; a second key for the same string is at best noise and at worst a duplicate key, which is a TypeScript error. Only the modal's own strings are new:
 
 ```ts
   // --- New section modal (Task 14) ---
@@ -10435,15 +10495,33 @@ Then two edits in `AgreementsPage.tsx`.
 )}
 ```
 
-**The two destinations.** `grep -n "addFirstAgreement" web/src/features/marriage/AgreementsPage.tsx` — Task 10 renders this button in both empty branches with no handler. Give each its own:
+**The button, and its two destinations.** `grep -n "addFirstAgreement" web/src/features/marriage/AgreementsPage.tsx` returns nothing before this step: Task 10 left the control out on purpose (its comment beside "Use starter set" says so). Add it to **both** empty panels, above the "Use starter set" button in state 3 — the design's own order is "Add your first agreement", then "Use starter set" — and as the only call to action in state 4, where "Use starter set" is gone. It is the same button either way and differs only in what it opens. Give each its own:
 
 ```tsx
-// State 3, `doc.sections.length === 0` (data-testid="agreements-empty"):
-onClick={() => setNewSectionOpen(true)}
+// State 3, doc.sections.length === 0 (data-testid="agreements-empty"), placed
+// immediately BEFORE the existing "Use starter set" button:
+<button
+  type="button"
+  className="min-h-11 rounded-lg bg-accent px-5 text-[13px] font-semibold text-white"
+  onClick={() => setNewSectionOpen(true)}
+>
+  {AGREEMENT_COPY.addFirstAgreement}
+</button>
 
-// State 4, sections seeded but nothing agreed (data-testid="agreements-seeded"):
-onClick={() => setProposeSeed({ mode: "add", sectionId: doc.sections[0].id })}
+// State 4, sections seeded but nothing agreed (data-testid="agreements-seeded"),
+// where it is the only call to action -- "Use starter set" is gone by then:
+<button
+  type="button"
+  className="min-h-11 rounded-lg bg-accent px-5 text-[13px] font-semibold text-white"
+  onClick={() => setProposeSeed({ mode: "add", sectionId: doc.sections[0].id })}
+>
+  {AGREEMENT_COPY.addFirstAgreement}
+</button>
 ```
+
+Both carry `min-h-11`, the 44px touch-target floor, and both read their label from
+`AGREEMENT_COPY.addFirstAgreement` rather than a literal — one copy object, so the two
+buttons cannot drift into two spellings of the same words.
 
 The split itself is Task 10's and stays as it is. The reason the two differ is the whole point of the split: with no sections, Propose's section select would be empty, and an empty select that still offers a submit button is the `BillsPage` dead end `docs/LEARNING.md` records — on the first screen anyone sees.
 
@@ -10699,7 +10777,7 @@ Expected, two different kinds — say which you saw where:
 grep -n "loading\|historyEmpty" web/src/features/marriage/agreementCopy.ts
 ```
 
-Task 10's page ladder very likely added a loading string already; reuse it below in place of `loadingHistory` if so, and do not add a second.
+Task 9 already defined `loading: "Loading…"`, so this modal reuses it: there is no `loadingHistory`, and adding one would put the same string under two keys.
 
 ```ts
   // --- Version history modal (Task 15) ---
@@ -10709,7 +10787,6 @@ Task 10's page ladder very likely added a loading string already; reuse it below
   historyVersion: (version: number) => `v${version}`,
   historyVersionCurrent: (version: number) => `v${version} · current`,
   historyEmpty: "Nothing has been agreed yet, so there is no history.",
-  loadingHistory: "Loading…",
   // The design's "Added #12 …" carries a display number. A change accepted two
   // years ago has no position in today's document (decision 11), so the section
   // name takes its place -- which is also why the wire carries no number here.
@@ -10793,7 +10870,7 @@ export function VersionHistoryModal({
         // flight would tell a household with years of history that it has
         // none -- the vacuous-first-render defect the spec names for `locked`.
         <p className="text-xs text-muted">
-          {isLoading ? AGREEMENT_COPY.loadingHistory : AGREEMENT_COPY.historyEmpty}
+          {isLoading ? AGREEMENT_COPY.loading : AGREEMENT_COPY.historyEmpty}
         </p>
       ) : (
         // The content block scrolls, not the panel -- VisionModal.tsx:665's
@@ -10963,7 +11040,7 @@ EOF
 ### Task 16: "To discuss" on the Retros page, and the one key both screens read
 
 **Files:**
-- Create: `web/src/features/marriage/AgreementsToDiscuss.tsx`, `web/src/features/marriage/AgreementsToDiscuss.test.tsx`, `web/src/features/marriage/useAgreementsInvalidation.test.ts`
+- Create: `web/src/features/marriage/AgreementsToDiscuss.tsx`, `web/src/features/marriage/AgreementsToDiscuss.test.tsx`, `web/src/features/marriage/useAgreementsInvalidation.test.tsx`
 - Modify: `web/src/features/marriage/agreementCopy.ts` (four keys appended to the one `AGREEMENT_COPY` object), `web/src/features/marriage/RetrosPage.tsx` (the import, and the mount after line 236 — the `)}` closing the `noRetrosYet` ternary opened on line 153), `web/src/features/marriage/RetrosPage.test.tsx` (`renderPage`'s default route map at `:104-106`, and the two direct `stubFetchRoutes` calls at `:227-229` and `:242-244`), `web/src/routes/router.test.tsx` (the two `stubFetchRoutes` calls that actually mount `RetrosPage`, at `:513` and `:594`)
 
 **Interfaces:**
@@ -11018,7 +11095,7 @@ Produces: `<AgreementsToDiscuss />`, no props — it owns its own `useAgreements
 
 Create `web/src/features/marriage/AgreementsToDiscuss.test.tsx`. Literal strings, never `AGREEMENT_COPY`'s exports — importing the copy module here makes every assertion tautological against a typo in that same module (`RetrosPage.test.tsx`'s own header comment).
 
-Two things about the fixtures. **Every body is wrapped**: the wire is `{ "agreements": {…} }` for the read and `{ "proposal": {…}, "agreements": {…} }` for a write, and `fetchAgreements` parses the envelope, so an unwrapped fixture fails inside Zod rather than in an assertion. **The fixtures are named as Task 10's** (`DOC_URL`, `documentFixture`, `proposalFixture`) and written out here rather than imported: every Vitest file in `web/src` owns its own fixtures — there is no shared fixture module in this repo — and importing another `.test.tsx` would register that file's `describe`s inside this one.
+Two things about the fixtures. `documentFixture`, `proposalFixture`, `meFixture`, `DOC_URL` and `ME_URL` come from `./agreementFixtures` (Task 10) rather than being re-typed here — this file adds only `parkedFixture`, since no earlier task needs a parked proposal. **Every body is wrapped**: the wire is `{ "agreements": {…} }` for the read and `{ "proposal": {…}, "agreements": {…} }` for a write, and `fetchAgreements` parses the envelope, so an unwrapped fixture fails inside Zod rather than in an assertion. **The fixtures are named as Task 10's** (`DOC_URL`, `documentFixture`, `proposalFixture`) and written out here rather than imported: every Vitest file in `web/src` owns its own fixtures — there is no shared fixture module in this repo — and importing another `.test.tsx` would register that file's `describe`s inside this one.
 
 **There is deliberately no loading test:** while the query is in flight `data` is undefined, so the filter yields an empty array and the component returns null down that path too — deleting the `isLoading` guard breaks nothing any fixture could tell apart, and a test that cannot fail protects nothing (`docs/LEARNING.md` pattern 2). The nothing-parked test uses `findByTestId(...).rejects`, which only settles after its own timeout, so a block that appears late still fails it.
 
@@ -11036,51 +11113,27 @@ import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
 import { AgreementsToDiscuss } from "./AgreementsToDiscuss";
 import { AgreementsPage } from "./AgreementsPage";
-import type { Me } from "../auth/schemas";
 import type { AgreementProposal, AgreementsDocument } from "./agreementSchemas";
-
-const DOC_URL = "/api/v1/marriage/agreements";
-const ME_URL = "/api/v1/auth/me";
+// Task 10's shared module, not a fourth copy of these four helpers. A local
+// meFixture here drifted from Task 10's on two fields the first time this was
+// written, which is the drift the shared module exists to prevent -- and
+// documentFixture/proposalFixture here return the INNER document, so the
+// wrapping below is still this file's job.
+import { DOC_URL, ME_URL, documentFixture, meFixture, proposalFixture } from "./agreementFixtures";
 const AGREE_URL = `POST ${DOC_URL}/proposals/prop-1/agree`;
 const OWNERS = [
   { membershipId: "mem-1", name: "Andreas" },
   { membershipId: "mem-2", name: "Christine" },
 ];
 
-function proposalFixture(o: Partial<AgreementProposal> = {}): AgreementProposal {
-  return {
-    id: "prop-1", kind: "add", status: "parked", sectionId: "sec-1", sectionName: "Money",
-    targetAgreementId: "", body: "No solo spend over $200", previousBody: "", note: "",
-    parkNote: "I want to talk about the number", proposedByMembershipId: "mem-1",
-    proposedByName: "Andreas", proposedAt: "2026-09-05T09:00:00+08:00",
-    awaitingNames: ["Christine"], targetChanged: false, canAgree: true, canWithdraw: false, ...o,
-  };
-}
-
-function documentFixture(o: Partial<AgreementsDocument> = {}): AgreementsDocument {
-  return {
-    locked: false, owners: OWNERS, version: 1, updatedAt: null,
-    sections: [], proposals: [], history: [], ...o,
-  };
-}
-
-// AgreementsPage calls useMe(); stubFetchRoutes throws on an unregistered
-// request, so the second describe below would fail on the session rather than
-// on anything it means to test if this were left out.
-function meFixture(): Me {
-  return {
-    user: { id: "u-1", email: "andreas@hearth.family", displayName: "Andreas", avatarInitial: "A" },
-    household: {
-      id: "h-1", name: "Andreas & Christine", familyName: "Oentoro",
-      primaryCurrency: "SGD", showSecondaryCurrency: false, secondaryCurrency: "IDR", fxRateMode: "auto",
-    },
-    membership: {
-      id: "mem-1", householdId: "h-1", userId: "u-1", role: "owner",
-      capabilities: ["calendar", "chores", "money", "marriage"],
-    },
-    capabilities: ["calendar", "chores", "money", "marriage"],
-    spaces: [], isPlatformAdmin: false, features: {},
-  };
+// The one fixture this file adds, because no other task needs a parked
+// proposal: everything else comes from ./agreementFixtures.
+function parkedFixture(o: Partial<AgreementProposal> = {}): AgreementProposal {
+  return proposalFixture({
+    status: "parked",
+    parkNote: "I want to talk about the number",
+    ...o,
+  });
 }
 
 function renderBlock(
@@ -11103,7 +11156,7 @@ describe("AgreementsToDiscuss", () => {
     let posted = false;
     renderBlock(
       documentFixture({
-        proposals: [proposalFixture(), proposalFixture({ id: "prop-2", status: "pending" })],
+        proposals: [parkedFixture(), proposalFixture({ id: "prop-2", status: "pending" })],
       }),
       {
         [AGREE_URL]: {
@@ -11159,7 +11212,7 @@ describe("AgreementsToDiscuss", () => {
       documentFixture({
         locked: true,
         owners: [OWNERS[0]],
-        proposals: [proposalFixture({ canAgree: false, canWithdraw: false })],
+        proposals: [parkedFixture({ canAgree: false, canWithdraw: false })],
       }),
     );
 
@@ -11169,7 +11222,7 @@ describe("AgreementsToDiscuss", () => {
   });
 
   it("shows the write failure in place and keeps the row, rather than emptying the block", async () => {
-    renderBlock(documentFixture({ proposals: [proposalFixture()] }), {
+    renderBlock(documentFixture({ proposals: [parkedFixture()] }), {
       [AGREE_URL]: {
         status: 500,
         body: { error: { code: "INTERNAL", message: "boom" } },
@@ -11192,7 +11245,7 @@ describe("AgreementsToDiscuss", () => {
 describe("the Agreements page and the To-discuss block, sharing one query key", () => {
   const parkedDoc = documentFixture({
     sections: [{ id: "sec-1", name: "Money", count: 0, visible: false, agreements: [] }],
-    proposals: [proposalFixture()],
+    proposals: [parkedFixture()],
   });
   // What the same GET answers after the Agree lands: the proposal is gone from
   // `proposals` (it is accepted, and the document carries pending and parked
@@ -11304,7 +11357,6 @@ Four keys, inside the existing `AGREEMENT_COPY` object — this feature has **on
   toDiscussTitle: "To discuss at the next retro",
   toDiscussSubtitle: "Parked from Agreements. Agree one here once you have talked it through.",
   toDiscussLoadError: "Couldn't load anything parked for this retro.",
-  toDiscussAgreeError: "Couldn't agree that just now.",
 ```
 
 No `parkedSummary` and no second `kind` switch: `proposalSummary` (Task 12) is what this block renders, which is what "the same summary" in the spec means and what keeps one fail-closed `default` in one place.
@@ -11340,7 +11392,7 @@ export function AgreementsToDiscuss() {
     agreements
       .agree(id)
       .catch((err: unknown) =>
-        setAgreeError(handleWriteError(err, agreements.reload, AGREEMENT_COPY.toDiscussAgreeError)),
+        setAgreeError(handleWriteError(err, agreements.reload, AGREEMENT_COPY.agreeError)),
       )
       .finally(() => setAgreeingId(null));
   }
@@ -11437,7 +11489,7 @@ If the second describe fails on `stubFetchRoutes: no stub registered for "GET /a
 
 - [ ] **Step 6: Pin every write's invalidation, not only Agree's**
 
-Create `web/src/features/marriage/useAgreementsInvalidation.test.ts`. The spec asks for "**every** write invalidating the agreements key"; Task 9's own test proves it for `agree` alone, and a `useMutation` written without `onSuccess: afterWrite` fails no test that only exercises its sibling. Six rows, one per write.
+Create `web/src/features/marriage/useAgreementsInvalidation.test.tsx`. The spec asks for "**every** write invalidating the agreements key"; Task 9's own test proves it for `agree` alone, and a `useMutation` written without `onSuccess: afterWrite` fails no test that only exercises its sibling. Six rows, one per write.
 
 This file pins behaviour Task 9 already implemented, so it has **no implementation step of its own** — it must pass on its first run. Its red state comes from Step 11's mutation. If a row fails now, the hook really is missing that invalidation and fixing `useAgreements.ts` is this task's work, not a later one's.
 
@@ -11575,7 +11627,7 @@ describe("useAgreements — every write invalidates the one key", () => {
 });
 ```
 
-Run it: `cd web && npx vitest run src/features/marriage/useAgreementsInvalidation.test.ts` — expected PASS, 6 tests.
+Run it: `cd web && npx vitest run src/features/marriage/useAgreementsInvalidation.test.tsx` — expected PASS, 6 tests.
 
 - [ ] **Step 7: Mount the block on the Retros page**
 
@@ -11678,7 +11730,7 @@ cd web && npx vitest run && cd .. && make lint
 ```bash
 git add web/src/features/marriage/AgreementsToDiscuss.tsx \
         web/src/features/marriage/AgreementsToDiscuss.test.tsx \
-        web/src/features/marriage/useAgreementsInvalidation.test.ts \
+        web/src/features/marriage/useAgreementsInvalidation.test.tsx \
         web/src/features/marriage/agreementCopy.ts \
         web/src/features/marriage/RetrosPage.tsx \
         web/src/features/marriage/RetrosPage.test.tsx \
@@ -12063,7 +12115,7 @@ Sign in with what `make seed` printed.
   });
   ```
 
-  During the hold, `document.querySelector('[data-testid="agreements-locked"]')` must be `null` and something must say the page is loading. Nothing renders from a guess: `data?.locked ?? true` flashes "you need a second owner" at a two-owner household on every cold load, and a walk that navigates and waits cannot see it.
+  During the hold, `document.querySelector('[data-testid="agreements-locked-invite"]')` must be `null` and something must say the page is loading. Nothing renders from a guess: `data?.locked ?? true` flashes "you need a second owner" at a two-owner household on every cold load, and a walk that navigates and waits cannot see it.
 - [ ] 3. Accept the invite `make seed` printed, in a second browser profile: the page is the unlocked **empty** state, not the locked one and not an error.
 - [ ] 4. Click **Use starter set**. The page does **not** look identical afterwards — an empty section is invisible (decision 8), so this is exactly the button that can appear to do nothing — and all four sections are offered in the propose modal's section picker.
 - [ ] 5. Propose as the first owner: the card names who it waits for, offers **Withdraw**, offers **no Agree**. Withdraw one and watch it go.
