@@ -15,6 +15,7 @@ import { ApiError } from "../../api/client";
 import { PageContainer } from "../../components/PageContainer";
 import { useMe } from "../auth/useAuth";
 import { AgreementSectionCard } from "./AgreementSectionCard";
+import { NewSectionModal } from "./NewSectionModal";
 import { ProposalCard } from "./ProposalCard";
 import { ProposeAgreementModal, type AgreementProposeSeed } from "./ProposeAgreementModal";
 import { AGREEMENT_COPY, agreementDateLabel } from "./agreementCopy";
@@ -50,7 +51,7 @@ export function AgreementsPage() {
   // buttons, the state and its setters land here so a modal task adds a modal
   // and nothing else.
   const [proposeSeed, setProposeSeed] = useState<AgreementProposeSeed | null>(null);
-  const [, setNewSectionOpen] = useState(false);
+  const [newSectionOpen, setNewSectionOpen] = useState(false);
   const [, setHistoryOpen] = useState(false);
 
   // The one write this task makes. One flag and one error slot, not a
@@ -251,12 +252,18 @@ export function AgreementsPage() {
         <section data-testid="agreements-empty" className={PANEL}>
           <h2 className="text-sm font-semibold text-ink">{AGREEMENT_COPY.emptyHeadline}</h2>
           <p className={MUTED}>{AGREEMENT_COPY.emptyBody}</p>
-          {/* "Add your first agreement" belongs beside this button and lands in
-              Task 14 with the New-section modal it opens -- on this screen it
-              must open New section, not Propose, because Propose's section
-              select would be empty (the BillsPage dead end docs/LEARNING.md
-              records) on the first screen anyone sees. Every control that opens
-              a modal lands with that modal. */}
+          {/* Opens New section, not Propose: Propose's section select would be
+              empty here, the BillsPage dead end docs/LEARNING.md records, on
+              the first screen anyone sees. Above "Use starter set", the
+              design's own order. */}
+          <button
+            type="button"
+            data-testid="agreements-add-first"
+            onClick={() => setNewSectionOpen(true)}
+            className={`mt-4 ${CTA}`}
+          >
+            {AGREEMENT_COPY.addFirstAgreement}
+          </button>
           <button
             type="button"
             data-testid="agreements-starter-set"
@@ -289,6 +296,18 @@ export function AgreementsPage() {
         <section data-testid="agreements-seeded" className={PANEL}>
           <h2 className="text-sm font-semibold text-ink">{AGREEMENT_COPY.seededHeadline}</h2>
           <p className={MUTED}>{AGREEMENT_COPY.seededBody(doc.sections.map((s) => s.name))}</p>
+          {/* The only call to action here -- "Use starter set" is gone by this
+              state, sections already existing. Opens Propose on the first
+              section rather than New section: there is now something for the
+              picker to offer. */}
+          <button
+            type="button"
+            data-testid="agreements-add-first"
+            onClick={() => setProposeSeed({ mode: "add", sectionId: doc.sections[0].id })}
+            className={`mt-4 ${CTA}`}
+          >
+            {AGREEMENT_COPY.addFirstAgreement}
+          </button>
         </section>
       )}
 
@@ -352,6 +371,17 @@ export function AgreementsPage() {
             setNewSectionOpen(true);
           }}
           onClose={() => setProposeSeed(null)}
+        />
+      )}
+
+      {newSectionOpen && (
+        <NewSectionModal
+          onClose={() => setNewSectionOpen(false)}
+          onCreated={(seed) => {
+            // Close, then open. Both booleans are Task 10's; this is the swap.
+            setNewSectionOpen(false);
+            setProposeSeed(seed);
+          }}
         />
       )}
     </PageContainer>

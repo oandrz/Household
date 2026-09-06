@@ -249,4 +249,16 @@ export const AGREEMENT_COPY = {
   // and inventing one risks two agreements sharing a label. The zero padding
   // is presentation, which is why the wire carries an integer (decision 11).
   targetOption: (number: number, body: string) => `${String(number).padStart(2, "0")} · ${body}`,
+
+  // --- New section modal (Task 14) ---
+  newSectionTitle: "New agreement section",
+  newSectionSubtitle: "Sections just group related agreements — add your own beyond the starters",
+  sectionNameLabel: "Section name",
+  sectionNamePlaceholder: "e.g. In-laws, Faith, Health, Careers",
+  suggestionsLabel: "Or pick a suggestion",
+  // Suggestions, not the starter set: unrelated to domain.StarterSectionNames()'
+  // four (decision 17), which "Use starter set" seeds and this list does not.
+  sectionSuggestions: ["In-laws & family", "Faith & values", "Health", "Careers", "Screens & tech"],
+  newSectionCreate: "Create & add first agreement",
+  newSectionFallbackError: "Could not create that section. Try again.",
 } as const;

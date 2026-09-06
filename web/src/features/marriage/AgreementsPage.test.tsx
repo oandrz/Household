@@ -178,6 +178,40 @@ describe("AgreementsPage", () => {
     expect(screen.queryByRole("button", { name: "Use starter set" })).not.toBeInTheDocument();
   });
 
+  // State 3 (no sections): this button opens NEW SECTION, not Propose -- the
+  // propose picker's section select would be empty, which is the BillsPage dead
+  // end docs/LEARNING.md records, on the first screen anyone sees.
+  it("with no sections, Add your first agreement opens the New section modal", async () => {
+    renderPage({
+      "GET /api/v1/marriage/agreements": { status: 200, body: emptyDoc() },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add your first agreement" }));
+
+    // By heading role: "New agreement section" is the Modal's own <h2>, and the
+    // page has no other element carrying that text.
+    expect(
+      await screen.findByRole("heading", { name: "New agreement section" }),
+    ).toBeInTheDocument();
+  });
+
+  // State 4 (sections seeded, nothing agreed): the same button opens PROPOSE, on
+  // the first section, because now there is something for the picker to offer.
+  it("with sections seeded, Add your first agreement opens Propose on the first section", async () => {
+    const seeded = seededDoc();
+    renderPage({
+      "GET /api/v1/marriage/agreements": { status: 200, body: seeded },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add your first agreement" }));
+
+    // The heading again, not getByText: the header's own "Propose a change"
+    // button carries the same string, and getByText would find two elements.
+    expect(await screen.findByRole("heading", { name: "Propose a change" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Add new" })).toBeChecked();
+    expect(screen.getByLabelText("Add to section")).toHaveValue(seeded.agreements.sections[0].id);
+  });
+
   // Column-MAJOR: the design's 01-12 runs continuously down one column and on
   // into the next, so Money 01-02 and Conflict 03-05 are the left column. The
   // row-major fill a grid-cols-2 produces would put Conflict beside Money and
