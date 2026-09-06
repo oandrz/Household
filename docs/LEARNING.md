@@ -3040,7 +3040,8 @@ case and no coordinate system to assert legibility in for the second.
   is a class fix that seeded the next instance of its own class.
 
 - **A twelfth instance, Agreements, and the ninth instance's own lesson
-  proving itself needed twice more on the same feature.** Task 7's guard-walk
+  proving itself needed again across two consecutive tasks on the same
+  feature.** Task 7's guard-walk
   floor for the unauthenticated-route matrix was believed to read 63; the
   implementer re-measured from the walk's own `t.Logf` rather than doing
   arithmetic on the number in the test file and got 69 — three protected
@@ -3061,9 +3062,9 @@ case and no coordinate system to assert legibility in for the second.
   claims to bound, whichever side is doing the counting. **The floor is the
   walk's own re-measured output, never a number to nudge forward by however
   much the latest task seems to have added** — the ninth instance's own
-  closing sentence, needed twice more within one feature because a route
-  landing on a branch between the floor's last measurement and its next one
-  is invisible to arithmetic and visible only to a re-run.
+  closing sentence, needed again on four separate floors across these two
+  tasks because a route landing on a branch between one measurement and the
+  next is invisible to arithmetic and visible only to a re-run.
 
 **Treat a citation the way you'd treat a test assertion: something the next
 reader can verify against the thing it names, not something to trust because
