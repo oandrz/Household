@@ -249,6 +249,7 @@ var (
 	_ usecase.BillRepository         = (*BillRepo)(nil)
 	_ usecase.RetroRepository        = (*RetroRepo)(nil)
 	_ usecase.RetroActionRepository  = (*RetroActionRepo)(nil)
+	_ usecase.AgreementRepository    = (*AgreementRepo)(nil)
 
 	_ usecase.PlatformAdminRepository      = (*PlatformAdminRepo)(nil)
 	_ usecase.FeatureFlagRepository        = (*FeatureFlagRepo)(nil)

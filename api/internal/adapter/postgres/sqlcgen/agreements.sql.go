@@ -11,6 +11,55 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const acceptAgreementProposal = `-- name: AcceptAgreementProposal :execrows
+UPDATE agreement_proposals SET status = 'accepted', resolved_at = $1::timestamptz
+WHERE household_id = $2 AND id = $3 AND status IN ('pending', 'parked')
+`
+
+type AcceptAgreementProposalParams struct {
+	At          pgtype.Timestamptz
+	HouseholdID pgtype.UUID
+	ID          pgtype.UUID
+}
+
+func (q *Queries) AcceptAgreementProposal(ctx context.Context, arg AcceptAgreementProposalParams) (int64, error) {
+	result, err := q.db.Exec(ctx, acceptAgreementProposal, arg.At, arg.HouseholdID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const countAgreementOwnerSignatures = `-- name: CountAgreementOwnerSignatures :one
+SELECT count(*) FROM agreement_signatures s JOIN memberships m ON m.id = s.membership_id
+WHERE s.proposal_id = $1 AND m.household_id = $2 AND m.role = 'owner'
+`
+
+type CountAgreementOwnerSignaturesParams struct {
+	ProposalID  pgtype.UUID
+	HouseholdID pgtype.UUID
+}
+
+// Joined through memberships: a departed owner's signature is ignored, never
+// deleted (decision 4).
+func (q *Queries) CountAgreementOwnerSignatures(ctx context.Context, arg CountAgreementOwnerSignaturesParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAgreementOwnerSignatures, arg.ProposalID, arg.HouseholdID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countAgreementOwners = `-- name: CountAgreementOwners :one
+SELECT count(*) FROM memberships WHERE household_id = $1 AND role = 'owner'
+`
+
+func (q *Queries) CountAgreementOwners(ctx context.Context, householdID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countAgreementOwners, householdID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createAgreementSection = `-- name: CreateAgreementSection :one
 INSERT INTO agreement_sections (household_id, name, created_at) VALUES ($1, $2, $3)
 RETURNING id, name, created_at
@@ -110,6 +159,80 @@ func (q *Queries) GetAgreementProposal(ctx context.Context, arg GetAgreementProp
 		&i.SignedBy,
 	)
 	return i, err
+}
+
+const insertAgreementFromProposal = `-- name: InsertAgreementFromProposal :one
+INSERT INTO agreements (household_id, section_id, body, added_by_proposal_id, created_at)
+SELECT $1, s.id, $2::text, $3,
+       $4::timestamptz
+FROM agreement_sections s
+WHERE s.id = $5 AND s.household_id = $1
+RETURNING id
+`
+
+type InsertAgreementFromProposalParams struct {
+	HouseholdID pgtype.UUID
+	Body        string
+	ProposalID  pgtype.UUID
+	CreatedAt   pgtype.Timestamptz
+	SectionID   pgtype.UUID
+}
+
+// Scoped through agreement_sections: the FK alone only proves the section
+// exists SOMEWHERE, and this is where a repointed proposal is caught.
+func (q *Queries) InsertAgreementFromProposal(ctx context.Context, arg InsertAgreementFromProposalParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, insertAgreementFromProposal,
+		arg.HouseholdID,
+		arg.Body,
+		arg.ProposalID,
+		arg.CreatedAt,
+		arg.SectionID,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const insertAgreementProposal = `-- name: InsertAgreementProposal :one
+INSERT INTO agreement_proposals (household_id, kind, status, section_id, target_agreement_id,
+    body, previous_body, note, proposed_by_membership_id, created_at)
+SELECT $1, $2::text, 'pending', s.id,
+       $3::uuid, $4::text, $5::text,
+       $6::text, $7::uuid, $8::timestamptz
+FROM agreement_sections s
+WHERE s.id = $9 AND s.household_id = $1
+RETURNING id
+`
+
+type InsertAgreementProposalParams struct {
+	HouseholdID       pgtype.UUID
+	Kind              string
+	TargetAgreementID pgtype.UUID
+	Body              string
+	PreviousBody      string
+	Note              string
+	ProposedBy        pgtype.UUID
+	CreatedAt         pgtype.Timestamptz
+	SectionID         pgtype.UUID
+}
+
+// INSERT ... SELECT is the household scoping: a section in another household
+// matches no row, which is indistinguishable from one that does not exist.
+func (q *Queries) InsertAgreementProposal(ctx context.Context, arg InsertAgreementProposalParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, insertAgreementProposal,
+		arg.HouseholdID,
+		arg.Kind,
+		arg.TargetAgreementID,
+		arg.Body,
+		arg.PreviousBody,
+		arg.Note,
+		arg.ProposedBy,
+		arg.CreatedAt,
+		arg.SectionID,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const listAcceptedAgreementProposals = `-- name: ListAcceptedAgreementProposals :many
@@ -363,4 +486,194 @@ func (q *Queries) ListOpenAgreementProposals(ctx context.Context, householdID pg
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockAgreementProposal = `-- name: LockAgreementProposal :one
+SELECT id, kind, status, section_id, target_agreement_id, body, previous_body
+FROM agreement_proposals WHERE household_id = $1 AND id = $2 FOR UPDATE
+`
+
+type LockAgreementProposalParams struct {
+	HouseholdID pgtype.UUID
+	ID          pgtype.UUID
+}
+
+type LockAgreementProposalRow struct {
+	ID                pgtype.UUID
+	Kind              string
+	Status            string
+	SectionID         pgtype.UUID
+	TargetAgreementID pgtype.UUID
+	Body              string
+	PreviousBody      string
+}
+
+// Sign's step 1, lean because FOR UPDATE cannot sit on the GROUP BY/array_agg
+// read above. It also orders two owners pressing Agree on the SAME proposal
+// at the same instant: the second waits here rather than racing.
+func (q *Queries) LockAgreementProposal(ctx context.Context, arg LockAgreementProposalParams) (LockAgreementProposalRow, error) {
+	row := q.db.QueryRow(ctx, lockAgreementProposal, arg.HouseholdID, arg.ID)
+	var i LockAgreementProposalRow
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.Status,
+		&i.SectionID,
+		&i.TargetAgreementID,
+		&i.Body,
+		&i.PreviousBody,
+	)
+	return i, err
+}
+
+const lockAgreementTarget = `-- name: LockAgreementTarget :one
+SELECT id, section_id FROM agreements
+WHERE household_id = $1 AND id = $2 AND removed_at IS NULL AND body = $3 FOR UPDATE
+`
+
+type LockAgreementTargetParams struct {
+	HouseholdID pgtype.UUID
+	ID          pgtype.UUID
+	Body        string
+}
+
+type LockAgreementTargetRow struct {
+	ID        pgtype.UUID
+	SectionID pgtype.UUID
+}
+
+// Sign's step 2, and the lock that matters (decision 12): the proposal lock
+// orders two signatures on one proposal and nothing else, so two proposals
+// against the same agreement never contend on it. All three predicates are IN
+// the WHERE -- under READ COMMITTED a waiter re-evaluates them after the
+// holder commits, so a removal or a rewording by the other proposal returns
+// zero rows here. A bare FOR UPDATE plus a Go-side compare defeats exactly
+// that race. CreateProposal makes the same call at propose time.
+func (q *Queries) LockAgreementTarget(ctx context.Context, arg LockAgreementTargetParams) (LockAgreementTargetRow, error) {
+	row := q.db.QueryRow(ctx, lockAgreementTarget, arg.HouseholdID, arg.ID, arg.Body)
+	var i LockAgreementTargetRow
+	err := row.Scan(&i.ID, &i.SectionID)
+	return i, err
+}
+
+const parkAgreementProposal = `-- name: ParkAgreementProposal :execrows
+UPDATE agreement_proposals SET status = 'parked', park_note = $1::text
+WHERE household_id = $2 AND id = $3 AND status IN ('pending', 'parked')
+`
+
+type ParkAgreementProposalParams struct {
+	Note        string
+	HouseholdID pgtype.UUID
+	ID          pgtype.UUID
+}
+
+// resolved_at stays NULL: parking keeps the proposal OPEN (decision 7). The
+// status condition is in the WHERE, never a service if -- a check-then-write
+// races. Nothing here touches a retro table and there is no foreign key to a
+// retro row: the next retro usually does not exist yet, which is exactly when
+// a couple parks something.
+func (q *Queries) ParkAgreementProposal(ctx context.Context, arg ParkAgreementProposalParams) (int64, error) {
+	result, err := q.db.Exec(ctx, parkAgreementProposal, arg.Note, arg.HouseholdID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const removeAgreement = `-- name: RemoveAgreement :execrows
+UPDATE agreements SET removed_at = $1::timestamptz, removed_by_proposal_id = $2
+WHERE household_id = $3 AND id = $4 AND removed_at IS NULL
+`
+
+type RemoveAgreementParams struct {
+	At          pgtype.Timestamptz
+	ProposalID  pgtype.UUID
+	HouseholdID pgtype.UUID
+	ID          pgtype.UUID
+}
+
+// AND removed_at IS NULL, so a row already removed is not stamped twice.
+func (q *Queries) RemoveAgreement(ctx context.Context, arg RemoveAgreementParams) (int64, error) {
+	result, err := q.db.Exec(ctx, removeAgreement,
+		arg.At,
+		arg.ProposalID,
+		arg.HouseholdID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const signAgreementProposal = `-- name: SignAgreementProposal :execrows
+INSERT INTO agreement_signatures (proposal_id, membership_id, signed_at)
+SELECT $1, m.id, $2::timestamptz
+FROM memberships m
+WHERE m.id = $3 AND m.household_id = $4 AND m.role = 'owner'
+ON CONFLICT (proposal_id, membership_id) DO UPDATE SET membership_id = excluded.membership_id
+`
+
+type SignAgreementProposalParams struct {
+	ProposalID   pgtype.UUID
+	SignedAt     pgtype.Timestamptz
+	MembershipID pgtype.UUID
+	HouseholdID  pgtype.UUID
+}
+
+// DO UPDATE, never DO NOTHING: it stores nothing new -- signed_at is left
+// alone, keeping the first stamp (decision 16) -- but still counts a row,
+// which is what lets :execrows tell a double-click (1) from a caller who is
+// not an owner here (0). DO NOTHING would make the two identical.
+func (q *Queries) SignAgreementProposal(ctx context.Context, arg SignAgreementProposalParams) (int64, error) {
+	result, err := q.db.Exec(ctx, signAgreementProposal,
+		arg.ProposalID,
+		arg.SignedAt,
+		arg.MembershipID,
+		arg.HouseholdID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const withdrawAgreementProposal = `-- name: WithdrawAgreementProposal :execrows
+UPDATE agreement_proposals AS ap SET status = 'withdrawn', resolved_at = $1::timestamptz
+WHERE ap.household_id = $2 AND ap.id = $3
+  AND ap.status IN ('pending', 'parked')
+  AND (ap.proposed_by_membership_id = $4
+       OR NOT EXISTS (SELECT 1 FROM memberships m
+                      WHERE m.id = ap.proposed_by_membership_id
+                        AND m.household_id = $2 AND m.role = 'owner'))
+`
+
+type WithdrawAgreementProposalParams struct {
+	At          pgtype.Timestamptz
+	HouseholdID pgtype.UUID
+	ID          pgtype.UUID
+	By          pgtype.UUID
+}
+
+// The proposer clause is a BACKSTOP; the handler answers first (decision 22).
+// Its second leg is decision 15: once the proposer is no longer an owner
+// here, any owner may withdraw -- without it a proposal a departed partner
+// left behind could never be removed by anyone.
+// Aliased as ap: sqlc v1.30.0 rejects the unaliased form with "column
+// reference \"household_id\" is ambiguous" once the correlated subquery below
+// reaches the UPDATE target by its bare table name. The alias sidesteps that
+// without changing what the statement does -- confirmed by the Withdraw
+// tests, which exercise both the proposer leg and the departed-owner leg
+// against a real Postgres container.
+func (q *Queries) WithdrawAgreementProposal(ctx context.Context, arg WithdrawAgreementProposalParams) (int64, error) {
+	result, err := q.db.Exec(ctx, withdrawAgreementProposal,
+		arg.At,
+		arg.HouseholdID,
+		arg.ID,
+		arg.By,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
