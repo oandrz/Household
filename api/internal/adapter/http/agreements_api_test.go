@@ -184,6 +184,51 @@ func TestAgreementsRouteRejectsALimitedMemberHoldingMarriage(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusForbidden, "FORBIDDEN")
 }
 
+// TestAgreementProposeRouteRejectsALimitedMemberHoldingMarriage extends the
+// doctored-membership pattern above to a WRITE route. Propose is the write
+// picked to isolate requireOwner for, because it is the one write with
+// nothing else beneath the HTTP layer to catch a missing guard: Sign's own
+// SQL only inserts a signature `WHERE ... m.role = 'owner'`
+// (queries/agreements.sql, SignAgreementProposal) and Withdraw's SQL refuses
+// unless the caller IS the proposer or the proposer has left ownership
+// (WithdrawAgreementProposal) -- but InsertAgreementProposal performs no
+// role check at all. If requireOwner were ever dropped from this group, or
+// the six writes moved to a sibling group that forgot it, Propose is the one
+// call a limited member could reach and have fully succeed: an arbitrary
+// proposal landed in the household's agreements document, nothing left to
+// refuse it.
+//
+// The request carries a real CSRF cookie and a matching X-CSRF-Token header,
+// so of the three guards this route sits behind (requireCapability,
+// requireOwner, requireCSRF), only requireOwner is left able to answer here
+// -- the doctored membership holds CapMarriage, so capability passes, and
+// CSRF is satisfied on purpose. A bare status/code check on this one request
+// is therefore a real isolation of requireOwner, not a guess about which of
+// three guards fired.
+func TestAgreementProposeRouteRejectsALimitedMemberHoldingMarriage(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.limitedEmail, env.limitedPassword)
+
+	router := env.routerWithMemberships(membershipDouble{
+		MembershipRepository: env.deps.Memberships,
+		membership: domain.Membership{
+			HouseholdID:  env.householdID,
+			UserID:       "irrelevant-scope-userid-comes-from-the-real-session",
+			Role:         domain.RoleLimited,
+			Capabilities: domain.Capabilities{domain.CapMarriage},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, agreementProposalsPath, nil)
+	req.AddCookie(session)
+	req.AddCookie(csrf)
+	req.Header.Set("X-CSRF-Token", csrf.Value)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	assertErrorResponse(t, rec, http.StatusForbidden, "FORBIDDEN")
+}
+
 // TestLockedAgreementsReadCarriesLiteralEmptyArrays reads the RAW WIRE BYTES,
 // because Go decodes null and [] into the same nil slice -- only the bytes
 // prove the frontend's Zod schemas get []. Vision's
