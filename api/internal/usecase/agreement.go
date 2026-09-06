@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
@@ -299,4 +301,184 @@ func (s *AgreementService) proposalView(
 		ProposedByName:         names[p.ProposedByMembershipID], ProposedAt: p.CreatedAt,
 		AwaitingNames: awaitingNames, TargetChanged: targetChanged,
 		SignedByMembershipIDs: p.SignedByMembershipIDs}, nil
+}
+
+// requireTwoOwners is decision 1's gate, and it runs FIRST in every write --
+// uniform on purpose, because a rule that let some writes through a locked
+// household is one a reader gets wrong. An open proposal simply waits for a
+// second owner; there is no expiry and no decline (decision 6).
+func (s *AgreementService) requireTwoOwners(ctx context.Context, householdID string) error {
+	views, err := s.members.List(ctx, householdID)
+	if err != nil {
+		return err
+	}
+	if domain.AgreementsLocked(membershipsFrom(views)) {
+		return domain.ErrAgreementsNeedTwoOwners
+	}
+	return nil
+}
+
+// writtenProposal is the read-back every proposal write ends with: compose
+// the document again and run the row that was just written through the same
+// proposalView the document's own open proposals went through. One
+// composition, so the row and the document in a single response cannot
+// describe the household differently -- and so an accepted or withdrawn row,
+// which the document's own walk excludes in SQL, still gets composed by the
+// code that knows how.
+//
+// The document is a snapshot taken AFTER the write and outside its
+// transaction, so a concurrent agree may already have overtaken it; the
+// frontend's refetch stays the authority. A write that lands and then cannot
+// be read back is an error, not a silent success: the row is committed, and
+// the caller is owed a 500 rather than a half-answer.
+func (s *AgreementService) writtenProposal(ctx context.Context, householdID string,
+	rec AgreementProposalRecord) (AgreementProposalView, AgreementsView, error) {
+	doc, lk, err := s.compose(ctx, householdID)
+	if err != nil {
+		return AgreementProposalView{}, AgreementsView{}, err
+	}
+	view, err := s.proposalView(rec, lk.all, lk.names, lk.liveBody, lk.sectionNames)
+	if err != nil {
+		return AgreementProposalView{}, AgreementsView{}, err
+	}
+	return view, doc, nil
+}
+
+// CreateSection adds one label. It never pre-checks the name: the unique index
+// decides the collision, and a "does this name already exist" read is a
+// check-then-write two owners can both pass (decision 19). The section comes
+// back as the recomposed document numbers and flags it, so the row in the
+// response and the same row inside `agreements` can never disagree.
+func (s *AgreementService) CreateSection(ctx context.Context, householdID, name string,
+	at time.Time) (AgreementSectionView, AgreementsView, error) {
+	if err := s.requireTwoOwners(ctx, householdID); err != nil {
+		return AgreementSectionView{}, AgreementsView{}, err
+	}
+	name = strings.TrimSpace(name) // trim first, so what is stored is what was validated
+	if err := domain.ValidateAgreementSectionName(name); err != nil {
+		return AgreementSectionView{}, AgreementsView{}, err
+	}
+	rec, err := s.agreements.CreateSection(ctx, householdID, name, at)
+	if err != nil {
+		return AgreementSectionView{}, AgreementsView{}, err
+	}
+	doc, _, err := s.compose(ctx, householdID)
+	if err != nil {
+		return AgreementSectionView{}, AgreementsView{}, err
+	}
+	for _, sec := range doc.Sections {
+		if sec.ID == rec.ID {
+			return sec, doc, nil
+		}
+	}
+	return AgreementSectionView{}, AgreementsView{}, fmt.Errorf(
+		"%w: section %s is missing from the document that just created it",
+		ErrAgreementDocumentCorrupt, rec.ID)
+}
+
+// SeedStarterSections is "Use starter set": four labels and no agreements
+// (decision 17), so "everything here is here because you both agreed" stays
+// literally true. Idempotent -- a second click is a no-op, not a 409. It
+// answers with the document alone: it creates labels, and there is no single
+// row to name. The repository's read-back proves all four landed; nothing
+// renders from that slice, because render order is always the document's.
+func (s *AgreementService) SeedStarterSections(ctx context.Context, householdID string,
+	at time.Time) (AgreementsView, error) {
+	if err := s.requireTwoOwners(ctx, householdID); err != nil {
+		return AgreementsView{}, err
+	}
+	if _, err := s.agreements.CreateSections(ctx, householdID, domain.StarterSectionNames(), at); err != nil {
+		return AgreementsView{}, err
+	}
+	return s.Get(ctx, householdID)
+}
+
+// Propose stamps the household and the proposer from the route and the session
+// BEFORE validating, so a body naming another household is judged against its
+// own constraints rather than smuggled past them -- VisionService.Save's own
+// reasoning. The target check is deliberately not repeated here: it can only
+// be made atomically inside CreateProposal's transaction.
+func (s *AgreementService) Propose(ctx context.Context, householdID, proposedByMembershipID string,
+	p domain.AgreementProposal, at time.Time) (AgreementProposalView, AgreementsView, error) {
+	if err := s.requireTwoOwners(ctx, householdID); err != nil {
+		return AgreementProposalView{}, AgreementsView{}, err
+	}
+	p.HouseholdID, p.ProposedByMembershipID = householdID, proposedByMembershipID
+	p.Body, p.PreviousBody = strings.TrimSpace(p.Body), strings.TrimSpace(p.PreviousBody)
+	p.Note = strings.TrimSpace(p.Note)
+	if err := p.Validate(); err != nil {
+		return AgreementProposalView{}, AgreementsView{}, err
+	}
+	rec, err := s.agreements.CreateProposal(ctx, AgreementProposalWrite{HouseholdID: p.HouseholdID,
+		Kind: p.Kind, SectionID: p.SectionID, TargetAgreementID: p.TargetAgreementID, Body: p.Body,
+		PreviousBody: p.PreviousBody, Note: p.Note,
+		ProposedByMembershipID: p.ProposedByMembershipID, CreatedAt: at})
+	if err != nil {
+		return AgreementProposalView{}, AgreementsView{}, err
+	}
+	return s.writtenProposal(ctx, householdID, rec)
+}
+
+// Sign validates nothing beyond the gate: every count and comparison that
+// decides the outcome -- the owner count, the signatures held by current
+// owners, the target's wording -- is inside the repository's transaction,
+// which is the only place any of them is atomic (decisions 4 and 13).
+func (s *AgreementService) Sign(ctx context.Context, householdID, proposalID, membershipID string,
+	at time.Time) (AgreementProposalView, AgreementsView, error) {
+	if err := s.requireTwoOwners(ctx, householdID); err != nil {
+		return AgreementProposalView{}, AgreementsView{}, err
+	}
+	rec, err := s.agreements.Sign(ctx, AgreementSignatureWrite{HouseholdID: householdID,
+		ProposalID: proposalID, MembershipID: membershipID, At: at})
+	if err != nil {
+		return AgreementProposalView{}, AgreementsView{}, err
+	}
+	return s.writtenProposal(ctx, householdID, rec)
+}
+
+// Park is Discuss: the proposal stays open and shows on the Retros page's
+// To-discuss block (decision 7). The note is capped in RUNES, never bytes, or
+// a household writing Chinese gets a third of what the modal promised -- and
+// in MaxAgreementParkNoteLen, not the proposal note's cap: two fields on two
+// screens, and one constant serving both would have to move for both.
+func (s *AgreementService) Park(ctx context.Context, householdID, proposalID, note string,
+	at time.Time) (AgreementProposalView, AgreementsView, error) {
+	if err := s.requireTwoOwners(ctx, householdID); err != nil {
+		return AgreementProposalView{}, AgreementsView{}, err
+	}
+	note = strings.TrimSpace(note) // trimmed before it is measured, as Validate's own contract says
+	if utf8.RuneCountInString(note) > domain.MaxAgreementParkNoteLen {
+		return AgreementProposalView{}, AgreementsView{}, domain.ErrAgreementParkNoteTooLong
+	}
+	rec, err := s.agreements.Park(ctx, householdID, proposalID, note, at)
+	if err != nil {
+		return AgreementProposalView{}, AgreementsView{}, err
+	}
+	return s.writtenProposal(ctx, householdID, rec)
+}
+
+// Withdraw does not branch on byMembershipID, and must not: the proposer check
+// is the handler's, because only the HTTP layer knows who is asking (decision
+// 15, in decision 22's 404 -> 403 -> 409 order). The id travels so the
+// repository's own WHERE-clause backstop can apply it, and a refusal that
+// comes back from there is the store's answer, not this method's.
+func (s *AgreementService) Withdraw(ctx context.Context, householdID, proposalID,
+	byMembershipID string, at time.Time) (AgreementProposalView, AgreementsView, error) {
+	if err := s.requireTwoOwners(ctx, householdID); err != nil {
+		return AgreementProposalView{}, AgreementsView{}, err
+	}
+	rec, err := s.agreements.Withdraw(ctx, householdID, proposalID, byMembershipID, at)
+	if err != nil {
+		return AgreementProposalView{}, AgreementsView{}, err
+	}
+	return s.writtenProposal(ctx, householdID, rec)
+}
+
+// Proposal is a read, and is deliberately NOT gated by requireTwoOwners: the
+// withdraw handler needs 404 before 403 before 409 (decision 22), and a gate
+// here would answer 409 for a proposal that does not exist. Pair it with Get's
+// Owners list, which is what decides whether the proposer is still one.
+func (s *AgreementService) Proposal(ctx context.Context, householdID,
+	proposalID string) (AgreementProposalRecord, error) {
+	return s.agreements.Proposal(ctx, householdID, proposalID)
 }
