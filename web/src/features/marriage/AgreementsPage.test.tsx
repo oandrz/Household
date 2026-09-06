@@ -354,4 +354,17 @@ describe("AgreementsPage", () => {
     expect(screen.queryByRole("button", { name: "Discuss" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Withdraw" })).not.toBeInTheDocument();
   });
+
+  it("Version history opens the modal off the document the page already has", async () => {
+    renderPage({
+      "GET /api/v1/marriage/agreements": { status: 200, body: { agreements: documentFixture() } },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Version history" }));
+
+    // The Modal's own <h2>. If stubFetchRoutes throws "no stub registered" here,
+    // the modal is fetching under a key of its own -- which is the defect, not
+    // the stub's.
+    expect(await screen.findByRole("heading", { name: "Version history" })).toBeInTheDocument();
+  });
 });

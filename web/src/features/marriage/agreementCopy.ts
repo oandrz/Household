@@ -261,4 +261,32 @@ export const AGREEMENT_COPY = {
   sectionSuggestions: ["In-laws & family", "Faith & values", "Health", "Careers", "Screens & tech"],
   newSectionCreate: "Create & add first agreement",
   newSectionFallbackError: "Could not create that section. Try again.",
+
+  // --- Version history modal (Task 15) ---
+  historyTitle: "Version history",
+  historySubtitle: "Every change, and who agreed",
+  historyRestore: "Restore",
+  historyVersion: (version: number) => `v${version}`,
+  historyVersionCurrent: (version: number) => `v${version} · current`,
+  historyEmpty: "Nothing has been agreed yet, so there is no history.",
+  // The design's "Added #12 …" carries a display number. A change accepted two
+  // years ago has no position in today's document (decision 11), so the section
+  // name takes its place -- which is also why the wire carries no number here.
+  // No default arm: the Zod enum is the fail-closed boundary, and a fourth kind
+  // needs a migration before it can reach this switch.
+  historySentence: (kind: "add" | "edit" | "remove", sectionName: string, text: string) => {
+    switch (kind) {
+      case "add":
+        return `Added to ${sectionName}: "${text}"`;
+      case "edit":
+        return `Changed in ${sectionName}: "${text}"`;
+      case "remove":
+        return `Removed from ${sectionName}: "${text}"`;
+    }
+  },
+  // A signer whose membership no longer resolves is omitted server-side rather
+  // than joined as "", or this reads "Agreed by Andreas and ".
+  historySignedBy: (signedByNames: string[]) => `Agreed by ${joinNames(signedByNames)}`,
+  historyShowOlder: (lowest: number, highest: number) =>
+    lowest === highest ? `Show v${lowest} ↓` : `Show v${lowest}–v${highest} ↓`,
 } as const;

@@ -18,6 +18,7 @@ import { AgreementSectionCard } from "./AgreementSectionCard";
 import { NewSectionModal } from "./NewSectionModal";
 import { ProposalCard } from "./ProposalCard";
 import { ProposeAgreementModal, type AgreementProposeSeed } from "./ProposeAgreementModal";
+import { VersionHistoryModal } from "./VersionHistoryModal";
 import { AGREEMENT_COPY, agreementDateLabel } from "./agreementCopy";
 import { handleWriteError, useAgreements } from "./useAgreements";
 
@@ -41,18 +42,13 @@ export function AgreementsPage() {
   // same query for one sentence.
   const me = useMe();
 
-  // The three modal slots. Task 13 (this task) binds proposeSeed; the other
-  // two VALUES stay elided because nothing reads them until their modal
-  // exists -- tsconfig has noUnusedLocals, so a bound name with no reader
-  // would not compile:
-  //   Task 14 -> const [newSectionOpen, setNewSectionOpen]
-  //   Task 15 -> const [historyOpen, setHistoryOpen]
-  // and mounts its modal at the marked point at the bottom of this file. The
+  // The three modal slots. Each task binds one already-declared value and
+  // mounts its modal at the marked point at the bottom of this file. The
   // buttons, the state and its setters land here so a modal task adds a modal
   // and nothing else.
   const [proposeSeed, setProposeSeed] = useState<AgreementProposeSeed | null>(null);
   const [newSectionOpen, setNewSectionOpen] = useState(false);
-  const [, setHistoryOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   // The one write this task makes. One flag and one error slot, not a
   // per-button pair: there is exactly one starter-set button on screen at a
@@ -380,6 +376,19 @@ export function AgreementsPage() {
           onCreated={(seed) => {
             // Close, then open. Both booleans are Task 10's; this is the swap.
             setNewSectionOpen(false);
+            setProposeSeed(seed);
+          }}
+        />
+      )}
+
+      {historyOpen && (
+        <VersionHistoryModal
+          onClose={() => setHistoryOpen(false)}
+          onRestore={(seed) => {
+            // Close, then open -- the same swap New section makes into
+            // Propose. Restoring is an ordinary add proposal (decision 18),
+            // not a second write path.
+            setHistoryOpen(false);
             setProposeSeed(seed);
           }}
         />
