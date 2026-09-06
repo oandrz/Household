@@ -117,6 +117,21 @@ describe("ProposalCard", () => {
     );
   });
 
+  // The gap a review pass caught: everyoneAgreed carries its OWN canAgree
+  // half (`proposal.canAgree && proposal.awaitingNames.length === 0`), not
+  // just the button gate above it. A locked household reaches an empty
+  // awaiting list the same way decision 16's household does -- three owners,
+  // one proposes, one agrees, the third leaves -- and the household then
+  // drops below two owners, so canAgree turns false while awaitingNames stays
+  // empty. Without this half, the sentence would invite a click on an Agree
+  // button the row above has already hidden.
+  it("says nothing about everyone having agreed when canAgree is false, even with an empty awaiting list", () => {
+    renderCard({ canAgree: false, awaitingNames: [] });
+
+    expect(screen.queryByTestId("proposal-everyone-agreed")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Agree" })).not.toBeInTheDocument();
+  });
+
   it("shows a park note under the To discuss label, and nothing when the note is empty", () => {
     const { rerender, onAgree, onPark, onWithdraw } = renderCard({ status: "parked", parkNote: "The ceiling feels low" });
 
