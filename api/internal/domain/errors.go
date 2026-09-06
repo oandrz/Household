@@ -212,4 +212,52 @@ var (
 	// ErrHouseholdLocked: locking the operator out of /admin must never lock
 	// their household out of the product.
 	ErrAdminLocked = errors.New("admin re-authentication is locked")
+
+	// --- Agreements ---
+
+	// ErrAgreementsNeedTwoOwners is decision 1's gate, and it sits here beside ErrLastOwner because it is a
+	// fact about the owner set rather than part of any port's contract. Every write refuses with it while a
+	// household has fewer than MinAgreementOwners owners.
+	ErrAgreementsNeedTwoOwners = errors.New("agreements need at least two owners")
+
+	// ErrAgreementChanged is a target that moved, went, or no longer reads the proposal's previous_body.
+	// Deliberately not ErrNotFound: "it vanished" and "someone changed it" are different things to be told,
+	// and ErrNotFound on these routes means the proposal row itself.
+	ErrAgreementChanged = errors.New("the agreement this proposal targets has changed")
+
+	// ErrAgreementNotOpen is a sign, park or withdraw against a resolved proposal -- ordinarily the last
+	// signer double-clicking Agree. It means "reload, this was settled", not "try again", and it pairs with
+	// AgreementProposalStatus.IsOpen. The wire code it maps to is AGREEMENT_PROPOSAL_RESOLVED, deliberately
+	// worded from the caller's side rather than this sentinel's.
+	ErrAgreementNotOpen = errors.New("this proposal is no longer open")
+
+	// Sections are never deleted, so a name is never freed again (decision 19).
+	ErrAgreementSectionNameTaken    = errors.New("that section name is already used")
+	ErrAgreementSectionNameRequired = errors.New("a section needs a name")
+	ErrAgreementSectionNameTooLong  = errors.New("a section name is too long")
+
+	ErrAgreementBodyRequired = errors.New("an agreement needs a body")
+	ErrAgreementBodyTooLong  = errors.New("an agreement body is too long")
+
+	// The two notes get a sentinel each rather than sharing one, so every 422 can name the field the screen
+	// has to highlight -- and so that MaxAgreementParkNoteLen quietly becoming an alias of MaxAgreementNoteLen
+	// is visible somewhere. AgreementService.Park's test is that somewhere; no domain assertion can see it.
+	ErrAgreementNoteTooLong     = errors.New("a proposal note is too long")
+	ErrAgreementParkNoteTooLong = errors.New("a discussion note is too long")
+
+	// ErrAgreementProposalShapeInvalid covers every wrong combination of the four content fields -- an add
+	// with no section, an edit with no target, a remove with no previous body -- as one sentinel, the way
+	// ErrTransactionAccountsInvalid does: the modal sends one of three complete shapes, so a mismatch is a
+	// hand-built request, and four codes would only tell it which field to try next.
+	ErrAgreementProposalShapeInvalid = errors.New("this proposal's fields do not match its kind")
+
+	// Separate from the shape refusal, because there the shape is fine and the screen says something
+	// different: the version number is a promise that something happened.
+	ErrAgreementEditUnchanged = errors.New("an edit must change the wording")
+
+	// Neither of these gets a MapDomainError case (Task 8). A bad kind in a request body is answered 422 by
+	// the handler's own parser (decision 21), so both can only reach the mapper from a database column --
+	// where a logged 500 is the right answer to an impossible row.
+	ErrUnknownAgreementProposalKind   = errors.New("unknown agreement proposal kind")
+	ErrUnknownAgreementProposalStatus = errors.New("unknown agreement proposal status")
 )
