@@ -215,9 +215,13 @@ var (
 
 	// --- Agreements ---
 
-	// ErrAgreementsNeedTwoOwners is decision 1's gate, and it sits here beside ErrLastOwner because it is a
-	// fact about the owner set rather than part of any port's contract. Every write refuses with it while a
-	// household has fewer than MinAgreementOwners owners.
+	// ErrAgreementsNeedTwoOwners is decision 1's gate. It sits here, in this
+	// "--- Agreements ---" block after ErrAdminLocked, grouped with the
+	// feature's other sentinels below it rather than beside ErrLastOwner
+	// (208 lines up) — even though it is, like ErrLastOwner, a fact about
+	// the owner set rather than part of any port's contract. Every write
+	// refuses with it while a household has fewer than MinAgreementOwners
+	// owners.
 	ErrAgreementsNeedTwoOwners = errors.New("agreements need at least two owners")
 
 	// ErrAgreementChanged is a target that moved, went, or no longer reads the proposal's previous_body.

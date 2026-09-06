@@ -659,8 +659,10 @@ describe("the real route tree", () => {
     // (router-core's parseLocation sets it straight from JSON.parse-per-value,
     // and matchRoutesInternal's `{...parentSearch, ...strictSearch}` composition
     // can't remove a key the raw URL seeded -- confirmed against
-    // @tanstack/router-core 1.170.18's own source, not assumed). It would keep
-    // reading `{ invite: "maybe" }` even with a correct validateSearch. The
+    // @tanstack/router-core 1.171.15's own source, not assumed -- that is the
+    // version this lockfile actually resolves (package-lock.json), not the
+    // 1.170.18 of the sibling @tanstack/react-router package.json names). It
+    // would keep reading `{ invite: "maybe" }` even with a correct validateSearch. The
     // dialog's absence above (and the strict `invite === true` check in
     // SettingsRouteComponent, mutation-tested below) is the actual fail-closed
     // contract; the "open" half's `toEqual({ invite: true })` above only holds
