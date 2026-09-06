@@ -421,8 +421,11 @@ count stays the number of bullets.)
   version bump that arrives *before* any conflict exists to latch onto —
   and `RetroModal.tsx` has exactly that path built in: `addAction`, called
   from inside the still-open modal, succeeds and invalidates the retro
-  query, moving `query.data.retro.version` while the mood/wentWell/wasHard/
-  notes draft stays exactly as typed before the action was added. The next
+  query, forcing a refetch that pulls whatever `version` a partner's own
+  concurrent `PATCH` has already committed into `query.data`, underneath the
+  mood/wentWell/wasHard/notes draft that stays exactly as typed before the
+  action was added (`addAction` itself never touches `version` — pattern 18
+  has the corrected mechanism and the SQL citation). The next
   Save reads the *new* version live off `query.data` (`useRetro.ts`'s
   `saveMutation.mutationFn`) and attaches it to the *old* draft — an
   accepted `200 OK` that silently overwrites a partner's concurrent write,
@@ -430,9 +433,10 @@ count stays the number of bullets.)
   `useVision.ts`'s `saveMutation` does the same live read for the same
   reason and has no addAction-shaped trigger of its own only because
   `VisionModal` has no secondary in-modal write to cause one — the
-  live-read shape is present regardless. Found reading the hooks during
-  Agreements' Task 18 walk (see pattern 18), while sweeping for a sibling
-  of a live-read defect that walk had just found and fixed in
+  live-read shape is present regardless, and the wider `staleTime`/
+  window-focus trigger pattern 18 names reaches both anyway. Found reading
+  the hooks during Agreements' Task 18 walk (see pattern 18), while sweeping
+  for a sibling of a live-read defect that walk had just found and fixed in
   `ProposeAgreementModal.tsx`; not fixed here, because it is pre-existing
   code in two already-shipped features and needs its own product decision,
   not a follow-on to an unrelated branch. **A fix framed around the control
@@ -3299,17 +3303,45 @@ does the identical thing with `current.version`. Both hooks' own
 THE APP READS `conflict` OR CALLS `reload()`" outside the modal's one-way
 latch) guards only a save that has already come back `*_CHANGED` once —
 it does nothing for the first save after a refetch that landed silently.
-And that refetch is not a hypothetical needing a real window-focus event:
-`RetroModal.tsx` calls `retro.addAction(...)` from inside the still-open
-modal (lines 242 and 281), and `addAction`'s own `onSuccess` invalidates
-both the retro and the retro-list queries (`useRetro.ts`'s
-`invalidateAfterRetroWrite`) — a product path, reachable with the modal
-open the entire time, that bumps `query.data.retro.version` under a draft
-that is still the one typed before the action was added. Adding an action,
-then saving the draft, sends the pre-action text with the post-action
-version attached; the server sees a current version and accepts it as
-`200 OK`, overwriting whatever the other partner wrote in between with no
-trace and no error either side can see.
+And a refetch reaching the open modal is not a hypothetical needing a real
+window-focus event to demonstrate — `RetroModal.tsx` calls
+`retro.addAction(...)` from inside the still-open modal (lines 242 and 281),
+and `addAction`'s own `onSuccess` invalidates both the retro and the
+retro-list queries (`useRetro.ts`'s `invalidateAfterRetroWrite`), a product
+path reachable with the modal open the entire time.
+
+**Correction: `addAction` does not itself move `version` — this entry
+originally said it "bumps `query.data.retro.version`", which is not what the
+SQL does.** `AddRetroAction`
+(`api/internal/adapter/postgres/queries/retro.sql:95-104`) inserts one row
+into `retro_actions` and touches nothing else; the only `version = version +
+1` anywhere in that file belongs to `UpdateRetro` (`:49`). What `addAction`
+supplies is a **refetch**, not a version bump: its invalidation makes
+`useRetro`'s query re-run, and if a partner's own `PATCH` (`UpdateRetro`) has
+already landed in between — committing a version increase the open tab has
+not seen yet — that refetch is what pulls the new `version` into
+`query.data` underneath a draft `RetroModal.tsx` seeded once and never
+re-seeds. The next Save then reads that new version live off `query.data`
+and attaches it to the old draft; the server sees a current version and
+accepts it as `200 OK`, overwriting whatever the partner wrote with no trace
+and no error either side can see. `addAction` is the trigger for the
+refetch, never the cause of the overwrite — the overwrite needs a partner's
+concurrent write too.
+
+**And the class is wider than `addAction`, which is why "wrong mechanism,
+wider reach" is the correction, not "overstated."** Nothing about this
+requires a second write inside the same modal at all: `web/src/main.tsx:11`
+sets `staleTime: 30_000`, and TanStack Query v5 defaults
+`refetchOnWindowFocus` to `true` (nothing in this codebase turns it off), so
+leaving the modal open past thirty seconds and returning to the browser tab —
+an ordinary alt-tab, no action added, nobody clicking anything in this
+household's own session — refetches the identical query the identical way.
+Neither trigger was reproduced live in this walk — see the methodology
+paragraph below — but `addAction` is a confirmed-reachable in-modal path in
+Retros specifically (`RetroModal.tsx:242, 281`), while plain window focus is
+the wider trigger that reaches Retros, Vision, and any future screen built
+on the same `useState`-draft-plus-live-version shape, read off the query
+defaults rather than watched firing.
 
 **`docs/LEARNING.md`'s own Frontend catalogue (the "Retros, Task 13" entry)
 already recorded a loss from this exact family, and its fix closed one
@@ -3326,6 +3358,31 @@ should do when a third write lands mid-edit, which is product thinking,
 not a follow-on to an Agreements task. `Start retro (modal)` and
 `Edit vision (modal)` are marked 🟡 in `docs/FEATURE_TRACKER.md` for this
 reason.
+
+**Methodology, stated here rather than left only in pattern 1's bullet and
+the Vision tracker row: everything above this line about `useRetro.ts`,
+`useVision.ts` and the `staleTime`/`refetchOnWindowFocus` trigger was
+confirmed by reading `useRetro.ts:144-161`, `RetroModal.tsx:140-148` (and its
+two `addAction` call sites at 242 and 281), `useVision.ts:101-113`,
+`retro.sql`'s own queries, and `main.tsx:11` — not by reproducing a silent
+overwrite end to end the way this pattern's OWN opening defect was
+eventually reproduced.** Neither Retros' nor Vision's route was watched
+actually overwriting a partner's write in a browser; both are read, not
+reproduced. What differs between them is only how many further conditions
+each reading needs: Retros' `addAction` route is a real, already-shipped,
+in-modal code path that needs nothing further beyond a partner's own
+concurrent `PATCH` to be reachable — confirmed by reading `RetroModal.tsx`'s
+two call sites, not by triggering one and watching the version move. The
+window-focus route is read off TanStack's documented v5 default and this
+codebase's own `staleTime`, also not watched happening in a browser, and it
+is the *only* route into Vision: `VisionModal` has no in-modal secondary
+write of its own to force a refetch the way Retros' `addAction` does, so
+Vision has a reachable trigger only if the window-focus reading is right,
+while Retros has one either way. **This entry was confidently wrong once
+already** (the `addAction`-bumps-`version` claim above) **on a reading of
+the same files this correction cites** — which is the reason to say plainly
+what was read versus what was watched, rather than stating either as flat
+fact.
 
 A grep across every modal in this codebase for a `.find(...)` lookup
 called directly inside its own submit handler, rather than only inside a
@@ -5251,6 +5308,43 @@ no test suite can hold.
   detour — recorded here as a browser fact worth knowing before assuming a
   future keyboard-walk finding of "focus briefly left the dialog" is this
   codebase's own bug rather than Chromium's.
+- **An accepted edit moves its agreement to the END of its section and
+  renumbers every agreement after it — deliberate, and found only by the
+  whole-branch review, not by this walk itself.** `applyAgreementChange`'s
+  `add()` (`api/internal/adapter/postgres/agreement_write_repo.go:132`)
+  stamps the replacement row's `CreatedAt` with the **acceptance** time (the
+  `at` the sign transaction runs at), not the target's original
+  `CreatedAt`, and `ListLiveAgreements`
+  (`api/internal/adapter/postgres/queries/agreements.sql:15`) orders by
+  `created_at, id` — the same ordering `AgreementSectionCard.tsx` numbers
+  `01..N` from at render (decision 11). So editing Money 02 of four does not
+  produce a new Money 02; it produces a new Money **04**, and the old 03 and
+  04 shift up to become 02 and 03. Verified live during the whole-branch
+  review: original agreement accepted `17:00:02`, its edit's replacement
+  accepted `17:00:04`, landing last. **This is what decision 9 (an edit is
+  remove-then-add, never an in-place UPDATE) and decision 11 (numbers are
+  derived at render and never stored) produce together when combined — not
+  a bug that slipped past a walk.** The walk that shipped this feature could
+  not have caught it regardless: its own final state was one agreement per
+  section throughout, where a renumber is invisible by construction. Ruled
+  **record, not fix**: changing it means copying the target's `created_at`
+  onto the replacement, which redefines what an edit is understood to
+  preserve — a product owner's call, not a reviewer's. The two places this
+  turns "just a display number" into something closer to a name a person
+  might reasonably expect to still refer to the same wording:
+  `agreementCopy.ts:40` composes `"Money 02"` (section name plus the padded
+  number) for the pending-proposal card's own summary line — "Andreas
+  proposed changing Money 02" can outlive the number it names, if a
+  different edit lands first — and `agreementCopy.ts:251`'s `targetOption`
+  builds the identical `"02 · {body}"` label the Propose modal's own
+  edit/remove target picker lists. Neither is wrong on its own terms (both
+  read the number the document carries *at that render*), but a household
+  reading either sentence has no way to know the number named in it can
+  already belong to a different agreement by the time they act on it.
+  See `docs/FEATURE_TRACKER.md`'s "Agreements by section" and "Propose a
+  change" rows for the tracker's own record, and
+  `api/internal/usecase/agreement_test.go:273-277` for where this was first
+  written down, as a test comment nobody outside that file would meet.
 
 ---
 
