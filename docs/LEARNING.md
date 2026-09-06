@@ -23,7 +23,7 @@ gets rebuilt.
 
 ### 1. Fixing an instance rarely fixes the class
 
-This happened **nineteen times** — one bullet each below, and the count is the
+This happened **twenty times** — one bullet each below, and the count is the
 number of bullets, so recount it when you add one (it had already drifted by
 one before the UX-repair round noticed). Almost every time, the fix was
 correct and the sibling kept the bug; two of them are the variant where
@@ -409,6 +409,36 @@ the usual way, the fix would have closed one disagreement and left an
 identical one a page over, for the next browser walk to file as a fresh
 defect. (No bullet added above: this one was caught before it shipped, and the
 count stays the number of bullets.)
+
+- **Retros, Task 13's own fix closed the route it was shown, not the class
+  it belonged to — and the second route sat in a shipped sibling feature
+  the whole time.** Task 13 fixed a UI-layer last-write-wins: the conflict
+  banner's Reload button cleared `useRetro`'s `conflict` flag without
+  re-seeding the modal's local draft, so a Save right after Reload sent
+  stale text with a fresh version attached, defeating the database's own
+  version guard. The fix removed Reload's ability to re-enable editing at
+  all. That closes the *post-conflict* route. It does nothing about a
+  version bump that arrives *before* any conflict exists to latch onto —
+  and `RetroModal.tsx` has exactly that path built in: `addAction`, called
+  from inside the still-open modal, succeeds and invalidates the retro
+  query, moving `query.data.retro.version` while the mood/wentWell/wasHard/
+  notes draft stays exactly as typed before the action was added. The next
+  Save reads the *new* version live off `query.data` (`useRetro.ts`'s
+  `saveMutation.mutationFn`) and attaches it to the *old* draft — an
+  accepted `200 OK` that silently overwrites a partner's concurrent write,
+  the identical loss Task 13 fixed, through a door Task 13 never looked at.
+  `useVision.ts`'s `saveMutation` does the same live read for the same
+  reason and has no addAction-shaped trigger of its own only because
+  `VisionModal` has no secondary in-modal write to cause one — the
+  live-read shape is present regardless. Found reading the hooks during
+  Agreements' Task 18 walk (see pattern 18), while sweeping for a sibling
+  of a live-read defect that walk had just found and fixed in
+  `ProposeAgreementModal.tsx`; not fixed here, because it is pre-existing
+  code in two already-shipped features and needs its own product decision,
+  not a follow-on to an unrelated branch. **A fix framed around the control
+  that exposed the bug (a button) protects that control, not the state
+  transition underneath it (a version moving); the same transition reached
+  through any other door is exactly as unguarded as it always was.**
 
 ### 2. A test that cannot fail protects nothing
 
@@ -3239,15 +3269,72 @@ second, cheaper trigger for the same underlying mechanism once the first
 one didn't fire. **The fix is the general one, not specific to this field**:
 anything a form's own contract says must "stay as you first saw it" needs
 its own `useState`, set once at the moment of selection and never
-recomputed from a prop afterward — `VisionModal.tsx`'s closing-the-modal-
-outright strategy on conflict (rather than trying to keep a draft alive
-across a version bump) is the sibling precedent for the same underlying
-worry, solved by a different, equally valid route (discard rather than
-snapshot). A grep across every modal in this codebase for a `.find(...)`
-lookup called directly inside its own submit handler, rather than only
-inside a state setter, found no second instance of this exact shape — the
-other candidates (`BillModal`, `BudgetModal`, `TransactionModal`) all look
-up a value to *display*, never one a server compares for staleness.
+recomputed from a prop afterward.
+
+**Correction: the sibling sweep searched the wrong layer, and the class is
+live, unfixed, in two shipped features.** This entry originally cited
+`VisionModal.tsx`'s closing-the-modal-outright strategy on conflict as "the
+sibling precedent for the same underlying worry, solved by a different,
+equally valid route." That claim was false, and a review of this walk
+caught it: closing the modal on conflict guards only the *post-409* path
+(a save that already failed once). It says nothing about a save that has
+not failed yet, which is where the actual class lives. The sweep that
+produced the false-safe claim also grepped the wrong shape — a *syntactic*
+one (`.find((x) => x.id === …)` called inside a submit handler, in files
+named `*Modal*.tsx`) rather than the *semantic* one this bug actually is:
+an optimistic-concurrency token (a `previousBody`, a `version`) read live
+at send time from a store that can move, while the draft it describes was
+snapshotted earlier. In this codebase that token is read inside the data
+hooks, not the modals, so a grep scoped to modal files could never have
+found it.
+
+`useRetro.ts`'s `saveMutation.mutationFn` (lines 144-161) reads
+`const current = query.data` fresh at send time and attaches
+`current.retro.version` to the PATCH; `RetroModal.tsx` seeds its own local
+`mood`/`wentWell`/`wasHard`/`notes` draft once, on first load
+(`!initialized`, lines 140-148), and never re-seeds it from a later
+`query.data`. `useVision.ts`'s `saveMutation.mutationFn` (lines 101-113)
+does the identical thing with `current.version`. Both hooks' own
+`hadConflict`/`conflict` latch (`useRetro.ts`'s own comment: "NOTHING IN
+THE APP READS `conflict` OR CALLS `reload()`" outside the modal's one-way
+latch) guards only a save that has already come back `*_CHANGED` once —
+it does nothing for the first save after a refetch that landed silently.
+And that refetch is not a hypothetical needing a real window-focus event:
+`RetroModal.tsx` calls `retro.addAction(...)` from inside the still-open
+modal (lines 242 and 281), and `addAction`'s own `onSuccess` invalidates
+both the retro and the retro-list queries (`useRetro.ts`'s
+`invalidateAfterRetroWrite`) — a product path, reachable with the modal
+open the entire time, that bumps `query.data.retro.version` under a draft
+that is still the one typed before the action was added. Adding an action,
+then saving the draft, sends the pre-action text with the post-action
+version attached; the server sees a current version and accepts it as
+`200 OK`, overwriting whatever the other partner wrote in between with no
+trace and no error either side can see.
+
+**`docs/LEARNING.md`'s own Frontend catalogue (the "Retros, Task 13" entry)
+already recorded a loss from this exact family, and its fix closed one
+route and not this one** — see pattern 1's new bullet below, "fixing an
+instance rarely fixes the class," which is exactly what happened here:
+Task 13 removed the Reload button's ability to re-enable editing after a
+*conflict* had already fired, which was the right fix for the bug that was
+found (a stale draft resubmitted after a hand-triggered Reload). It left
+untouched the case this entry describes, where the version moves *before*
+any conflict exists to trigger the latch at all. Not fixed on this branch
+— it is pre-existing code in two already-shipped features, and a correct
+fix needs its own decision about what two partners editing one document
+should do when a third write lands mid-edit, which is product thinking,
+not a follow-on to an Agreements task. `Start retro (modal)` and
+`Edit vision (modal)` are marked 🟡 in `docs/FEATURE_TRACKER.md` for this
+reason.
+
+A grep across every modal in this codebase for a `.find(...)` lookup
+called directly inside its own submit handler, rather than only inside a
+state setter, found no second instance of *that* shape — the other
+candidates (`BillModal`, `BudgetModal`, `TransactionModal`) all look up a
+value to *display*, never one a server compares for staleness. That sweep
+was real and its own negative result stands; it simply answered a
+narrower question than "does this class exist elsewhere," and the class
+turned out to live one layer down from where the grep was aimed.
 
 ---
 
@@ -4567,6 +4654,28 @@ route with a missing guard has no second line of defence.
   check comes *first* — true of the file and irrelevant to the program — and
   was reworded in the same change that added the third screen, which is the
   only one of the three whose comment stated the value rule from the start.
+
+- **A controlled `<select>` can drift from the state it is supposedly
+  bound to, and confirmed-safe is not the same as invisible.** Task 18's
+  Agreements walk found that once a background refetch lands inside an
+  open `ProposeAgreementModal.tsx` (edit or remove mode), the target
+  `<select>` visually falls back to displaying option 0 — the section's
+  now-first agreement, post-refetch — while the component's own `targetId`
+  state still holds the id it was opened with. What the household sees and
+  what the form would submit disagree from that moment on. This does **not**
+  reach a wrong write: `targetId` is what actually gets sent, and the
+  server's own `LockAgreementTarget` query (`WHERE ... removed_at IS NULL`)
+  answers `409 AGREEMENT_CHANGED` the instant that id is no longer live,
+  which is exactly the case here (an edit or remove always retires the old
+  id — decision 9). So the send fails safely into the conflict banner
+  rather than silently landing against the wrong row. The gap is real
+  regardless: the display and the state it is meant to reflect are two
+  different things for as long as the modal stays open after that refetch,
+  which is a defect in what the screen tells the household even though it
+  never becomes a defect in what gets written. Left unfixed on this branch
+  (pattern 18 above traces the same refetch-into-an-open-modal path and is
+  where the actual write-safety analysis lives) — recorded here so the
+  select's own visual drift does not get rediscovered as if it were new.
 
 ### Tooling and infrastructure
 

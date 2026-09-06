@@ -255,6 +255,30 @@ needed them to exist (see "Where things stand" below).
 > the same as it did before this correction — the number that changes here
 > is the built-and-*verified* count, 80 → 88, not the headline above.
 
+> **Corrected again, same day, from a review of the walk above.** The
+> sibling sweep for the `previousBody` defect had grepped a syntactic shape
+> (a `.find(...)` lookup inside a submit handler, in files named
+> `*Modal*.tsx`) rather than the semantic one the bug actually is: a
+> concurrency token read live at send time from a store that can move,
+> under a draft snapshotted earlier. That token lives in the data hooks in
+> two other shipped features, not in any modal file the sweep looked at —
+> `useRetro.ts`'s and `useVision.ts`'s `saveMutation`s both read
+> `query.data`'s version live, and `RetroModal.tsx`'s in-modal `addAction`
+> is a real product path that moves that version while its own draft stays
+> untouched, reachable without any conflict ever firing to latch against.
+> **`Start retro (modal)` and `Edit vision (modal)` move ✅ → 🟡** in section
+> 6 for this reason, each row naming the gap and dated 2026-09-06; neither
+> is fixed here, since both are pre-existing code in already-shipped
+> features and the right fix needs its own product decision, not a
+> follow-on to the Agreements branch. Full account in `docs/LEARNING.md`
+> pattern 18's correction and pattern 1's newest bullet. **Recounted, not
+> adjusted by hand**, the same way as above: 12/1/2/0, 7/1/1/0, 11/8/2/0,
+> 8/2/1/0, 25/3/7/0, **16/2/2/0**, 0/1/1/1, 0/0/0/1, 7/1/0/1 — **86/19/16/3
+> = 124**, Built + Partial **105**, unchanged again: two rows moved from
+> the built column to the partial column, and Built + Partial counts both,
+> so only the split between ✅ and 🟡 changes, not the total nor the
+> denominator.
+
 > **In production since 2026-08-15**, at <https://oink.mywire.org>. **No count
 > below changes** — deployment is not a design feature, and this file's totals
 > are a measure of the product against `design/Household Dashboard.dc.html`, not
@@ -865,11 +889,11 @@ flags screen sits in its own cell above, not folded into that number.
 | Household settings | 11 | 8 | 2 | 0 |
 | Overview (home) | 8 | 2 | 1 | 0 |
 | Money | 25 | 3 | 7 | 0 |
-| Marriage | 18 | 0 | 2 | 0 |
+| Marriage | 16 | 2 | 2 | 0 |
 | Family | 0 | 1 | 1 | 1 |
 | Household extras | 0 | 0 | 0 | 1 |
 | Platform administration | 7 | 1 | 0 | 1 |
-| **Total** | **88** | **17** | **16** | **3** |
+| **Total** | **86** | **19** | **16** | **3** |
 
 ---
 
@@ -1499,14 +1523,14 @@ for Money.
 | Retro history with mood | ✅ |
 | Mood chart over 12 months | ✅ |
 | Single retro view — went well, was hard, actions, notes | ✅ |
-| Start retro (modal) with mood, money check-in and actions | ✅ *(the design's own "45 min" duration is drawn, not built — spec decision 8)* |
+| Start retro (modal) with mood, money check-in and actions | 🟡 *(the design's own "45 min" duration is drawn, not built — spec decision 8. **Gap found 2026-09-06, during Agreements' Task 18 walk, sweeping for a sibling of that walk's own `previousBody` live-read defect**: `useRetro.ts`'s `saveMutation` reads `query.data.retro.version` live at send time (lines 144-161), while `RetroModal.tsx` seeds its own mood/wentWell/wasHard/notes draft once and never re-seeds it. `addAction`, callable from inside the still-open modal (lines 242, 281), succeeds and invalidates the retro query, moving that version under the untouched draft — the next Save then sends stale text with a version that now matches, a silent last-write-wins with no error either side can see. Not the same route Retros Task 13 already fixed (that closed the post-conflict Reload button only); this route never reaches a conflict at all. Not fixed here — pre-existing code in an already-shipped feature, needs its own product decision about concurrent edits, out of scope for an Agreements branch. `docs/LEARNING.md` pattern 18 and pattern 1's newest bullet)* |
 | Carry an unfinished action into the next retro (no mockup — see below) | ✅ |
 | Delete a draft retro (no mockup — see below) | ✅ |
 | Vision — yearly theme | ✅ *(`VisionPage.tsx`'s theme hero, Vision spec's task 11 — the year label, the theme in literal quotes, and its description; an empty description renders nothing, not an empty block. **Per-year history is real, not merely stored**: `visions` keeps one row per `(household_id, year)` forever (spec decision 4), and a household genuinely can reach a past year — the modal's own year select (`vision-modal-year`) is the only affordance that changes which year this page renders, and it writes back to `VisionPage`'s own `year` state, so the same mounted `useVision(year)` call reloads on the SAME page rather than the modal alone. The select offers only the previous, current and next calendar year, anchored on today, so 2025 or 2027 is reachable through the UI today but 2019 is not — the server accepts any year in `MinVisionYear`–`MaxVisionYear`, so that narrowing is a UI choice, not an API limit, and a page-level year picker of its own would be a small, real addition rather than a gap in what already exists)* |
 | Vision — marriage duration beside the theme ("Married · 14 years · Feb 14, 2012") | ⬜ *(drawn, deliberately not built — Vision spec decision 2. Nothing in this product stores a wedding date, no feature would read one, and the only derived figure is today minus the date; building it costs a column, a modal field the design itself never draws, a null state, a visibility decision and a leap-day edge, for no behaviour. The theme hero renders full width instead. Same treatment as the design's drawn-but-unbuilt "45 min" retro duration, Retros decision 8)* |
 | Vision — pillars with measures | ✅ *(`PillarCard.tsx`, Vision spec's task 11 — numbered "Pillar 1", "Pillar 2"…, name, description and every measure. A measure with `hasFigure: false` (a linked goal deleted, a link that failed to resolve, or an unrecognised kind) renders its label and no number at all, never "0 of 0" or "0%" — the same "blank the figure and say why" rule Accounts applies when a primary-currency change leaves net worth uncomputable)* |
 | Vision — longer-horizon milestones | ✅ *(`MilestoneGrid.tsx`, Vision spec's task 11 — one card per milestone, in order, with year, title and note; an empty note renders nothing. The dashed "+ Add milestone" tile opens the Edit-vision modal (Vision spec's task 12), the same as the header's own Edit vision button)* |
-| Edit vision (modal) | ✅ *(`VisionModal.tsx`, Vision spec's task 12 — the whole-document editor: theme, a year select offering only the previous/current/next calendar year, description, every pillar's name, description and measures, and every milestone, saved together in one `PUT`. Adds the two fields the design's own modal never drew at all (spec decision 7) — a pillar's own description and a measure editor per pillar (a label, then either a typed current/target pair or a linked-goal picker, never both; switching modes clears the other's inputs rather than leaving a hidden stale value that would still submit). All three of `onEdit`'s call sites open it — the header's Edit vision button, the "+ Add milestone" tile, and the empty state's own call to action, the one every household with no vision yet sees first. A stale `version` (409) latches a one-way conflict banner decided from the response's own error code (RetroModal.tsx's precedent, for the same staleness reason); its only action reloads the year and discards the local draft outright, rather than trying to resume editing in place)* |
+| Edit vision (modal) | 🟡 *(`VisionModal.tsx`, Vision spec's task 12 — the whole-document editor: theme, a year select offering only the previous/current/next calendar year, description, every pillar's name, description and measures, and every milestone, saved together in one `PUT`. Adds the two fields the design's own modal never drew at all (spec decision 7) — a pillar's own description and a measure editor per pillar (a label, then either a typed current/target pair or a linked-goal picker, never both; switching modes clears the other's inputs rather than leaving a hidden stale value that would still submit). All three of `onEdit`'s call sites open it — the header's Edit vision button, the "+ Add milestone" tile, and the empty state's own call to action, the one every household with no vision yet sees first. A stale `version` (409) latches a one-way conflict banner decided from the response's own error code (RetroModal.tsx's precedent, for the same staleness reason); its only action reloads the year and discards the local draft outright, rather than trying to resume editing in place. **Gap found 2026-09-06, same sweep as Retros above**: `useVision.ts`'s `saveMutation` reads `query.data.version` live at send time (lines 101-113) exactly like `useRetro.ts` does; this modal has no in-modal secondary write of its own to force the refetch the way Retros' `addAction` does, so the trigger is unconfirmed live, but the live-read shape is identical and equally unguarded by the 409 latch, which only ever covers a save that already failed once. Not fixed here, same reasoning as Retros. `docs/LEARNING.md` pattern 18 and pattern 1's newest bullet)* |
 | Agreements by section | ✅ *(`AgreementSectionCard.tsx` renders each section's name, live count and the `01..N` numbering that runs continuously across sections; an empty section is invisible in the document (decision 8). Every Agreements date label — the proposal card's timestamp, the header's "updated" clause, and Version history's entries — uses `toLocaleDateString`, which renders in the **viewer's** timezone rather than the ISO string's own offset, so a change stamped late at night in Singapore can read as one date to one partner and the next day to another in Indonesia; cosmetic, does not touch signing, recorded rather than fixed — `docs/HANDOVER.md`, "Worth doing when convenient", and demonstrated with real before/after strings in the walk below. **Code-complete and reviewed across Tasks 1–16** (`915edba`); **the feature's own fifteen-criterion browser walk (Task 18) has now run and passed, 15 of 15** (2026-09-06), recorded in `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md` — criterion 7 read this row's own numbering, count and header `v{n}` together in one script and confirmed all three move in step)* |
 | Agreements empty state with starter sets | ✅ *("Use starter set" seeds the four section labels — Money, Conflict, Home & kids, Us — and **no agreements** (spec decision 17). Every agreement without exception arrives through propose → sign, so "everything on this page is here because you both agreed" stays literally true, with no bulk-signed exception to explain. An empty section is invisible in the document (decision 8), so the screen names the four it just created rather than showing four empty headings. Code-complete and reviewed; **the feature's own fifteen-criterion browser walk (Task 18) has now run and passed, 15 of 15** (2026-09-06) — criterion 4 confirmed the screen genuinely changes on click and the propose picker offers all four, in `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md`)* |
 | Propose a change — add, edit, remove (modal) | ✅ *(`ProposeAgreementModal.tsx`, three shapes behind one submit — add needs a section, edit and remove need a target and its current wording, pre-filled. A target that has moved since the modal opened answers `409 AGREEMENT_CHANGED` without losing what was typed, and the send control stays disabled after the refetch rather than inviting a second identical failure. Code-complete and reviewed; **the feature's own fifteen-criterion browser walk (Task 18) has now run and passed, 15 of 15** (2026-09-06) — criterion 10 walked the conflict two ways, an interpreted propose-time race and a literal sign-time one, both against a real second signed-in owner. **One defect surfaced in the same walk, off the criteria's own literal path**: `previousBody` was read live off the `sections` prop at send time rather than snapshotted when the target was chosen, so the first background refetch reaching an open modal after ANY edit landed on its target (an edit or a remove always retires the row's id, decision 9) made that read resolve to `""` — a shape the domain's own CHECK refuses, surfacing as a dead-end generic error instead of the conflict banner this exact situation should show. Fixed: `previousBody` is now its own snapshot, never re-read from the prop; a mutation-checked regression test covers it. Full account and the sibling sweep in `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md` and `docs/LEARNING.md` pattern 18)* |
@@ -1584,8 +1608,8 @@ both of their halves, where the design has more than one to name. **The
 feature's own fifteen-criterion browser walk has now run and passed, 15 of
 15** (2026-09-06), the same bar every other feature in this file is held to
 before its rows read ✅ rather than 🟡 — this file's legend makes ✅ mean
-built **and** verified, not built alone, and every row above now reads ✅
-because both halves are now true. `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md`
+built **and** verified, not built alone, and all eight Agreements rows now
+read ✅ on that basis. `docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md`
 has the full record, including two criteria (2 and 3) walked out of their
 brief's own numeric order for a dependency reason named there, and criterion
 10 walked by two separate paths since the code's own conflict check could
@@ -1597,6 +1621,21 @@ a mutation-checked regression test; the Propose row above names it. A
 second finding, Chromium's own native `<dialog>` focus-cycling behaviour,
 is not application code and stays unfixed, named in that file's own
 "Findings, not defects."
+
+**A second-order review of that same walk found the sibling sweep for the
+`previousBody` defect had searched the wrong layer, and moved two rows
+back out of Marriage's own ✅ set.** The sweep grepped for a syntactic
+shape (`.find(...)` inside a submit handler, scoped to `*Modal*.tsx`
+files); the bug is a semantic shape one layer down — a concurrency token
+read live from a data hook at send time under a draft snapshotted earlier
+— and that shape is live in `useRetro.ts` and `useVision.ts`, reachable in
+`RetroModal.tsx` through the in-modal `addAction` composer with no conflict
+ever needing to fire first. **`Start retro (modal)` and `Edit vision
+(modal)` move back to 🟡**, each naming the gap; neither is fixed here, as
+both are pre-existing code in already-shipped features and the fix needs
+its own product decision. Full account in `docs/LEARNING.md` pattern 18's
+correction and pattern 1's newest bullet; the recount is in the summary
+table's own amendment above.
 
 ## 7 · Family
 
