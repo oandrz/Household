@@ -1,7 +1,8 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { AgreementsPage } from "./AgreementsPage";
+import type { AgreementSection } from "./agreementSchemas";
 import {
   DOC_URL,
   ONE_OWNER,
@@ -16,6 +17,20 @@ import {
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+
+function sectionFixture(name: string, first: number, bodies: string[]): AgreementSection {
+  return {
+    id: `sec-${name}`,
+    name,
+    count: bodies.length,
+    visible: bodies.length > 0,
+    agreements: bodies.map((body, i) => ({ id: `${name}-${i}`, number: first + i, body })),
+  };
+}
+const headingsIn = (testId: string) =>
+  within(screen.getByTestId(testId))
+    .getAllByRole("heading", { level: 3 })
+    .map((heading) => heading.textContent);
 
 describe("AgreementsPage", () => {
   it("a limited member is told this is owner-only, not that something broke", async () => {
@@ -161,5 +176,62 @@ describe("AgreementsPage", () => {
       "Money, Conflict, Home & kids and Us are ready.",
     );
     expect(screen.queryByRole("button", { name: "Use starter set" })).not.toBeInTheDocument();
+  });
+
+  // Column-MAJOR: the design's 01-12 runs continuously down one column and on
+  // into the next, so Money 01-02 and Conflict 03-05 are the left column. The
+  // row-major fill a grid-cols-2 produces would put Conflict beside Money and
+  // zig-zag the numbering down the page. `visible` is the server's own flag
+  // (decision 8), never a rule re-derived here.
+  it("renders the visible sections in two column-major columns, skipping the ones the server hid", async () => {
+    renderPage({
+      [`GET ${DOC_URL}`]: {
+        status: 200,
+        body: {
+          agreements: documentFixture({
+            sections: [
+              sectionFixture("Money", 1, ["One shared account", "Any purchase over S$500 gets discussed first."]),
+              sectionFixture("Conflict", 3, ["No raised voices", "No silent treatment", "We finish it the same day"]),
+              sectionFixture("Home & kids", 6, ["Bedtime is a two-person job", "Saturday mornings are the kids'"]),
+              sectionFixture("Us", 8, ["One night out a month"]),
+              sectionFixture("Faith & values", 9, []),
+            ],
+          }),
+        },
+      },
+    });
+
+    await screen.findByTestId("agreements-column-0");
+    expect(headingsIn("agreements-column-0")).toEqual(["Money", "Conflict"]);
+    expect(headingsIn("agreements-column-1")).toEqual(["Home & kids", "Us"]);
+    // An empty section stays invisible in the document (decision 8) while the
+    // propose picker still offers it, which Task 13 reads off the same array.
+    expect(screen.queryByText("Faith & values")).not.toBeInTheDocument();
+    expect(screen.getByText("03")).toBeInTheDocument();
+    expect(screen.getByText("3 agreements")).toBeInTheDocument();
+  });
+
+  // Decision 3: two owners can become one, and the promise those two people
+  // made does not stop existing when one of them does. The document renders;
+  // the banner explains; nothing here is a write.
+  it("a locked household still sees its whole document under the frozen banner", async () => {
+    renderPage({
+      [`GET ${DOC_URL}`]: {
+        status: 200,
+        body: {
+          agreements: documentFixture({
+            locked: true,
+            owners: ONE_OWNER,
+            version: 2,
+            updatedAt: "2026-06-28T21:18:52+08:00",
+            sections: [sectionFixture("Money", 1, ["One shared account", "Any purchase over S$500 gets discussed first."])],
+          }),
+        },
+      },
+    });
+
+    expect(await screen.findByTestId("agreements-frozen")).toBeInTheDocument();
+    expect(headingsIn("agreements-column-0")).toEqual(["Money"]);
+    expect(screen.getByTestId("agreement-row-Money-0")).toHaveTextContent("One shared account");
   });
 });

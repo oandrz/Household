@@ -126,4 +126,10 @@ export const AGREEMENT_COPY = {
   writeErrorLocked: "This household is down to one owner, so nothing here can change.",
   writeErrorResolved: "That was already settled — this page has just refreshed.",
   sectionNameTaken: "You already have a section called that.",
+
+  // "3 agreements" under the section name. The count is the service's own
+  // (agreementSectionDTO.Count), never section.agreements.length: a total and
+  // its breakdown that apply different filters quietly stop reconciling, which
+  // browser criterion 7 exists to catch.
+  sectionCount: (n: number) => (n === 1 ? "1 agreement" : `${n} agreements`),
 } as const;

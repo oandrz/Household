@@ -14,6 +14,7 @@ import { Link } from "@tanstack/react-router";
 import { ApiError } from "../../api/client";
 import { PageContainer } from "../../components/PageContainer";
 import { useMe } from "../auth/useAuth";
+import { AgreementSectionCard } from "./AgreementSectionCard";
 import { AGREEMENT_COPY, agreementDateLabel } from "./agreementCopy";
 import type { AgreementKind } from "./agreementSchemas";
 import { handleWriteError, useAgreements } from "./useAgreements";
@@ -145,6 +146,17 @@ export function AgreementsPage() {
   // there is something to read. A household that never had two owners has an
   // empty history and no rows behind the button.
   const showHistory = !doc.locked || hasContent;
+
+  // `visible` is the server's own flag (decision 8), never a rule re-derived
+  // here; the propose picker (Task 13) is handed doc.sections whole, empty
+  // sections included, off this same array.
+  const visible = doc.sections.filter((section) => section.visible);
+  // Column-MAJOR, and deliberately not `grid-cols-2`: a row-major fill would
+  // put Conflict's 03-05 beside Money's 01-02 and zig-zag the design's
+  // continuous numbering down the page. Below `lg` the two wrappers stack, so
+  // server order (created_at, id -- decision 11) holds at every width.
+  const half = Math.ceil(visible.length / 2);
+  const columns = [visible.slice(0, half), visible.slice(half)];
 
   return (
     <PageContainer data-testid="agreements-page">
@@ -283,12 +295,22 @@ export function AgreementsPage() {
       )}
 
       {/* Mount point. Task 12 renders doc.proposals as one block HERE, above
-          the grid, for every state except the locked-invite one. Task 11 then
-          renders the two-column sections grid below it, on the same condition
-          -- a locked household with content still sees its document (decision
-          3). Tasks 13, 14 and 15 mount their modals at the very end, each
-          binding the state slot reserved for it at the top of this file. All
-          four states above stay exactly as they are. */}
+          the grid, for every state except the locked-invite one. Tasks 13, 14
+          and 15 mount their modals at the very end, each binding the state
+          slot reserved for it at the top of this file. All four states above
+          stay exactly as they are. */}
+
+      {visible.length > 0 && (
+        <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
+          {columns.map((column, i) => (
+            <div key={i} data-testid={`agreements-column-${i}`} className="flex flex-col gap-4">
+              {column.map((section) => (
+                <AgreementSectionCard key={section.id} section={section} />
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
     </PageContainer>
   );
 }
