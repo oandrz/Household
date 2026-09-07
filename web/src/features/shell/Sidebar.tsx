@@ -46,11 +46,12 @@ const SPACE_PAGES: Record<string, { label: string; to: string }[]> = {
   // (docs/FEATURE_TRACKER.md section 6). This is the entry `110ab0a` deleted
   // alongside `/marriage`'s own route and guard; all three came back
   // together (see router.tsx's own header comment on why splitting them
-  // across tasks isn't safe). Task 11 added Vision & goals as the second --
-  // Agreements is still ⬜.
+  // across tasks isn't safe). Task 11 added Vision & goals as the second,
+  // and the Agreements round added Agreements as the third and last.
   marriage: [
     { label: "Retros", to: "/marriage/retros" },
     { label: "Vision & goals", to: "/marriage/vision" },
+    { label: "Agreements", to: "/marriage/agreements" },
   ],
 };
 

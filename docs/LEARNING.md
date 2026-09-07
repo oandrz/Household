@@ -23,7 +23,7 @@ gets rebuilt.
 
 ### 1. Fixing an instance rarely fixes the class
 
-This happened **nineteen times** — one bullet each below, and the count is the
+This happened **twenty times** — one bullet each below, and the count is the
 number of bullets, so recount it when you add one (it had already drifted by
 one before the UX-repair round noticed). Almost every time, the fix was
 correct and the sibling kept the bug; two of them are the variant where
@@ -409,6 +409,40 @@ the usual way, the fix would have closed one disagreement and left an
 identical one a page over, for the next browser walk to file as a fresh
 defect. (No bullet added above: this one was caught before it shipped, and the
 count stays the number of bullets.)
+
+- **Retros, Task 13's own fix closed the route it was shown, not the class
+  it belonged to — and the second route sat in a shipped sibling feature
+  the whole time.** Task 13 fixed a UI-layer last-write-wins: the conflict
+  banner's Reload button cleared `useRetro`'s `conflict` flag without
+  re-seeding the modal's local draft, so a Save right after Reload sent
+  stale text with a fresh version attached, defeating the database's own
+  version guard. The fix removed Reload's ability to re-enable editing at
+  all. That closes the *post-conflict* route. It does nothing about a
+  version bump that arrives *before* any conflict exists to latch onto —
+  and `RetroModal.tsx` has exactly that path built in: `addAction`, called
+  from inside the still-open modal, succeeds and invalidates the retro
+  query, forcing a refetch that pulls whatever `version` a partner's own
+  concurrent `PATCH` has already committed into `query.data`, underneath the
+  mood/wentWell/wasHard/notes draft that stays exactly as typed before the
+  action was added (`addAction` itself never touches `version` — pattern 18
+  has the corrected mechanism and the SQL citation). The next
+  Save reads the *new* version live off `query.data` (`useRetro.ts`'s
+  `saveMutation.mutationFn`) and attaches it to the *old* draft — an
+  accepted `200 OK` that silently overwrites a partner's concurrent write,
+  the identical loss Task 13 fixed, through a door Task 13 never looked at.
+  `useVision.ts`'s `saveMutation` does the same live read for the same
+  reason and has no addAction-shaped trigger of its own only because
+  `VisionModal` has no secondary in-modal write to cause one — the
+  live-read shape is present regardless, and the wider `staleTime`/
+  window-focus trigger pattern 18 names reaches both anyway. Found reading
+  the hooks during Agreements' Task 18 walk (see pattern 18), while sweeping
+  for a sibling of a live-read defect that walk had just found and fixed in
+  `ProposeAgreementModal.tsx`; not fixed here, because it is pre-existing
+  code in two already-shipped features and needs its own product decision,
+  not a follow-on to an unrelated branch. **A fix framed around the control
+  that exposed the bug (a button) protects that control, not the state
+  transition underneath it (a version moving); the same transition reached
+  through any other door is exactly as unguarded as it always was.**
 
 ### 2. A test that cannot fail protects nothing
 
@@ -1359,6 +1393,71 @@ person to ask whether the test could ever have gone red in the first place.
   file, "reads the raw error, never the filtered one" describes the
   program, and only the second one can be broken on purpose.
 
+- **Agreements produced six more instances of this pattern on one branch —
+  second only to Transactions' own nine, the entry above dated Tasks 5
+  through 17 — and every one was caught before merge, three by review
+  reading rather than by a test going red.** A repository test built a
+  fixture in one household and never proved a second household's row was
+  unreachable, the gap ten sibling
+  repositories in this same package already close the same way
+  (`bill_repo_test.go:599`); the brief omitted it and the gap entered the
+  fix loop as a spec requirement, not a nice-to-have. A starvation test
+  written to prove the lock decision 12 exists used only an `add` proposal,
+  so it never reached `LockAgreementTarget` at all — the whole property the
+  task existed to pin stayed unobserved while the suite stayed green,
+  discovered by asking what row the test's own fixture actually touched,
+  not by a mutation going the wrong way. The same task's suite stayed green
+  with `remove()` deleted from the `ProposalRemove` branch — nothing had
+  ever driven an edit or a remove through to completion — which is the
+  exact half of decision 9 ("a household that agreed to one edit ends up
+  with two live agreements") a defect there would produce. A route-guard
+  walk (`TestOwnerOnlyRoutesRejectALimitedMember`) proved *a* guard refused
+  a limited member on every marriage-group route, never that `requireOwner`
+  specifically did, because no fixture can hold `CapMarriage` as a limited
+  member without also refusing at `requireCapability` first — the identical
+  shape this pattern's own accounts-spec entry above names for a different
+  route group, recurring here because the fixture that would isolate the
+  second guard already existed for the GET and nobody had pointed it at a
+  write. Dropping `canAgree` from `everyoneAgreed`'s conjunction left all
+  twenty-six existing tests green, because every one of them constructed a
+  proposal where the awaiting list was already non-empty; the one case a
+  locked household's awaiting list has already emptied — where the
+  sentence must read "Agree once more" with no button under it — had never
+  been built. And a chip that fills the new-section field rather than
+  submitting it had its own first mutation come back **green**: the stale
+  closure the mutation exposed fires the write with `name=""`, which
+  synchronously disables Create before the test's second click, so exactly
+  one `POST` lands whether the code is correct or broken, and a test that
+  only counts requests cannot tell those two worlds apart. **None of these
+  six needed a new kind of check, only the same one aimed at what the code
+  actually does under the condition the test claims to cover** — a fixture
+  that reaches the lock the test is about, a write that runs to completion
+  rather than stopping at its first statement, a caller that holds the
+  narrower guard without the broader one already refusing it, a starting
+  state where the property being tested has already become true, and an
+  assertion on the value that changed rather than on how many times
+  something happened.
+- **Count-based assertions cannot distinguish identity, which is the
+  sharper lesson inside the chip instance above.** Asserting *how many*
+  `POST`s a chip click produced passed on both the correct code and the
+  code that silently posted an empty name — the mutated path still fired
+  exactly once. Asserting the *posted names* (`expected [''] to deeply
+  equal ['Faith & values']`) caught it, and that was the fix taken. Review
+  went one step further and found even that assertion catches this
+  mutation through a side effect of its particular shape rather than
+  through the property it claims to guard: the stale closure happens to
+  post an empty string, which is what the names assertion sees, but a chip
+  that posted the *correct* name via some other broken path would still
+  pass both the count and the names check. What would actually discriminate
+  any "chip submits" defect is asserting the Create button stays
+  **enabled** immediately after a chip click — shipped code leaves it
+  enabled, the mutation disables it synchronously, and that is the one
+  observable the bug and only the bug produces. **When a count goes green
+  under a mutation, the next fix is not "assert a bigger count," it is
+  "assert the identity of what happened" — and even then, ask whether the
+  assertion proves the property or merely happens to catch this one
+  mutation's particular shape.**
+
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
 a different reason than the one you meant to prove, that is not yet proof
@@ -1384,6 +1483,26 @@ never mounted, and a reordering of two statements that do not interact.
   the fallback path ever ran.
 - Fixing that exposed a second bug that had been unreachable: the dialog never
   stretched to the viewport, so there was **no backdrop area to click**.
+- **A close-one-open-another dialog handoff is unexercised in either
+  direction under jsdom, and this project has already shipped a modal that
+  threw on every single open in production while all five of its tests
+  passed — the entry directly above.** jsdom's `HTMLDialogElement` has
+  neither `showModal()` nor `close()`, so a test that swaps
+  `NewSectionModal` for `ProposeAgreementModal` (Agreements, "Create & add
+  first agreement") or `VersionHistoryModal` for `ProposeAgreementModal`
+  (Restore) can assert the state transition — one modal's open flag flips
+  to `false`, the other's to `true` — without ever exercising a real
+  `close()` call, the focus it is supposed to restore to the trigger that
+  opened the first dialog, or the focus-trap entry the second dialog's own
+  `showModal()` is supposed to perform. Both handoffs exist in Agreements,
+  and both were closed by clicking through them in a real browser rather
+  than trusted to the suite: Restore's own task drove it in two independent
+  browser tools after creating a genuine `remove` entry through propose and
+  agree, confirming Version History closed instantly and Propose opened
+  seeded per decision 18. **When a component swaps one `<dialog>` for
+  another on the same trigger, the suite proves the state change and a real
+  browser has to prove the handoff** — jsdom cannot fail this test in
+  either direction, which means it cannot pass it either.
 - The 401 redirect handler bounced every invitee off the invite screen. Green
   suite — because the handler defaults to null and every test installed a stub
   instead of the real wiring.
@@ -1851,6 +1970,24 @@ time a reviewer found it by building a probe rather than reading the diff.
   through both sides of the same field, not by a failing test; fixed with a
   `null -> ""` translation on the update path only, and a dedicated test now
   asserts the PATCH body itself carries `""`.
+
+- **A proposal without its own proposer's signature is one nobody has agreed
+  to, including its author — Agreements, decision 5.** The design's pending
+  card reads "needs Christine," never "needs both," so proposing has to *be*
+  agreeing: `CreateProposal` writes `agreement_proposals` **and**
+  `agreement_signatures` for the proposer in one transaction, not a service
+  calling the repository twice. Splitting it into two calls would put a
+  window between them where a proposal exists that nothing has signed, and
+  the card would render it exactly the same as one that had — the awaiting
+  list is computed off the owners who have *not* signed, so a proposal with
+  zero signatures reads no differently from one with one. Nothing exercises
+  this by going red on a torn write, the same gap the repository test
+  catalogue below names for `CreateSection`/`CreateSections`: no test in this
+  codebase kills a connection mid-transaction, so the property rests on
+  `pgx.BeginFunc`'s own commit-or-rollback guarantee being trusted rather
+  than proven per feature. Another instance for this pattern's own list, and
+  the reason the write is one repository method running one transaction
+  rather than a service orchestrating two.
 
 - **A backup that restores every table and none of the roles — database
   browse, 2026-09-04.** Written before anyone has tripped it, because the day
@@ -2937,6 +3074,33 @@ case and no coordinate system to assert legibility in for the second.
   fix is exactly the shape that leaves it behind. See also pattern 1: this
   is a class fix that seeded the next instance of its own class.
 
+- **A twelfth instance, Agreements, and the ninth instance's own lesson
+  proving itself needed again across two consecutive tasks on the same
+  feature.** Task 7's guard-walk
+  floor for the unauthenticated-route matrix was believed to read 63; the
+  implementer re-measured from the walk's own `t.Logf` rather than doing
+  arithmetic on the number in the test file and got 69 — three protected
+  surfaces (admin households and metrics, the outbound message inspector, the
+  read-only database browse) had landed on this branch's ancestry since the
+  floor was last set, and nobody had gone back to raise it. Task 8 repeated
+  the shape three floors in the same task: unauthenticated 69→75, CSRF
+  44→50, and `TestOwnerOnlyRoutesRejectALimitedMember` 10→45 — the last one
+  sharper than the other two, because 10 was never a real count to begin
+  with. It counts every mutating non-admin, non-allowlisted route in the
+  whole router, not just this feature's six, so the jump decomposes as 6
+  points this task's own routes added and **29 points of drift that had
+  already happened before this task started**, sitting behind a floor
+  comment that read as though the whole 35-point rise were new. Review
+  reconciled all three independently against `router.go` itself rather than
+  accepting the re-measurement, and the number both sides landed on matched
+  exactly — the floor is not evidence until someone counts the routes it
+  claims to bound, whichever side is doing the counting. **The floor is the
+  walk's own re-measured output, never a number to nudge forward by however
+  much the latest task seems to have added** — the ninth instance's own
+  closing sentence, needed again on four separate floors across these two
+  tasks because a route landing on a branch between one measurement and the
+  next is invisible to arithmetic and visible only to a re-run.
+
 **Treat a citation the way you'd treat a test assertion: something the next
 reader can verify against the thing it names, not something to trust because
 it reads confidently.** Nearly every instance above cost nothing to
@@ -3057,6 +3221,177 @@ faithfully executed a spec that was itself wrong. Here the spec was right and
 the derivation dropped it. Both say the same thing about derived artifacts —
 **check the derivation against its source, not only the work against the
 derivation.**
+
+---
+
+### 18. A value a form must "remember what it saw" has to be a snapshot, not a live re-read of the same prop the form still renders from
+
+`ProposeAgreementModal.tsx`'s own header comment states the rule plainly:
+"wording the proposer never saw must never be what gets compared." The field
+that carries that promise, `previousBody`, was nonetheless computed by
+calling `bodyOf(targetId)` — a lookup against `targets`, itself derived from
+the `sections` **prop** — fresh, at the moment `handleSend` ran, rather than
+once, when the target was chosen. A prop is exactly the value that changes
+out from under an open form: `sections` updates on every refetch the shared
+`useAgreements()` query receives, and this modal stays open on purpose after
+a conflict (`hadConflict`'s own comment: "nothing typed is lost"), so a
+refetch reaching it while it waits is not a hypothetical, it is the state
+the modal is designed to survive.
+
+**The walk that found this (Task 18, Agreements) initially concluded the
+opposite of what was actually true, on a first, code-only reading.** The
+worry going in was that a live re-read would silently return the *new*
+wording, making a stale edit succeed unnoticed. Live reproduction attempts
+using window-focus events, `document.hasFocus()`, and `visibilitychange`
+all failed to trigger a background refetch inside Playwright's automation
+harness (see the walk's own record), and the finding was provisionally
+written up as "investigated, not reproduced." **A stronger reviewer's
+suggestion to trigger the SAME queryClient's own invalidation from inside
+the open tab — an unrelated pending card's Agree button, clicked behind the
+modal's own backdrop via a script, the same invalidation path a real
+window-focus refetch would also take — reproduced it in one call.** The
+actual failure mode was worse than the one hypothesised, not milder: an
+`edit` or a `remove` doesn't just change an agreement's *body*, it retires
+the row's id outright and inserts a new one (decision 9's append-only
+design, `applyAgreementChange`'s own `remove()` then `add()`), so the very
+first background refetch after ANY edit landed made `bodyOf(targetId)`
+return `""` for a `targetId` that no longer resolved to anything — and an
+empty `previous_body` on an edit or a remove is a shape the database's own
+`agreement_proposals_shape` CHECK refuses outright. The household saw
+"Could not send that for agreement. Try again." — a dead end with no hint
+that the target had moved, not a silently wrong write, but a defect either
+way: the one screen built specifically to explain this exact situation
+never got the chance to.
+
+**A confirmed-clean code reading is not confirmation the runtime is clean,
+and a failed reproduction attempt is not confirmation there is nothing to
+find** — it can mean the reproduction path was wrong, not that the concern
+was. Two things narrowed the gap between them, in order: reasoning about
+what the code's OWN comment promised versus what it actually did (a live
+prop read cannot keep a "what you saw" promise, on its face), and then a
+second, cheaper trigger for the same underlying mechanism once the first
+one didn't fire. **The fix is the general one, not specific to this field**:
+anything a form's own contract says must "stay as you first saw it" needs
+its own `useState`, set once at the moment of selection and never
+recomputed from a prop afterward.
+
+**Correction: the sibling sweep searched the wrong layer, and the class is
+live, unfixed, in two shipped features.** This entry originally cited
+`VisionModal.tsx`'s closing-the-modal-outright strategy on conflict as "the
+sibling precedent for the same underlying worry, solved by a different,
+equally valid route." That claim was false, and a review of this walk
+caught it: closing the modal on conflict guards only the *post-409* path
+(a save that already failed once). It says nothing about a save that has
+not failed yet, which is where the actual class lives. The sweep that
+produced the false-safe claim also grepped the wrong shape — a *syntactic*
+one (`.find((x) => x.id === …)` called inside a submit handler, in files
+named `*Modal*.tsx`) rather than the *semantic* one this bug actually is:
+an optimistic-concurrency token (a `previousBody`, a `version`) read live
+at send time from a store that can move, while the draft it describes was
+snapshotted earlier. In this codebase that token is read inside the data
+hooks, not the modals, so a grep scoped to modal files could never have
+found it.
+
+`useRetro.ts`'s `saveMutation.mutationFn` (lines 144-161) reads
+`const current = query.data` fresh at send time and attaches
+`current.retro.version` to the PATCH; `RetroModal.tsx` seeds its own local
+`mood`/`wentWell`/`wasHard`/`notes` draft once, on first load
+(`!initialized`, lines 140-148), and never re-seeds it from a later
+`query.data`. `useVision.ts`'s `saveMutation.mutationFn` (lines 101-113)
+does the identical thing with `current.version`. Both hooks' own
+`hadConflict`/`conflict` latch (`useRetro.ts`'s own comment: "NOTHING IN
+THE APP READS `conflict` OR CALLS `reload()`" outside the modal's one-way
+latch) guards only a save that has already come back `*_CHANGED` once —
+it does nothing for the first save after a refetch that landed silently.
+And a refetch reaching the open modal is not a hypothetical needing a real
+window-focus event to demonstrate — `RetroModal.tsx` calls
+`retro.addAction(...)` from inside the still-open modal (lines 242 and 281),
+and `addAction`'s own `onSuccess` invalidates both the retro and the
+retro-list queries (`useRetro.ts`'s `invalidateAfterRetroWrite`), a product
+path reachable with the modal open the entire time.
+
+**Correction: `addAction` does not itself move `version` — this entry
+originally said it "bumps `query.data.retro.version`", which is not what the
+SQL does.** `AddRetroAction`
+(`api/internal/adapter/postgres/queries/retro.sql:95-104`) inserts one row
+into `retro_actions` and touches nothing else; the only `version = version +
+1` anywhere in that file belongs to `UpdateRetro` (`:49`). What `addAction`
+supplies is a **refetch**, not a version bump: its invalidation makes
+`useRetro`'s query re-run, and if a partner's own `PATCH` (`UpdateRetro`) has
+already landed in between — committing a version increase the open tab has
+not seen yet — that refetch is what pulls the new `version` into
+`query.data` underneath a draft `RetroModal.tsx` seeded once and never
+re-seeds. The next Save then reads that new version live off `query.data`
+and attaches it to the old draft; the server sees a current version and
+accepts it as `200 OK`, overwriting whatever the partner wrote with no trace
+and no error either side can see. `addAction` is the trigger for the
+refetch, never the cause of the overwrite — the overwrite needs a partner's
+concurrent write too.
+
+**And the class is wider than `addAction`, which is why "wrong mechanism,
+wider reach" is the correction, not "overstated."** Nothing about this
+requires a second write inside the same modal at all: `web/src/main.tsx:11`
+sets `staleTime: 30_000`, and TanStack Query v5 defaults
+`refetchOnWindowFocus` to `true` (nothing in this codebase turns it off), so
+leaving the modal open past thirty seconds and returning to the browser tab —
+an ordinary alt-tab, no action added, nobody clicking anything in this
+household's own session — refetches the identical query the identical way.
+Neither trigger was reproduced live in this walk — see the methodology
+paragraph below — but `addAction` is a confirmed-reachable in-modal path in
+Retros specifically (`RetroModal.tsx:242, 281`), while plain window focus is
+the wider trigger that reaches Retros, Vision, and any future screen built
+on the same `useState`-draft-plus-live-version shape, read off the query
+defaults rather than watched firing.
+
+**`docs/LEARNING.md`'s own Frontend catalogue (the "Retros, Task 13" entry)
+already recorded a loss from this exact family, and its fix closed one
+route and not this one** — see pattern 1's new bullet below, "fixing an
+instance rarely fixes the class," which is exactly what happened here:
+Task 13 removed the Reload button's ability to re-enable editing after a
+*conflict* had already fired, which was the right fix for the bug that was
+found (a stale draft resubmitted after a hand-triggered Reload). It left
+untouched the case this entry describes, where the version moves *before*
+any conflict exists to trigger the latch at all. Not fixed on this branch
+— it is pre-existing code in two already-shipped features, and a correct
+fix needs its own decision about what two partners editing one document
+should do when a third write lands mid-edit, which is product thinking,
+not a follow-on to an Agreements task. `Start retro (modal)` and
+`Edit vision (modal)` are marked 🟡 in `docs/FEATURE_TRACKER.md` for this
+reason.
+
+**Methodology, stated here rather than left only in pattern 1's bullet and
+the Vision tracker row: everything above this line about `useRetro.ts`,
+`useVision.ts` and the `staleTime`/`refetchOnWindowFocus` trigger was
+confirmed by reading `useRetro.ts:144-161`, `RetroModal.tsx:140-148` (and its
+two `addAction` call sites at 242 and 281), `useVision.ts:101-113`,
+`retro.sql`'s own queries, and `main.tsx:11` — not by reproducing a silent
+overwrite end to end the way this pattern's OWN opening defect was
+eventually reproduced.** Neither Retros' nor Vision's route was watched
+actually overwriting a partner's write in a browser; both are read, not
+reproduced. What differs between them is only how many further conditions
+each reading needs: Retros' `addAction` route is a real, already-shipped,
+in-modal code path that needs nothing further beyond a partner's own
+concurrent `PATCH` to be reachable — confirmed by reading `RetroModal.tsx`'s
+two call sites, not by triggering one and watching the version move. The
+window-focus route is read off TanStack's documented v5 default and this
+codebase's own `staleTime`, also not watched happening in a browser, and it
+is the *only* route into Vision: `VisionModal` has no in-modal secondary
+write of its own to force a refetch the way Retros' `addAction` does, so
+Vision has a reachable trigger only if the window-focus reading is right,
+while Retros has one either way. **This entry was confidently wrong once
+already** (the `addAction`-bumps-`version` claim above) **on a reading of
+the same files this correction cites** — which is the reason to say plainly
+what was read versus what was watched, rather than stating either as flat
+fact.
+
+A grep across every modal in this codebase for a `.find(...)` lookup
+called directly inside its own submit handler, rather than only inside a
+state setter, found no second instance of *that* shape — the other
+candidates (`BillModal`, `BudgetModal`, `TransactionModal`) all look up a
+value to *display*, never one a server compares for staleness. That sweep
+was real and its own negative result stands; it simply answered a
+narrower question than "does this class exist elsewhere," and the class
+turned out to live one layer down from where the grep was aimed.
 
 ---
 
@@ -3478,6 +3813,27 @@ derivation.**
   `ctid` for a table that has none — arbitrary but stable within one read,
   and honest about being arbitrary. Pattern 2 carries the mutation-check
   story; this is the mechanism.
+- **A row lock only serialises the row it takes — Agreements, decision 12,
+  found in design review, not by a test.** `Sign`'s first sketch locked the
+  `agreement_proposals` row `FOR UPDATE`, which orders two signatures on
+  *that proposal* and nothing else. Two different proposals against the
+  *same* agreement — one editing it, one removing it — each pass their own
+  `previous_body` check independently and each apply: a household that
+  agreed to one edit ends up with two live agreements, or a removal recorded
+  against wording nobody actually agreed to remove. The lock has to be on
+  the target `agreements` row instead, so a second proposal against the same
+  agreement blocks behind the first and re-reads `previous_body` after it
+  wakes, inside the same transaction that re-counts current owners — and
+  the fix is a doc comment on `ports.go` naming the earlier, wrong sketch
+  explicitly, since the mistake is exactly the shape a future editor would
+  reach for by habit ("lock the row you're about to update," which is the
+  proposal, not the agreement it points at). No test in this codebase drives
+  real concurrent database load, which is the same reason the pool-starvation
+  entry above it (`VisionRepo.Save`) was found by reading rather than by
+  going red: **when a lock's job is to order two writers against each
+  other, ask which row the second writer actually reads before deciding
+  which one to lock** — the row being written and the row that would prove
+  the collision are not always the same row.
 
 ### HTTP layer
 
@@ -4356,6 +4712,28 @@ route with a missing guard has no second line of defence.
   was reworded in the same change that added the third screen, which is the
   only one of the three whose comment stated the value rule from the start.
 
+- **A controlled `<select>` can drift from the state it is supposedly
+  bound to, and confirmed-safe is not the same as invisible.** Task 18's
+  Agreements walk found that once a background refetch lands inside an
+  open `ProposeAgreementModal.tsx` (edit or remove mode), the target
+  `<select>` visually falls back to displaying option 0 — the section's
+  now-first agreement, post-refetch — while the component's own `targetId`
+  state still holds the id it was opened with. What the household sees and
+  what the form would submit disagree from that moment on. This does **not**
+  reach a wrong write: `targetId` is what actually gets sent, and the
+  server's own `LockAgreementTarget` query (`WHERE ... removed_at IS NULL`)
+  answers `409 AGREEMENT_CHANGED` the instant that id is no longer live,
+  which is exactly the case here (an edit or remove always retires the old
+  id — decision 9). So the send fails safely into the conflict banner
+  rather than silently landing against the wrong row. The gap is real
+  regardless: the display and the state it is meant to reflect are two
+  different things for as long as the modal stays open after that refetch,
+  which is a defect in what the screen tells the household even though it
+  never becomes a defect in what gets written. Left unfixed on this branch
+  (pattern 18 above traces the same refetch-into-an-open-modal path and is
+  where the actual write-safety analysis lives) — recorded here so the
+  select's own visual drift does not get rediscovered as if it were new.
+
 ### Tooling and infrastructure
 
 - The architecture lint **never enforced the rule it existed for**. Both branches
@@ -4522,6 +4900,24 @@ route with a missing guard has no second line of defence.
   the size of the fix, and does not change the check**: `curl` the module
   Vite is actually serving before concluding a freshly-built screen is
   broken, however much of it looks wrong.
+  **A fifth instance, Agreements task 15, is not a new shape of the trap —
+  it is the same trap costing most of a task despite this section already
+  documenting it almost word for word.** The implementer met the identical
+  symptom (a change that reads exactly like it did not compile) and
+  diagnosed it correctly — comparing `curl` against the running dev server
+  with `docker exec … cat` against the file on disk — but arrived there the
+  slow way, treating it as a fresh discovery rather than opening this
+  document first. `CLAUDE.md` says to consult the docs when something
+  breaks oddly, and this trap is exactly the kind of oddness the four
+  instances above exist to name. **Task 16, one task later on the same
+  branch, hit the identical trap and spent none of that time**: it applied
+  `docker restart hearth-web-1` immediately, because it had read what task
+  15 (and this section) already knew, rather than re-diagnosing correct
+  code as broken. Four instances of the mechanism were already on record
+  before task 15 started; what task 15 and task 16 add is the contrast
+  itself — the fix for a documented trap is not writing it down a sixth
+  time, it is reading it before the first `docker exec` of the next task
+  that meets it.
 
 - **A secret leaked through an error nobody constructed: `http.NewRequestWithContext`
   returns a `*url.Error` that embeds the whole request URL, and Telegram's API
@@ -4595,6 +4991,31 @@ route with a missing guard has no second line of defence.
   written down as a repeat**, especially on an unusual display
   configuration; the deciding evidence here was a second screenshot
   pipeline, not more scrutiny of the first one.
+- **Reach for the product's own flow before writing to its database to get a
+  second session — Agreements tasks 13 and 15, one commit apart, doing the
+  same job two different ways.** Both tasks needed a second real, signed-in
+  owner to drive a two-actor browser check. Task 13 read the second owner's
+  magic link straight out of Mailpit's own HTTP API and signed in through it
+  — the product's real path, no side effect, nothing to clean up afterwards.
+  Task 15, one commit later, needed the identical thing and instead copied
+  the first owner's `password_hash` onto the second owner's seeded account so
+  it could sign in with a password — a write straight to a column this
+  codebase treats as security-sensitive, to a row a later reader would have
+  no reason to suspect had been touched. It said afterwards that it withdrew
+  the test proposal to leave the household clean, but never restored the
+  hash; the two accounts stayed byte-identical until review caught it by
+  reading the row directly, and the fix was to set the column back to `NULL`
+  — the correct state for a magic-link-only member — because the original
+  hash was already gone and could not be recovered. **The zero-side-effect
+  path had already been proven one task earlier, in the same feature, and
+  the report that chose the database write never mentions it or says why it
+  was not used** — the justification given was that `adminctl
+  reset-password` needs a TTY, which is true and beside the point, since the
+  alternative on the table was never that command. Before writing to a row a
+  test does not own to manufacture a state the product can produce on its
+  own, check whether an earlier task in the same run already solved the
+  identical problem through the product's real path — the answer was one
+  commit away.
 
 ### Provisioning the read-only role on the box (2026-09-05)
 
@@ -4827,6 +5248,103 @@ no test suite can hold.
   seeds itself from a state its own submission cannot represent needs to
   say so in the UI, not only in a code comment** — a household editing an
   unrelated field should not be able to fabricate a number by omission.
+
+### Agreements' fifteen-criterion browser walk (2026-09-06)
+
+- **`make down` does not drop the database volume, so "a freshly seeded
+  household" can be a lie the moment a stack is reused across sessions.**
+  Task 18's own brief is explicit that criterion 1's fixture *is* a freshly
+  seeded, one-owner-plus-pending-invite household — but `make down && make
+  up && make seed` on a volume a previous session had already run `make
+  seed` against (and then accepted the invite in) reseeded on top of the
+  OLD data: `adminctl seed` reported "Christine has already accepted her
+  invite," not a pending one, because `docker compose down` (no `-v`) never
+  touches `hearth-pgdata`. The fix was `docker volume rm
+  hearth_hearth-pgdata` between `down` and the next `up`. This is the same
+  shape as the two-Docker-engines and stale-Vite traps this task's own
+  brief already names as costing previous walks real time — add it to
+  `docs/HANDOVER.md` alongside them: whenever a criterion's own fixture
+  depends on the household being *genuinely* new, drop the volume first,
+  don't trust a re-seed to produce it.
+- **A JS closure captured in one `browser_run_code_unsafe` call does not
+  survive into the next one, but the live Playwright objects it created
+  do.** `globalThis.__foo = ...` set in one call read back as `undefined` in
+  the next (confirmed empirically before relying on it either way) — the
+  harness evaluates each call in a fresh scope. `page.context().browser()
+  .contexts()` and any property written directly onto a `BrowserContext` or
+  `Page` object (e.g. `pageB.__owner = "christine1"`), by contrast, persist
+  perfectly, because those are the same underlying objects the browser
+  process is still holding open. For any multi-call walk driving more than
+  one browser context, tag the objects themselves and re-derive them by
+  that tag each call — never rely on a variable surviving between calls.
+- **Chromium's own automation-controlled pages never report
+  `document.hasFocus() === false`,** even across genuinely separate
+  `BrowserContext`s, a same-context decoy tab brought to the front, and a
+  synthetic `visibilitychange`/`focus` dispatch — closing off
+  `refetchOnWindowFocus` specifically as a way to trigger a background
+  refetch inside Playwright. **This is a real limitation of the harness,
+  not evidence the underlying concern was unfounded**: the suspected
+  defect it was chasing (a stale value read live from a prop inside an open
+  `ProposeAgreementModal.tsx`) turned out to be real and was reproduced
+  by a cheaper, different trigger a stronger reviewer suggested — an
+  unrelated pending card's own Agree, clicked from inside the same tab,
+  which reaches the identical `queryClient.invalidateQueries` a real
+  window-focus refetch would also call. Fixed; see pattern 18 above. Worth
+  remembering the distinction the next time a walk reports "investigated,
+  not reproduced" against one specific trigger: that closes off the
+  trigger, not the concern.
+- **A native `<dialog>`'s own Tab-order wraparound is not perfectly
+  seamless in Chromium: the last focusable control inside a modal opened
+  via `showModal()` sends a forward Tab to `document.body` for exactly one
+  keypress before the next Tab correctly lands back on the dialog's first
+  control.** Reproduced in a bare, zero-application-code test page (a
+  `<dialog>` with two `<button>`s and nothing else), so this is the
+  platform's own behaviour, not `Modal.tsx`'s — but it is a real,
+  momentary, visible-focus-ring gap for a keyboard user tabbing forward
+  past the last control in ANY modal in this codebase, since every one of
+  them shares `Modal.tsx`. Outside content stays properly inert throughout
+  (confirmed: a direct `.focus()` call on a real button behind the open
+  dialog was refused), so this is not a trap failure, only a one-frame
+  detour — recorded here as a browser fact worth knowing before assuming a
+  future keyboard-walk finding of "focus briefly left the dialog" is this
+  codebase's own bug rather than Chromium's.
+- **An accepted edit moves its agreement to the END of its section and
+  renumbers every agreement after it — deliberate, and found only by the
+  whole-branch review, not by this walk itself.** `applyAgreementChange`'s
+  `add()` (`api/internal/adapter/postgres/agreement_write_repo.go:132`)
+  stamps the replacement row's `CreatedAt` with the **acceptance** time (the
+  `at` the sign transaction runs at), not the target's original
+  `CreatedAt`, and `ListLiveAgreements`
+  (`api/internal/adapter/postgres/queries/agreements.sql:15`) orders by
+  `created_at, id` — the same ordering `AgreementSectionCard.tsx` numbers
+  `01..N` from at render (decision 11). So editing Money 02 of four does not
+  produce a new Money 02; it produces a new Money **04**, and the old 03 and
+  04 shift up to become 02 and 03. Verified live during the whole-branch
+  review: original agreement accepted `17:00:02`, its edit's replacement
+  accepted `17:00:04`, landing last. **This is what decision 9 (an edit is
+  remove-then-add, never an in-place UPDATE) and decision 11 (numbers are
+  derived at render and never stored) produce together when combined — not
+  a bug that slipped past a walk.** The walk that shipped this feature could
+  not have caught it regardless: its own final state was one agreement per
+  section throughout, where a renumber is invisible by construction. Ruled
+  **record, not fix**: changing it means copying the target's `created_at`
+  onto the replacement, which redefines what an edit is understood to
+  preserve — a product owner's call, not a reviewer's. The two places this
+  turns "just a display number" into something closer to a name a person
+  might reasonably expect to still refer to the same wording:
+  `agreementCopy.ts:40` composes `"Money 02"` (section name plus the padded
+  number) for the pending-proposal card's own summary line — "Andreas
+  proposed changing Money 02" can outlive the number it names, if a
+  different edit lands first — and `agreementCopy.ts:251`'s `targetOption`
+  builds the identical `"02 · {body}"` label the Propose modal's own
+  edit/remove target picker lists. Neither is wrong on its own terms (both
+  read the number the document carries *at that render*), but a household
+  reading either sentence has no way to know the number named in it can
+  already belong to a different agreement by the time they act on it.
+  See `docs/FEATURE_TRACKER.md`'s "Agreements by section" and "Propose a
+  change" rows for the tracker's own record, and
+  `api/internal/usecase/agreement_test.go:273-277` for where this was first
+  written down, as a test comment nobody outside that file would meet.
 
 ---
 

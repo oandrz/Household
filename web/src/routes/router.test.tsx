@@ -59,6 +59,20 @@ const NO_SESSION = {
   body: { error: { code: "UNAUTHENTICATED", message: "Sign in required." } },
 };
 
+// RetrosPage mounts AgreementsToDiscuss unconditionally (Task 16), which fires
+// this GET on every render of that page below. Nothing parked, so the block
+// renders nothing -- AgreementsToDiscuss.test.tsx owns the assertions about
+// it. Wrapped in its envelope, like every other agreements fixture.
+const NO_AGREEMENTS = {
+  status: 200,
+  body: {
+    agreements: {
+      locked: false, owners: [], version: 1, updatedAt: null,
+      sections: [], proposals: [], history: [],
+    },
+  },
+};
+
 function invitePreviewFixture(overrides: Partial<InvitePreview> = {}): InvitePreview {
   return {
     householdName: "Andreas & Christine",
@@ -516,6 +530,7 @@ describe("the real route tree", () => {
         status: 200,
         body: { retros: [], mood: [], doneCount: 0, since: null, startMonth: "2026-08" },
       },
+      "GET /api/v1/marriage/agreements": NO_AGREEMENTS,
     });
 
     const { router } = renderApp("/marriage/retros");
@@ -578,6 +593,83 @@ describe("the real route tree", () => {
     // Real timers restored in this file's shared afterEach below.
   });
 
+  // The positive counterpart to the capability redirect: proves
+  // marriageAgreementsRoute exists, sits under marriageGuardRoute, and mounts
+  // the real page rather than a 404. The locked fixture is the cheapest valid
+  // document -- one owner, nothing written -- and it exercises the <Link into
+  // /settings?invite=true against the REAL route tree, which is the only place
+  // settingsRoute's validateSearch is actually wired.
+  it("mounts the Agreements page at /marriage/agreements for a caller who has the marriage capability", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      "GET /api/v1/marriage/agreements": {
+        status: 200,
+        body: {
+          agreements: {
+            locked: true,
+            owners: [{ membershipId: "membership-1", name: "Andreas" }],
+            version: 1,
+            updatedAt: null,
+            sections: [],
+            proposals: [],
+            history: [],
+          },
+        },
+      },
+    });
+
+    const { router } = renderApp("/marriage/agreements");
+
+    expect(await screen.findByTestId("agreements-page")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Our agreements" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/marriage/agreements");
+  });
+
+  // The invite deep link is this feature's own new work (decision 2), so it is
+  // pinned in both directions: ?invite=true opens the modal, and anything else
+  // fails CLOSED to {} rather than being carried around as an unvalidated
+  // string. The three non-Members panels are stubbed as 500s deliberately --
+  // their shapes are not this test's subject, each renders its own error line
+  // rather than throwing (CurrencyPanel.tsx:124, NotificationsPanel.tsx:77,
+  // SpacesPanel.tsx:39), and leaving a route unregistered would instead throw
+  // inside stubFetchRoutes where TanStack Query swallows it into error state.
+  it("/settings?invite=true lands with the invite modal open, and ?invite=maybe does not", async () => {
+    const broke = { status: 500, body: { error: { code: "INTERNAL", message: "Broke." } } };
+    const settingsStubs = {
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      "GET /api/v1/household/members": { status: 200, body: [] },
+      "GET /api/v1/household": broke,
+      "GET /api/v1/spaces": broke,
+      "GET /api/v1/notification-preferences": broke,
+    };
+
+    stubFetchRoutes(settingsStubs);
+    const open = renderApp("/settings?invite=true");
+    expect(await screen.findByRole("dialog")).toHaveTextContent("Invite a family member");
+    expect(open.router.state.location.search).toEqual({ invite: true });
+    open.unmount();
+
+    stubFetchRoutes(settingsStubs);
+    renderApp("/settings?invite=maybe");
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Settings" }),
+    ).toBeInTheDocument();
+    // No `router.state.location.search` assertion here: that field is
+    // TanStack's raw `parseSearch` of the URL and is never re-validated
+    // (router-core's parseLocation sets it straight from JSON.parse-per-value,
+    // and matchRoutesInternal's `{...parentSearch, ...strictSearch}` composition
+    // can't remove a key the raw URL seeded -- confirmed against
+    // @tanstack/router-core 1.171.15's own source, not assumed -- that is the
+    // version this lockfile actually resolves (package-lock.json), not the
+    // 1.170.18 of the sibling @tanstack/react-router package.json names). It
+    // would keep reading `{ invite: "maybe" }` even with a correct validateSearch. The
+    // dialog's absence above (and the strict `invite === true` check in
+    // SettingsRouteComponent, mutation-tested below) is the actual fail-closed
+    // contract; the "open" half's `toEqual({ invite: true })` above only holds
+    // because JSON.parse("true") happens to already equal the validated shape.
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   // Task 11 gave marriageGuardRoute a real index route -- before this, bare
   // "/marriage" matched marriageGuardRoute itself (a real route, not an
   // absence), ran RequireAuth and RequireCapability as normal, and then had
@@ -597,6 +689,7 @@ describe("the real route tree", () => {
         status: 200,
         body: { retros: [], mood: [], doneCount: 0, since: null, startMonth: "2026-08" },
       },
+      "GET /api/v1/marriage/agreements": NO_AGREEMENTS,
     });
 
     const { router } = renderApp("/marriage");

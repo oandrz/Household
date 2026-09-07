@@ -197,6 +197,15 @@ const goalContributionRolloverUniqueConstraint = "goal_contributions_one_rollove
 // collision, archived rows included, is domain.ErrBillNameTaken -- hold.
 const billNameUniqueConstraint = "bills_household_id_name_key"
 
+// agreementSectionNameUniqueConstraint is the name Postgres gave
+// agreement_sections' own UNIQUE (household_id, name)
+// (migrations/00014_agreements.sql), the same "<table>_<columns>_key" default
+// naming categoryNameUniqueConstraint's own comment explains. translate
+// checks this by name, not only by SQLSTATE 23505, so a future unique key on
+// the table cannot masquerade as a name collision (decision 19). Sections are
+// never deleted, so a name is never freed once taken.
+const agreementSectionNameUniqueConstraint = "agreement_sections_household_id_name_key"
+
 // translate converts driver errors into domain errors so nothing above the
 // adapter layer ever sees pgx types.
 func translate(err error, op string) error {
@@ -232,6 +241,12 @@ func translate(err error, op string) error {
 		// attempted; this index is what makes a future code path that
 		// forgets the conditional UPDATE fail safely instead of silently.
 		return fmt.Errorf("%s: constraint %q: %w", op, pgErr.ConstraintName, domain.ErrRolloverAlreadyDone)
+	case errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == agreementSectionNameUniqueConstraint:
+		// AgreementRepository.CreateSection's own contract: the unique index
+		// decides the collision, never a pre-read, and the screen has to be
+		// able to say "you already have a section called that" rather than
+		// showing whatever generic message ALREADY_EXISTS carries.
+		return fmt.Errorf("%s: constraint %q: %w", op, pgErr.ConstraintName, domain.ErrAgreementSectionNameTaken)
 	case errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation:
 		// Mirrors ErrNotFound's translation: a caller-testable domain
 		// sentinel rather than a generic wrapped driver error, so

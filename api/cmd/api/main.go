@@ -112,6 +112,7 @@ func run() error {
 	retroRepo := postgres.NewRetroRepo(db)
 	retroActionRepo := postgres.NewRetroActionRepo(db)
 	visionRepo := postgres.NewVisionRepo(db)
+	agreementRepo := postgres.NewAgreementRepo(db)
 	telegramLinks := postgres.NewTelegramLinkRepo(db)
 	telegramAccounts := postgres.NewTelegramAccountRepo(db)
 	platformAdminRepo := postgres.NewPlatformAdminRepo(db)
@@ -255,6 +256,7 @@ func run() error {
 	// percentage from Goals and the narrow port is what keeps it from
 	// depending on GoalRepository's whole surface.
 	visionSvc := usecase.NewVisionService(visionRepo, goalRepo, sysClock)
+	agreementSvc := usecase.NewAgreementService(agreementRepo, memberships)
 	adminSvc := usecase.NewAdminService(usecase.AdminDeps{
 		Admins: platformAdminRepo,
 		Flags:  featureFlagRepo,
@@ -304,6 +306,7 @@ func run() error {
 			Bills:          billSvc,
 			Retros:         retroSvc,
 			Visions:        visionSvc,
+			Agreements:     agreementSvc,
 			Telegram:       telegramSvc,
 			Admin:          adminSvc,
 			AdminReauth:    adminReauthSvc,

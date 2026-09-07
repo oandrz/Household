@@ -57,6 +57,12 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, dest any) bool {
 //     hard / notes) this feature deliberately never caps (RetroUpdate's own
 //     doc comment in ports.go). retro_handlers.go's
 //     maxRetroRequestBodyBytes is the caller that needs this.
+//   - POST /marriage/agreements/proposals and
+//     POST /marriage/agreements/proposals/{id}/park carry rune-capped free
+//     text (body, previousBody, note, park note) at 500 runes each, and a
+//     500-rune CJK field alone exceeds the 1 KiB default.
+//     agreement_handlers.go's maxAgreementRequestBodyBytes is the caller that
+//     needs this.
 //
 // Every other route keeps using the tighter default via decodeJSONBody
 // above.
@@ -434,6 +440,57 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, domain.ErrVisionTooManyMilestones):
 		WriteError(w, http.StatusUnprocessableEntity, "VISION_INVALID",
 			"A vision can have at most 24 milestones.", nil)
+	// --- Agreements ---------------------------------------------------------
+	// domain.ErrUnknownAgreementProposalKind and
+	// domain.ErrUnknownAgreementProposalStatus are deliberately absent from
+	// this block. A bad kind in a request body is answered by
+	// handleProposeAgreementChange's own ParseAgreementProposalKind call, with
+	// 422 AGREEMENT_KIND_INVALID, exactly as parseVisionYear answers a bad year
+	// (decision 21). So either sentinel reaching this function came from a
+	// database column -- a row no migration allows and no writer here wrote --
+	// and the logged 500 below is the right answer to an impossible row, not a
+	// 4xx telling a household their request was wrong when it was not.
+	case errors.Is(err, domain.ErrAgreementsNeedTwoOwners):
+		WriteError(w, http.StatusConflict, "AGREEMENTS_NEED_TWO_OWNERS",
+			"Agreements need at least two owners.", nil)
+	case errors.Is(err, domain.ErrAgreementChanged):
+		WriteError(w, http.StatusConflict, "AGREEMENT_CHANGED",
+			"The agreement this was written against has changed, so nothing was signed.", nil)
+	case errors.Is(err, domain.ErrAgreementNotOpen):
+		WriteError(w, http.StatusConflict, "AGREEMENT_PROPOSAL_RESOLVED",
+			"This change was already settled. Reload to see it.", nil)
+	case errors.Is(err, domain.ErrAgreementSectionNameTaken):
+		WriteError(w, http.StatusConflict, "AGREEMENT_SECTION_NAME_TAKEN",
+			"You already have a section with that name.", nil)
+	case errors.Is(err, domain.ErrAgreementSectionNameRequired):
+		WriteError(w, http.StatusUnprocessableEntity, "AGREEMENT_SECTION_NAME_REQUIRED",
+			"Give this section a name.", nil)
+	case errors.Is(err, domain.ErrAgreementSectionNameTooLong):
+		WriteError(w, http.StatusUnprocessableEntity, "AGREEMENT_SECTION_NAME_TOO_LONG",
+			"That section name is too long.", nil)
+	case errors.Is(err, domain.ErrAgreementProposalShapeInvalid):
+		WriteError(w, http.StatusUnprocessableEntity, "AGREEMENT_PROPOSAL_SHAPE_INVALID",
+			"That is not a change we can propose.", nil)
+	case errors.Is(err, domain.ErrAgreementEditUnchanged):
+		WriteError(w, http.StatusUnprocessableEntity, "AGREEMENT_EDIT_UNCHANGED",
+			"This wording is the same as the agreement it changes.", nil)
+	case errors.Is(err, domain.ErrAgreementBodyRequired):
+		WriteError(w, http.StatusUnprocessableEntity, "AGREEMENT_BODY_REQUIRED",
+			"Write the agreement before proposing it.", nil)
+	case errors.Is(err, domain.ErrAgreementBodyTooLong):
+		WriteError(w, http.StatusUnprocessableEntity, "AGREEMENT_BODY_TOO_LONG",
+			"That agreement is too long.", nil)
+	// The two note caps get two codes rather than one shared "note too long",
+	// because they are different fields on different screens: the proposal's
+	// note is in the Propose modal, the park note in the card's Discuss
+	// expander, and a 422 that cannot say which field is a 422 the screen
+	// cannot place.
+	case errors.Is(err, domain.ErrAgreementNoteTooLong):
+		WriteError(w, http.StatusUnprocessableEntity, "AGREEMENT_NOTE_TOO_LONG",
+			"That note is too long.", nil)
+	case errors.Is(err, domain.ErrAgreementParkNoteTooLong):
+		WriteError(w, http.StatusUnprocessableEntity, "AGREEMENT_PARK_NOTE_TOO_LONG",
+			"That note is too long.", nil)
 	// domain.ErrUnknownContributionSource has no case here, deliberately: it
 	// means a goal_contributions row holds a source value this code never
 	// wrote (ParseContributionSource's own doc comment), which is a real

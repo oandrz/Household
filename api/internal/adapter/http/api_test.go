@@ -329,6 +329,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 	// percentage from Goals and the narrow port is what keeps it from
 	// depending on GoalRepository's whole surface.
 	visionSvc := usecase.NewVisionService(postgres.NewVisionRepo(db), goalRepo, clk)
+	agreementSvc := usecase.NewAgreementService(postgres.NewAgreementRepo(db), memberships)
 
 	platformAdminRepo := postgres.NewPlatformAdminRepo(db)
 	featureFlagRepo := postgres.NewFeatureFlagRepo(db)
@@ -378,6 +379,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Bills:          billSvc,
 		Retros:         retroSvc,
 		Visions:        visionSvc,
+		Agreements:     agreementSvc,
 		Admin:          adminSvc,
 		AdminReauth:    adminReauthSvc,
 		AdminDirectory: adminDirectorySvc,

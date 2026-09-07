@@ -3924,3 +3924,355 @@ func (d *fakeReauthAttemptRepo) ClearFailures(_ context.Context, userID string) 
 }
 
 var _ usecase.AdminReauthAttemptRepository = (*fakeReauthAttemptRepo)(nil)
+
+// --- AgreementRepository ---------------------------------------------
+
+// agreementRepoDouble is the in-memory AgreementRepository every
+// AgreementService test runs against. It implements EVERY port method,
+// including ones no test calls (Liskov, CLAUDE.md), and it honours the
+// refusals the real one makes: a caller must never need to know which
+// implementation it is holding. writes counts only calls that actually
+// changed a row, so "refused" is distinguishable from "refused eventually" --
+// the counter is the whole point of the one-owner test.
+//
+// Wire setMembers, or Sign can never complete a set: completion is every
+// CURRENT owner having signed, which the real transaction counts through
+// memberships in-transaction.
+type agreementRepoDouble struct {
+	sections   []usecase.AgreementSectionRecord
+	agreements []usecase.AgreementRecord
+	// removed is the removed_at stamp (decision 9): the row stays and the
+	// read filters. It lives in a side map because AgreementRecord is the
+	// LIVE shape and carries no removed_at -- which is the port's contract,
+	// not an omission.
+	removed   map[string]time.Time
+	proposals []*usecase.AgreementProposalRecord
+	members   *membershipDouble
+	writes    int
+	// lastWithdrawBy is the byMembershipID the service last handed over, set
+	// before any refusal. The service must never branch on that id (decision
+	// 15: the proposer check is the handler's), and this is the only way a
+	// test can see whether it did -- Task 4's third mutation check reddens
+	// here.
+	lastWithdrawBy string
+	n              int
+}
+
+var agreementSeedAt = time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
+
+func newAgreementRepoDouble() *agreementRepoDouble {
+	return &agreementRepoDouble{removed: map[string]time.Time{}}
+}
+
+func (d *agreementRepoDouble) setMembers(m *membershipDouble) { d.members = m }
+func (d *agreementRepoDouble) id(kind string) string          { d.n++; return fmt.Sprintf("%s-%d", kind, d.n) }
+
+func (d *agreementRepoDouble) seedSection(name string) usecase.AgreementSectionRecord {
+	s := usecase.AgreementSectionRecord{ID: d.id("section"), Name: name, CreatedAt: agreementSeedAt}
+	d.sections = append(d.sections, s)
+	return s
+}
+
+func (d *agreementRepoDouble) seedAgreement(sectionID, body string) usecase.AgreementRecord {
+	a := usecase.AgreementRecord{ID: d.id("agreement"), SectionID: sectionID, Body: body,
+		AddedByProposalID: "seeded", CreatedAt: agreementSeedAt}
+	d.agreements = append(d.agreements, a)
+	return a
+}
+
+// seedProposal writes one row at any of the four statuses, always proposed by
+// m1: the version test needs all four, since count(accepted) and count(*)
+// agree on anything less. Edits and removes are made through Propose in the
+// tests that need them, so they arrive with the section the target gave them.
+func (d *agreementRepoDouble) seedProposal(status, kind, sectionID, body string,
+	resolvedAt *time.Time, signers ...string) *usecase.AgreementProposalRecord {
+	p := &usecase.AgreementProposalRecord{ID: d.id("proposal"), Kind: kind, Status: status,
+		SectionID: sectionID, Body: body, ProposedByMembershipID: "m1", CreatedAt: agreementSeedAt,
+		ResolvedAt: resolvedAt, SignedByMembershipIDs: signers}
+	d.proposals = append(d.proposals, p)
+	return p
+}
+
+func (d *agreementRepoDouble) Document(_ context.Context, _ string) (usecase.AgreementDocument, error) {
+	doc := usecase.AgreementDocument{
+		Sections:   append([]usecase.AgreementSectionRecord{}, d.sections...),
+		Agreements: make([]usecase.AgreementRecord, 0, len(d.agreements)),
+		Open:       []usecase.AgreementProposalRecord{},
+		Accepted:   []usecase.AgreementProposalRecord{},
+	}
+	for _, a := range d.agreements {
+		if _, gone := d.removed[a.ID]; gone {
+			continue // removed_at IS NULL, which belongs in SQL and never in a caller
+		}
+		doc.Agreements = append(doc.Agreements, a)
+	}
+	for _, p := range d.proposals {
+		switch p.Status {
+		case "pending", "parked":
+			doc.Open = append(doc.Open, *p)
+		case "accepted":
+			doc.Accepted = append(doc.Accepted, *p)
+		}
+		// withdrawn lands in neither slice, excluded in SQL by the real one.
+	}
+	// Accepted is resolved_at asc, which is NOT creation order: two proposals
+	// created A then B can be accepted B then A, and the version a change
+	// produced is its position in THIS order. Open keeps insertion order,
+	// which is created_at asc because every seeded row shares a timestamp.
+	sort.SliceStable(doc.Accepted, func(i, j int) bool {
+		l, r := doc.Accepted[i].ResolvedAt, doc.Accepted[j].ResolvedAt
+		if l == nil || r == nil {
+			return false
+		}
+		return l.Before(*r)
+	})
+	return doc, nil
+}
+
+func (d *agreementRepoDouble) Proposal(_ context.Context, _, proposalID string) (usecase.AgreementProposalRecord, error) {
+	for _, p := range d.proposals {
+		if p.ID == proposalID {
+			return *p, nil
+		}
+	}
+	return usecase.AgreementProposalRecord{}, domain.ErrNotFound
+}
+
+func (d *agreementRepoDouble) CreateSection(_ context.Context, _, name string,
+	createdAt time.Time) (usecase.AgreementSectionRecord, error) {
+	for _, s := range d.sections {
+		if s.Name == name {
+			return usecase.AgreementSectionRecord{}, domain.ErrAgreementSectionNameTaken
+		}
+	}
+	d.writes++
+	s := usecase.AgreementSectionRecord{ID: d.id("section"), Name: name, CreatedAt: createdAt}
+	d.sections = append(d.sections, s)
+	return s, nil
+}
+
+// CreateSections is ON CONFLICT DO NOTHING then a read-back: a name already
+// there is skipped without a write, and every name asked for comes back,
+// which is how the caller proves all four landed.
+func (d *agreementRepoDouble) CreateSections(ctx context.Context, householdID string, names []string,
+	createdAt time.Time) ([]usecase.AgreementSectionRecord, error) {
+	out := make([]usecase.AgreementSectionRecord, 0, len(names))
+	for _, name := range names {
+		s, err := d.CreateSection(ctx, householdID, name, createdAt)
+		if err != nil {
+			for _, existing := range d.sections {
+				if existing.Name == name {
+					s = existing
+				}
+			}
+		}
+		out = append(out, s)
+	}
+	return out, nil
+}
+
+// CreateProposal writes the proposal row AND the proposer's implicit
+// signature (decision 5) as one unit, so writes moves by one and not two. For
+// an edit or a remove it verifies the target BEFORE counting a write and
+// copies the target's section onto the proposal -- which is what the real
+// statement does, and what makes Validate's refusal of a caller-supplied
+// section safe rather than lossy.
+func (d *agreementRepoDouble) CreateProposal(_ context.Context,
+	in usecase.AgreementProposalWrite) (usecase.AgreementProposalRecord, error) {
+	sectionID := in.SectionID
+	if in.Kind != "add" {
+		target, err := d.liveAgreement(in.TargetAgreementID)
+		if err != nil {
+			return usecase.AgreementProposalRecord{}, err
+		}
+		if target.Body != in.PreviousBody {
+			return usecase.AgreementProposalRecord{}, domain.ErrAgreementChanged
+		}
+		sectionID = target.SectionID
+	}
+	d.writes++
+	p := &usecase.AgreementProposalRecord{ID: d.id("proposal"), Kind: in.Kind, Status: "pending",
+		SectionID: sectionID, TargetAgreementID: in.TargetAgreementID, Body: in.Body,
+		PreviousBody: in.PreviousBody, Note: in.Note, ProposedByMembershipID: in.ProposedByMembershipID,
+		CreatedAt: in.CreatedAt, SignedByMembershipIDs: []string{in.ProposedByMembershipID}}
+	d.proposals = append(d.proposals, p)
+	return *p, nil
+}
+
+// Sign completes only when every CURRENT owner has signed and there are at
+// least MinAgreementOwners of them -- what the real transaction counts inside
+// itself. The target check is step 2 and runs before the signature of step 3,
+// because after step 4 a middle signer's agreement is recorded against
+// wording that has already moved.
+func (d *agreementRepoDouble) Sign(ctx context.Context,
+	in usecase.AgreementSignatureWrite) (usecase.AgreementProposalRecord, error) {
+	p, err := d.open(in.ProposalID)
+	if err != nil {
+		return usecase.AgreementProposalRecord{}, err
+	}
+	var target usecase.AgreementRecord
+	if p.Kind != "add" {
+		target, err = d.liveAgreement(p.TargetAgreementID)
+		if err != nil {
+			return usecase.AgreementProposalRecord{}, err
+		}
+		if target.Body != p.PreviousBody {
+			return usecase.AgreementProposalRecord{}, domain.ErrAgreementChanged
+		}
+	}
+	// Step 3's INSERT selects the signer through memberships (this household,
+	// role = 'owner'); zero rows there is ErrForbidden, the backstop behind
+	// requireOwner. No test in Tasks 3 and 4 needs it, and it is here anyway,
+	// because a double that skips a refusal its port documents is a double a
+	// caller can pass and the real thing cannot.
+	signerIsOwner, err := d.isOwner(ctx, in.HouseholdID, in.MembershipID)
+	if err != nil {
+		return usecase.AgreementProposalRecord{}, err
+	}
+	if !signerIsOwner {
+		return usecase.AgreementProposalRecord{}, domain.ErrForbidden
+	}
+	d.writes++
+	if !signedBy(p.SignedByMembershipIDs, in.MembershipID) {
+		p.SignedByMembershipIDs = append(p.SignedByMembershipIDs, in.MembershipID)
+	}
+	views, err := d.members.List(ctx, in.HouseholdID)
+	if err != nil {
+		return usecase.AgreementProposalRecord{}, err
+	}
+	var owners, signed int
+	for _, v := range views {
+		if v.Membership.Role != domain.RoleOwner {
+			continue
+		}
+		owners++
+		if signedBy(p.SignedByMembershipIDs, v.Membership.ID) {
+			signed++
+		}
+	}
+	if owners < domain.MinAgreementOwners || signed != owners {
+		return *p, nil // not complete: commit here, status unchanged
+	}
+	// Step 5, in a switch with a refusing default. An edit is a remove and an
+	// add together, so the agreement's ID CHANGES and the new row sorts last
+	// in its section -- exactly where created_at, id puts it in the real one.
+	switch p.Kind {
+	case "add":
+		d.addAgreement(p, in.At)
+	case "edit":
+		d.removed[target.ID] = in.At
+		d.addAgreement(p, in.At)
+	case "remove":
+		d.removed[target.ID] = in.At
+	default:
+		return usecase.AgreementProposalRecord{}, domain.ErrUnknownAgreementProposalKind
+	}
+	at := in.At
+	p.Status, p.ResolvedAt = "accepted", &at
+	return *p, nil
+}
+
+func (d *agreementRepoDouble) addAgreement(p *usecase.AgreementProposalRecord, at time.Time) {
+	d.agreements = append(d.agreements, usecase.AgreementRecord{ID: d.id("agreement"),
+		SectionID: p.SectionID, Body: p.Body, AddedByProposalID: p.ID, CreatedAt: at})
+}
+
+func (d *agreementRepoDouble) Park(_ context.Context, _, proposalID, note string,
+	_ time.Time) (usecase.AgreementProposalRecord, error) {
+	p, err := d.open(proposalID)
+	if err != nil {
+		return usecase.AgreementProposalRecord{}, err
+	}
+	d.writes++
+	p.Status, p.ParkNote = "parked", note
+	return *p, nil
+}
+
+// Withdraw runs the port's four legs in order: gone, resolved, then the
+// WHERE clause's backstop -- proposer-only until the proposer is no longer an
+// owner here (decision 15). The backstop is here rather than in the service
+// because a caller must never need to know which implementation it holds, and
+// because it is what lets a test prove the SERVICE was not the thing that
+// decided.
+func (d *agreementRepoDouble) Withdraw(ctx context.Context, householdID, proposalID,
+	byMembershipID string, at time.Time) (usecase.AgreementProposalRecord, error) {
+	d.lastWithdrawBy = byMembershipID
+	p, err := d.open(proposalID)
+	if err != nil {
+		return usecase.AgreementProposalRecord{}, err
+	}
+	if byMembershipID != p.ProposedByMembershipID {
+		stillOwner, err := d.isOwner(ctx, householdID, p.ProposedByMembershipID)
+		if err != nil {
+			return usecase.AgreementProposalRecord{}, err
+		}
+		if stillOwner {
+			return usecase.AgreementProposalRecord{}, domain.ErrForbidden
+		}
+	}
+	d.writes++
+	stamp := at
+	p.Status, p.ResolvedAt = "withdrawn", &stamp
+	return *p, nil
+}
+
+// open is the guarded UPDATE's WHERE clause and its first two diagnose legs:
+// gone is ErrNotFound, resolved is ErrAgreementNotOpen, and NEITHER
+// increments writes -- or a refusal is indistinguishable from a write.
+func (d *agreementRepoDouble) open(proposalID string) (*usecase.AgreementProposalRecord, error) {
+	for _, p := range d.proposals {
+		if p.ID != proposalID {
+			continue
+		}
+		status, err := domain.ParseAgreementProposalStatus(p.Status)
+		if err != nil {
+			return nil, err
+		}
+		if !status.IsOpen() {
+			return nil, domain.ErrAgreementNotOpen
+		}
+		return p, nil
+	}
+	return nil, domain.ErrNotFound
+}
+
+// liveAgreement is step 2's SELECT ... FOR UPDATE minus the lock. A target
+// that is gone, removed or reworded is ErrAgreementChanged and never
+// ErrNotFound: "it vanished" and "someone changed it" are the same answer to
+// the caller, and a different answer from "no such proposal".
+func (d *agreementRepoDouble) liveAgreement(id string) (usecase.AgreementRecord, error) {
+	for _, a := range d.agreements {
+		if a.ID != id {
+			continue
+		}
+		if _, gone := d.removed[a.ID]; gone {
+			return usecase.AgreementRecord{}, domain.ErrAgreementChanged
+		}
+		return a, nil
+	}
+	return usecase.AgreementRecord{}, domain.ErrAgreementChanged
+}
+
+func (d *agreementRepoDouble) isOwner(ctx context.Context, householdID, membershipID string) (bool, error) {
+	views, err := d.members.List(ctx, householdID)
+	if err != nil {
+		return false, err
+	}
+	for _, v := range views {
+		if v.Membership.ID == membershipID && v.Membership.Role == domain.RoleOwner {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func signedBy(ids []string, id string) bool {
+	for _, got := range ids {
+		if got == id {
+			return true
+		}
+	}
+	return false
+}
+
+var _ usecase.AgreementRepository = (*agreementRepoDouble)(nil)

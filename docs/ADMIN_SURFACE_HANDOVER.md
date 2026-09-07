@@ -11,9 +11,9 @@ surface and is deliberately self-contained.
 
 ## 1. Status
 
-**Branch `admin-surface`, open as
-[PR #15](https://github.com/oandrz/Household/pull/15). Not merged. Not
-deployed.** Nothing in this work has ever run in production.
+**Branch `admin-surface`, [PR #15](https://github.com/oandrz/Household/pull/15)
+— written while it was still open and unmerged; it merged 2026-09-01 as
+`b9dfd1f`. Read the dated paragraph below, which supersedes this one.**
 
 - `make lint` and `make test` both exit 0 on the branch head: 11 of 11 Go
   packages, 716 frontend tests, arch lint clean.
@@ -33,8 +33,8 @@ via `docs/superpowers/plans/2026-09-01-hearth-admin-surface.md` (the plan).
 above, which describes only the first slice.** That slice merged as PR #15,
 households and metrics as PR #16, and the outbound message inspector as PR
 #17 (`3eddbe2`). The read-only database browse is the fourth and last, on
-branch `admin-db-browse` and **open as
-[PR #18](https://github.com/oandrz/Household/pull/18) — not merged** —
+branch `admin-db-browse` and **merged as
+[PR #18](https://github.com/oandrz/Household/pull/18), `a44b111`, 2026-09-04** —
 code-complete, reviewed, and **walked 2026-09-04: 15 of 15 criteria pass**
 (`docs/superpowers/plans/2026-09-04-hearth-database-browse-verification.md`).
 **The operator surface is finished** — §3 below has no

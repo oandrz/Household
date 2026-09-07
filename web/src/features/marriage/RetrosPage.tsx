@@ -8,6 +8,7 @@
 import { useState } from "react";
 import { ApiError } from "../../api/client";
 import { PageContainer } from "../../components/PageContainer";
+import { AgreementsToDiscuss } from "./AgreementsToDiscuss";
 import { MoodChart } from "./MoodChart";
 import { RetroDetail } from "./RetroDetail";
 import { RetroHistoryList } from "./RetroHistoryList";
@@ -234,6 +235,13 @@ export function RetrosPage() {
           </div>
         </div>
       )}
+
+      {/* A SIBLING of the ternary above, never inside either branch: the
+          household most likely to have parked something has not started a
+          retro yet, and a block inside either branch is invisible in the
+          other (decision 7). It renders nothing at all when nothing is
+          parked, so an ordinary Retros page is unchanged. */}
+      <AgreementsToDiscuss />
 
       {/* Conditional mount, not a declarative `open` prop -- Modal.tsx's own
           header comment on why the two never mix. Renders for both entry

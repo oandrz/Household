@@ -500,4 +500,31 @@ describe("MembersPanel", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Kayla's role" })).toHaveTextContent("Limited");
   });
+
+  it("openInvite seeds the modal open, and closing it survives a re-render", async () => {
+    stubFetchRoutes({
+      [`GET ${ME_URL}`]: { status: 200, body: meFixture() },
+      [`GET ${MEMBERS_URL}`]: { status: 200, body: [andreas, kayla, ethan] },
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const panel = (
+      <QueryClientProvider client={queryClient}>
+        <MembersPanel openInvite />
+      </QueryClientProvider>
+    );
+
+    const { rerender } = render(panel);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    // The re-render is the whole test: a bound `open={openInvite}` would put
+    // the dialog straight back for as long as the URL still carries
+    // ?invite=true, so closing it would appear to do nothing the moment
+    // anything else on Settings re-rendered.
+    rerender(panel);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
 });
