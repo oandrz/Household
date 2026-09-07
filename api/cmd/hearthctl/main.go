@@ -52,7 +52,7 @@ commands:
   login --email=<email>        sign in; password from $HEARTH_PASSWORD or stdin
   logout                       sign out and forget the stored session
   whoami                       print the signed-in user, household, membership
-  routes                       every API route, who may call it, its body shape
+  routes [--json]              every API route, who may call it, its body shape
   list <kind>                  accounts | categories | members | goals | bills |
                                transactions
   api <METHOD> <path> [--data=<json>|--data=@file]
@@ -112,7 +112,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "whoami":
 		return cmdWhoami(ctx, client, stdout)
 	case "routes":
-		return cmdRoutes(stdout)
+		return cmdRoutes(rest[1:], stdout)
 	case "list":
 		return cmdList(ctx, client, rest[1:], stdout)
 	case "api":
