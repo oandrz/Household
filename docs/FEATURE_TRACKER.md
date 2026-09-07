@@ -11,9 +11,9 @@ needed them to exist (see "Where things stand" below).
 | ✅ | Built and verified |
 | 🟡 | Partly built — the gap is named |
 | ⬜ | Not started |
-| 🚫 | Out of scope — marked "· not built" by the design itself, or descoped by the product owner; the row says which |
+| 🚫 | Out of scope — three different reasons, and **the row always says which**: marked "· not built" by the design itself; cut outright by the product owner (the audit screen, §9 — the code was deleted); or **deferred past the current release** by the product owner, meaning it is expected back later (the Family calendar, §7). A 🚫 is not a promise that something will never exist — it is a statement that it is not this release's work, and the row says what would bring it back |
 
-**Where things stand:** 105 of 124 features built or partly built.
+**Where things stand:** 104 of 124 features built or partly built — and **five of the 124 are 🚫**, so the honest denominator for this release is 119.
 
 > **Recounted 2026-09-02**, when the four unbuilt platform-administration
 > features were given rows (section 9). The count of *built* work does not
@@ -882,6 +882,47 @@ own header says why they are counted anyway. "88 of 111 built or partly
 built" becomes **"94 of 116"**; the gap this file exists to name for the
 flags screen sits in its own cell above, not folded into that number.
 
+**The Family calendar, 2026-09-07 — deferred out of this release by the
+product owner, and the legend grew a third meaning for 🚫.** The whole of §7
+that was still open — "Shared month calendar with per-person filters" (🟡, an
+API stub and a flag behind it) and "New event (modal)" (⬜) — moves to 🚫.
+Nothing about it proved unbuildable and its one dependency was satisfied a
+month ago; it is a scope call, and the rows say so in those words.
+
+**Why 🚫 rather than leaving the rows open with a note.** The headline this
+file exists to give is "what is left" — and rows the owner has taken out of
+the release are not left, they are elsewhere. Counting them as open work
+makes every number here overstate the remaining job. The cost of the choice
+is real and is why the legend changed in the same edit: every 🚫 in this file
+until today meant *permanent* — the design's own "· not built" (Kids view,
+custom space pages) or the audit screen the owner cut outright with its code
+deleted. A reader meeting a third 🚫 would reasonably conclude the calendar
+is dead. So the legend now names all three cases and says plainly that a 🚫
+is not a promise something will never exist; each row carries which kind it
+is and what would bring it back.
+
+**"This week" agenda (§4) stays ⬜ on purpose.** It is Overview's seventh
+card and it reads the calendar, so it is unstartable — but the owner deferred
+the calendar, not this card, and a row moved by inference is the map making a
+scope decision nobody made. Its cell now says the dependency is 🚫 and that
+**Overview closes this release at six of seven cards**. Family's own
+dependency on Bills was carried as a note rather than a status for the same
+reason.
+
+**What "this release" means is not defined anywhere in these documents** — the
+phrase has no referent in `docs/`, and the product ships continuously to one
+box. Read here as the first sold version, per the committed decision to sell.
+If the owner means a different boundary, this entry is the line to correct.
+
+**Recounted by symbol, not by delta**, this file's own rule: the first status
+symbol in each row's own cell, counted per section and re-summed across all
+nine. §7 becomes **0 ✅ / 0 🟡 / 0 ⬜ / 3 🚫** — the first section in this file
+with no open row that is nevertheless not finished. Totals move from
+86/19/16/3 to **86/18/15/5 = 124**; no row was added or removed, two moved.
+Built + Partial falls from 105 to **104**, and the headline now also states
+the figure that actually matters for planning: with five rows out of scope,
+**119** is this release's denominator.
+
 | Area | Built | Partial | Not started | Out of scope |
 |---|---|---|---|---|
 | Entry & authentication | 12 | 1 | 2 | 0 |
@@ -890,10 +931,10 @@ flags screen sits in its own cell above, not folded into that number.
 | Overview (home) | 8 | 2 | 1 | 0 |
 | Money | 25 | 3 | 7 | 0 |
 | Marriage | 16 | 2 | 2 | 0 |
-| Family | 0 | 1 | 1 | 1 |
+| Family | 0 | 0 | 0 | 3 |
 | Household extras | 0 | 0 | 0 | 1 |
 | Platform administration | 7 | 1 | 0 | 1 |
-| **Total** | **86** | **19** | **16** | **3** |
+| **Total** | **86** | **18** | **15** | **5** |
 
 ---
 
@@ -1036,7 +1077,7 @@ the designed Overview rather than being replaced.
 | Next retro card with carried-over actions | ✅ — shows the current month's retro (draft or finished), or the startable month as a prompt, plus its OPEN action count beneath. `GET /retros` carries both `actionCount` (the total) and `openActionCount` per row; the card reads the latter, the design's own "carried-over actions" figure. Shipped 🟡 first (Task 15, reading the total instead, which overstated outstanding work on a fully-ticked retro) — closed end to end (SQL subquery through the zod schema), leaving `RetroHistoryList`'s own "K actions, ticked or not" row reading the total it is supposed to |
 | Vision 2026 card | ✅ *(`VisionCard.tsx`, Vision spec's task 13 — a row this table never carried until now, though the section's own intro paragraph had already counted it among the seven cards since the Vision reconnaissance. Renders one line per pillar, in `position` order, each showing that pillar's FIRST measure with its live figures, not the design's own three flat commitment lines ("1 weekend away per quarter" etc.) — a third shape the design never says how to store (spec decision 3). A pillar with no measures falls back to its own name; a measure with `hasFigure: false` shows its label and no number. Omitted entirely — not an empty quotation — for a year with no vision yet (`version: 0`); Overview's setup checklist is the surface that names what is missing, not this card)* |
 | Vision check-in strip | ✅ *(inside `NextRetroCard.tsx`, Vision spec's task 13 — "Vision check-in: 2026 theme — "…"", gated on the theme being non-empty, which a version-0 year always sends as `""`, so the strip and the card agree about when there is nothing to show without a second, separate check)* |
-| "This week" agenda | ⬜ |
+| "This week" agenda | ⬜ | **Stays ⬜, deliberately, though the thing it reads is now 🚫.** It is the seventh and last of the design's Overview cards, and it reads Family's calendar — deferred out of this release on 2026-09-07 (§7). The owner deferred the calendar, not this card, so moving this row by inference would be the map making a scope decision nobody made. Practically: **Overview closes this release at six of seven cards**, and this row is unstartable until §7 reopens |
 | "+ Add" quick-create menu | 🟡 — four of six entries now live: Transaction, Account, Savings goal and Bill. Transaction and Bill are both disabled with their reason until an account exists — a bill needs a pay-from account the same way an expense needs a from-account; Savings goal has no such precondition (Goals decision 6 — there is no funding-source account to require). Calendar event and Marriage retro still join it in the change that builds each |
 | Setup checklist (no mockup — see below) | ✅ |
 | Limited-member "amounts are hidden" panel (no mockup — see below) | ✅ |
@@ -1641,9 +1682,15 @@ table's own amendment above.
 
 | Feature | State | Notes |
 |---|---|---|
-| Shared month calendar with per-person filters | 🟡 | **The admin-surface branch (2026-09-02) gave this an API stub and a flag, nothing else.** `GET /api/v1/family/calendar` exists, gated behind `domain.FlagFamilyCalendar` (default off) — turning the flag on answers `200 {"events":[]}` rather than 404, walked directly against the running API. It exists to prove dark-shipping works before the feature is needed in anger, per the flags spec's own words: nothing writes an event, and no page or route reads the endpoint from the browser. Still needs Bills' own dependency satisfied (bill dates on the grid) plus the real page and the write side |
-| New event (modal) | ⬜ | |
+| Shared month calendar with per-person filters | 🚫 | **Deferred out of the current release by the product owner, 2026-09-07 — not cut.** Nothing about it turned out to be unbuildable, and its one dependency (Bills, for bill dates on the grid) has been satisfied since 2026-08-10; it is simply not this release's work. **What already exists stays and is deliberately untouched**: `GET /api/v1/family/calendar` is mounted in `api/internal/adapter/http/router.go:208-209` behind `requireFeature(deps, domain.FlagFamilyCalendar)`, default off, answering `200 {"events":[]}` when the flag is on. That stub is the flags spec's own dark-shipping exercise rather than calendar work — deleting it would undo the proof, not the feature. Nothing writes an event and no page reads the endpoint. **What brings this row back:** the product owner saying so. Whoever picks it up should start from the four questions this deferral did not answer — bill amounts on a capability-less page (a limited member without `money` must not read `Netflix S$19.98`; Accounts' wire-level redaction is the precedent), projecting a month of bill dates from a single stored `NextDue` plus `Cadence`, the product's first clock time (`account.go:165` records that no household stores a timezone), and event recurrence |
+| New event (modal) | 🚫 | Deferred with the calendar row above, 2026-09-07, and for the same reason — a modal that writes an event to a grid nobody is building this release has nothing to write to. Not cut |
 | Kids view | 🚫 | The design marks it "· not built" |
+
+**Every row in this section is 🚫 as of 2026-09-07, and only one of the three
+is permanent.** Kids view is the design's own "· not built"; the calendar and
+its New-event modal are the product owner's deferral out of this release, and
+both rows say what would bring them back. This is the first section with no
+open work that is nevertheless not finished — read the rows, not the symbols.
 
 **Family has no routes any more, and no sidebar entry**, for the same reason
 Marriage does not (`110ab0a`): `/family/calendar` and its "Arriving in slice
@@ -1752,7 +1799,64 @@ passed, 15 of 15, on 2026-09-06 — every row above now reads ✅. Item 6 will
 never reach "every row ✅ in the whole section" the way section 9's items
 did, though: its two remaining ⬜ rows (Vision's marriage-duration row and
 "Popular starting points") are permanent, drawn-but-not-built decisions,
-not open work. **So item 7, Family, is where the next spec opens.**
+not open work. ~~**So item 7, Family, is where the next spec opens.**~~
+
+**Item 7 is out of this release — the product owner deferred the Family
+calendar on 2026-09-07**, so §7 is now three 🚫 rows and the next spec does
+*not* open there. See §7 for what was deferred and what brings it back.
+
+**With Family out, no ⬜ row anywhere is a slice of its own any more.** The
+four remaining household areas are all built; what is left across §§1–6 is
+eighteen 🟡 gaps and fifteen ⬜ rows, and they do not share a shape. The
+recommended next work is the one group of them with a **single root cause**:
+
+**Next — Notifications delivery (§3, four 🟡 rows).** "Bill due reminders",
+"Overspend alerts", "Monthly retro reminder" and "Weekly family digest" are
+each stored, served and editable end to end, and **not one of them is ever
+sent**. Today a household toggles a switch the design's own copy promises
+will deliver something, and nothing happens — the only 🟡 group in this file
+where the product actively tells the user something untrue. Four rows, one
+cause, no dependency on anything unbuilt.
+
+Two things it must settle before code, both of which are existing decisions
+it would contradict — and `CLAUDE.md` requires saying so rather than
+overriding them silently:
+
+- **Nothing in this codebase runs on a clock.** The only cron anywhere is the
+  box's nightly backup. Budget decision 1 and Goals decision 4 each refused
+  outright to invent this product's first scheduler inside their own feature,
+  and Bills decision 3 records the consequence in the product's own copy —
+  "nothing pays itself, because nothing in this product runs on a clock". A
+  reminder needs that scheduler, so the spec has to make the argument for it
+  openly rather than quietly reversing three decisions.
+
+  **The Bills spec already says this group is one piece, not several gaps.**
+  Its own "Out of scope" section names bill reminders, automatic goal
+  contributions and automatic month-end rollover and calls them "one missing
+  piece, not three gaps". So the work closes more than the four notification
+  rows: §5's **"Roll unspent into savings"** is 🟡 for exactly this reason —
+  the manual move ships, the design's automatic month-end toggle does not —
+  which makes it **five 🟡 rows across two sections behind one cause.**
+- **Mail does not leave the box** ([ADR 3](adr/0003-mail-stays-on-the-box.md)),
+  so a reminder that goes by email reaches nobody in production. Telegram is
+  the channel that works ([ADR 4](adr/0004-telegram-as-a-second-delivery-channel.md)),
+  which makes a household with no bot linked the case to design for, not the
+  edge case. This is also where ADR 4's deferred `Notifier` port earns its
+  existence on the terms ADR 4 itself set: a second implementation **and** a
+  second caller. A scheduled reminder is that second caller — the first code
+  in this product that must *choose* a channel.
+
+The `notification_delivery` flag already exists in the registry, so this ships
+dark the same way the calendar stub did.
+
+**Two honesty items, neither of them work, both the owner's call.** The three
+**Link account** rows (§5, ⬜) describe the SGFinDex flow that is restricted to
+licensed financial institutions — this product cannot build them, so ⬜
+overstates them and 🚫 with the reason is the truthful symbol; not moved
+here, because "unbuildable" is a judgement to confirm rather than assume. And
+the **flags screen's** named 🟡 gap (§9) is unchanged: still no control to
+create a per-household override, still a small addition to a built screen
+rather than a slice.
 
 1. ~~**Admin audit screen**~~ — **removed from the roadmap 2026-09-02.**
    Built and walked that day, then descoped by the product owner as not
@@ -1815,10 +1919,17 @@ this group is no longer "then": it is next**, and item 6 is where it starts.
    points") are permanent design decisions, not open work, unlike items
    1–4 above this item never reaches "every row ✅." Numbering kept, as for
    items 1–4.
-7. **Family** — the only genuinely untouched area. Calendar needs Bills for the
-   bill dates on the month grid, and Bills is ✅
-8. **Overview** — 8 of 11 already ✅ because it grew alongside Money; what
-   remains only aggregates the areas above
+7. ~~**Family**~~ — **out of this release, 2026-09-07.** It was never blocked:
+   the calendar's dependency on Bills for bill dates on the month grid was
+   satisfied on 2026-08-10, and nothing about it proved unbuildable. The
+   product owner deferred it. All three of §7's rows are 🚫 and the two
+   deferred ones say what would bring them back. Numbering kept, as for items
+   1–4.
+8. ~~**Overview**~~ — **closed for this release at six of seven cards**, for
+   item 7's reason and no other. The one card left, "This week" agenda, reads
+   the calendar; its row stays ⬜ rather than 🚫 because the owner deferred the
+   calendar and not the card. Everything else on that screen only aggregates
+   the areas above, and those are built.
 
 **What this cost.** Sections 1–8 are the household product — what a customer
 buys. Section 9 is the surface the operator uses to run the install; no

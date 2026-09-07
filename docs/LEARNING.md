@@ -5017,6 +5017,43 @@ route with a missing guard has no second line of defence.
   identical problem through the product's real path — the answer was one
   commit away.
 
+- **An MCP server is started by the agent harness, not by your shell, so it
+  never sees your shell profile — and Serena sat installed, onboarded and
+  completely dead in this repo for five weeks because of it.** `go` is
+  deliberately not on `PATH` on this machine (the "Running it" note in
+  `CLAUDE.md` has said so all along), and neither is `gopls`. The Serena
+  plugin's `.mcp.json` set no `env`, so its server inherited that same
+  `PATH`-less environment, `gopls` could not start, and — because Serena
+  initialises all of its language servers as a unit — the TypeScript server
+  went down with the Go one. Every symbol tool then failed with `the language
+  server manager is not initialized`, a message that names neither `PATH` nor
+  Go. Nothing about the install looked wrong from the outside: the plugin was
+  enabled, `.serena/project.yml` was present, `.serena/cache/` held pickled
+  symbols from the onboarding run, and 118 commits went by. The second, softer
+  trap sat on top: with no `--project` flag the server activates nothing, so
+  even a working install answers the *first* call of every session with `No
+  active project`, which is enough friction on its own to make the tools go
+  unused. **A tool that fails only on its first real call, in a session nobody
+  is debugging it in, is indistinguishable from a tool nobody reached for** —
+  the way to tell them apart is to call it once, deliberately, and read the
+  error. Fixed by a versioned `.mcp.json` at the repo root that writes `PATH`
+  out in full and passes `--project`, with the plugin copy disabled so two
+  servers do not race. Proven with `serena project health-check`, which starts
+  the real language servers outside the harness and is the check to run before
+  believing any of this again.
+- **Rooting a language server at the repo root, in a repo whose module is not
+  at the repo root, silently degrades it rather than failing.** With
+  `ls_workspace_folders: ["."]`, `gopls` logged
+  `Created View (#1) view_type="AdHoc" ... packages=2` — an ad-hoc view is
+  gopls's fallback for "no module here", and it resolves almost nothing across
+  packages, which is exactly what the tool was wanted for. The Go module is at
+  `api/go.mod` and the TypeScript app at `web/`; pointing the workspace folders
+  there instead produced `view_type="GoMod" ... packages=41`. Both runs
+  reported `Health check passed`, because the health check only asks whether
+  the tools return *something*. **Read what the language server says about the
+  workspace it built, not only whether the call succeeded** — the difference
+  between a useful index and a useless one was two words in a log line.
+
 ### Provisioning the read-only role on the box (2026-09-05)
 
 **A runbook command that wraps with a trailing `\` does not survive being
