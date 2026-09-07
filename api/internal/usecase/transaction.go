@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -18,6 +19,10 @@ import (
 // received amount: only its figure crosses the wire, and its currency comes
 // from the destination account.
 type NewTransaction struct {
+	// IdempotencyKey is optional. When set, a repeated create with the same
+	// key and the same fields answers the stored row instead of writing a
+	// second one -- see CreateOrReplay.
+	IdempotencyKey      string
 	HouseholdID         string
 	Kind                string
 	OccurredOn          time.Time
@@ -90,7 +95,29 @@ func (s *TransactionService) Delete(ctx context.Context, householdID, id string)
 }
 
 func (s *TransactionService) Create(ctx context.Context, in NewTransaction) (domain.Transaction, error) {
+	created, _, err := s.CreateOrReplay(ctx, in)
+	return created, err
+}
+
+// CreateOrReplay is Create with the idempotency contract made visible: the
+// bool is true when the key had already been used for this exact
+// transaction and the stored row is being handed back rather than a new
+// one written. Without a key it is Create.
+//
+// The order is insert first, look up second -- never "check, then insert".
+// Two retries racing each other would both pass the check; the unique index
+// lets exactly one insert win and turns the other into the replay path.
+// A key that exists but whose stored row differs from this request is
+// refused (ErrIdempotencyKeyReused): the caller asked for one transaction
+// and would otherwise be told "done" about another.
+func (s *TransactionService) CreateOrReplay(ctx context.Context, in NewTransaction) (domain.Transaction, bool, error) {
+	if in.IdempotencyKey != "" {
+		if err := domain.ValidateIdempotencyKey(in.IdempotencyKey); err != nil {
+			return domain.Transaction{}, false, err
+		}
+	}
 	t := domain.Transaction{
+		IdempotencyKey:     in.IdempotencyKey,
 		HouseholdID:        in.HouseholdID,
 		Kind:               domain.TransactionKind(in.Kind),
 		OccurredOn:         in.OccurredOn,
@@ -105,9 +132,27 @@ func (s *TransactionService) Create(ctx context.Context, in NewTransaction) (dom
 		t.ReceivedAmount = &domain.Money{Amount: *in.ReceivedAmountMinor}
 	}
 	if err := s.validate(ctx, &t); err != nil {
-		return domain.Transaction{}, err
+		return domain.Transaction{}, false, err
 	}
-	return s.d.Transactions.Create(ctx, t)
+	created, err := s.d.Transactions.Create(ctx, t)
+	if err == nil {
+		return created, false, nil
+	}
+	if t.IdempotencyKey == "" || !errors.Is(err, domain.ErrIdempotencyKeyInUse) {
+		return domain.Transaction{}, false, err
+	}
+	stored, lookupErr := s.d.Transactions.GetByIdempotencyKey(ctx, t.HouseholdID, t.IdempotencyKey)
+	if lookupErr != nil {
+		// The index said the key exists and the lookup says it does not:
+		// the row was deleted between the two calls. Report the original
+		// refusal rather than inventing an answer; the caller's retry will
+		// simply create it.
+		return domain.Transaction{}, false, fmt.Errorf("replay lookup after %w: %v", err, lookupErr)
+	}
+	if !t.SameCreate(stored) {
+		return domain.Transaction{}, false, domain.ErrIdempotencyKeyReused
+	}
+	return stored, true, nil
 }
 
 // Update merges the patch onto the stored transaction and validates the

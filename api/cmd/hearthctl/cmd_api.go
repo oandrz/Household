@@ -13,10 +13,15 @@ import (
 // cmdAPI is the escape hatch: any method, any path, an optional JSON body.
 // It is what makes every route reachable without a typed verb for each,
 // and what an agent uses for anything `routes` lists that has no verb.
+// idempotencyKeyHeader is the server's name for the header (the IETF
+// draft's), copied from internal/adapter/http/transaction_handlers.go.
+const idempotencyKeyHeader = "Idempotency-Key"
+
 func cmdAPI(ctx context.Context, c *client, args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("api", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	data := fs.String("data", "", "JSON request body, or @path to read it from a file")
+	key := fs.String("idempotency-key", "", "Idempotency-Key header, for POST /transactions: makes the call safe to retry")
 	// Flags may come before or after the two positionals.
 	positional, flagArgs := splitPositionals(args, 2)
 	if err := fs.Parse(flagArgs); err != nil {
@@ -47,7 +52,11 @@ func cmdAPI(ctx context.Context, c *client, args []string, stdout io.Writer) err
 	if err := c.requireCreds(); err != nil && !isPublic(method, path) {
 		return err
 	}
-	res, err := c.do(ctx, method, path, body)
+	var headers map[string]string
+	if *key != "" {
+		headers = map[string]string{idempotencyKeyHeader: *key}
+	}
+	res, err := c.doWithHeaders(ctx, method, path, body, headers)
 	if err != nil {
 		return err
 	}

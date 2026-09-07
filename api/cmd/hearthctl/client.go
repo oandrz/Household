@@ -65,6 +65,13 @@ type response struct {
 // password's 401 carries "attemptsRemaining", the one number that tells a
 // caller to stop before the household locks. refuse below maps it.
 func (c *client) do(ctx context.Context, method, path string, body []byte) (response, error) {
+	return c.doWithHeaders(ctx, method, path, body, nil)
+}
+
+// doWithHeaders is do plus extra request headers -- today only
+// Idempotency-Key on a transaction create. Kept separate so the many
+// callers that need no header do not each pass nil.
+func (c *client) doWithHeaders(ctx context.Context, method, path string, body []byte, headers map[string]string) (response, error) {
 	if !strings.HasPrefix(path, "/api/") {
 		path = apiPrefix + "/" + strings.TrimLeft(path, "/")
 	}
@@ -83,6 +90,9 @@ func (c *client) do(ctx context.Context, method, path string, body []byte) (resp
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 	if c.creds != nil {
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: c.creds.Session})

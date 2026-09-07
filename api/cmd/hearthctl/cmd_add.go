@@ -26,6 +26,12 @@ type insert struct {
 	build func(args []string, stderr io.Writer) (map[string]any, error)
 }
 
+// keyFlag is the one flag that is not part of the body: it becomes the
+// Idempotency-Key header. Only transactions honour it server-side today, so
+// only transaction add declares it (buildTransaction pops it off the body
+// under this name before the body is sent).
+const keyFlag = "__idempotencyKey"
+
 var inserts = map[string]insert{
 	"transaction": {path: "/transactions", build: buildTransaction},
 	"account":     {path: "/accounts", build: buildAccount},
@@ -46,11 +52,18 @@ func cmdAdd(ctx context.Context, c *client, kind string, args []string, stdout i
 	if err := c.requireCreds(); err != nil {
 		return err
 	}
+	var headers map[string]string
+	if key, ok := body[keyFlag].(string); ok {
+		delete(body, keyFlag)
+		if key != "" {
+			headers = map[string]string{idempotencyKeyHeader: key}
+		}
+	}
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
-	res, err := c.do(ctx, http.MethodPost, ins.path, raw)
+	res, err := c.doWithHeaders(ctx, http.MethodPost, ins.path, raw, headers)
 	if err != nil {
 		return err
 	}
@@ -109,6 +122,7 @@ func buildTransaction(args []string, stderr io.Writer) (map[string]any, error) {
 	category := fs.String("category", "", "category id (expense and income)")
 	paidBy := fs.String("paid-by", "", "membership id of who paid (see whoami / list members)")
 	received := fs.Int64("received-minor", -1, "amount that arrived, minor units, for a transfer between currencies")
+	key := fs.String("key", "", "idempotency key: the same key with the same fields never creates a second row, so a retry is safe")
 	if err := parse(fs, args); err != nil {
 		return nil, err
 	}
@@ -146,6 +160,9 @@ func buildTransaction(args []string, stderr io.Writer) (map[string]any, error) {
 	setIf(body, "paidByMembershipId", *paidBy)
 	if *received >= 0 {
 		body["receivedAmountMinor"] = *received
+	}
+	if *key != "" {
+		body[keyFlag] = *key
 	}
 	return body, nil
 }

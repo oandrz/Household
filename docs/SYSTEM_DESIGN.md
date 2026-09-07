@@ -1112,7 +1112,7 @@ that presses `/start` is Telegram's, not the person's.
 | PATCH | `/accounts/{id}` | session · money · CSRF · owner |
 | POST | `/accounts/{id}/archive`, `/accounts/{id}/restore` | session · money · CSRF · owner |
 | GET | `/transactions`, `/categories` | session · money · owner — owner gates the read, unlike accounts |
-| POST | `/transactions` | session · money · owner · CSRF |
+| POST | `/transactions` | session · money · owner · CSRF — an optional `Idempotency-Key` header makes the call safe to retry: same key and same fields answer the stored row with 200, same key and different fields `409 IDEMPOTENCY_KEY_REUSED` (see §5, "Idempotent create") |
 | PATCH · DELETE | `/transactions/{id}` | session · money · owner · CSRF |
 | GET | `/budgets/{month}`, `/budgets/history` | session · money · owner — same reasoning as the transactions/categories reads above |
 | PUT | `/budgets/{month}` | session · money · owner · CSRF — its own CSRF sub-group, not the one below |
@@ -1673,6 +1673,55 @@ the rate that held at the time, because there is no historical rate table;
 the chart shows how balances moved with the exchange rate held still, which
 is the more useful of the two questions anyway (an account whose balance
 never moved should not appear to rise and fall because a currency did).
+
+### Transactions — an idempotent create, for callers that retry
+
+```mermaid
+sequenceDiagram
+    participant C as hearthctl (or any client)
+    participant H as Handler
+    participant Svc as TransactionService
+    participant Repo as TransactionRepository
+    participant PG as postgres
+
+    C->>H: POST /api/v1/transactions + Idempotency-Key: k
+    H->>Svc: CreateOrReplay(in{IdempotencyKey: k})
+    Svc->>Svc: ValidateIdempotencyKey, then the usual validate()
+    Svc->>Repo: Create(t)
+    Repo->>PG: INSERT ... idempotency_key = k
+    alt first time
+        PG-->>Repo: row
+        Svc-->>H: (created, replayed=false)
+        H-->>C: 201 transaction
+    else transactions_household_idempotency_key hit
+        PG-->>Repo: 23505
+        Repo-->>Svc: ErrIdempotencyKeyInUse
+        Svc->>Repo: GetByIdempotencyKey(household, k)
+        Svc->>Svc: t.SameCreate(stored)?
+        alt same fields
+            Svc-->>H: (stored, replayed=true)
+            H-->>C: 200 the stored transaction
+        else different fields
+            Svc-->>H: ErrIdempotencyKeyReused
+            H-->>C: 409 IDEMPOTENCY_KEY_REUSED
+        end
+    end
+```
+
+Insert first, look up second — never "check, then insert". Two retries
+racing each other both pass a check; the partial unique index lets exactly
+one insert win and turns the other into the replay path, with no application
+lock. A replay compares every caller-controlled field and refuses a mismatch
+rather than handing back a different transaction than the one asked for
+(LEARNING pattern 5). The key lives on the row, so a deleted transaction
+frees its key and there is no retention job. Without the header the route
+behaves exactly as before; the web app never sends one. Only transactions
+carry this today — they are the row an agent creates hundreds of; the
+pattern is copied to a second table when one needs it, not generalised
+early. Spec: `docs/superpowers/specs/2026-09-08-hearth-idempotent-import-design.md`.
+`hearthctl transaction import` is the first caller: one keyed POST per CSV
+row, the key derived from the row's content so a re-run of the same file is
+all replays.
 
 ### Transactions — the ledger and month-to-date spend, one request
 
@@ -2710,6 +2759,7 @@ erDiagram
         char amount_currency
         bigint received_amount_minor "nullable — transfer only"
         char received_amount_currency "nullable, paired with the amount above"
+        text idempotency_key "nullable — partial UNIQUE (household_id, key); a retry-safe create's handle, freed when the row is deleted"
     }
     budgets {
         uuid id PK

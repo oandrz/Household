@@ -57,7 +57,10 @@ commands:
                                transactions
   api <METHOD> <path> [--data=<json>|--data=@file]
                                call any route; path is relative to /api/v1
-  transaction add ...          write an expense, income or transfer
+  transaction add ...          write an expense, income or transfer (--key makes it retry-safe)
+  transaction import <file.csv> [--dry-run]
+                               many rows, each with an idempotency key, so the
+                               same file run twice creates nothing new
   account add ...              create an account
   bill add ...                 create a recurring bill
   goal add ...                 create a savings goal
@@ -118,6 +121,9 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "api":
 		return cmdAPI(ctx, client, rest[1:], stdout)
 	case "transaction", "account", "bill", "goal", "category":
+		if rest[0] == "transaction" && len(rest) > 1 && rest[1] == "import" {
+			return cmdImport(ctx, client, rest[2:], stdout, stderr)
+		}
 		return cmdAdd(ctx, client, rest[0], rest[1:], stdout)
 	default:
 		return fail(exitUsage, "unknown command %q\n\n%s", rest[0], usage)

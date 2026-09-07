@@ -4767,7 +4767,16 @@ route with a missing guard has no second line of defence.
   through like any refusal, `login` has its own message that never says
   "retry", and a test pins the body on stdout, one request made, no
   credentials stored. A rule in a spec is not a behaviour until a test
-  would fail without it.
+  would fail without it. *(e)* **The dev `api` container does not rebuild
+  when you edit code on this machine.** `air` watches a volume mounted from
+  macOS into colima, and file events do not cross that boundary, so the
+  container went on serving the binary it built at start-up. The first live
+  run of `transaction import` "created 3" twice and a reused key got 201,
+  with every test green and the migration visibly applied — the old binary
+  simply did not know the header. The tell was the same one
+  `verifying-in-the-real-environment` already names: a response the code you
+  are reading cannot produce. `docker compose restart api` forces a rebuild.
+  Check the binary's build time before trusting a walk.
 - The architecture lint **never enforced the rule it existed for**. Both branches
   only matched imports *within* the module, so third-party imports in
   `internal/domain` passed. Proven by planting `pgx` and getting exit 0.

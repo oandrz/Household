@@ -60,6 +60,34 @@ hearthctl category add --name=Groceries
 
 Every command prints `-h` for its flags.
 
+## Import many transactions
+
+```bash
+hearthctl transaction import statement.csv --dry-run   # resolves every row, sends nothing
+hearthctl transaction import statement.csv
+```
+
+Header row required, columns in any order; unknown columns are refused:
+
+```
+date,kind,description,amount_minor,from_account,to_account,category,paid_by,key,received_minor
+2026-09-03,expense,Coffee,450,DBS Savings,,Dining out,Andreas,,
+2026-09-04,income,Refund,2000,,DBS Savings,,,,
+```
+
+`from_account`, `to_account`, `category` and `paid_by` take an id **or a
+name** (case-insensitive, must match exactly one; members match display
+name or email). Every row is resolved before the first request; one bad row
+means nothing is sent, and the summary names its line.
+
+Each row is posted with an idempotency key: the `key` column if given,
+otherwise a hash of the row's content plus `#2`, `#3`… for identical rows in
+the same file. So **running the same file twice creates nothing new**, two
+genuine identical coffees stay two rows, and adding a row above does not
+re-key the ones below. Output is `{"created":n,"replayed":n,"failed":[…]}`;
+exit 3 if any row was refused. A network failure stops the run — re-run the
+file, the rows already sent replay.
+
 ## Reach anything else
 
 `hearthctl routes` prints every route, who may call it, and its body shape.
@@ -92,9 +120,13 @@ person goes to stderr. A 204 prints nothing.
 
 - **Writes need an owner.** A limited member's session gets 403 on every
   insert, the same as in the app.
-- **No retries on writes.** The API has no idempotency keys, so a retried
-  POST is a duplicate row. If a write's exit code is 4 you do not know
-  whether it landed: `list` before trying again.
+- **Retrying a write is safe only with a key.** `transaction add --key=<k>`
+  (or `api POST /transactions --idempotency-key=<k>`) makes the same call
+  repeatable: same key and same fields answer the stored row with 200; same
+  key and different fields are refused with `409 IDEMPOTENCY_KEY_REUSED`.
+  Without a key, a write whose exit code is 4 may or may not have landed —
+  `list` before trying again. Accounts, bills, goals and categories have no
+  key yet.
 - **Money-capability routes are gated per member.** `routes` shows the guard
   for each.
 - Sign-up, magic link, Telegram and invite acceptance are browser flows and

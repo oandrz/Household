@@ -839,9 +839,17 @@ type TransactionRepository interface {
 	// which must be indistinguishable from not existing at all.
 	Get(ctx context.Context, householdID, transactionID string) (TransactionView, error)
 	// Create writes the "" <-> SQL NULL convention for every optional id:
-	// category, payer, and whichever account side the kind leaves empty.
-	// t.ID is ignored -- the database assigns it.
+	// category, payer, and whichever account side the kind leaves empty --
+	// and for t.IdempotencyKey, which is stored NULL when "". t.ID is
+	// ignored; the database assigns it. A non-empty key this household has
+	// already stored reports domain.ErrIdempotencyKeyInUse and writes
+	// nothing; the service decides whether that is a replay.
 	Create(ctx context.Context, t domain.Transaction) (domain.Transaction, error)
+	// GetByIdempotencyKey is the replay lookup after Create reported
+	// ErrIdempotencyKeyInUse. Household-scoped: another household's row
+	// under the same key is domain.ErrNotFound, indistinguishable from no
+	// row at all.
+	GetByIdempotencyKey(ctx context.Context, householdID, key string) (domain.Transaction, error)
 	// Update replaces every mutable column. TransactionService is what turns a
 	// partial PATCH into a complete Transaction; this port never merges.
 	Update(ctx context.Context, t domain.Transaction) (domain.Transaction, error)

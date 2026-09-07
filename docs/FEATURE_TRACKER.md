@@ -925,7 +925,9 @@ the figure that actually matters for planning: with five rows out of scope,
 
 **2026-09-08 — §10 Automation added** (two rows, one ✅ and one ⬜) for the
 `hearthctl` command-line client, which the design never drew. Totals move to
-**87/18/16/5 = 126**; the release denominator becomes **121**.
+**87/18/16/5 = 126**; the release denominator becomes **121**. **Later the
+same day**, two more ✅ rows (idempotent create, CSV import):
+**89/18/16/5 = 128**, denominator **123**.
 
 | Area | Built | Partial | Not started | Out of scope |
 |---|---|---|---|---|
@@ -938,8 +940,8 @@ the figure that actually matters for planning: with five rows out of scope,
 | Family | 0 | 0 | 0 | 3 |
 | Household extras | 0 | 0 | 0 | 1 |
 | Platform administration | 7 | 1 | 0 | 1 |
-| Automation | 1 | 0 | 1 | 0 |
-| **Total** | **87** | **18** | **16** | **5** |
+| Automation | 3 | 0 | 1 | 0 |
+| **Total** | **89** | **18** | **16** | **5** |
 
 ---
 
@@ -1780,7 +1782,9 @@ the design drew it. Decision and shape in
 
 | Feature | State | Notes |
 |---|---|---|
-| `hearthctl` — a command-line client of the API | ✅ | `api/cmd/hearthctl`, built by `make hearthctl`. Signs in with `POST /auth/sign-in`, stores the session and CSRF cookies in `~/.config/hearth/<host>.json` (0600, one file per host), sends `X-CSRF-Token` on every write. `login`/`logout`/`whoami`, `list <kind>`, `api <METHOD> <path> [--data]` for any route, five typed inserts (`transaction`, `account`, `bill`, `goal`, `category` `add`), and `routes` — a hand-kept table a test diffs against `router.go` both ways. Goes **through** every guard, never around them (ADR 6). **Walked against the dev stack 2026-09-08**: account, expense, income, bill, goal and category all inserted from the shell; the ledger showed both rows with the right signs and the account balance read 500000 + 650000 − 8450 = 1141550 in `list accounts` and S$11,415.50 on the Overview. Three mutations (drop the CSRF header, rename a route in the table, stop mapping 401) each turned a test red. **Known gaps, deliberate:** no retry on writes because the API has no idempotency keys, so a write that exits 4 may or may not have landed — `list` before retrying; amounts are minor units only (no `12.34` parsing); sign-up, magic link, Telegram and invite acceptance are not wrapped |
+| `hearthctl` — a command-line client of the API | ✅ | `api/cmd/hearthctl`, built by `make hearthctl`. Signs in with `POST /auth/sign-in`, stores the session and CSRF cookies in `~/.config/hearth/<host>.json` (0600, one file per host), sends `X-CSRF-Token` on every write. `login`/`logout`/`whoami`, `list <kind>`, `api <METHOD> <path> [--data]` for any route, five typed inserts (`transaction`, `account`, `bill`, `goal`, `category` `add`), and `routes` — a hand-kept table a test diffs against `router.go` both ways. Goes **through** every guard, never around them (ADR 6). **Walked against the dev stack 2026-09-08**: account, expense, income, bill, goal and category all inserted from the shell; the ledger showed both rows with the right signs and the account balance read 500000 + 650000 − 8450 = 1141550 in `list accounts` and S$11,415.50 on the Overview. Three mutations (drop the CSRF header, rename a route in the table, stop mapping 401) each turned a test red. **Known gaps, deliberate:** amounts are minor units only (no `12.34` parsing); sign-up, magic link, Telegram and invite acceptance are not wrapped |
+| Idempotent `POST /transactions` (`Idempotency-Key` header) | ✅ | Migration `00015`: nullable `transactions.idempotency_key` with a partial unique index per household. `TransactionService.CreateOrReplay` inserts first and looks up second, so two racing retries are settled by the index; a replay compares every caller-controlled field (`domain.Transaction.SameCreate`) and answers the stored row with 200, a mismatch `409 IDEMPOTENCY_KEY_REUSED`, a malformed key `422`. No header means the old behaviour exactly; the web app sends none. **Verified live 2026-09-08**: same key twice → one row, 200 second time; same key different amount → 409 with the body shown. Three mutations (fake repository stops enforcing the key, service stops comparing fields, adapter stops translating the constraint) each turned a test red — the last one surfacing as `409 ALREADY_EXISTS` from the real database, which is how the translate case was proven load-bearing. Only transactions carry a key; other creates do not (spec decision 7) |
+| `hearthctl transaction import <file.csv>` | ✅ | Client-side loop of keyed `POST /transactions`, no bulk route. Names or ids for accounts, categories and members; every row resolved before anything is sent, one bad row blocks the file; default key is a content hash plus `#n` for identical rows, so the same file run twice is all replays. **Verified live 2026-09-08**: a four-row file with one unknown account sent nothing and named line 5; the three-row file created 3 then replayed 3; the ledger in a real browser showed six rows for two runs plus one keyed add, no duplicates. The first live run created 3 twice — the dev `api` container's `air` had not rebuilt on the mounted volume, so the old binary answered; `docker compose restart api` fixed it and LEARNING carries the note |
 | Personal API tokens for headless callers | ⬜ | Deferred by ADR 6, not rejected: a 30-day session covers one agent on one machine. Becomes worth its table and Bearer middleware when a headless box or a second agent needs a credential that is not a person's session. When it lands, `hearthctl login` gains a second way to obtain a credential and nothing else in the CLI changes |
 
 ## Suggested order

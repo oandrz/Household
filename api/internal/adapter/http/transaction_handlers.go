@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/andreasoentoro/hearth/api/internal/domain"
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
@@ -354,6 +355,11 @@ func toMonthSummaryDTO(s usecase.MonthSummary) monthSummaryDTO {
 // denominated in its account's currency and the service derives it. A field
 // here that the service overwrote would be a field this handler accepts and
 // never persists -- the shape guarding-partial-writes exists for.
+// idempotencyKeyHeader carries a caller's key on POST /transactions. The
+// IETF draft's name, so a generic HTTP client that already knows the
+// convention needs no Hearth-specific knowledge.
+const idempotencyKeyHeader = "Idempotency-Key"
+
 type createTransactionRequest struct {
 	Kind                string  `json:"kind"`
 	OccurredOn          string  `json:"occurredOn"`
@@ -402,7 +408,24 @@ func handleCreateTransaction(deps Deps) http.HandlerFunc {
 			return
 		}
 
+		// The key rides in a header, not the body, so the body DTO the
+		// web app sends is unchanged and a missing header is exactly
+		// today's behaviour. Header.Values, not Get: Get answers "" for
+		// both "absent" and "present but empty", and a caller who sent the
+		// header empty is refused (ValidateIdempotencyKey) rather than
+		// silently treated as having sent none. See the 2026-09-08
+		// idempotent-import spec.
+		var idempotencyKey string
+		if values := r.Header.Values(idempotencyKeyHeader); len(values) > 0 {
+			idempotencyKey = values[0]
+			if err := domain.ValidateIdempotencyKey(idempotencyKey); err != nil {
+				MapDomainError(w, r, err)
+				return
+			}
+		}
+
 		in := usecase.NewTransaction{
+			IdempotencyKey:      idempotencyKey,
 			HouseholdID:         scope.HouseholdID,
 			Kind:                req.Kind,
 			OccurredOn:          occurredOn,
@@ -423,12 +446,18 @@ func handleCreateTransaction(deps Deps) http.HandlerFunc {
 			in.ToAccountID = *req.ToAccountID
 		}
 
-		created, err := deps.Transactions.Create(r.Context(), in)
+		created, replayed, err := deps.Transactions.CreateOrReplay(r.Context(), in)
 		if err != nil {
 			MapDomainError(w, r, err)
 			return
 		}
-		writeTransaction(w, r, deps, scope.HouseholdID, created.ID, http.StatusCreated)
+		// 201 says a row was written; a replay wrote nothing, so it is 200.
+		// The status is how hearthctl's import counts created vs replayed.
+		status := http.StatusCreated
+		if replayed {
+			status = http.StatusOK
+		}
+		writeTransaction(w, r, deps, scope.HouseholdID, created.ID, status)
 	}
 }
 

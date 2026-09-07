@@ -2571,10 +2571,29 @@ func (f *fakeTransactionRepo) markBeforeFromAccountOpening(transactionID string)
 }
 
 func (f *fakeTransactionRepo) Create(_ context.Context, t domain.Transaction) (domain.Transaction, error) {
+	// The partial unique index from 00015, enforced here too: a fake that
+	// accepted a duplicate key would let the service's replay branch go
+	// untested while every test stayed green.
+	if t.IdempotencyKey != "" {
+		for _, existing := range f.transactions {
+			if existing.HouseholdID == t.HouseholdID && existing.IdempotencyKey == t.IdempotencyKey {
+				return domain.Transaction{}, domain.ErrIdempotencyKeyInUse
+			}
+		}
+	}
 	f.nextID++
 	t.ID = fmt.Sprintf("txn-%d", f.nextID)
 	f.transactions = append(f.transactions, t)
 	return t, nil
+}
+
+func (f *fakeTransactionRepo) GetByIdempotencyKey(_ context.Context, householdID, key string) (domain.Transaction, error) {
+	for _, t := range f.transactions {
+		if t.HouseholdID == householdID && t.IdempotencyKey == key {
+			return t, nil
+		}
+	}
+	return domain.Transaction{}, domain.ErrNotFound
 }
 
 func (f *fakeTransactionRepo) Get(_ context.Context, householdID, id string) (usecase.TransactionView, error) {

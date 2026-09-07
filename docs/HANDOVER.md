@@ -119,7 +119,13 @@ client of the API at `api/cmd/hearthctl` (`make hearthctl`, manual in
 so a script or an AI agent can insert and read data without a browser. It goes
 through every HTTP guard rather than around them, unlike `adminctl`. Walked
 against the dev stack the same day; `docs/FEATURE_TRACKER.md` §10 has the
-record. Personal API tokens are the deferred follow-up.
+record. **Stacked on it, branch `hearthctl-agent` (same day):** `routes
+--json`, the `hearth-cli` project skill, an `Idempotency-Key` header on
+`POST /transactions` (migration `00015`, spec
+`docs/superpowers/specs/2026-09-08-hearth-idempotent-import-design.md`), and
+`hearthctl transaction import <file.csv>` — a keyed client-side loop, so the
+same statement imported twice creates nothing new. Both walked live. Personal
+API tokens are the deferred follow-up.
 
 Self-serve sign-up carries no slice number on purpose: it was specified and
 built between slices 1 and 2, ahead of Money (see "What to do next" below for

@@ -52,7 +52,7 @@ var routeTable = []route{
 	{"POST", "/accounts/{id}/restore", "money+owner+csrf", "-"},
 
 	{"GET", "/transactions", "money+owner", `?month=YYYY-MM&kind=&account_id=&category_id=&paid_by=&cursor=&limit=`},
-	{"POST", "/transactions", "money+owner+csrf", `{"kind","occurredOn","description","amountMinor","fromAccountId"?,"toAccountId"?,"categoryId"?,"paidByMembershipId"?,"receivedAmountMinor"?}`},
+	{"POST", "/transactions", "money+owner+csrf", `{"kind","occurredOn","description","amountMinor","fromAccountId"?,"toAccountId"?,"categoryId"?,"paidByMembershipId"?,"receivedAmountMinor"?} + header Idempotency-Key? (200 on replay, 409 on reuse)`},
 	{"PATCH", "/transactions/{id}", "money+owner+csrf", `same fields, all optional`},
 	{"DELETE", "/transactions/{id}", "money+owner+csrf", "-"},
 	{"GET", "/categories", "money+owner", "?includeArchived=true"},

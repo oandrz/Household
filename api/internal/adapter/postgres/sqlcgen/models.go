@@ -335,6 +335,7 @@ type Transaction struct {
 	ReceivedAmountMinor    *int64
 	ReceivedAmountCurrency *string
 	CreatedAt              pgtype.Timestamptz
+	IdempotencyKey         *string
 }
 
 type User struct {
