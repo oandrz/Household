@@ -4736,6 +4736,38 @@ route with a missing guard has no second line of defence.
 
 ### Tooling and infrastructure
 
+- **`hearthctl` (2026-09-08).** Three things worth keeping from building the
+  CLI. *(a)* A fake `httptest` server that records `*http.Request` and lets
+  the test read `r.Body` afterwards reads a **closed** body — the server
+  closes it when the handler returns — so the first two body assertions
+  passed vacuously against an empty map. Read and store the bytes inside the
+  handler. *(b)* A test that diffs a hand-kept route table against
+  `router.go` by regexp sees the literals chi registers, and routes inside
+  `api.Route("/auth", …)` or `g.Route("/admin", …)` register **without their
+  prefix** (`"/me"`, `"/session"`). The first run reported eleven admin
+  routes "missing" from a table that deliberately omits them; the fix is to
+  name the nesting in the test and skip by literal, not by the path a
+  reader would expect. Prose an agent trusts needs a test, and that test
+  needs to know the shape of the thing it reads. *(c)* Found, not fixed:
+  `POST /accounts` answers the account DTO **bare**, while `POST /bills`,
+  `/goals` and `/categories` each wrap theirs (`{"bill":…}`,
+  `{"goal":…}`, `{"category":…}`) and `POST /transactions` is bare again.
+  The walk script assumed `{"account":…}` and reported "no account created"
+  while `list accounts` showed it. Every caller that is not the frontend
+  (which has one hook per route and never noticed) will trip on this once;
+  a follow-up could pick one envelope, but changing a shipped shape is a
+  frontend change too, so it is recorded here rather than done as a side
+  effect of a CLI. *(d)* Caught in review, not by a test: `do` first
+  short-circuited every 401 into "not signed in, run `hearthctl login`"
+  **before** the body reached the caller — so a wrong password at `login`
+  printed advice to run login again and threw away the one number
+  (`attemptsRemaining`) that says the household is two failures from
+  locking. The spec's own decision 4 ("never retry sign-in") was written
+  for exactly that case and the code hid the evidence. The 401 now flows
+  through like any refusal, `login` has its own message that never says
+  "retry", and a test pins the body on stdout, one request made, no
+  credentials stored. A rule in a spec is not a behaviour until a test
+  would fail without it.
 - The architecture lint **never enforced the rule it existed for**. Both branches
   only matched imports *within* the module, so third-party imports in
   `internal/domain` passed. Proven by planting `pgx` and getting exit 0.
