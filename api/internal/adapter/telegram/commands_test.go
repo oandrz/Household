@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
@@ -32,7 +33,9 @@ func TestParseCommandGrammar(t *testing.T) {
 		{"/recent extra words", Command{Name: "recent"}, true},
 		{"/help", Command{Name: "help"}, true},
 		{"/start abc", Command{}, false},
-		{"just words", Command{}, false},
+		{"just words", Command{Name: "text", Description: "just words"}, true},
+		{"/yes", Command{Name: "yes"}, true},
+		{"/no thanks", Command{Name: "no"}, true},
 		{"/unknown 5", Command{}, false},
 		{"", Command{}, false},
 	}
@@ -81,6 +84,22 @@ func (s *serviceSpy) Balances(context.Context, string) ([]usecase.AccountView, e
 }
 func (s *serviceSpy) Recent(context.Context, string, int) ([]usecase.TransactionView, error) {
 	return nil, nil
+}
+func (s *serviceSpy) Names(context.Context, string) ([]string, []string, error) {
+	return []string{"DBS Savings"}, []string{"Groceries"}, nil
+}
+
+// parserStub answers every sentence with one intent, and records what it
+// was asked so a test can see the names went along.
+type parserStub struct {
+	intent usecase.Intent
+	err    error
+	asked  []usecase.ParseIntentInput
+}
+
+func (p *parserStub) ParseIntent(_ context.Context, in usecase.ParseIntentInput) (usecase.Intent, error) {
+	p.asked = append(p.asked, in)
+	return p.intent, p.err
 }
 
 type senderSpy struct {
@@ -196,5 +215,102 @@ func TestHelpNeedsNoLinkedAccount(t *testing.T) {
 	NewCommander(resolverStub{err: domain.ErrNotFound}, &serviceSpy{}, sender).HandleCommand(context.Background(), Command{ChatID: 1, Name: "help"})
 	if sender.sent[0] != replyHelp {
 		t.Fatalf("got %q", sender.sent[0])
+	}
+}
+
+func TestFreeTextWithoutAParserIsCommandsOnly(t *testing.T) {
+	svc, sender := &serviceSpy{}, &senderSpy{}
+	NewCommander(resolverStub{member: owner()}, svc, sender).HandleCommand(context.Background(), Command{ChatID: 1, Name: "text", Description: "spent 5 on gum"})
+	if len(sender.sent) != 1 || sender.sent[0] != replyNoParser || len(svc.spends) != 0 {
+		t.Fatalf("sent %v spends %d", sender.sent, len(svc.spends))
+	}
+}
+
+func TestFreeTextIsShownBackAndWrittenOnlyOnYes(t *testing.T) {
+	svc := &serviceSpy{result: usecase.TelegramSpendResult{
+		Transaction: domain.Transaction{Description: "groceries", Amount: domain.Money{Amount: 8450, Currency: "SGD"}}, AccountName: "DBS Savings", MinorUnits: 2,
+	}}
+	sender := &senderSpy{}
+	parser := &parserStub{intent: usecase.Intent{Kind: "expense", Amount: "84.50", Description: "groceries", Account: "DBS Savings", Category: "Groceries"}}
+	c := NewCommander(resolverStub{member: owner()}, svc, sender).WithIntentParser(parser)
+
+	c.HandleCommand(context.Background(), Command{ChatID: 42, UpdateID: 500, Name: "text", Description: "spent 84.50 on groceries at DBS"})
+	if len(svc.spends) != 0 {
+		t.Fatalf("a parsed sentence must not be written before /yes")
+	}
+	if len(parser.asked) != 1 || parser.asked[0].Accounts[0] != "DBS Savings" || parser.asked[0].Categories[0] != "Groceries" {
+		t.Fatalf("parser must receive the household's names: %+v", parser.asked)
+	}
+	if sender.sent[0] != "Log expense 84.50 — groceries #Groceries @DBS Savings? Reply /yes or /no." {
+		t.Fatalf("summary %q", sender.sent[0])
+	}
+
+	c.HandleCommand(context.Background(), Command{ChatID: 42, UpdateID: 501, Name: "yes"})
+	if len(svc.spends) != 1 {
+		t.Fatalf("/yes must write exactly once, wrote %d", len(svc.spends))
+	}
+	in := svc.spends[0]
+	if in.UpdateID != 500 || in.AmountText != "84.50" || in.AccountName != "DBS Savings" || in.CategoryName != "Groceries" || in.Kind != domain.TransactionExpense {
+		t.Fatalf("written %+v; the key must be the sentence's update id, not the /yes", in)
+	}
+	if sender.sent[1] != "Logged -84.50 SGD — groceries (DBS Savings)" {
+		t.Fatalf("receipt %q", sender.sent[1])
+	}
+
+	c.HandleCommand(context.Background(), Command{ChatID: 42, UpdateID: 502, Name: "yes"})
+	if len(svc.spends) != 1 || sender.sent[2] != replyNothingPending {
+		t.Fatalf("a second /yes must write nothing: spends=%d sent=%q", len(svc.spends), sender.sent[2])
+	}
+}
+
+func TestNoDiscardsAndAnExpiredPendingIsNotWritten(t *testing.T) {
+	svc, sender := &serviceSpy{}, &senderSpy{}
+	parser := &parserStub{intent: usecase.Intent{Kind: "income", Amount: "10", Description: "refund"}}
+	c := NewCommander(resolverStub{member: owner()}, svc, sender).WithIntentParser(parser)
+	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	c.now = func() time.Time { return now }
+
+	c.HandleCommand(context.Background(), Command{ChatID: 1, UpdateID: 1, Name: "text", Description: "got a 10 refund"})
+	c.HandleCommand(context.Background(), Command{ChatID: 1, UpdateID: 2, Name: "no"})
+	c.HandleCommand(context.Background(), Command{ChatID: 1, UpdateID: 3, Name: "yes"})
+	if len(svc.spends) != 0 || sender.sent[1] != replyDiscarded || sender.sent[2] != replyNothingPending {
+		t.Fatalf("spends=%d sent=%v", len(svc.spends), sender.sent)
+	}
+
+	c.HandleCommand(context.Background(), Command{ChatID: 1, UpdateID: 4, Name: "text", Description: "got a 10 refund"})
+	now = now.Add(pendingTTL + time.Second)
+	c.HandleCommand(context.Background(), Command{ChatID: 1, UpdateID: 5, Name: "yes"})
+	if len(svc.spends) != 0 || sender.sent[4] != replyNothingPending {
+		t.Fatalf("an expired intent must not be written: spends=%d sent=%q", len(svc.spends), sender.sent[4])
+	}
+}
+
+func TestASentenceThatIsNotATransactionIsNotHeld(t *testing.T) {
+	svc, sender := &serviceSpy{}, &senderSpy{}
+	c := NewCommander(resolverStub{member: owner()}, svc, sender).WithIntentParser(&parserStub{intent: usecase.Intent{Kind: "none"}})
+	c.HandleCommand(context.Background(), Command{ChatID: 1, UpdateID: 1, Name: "text", Description: "hello there"})
+	c.HandleCommand(context.Background(), Command{ChatID: 1, UpdateID: 2, Name: "yes"})
+	if sender.sent[0] != replyNotUnderstood || sender.sent[1] != replyNothingPending || len(svc.spends) != 0 {
+		t.Fatalf("sent %v spends %d", sender.sent, len(svc.spends))
+	}
+}
+
+// A sentence from a chat that may not write gets silence: no parser call
+// (money), no reply (an outbound send a stranger could farm). A slash
+// command from the same chat still gets its one-sentence refusal.
+func TestAStrangerOrLimitedMembersSentenceIsIgnoredSilently(t *testing.T) {
+	limited := domain.Membership{ID: "m-2", HouseholdID: "h-1", Role: domain.RoleLimited, Capabilities: domain.Capabilities{domain.CapMoney}}
+	for name, r := range map[string]resolverStub{"stranger": {err: domain.ErrNotFound}, "limited": {member: limited}} {
+		parser := &parserStub{intent: usecase.Intent{Kind: "expense", Amount: "5", Description: "x"}}
+		sender := &senderSpy{}
+		c := NewCommander(r, &serviceSpy{}, sender).WithIntentParser(parser)
+		c.HandleCommand(context.Background(), Command{ChatID: 1, Name: "text", Description: "spent 5"})
+		if len(parser.asked) != 0 || len(sender.sent) != 0 {
+			t.Errorf("%s: asked=%d sent=%v, want nothing", name, len(parser.asked), sender.sent)
+		}
+		c.HandleCommand(context.Background(), Command{ChatID: 1, Name: "balance"})
+		if len(sender.sent) != 1 {
+			t.Errorf("%s: a slash command must still be answered, sent %v", name, sender.sent)
+		}
 	}
 }

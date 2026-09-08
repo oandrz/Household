@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
@@ -20,7 +22,10 @@ import (
 type Command struct {
 	ChatID   int64
 	UpdateID int64
-	Name     string // "spend" | "income" | "balance" | "recent" | "help"
+	// Name is one of spend, income, balance, recent, help, yes, no, or
+	// text -- the last being a plain sentence, which only means something
+	// when an IntentParser is configured (stage 5b).
+	Name string
 	// For spend and income:
 	Amount      string
 	Description string
@@ -47,15 +52,21 @@ func ParseCommand(u Update) (Command, bool) {
 		return Command{}, false
 	}
 	text := strings.TrimSpace(u.Message.Text)
-	if !strings.HasPrefix(text, "/") {
+	cmd := Command{ChatID: u.Message.Chat.ID, UpdateID: u.UpdateID}
+	if text == "" {
 		return Command{}, false
+	}
+	if !strings.HasPrefix(text, "/") {
+		// A plain sentence. The Commander decides whether it means anything
+		// (only with a parser configured); the poller just hands it over.
+		cmd.Name, cmd.Description = "text", text
+		return cmd, true
 	}
 	word, rest, _ := strings.Cut(text, " ")
 	// Telegram appends @botname to commands in groups: "/spend@HearthBot".
 	word, _, _ = strings.Cut(strings.ToLower(word), "@")
-	cmd := Command{ChatID: u.Message.Chat.ID, UpdateID: u.UpdateID}
 	switch word {
-	case "/balance", "/recent", "/help":
+	case "/balance", "/recent", "/help", "/yes", "/no":
 		cmd.Name = strings.TrimPrefix(word, "/")
 		return cmd, true
 	case "/spend", "/income":
@@ -120,6 +131,9 @@ type CommandService interface {
 	LogSpend(ctx context.Context, in usecase.TelegramSpend) (usecase.TelegramSpendResult, error)
 	Balances(ctx context.Context, householdID string) ([]usecase.AccountView, error)
 	Recent(ctx context.Context, householdID string, n int) ([]usecase.TransactionView, error)
+	// Names is what the parser may pick from: live account nicknames and
+	// the household's unarchived category names.
+	Names(ctx context.Context, householdID string) (accounts, categories []string, err error)
 }
 
 type Sender interface {
@@ -132,19 +146,49 @@ type Commander struct {
 	resolver CallerResolver
 	svc      CommandService
 	sender   Sender
+	// parser is nil unless an API key is configured; then free text is read
+	// into an intent, shown back, and written only on /yes.
+	parser usecase.IntentParser
+	now    func() time.Time
+
+	mu      sync.Mutex
+	pending map[int64]pendingIntent // by chat; the one thing awaiting /yes
 }
 
+// pendingIntent is a parsed sentence waiting for its /yes. It keeps the
+// update id of the sentence, not of the /yes, so the eventual write's
+// idempotency key is the message that carried the intent.
+type pendingIntent struct {
+	spend   usecase.TelegramSpend
+	summary string
+	expires time.Time
+}
+
+// pendingTTL is how long a "Log this? /yes" waits. Short on purpose: a /yes
+// twenty minutes later is more likely a reply to something else.
+const pendingTTL = 5 * time.Minute
+
 func NewCommander(r CallerResolver, s CommandService, sender Sender) *Commander {
-	return &Commander{resolver: r, svc: s, sender: sender}
+	return &Commander{resolver: r, svc: s, sender: sender, now: time.Now, pending: map[int64]pendingIntent{}}
+}
+
+// WithIntentParser turns free text on. Returns the commander for chaining.
+func (c *Commander) WithIntentParser(p usecase.IntentParser) *Commander {
+	c.parser = p
+	return c
 }
 
 const (
-	replyNotLinked   = "This chat is not linked to a Hearth account. Sign in from the app with Telegram first."
-	replyNotOwner    = "Only a household owner with Money can log spending here."
-	replyHelp        = "Commands:\n/spend <amount> <what> [#category] [@account]\n/income <amount> <what> [#category] [@account]\n/balance\n/recent\n\nExamples:\n/spend 84.50 groceries #Groceries @\"DBS Savings\"\n/income 6500 salary\n\nAmounts are in the account's currency. Quote names with spaces."
-	replyUsageSpend  = "Usage: /spend <amount> <what> [#category] [@account] — e.g. /spend 12.50 coffee #\"Dining out\""
-	replyUsageIncome = "Usage: /income <amount> <what> [#category] [@account] — e.g. /income 6500 salary @\"DBS Savings\""
-	recentCount      = 5
+	replyNotLinked      = "This chat is not linked to a Hearth account. Sign in from the app with Telegram first."
+	replyNotOwner       = "Only a household owner with Money can log spending here."
+	replyHelp           = "Commands:\n/spend <amount> <what> [#category] [@account]\n/income <amount> <what> [#category] [@account]\n/balance\n/recent\n\nExamples:\n/spend 84.50 groceries #Groceries @\"DBS Savings\"\n/income 6500 salary\n\nAmounts are in the account's currency. Quote names with spaces."
+	replyUsageSpend     = "Usage: /spend <amount> <what> [#category] [@account] — e.g. /spend 12.50 coffee #\"Dining out\""
+	replyUsageIncome    = "Usage: /income <amount> <what> [#category] [@account] — e.g. /income 6500 salary @\"DBS Savings\""
+	replyNoParser       = "I only understand commands here. Send /help to see them."
+	replyNotUnderstood  = "I could not read that as an expense or income. Try /spend <amount> <what>, or /help."
+	replyNothingPending = "Nothing to confirm. Tell me what you spent, or use /spend."
+	replyDiscarded      = "Discarded."
+	recentCount         = 5
 )
 
 // HandleCommand is the whole edge: resolve the chat, refuse what a limited
@@ -157,12 +201,22 @@ func (c *Commander) HandleCommand(ctx context.Context, cmd Command) error {
 	}
 	member, err := c.resolver.Resolve(ctx, cmd.ChatID)
 	if err != nil {
+		// A plain sentence from an unlinked chat gets silence, not a reply:
+		// before free text existed such a message was ignored, and every
+		// reply is an outbound send against the same Telegram budget
+		// sign-in links use. A slash command still gets the sentence back.
+		if cmd.Name == "text" {
+			return nil
+		}
 		return c.sender.SendMessage(ctx, cmd.ChatID, replyNotLinked)
 	}
 	// The same stack the money routes carry: the capability and the role,
 	// both, for the same reason router.go stacks them -- neither may lean on
 	// an invariant enforced elsewhere.
 	if member.Role != domain.RoleOwner || !member.Capabilities.Has(domain.CapMoney) {
+		if cmd.Name == "text" {
+			return nil
+		}
 		return c.sender.SendMessage(ctx, cmd.ChatID, replyNotOwner)
 	}
 
@@ -173,6 +227,13 @@ func (c *Commander) HandleCommand(ctx context.Context, cmd Command) error {
 		return c.balance(ctx, member, cmd)
 	case "recent":
 		return c.recent(ctx, member, cmd)
+	case "text":
+		return c.freeText(ctx, member, cmd)
+	case "yes":
+		return c.confirm(ctx, cmd)
+	case "no":
+		c.takePending(cmd.ChatID)
+		return c.sender.SendMessage(ctx, cmd.ChatID, replyDiscarded)
 	default:
 		// Fail closed: ParseCommand only builds the names above, but a
 		// switch over a value it did not construct itself still refuses.
@@ -203,6 +264,85 @@ func (c *Commander) logSpend(ctx context.Context, member domain.Membership, cmd 
 	if err != nil {
 		return c.sender.SendMessage(ctx, cmd.ChatID, explain(err))
 	}
+	return c.sender.SendMessage(ctx, cmd.ChatID, receipt(res, kind))
+}
+
+// freeText is stage 5b: a sentence, read by the parser into the same
+// fields /spend takes, shown back, and held until /yes. The guard above
+// has already run, so a stranger's message never reaches the API.
+func (c *Commander) freeText(ctx context.Context, member domain.Membership, cmd Command) error {
+	if c.parser == nil {
+		return c.sender.SendMessage(ctx, cmd.ChatID, replyNoParser)
+	}
+	accounts, categories, err := c.svc.Names(ctx, member.HouseholdID)
+	if err != nil {
+		slog.Error("telegram names failed", "error", err)
+		return c.sender.SendMessage(ctx, cmd.ChatID, "Could not read the accounts right now.")
+	}
+	intent, err := c.parser.ParseIntent(ctx, usecase.ParseIntentInput{Text: cmd.Description, Accounts: accounts, Categories: categories})
+	if err != nil {
+		slog.Error("telegram intent parse failed", "error", err)
+		return c.sender.SendMessage(ctx, cmd.ChatID, "I could not read that right now. Use /spend <amount> <what> instead.")
+	}
+	var kind domain.TransactionKind
+	switch intent.Kind {
+	case "expense":
+		kind = domain.TransactionExpense
+	case "income":
+		kind = domain.TransactionIncome
+	default:
+		return c.sender.SendMessage(ctx, cmd.ChatID, replyNotUnderstood)
+	}
+	if intent.Amount == "" || intent.Description == "" {
+		return c.sender.SendMessage(ctx, cmd.ChatID, replyNotUnderstood)
+	}
+	spend := usecase.TelegramSpend{
+		HouseholdID: member.HouseholdID, MembershipID: member.ID, UpdateID: cmd.UpdateID,
+		Kind: kind, AmountText: intent.Amount, Description: intent.Description,
+		AccountName: intent.Account, CategoryName: intent.Category,
+	}
+	summary := fmt.Sprintf("%s %s — %s", intent.Kind, intent.Amount, intent.Description)
+	if intent.Category != "" {
+		summary += " #" + intent.Category
+	}
+	if intent.Account != "" {
+		summary += " @" + intent.Account
+	}
+	c.mu.Lock()
+	c.pending[cmd.ChatID] = pendingIntent{spend: spend, summary: summary, expires: c.now().Add(pendingTTL)}
+	c.mu.Unlock()
+	return c.sender.SendMessage(ctx, cmd.ChatID, "Log "+summary+"? Reply /yes or /no.")
+}
+
+// confirm writes the pending intent. The /yes itself carries no fields: a
+// person cannot confirm something the bot did not just show them.
+func (c *Commander) confirm(ctx context.Context, cmd Command) error {
+	p, ok := c.takePending(cmd.ChatID)
+	if !ok {
+		return c.sender.SendMessage(ctx, cmd.ChatID, replyNothingPending)
+	}
+	res, err := c.svc.LogSpend(ctx, p.spend)
+	if err != nil {
+		return c.sender.SendMessage(ctx, cmd.ChatID, explain(err))
+	}
+	return c.sender.SendMessage(ctx, cmd.ChatID, receipt(res, p.spend.Kind))
+}
+
+// takePending removes and returns the chat's pending intent if it has not
+// expired. Expired ones are dropped on the way out, so the map never grows
+// past one live entry per chat that ever spoke.
+func (c *Commander) takePending(chatID int64) (pendingIntent, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	p, ok := c.pending[chatID]
+	delete(c.pending, chatID)
+	if !ok || !c.now().Before(p.expires) {
+		return pendingIntent{}, false
+	}
+	return p, true
+}
+
+func receipt(res usecase.TelegramSpendResult, kind domain.TransactionKind) string {
 	verb := "Logged"
 	if res.Replayed {
 		verb = "Already logged"
@@ -212,8 +352,7 @@ func (c *Commander) logSpend(ctx context.Context, member domain.Membership, cmd 
 		sign = "+"
 	}
 	amount := domain.FormatAmount(res.Transaction.Amount.Amount, res.MinorUnits)
-	return c.sender.SendMessage(ctx, cmd.ChatID, fmt.Sprintf("%s %s%s %s — %s (%s)",
-		verb, sign, amount, res.Transaction.Amount.Currency, res.Transaction.Description, res.AccountName))
+	return fmt.Sprintf("%s %s%s %s — %s (%s)", verb, sign, amount, res.Transaction.Amount.Currency, res.Transaction.Description, res.AccountName)
 }
 
 func (c *Commander) balance(ctx context.Context, member domain.Membership, cmd Command) error {

@@ -154,6 +154,32 @@ func (s *TelegramCommandService) Recent(ctx context.Context, householdID string,
 	return views, nil
 }
 
+// Names is what an IntentParser may choose from: live account nicknames
+// and unarchived category names, both kinds. Names rather than ids so the
+// parser echoes something the person recognises; resolution to an id is
+// LogSpend's job, by the same rule /spend uses.
+func (s *TelegramCommandService) Names(ctx context.Context, householdID string) (accounts, categories []string, err error) {
+	views, err := s.d.Accounts.List(ctx, householdID, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, v := range views {
+		accounts = append(accounts, v.Account.Nickname)
+	}
+	cats, err := s.d.Categories.List(ctx, householdID)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, c := range cats {
+		if c.ArchivedAt == nil {
+			categories = append(categories, c.Name)
+		}
+	}
+	sort.Strings(accounts)
+	sort.Strings(categories)
+	return accounts, categories, nil
+}
+
 // resolveAccount is the same rule hearthctl's import uses -- an exact,
 // case-insensitive name, unambiguous -- plus one convenience a chat needs:
 // no name means the household's only cash account, if there is exactly

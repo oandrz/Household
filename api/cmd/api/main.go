@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	anthropicadapter "github.com/andreasoentoro/hearth/api/internal/adapter/anthropic"
 	"github.com/andreasoentoro/hearth/api/internal/adapter/clock"
 	"github.com/andreasoentoro/hearth/api/internal/adapter/crypto"
 	"github.com/andreasoentoro/hearth/api/internal/adapter/fx"
@@ -380,7 +381,7 @@ func run() error {
 		// membership and refuses anyone who is not an owner with Money
 		// before any service is called. Wired here, after the money
 		// services exist, rather than where the poller was built.
-		telegramPoller.WithCommands(telegram.NewCommander(
+		commander := telegram.NewCommander(
 			&usecase.TelegramCallerService{Accounts: telegramAccounts, Memberships: memberships},
 			usecase.NewTelegramCommandService(usecase.TelegramCommandDeps{
 				Accounts:     accountSvc,
@@ -389,8 +390,16 @@ func run() error {
 				Clock:        sysClock,
 			}),
 			telegramClient,
-		))
-		slog.Info("telegram sign-in and chat commands enabled", "bot_username", cfg.TelegramBotUsername)
+		)
+		// Free text is read by Claude only when a key is configured, and
+		// written only after the person confirms (commands.go). Without a
+		// key the bot is commands-only and says so.
+		if cfg.IntentParsingEnabled() {
+			commander.WithIntentParser(anthropicadapter.NewIntentParser(cfg.AnthropicAPIKey))
+		}
+		telegramPoller.WithCommands(commander)
+		slog.Info("telegram sign-in and chat commands enabled",
+			"bot_username", cfg.TelegramBotUsername, "free_text", cfg.IntentParsingEnabled())
 		go telegramPoller.Run(ctx)
 	}
 

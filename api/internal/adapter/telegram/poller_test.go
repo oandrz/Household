@@ -269,9 +269,10 @@ func (c *commandSpy) seen() []Command {
 	return append([]Command(nil), c.calls...)
 }
 
-// A poller with commands on hands /spend to the command handler and /start
-// to the start handler, and still ignores chatter; without WithCommands the
-// same /spend is ignored, so a sign-in-only bot stays exactly that.
+// A poller with commands on hands /spend and plain text to the command
+// handler (the Commander decides what text means) and /start to the start
+// handler; without WithCommands both are ignored, so a sign-in-only bot
+// stays exactly that.
 func TestPollerDispatchesChatCommandsOnlyWhenEnabled(t *testing.T) {
 	updates := `{"ok":true,"result":[
 		{"update_id":21,"message":{"text":"/start nonce-b","chat":{"id":7}}},
@@ -300,11 +301,14 @@ func TestPollerDispatchesChatCommandsOnlyWhenEnabled(t *testing.T) {
 	p := NewPoller(newClientWithBase("t", srv.URL), starts).WithCommands(commands)
 	ctx, cancel := context.WithCancel(context.Background())
 	go p.Run(ctx)
-	waitFor(t, func() bool { return len(commands.seen()) == 1 && len(starts.seen()) == 1 })
+	waitFor(t, func() bool { return len(commands.seen()) == 2 && len(starts.seen()) == 1 })
 	cancel()
-	got := commands.seen()[0]
-	if got.Name != "spend" || got.UpdateID != 22 || got.ChatID != 7 || got.Amount != "5" {
-		t.Fatalf("dispatched %+v", got)
+	got := commands.seen()
+	if got[0].Name != "spend" || got[0].UpdateID != 22 || got[0].ChatID != 7 || got[0].Amount != "5" {
+		t.Fatalf("dispatched %+v", got[0])
+	}
+	if got[1].Name != "text" || got[1].Description != "hello" || got[1].UpdateID != 23 {
+		t.Fatalf("plain text should arrive as a text command: %+v", got[1])
 	}
 
 	srv2 := newServer()

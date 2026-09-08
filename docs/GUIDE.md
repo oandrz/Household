@@ -168,6 +168,12 @@ your only cash account — if you have more than one it asks which. The bot
 answers with what it saved, and the row appears in Transactions dated today
 with you as the payer.
 
+If the install has a Claude API key configured, you can also just say it —
+"spent 84.50 on groceries at DBS" — and the bot reads it back: "Log expense
+84.50 — groceries #Groceries @DBS Savings? Reply /yes or /no." Nothing is
+saved until you answer `/yes`, and the offer expires after five minutes.
+Without a key the bot understands the slash commands only.
+
 ## What is not built yet
 
 The sidebar shows where these will go. Clicking through tells you which stage

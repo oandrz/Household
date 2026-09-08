@@ -31,6 +31,38 @@ as a way to log spending, beside the browser and `hearthctl`.
 8. **Off unless a bot is configured**, like sign-in; on the same poller,
    enabled with `WithCommands`.
 
+## Stage 5b — free text, behind a key, written only on /yes
+
+9. **`usecase.IntentParser` is a port**; `adapter/anthropic` is its one
+   implementation, built only when `ANTHROPIC_API_KEY` is set. Without it
+   the bot answers a sentence with "commands only, /help". Nothing else in
+   the product depends on the key.
+10. **The model is `claude-opus-5` at effort `low`**, one strict tool
+    (`log_transaction`: kind, amount, description, account, category),
+    `tool_choice: auto` with `disable_parallel_tool_use`, the household's
+    account and category names in the system prompt so the model echoes a
+    real name. No tool call, a refusal, or a kind the schema did not name
+    all read as "none". Errors name the operation, never the URL.
+11. **A parse is never a write.** The Commander shows the reading back —
+    "Log expense 84.50 — groceries #Groceries @DBS Savings? Reply /yes or
+    /no." — and holds it per chat for five minutes. `/yes` writes it with
+    the **sentence's** update id as the idempotency key; `/no` discards;
+    a second `/yes`, or one after expiry, writes nothing and says so.
+12. **The guard runs before the parser.** A stranger's or a limited
+    member's sentence never reaches the API, so it cannot cost money or
+    leak names.
+13. **A sentence from a chat that may not write is ignored silently.**
+    Before free text, a non-slash message was ignored; keeping that for
+    strangers and limited members means the change is invisible to them,
+    and no stranger can farm outbound sends (the same Telegram budget
+    sign-in links use). A slash command from the same chat still gets its
+    one-sentence refusal. **No per-chat limit on parser calls** for an
+    authorised owner yet — a named gap, since no key exists anywhere today.
+14. **Not walked against the real API**: no key on this machine. Tested
+    against an `httptest` fake of the Messages API that checks the request
+    shape (model, strict closed schema, tool choice, effort, no `thinking`
+    sent) and the parse of the reply. 🟡 until a key is configured.
+
 ## Files
 
 ```
@@ -38,6 +70,8 @@ api/internal/domain/amount_parse.go             ParseAmount, FormatAmount, Minor
 api/internal/usecase/telegram_command.go        TelegramCallerService (resolve), TelegramCommandService (LogSpend, Balances, Recent)
 api/internal/adapter/telegram/commands.go       ParseCommand, Commander (the guard and the reply)
 api/internal/adapter/telegram/poller.go         WithCommands, dispatchCommand
+api/internal/usecase/intent.go                  IntentParser port, Intent
+api/internal/adapter/anthropic/intent_parser.go the Claude adapter (stage 5b)
 api/cmd/api/main.go                             wiring
 ```
 

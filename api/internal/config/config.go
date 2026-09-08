@@ -76,6 +76,9 @@ type Config struct {
 	// refuses the boot on a value it cannot parse, and on one that connects
 	// as a role which can write.
 	DatabaseReadonlyURL string
+	// AnthropicAPIKey turns free-text intent parsing on for the Telegram
+	// bot (adapter/anthropic). Empty is the default and means commands only.
+	AnthropicAPIKey string
 }
 
 func (c Config) IsDevelopment() bool { return c.AppEnv == "development" }
@@ -84,6 +87,12 @@ func (c Config) IsDevelopment() bool { return c.AppEnv == "development" }
 // false the route answers 404 and the poller never starts, so an install that
 // has not set up a bot behaves exactly as it did before this feature existed.
 func (c Config) TelegramEnabled() bool { return c.TelegramBotToken != "" }
+
+// IntentParsingEnabled reports whether the Telegram bot reads free text
+// through the Claude API. Off means the bot answers a sentence with /help;
+// the slash commands work either way. A single value with no pairing rule:
+// there is nothing else it travels with.
+func (c Config) IntentParsingEnabled() bool { return c.AnthropicAPIKey != "" }
 
 // OutboxEnabled reports whether the outbound message inspector is configured.
 // When it is false the admin routes answer 503 and say which variable is
@@ -118,6 +127,7 @@ func Load() (Config, error) {
 		TelegramBotUsername: os.Getenv("TELEGRAM_BOT_USERNAME"),
 		MailpitAPIURL:       os.Getenv("MAILPIT_API_URL"),
 		DatabaseReadonlyURL: os.Getenv("DATABASE_READONLY_URL"),
+		AnthropicAPIKey:     os.Getenv("ANTHROPIC_API_KEY"),
 	}
 
 	switch cfg.AppEnv {
