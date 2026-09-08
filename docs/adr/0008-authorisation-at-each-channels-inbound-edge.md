@@ -68,6 +68,13 @@ Two supporting decisions:
 - The bot's writes are exactly as guarded as the browser's. A future
   Telegram capability for limited members is a change to one `if` in one
   file, mirrored on one route group.
+- Free text (a plain sentence read by a language model, stage 5b) sits
+  behind the same guard, and the guard runs *before* the parser: a
+  stranger's or a limited member's sentence never reaches the paid or
+  rate-limited API, and is not answered at all — the one place this edge
+  is quieter than the routes, because every reply is an outbound send a
+  stranger could farm. The parser is a reader, never a writer; the write
+  happens on `/yes`, through the same service and the same idempotency key.
 - Chat commands were **walked against a real bot on 2026-09-08**, but only
   after the owner created a second, development bot. The first attempt used
   the production token from the local `.env`: another poller held it, the
