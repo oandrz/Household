@@ -98,7 +98,9 @@ as a way to log spending, beside the browser and `hearthctl`.
     upstream minute to minute, each on its own schedule, and the first walk
     hit `429` twice on a single id. A fourth id is refused at boot, because
     OpenRouter answers `400 'models' array must have 3 items or fewer` to
-    every request — which the second walk hit.
+    every request — which the second walk hit. The third walk passed:
+    "spent 12.30 on lunch" written on `/yes` as `telegram-update-172668172`,
+    "hello there" refused as not a transaction.
 
 ## Files
 

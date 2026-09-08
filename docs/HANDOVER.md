@@ -139,10 +139,9 @@ open-weight model through OpenRouter, up to three ids tried in order): a
 sentence is read into an intent, shown back, and written only on `/yes`.
 Built first on Claude; the owner's first call was refused for lack of
 credits, they chose free models, and the Claude adapter and its SDK were
-removed the same day (git has it). 🟡 until the Telegram walk lands; the
-adapter itself was run live against OpenRouter from a test and read three
-sentences correctly. `docker compose up -d api`, not `restart`, after any
-`.env` change (LEARNING h).
+removed the same day (git has it). ✅, walked live from the owner's chat:
+a lunch row keyed by its update id, and a greeting refused. `docker compose
+up -d api`, not `restart`, after any `.env` change (LEARNING h).
 
 Self-serve sign-up carries no slice number on purpose: it was specified and
 built between slices 1 and 2, ahead of Money (see "What to do next" below for
