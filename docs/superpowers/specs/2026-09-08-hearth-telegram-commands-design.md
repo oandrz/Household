@@ -33,10 +33,11 @@ as a way to log spending, beside the browser and `hearthctl`.
 
 ## Stage 5b — free text, behind a key, written only on /yes
 
-9. **`usecase.IntentParser` is a port**; `adapter/anthropic` is its one
-   implementation, built only when `ANTHROPIC_API_KEY` is set. Without it
-   the bot answers a sentence with "commands only, /help". Nothing else in
-   the product depends on the key.
+9. **`usecase.IntentParser` is a port**; `adapter/anthropic` was its first
+   implementation, built only when `ANTHROPIC_API_KEY` was set (decisions
+   10-14 describe it; it was removed later the same day, see 16). Without a
+   parser the bot answers a sentence with "commands only, /help". Nothing
+   else in the product depends on the key.
 10. **The model is `claude-opus-5` at effort `low`**, one strict tool
     (`log_transaction`: kind, amount, description, account, category),
     `tool_choice: auto` with `disable_parallel_tool_use`, the household's
@@ -87,6 +88,17 @@ as a way to log spending, beside the browser and `hearthctl`.
     queue would otherwise hold every chat. Quality is the accepted trade: an
     open-weight model follows the schema less reliably than Claude, which is
     what the confirm-on-`/yes` step exists for.
+16. **The Claude adapter was removed the same day**, at the owner's request,
+    once OpenRouter read sentences correctly: one provider is one config
+    branch, one dependency (`anthropic-sdk-go` left `go.mod`) and no
+    "never both" rule to remember. Git commit 04c4da9 holds it if a paid
+    model is wanted back; `adapter/intent` is everything it would reuse.
+    **`OPENROUTER_MODEL` takes up to three ids**, comma-separated, sent as
+    OpenRouter's `models` fallback list: free models are rate-limited
+    upstream minute to minute, each on its own schedule, and the first walk
+    hit `429` twice on a single id. A fourth id is refused at boot, because
+    OpenRouter answers `400 'models' array must have 3 items or fewer` to
+    every request — which the second walk hit.
 
 ## Files
 
@@ -96,7 +108,8 @@ api/internal/usecase/telegram_command.go        TelegramCallerService (resolve),
 api/internal/adapter/telegram/commands.go       ParseCommand, Commander (the guard and the reply)
 api/internal/adapter/telegram/poller.go         WithCommands, dispatchCommand
 api/internal/usecase/intent.go                  IntentParser port, Intent
-api/internal/adapter/anthropic/intent_parser.go the Claude adapter (stage 5b)
+api/internal/adapter/openrouter/intent_parser.go the OpenRouter adapter (stage 5b)
+api/internal/adapter/intent/intent.go           prompt, tool schema, fail-closed reader
 api/cmd/api/main.go                             wiring
 ```
 

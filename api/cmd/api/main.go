@@ -13,7 +13,6 @@ import (
 	"syscall"
 	"time"
 
-	anthropicadapter "github.com/andreasoentoro/hearth/api/internal/adapter/anthropic"
 	"github.com/andreasoentoro/hearth/api/internal/adapter/clock"
 	"github.com/andreasoentoro/hearth/api/internal/adapter/crypto"
 	"github.com/andreasoentoro/hearth/api/internal/adapter/fx"
@@ -395,18 +394,18 @@ func run() error {
 		// Free text is read by Claude only when a key is configured, and
 		// written only after the person confirms (commands.go). Without a
 		// key the bot is commands-only and says so.
-		// config.Load has already refused a configuration naming both, so
-		// the switch has one live arm; the default is "commands only".
-		switch cfg.IntentProvider() {
-		case "anthropic":
-			commander.WithIntentParser(anthropicadapter.NewIntentParser(cfg.AnthropicAPIKey))
-		case "openrouter":
-			commander.WithIntentParser(openrouter.NewIntentParser(cfg.OpenRouterAPIKey, cfg.OpenRouterModel))
+		if cfg.IntentParsingEnabled() {
+			parser, err := openrouter.NewIntentParser(cfg.OpenRouterAPIKey, cfg.OpenRouterModel)
+			if err != nil {
+				slog.Error("openrouter configuration refused", "error", err)
+				os.Exit(1)
+			}
+			commander.WithIntentParser(parser)
 		}
 		telegramPoller.WithCommands(commander)
 		slog.Info("telegram sign-in and chat commands enabled",
 			"bot_username", cfg.TelegramBotUsername, "free_text", cfg.IntentParsingEnabled(),
-			"provider", cfg.IntentProvider(), "model", cfg.OpenRouterModel)
+			"model", cfg.OpenRouterModel)
 		go telegramPoller.Run(ctx)
 	}
 

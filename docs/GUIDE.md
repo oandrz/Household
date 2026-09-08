@@ -168,8 +168,8 @@ your only cash account — if you have more than one it asks which. The bot
 answers with what it saved, and the row appears in Transactions dated today
 with you as the payer.
 
-If the install has a language model configured (Claude, or an open-weight
-model through OpenRouter — the bot behaves the same), you can also just say it —
+If the install has a language model configured (an open-weight model
+through OpenRouter), you can also just say it —
 "spent 84.50 on groceries at DBS" — and the bot reads it back: "Log expense
 84.50 — groceries #Groceries @DBS Savings? Reply /yes or /no." Nothing is
 saved until you answer `/yes`, and the offer expires after five minutes.

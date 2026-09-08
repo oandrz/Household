@@ -98,10 +98,9 @@ services:
       # startup, deliberately.
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
-      # Free text in the Telegram bot. Empty means "commands only"; the api
-      # never refuses to boot over it. Production reads .env whole via
+      # Free text in the Telegram bot. Both empty means "commands only";
+      # exactly one set is refused at boot. Production reads .env whole via
       # env_file, so only this dev file has to name each value.
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-}
     ports: ["8080:8080"]

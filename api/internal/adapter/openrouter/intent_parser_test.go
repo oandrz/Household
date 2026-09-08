@@ -40,7 +40,10 @@ const toolCallReply = `{"id":"gen-1","choices":[{"finish_reason":"tool_calls","m
 
 func parse(t *testing.T, srv *httptest.Server, text string) (usecase.Intent, error) {
 	t.Helper()
-	p := NewIntentParser("sk-or-test", "some/model:free", WithBaseURL(srv.URL))
+	p, err := NewIntentParser("sk-or-test", "some/model:free", WithBaseURL(srv.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
 	return p.ParseIntent(context.Background(), usecase.ParseIntentInput{
 		Text: text, Accounts: []string{"DBS Savings", "OCBC"}, Categories: []string{"Groceries"},
 	})
@@ -60,6 +63,9 @@ func TestParseIntentForcesOneToolCallAndReadsIt(t *testing.T) {
 	req := *got
 	if req["model"] != "some/model:free" {
 		t.Fatalf("model %v", req["model"])
+	}
+	if _, ok := req["models"]; ok {
+		t.Fatalf("one model means no fallback list, got %v", req["models"])
 	}
 	if req["max_tokens"].(float64) != 4096 {
 		t.Fatalf("max_tokens %v", req["max_tokens"])
@@ -145,8 +151,11 @@ func TestAProviderErrorNamesTheStatusAndMessageOnly(t *testing.T) {
 }
 
 func TestATransportErrorCarriesNoURL(t *testing.T) {
-	p := NewIntentParser("sk-or-test", "m", WithBaseURL("http://127.0.0.1:1"))
-	_, err := p.ParseIntent(context.Background(), usecase.ParseIntentInput{Text: "x"})
+	p, err := NewIntentParser("sk-or-test", "m", WithBaseURL("http://127.0.0.1:1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.ParseIntent(context.Background(), usecase.ParseIntentInput{Text: "x"})
 	if err == nil {
 		t.Fatal("want an error")
 	}
@@ -155,5 +164,41 @@ func TestATransportErrorCarriesNoURL(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "connection failed") {
 		t.Fatalf("error must say what kind of failure: %q", err)
+	}
+}
+
+// Free models are rate-limited upstream on their own schedules; a
+// comma-separated OPENROUTER_MODEL becomes OpenRouter's fallback list, so
+// one request tries the next model instead of answering "could not read".
+func TestACommaSeparatedModelListBecomesAFallbackList(t *testing.T) {
+	srv, got := fakeChat(t, 200, toolCallReply)
+	p, err := NewIntentParser("sk-or-test", " a/one:free, b/two:free ,c/three ", WithBaseURL(srv.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.ParseIntent(context.Background(), usecase.ParseIntentInput{Text: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	req := *got
+	if req["model"] != "a/one:free" {
+		t.Fatalf("model must be the first, got %v", req["model"])
+	}
+	models := req["models"].([]any)
+	if len(models) != 3 || models[1] != "b/two:free" || models[2] != "c/three" {
+		t.Fatalf("models must be every id in order, trimmed: %v", models)
+	}
+}
+
+// OpenRouter refuses a fallback list longer than three with a 400 on every
+// request; the first live walk hit exactly that. Refuse at boot instead.
+func TestMoreThanThreeModelsIsRefusedAtConstruction(t *testing.T) {
+	if _, err := NewIntentParser("k", "a,b,c,d"); err == nil {
+		t.Fatal("four models must be refused when the parser is built, not on every message")
+	}
+	if _, err := NewIntentParser("k", " , "); err == nil {
+		t.Fatal("no model at all must be refused")
+	}
+	if _, err := NewIntentParser("k", "a,b,c"); err != nil {
+		t.Fatalf("three models is the cap and must be accepted: %v", err)
 	}
 }

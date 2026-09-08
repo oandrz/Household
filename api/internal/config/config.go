@@ -76,16 +76,13 @@ type Config struct {
 	// refuses the boot on a value it cannot parse, and on one that connects
 	// as a role which can write.
 	DatabaseReadonlyURL string
-	// AnthropicAPIKey turns free-text intent parsing on for the Telegram
-	// bot through the Claude API (adapter/anthropic). Empty is the default
-	// and means commands only, unless OpenRouter is configured instead.
-	AnthropicAPIKey string
-	// OpenRouterAPIKey and OpenRouterModel turn the same feature on through
-	// OpenRouter (adapter/openrouter), for an install that wants an
-	// open-weight or free model. They travel together: a key with no model
-	// has nothing to call, and a model with no key cannot call it. The
-	// model is never defaulted in code, because the free, tool-capable
-	// models OpenRouter offers change month to month.
+	// OpenRouterAPIKey and OpenRouterModel turn free-text intent parsing on
+	// for the Telegram bot through OpenRouter (adapter/openrouter). They
+	// travel together: a key with no model has nothing to call, and a model
+	// with no key cannot call it. The model is never defaulted in code,
+	// because the free, tool-capable models OpenRouter offers change month
+	// to month; up to three, comma-separated, are tried in order. Empty is
+	// the default and means commands only.
 	OpenRouterAPIKey string
 	OpenRouterModel  string
 }
@@ -97,23 +94,11 @@ func (c Config) IsDevelopment() bool { return c.AppEnv == "development" }
 // has not set up a bot behaves exactly as it did before this feature existed.
 func (c Config) TelegramEnabled() bool { return c.TelegramBotToken != "" }
 
-// IntentProvider names which adapter reads free text for the Telegram bot:
-// "anthropic", "openrouter", or "" for none. Load refuses a configuration
-// that sets both, so there is never a silent precedence to remember.
-func (c Config) IntentProvider() string {
-	switch {
-	case c.AnthropicAPIKey != "":
-		return "anthropic"
-	case c.OpenRouterAPIKey != "":
-		return "openrouter"
-	}
-	return ""
-}
-
-// IntentParsingEnabled reports whether the Telegram bot reads free text at
-// all. Off means the bot answers a sentence with /help; the slash commands
-// work either way.
-func (c Config) IntentParsingEnabled() bool { return c.IntentProvider() != "" }
+// IntentParsingEnabled reports whether the Telegram bot reads free text.
+// Off means the bot answers a sentence with /help; the slash commands work
+// either way. Load has already enforced that the key and the model come
+// together, so one of them is enough to ask.
+func (c Config) IntentParsingEnabled() bool { return c.OpenRouterAPIKey != "" }
 
 // OutboxEnabled reports whether the outbound message inspector is configured.
 // When it is false the admin routes answer 503 and say which variable is
@@ -148,7 +133,6 @@ func Load() (Config, error) {
 		TelegramBotUsername: os.Getenv("TELEGRAM_BOT_USERNAME"),
 		MailpitAPIURL:       os.Getenv("MAILPIT_API_URL"),
 		DatabaseReadonlyURL: os.Getenv("DATABASE_READONLY_URL"),
-		AnthropicAPIKey:     os.Getenv("ANTHROPIC_API_KEY"),
 		OpenRouterAPIKey:    os.Getenv("OPENROUTER_API_KEY"),
 		OpenRouterModel:     os.Getenv("OPENROUTER_MODEL"),
 	}
@@ -189,9 +173,6 @@ func Load() (Config, error) {
 	}
 	if (cfg.OpenRouterAPIKey == "") != (cfg.OpenRouterModel == "") {
 		return Config{}, fmt.Errorf("OPENROUTER_API_KEY and OPENROUTER_MODEL must both be set, or both left empty")
-	}
-	if cfg.AnthropicAPIKey != "" && cfg.OpenRouterAPIKey != "" {
-		return Config{}, fmt.Errorf("ANTHROPIC_API_KEY and OPENROUTER_API_KEY are both set; the Telegram bot reads free text through one provider, so unset one")
 	}
 	if cfg.MailpitAPIURL != "" {
 		parsed, err := url.Parse(cfg.MailpitAPIURL)

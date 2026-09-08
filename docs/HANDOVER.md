@@ -134,14 +134,15 @@ Telegram chat commands** ([ADR 8](adr/0008-authorisation-at-each-channels-inboun
 the adapter's edge — ✅, walked live against a development bot
 (`@HearthOinkDevBot`, token in the local `.env` only) after the shared
 production token proved unusable for a dev walk. **And free text through
-a language model** (`usecase.IntentParser`; `adapter/anthropic` for Claude
-or `adapter/openrouter` for an open-weight model, chosen by which key is in
-`.env`, never both): a sentence is read into an intent, shown back, and
-written only on `/yes`. The owner's first Claude call was refused for lack
-of credits, so OpenRouter with a `:free` model became the second adapter the
-port had been waiting for. 🟡 until the OpenRouter walk lands; fakes of both
-APIs pin the request shapes. `docker compose up -d api`, not `restart`, after
-any `.env` change (LEARNING h).
+a language model** (`usecase.IntentParser`, `adapter/openrouter`, an
+open-weight model through OpenRouter, up to three ids tried in order): a
+sentence is read into an intent, shown back, and written only on `/yes`.
+Built first on Claude; the owner's first call was refused for lack of
+credits, they chose free models, and the Claude adapter and its SDK were
+removed the same day (git has it). 🟡 until the Telegram walk lands; the
+adapter itself was run live against OpenRouter from a test and read three
+sentences correctly. `docker compose up -d api`, not `restart`, after any
+`.env` change (LEARNING h).
 
 Self-serve sign-up carries no slice number on purpose: it was specified and
 built between slices 1 and 2, ahead of Money (see "What to do next" below for

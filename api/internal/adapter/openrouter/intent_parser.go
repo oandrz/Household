@@ -1,11 +1,12 @@
 // Package openrouter is the adapter that owns Hearth's dependency on
-// OpenRouter, a hosted gateway to open-weight models. It does the same one
-// job as adapter/anthropic -- reading a chat sentence into a transaction
-// intent (usecase.IntentParser) -- for installs that would rather pay
-// nothing (OpenRouter's ":free" models) or run a model Anthropic does not
-// serve. It speaks the OpenAI chat-completions dialect over plain net/http,
-// so any host that speaks it (Ollama, vLLM, Groq) is a base URL away; only
-// OpenRouter is wired today. Nothing it returns is written without the
+// OpenRouter, a hosted gateway to open-weight models. It has one job:
+// reading a chat sentence into a transaction intent (usecase.IntentParser),
+// for nothing on OpenRouter's ":free" models. It speaks the OpenAI
+// chat-completions dialect over plain net/http, so any host that speaks it
+// (Ollama, vLLM, Groq) is a base URL away; only OpenRouter is wired today.
+// A Claude adapter existed for a day (anthropic-sdk-go, `claude-opus-5`)
+// and was removed on 2026-09-08 when the owner chose to run on free
+// models; git has it if a paid model is ever wanted back. Nothing it returns is written without the
 // person confirming it first -- see adapter/telegram/commands.go.
 package openrouter
 
@@ -18,6 +19,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/intent"
@@ -29,21 +31,24 @@ const (
 	DefaultBaseURL = "https://openrouter.ai/api/v1"
 	// maxTokens leaves room for models that spend reasoning tokens before
 	// the tool call; a max_tokens stop yields no call, which reads as
-	// "none". Same trade as the anthropic adapter.
+	// "none".
 	maxTokens = 4096
 	// requestTimeout bounds one parse. The Commander also caps the context,
 	// but a free-tier queue can stall for minutes and this client must never
 	// hold the poller that long on its own.
 	requestTimeout = 30 * time.Second
+	// maxModels is OpenRouter's own cap on the fallback list. Checked at
+	// construction so a fourth id fails the boot, not every message.
+	maxModels = 3
 	// maxErrorBody is how much of an error response the adapter reads for
 	// its message; the rest is not a log line's business.
 	maxErrorBody = 4 << 10
 )
 
-// IntentParser is one model behind one key.
+// IntentParser is one key and an ordered list of models.
 type IntentParser struct {
 	apiKey  string
-	model   string
+	models  []string
 	baseURL string
 	client  *http.Client
 }
@@ -55,16 +60,32 @@ type Option func(*IntentParser)
 // it for a fake server.
 func WithBaseURL(u string) Option { return func(p *IntentParser) { p.baseURL = u } }
 
-// NewIntentParser builds a parser for one key and one model id. The model is
-// not defaulted here on purpose: the set of free, tool-capable models on
-// OpenRouter changes month to month, so the choice lives in configuration
-// where it can change without a release.
-func NewIntentParser(apiKey, model string, opts ...Option) *IntentParser {
-	p := &IntentParser{apiKey: apiKey, model: model, baseURL: DefaultBaseURL, client: &http.Client{Timeout: requestTimeout}}
+// NewIntentParser builds a parser for one key and one or more model ids,
+// comma-separated, tried in order. Free models are rate-limited upstream
+// minute to minute, each on its own schedule, so one id alone means "could
+// not read that" for as long as that provider is busy; OpenRouter's
+// `models` fallback list moves to the next in the same request. No model
+// is defaulted here on purpose: the set of free, tool-capable models
+// changes month to month, so the choice lives in configuration where it can
+// change without a release.
+func NewIntentParser(apiKey, models string, opts ...Option) (*IntentParser, error) {
+	var ids []string
+	for _, m := range strings.Split(models, ",") {
+		if m = strings.TrimSpace(m); m != "" {
+			ids = append(ids, m)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, errors.New("openrouter: OPENROUTER_MODEL names no model")
+	}
+	if len(ids) > maxModels {
+		return nil, fmt.Errorf("openrouter: OPENROUTER_MODEL names %d models; OpenRouter accepts at most %d in a fallback list", len(ids), maxModels)
+	}
+	p := &IntentParser{apiKey: apiKey, models: ids, baseURL: DefaultBaseURL, client: &http.Client{Timeout: requestTimeout}}
 	for _, o := range opts {
 		o(p)
 	}
-	return p
+	return p, nil
 }
 
 // Request and response shapes: only the fields this adapter sends or reads.
@@ -72,7 +93,10 @@ func NewIntentParser(apiKey, model string, opts ...Option) *IntentParser {
 // parallel_tool_calls, no reasoning), because OpenRouter forwards unknown
 // parameters to the upstream provider and some of them refuse.
 type chatRequest struct {
-	Model      string        `json:"model"`
+	Model string `json:"model"`
+	// Models is OpenRouter's fallback list: the request runs on the first
+	// that is not refusing. Omitted when there is only one.
+	Models     []string      `json:"models,omitempty"`
 	MaxTokens  int           `json:"max_tokens"`
 	Messages   []chatMessage `json:"messages"`
 	Tools      []chatTool    `json:"tools"`
@@ -120,8 +144,13 @@ type chatResponse struct {
 // sentence would come back "I could not read that". No tool call at all is
 // still "none", so a host that ignores the forcing cannot make the bot write.
 func (p *IntentParser) ParseIntent(ctx context.Context, in usecase.ParseIntentInput) (usecase.Intent, error) {
+	var fallbacks []string
+	if len(p.models) > 1 {
+		fallbacks = p.models
+	}
 	body, err := json.Marshal(chatRequest{
-		Model:     p.model,
+		Model:     p.models[0],
+		Models:    fallbacks,
 		MaxTokens: maxTokens,
 		Messages: []chatMessage{
 			{Role: "system", Content: intent.SystemPrompt(in)},

@@ -1,10 +1,10 @@
-// Package intent holds what every language-model adapter for
-// usecase.IntentParser shares: the prompt, the one tool the model is asked
-// to call, and the fail-closed reader of that tool's arguments. It exists
-// because there are two such adapters (anthropic, openrouter) and a prompt
-// that lives in two places drifts -- the reader in particular is the last
-// line between a model's output and the ledger, and must be identical
-// whichever model produced the output.
+// Package intent holds what a language-model adapter for
+// usecase.IntentParser needs that is not about the wire: the prompt, the
+// one tool the model is asked to call, and the fail-closed reader of that
+// tool's arguments. It is separate from adapter/openrouter because the
+// reader is the last line between a model's output and the ledger and
+// deserves its own tests, and because a second adapter (there was a Claude
+// one for a day) reuses all of it and none of the HTTP.
 package intent
 
 import (

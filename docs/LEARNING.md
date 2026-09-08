@@ -4824,7 +4824,17 @@ route with a missing guard has no second line of defence.
   holds every chat's next message for a minute. The Commander now sets a
   30 s deadline on every parser call, and the test checks the context
   carries one — a mutation that swapped `WithTimeout` for `WithCancel`
-  went red.
+  went red. *(m)* **Probe a free model's limits before handing the walk
+  to a person.** Two Telegram walks in a row answered "could not read
+  that": first a single free model rate-limited upstream (`429`), then my
+  own fix — a four-id fallback list, which OpenRouter refuses with `400
+  'models' array must have 3 items or fewer` on every request. Both were
+  visible in one log line each, and both would have been caught by
+  running the adapter against the real API from a throwaway test before
+  asking the owner to type anything. That test now exists as a habit: the
+  third walk was preceded by it, and it read three sentences correctly.
+  A provider's documented cap is a constructor check, not a runtime
+  surprise.
 - The architecture lint **never enforced the rule it existed for**. Both branches
   only matched imports *within* the module, so third-party imports in
   `internal/domain` passed. Proven by planting `pgx` and getting exit 0.

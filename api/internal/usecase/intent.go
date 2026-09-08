@@ -5,7 +5,7 @@ import "context"
 // IntentParser turns a sentence a person typed into a chat -- "spent 84.50
 // on groceries at DBS" -- into the same fields the /spend grammar produces.
 // It is a port because the implementation is a language model behind an API
-// key (adapter/anthropic), and the product must work identically without
+// key (adapter/openrouter), and the product must work identically without
 // one: when no parser is configured the bot answers free text with /help.
 //
 // A parser is a reader of intent, never a writer: whatever it returns is
