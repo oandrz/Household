@@ -116,6 +116,7 @@ func run() error {
 	agreementRepo := postgres.NewAgreementRepo(db)
 	telegramLinks := postgres.NewTelegramLinkRepo(db)
 	telegramAccounts := postgres.NewTelegramAccountRepo(db)
+	nudgeRepo := postgres.NewNudgeRepo(db)
 	platformAdminRepo := postgres.NewPlatformAdminRepo(db)
 	featureFlagRepo := postgres.NewFeatureFlagRepo(db)
 	adminAuditRepo := postgres.NewAdminAuditRepo(db)
@@ -388,6 +389,7 @@ func run() error {
 				Categories:   categorySvc,
 				Transactions: transactionSvc,
 				Clock:        sysClock,
+				Nudges:       nudgeRepoIfEnabled(cfg, nudgeRepo),
 			}),
 			telegramClient,
 		)
@@ -407,6 +409,19 @@ func run() error {
 			"bot_username", cfg.TelegramBotUsername, "free_text", cfg.IntentParsingEnabled(),
 			"model", cfg.OpenRouterModel)
 		go telegramPoller.Run(ctx)
+
+		// The daily digest: a bare goroutine like the poller's, cancelled by
+		// the same context, recovering for the same reason (no Recoverer
+		// over it). It ticks every fifteen minutes and lets NudgeDue and the
+		// claim ledger decide; a restart at 09:01 still delivers at 09:15,
+		// and every tick after the first is a no-op in the database.
+		if cfg.NudgesEnabled() {
+			nudges := usecase.NewNudgeService(usecase.NudgeDeps{
+				Recipients: nudgeRepo, Bills: billSvc, Budgets: budgetSvc, Sender: telegramClient,
+			})
+			go runNudges(ctx, nudges, cfg.NudgesAt, cfg.NudgesLocation, nudgeRepo)
+			slog.Info("daily digest enabled", "at", cfg.NudgesAt, "timezone", cfg.NudgesLocation.String())
+		}
 	}
 
 	if cfg.OutboxEnabled() {
@@ -524,4 +539,50 @@ func openBrowse(ctx context.Context, cfg config.Config) (*usecase.AdminBrowseSer
 func logStartupAddresses(cfg config.Config, listenAddr string) {
 	slog.Info("listening", "addr", listenAddr, "env", cfg.AppEnv)
 	slog.Info("sending mail", "smtp_addr", cfg.SMTPAddr, "tls_mode", cfg.SMTPTLSMode)
+}
+
+// nudgeRepoIfEnabled gives /nudges its repository only when the digest runs,
+// so the command can say "not configured here" instead of saving a choice
+// nothing reads. A typed nil would not do: the interface would be non-nil.
+func nudgeRepoIfEnabled(cfg config.Config, repo *postgres.NudgeRepo) usecase.NudgeRepository {
+	if !cfg.NudgesEnabled() {
+		return nil
+	}
+	return repo
+}
+
+// runNudges is the digest's clock. Deliveries older than a month are pruned
+// on the first tick of each run and then daily, beside the send.
+func runNudges(ctx context.Context, svc *usecase.NudgeService, at string, loc *time.Location, repo *postgres.NudgeRepo) {
+	ticker := time.NewTicker(15 * time.Minute)
+	defer ticker.Stop()
+	for {
+		nudgeTick(ctx, svc, at, loc, repo)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// nudgeTick is one tick, recovering per tick the way the poller recovers per
+// update: a panic costs one delivery attempt, not the digest until the next
+// deploy.
+func nudgeTick(ctx context.Context, svc *usecase.NudgeService, at string, loc *time.Location, repo *postgres.NudgeRepo) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("daily digest tick panicked", "panic", r)
+		}
+	}()
+	day, due := usecase.NudgeDue(time.Now(), at, loc)
+	if !due {
+		return
+	}
+	svc.RunOnce(ctx, day)
+	if n, err := repo.Prune(ctx, day.AddDate(0, -1, 0)); err != nil {
+		slog.Error("nudge prune failed", "error", err)
+	} else if n > 0 {
+		slog.Info("nudge deliveries pruned", "rows", n)
+	}
 }

@@ -356,3 +356,45 @@ func TestIntentParsingIsOffUntilOpenRouterIsConfigured(t *testing.T) {
 		t.Fatalf("openrouter set: enabled %v model %q", cfg.IntentParsingEnabled(), cfg.OpenRouterModel)
 	}
 }
+
+func TestNudgeValuesMustBeBothOrNeitherAndNeedTelegram(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("NUDGES_AT", "09:00")
+	if _, err := config.Load(); err == nil {
+		t.Fatal("NUDGES_AT without NUDGES_TIMEZONE succeeded, want an error")
+	}
+	t.Setenv("NUDGES_TIMEZONE", "Asia/Singapore")
+	if _, err := config.Load(); err == nil {
+		t.Fatal("nudges without Telegram succeeded, want an error: the digest has no channel")
+	}
+	t.Setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+	t.Setenv("TELEGRAM_BOT_USERNAME", "HearthBot")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() = %v, want nil", err)
+	}
+	if !cfg.NudgesEnabled() || cfg.NudgesAt != "09:00" || cfg.NudgesLocation.String() != "Asia/Singapore" {
+		t.Fatalf("nudges: enabled=%v at=%q loc=%v", cfg.NudgesEnabled(), cfg.NudgesAt, cfg.NudgesLocation)
+	}
+
+	t.Setenv("NUDGES_AT", "9am")
+	if _, err := config.Load(); err == nil {
+		t.Fatal("a clock that is not HH:MM succeeded, want an error")
+	}
+	t.Setenv("NUDGES_AT", "09:00")
+	t.Setenv("NUDGES_TIMEZONE", "Mars/Olympus")
+	if _, err := config.Load(); err == nil {
+		t.Fatal("an unknown zone succeeded, want an error")
+	}
+}
+
+func TestNudgesAreOffWhenUnset(t *testing.T) {
+	setRequiredEnv(t)
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.NudgesEnabled() {
+		t.Fatal("NudgesEnabled() = true with nothing set")
+	}
+}

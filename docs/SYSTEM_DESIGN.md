@@ -547,7 +547,7 @@ graph TD
         PGA["postgres — repositories over sqlc,<br/>plus BrowseRepo, the one hand-written<br/>pgx file, over its own read-only pool"]
         Crypto["crypto — argon2id, tokens"]
         MailA["mail — SMTP, and MailOutbox<br/>(reads Mailpit's own HTTP API)"]
-        TelegramA["telegram — Bot API client,<br/>getUpdates poller, update parsing,<br/>and Commander: the channel's inbound<br/>guard for chat commands (ADR 8).<br/>Driven AND driving: see below"]
+        TelegramA["telegram — Bot API client,<br/>getUpdates poller, update parsing,<br/>and Commander: the channel's inbound<br/>guard for chat commands (ADR 8).<br/>Also the daily digest's outbound channel.<br/>Driven AND driving: see below"]
         OpenRouterA["openrouter — IntentParser over<br/>OpenRouter's OpenAI-dialect chat API, plain<br/>net/http, one forced tool call reads a sentence<br/>into an intent. Built only when OPENROUTER_API_KEY<br/>+ _MODEL are set; never writes"]
         IntentShared["intent — the parser's non-wire half:<br/>the prompt, the tool schema, and the<br/>fail-closed reader of its arguments"]
         Clock["clock"]
@@ -559,7 +559,8 @@ graph TD
         Invite["InviteService"]
         Signup["SignupService"]
         TelegramAuth["TelegramAuthService — delivers the magic-link<br/>and sign-up tokens the other services already<br/>mint; mints no token type of its own"]
-        TelegramCmd["TelegramCommandService — /spend, /income,<br/>/balance, /recent: names to ids, amount in the<br/>account's currency, update id as the key.<br/>Takes no actor: the adapter's Commander is the guard (ADR 8)"]
+        TelegramCmd["TelegramCommandService — /spend, /income,<br/>/balance, /recent, /nudges: names to ids, amount in the<br/>account's currency, update id as the key.<br/>Takes no actor: the adapter's Commander is the guard (ADR 8)"]
+        Nudge["NudgeService — the daily digest (stage 6):<br/>Compose from BillsReader + BudgetReader, RunOnce<br/>claims a nudge_deliveries row before each send.<br/>Rules, no model. Recipients query = ADR 8 outbound"]
         Member["MemberService"]
         House["HouseholdService"]
         Account["AccountService — net worth is<br/>composed here, not stored"]
@@ -735,6 +736,7 @@ refuses (spec decision 7).
 | `TelegramLinkRepository` | `adapter/postgres` | Twentieth. Stores the pending deep-link nonces, hashed, that carry a browser's sign-in request across to Telegram. `Consume` stamps `consumed_at` **and** records the redeeming `chat_id` in one statement, because the chat is unknown when the nonce is minted — the browser has not met Telegram yet — so redemption is the only moment the two can be joined, and a redemption that failed to record its chat would be a rate limit that silently never fires. Absent, expired or already consumed all return `domain.ErrNotFound` from one guarded `UPDATE`, the same shape `MagicLinkRepository.Consume` uses. `CountLinksSince` lives here, on the *link* repository, and not on `TelegramAccountRepository`, because the per-chat limit has to bind chats that have no account yet: a stranger repeating `/start` has no user row to count against |
 | `TelegramAccountRepository` | `adapter/postgres` | Twenty-first, and one method wide. `ByChatID` resolves a chat to the user it is bound to, or `domain.ErrNotFound` — which is the entire branch key of the Telegram flow: found means "send a sign-in link", not found means "send a sign-up link" (§5). The binding is *written* by `SignupRepository.Provision`, inside its existing transaction, not by this port; there is no `Bind` method here on purpose, because a chat id a caller could pass in is exactly the substitution `Provision`'s own doc comment refuses |
 | `PlatformAdminRepository` | `adapter/postgres` | Twenty-second. `Get`/`Grant`/`Revoke`/`List` over `platform_admins`. `Grant` has exactly one call site in the whole repository outside test code — `adminctl`'s `runGrantPlatformAdmin` — which is the property [ADR 5](adr/0005-platform-admin-authorization.md) exists to keep true; there is no `AdminService` method that calls it, on purpose, since granting is not a decision the running service ever makes |
+| `NudgeRepository` | `adapter/postgres` | The daily digest's at-most-once ledger and opt-out ([ADR 9](adr/0009-scheduled-work-runs-inside-the-api.md)). `Recipients` is the authorisation for the outbound direction: `telegram_accounts ⋈ memberships` keeping only owners with Money whose chat has not said `/nudges off` — a postgres test plants each excluded shape. `Claim` is `INSERT … ON CONFLICT DO NOTHING` on `(chat_id, household_id, day)`, insert-first like the transaction idempotency key; `Release` deletes it after a failed send; `Prune` keeps a month. `BillsReader` and `BudgetReader` are the two narrow reads `NudgeService` declares, satisfied by the bill and budget services |
 | `APITokenRepository` | `adapter/postgres` | Personal API tokens ([ADR 7](adr/0007-personal-api-tokens.md)): `Create` stores only the SHA-256 and an 8-character prefix; `ByTokenHash` is the live lookup (revoked or expired is `ErrNotFound`, like `GetLiveSession`); `Revoke` is user-scoped so a guessed id from another member is a miss; `RevokeAllForUser` sits beside `SessionRepository.RevokeAllForUser` in `MemberService.revokeCredentials`; `Touch` is throttled by the caller to one write an hour |
 | `IntentParser` | `adapter/openrouter` | The Telegram bot's free-text reader (stage 5b of the chat-commands spec): an open-weight model through OpenRouter's OpenAI-dialect API over plain `net/http`, up to three model ids tried in order. One implementation and one caller, which is normally the wrong shape for a port — it is one anyway because the implementation is a third-party API behind a key, and the product must behave identically without it: `nil` means "commands only". (A Claude adapter was its second implementation for one day, 2026-09-08, and was removed when the owner chose free models; git has it.) The prompt, the `log_transaction` schema, and the reader that turns the model's arguments into an `Intent` and fails closed on any kind it did not name live in `adapter/intent`, apart from the HTTP, because the reader is the last line between a model's output and the ledger and earns its own tests. The port returns text fields, never ids, so what the person confirms is what they can read. The Commander caps every call at 30 s, because the poller handles one update at a time and a stalled provider would hold every chat |
 | `FeatureFlagRepository` | `adapter/postgres` | Twenty-third. `OverridesFor` is the one query `requireSession` runs on every authenticated request — both the global and the household layer in a single `UNION ALL` statement, never two round trips. `key` carries no foreign key to a registry table, because the registry (`domain.AllFlags`) is compile-time; a row can outlive the `const` that named it, and `SetHousehold`/`ClearHousehold` are two different operations on purpose — setting a household's override to `false` and removing the override row entirely are different states downstream, not the same write with a different value |
@@ -1489,8 +1491,43 @@ for the channel, before any service runs ([ADR 8](adr/0008-authorisation-at-each
 The resolver decides nothing; the service takes a household and a
 membership it never questions. The update id is the idempotency key, so
 the poller's known redelivery-after-restart becomes a replay rather than a
-second row. **Not yet walked against the real bot** — the production box
-polls the same token, so a local poller cannot be the sole consumer.
+second row. Walked live on 2026-09-08 against a development bot, after the
+first attempt with the production token went to the production poller.
+
+### Telegram — the bot speaks first: the daily digest
+
+```mermaid
+sequenceDiagram
+    participant K as runNudges (15-min tick)
+    participant N as NudgeService
+    participant R as NudgeRepository
+    participant B as BillService / BudgetService
+    participant TG as Telegram
+
+    K->>K: NudgeDue(now, "09:00", Asia/Singapore)? no → sleep
+    K->>N: RunOnce(day)
+    N->>R: Recipients() — owners with Money, nudges_enabled
+    loop each recipient
+        N->>R: Claim(chat, household, day)
+        R-->>N: false → skip (already sent, or being sent)
+        N->>B: List(bills, today) · Month(budget, today)
+        N->>N: due ≤ today+3 and not autopay · spent×100 ≥ cap×80
+        N-->>N: nothing → keep the claim, no message
+        N->>TG: sendMessage(chat, digest)
+        TG-->>N: error → Release(claim); next tick retries
+    end
+```
+
+No actor asks, so ADR 8's question becomes "who may receive": the
+recipients query keeps only what the Commander would let through inbound,
+and an opted-out chat (`/nudges off`) is simply absent from it. The claim is
+written before the send, so a restart mid-run or two ticks in one hour
+cannot deliver twice, and the scheduler is allowed to be sloppy because the
+ledger is not ([ADR 9](adr/0009-scheduled-work-runs-inside-the-api.md)).
+The digest is rules, not a model: `BillService.List` and
+`BudgetService.Month` — the same reads the screens make — filtered to three
+days and 80%, formatted with `domain.FormatAmount`. One zone for the whole
+install is the named gap.
 
 ### Telegram — a second delivery channel, and the link comes back to the tapper
 
@@ -2769,6 +2806,13 @@ erDiagram
         uuid user_id FK "NOT NULL, UNIQUE, ON DELETE CASCADE"
         bigint chat_id "NOT NULL, UNIQUE"
         timestamptz linked_at
+        boolean nudges_enabled "NOT NULL DEFAULT true — /nudges off"
+    }
+    nudge_deliveries {
+        bigint chat_id PK
+        uuid household_id PK "FK ON DELETE CASCADE"
+        date day PK
+        timestamptz sent_at "claimed before the send; deleted if it fails"
     }
     telegram_link_requests {
         uuid id PK
@@ -3969,7 +4013,8 @@ prefix, which is what made the duplication stop being optional.
 | Telegram | **Off unless configured**, and both values travel together: `config.Load` refuses a boot where exactly one of `TELEGRAM_BOT_TOKEN`/`TELEGRAM_BOT_USERNAME` is set, the same both-or-neither rule `SMTP_USERNAME`/`SMTP_PASSWORD` already follow, because a half-configured channel misbehaves silently. Both empty — which is what `deploy/.env` on the production box says, and this change is not deployed there yet in any case — means `POST /auth/telegram/start` answers `404`, the poller never starts, and `adminctl` (which runs `config.Load` before every subcommand) is unaffected. **Exactly one process may call `getUpdates`:** Telegram hands each update to a single caller, so a second `api` replica would silently steal updates and the symptom would be "sign-in works about half the time" — an operational constraint on ever scaling this service horizontally, not just a code comment (§1). Outbound only; no webhook, so nothing new faces the internet. The bot token is never logged in any branch, including error paths — `client.go` builds its errors from the method name rather than the request URL, because Telegram's own API URLs embed the token in the path and a `*url.Error` carries that URL |
 | Database browse | **Off unless configured, and off on the production box today by the owner's decision.** `DATABASE_READONLY_URL` points at `hearth_readonly`, a `SELECT`-only role created by `deploy/readonly-role.sql` during provisioning — **not by a migration**, because a role is cluster-level rather than schema, and for the same reason it is in **no backup this product takes** (`backup.sh` dumps one database with `--no-privileges`), so a restore re-runs that script. Idempotent, so "after every restore" is the whole rule. Unset means both `/admin/db/*` routes answer `503 DB_BROWSE_NOT_CONFIGURED` naming the variable; there is deliberately **no fallback to `DATABASE_URL`**, so a half-provisioned box degrades to "you cannot use this panel", never to "you are using it through the read-write connection". Set but unparseable, or set to a role that can write, **refuses the boot** — `OpenReadOnly` runs a privilege check in `AfterConnect`, so it holds on every connection the pool opens, not only the first. Set but merely unreachable does **not** refuse the boot: that is restore day, and taking the household product down over an operator panel would invert the promise. It answers `503 DB_BROWSE_UNAVAILABLE` instead, from a stand-in browser that carries the boot failure so the log says why (§3). Turning it on in production is `deploy/PROVISION.md` §10, not a deploy |
 | Seeding | `adminctl seed`, refused unless `APP_ENV=development` **and** the database host is local — both checked before the connection opens |
-| Retention | `adminctl prune --older-than=<days>` (default 30, floor 7) deletes consumed/expired `signups`, stale `login_attempts` and — closed in the whole-branch fix wave, 2026-09-01 — consumed/expired `telegram_link_requests`, the third table a stranger can grow without an account (`PruneTelegramLinkRequests` mirrors `PruneSignups`'s own retention condition exactly). `magic_links`, `invites`, `sessions` and now `api_tokens` (revoked and expired rows are stamped, never deleted) still grow forever, a real gap rather than a decision (§6) |
+| Retention | `adminctl prune --older-than=<days>` (default 30, floor 7) deletes consumed/expired `signups`, stale `login_attempts` and — closed in the whole-branch fix wave, 2026-09-01 — consumed/expired `telegram_link_requests`, the third table a stranger can grow without an account (`PruneTelegramLinkRequests` mirrors `PruneSignups`'s own retention condition exactly). `nudge_deliveries` is pruned by the api itself on its own tick, a month back. `magic_links`, `invites`, `sessions` and now `api_tokens` (revoked and expired rows are stamped, never deleted) still grow forever, a real gap rather than a decision (§6) |
+| Daily digest | **Off unless configured.** `NUDGES_AT` (local `HH:MM`) **and** `NUDGES_TIMEZONE` (IANA), both or neither, refused without Telegram; a bad clock or an unknown zone refuses the boot. A goroutine beside the poller ticks every fifteen minutes; `usecase.NudgeDue` says whether local time is past the clock and which local date to claim. One message per owner-with-Money chat per household per day, never a second one, never one that says "all fine". The start-up log line `daily digest enabled at=… timezone=…` is the tell; each send logs `nudge sent household=…`. One zone for the whole install |
 | Rate limiting | Per-address (3/hour) and a global daily ceiling (1000, reset at midnight, not a rolling 24 hours), both counted from `signups` so a restart cannot reset them — and the Telegram sign-up path counts against that **same** global ceiling, deliberately, so a flood of `/start` cannot run the shared counter up and silently stop email sign-up while having no ceiling of its own. Telegram adds two more: per-**chat**, at most 3 links delivered per hour, counted from `telegram_link_requests` (so a restart cannot reset it either), and a second per-IP bucket of 20/hour on `POST /auth/telegram/start`, in its own limiter instance so it and sign-up cannot spend each other's budget (§4). Per-IP (5/hour on sign-up) is an in-memory token bucket in the HTTP layer — process-local, spoofable in development, and keyed to the *proxy* rather than the client if a proxy is put in front of nginx without `set_real_ip_from`; Caddy is in front in production, so `web/nginx.conf` carries that directive over the compose subnet and it is verified, not assumed (both in §1). The per-IP limit binds before the global one by construction (5 × 24 = 120 ≪ 1000) so one IP alone can never exhaust the global ceiling — but that arithmetic covers only the **email** sign-up path, whose every request to `/auth/sign-up` arrives over HTTP from the stranger's own IP and passes through that 5/hour bucket on the way to the shared counter. **The Telegram sign-up path has no per-IP bound at all.** The row that actually advances the shared global counter is written by `sendSignUp` (`telegram_auth.go`), reached only from the poller processing a Telegram update — the IP on that request is Telegram's own long-poll host, not the stranger's, so no per-IP bucket sees it (the 20/hour bucket on `POST /auth/telegram/start`, above, limits only how often a *browser* can mint a nonce, a step upstream of and separate from a chat sending `/start`). What actually bounds a Telegram sign-up flood is the per-**chat** limit (3/hour, above) plus the same shared global daily ceiling the email path counts against |
 | Health | `/healthz` ignores the database; `/readyz` pings it |
 | Intent parsing | **Off unless configured.** `OPENROUTER_API_KEY` **and** `OPENROUTER_MODEL` set (both or neither — `config.Load` refuses one alone) means the Telegram `Commander` gets an `IntentParser` over an open-weight model through OpenRouter (`adapter/openrouter`, forced tool call, `max_tokens` 4096, 30 s client timeout; up to three comma-separated model ids, tried in order in one request, because free models are rate-limited upstream minute to minute; the ids are configuration because OpenRouter's free, tool-capable list changes month to month, and a fourth id is refused at boot since OpenRouter caps the list at three). Unset means a plain sentence to the bot from an authorised owner is answered "commands only" and a stranger's is ignored. The start-up log line names the `model` list. The key is never logged and the adapter's errors carry the status and the provider's message only — no URL, no request id. A parse is never a write: the reading is shown back and held five minutes per chat in the poller's memory, written on `/yes` with the sentence's update id as the idempotency key. Not run against the real API on this machine (no key) — tested against a fake Messages API |

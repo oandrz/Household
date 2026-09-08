@@ -70,9 +70,11 @@ func (r resolverStub) Resolve(context.Context, int64) (domain.Membership, error)
 }
 
 type serviceSpy struct {
-	spends []usecase.TelegramSpend
-	result usecase.TelegramSpendResult
-	err    error
+	nudges    []bool
+	nudgesErr error
+	spends    []usecase.TelegramSpend
+	result    usecase.TelegramSpendResult
+	err       error
 }
 
 func (s *serviceSpy) LogSpend(_ context.Context, in usecase.TelegramSpend) (usecase.TelegramSpendResult, error) {
@@ -87,6 +89,11 @@ func (s *serviceSpy) Recent(context.Context, string, int) ([]usecase.Transaction
 }
 func (s *serviceSpy) Names(context.Context, string) ([]string, []string, error) {
 	return []string{"DBS Savings"}, []string{"Groceries"}, nil
+}
+
+func (s *serviceSpy) SetNudges(_ context.Context, chatID int64, enabled bool) error {
+	s.nudges = append(s.nudges, enabled)
+	return s.nudgesErr
 }
 
 // parserStub answers every sentence with one intent, and records what it
@@ -325,5 +332,50 @@ func TestTheParserIsAlwaysCalledWithADeadline(t *testing.T) {
 	c.HandleCommand(context.Background(), Command{ChatID: 1, Name: "text", Description: "hello"})
 	if len(parser.asked) != 1 || !parser.hadDeadline {
 		t.Fatalf("asked=%d deadline=%v, want one call with a deadline", len(parser.asked), parser.hadDeadline)
+	}
+}
+
+func TestNudgesOnOffTogglesThisChatAndAnythingElseIsUsage(t *testing.T) {
+	svc := &serviceSpy{}
+	sender := &senderSpy{}
+	c := NewCommander(resolverStub{member: owner()}, svc, sender)
+	for _, arg := range []string{"off", "on", "maybe"} {
+		m := &Message{Text: "/nudges " + arg}
+		m.Chat.ID = 1
+		cmd, ok := ParseCommand(Update{UpdateID: 1, Message: m})
+		if !ok || cmd.Name != "nudges" {
+			t.Fatalf("/nudges %s parsed as %+v ok=%v", arg, cmd, ok)
+		}
+		c.HandleCommand(context.Background(), cmd)
+	}
+	if len(svc.nudges) != 2 || svc.nudges[0] != false || svc.nudges[1] != true {
+		t.Fatalf("toggles = %v, want [false true]", svc.nudges)
+	}
+	if len(sender.sent) != 3 || sender.sent[0] != replyNudgesOff || sender.sent[1] != replyNudgesOn || sender.sent[2] != replyUsageNudges {
+		t.Fatalf("replies = %q", sender.sent)
+	}
+}
+
+// The guard runs before the toggle: a limited member cannot turn on a digest
+// that would carry money they may not see.
+func TestALimitedMemberCannotToggleNudges(t *testing.T) {
+	svc := &serviceSpy{}
+	limited := domain.Membership{ID: "m-2", HouseholdID: "h-1", Role: domain.RoleLimited, Capabilities: domain.Capabilities{domain.CapMoney}}
+	NewCommander(resolverStub{member: limited}, svc, &senderSpy{}).
+		HandleCommand(context.Background(), Command{ChatID: 1, Name: "nudges", Description: "on"})
+	if len(svc.nudges) != 0 {
+		t.Fatal("a limited member reached SetNudges")
+	}
+}
+
+// On an install with no digest configured, /nudges is a question with an
+// answer, not a failure: the reply says so and nothing is logged as an error.
+func TestNudgesOnAnInstallWithoutADigestSaysSo(t *testing.T) {
+	svc := &serviceSpy{nudgesErr: usecase.ErrNudgesUnavailable}
+	sender := &senderSpy{}
+	NewCommander(resolverStub{member: owner()}, svc, sender).
+		HandleCommand(context.Background(), Command{ChatID: 1, Name: "nudges", Description: "off"})
+	if len(sender.sent) != 1 || sender.sent[0] != replyNudgesUnavailable {
+		t.Fatalf("replies = %q, want the not-configured reply", sender.sent)
 	}
 }

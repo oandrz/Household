@@ -250,6 +250,13 @@ type NotificationPreference struct {
 	WeeklyDigest    bool
 }
 
+type NudgeDelivery struct {
+	ChatID      int64
+	HouseholdID pgtype.UUID
+	Day         pgtype.Date
+	SentAt      pgtype.Timestamptz
+}
+
 type PlatformAdmin struct {
 	UserID    pgtype.UUID
 	Note      string
@@ -318,10 +325,11 @@ type Space struct {
 }
 
 type TelegramAccount struct {
-	ID       pgtype.UUID
-	UserID   pgtype.UUID
-	ChatID   int64
-	LinkedAt pgtype.Timestamptz
+	ID            pgtype.UUID
+	UserID        pgtype.UUID
+	ChatID        int64
+	LinkedAt      pgtype.Timestamptz
+	NudgesEnabled bool
 }
 
 type TelegramLinkRequest struct {

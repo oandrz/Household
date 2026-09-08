@@ -44,7 +44,13 @@ type TelegramCommandDeps struct {
 	Categories   *CategoryService
 	Transactions *TransactionService
 	Clock        Clock
+	// Nudges is nil when the daily digest is not configured; /nudges then
+	// answers that there is nothing to turn off.
+	Nudges NudgeRepository
 }
+
+// ErrNudgesUnavailable is /nudges on an install with no daily digest.
+var ErrNudgesUnavailable = errors.New("daily digest is not configured on this install")
 
 type TelegramCommandService struct{ d TelegramCommandDeps }
 
@@ -140,6 +146,15 @@ func (s *TelegramCommandService) LogSpend(ctx context.Context, in TelegramSpend)
 // Balances is /balance: every live account with its current balance.
 func (s *TelegramCommandService) Balances(ctx context.Context, householdID string) ([]AccountView, error) {
 	return s.d.Accounts.List(ctx, householdID, false)
+}
+
+// SetNudges is /nudges on|off. ErrNudgesUnavailable when no digest is
+// configured, so the reply can say so rather than pretend to save a choice.
+func (s *TelegramCommandService) SetNudges(ctx context.Context, chatID int64, enabled bool) error {
+	if s.d.Nudges == nil {
+		return ErrNudgesUnavailable
+	}
+	return s.d.Nudges.SetEnabled(ctx, chatID, enabled)
 }
 
 // Recent is /recent: the newest n transactions across every month.

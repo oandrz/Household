@@ -4834,7 +4834,28 @@ route with a missing guard has no second line of defence.
   asking the owner to type anything. That test now exists as a habit: the
   third walk was preceded by it, and it read three sentences correctly.
   A provider's documented cap is a constructor check, not a runtime
-  surprise.
+  surprise. *(n)* **Read the schema's CHECKs before planning a negative
+  test.** The recipients test for the daily digest planned an "owner
+  without Money" row to prove the capability predicate; the insert failed
+  on `owners_hold_all_capabilities`, which forbids exactly that. The
+  predicate stays in the query as belt-and-braces mirrored on the routes,
+  and the test says why that shape is absent rather than silently dropping
+  it. *(o)* **A scheduled sender needs three things a request handler
+  does not**: a claim written before the send (so a restart cannot repeat
+  it), a release on failure (so a bad minute does not cost a day), and a
+  tick that asks "is it past the time" rather than "is it the time" (so a
+  restart cannot skip it). The first cut of `RunOnce` had all three
+  because the transaction idempotency key had already taught the first;
+  the mutation that ignored the claim result went red on the two-tick
+  test. Review added a fourth and a fifth: **recover per tick, not per
+  goroutine** (a `defer recover()` at the top of the loop function logs
+  one panic and then the loop is gone until the next deploy — the poller
+  had already put its recover inside `dispatch` for this reason), and
+  **hand the reads the same date shape the screens use** — the zoned tick
+  instant went straight into `Compose`, and for a UTC+8 install ticking
+  before 08:00 that is yesterday's date: a two-day horizon, and on the 1st,
+  last month's budget. The fix is one `time.Date(…, time.UTC)` at the top
+  of `RunOnce`, and a test that ticks at 00:15 SGT on the 1st.
 - The architecture lint **never enforced the rule it existed for**. Both branches
   only matched imports *within* the module, so third-party imports in
   `internal/domain` passed. Proven by planting `pgx` and getting exit 0.

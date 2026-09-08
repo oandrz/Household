@@ -69,6 +69,11 @@ func ParseCommand(u Update) (Command, bool) {
 	case "/balance", "/recent", "/help", "/yes", "/no":
 		cmd.Name = strings.TrimPrefix(word, "/")
 		return cmd, true
+	case "/nudges":
+		// "/nudges on" or "/nudges off"; the argument rides in Description
+		// and the handler answers with usage for anything else.
+		cmd.Name, cmd.Description = "nudges", strings.ToLower(strings.TrimSpace(rest))
+		return cmd, true
 	case "/spend", "/income":
 		cmd.Name = strings.TrimPrefix(word, "/")
 	default:
@@ -134,6 +139,9 @@ type CommandService interface {
 	// Names is what the parser may pick from: live account nicknames and
 	// the household's unarchived category names.
 	Names(ctx context.Context, householdID string) (accounts, categories []string, err error)
+	// SetNudges is /nudges on|off for this chat: whether the daily digest
+	// reaches it. Per chat, not per household, because it is "this phone".
+	SetNudges(ctx context.Context, chatID int64, enabled bool) error
 }
 
 type Sender interface {
@@ -186,16 +194,20 @@ func (c *Commander) WithIntentParser(p usecase.IntentParser) *Commander {
 }
 
 const (
-	replyNotLinked      = "This chat is not linked to a Hearth account. Sign in from the app with Telegram first."
-	replyNotOwner       = "Only a household owner with Money can log spending here."
-	replyHelp           = "Commands:\n/spend <amount> <what> [#category] [@account]\n/income <amount> <what> [#category] [@account]\n/balance\n/recent\n\nExamples:\n/spend 84.50 groceries #Groceries @\"DBS Savings\"\n/income 6500 salary\n\nAmounts are in the account's currency. Quote names with spaces."
-	replyUsageSpend     = "Usage: /spend <amount> <what> [#category] [@account] — e.g. /spend 12.50 coffee #\"Dining out\""
-	replyUsageIncome    = "Usage: /income <amount> <what> [#category] [@account] — e.g. /income 6500 salary @\"DBS Savings\""
-	replyNoParser       = "I only understand commands here. Send /help to see them."
-	replyNotUnderstood  = "I could not read that as an expense or income. Try /spend <amount> <what>, or /help."
-	replyNothingPending = "Nothing to confirm. Tell me what you spent, or use /spend."
-	replyDiscarded      = "Discarded."
-	recentCount         = 5
+	replyNotLinked         = "This chat is not linked to a Hearth account. Sign in from the app with Telegram first."
+	replyNotOwner          = "Only a household owner with Money can log spending here."
+	replyHelp              = "Commands:\n/spend <amount> <what> [#category] [@account]\n/income <amount> <what> [#category] [@account]\n/balance\n/recent\n/nudges on|off\n\nExamples:\n/spend 84.50 groceries #Groceries @\"DBS Savings\"\n/income 6500 salary\n\nAmounts are in the account's currency. Quote names with spaces."
+	replyUsageSpend        = "Usage: /spend <amount> <what> [#category] [@account] — e.g. /spend 12.50 coffee #\"Dining out\""
+	replyUsageIncome       = "Usage: /income <amount> <what> [#category] [@account] — e.g. /income 6500 salary @\"DBS Savings\""
+	replyNoParser          = "I only understand commands here. Send /help to see them."
+	replyNotUnderstood     = "I could not read that as an expense or income. Try /spend <amount> <what>, or /help."
+	replyNothingPending    = "Nothing to confirm. Tell me what you spent, or use /spend."
+	replyDiscarded         = "Discarded."
+	replyNudgesOn          = "Daily digest on. Each morning I will list bills due in the next three days and budget lines past 80%. Send /nudges off to stop."
+	replyNudgesOff         = "Daily digest off for this chat. Send /nudges on to start again."
+	replyUsageNudges       = "Usage: /nudges on — or — /nudges off"
+	replyNudgesUnavailable = "The daily digest is not turned on for this install, so there is nothing to change."
+	recentCount            = 5
 )
 
 // HandleCommand is the whole edge: resolve the chat, refuse what a limited
@@ -238,6 +250,8 @@ func (c *Commander) HandleCommand(ctx context.Context, cmd Command) error {
 		return c.freeText(ctx, member, cmd)
 	case "yes":
 		return c.confirm(ctx, cmd)
+	case "nudges":
+		return c.nudges(ctx, cmd)
 	case "no":
 		c.takePending(cmd.ChatID)
 		return c.sender.SendMessage(ctx, cmd.ChatID, replyDiscarded)
@@ -272,6 +286,33 @@ func (c *Commander) logSpend(ctx context.Context, member domain.Membership, cmd 
 		return c.sender.SendMessage(ctx, cmd.ChatID, explain(err))
 	}
 	return c.sender.SendMessage(ctx, cmd.ChatID, receipt(res, kind))
+}
+
+// nudges is the opt-out for the daily digest. The guard above has already
+// run: only an owner with Money can toggle it, which is also the only kind of
+// chat the digest would ever reach.
+func (c *Commander) nudges(ctx context.Context, cmd Command) error {
+	var enabled bool
+	switch cmd.Description {
+	case "on":
+		enabled = true
+	case "off":
+		enabled = false
+	default:
+		return c.sender.SendMessage(ctx, cmd.ChatID, replyUsageNudges)
+	}
+	if err := c.svc.SetNudges(ctx, cmd.ChatID, enabled); err != nil {
+		if errors.Is(err, usecase.ErrNudgesUnavailable) {
+			// A configuration state, not a failure: no error log.
+			return c.sender.SendMessage(ctx, cmd.ChatID, replyNudgesUnavailable)
+		}
+		slog.Error("telegram nudges toggle failed", "error", err)
+		return c.sender.SendMessage(ctx, cmd.ChatID, "Could not change that right now.")
+	}
+	if enabled {
+		return c.sender.SendMessage(ctx, cmd.ChatID, replyNudgesOn)
+	}
+	return c.sender.SendMessage(ctx, cmd.ChatID, replyNudgesOff)
 }
 
 // freeText is stage 5b: a sentence, read by the parser into the same

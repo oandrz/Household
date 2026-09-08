@@ -175,6 +175,25 @@ through OpenRouter), you can also just say it —
 saved until you answer `/yes`, and the offer expires after five minutes.
 Without a key the bot understands the slash commands only.
 
+## The bot speaks first: the daily digest
+
+If the install has the digest turned on, each morning the bot sends every
+owner with Money one short message per household: bills overdue or due in
+the next three days (bills on autopay are left out), and budget categories
+at or past 80% of their cap. On a day with nothing to say it stays quiet.
+
+```
+Bills due soon:
+• Electricity SGD 88.50, Thu 10 Sep
+
+Budget running hot:
+• Dining out 84% used (420.00 of 500.00)
+```
+
+Send `/nudges off` in the chat to stop it for that phone, and `/nudges on`
+to start again. It reaches only owners with Money, because it carries
+money.
+
 ## What is not built yet
 
 The sidebar shows where these will go. Clicking through tells you which stage

@@ -187,7 +187,9 @@ turn on Telegram sign-in and chat commands (**one token, one poller** — the
 production bot's token belongs on this box only; a developer machine uses a
 separate bot), and `OPENROUTER_API_KEY` + `OPENROUTER_MODEL` let the bot read
 a plain sentence into an expense (up to three comma-separated model ids;
-free ones cost nothing). Each pair is both-or-neither; `config.Load` refuses
+free ones cost nothing). A third pair, `NUDGES_AT` + `NUDGES_TIMEZONE`
+(a local `HH:MM` and an IANA zone), turns on the daily Telegram digest and
+needs the Telegram pair. Each pair is both-or-neither; `config.Load` refuses
 one alone.
 
 ## 9 · First bring-up

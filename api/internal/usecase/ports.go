@@ -203,6 +203,39 @@ type TelegramAccountRepository interface {
 	ByChatID(ctx context.Context, chatID int64) (userID string, err error)
 }
 
+// NudgeRecipient is one chat that may receive one household's daily digest:
+// an owner with the money capability whose chat has not opted out. The
+// repository's query is the authorisation for this outbound direction (ADR 8):
+// a digest carries money, so it goes only where /balance would already be
+// answered.
+type NudgeRecipient struct {
+	ChatID       int64
+	HouseholdID  string
+	MembershipID string
+	Currency     string
+}
+
+// NudgeRepository is the at-most-once ledger behind the daily digest, plus the
+// per-chat opt-out. Claim is insert-first, the same shape as the transaction
+// idempotency key: the row is written before the message is sent, and the
+// primary key decides who sends.
+type NudgeRepository interface {
+	Recipients(ctx context.Context) ([]NudgeRecipient, error)
+	// Claim returns false when a delivery for this chat, household and day
+	// already exists -- sent, or being sent by another tick. The caller
+	// skips; it never sends on false.
+	Claim(ctx context.Context, chatID int64, householdID string, day time.Time) (bool, error)
+	// Release deletes the claim after a failed send so the next tick may
+	// try again. A claim that is not released stands for the whole day,
+	// which is what "nothing to say today" also leaves behind on purpose.
+	Release(ctx context.Context, chatID int64, householdID string, day time.Time) error
+	// SetEnabled is /nudges on|off. domain.ErrNotFound when the chat is not
+	// bound to anyone, which the Commander's guard has already ruled out.
+	SetEnabled(ctx context.Context, chatID int64, enabled bool) error
+	// Prune deletes delivery rows for days before the given one.
+	Prune(ctx context.Context, before time.Time) (int64, error)
+}
+
 // APITokenRepository stores a member's long-lived credentials. Only the
 // hash of a token is ever persisted; the raw value is shown once and never
 // written anywhere.
