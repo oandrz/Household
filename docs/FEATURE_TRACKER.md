@@ -929,7 +929,9 @@ the figure that actually matters for planning: with five rows out of scope,
 same day**, two more ✅ rows (idempotent create, CSV import):
 **89/18/16/5 = 128**, denominator **123**. Then personal API tokens moved
 ⬜ → ✅ and a ⬜ row for their Settings screen was added: **90/18/16/5 =
-129**, denominator **124**.
+129**, denominator **124**. Then Telegram chat commands as 🟡 (built and
+tested, not walked against the real bot): **90/19/16/5 = 130**, denominator
+**125**.
 
 | Area | Built | Partial | Not started | Out of scope |
 |---|---|---|---|---|
@@ -942,8 +944,8 @@ same day**, two more ✅ rows (idempotent create, CSV import):
 | Family | 0 | 0 | 0 | 3 |
 | Household extras | 0 | 0 | 0 | 1 |
 | Platform administration | 7 | 1 | 0 | 1 |
-| Automation | 4 | 0 | 1 | 0 |
-| **Total** | **90** | **18** | **16** | **5** |
+| Automation | 4 | 1 | 1 | 0 |
+| **Total** | **90** | **19** | **16** | **5** |
 
 ---
 
@@ -1788,6 +1790,7 @@ the design drew it. Decision and shape in
 | Idempotent `POST /transactions` (`Idempotency-Key` header) | ✅ | Migration `00015`: nullable `transactions.idempotency_key` with a partial unique index per household. `TransactionService.CreateOrReplay` inserts first and looks up second, so two racing retries are settled by the index; a replay compares every caller-controlled field (`domain.Transaction.SameCreate`) and answers the stored row with 200, a mismatch `409 IDEMPOTENCY_KEY_REUSED`, a malformed key `422`. No header means the old behaviour exactly; the web app sends none. **Verified live 2026-09-08**: same key twice → one row, 200 second time; same key different amount → 409 with the body shown. Three mutations (fake repository stops enforcing the key, service stops comparing fields, adapter stops translating the constraint) each turned a test red — the last one surfacing as `409 ALREADY_EXISTS` from the real database, which is how the translate case was proven load-bearing. Only transactions carry a key; other creates do not (spec decision 7) |
 | `hearthctl transaction import <file.csv>` | ✅ | Client-side loop of keyed `POST /transactions`, no bulk route. Names or ids for accounts, categories and members; every row resolved before anything is sent, one bad row blocks the file; default key is a content hash plus `#n` for identical rows, so the same file run twice is all replays. **Verified live 2026-09-08**: a four-row file with one unknown account sent nothing and named line 5; the three-row file created 3 then replayed 3; the ledger in a real browser showed six rows for two runs plus one keyed add, no duplicates. The first live run created 3 twice — the dev `api` container's `air` had not rebuilt on the mounted volume, so the old binary answered; `docker compose restart api` fixed it and LEARNING carries the note |
 | Personal API tokens for headless callers | ✅ | [ADR 7](adr/0007-personal-api-tokens.md), migration `00016`. `Authorization: Bearer hearth_…` resolves to the member's own Scope; Bearer wins and never falls back to the cookie; CSRF is skipped for a resolved token only; a token cannot mint, revoke, sign out or reach `/admin`; expiry required (90 days default, 365 max); membership update and removal revoke tokens beside sessions. `hearthctl token create|list|revoke` from a browser session, `hearthctl login --token` / `HEARTH_TOKEN` on the headless side. **Walked live 2026-09-08**: minted, listed (prefix only), signed in with it in a second config dir, `whoami` as the owner, a category written with no CSRF header, `token create` and a raw `POST /auth/tokens` through the token both refused (`SESSION_REQUIRED`), `/admin/flags` through the token 404, revoked from the browser session, next call exit 2. Three mutations (cookie fallback, CSRF skip removed, member removal no longer revoking tokens) each turned a test red. **Gap, named:** no Settings screen — the row below |
+| Telegram chat commands — `/spend`, `/income`, `/balance`, `/recent`, `/help` | 🟡 | [ADR 8](adr/0008-authorisation-at-each-channels-inbound-edge.md), spec `docs/superpowers/specs/2026-09-08-hearth-telegram-commands-design.md`. A fixed grammar with quoted names; amounts parsed in the account's currency with integer arithmetic (`domain.ParseAmount`, JPY 0 places, BHD 3); account defaults to the household's only cash account or is refused with the list; categories offered by kind; dated today, paid by the sender; the update id is the idempotency key so Telegram's redelivery replays. The guard — owner **and** money, chat resolved to a membership first — is the adapter's `Commander`, the channel's edge, not a service. Nineteen tests across domain, usecase and adapter, including the poller dispatching only with `WithCommands`. **The gap:** not walked against the real bot, because the production box holds the same `TELEGRAM_BOT_TOKEN` and the api logs show its poller and ours fighting (`terminated by other getUpdates request`); a walk would be flaky and could hand a command to the process that ignores it. Needs a **development bot** from BotFather for the local `.env`; then the walk is: `/help`, an unlinked chat refused, `/spend 4.50 coffee` from the seeded owner, the row in the ledger, the same update replayed by restarting the api, `/balance` |
 | Manage API tokens in Settings | ⬜ | The design never drew it. A list with name, prefix, created, last used, expiry, a Revoke button, and a "New token" dialog that shows the secret once. The API is complete; this is a frontend screen over `GET/POST/DELETE /auth/tokens` |
 
 ## Suggested order

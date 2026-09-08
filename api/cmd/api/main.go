@@ -182,8 +182,10 @@ func run() error {
 	// expressed once, here, rather than re-derived by every consumer.
 	var telegramSvc *usecase.TelegramAuthService
 	var telegramPoller *telegram.Poller
+	var telegramClient *telegram.Client
 	if cfg.TelegramEnabled() {
 		client := telegram.NewClient(cfg.TelegramBotToken)
+		telegramClient = client
 		telegramSvc = usecase.NewTelegramAuthService(usecase.TelegramAuthDeps{
 			Links:      telegramLinks,
 			Accounts:   telegramAccounts,
@@ -373,7 +375,22 @@ func run() error {
 	// it trades a clean cancellation for a write racing process death. Add the
 	// WaitGroup when something in this loop starts writing more than one row.
 	if telegramPoller != nil {
-		slog.Info("telegram sign-in enabled", "bot_username", cfg.TelegramBotUsername)
+		// Chat commands ride the same poller. The Commander is the
+		// channel's inbound guard (ADR 8): it resolves the chat to a
+		// membership and refuses anyone who is not an owner with Money
+		// before any service is called. Wired here, after the money
+		// services exist, rather than where the poller was built.
+		telegramPoller.WithCommands(telegram.NewCommander(
+			&usecase.TelegramCallerService{Accounts: telegramAccounts, Memberships: memberships},
+			usecase.NewTelegramCommandService(usecase.TelegramCommandDeps{
+				Accounts:     accountSvc,
+				Categories:   categorySvc,
+				Transactions: transactionSvc,
+				Clock:        sysClock,
+			}),
+			telegramClient,
+		))
+		slog.Info("telegram sign-in and chat commands enabled", "bot_username", cfg.TelegramBotUsername)
 		go telegramPoller.Run(ctx)
 	}
 

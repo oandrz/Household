@@ -4785,7 +4785,13 @@ route with a missing guard has no second line of defence.
   down from where the omission was. The HTTP env caught the same omission
   at compile time only because its Deps are passed by name into a router
   that dereferences them at build. When a port is added, grep every
-  `XDeps{` literal, tests included, before running anything.
+  `XDeps{` literal, tests included, before running anything. *(g)* **The
+  Go suite has a 5-minute timeout per package and the two testcontainers
+  packages each run for about five minutes on this machine.** Running
+  targeted `http` tests while `make test-api` was already running pushed
+  `postgres` from 298s to a timeout at 300s — a red run with no red test.
+  Run the full suite alone, and read "panic: test timed out" as load, not
+  as a defect, before chasing it.
 - The architecture lint **never enforced the rule it existed for**. Both branches
   only matched imports *within* the module, so third-party imports in
   `internal/domain` passed. Proven by planting `pgx` and getting exit 0.

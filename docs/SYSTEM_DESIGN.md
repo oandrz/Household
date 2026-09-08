@@ -545,7 +545,7 @@ graph TD
         PGA["postgres — repositories over sqlc,<br/>plus BrowseRepo, the one hand-written<br/>pgx file, over its own read-only pool"]
         Crypto["crypto — argon2id, tokens"]
         MailA["mail — SMTP, and MailOutbox<br/>(reads Mailpit's own HTTP API)"]
-        TelegramA["telegram — Bot API client,<br/>getUpdates poller, update parsing.<br/>Driven AND driving: see below"]
+        TelegramA["telegram — Bot API client,<br/>getUpdates poller, update parsing,<br/>and Commander: the channel's inbound<br/>guard for chat commands (ADR 8).<br/>Driven AND driving: see below"]
         Clock["clock"]
         FX["fx — static rates"]
     end
@@ -555,6 +555,7 @@ graph TD
         Invite["InviteService"]
         Signup["SignupService"]
         TelegramAuth["TelegramAuthService — delivers the magic-link<br/>and sign-up tokens the other services already<br/>mint; mints no token type of its own"]
+        TelegramCmd["TelegramCommandService — /spend, /income,<br/>/balance, /recent: names to ids, amount in the<br/>account's currency, update id as the key.<br/>Takes no actor: the adapter's Commander is the guard (ADR 8)"]
         Member["MemberService"]
         House["HouseholdService"]
         Account["AccountService — net worth is<br/>composed here, not stored"]
@@ -1436,6 +1437,40 @@ be sent unlimited "you already have an account" mail while a fresh address's
 mail stopped at three an hour — the exact oracle this endpoint exists to
 close, expressed as mail volume instead of a status code. See
 `docs/LEARNING.md`.
+
+### Telegram — chat commands, guarded at the channel's edge
+
+```mermaid
+sequenceDiagram
+    participant TG as Telegram
+    participant P as Poller
+    participant C as Commander (adapter)
+    participant R as TelegramCallerService
+    participant S as TelegramCommandService
+    participant T as TransactionService
+
+    TG-->>P: update 91: "/spend 84.50 groceries #Groceries"
+    P->>C: HandleCommand(Command{spend, 84.50, groceries, #Groceries, update 91})
+    C->>R: Resolve(chatID)
+    R-->>C: Membership (or ErrNotFound → "link your account")
+    C->>C: owner AND money? else "only an owner with Money…"
+    C->>S: LogSpend{household, membership, update 91, expense, "84.50", …}
+    S->>S: resolve account (sole cash, or @name), category (expense kind only)
+    S->>S: ParseAmount("84.50", places for the account's currency)
+    S->>T: CreateOrReplay(key = telegram-update-91)
+    T-->>S: (row, replayed?)
+    S-->>C: result
+    C-->>TG: "Logged -84.50 SGD — groceries (DBS Savings)"
+```
+
+The Commander is to Telegram what `requireSession → requireCapability →
+requireOwner` is to a request: the one place "who may do this" is decided
+for the channel, before any service runs ([ADR 8](adr/0008-authorisation-at-each-channels-inbound-edge.md)).
+The resolver decides nothing; the service takes a household and a
+membership it never questions. The update id is the idempotency key, so
+the poller's known redelivery-after-restart becomes a replay rather than a
+second row. **Not yet walked against the real bot** — the production box
+polls the same token, so a local poller cannot be the sole consumer.
 
 ### Telegram — a second delivery channel, and the link comes back to the tapper
 
