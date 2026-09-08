@@ -147,6 +147,34 @@ Only owners can change any of these. Everyone can see them.
 
 ---
 
+## Logging spending from Telegram
+
+If the install has a bot and you signed in through Telegram at least once,
+the same chat takes commands. Only an owner with Money can use them.
+
+```
+/spend 84.50 groceries #Groceries
+/spend 12 coffee and cake #"Dining out" @"DBS Savings"
+/income 6500 salary
+/balance
+/recent
+/help
+```
+
+Write the amount in the account's currency, as you would say it: `84.50`
+for dollars, `1200` for yen. Put the category after `#` and the account
+after `@`; quote a name with spaces. Leave `@account` out and the bot uses
+your only cash account — if you have more than one it asks which. The bot
+answers with what it saved, and the row appears in Transactions dated today
+with you as the payer.
+
+If the install has a language model configured (an open-weight model
+through OpenRouter), you can also just say it —
+"spent 84.50 on groceries at DBS" — and the bot reads it back: "Log expense
+84.50 — groceries #Groceries @DBS Savings? Reply /yes or /no." Nothing is
+saved until you answer `/yes`, and the offer expires after five minutes.
+Without a key the bot understands the slash commands only.
+
 ## What is not built yet
 
 The sidebar shows where these will go. Clicking through tells you which stage

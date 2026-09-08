@@ -150,9 +150,12 @@ are load-bearing — read them before writing a service or a repository.
 
 ### Rules specific to this product
 
-**Authorisation exists only in the HTTP layer.** No service takes an actor
-parameter; services enforce what is *valid*, middleware enforces who is
-*asking*. A route without its guard has no second line of defence.
+**Authorisation exists only in the HTTP layer** — extended by
+[ADR 8](docs/adr/0008-authorisation-at-each-channels-inbound-edge.md) to
+*each channel's inbound edge*: the Telegram `Commander` is the second such
+edge. No service takes an actor parameter; services enforce what is *valid*,
+the edge enforces who is *asking*. A route without its guard has no second
+line of defence.
 
 **Money is `int64` minor units plus an ISO 4217 code, everywhere.** `float64`
 never appears in a monetary path. Exchange rates are fractions, not scaled

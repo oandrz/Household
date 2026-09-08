@@ -27,12 +27,16 @@ import (
 func cmdLogin(ctx context.Context, c *client, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	email := fs.String("email", "", "the member's email address (required)")
+	email := fs.String("email", "", "the member's email address")
+	useToken := fs.Bool("token", false, "sign in with a personal API token from $HEARTH_TOKEN or stdin instead of a password")
 	if err := fs.Parse(args); err != nil {
 		return fail(exitUsage, "")
 	}
+	if *useToken {
+		return loginWithToken(ctx, c, stdin, stdout, stderr)
+	}
 	if *email == "" {
-		return fail(exitUsage, "login needs --email")
+		return fail(exitUsage, "login needs --email (or --token)")
 	}
 
 	password, err := readPassword(stdin, stderr)
@@ -66,36 +70,88 @@ func cmdLogin(ctx context.Context, c *client, args []string, stdin io.Reader, st
 	return nil
 }
 
+// loginWithToken stores a personal API token as the credential. The token
+// is read the way a password is -- environment or stdin, never a flag -- and
+// proven against /auth/me before it is written, so a mistyped token is
+// refused now rather than on the first real command.
+func loginWithToken(ctx context.Context, c *client, stdin io.Reader, stdout, stderr io.Writer) error {
+	raw := os.Getenv("HEARTH_TOKEN")
+	if raw == "" {
+		var err error
+		raw, err = readSecret(stdin, stderr, "token: ", "no token: set HEARTH_TOKEN or pipe it on stdin")
+		if err != nil {
+			return err
+		}
+	}
+	c.creds = &credentials{BaseURL: c.baseURL, Token: raw}
+	res, err := c.do(ctx, http.MethodGet, "/auth/me", nil)
+	if err != nil {
+		return err
+	}
+	if err := refuse(res, stdout); err != nil {
+		return err
+	}
+	var me struct {
+		User struct {
+			Email string `json:"email"`
+		} `json:"user"`
+	}
+	json.Unmarshal(res.body, &me)
+	c.creds.Email = me.User.Email
+	if err := c.store.save(c.creds); err != nil {
+		return err
+	}
+	fmt.Fprintf(stderr, "token accepted for %s on %s; stored in %s\n", me.User.Email, c.baseURL, c.store.path)
+	writeBody(stdout, res.body)
+	return nil
+}
+
 func readPassword(stdin io.Reader, stderr io.Writer) (string, error) {
 	if pw := os.Getenv("HEARTH_PASSWORD"); pw != "" {
 		return pw, nil
 	}
+	return readSecret(stdin, stderr, "password: ", "no password: set HEARTH_PASSWORD or pipe it on stdin")
+}
+
+// readSecret reads one secret from a terminal (hidden) or one line from a
+// pipe. Shared by the password and the token so neither ever becomes a
+// flag that lands in shell history.
+func readSecret(stdin io.Reader, stderr io.Writer, prompt, missing string) (string, error) {
 	if f, ok := stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
-		fmt.Fprint(stderr, "password: ")
+		fmt.Fprint(stderr, prompt)
 		raw, err := term.ReadPassword(int(f.Fd()))
 		fmt.Fprintln(stderr)
 		if err != nil {
-			return "", fail(exitUsage, "reading password: %v", err)
+			return "", fail(exitUsage, "reading secret: %v", err)
 		}
 		return string(raw), nil
 	}
 	line, err := bufio.NewReader(stdin).ReadString('\n')
 	if err != nil && line == "" {
-		return "", fail(exitUsage, "no password: set HEARTH_PASSWORD or pipe it on stdin")
+		return "", fail(exitUsage, "%s", missing)
 	}
-	pw := strings.TrimRight(line, "\r\n")
-	if pw == "" {
-		return "", fail(exitUsage, "no password: set HEARTH_PASSWORD or pipe it on stdin")
+	secret := strings.TrimRight(line, "\r\n")
+	if secret == "" {
+		return "", fail(exitUsage, "%s", missing)
 	}
-	return pw, nil
+	return secret, nil
 }
 
 // cmdLogout revokes the session server-side and forgets the file. The file
 // is cleared even if the server refuses (a session already expired answers
-// 401): the stored value is useless either way.
+// 401): the stored value is useless either way. A stored token is only
+// forgotten -- revoking it is `hearthctl token revoke`, from a browser
+// session, because a token cannot revoke a token.
 func cmdLogout(ctx context.Context, c *client, stdout, stderr io.Writer) error {
 	if err := c.requireCreds(); err != nil {
 		return err
+	}
+	if c.creds.Token != "" {
+		if err := c.store.clear(); err != nil {
+			return err
+		}
+		fmt.Fprintf(stderr, "forgot the stored token for %s (it is still valid; revoke it with: hearthctl token revoke <id>)\n", c.baseURL)
+		return nil
 	}
 	res, err := c.do(ctx, http.MethodPost, "/auth/sign-out", nil)
 	if clearErr := c.store.clear(); clearErr != nil {

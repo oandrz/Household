@@ -40,9 +40,21 @@ func (r *TransactionRepo) Create(ctx context.Context, t domain.Transaction) (dom
 		AmountCurrency:         t.Amount.Currency,
 		ReceivedAmountMinor:    receivedMinor(t.ReceivedAmount),
 		ReceivedAmountCurrency: receivedCurrency(t.ReceivedAmount),
+		IdempotencyKey:         optionalID(t.IdempotencyKey),
 	})
 	if err != nil {
 		return domain.Transaction{}, translate(err, "create transaction")
+	}
+	return toTransaction(row), nil
+}
+
+func (r *TransactionRepo) GetByIdempotencyKey(ctx context.Context, householdID, key string) (domain.Transaction, error) {
+	row, err := r.q.GetTransactionByIdempotencyKey(ctx, sqlcgen.GetTransactionByIdempotencyKeyParams{
+		HouseholdID:    uuid(householdID),
+		IdempotencyKey: &key,
+	})
+	if err != nil {
+		return domain.Transaction{}, translate(err, "get transaction by idempotency key")
 	}
 	return toTransaction(row), nil
 }
@@ -115,6 +127,9 @@ func toTransaction(t sqlcgen.Transaction) domain.Transaction {
 		FromAccountID:      optionalIDToString(t.FromAccountID),
 		ToAccountID:        optionalIDToString(t.ToAccountID),
 		Amount:             domain.Money{Amount: t.AmountMinor, Currency: t.AmountCurrency},
+	}
+	if t.IdempotencyKey != nil {
+		out.IdempotencyKey = *t.IdempotencyKey
 	}
 	if t.ReceivedAmountMinor != nil && t.ReceivedAmountCurrency != nil {
 		out.ReceivedAmount = &domain.Money{

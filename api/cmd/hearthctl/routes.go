@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"text/tabwriter"
@@ -14,6 +15,16 @@ type route struct {
 	method, path, guard, body string
 }
 
+// routeJSON is the shape `routes --json` prints: the same four fields with
+// stable names, so an agent parses the table rather than the tabwriter
+// layout.
+type routeJSON struct {
+	Method string `json:"method"`
+	Path   string `json:"path"`
+	Guard  string `json:"guard"`
+	Body   string `json:"body"`
+}
+
 // routeTable is hand-maintained and checked by routes_test.go against
 // internal/adapter/http/router.go: every path here must exist there, so a
 // route that is renamed or removed fails the build rather than misleading
@@ -22,6 +33,9 @@ var routeTable = []route{
 	{"POST", "/auth/sign-in", "public", `{"email","password"}`},
 	{"POST", "/auth/sign-out", "session+csrf", "-"},
 	{"GET", "/auth/me", "session", "-"},
+	{"GET", "/auth/tokens", "session", "-"},
+	{"POST", "/auth/tokens", "browser session+csrf (a token cannot mint a token)", `{"name","expiresInDays"?}` + " -> the raw token, shown once"},
+	{"DELETE", "/auth/tokens/{id}", "browser session+csrf", "-"},
 	{"GET", "/currencies", "public", "-"},
 	{"GET", "/household", "session", "-"},
 	{"PATCH", "/household", "owner+csrf", `{"name"?,"familyName"?,"primaryCurrency"?,"showSecondaryCurrency"?,"secondaryCurrency"?,"fxRateMode"?}`},
@@ -41,7 +55,7 @@ var routeTable = []route{
 	{"POST", "/accounts/{id}/restore", "money+owner+csrf", "-"},
 
 	{"GET", "/transactions", "money+owner", `?month=YYYY-MM&kind=&account_id=&category_id=&paid_by=&cursor=&limit=`},
-	{"POST", "/transactions", "money+owner+csrf", `{"kind","occurredOn","description","amountMinor","fromAccountId"?,"toAccountId"?,"categoryId"?,"paidByMembershipId"?,"receivedAmountMinor"?}`},
+	{"POST", "/transactions", "money+owner+csrf", `{"kind","occurredOn","description","amountMinor","fromAccountId"?,"toAccountId"?,"categoryId"?,"paidByMembershipId"?,"receivedAmountMinor"?} + header Idempotency-Key? (200 on replay, 409 on reuse)`},
 	{"PATCH", "/transactions/{id}", "money+owner+csrf", `same fields, all optional`},
 	{"DELETE", "/transactions/{id}", "money+owner+csrf", "-"},
 	{"GET", "/categories", "money+owner", "?includeArchived=true"},
@@ -94,7 +108,18 @@ var routeTable = []route{
 // without opening router.go. Body shapes marked `?` are optional; `{...}`
 // means "see the handler" -- the shape is bigger than fits on a line, and
 // `hearthctl api` passes any JSON through untouched.
-func cmdRoutes(stdout io.Writer) error {
+func cmdRoutes(args []string, stdout io.Writer) error {
+	if len(args) == 1 && args[0] == "--json" {
+		out := make([]routeJSON, 0, len(routeTable))
+		for _, r := range routeTable {
+			out = append(out, routeJSON{r.method, r.path, r.guard, r.body})
+		}
+		enc := json.NewEncoder(stdout)
+		return enc.Encode(out)
+	}
+	if len(args) != 0 {
+		return fail(exitUsage, "usage: hearthctl routes [--json]")
+	}
 	tw := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "METHOD\tPATH\tWHO MAY CALL\tBODY")
 	for _, r := range routeTable {

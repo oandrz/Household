@@ -65,6 +65,13 @@ type response struct {
 // password's 401 carries "attemptsRemaining", the one number that tells a
 // caller to stop before the household locks. refuse below maps it.
 func (c *client) do(ctx context.Context, method, path string, body []byte) (response, error) {
+	return c.doWithHeaders(ctx, method, path, body, nil)
+}
+
+// doWithHeaders is do plus extra request headers -- today only
+// Idempotency-Key on a transaction create. Kept separate so the many
+// callers that need no header do not each pass nil.
+func (c *client) doWithHeaders(ctx context.Context, method, path string, body []byte, headers map[string]string) (response, error) {
 	if !strings.HasPrefix(path, "/api/") {
 		path = apiPrefix + "/" + strings.TrimLeft(path, "/")
 	}
@@ -84,7 +91,15 @@ func (c *client) do(ctx context.Context, method, path string, body []byte) (resp
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if c.creds != nil {
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	switch {
+	case c.creds != nil && c.creds.Token != "":
+		// A token is the whole credential: no cookies, and no CSRF header,
+		// which the server does not ask of a Bearer request.
+		req.Header.Set("Authorization", "Bearer "+c.creds.Token)
+	case c.creds != nil && c.creds.Session != "":
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: c.creds.Session})
 		if isWrite(method) && c.creds.CSRF != "" {
 			req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: c.creds.CSRF})
@@ -127,6 +142,12 @@ func (c *client) absorbCookies(cookies []*http.Cookie) {
 		}
 		if c.creds == nil {
 			c.creds = &credentials{BaseURL: c.baseURL}
+		}
+		// A token session never absorbs cookies: the server sets none for a
+		// Bearer request, and a stray Set-Cookie must not turn a token
+		// credential into a half-session.
+		if c.creds.Token != "" {
+			return
 		}
 		cleared := ck.Value == "" || ck.MaxAge < 0 || (!ck.Expires.IsZero() && ck.Expires.Before(time.Now()))
 		switch ck.Name {
@@ -188,7 +209,7 @@ var errNotSignedIn = errors.New("not signed in")
 // mean anything without a session. It saves a round trip, but it is not the
 // guard: the server's 401 is, and do maps that to the same exit code.
 func (c *client) requireCreds() error {
-	if c.creds == nil || c.creds.Session == "" {
+	if !c.creds.signedIn() {
 		return fail(exitSignInAgain, "%v to %s. Run: hearthctl login --email=<you>", errNotSignedIn, c.baseURL)
 	}
 	return nil

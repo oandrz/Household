@@ -98,6 +98,11 @@ services:
       # startup, deliberately.
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
+      # Free text in the Telegram bot. Both empty means "commands only";
+      # exactly one set is refused at boot. Production reads .env whole via
+      # env_file, so only this dev file has to name each value.
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-}
     ports: ["8080:8080"]
     volumes: ["./api:/src"]
     depends_on:

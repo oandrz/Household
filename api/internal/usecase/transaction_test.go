@@ -3,6 +3,7 @@ package usecase_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -368,5 +369,90 @@ func TestARejectedUpdateDoesNotMutateTheStoredReceivedAmount(t *testing.T) {
 	}
 	if stored.Transaction.ReceivedAmount == nil || stored.Transaction.ReceivedAmount.Currency != "IDR" {
 		t.Fatalf("stored received amount = %v, want untouched 620000000 IDR", stored.Transaction.ReceivedAmount)
+	}
+}
+
+// Idempotency: the same key twice hands back the first row and writes
+// nothing; the same key for a different transaction is refused; no key
+// means two rows, exactly as before the key existed.
+
+func TestCreateOrReplayReturnsTheStoredRowForARepeatedKey(t *testing.T) {
+	svc, repo := transactionFixture(t)
+	in := expenseInput()
+	in.IdempotencyKey = "import-2026-09-08-row-7"
+
+	first, replayed, err := svc.CreateOrReplay(context.Background(), in)
+	if err != nil || replayed {
+		t.Fatalf("first create: err=%v replayed=%v", err, replayed)
+	}
+	second, replayed, err := svc.CreateOrReplay(context.Background(), in)
+	if err != nil {
+		t.Fatalf("second create with the same key: %v", err)
+	}
+	if !replayed {
+		t.Fatalf("the second call must report a replay")
+	}
+	if second.ID != first.ID {
+		t.Fatalf("replay returned %q, want the stored row %q", second.ID, first.ID)
+	}
+	if len(repo.transactions) != 1 {
+		t.Fatalf("stored %d rows, want exactly one", len(repo.transactions))
+	}
+}
+
+func TestCreateOrReplayRefusesAKeyReusedForADifferentTransaction(t *testing.T) {
+	svc, repo := transactionFixture(t)
+	in := expenseInput()
+	in.IdempotencyKey = "k1"
+	if _, _, err := svc.CreateOrReplay(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+
+	changed := in
+	changed.AmountMinor = in.AmountMinor + 1
+	_, _, err := svc.CreateOrReplay(context.Background(), changed)
+	if !errors.Is(err, domain.ErrIdempotencyKeyReused) {
+		t.Fatalf("err = %v, want ErrIdempotencyKeyReused", err)
+	}
+	if len(repo.transactions) != 1 {
+		t.Fatalf("a refused reuse must write nothing; stored %d", len(repo.transactions))
+	}
+}
+
+func TestCreateOrReplayWithoutAKeyWritesEveryTime(t *testing.T) {
+	svc, repo := transactionFixture(t)
+	for i := 0; i < 2; i++ {
+		if _, replayed, err := svc.CreateOrReplay(context.Background(), expenseInput()); err != nil || replayed {
+			t.Fatalf("call %d: err=%v replayed=%v", i, err, replayed)
+		}
+	}
+	if len(repo.transactions) != 2 {
+		t.Fatalf("stored %d rows, want two: no key means no dedupe", len(repo.transactions))
+	}
+}
+
+func TestCreateOrReplayRefusesAMalformedKey(t *testing.T) {
+	svc, repo := transactionFixture(t)
+	for _, key := range []string{"has space", "tab\tkey", strings.Repeat("x", 129), "ünïcode"} {
+		in := expenseInput()
+		in.IdempotencyKey = key
+		if _, _, err := svc.CreateOrReplay(context.Background(), in); !errors.Is(err, domain.ErrIdempotencyKeyInvalid) {
+			t.Errorf("key %q: err = %v, want ErrIdempotencyKeyInvalid", key, err)
+		}
+	}
+	if len(repo.transactions) != 0 {
+		t.Fatalf("a refused key must write nothing")
+	}
+}
+
+func TestIdempotencyKeysAreScopedToTheHousehold(t *testing.T) {
+	_, repo := transactionFixture(t)
+	a := domain.Transaction{HouseholdID: "house-1", IdempotencyKey: "shared"}
+	b := domain.Transaction{HouseholdID: "house-2", IdempotencyKey: "shared"}
+	if _, err := repo.Create(context.Background(), a); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.Create(context.Background(), b); err != nil {
+		t.Fatalf("another household's identical key must not collide: %v", err)
 	}
 }

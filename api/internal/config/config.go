@@ -76,6 +76,15 @@ type Config struct {
 	// refuses the boot on a value it cannot parse, and on one that connects
 	// as a role which can write.
 	DatabaseReadonlyURL string
+	// OpenRouterAPIKey and OpenRouterModel turn free-text intent parsing on
+	// for the Telegram bot through OpenRouter (adapter/openrouter). They
+	// travel together: a key with no model has nothing to call, and a model
+	// with no key cannot call it. The model is never defaulted in code,
+	// because the free, tool-capable models OpenRouter offers change month
+	// to month; up to three, comma-separated, are tried in order. Empty is
+	// the default and means commands only.
+	OpenRouterAPIKey string
+	OpenRouterModel  string
 }
 
 func (c Config) IsDevelopment() bool { return c.AppEnv == "development" }
@@ -84,6 +93,12 @@ func (c Config) IsDevelopment() bool { return c.AppEnv == "development" }
 // false the route answers 404 and the poller never starts, so an install that
 // has not set up a bot behaves exactly as it did before this feature existed.
 func (c Config) TelegramEnabled() bool { return c.TelegramBotToken != "" }
+
+// IntentParsingEnabled reports whether the Telegram bot reads free text.
+// Off means the bot answers a sentence with /help; the slash commands work
+// either way. Load has already enforced that the key and the model come
+// together, so one of them is enough to ask.
+func (c Config) IntentParsingEnabled() bool { return c.OpenRouterAPIKey != "" }
 
 // OutboxEnabled reports whether the outbound message inspector is configured.
 // When it is false the admin routes answer 503 and say which variable is
@@ -118,6 +133,8 @@ func Load() (Config, error) {
 		TelegramBotUsername: os.Getenv("TELEGRAM_BOT_USERNAME"),
 		MailpitAPIURL:       os.Getenv("MAILPIT_API_URL"),
 		DatabaseReadonlyURL: os.Getenv("DATABASE_READONLY_URL"),
+		OpenRouterAPIKey:    os.Getenv("OPENROUTER_API_KEY"),
+		OpenRouterModel:     os.Getenv("OPENROUTER_MODEL"),
 	}
 
 	switch cfg.AppEnv {
@@ -153,6 +170,9 @@ func Load() (Config, error) {
 	}
 	if (cfg.TelegramBotToken == "") != (cfg.TelegramBotUsername == "") {
 		return Config{}, fmt.Errorf("TELEGRAM_BOT_TOKEN and TELEGRAM_BOT_USERNAME must both be set, or both left empty")
+	}
+	if (cfg.OpenRouterAPIKey == "") != (cfg.OpenRouterModel == "") {
+		return Config{}, fmt.Errorf("OPENROUTER_API_KEY and OPENROUTER_MODEL must both be set, or both left empty")
 	}
 	if cfg.MailpitAPIURL != "" {
 		parsed, err := url.Parse(cfg.MailpitAPIURL)

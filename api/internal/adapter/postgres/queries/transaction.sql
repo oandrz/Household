@@ -152,12 +152,24 @@ WHERE t.household_id = $1 AND t.id = $2;
 INSERT INTO transactions (
     household_id, kind, occurred_on, description, category_id,
     paid_by_membership_id, from_account_id, to_account_id,
-    amount_minor, amount_currency, received_amount_minor, received_amount_currency
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    amount_minor, amount_currency, received_amount_minor, received_amount_currency,
+    idempotency_key
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 RETURNING id, household_id, kind, occurred_on, description, category_id,
           paid_by_membership_id, from_account_id, to_account_id,
           amount_minor, amount_currency, received_amount_minor,
-          received_amount_currency, created_at;
+          received_amount_currency, created_at, idempotency_key;
+
+-- The replay lookup for a create that hit transactions_household_idempotency_key.
+-- Household-scoped like every other read: a key is only unique within one
+-- household, and one household's retry must never read another's row.
+-- name: GetTransactionByIdempotencyKey :one
+SELECT id, household_id, kind, occurred_on, description, category_id,
+       paid_by_membership_id, from_account_id, to_account_id,
+       amount_minor, amount_currency, received_amount_minor,
+       received_amount_currency, created_at, idempotency_key
+FROM transactions
+WHERE household_id = $1 AND idempotency_key = $2;
 
 -- name: UpdateTransaction :one
 UPDATE transactions
@@ -176,7 +188,7 @@ WHERE household_id = $1 AND id = $2
 RETURNING id, household_id, kind, occurred_on, description, category_id,
           paid_by_membership_id, from_account_id, to_account_id,
           amount_minor, amount_currency, received_amount_minor,
-          received_amount_currency, created_at;
+          received_amount_currency, created_at, idempotency_key;
 
 -- DeleteTransaction is scoped by household_id like every other query here, and
 -- returns the id so the caller can tell "removed" from "there was nothing to

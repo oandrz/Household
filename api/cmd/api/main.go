@@ -18,6 +18,7 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/adapter/fx"
 	httpadapter "github.com/andreasoentoro/hearth/api/internal/adapter/http"
 	"github.com/andreasoentoro/hearth/api/internal/adapter/mail"
+	"github.com/andreasoentoro/hearth/api/internal/adapter/openrouter"
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres"
 	"github.com/andreasoentoro/hearth/api/internal/adapter/telegram"
 	"github.com/andreasoentoro/hearth/api/internal/config"
@@ -154,10 +155,13 @@ func run() error {
 		SessionTTL: httpadapter.SessionTTL,
 		BaseURL:    cfg.AppBaseURL,
 	})
+	apiTokens := postgres.NewAPITokenRepo(db)
 	memberSvc := usecase.NewMemberService(usecase.MemberDeps{
-		Members:  memberships,
-		Sessions: sessions,
+		Members:   memberships,
+		Sessions:  sessions,
+		APITokens: apiTokens,
 	})
+	apiTokenSvc := usecase.NewAPITokenService(usecase.APITokenDeps{Tokens: apiTokens, Gen: tokens, Clock: sysClock})
 	householdSvc := usecase.NewHouseholdService(usecase.HouseholdDeps{
 		Households:    households,
 		Spaces:        spaces,
@@ -179,8 +183,10 @@ func run() error {
 	// expressed once, here, rather than re-derived by every consumer.
 	var telegramSvc *usecase.TelegramAuthService
 	var telegramPoller *telegram.Poller
+	var telegramClient *telegram.Client
 	if cfg.TelegramEnabled() {
 		client := telegram.NewClient(cfg.TelegramBotToken)
+		telegramClient = client
 		telegramSvc = usecase.NewTelegramAuthService(usecase.TelegramAuthDeps{
 			Links:      telegramLinks,
 			Accounts:   telegramAccounts,
@@ -307,6 +313,8 @@ func run() error {
 			Retros:         retroSvc,
 			Visions:        visionSvc,
 			Agreements:     agreementSvc,
+			APITokens:      apiTokenSvc,
+			APITokenRepo:   apiTokens,
 			Telegram:       telegramSvc,
 			Admin:          adminSvc,
 			AdminReauth:    adminReauthSvc,
@@ -368,7 +376,36 @@ func run() error {
 	// it trades a clean cancellation for a write racing process death. Add the
 	// WaitGroup when something in this loop starts writing more than one row.
 	if telegramPoller != nil {
-		slog.Info("telegram sign-in enabled", "bot_username", cfg.TelegramBotUsername)
+		// Chat commands ride the same poller. The Commander is the
+		// channel's inbound guard (ADR 8): it resolves the chat to a
+		// membership and refuses anyone who is not an owner with Money
+		// before any service is called. Wired here, after the money
+		// services exist, rather than where the poller was built.
+		commander := telegram.NewCommander(
+			&usecase.TelegramCallerService{Accounts: telegramAccounts, Memberships: memberships},
+			usecase.NewTelegramCommandService(usecase.TelegramCommandDeps{
+				Accounts:     accountSvc,
+				Categories:   categorySvc,
+				Transactions: transactionSvc,
+				Clock:        sysClock,
+			}),
+			telegramClient,
+		)
+		// Free text is read by Claude only when a key is configured, and
+		// written only after the person confirms (commands.go). Without a
+		// key the bot is commands-only and says so.
+		if cfg.IntentParsingEnabled() {
+			parser, err := openrouter.NewIntentParser(cfg.OpenRouterAPIKey, cfg.OpenRouterModel)
+			if err != nil {
+				slog.Error("openrouter configuration refused", "error", err)
+				os.Exit(1)
+			}
+			commander.WithIntentParser(parser)
+		}
+		telegramPoller.WithCommands(commander)
+		slog.Info("telegram sign-in and chat commands enabled",
+			"bot_username", cfg.TelegramBotUsername, "free_text", cfg.IntentParsingEnabled(),
+			"model", cfg.OpenRouterModel)
 		go telegramPoller.Run(ctx)
 	}
 

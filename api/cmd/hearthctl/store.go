@@ -17,11 +17,20 @@ import (
 // which is why the file is written 0600 and why login never puts the
 // password itself anywhere.
 type credentials struct {
-	BaseURL   string    `json:"baseUrl"`
-	Email     string    `json:"email"`
-	Session   string    `json:"session"`
-	CSRF      string    `json:"csrf"`
+	BaseURL string `json:"baseUrl"`
+	Email   string `json:"email"`
+	Session string `json:"session,omitempty"`
+	CSRF    string `json:"csrf,omitempty"`
+	// Token is a personal API token (hearthctl token create, or login
+	// --token). When set it is the credential: Session and CSRF are empty
+	// and every request carries Authorization: Bearer instead of cookies.
+	Token     string    `json:"token,omitempty"`
 	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+// signedIn is whether the file holds any usable credential.
+func (c *credentials) signedIn() bool {
+	return c != nil && (c.Session != "" || c.Token != "")
 }
 
 // store is the credential file for one base URL. One file per host means a
@@ -67,8 +76,8 @@ func (s *store) load() (*credentials, error) {
 	if err := json.Unmarshal(raw, &c); err != nil {
 		return nil, fmt.Errorf("credential file %s is not valid JSON: %w", s.path, err)
 	}
-	if c.Session == "" {
-		return nil, errors.New("credential file has no session")
+	if !c.signedIn() {
+		return nil, errors.New("credential file has no session or token")
 	}
 	return &c, nil
 }

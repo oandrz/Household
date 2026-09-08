@@ -1,6 +1,7 @@
 package httpadapter_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -308,4 +309,131 @@ func (env *testEnv) listTransactions(t *testing.T, session *http.Cookie, path st
 		t.Fatalf("decode transactions: %v", err)
 	}
 	return body
+}
+
+// Idempotency-Key on POST /transactions: the spec's HTTP contract
+// (docs/superpowers/specs/2026-09-08-hearth-idempotent-import-design.md).
+func (env *testEnv) postTransactionWithKey(t *testing.T, session, csrf *http.Cookie, key string, body map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/transactions", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(session)
+	req.AddCookie(csrf)
+	req.Header.Set("X-CSRF-Token", csrf.Value)
+	if key != "" {
+		req.Header.Set("Idempotency-Key", key)
+	}
+	rec := httptest.NewRecorder()
+	env.router.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestCreateTransactionWithTheSameKeyTwiceWritesOneRow(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	accountID := env.mustCreateAccountID(t, session, csrf)
+	categoryID, _ := env.firstExpenseCategory(t, session)
+	thisMonth, _ := thisMonthAndLast()
+	body := map[string]any{
+		"kind": "expense", "occurredOn": thisMonth.Format(dayLayout), "description": "Coffee",
+		"categoryId": categoryID, "fromAccountId": accountID, "amountMinor": 650,
+	}
+
+	first := env.postTransactionWithKey(t, session, csrf, "row-1", body)
+	if first.Code != http.StatusCreated {
+		t.Fatalf("first: %d %s", first.Code, first.Body.String())
+	}
+	second := env.postTransactionWithKey(t, session, csrf, "row-1", body)
+	if second.Code != http.StatusOK {
+		t.Fatalf("replay must answer 200, got %d %s", second.Code, second.Body.String())
+	}
+	var a, b struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal(first.Body.Bytes(), &a)
+	json.Unmarshal(second.Body.Bytes(), &b)
+	if a.ID == "" || a.ID != b.ID {
+		t.Fatalf("replay returned id %q, want the original %q", b.ID, a.ID)
+	}
+	if got := len(env.listTransactions(t, session, "/api/v1/transactions").Transactions); got != 1 {
+		t.Fatalf("ledger holds %d rows, want 1", got)
+	}
+}
+
+func TestCreateTransactionRefusesAKeyReusedForADifferentBody(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	accountID := env.mustCreateAccountID(t, session, csrf)
+	categoryID, _ := env.firstExpenseCategory(t, session)
+	thisMonth, _ := thisMonthAndLast()
+	body := map[string]any{
+		"kind": "expense", "occurredOn": thisMonth.Format(dayLayout), "description": "Coffee",
+		"categoryId": categoryID, "fromAccountId": accountID, "amountMinor": 650,
+	}
+	if rec := env.postTransactionWithKey(t, session, csrf, "row-1", body); rec.Code != http.StatusCreated {
+		t.Fatalf("first: %d %s", rec.Code, rec.Body.String())
+	}
+	body["amountMinor"] = 651
+	rec := env.postTransactionWithKey(t, session, csrf, "row-1", body)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "IDEMPOTENCY_KEY_REUSED") {
+		t.Fatalf("want 409 IDEMPOTENCY_KEY_REUSED, got %d %s", rec.Code, rec.Body.String())
+	}
+	if got := len(env.listTransactions(t, session, "/api/v1/transactions").Transactions); got != 1 {
+		t.Fatalf("ledger holds %d rows, want 1", got)
+	}
+}
+
+func TestCreateTransactionWithoutAKeyStillWritesEveryTime(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	accountID := env.mustCreateAccountID(t, session, csrf)
+	categoryID, _ := env.firstExpenseCategory(t, session)
+	thisMonth, _ := thisMonthAndLast()
+	body := map[string]any{
+		"kind": "expense", "occurredOn": thisMonth.Format(dayLayout), "description": "Coffee",
+		"categoryId": categoryID, "fromAccountId": accountID, "amountMinor": 650,
+	}
+	for i := 0; i < 2; i++ {
+		if rec := env.postTransactionWithKey(t, session, csrf, "", body); rec.Code != http.StatusCreated {
+			t.Fatalf("call %d: %d %s", i, rec.Code, rec.Body.String())
+		}
+	}
+	if got := len(env.listTransactions(t, session, "/api/v1/transactions").Transactions); got != 2 {
+		t.Fatalf("ledger holds %d rows, want 2", got)
+	}
+}
+
+func TestCreateTransactionRefusesAMalformedKey(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	accountID := env.mustCreateAccountID(t, session, csrf)
+	categoryID, _ := env.firstExpenseCategory(t, session)
+	thisMonth, _ := thisMonthAndLast()
+	body := map[string]any{
+		"kind": "expense", "occurredOn": thisMonth.Format(dayLayout), "description": "Coffee",
+		"categoryId": categoryID, "fromAccountId": accountID, "amountMinor": 650,
+	}
+	rec := env.postTransactionWithKey(t, session, csrf, "has space", body)
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "IDEMPOTENCY_KEY_INVALID") {
+		t.Fatalf("want 422 IDEMPOTENCY_KEY_INVALID, got %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Present but empty is refused too, not read as "no key": a client that
+	// meant to send a key and sent nothing must not get an unkeyed write.
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/transactions", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(session)
+	req.AddCookie(csrf)
+	req.Header.Set("X-CSRF-Token", csrf.Value)
+	req.Header.Set("Idempotency-Key", "")
+	rec = httptest.NewRecorder()
+	env.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("an empty Idempotency-Key header must be refused, got %d %s", rec.Code, rec.Body.String())
+	}
+	if got := len(env.listTransactions(t, session, "/api/v1/transactions").Transactions); got != 0 {
+		t.Fatalf("an empty header must write nothing, ledger holds %d", got)
+	}
 }

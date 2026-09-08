@@ -1,0 +1,375 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Hearth — production architecture",
+    "output": "architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/oandrz/Household",
+      "revision": "2a96f948e15d46cf3ef5431cc4d984d112190a41"
+    },
+    "views": [
+      {
+        "id": "request-path",
+        "label": "The request path",
+        "focus": [
+          "browser",
+          "caddy",
+          "nginx",
+          "api",
+          "postgres"
+        ],
+        "note": "One origin end to end: TLS at Caddy, the SPA and /api proxy at nginx, Go behind it, Postgres behind that."
+      },
+      {
+        "id": "off-unless-configured",
+        "label": "Off unless configured",
+        "focus": [
+          "api",
+          "postgres",
+          "mailpit",
+          "telegram"
+        ],
+        "note": "Two dashed edges are off here — the read-only pool and Telegram — and the /admin/mail read-back lands only on the next deploy."
+      },
+      {
+        "id": "operating-the-box",
+        "label": "Operating the box",
+        "focus": [
+          "adminimage",
+          "postgres",
+          "mailpit",
+          "r2"
+        ],
+        "note": "How the box is operated and recovered: the admin image for migrations, R2 for the nightly dump."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "browser",
+      "type": "external",
+      "label": "Browser",
+      "sublabel": "the household, one origin",
+      "pos": [
+        24,
+        200
+      ],
+      "size": [
+        140,
+        64
+      ]
+    },
+    {
+      "id": "caddy",
+      "type": "security",
+      "label": "Caddy :443",
+      "sublabel": "terminates TLS, renews certs",
+      "tag": "caddy-data volume",
+      "pos": [
+        234,
+        200
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "deploy/Caddyfile",
+          "label": "Caddyfile"
+        }
+      ]
+    },
+    {
+      "id": "nginx",
+      "type": "frontend",
+      "label": "web — nginx :80",
+      "sublabel": "serves the built SPA, proxies /api",
+      "pos": [
+        514,
+        200
+      ],
+      "size": [
+        185,
+        64
+      ],
+      "sources": [
+        {
+          "path": "web/nginx.conf",
+          "label": "nginx.conf"
+        }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "api — Go :8080",
+      "sublabel": "distroless, no shell",
+      "tag": "clean architecture",
+      "pos": [
+        854,
+        200
+      ],
+      "size": [
+        185,
+        68
+      ],
+      "sources": [
+        {
+          "path": "api/cmd/api/main.go",
+          "label": "main.go wiring"
+        }
+      ]
+    },
+    {
+      "id": "postgres",
+      "type": "database",
+      "label": "postgres",
+      "sublabel": "volume, not published",
+      "pos": [
+        1085,
+        360
+      ],
+      "size": [
+        165,
+        64
+      ],
+      "sources": [
+        {
+          "path": "deploy/docker-compose.prod.yml",
+          "label": "compose.prod"
+        }
+      ]
+    },
+    {
+      "id": "mailpit",
+      "type": "backend",
+      "label": "Mailpit",
+      "sublabel": "mail stops on the box",
+      "tag": "UI on 127.0.0.1:8025",
+      "pos": [
+        280,
+        360
+      ],
+      "size": [
+        185,
+        68
+      ],
+      "sources": [
+        {
+          "path": "api/internal/adapter/mail/mailpit_outbox.go",
+          "label": "MailOutbox"
+        }
+      ]
+    },
+    {
+      "id": "adminimage",
+      "type": "backend",
+      "label": "admin image",
+      "sublabel": "goose + adminctl",
+      "pos": [
+        640,
+        360
+      ],
+      "size": [
+        165,
+        68
+      ],
+      "sources": [
+        {
+          "path": "api/Dockerfile",
+          "label": "target: admin"
+        }
+      ]
+    },
+    {
+      "id": "letsencrypt",
+      "type": "external",
+      "label": "Let's Encrypt",
+      "sublabel": "ACME HTTP-01 over port 80",
+      "pos": [
+        234,
+        40
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "telegram",
+      "type": "external",
+      "label": "api.telegram.org",
+      "sublabel": "outbound only, no webhook",
+      "pos": [
+        854,
+        40
+      ],
+      "size": [
+        185,
+        64
+      ]
+    },
+    {
+      "id": "r2",
+      "type": "cloud",
+      "label": "Cloudflare R2",
+      "sublabel": "nightly age-encrypted dump",
+      "tag": "private key not on the box",
+      "pos": [
+        1105,
+        40
+      ],
+      "size": [
+        175,
+        64
+      ],
+      "sources": [
+        {
+          "path": "deploy/backup.sh",
+          "label": "backup.sh"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "One VPS — Hetzner CX23, Falkenstein",
+      "wraps": [
+        "caddy",
+        "nginx",
+        "api",
+        "postgres",
+        "mailpit",
+        "adminimage"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "browser-https",
+      "from": "browser",
+      "to": "caddy",
+      "label": "HTTPS",
+      "variant": "emphasis"
+    },
+    {
+      "id": "caddy-to-nginx",
+      "from": "caddy",
+      "to": "nginx",
+      "label": "HTTP, one origin",
+      "variant": "emphasis"
+    },
+    {
+      "id": "nginx-to-api",
+      "from": "nginx",
+      "to": "api",
+      "label": "/api/v1, /healthz, /readyz",
+      "variant": "emphasis"
+    },
+    {
+      "id": "app-pool",
+      "from": "api",
+      "to": "postgres",
+      "label": "DATABASE_URL — application pool",
+      "variant": "emphasis",
+      "labelDx": -102,
+      "labelDy": 52
+    },
+    {
+      "id": "browse-pool",
+      "from": "api",
+      "to": "postgres",
+      "label": "DATABASE_READONLY_URL — SELECT-only",
+      "variant": "dashed",
+      "labelDx": -112,
+      "labelDy": 60
+    },
+    {
+      "id": "api-mailpit",
+      "from": "api",
+      "to": "mailpit",
+      "label": "SMTP out; HTTP read-back for /admin/mail once deployed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "via": [
+        [
+          946.5,
+          320
+        ],
+        [
+          372.5,
+          320
+        ]
+      ],
+      "labelAt": [
+        640,
+        306
+      ]
+    },
+    {
+      "id": "api-telegram",
+      "from": "api",
+      "to": "telegram",
+      "label": "getUpdates long-poll, sendMessage",
+      "variant": "dashed"
+    },
+    {
+      "id": "caddy-acme",
+      "from": "caddy",
+      "to": "letsencrypt",
+      "label": "ACME HTTP-01",
+      "variant": "security",
+      "labelDy": -30
+    },
+    {
+      "id": "admin-to-pg",
+      "from": "adminimage",
+      "to": "postgres",
+      "label": "migrations, unlock, prune",
+      "variant": "dashed"
+    },
+    {
+      "id": "nightly-backup",
+      "from": "postgres",
+      "to": "r2",
+      "label": "nightly pg_dump, gzip, age, rclone",
+      "fromSide": "top",
+      "toSide": "bottom"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Edge",
+      "items": [
+        "Caddy exists to renew certificates; nginx already does the routing",
+        "One origin end to end, so there is no CORS configuration anywhere",
+        "nginx sets X-Real-IP from Caddy, which stops a client spoofing the per-IP sign-up limiter"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Inside api — dependencies point inward",
+      "items": [
+        "internal/domain — money as int64 minor units, currency, roles; standard library only",
+        "internal/usecase — services plus ports.go; no service takes an actor parameter",
+        "internal/adapter — http, postgres, mail, telegram, crypto, clock and fx implement those ports",
+        "make lint-arch enforces the direction, test files included"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Dashed means off on this box",
+      "items": [
+        "DATABASE_READONLY_URL unset — /admin/db/* answers 503, no fallback to DATABASE_URL",
+        "TELEGRAM_BOT_TOKEN empty — the route answers 404 and the poller never starts",
+        "Mail stops at Mailpit; that inbox is an auth bypass, so 8025 binds to 127.0.0.1 and is read over an SSH tunnel",
+        "Nightly plain-SQL dump encrypted to R2; the private key is not on the box"
+      ]
+    }
+  ]
+}

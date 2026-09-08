@@ -59,6 +59,58 @@ type Transaction struct {
 	ToAccountID        string
 	Amount             Money
 	ReceivedAmount     *Money
+	// IdempotencyKey is the caller's own handle on this create, "" when none
+	// was given (every row the web app writes). Unique per household while
+	// the row exists; see ValidateIdempotencyKey and the 00015 migration.
+	IdempotencyKey string
+}
+
+// Idempotency keys are caller-supplied, so their shape is refused rather
+// than trusted: 1 to 128 printable ASCII characters with no spaces. Long
+// enough for a hash, short enough to index, and nothing a log line or a
+// header cannot carry verbatim.
+const MaxIdempotencyKeyLength = 128
+
+// ValidateIdempotencyKey reports ErrIdempotencyKeyInvalid for anything a
+// key must not be. An empty string is invalid here on purpose: "" is the
+// stored meaning of "no key", so a caller who sends an empty header is
+// refused rather than silently treated as having sent none.
+func ValidateIdempotencyKey(key string) error {
+	if key == "" || len(key) > MaxIdempotencyKeyLength {
+		return ErrIdempotencyKeyInvalid
+	}
+	for i := 0; i < len(key); i++ {
+		if key[i] <= ' ' || key[i] > '~' {
+			return ErrIdempotencyKeyInvalid
+		}
+	}
+	return nil
+}
+
+// SameCreate reports whether a repeated create with this key asked for the
+// same transaction as the stored one: every field the caller controls,
+// compared after validation normalised both sides. The id and the key are
+// not compared -- the key is what brought the two together, and the id is
+// the server's. A nil and a non-nil ReceivedAmount differ.
+func (t Transaction) SameCreate(stored Transaction) bool {
+	if t.Kind != stored.Kind ||
+		!t.OccurredOn.Equal(stored.OccurredOn) ||
+		t.Description != stored.Description ||
+		t.CategoryID != stored.CategoryID ||
+		t.PaidByMembershipID != stored.PaidByMembershipID ||
+		t.FromAccountID != stored.FromAccountID ||
+		t.ToAccountID != stored.ToAccountID ||
+		t.Amount != stored.Amount {
+		return false
+	}
+	switch {
+	case t.ReceivedAmount == nil && stored.ReceivedAmount == nil:
+		return true
+	case t.ReceivedAmount == nil || stored.ReceivedAmount == nil:
+		return false
+	default:
+		return *t.ReceivedAmount == *stored.ReceivedAmount
+	}
 }
 
 // CreditedAmount is what arrives in the destination account: the received

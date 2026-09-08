@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"regexp"
 	"strings"
@@ -58,4 +59,21 @@ func registeredUnderAuth(registered map[string]bool, r route) bool {
 func withAuthPrefix(key string) string {
 	parts := strings.SplitN(key, " ", 2)
 	return parts[0] + " /auth" + parts[1]
+}
+
+func TestRoutesJSONIsTheWholeTable(t *testing.T) {
+	var buf strings.Builder
+	if err := cmdRoutes([]string{"--json"}, &buf); err != nil {
+		t.Fatal(err)
+	}
+	var got []routeJSON
+	if err := json.Unmarshal([]byte(buf.String()), &got); err != nil {
+		t.Fatalf("not JSON: %v\n%s", err, buf.String())
+	}
+	if len(got) != len(routeTable) {
+		t.Fatalf("printed %d routes, table has %d", len(got), len(routeTable))
+	}
+	if got[0].Method != routeTable[0].method || got[0].Path != routeTable[0].path {
+		t.Fatalf("first row %+v does not match the table", got[0])
+	}
 }

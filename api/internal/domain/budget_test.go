@@ -35,10 +35,10 @@ func TestDaysLeftInMonth(t *testing.T) {
 
 func TestPercentUsed(t *testing.T) {
 	cases := []struct {
-		name             string
-		spent, budgeted  int64
-		wantPct          int
-		wantOK           bool
+		name            string
+		spent, budgeted int64
+		wantPct         int
+		wantOK          bool
 	}{
 		{"the design's own figures round to 66", 342000, 520000, 66, true},
 		{"zero budgeted hides the figure, never NaN", 342000, 0, 0, false},

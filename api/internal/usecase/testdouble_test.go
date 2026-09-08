@@ -1688,6 +1688,7 @@ type fixture struct {
 	householdSvc  *usecase.HouseholdService
 	clock         *fixedClock
 	sessions      *sessionDouble
+	apiTokens     *apiTokenDouble
 	mailer        *mailerDouble
 	hasher        *fakeHasher
 	users         *userDouble
@@ -1772,9 +1773,12 @@ func newFixture(t *testing.T) *fixture {
 		BaseURL:    "http://localhost:5173",
 	})
 
+	apiTokens := newAPITokenDouble()
+	apiTokens.clock = clock
 	memberSvc := usecase.NewMemberService(usecase.MemberDeps{
-		Members:  members,
-		Sessions: sessions,
+		Members:   members,
+		Sessions:  sessions,
+		APITokens: apiTokens,
 	})
 
 	households := newHouseholdDouble()
@@ -1799,7 +1803,7 @@ func newFixture(t *testing.T) *fixture {
 
 	return &fixture{
 		auth: auth, invites: invites, memberSvc: memberSvc, householdSvc: householdSvc,
-		clock: clock, sessions: sessions, mailer: mailer, hasher: hasher,
+		clock: clock, sessions: sessions, apiTokens: apiTokens, mailer: mailer, hasher: hasher,
 		users: users, members: members, magicLinks: magicLinks, inviteRepo: inviteRepo,
 		households: households, spaces: spaces, notifications: notifications,
 		householdID: householdID, andreasID: andreas.ID, ethanID: ethan.ID,
@@ -2571,10 +2575,29 @@ func (f *fakeTransactionRepo) markBeforeFromAccountOpening(transactionID string)
 }
 
 func (f *fakeTransactionRepo) Create(_ context.Context, t domain.Transaction) (domain.Transaction, error) {
+	// The partial unique index from 00015, enforced here too: a fake that
+	// accepted a duplicate key would let the service's replay branch go
+	// untested while every test stayed green.
+	if t.IdempotencyKey != "" {
+		for _, existing := range f.transactions {
+			if existing.HouseholdID == t.HouseholdID && existing.IdempotencyKey == t.IdempotencyKey {
+				return domain.Transaction{}, domain.ErrIdempotencyKeyInUse
+			}
+		}
+	}
 	f.nextID++
 	t.ID = fmt.Sprintf("txn-%d", f.nextID)
 	f.transactions = append(f.transactions, t)
 	return t, nil
+}
+
+func (f *fakeTransactionRepo) GetByIdempotencyKey(_ context.Context, householdID, key string) (domain.Transaction, error) {
+	for _, t := range f.transactions {
+		if t.HouseholdID == householdID && t.IdempotencyKey == key {
+			return t, nil
+		}
+	}
+	return domain.Transaction{}, domain.ErrNotFound
 }
 
 func (f *fakeTransactionRepo) Get(_ context.Context, householdID, id string) (usecase.TransactionView, error) {
@@ -4276,3 +4299,83 @@ func signedBy(ids []string, id string) bool {
 }
 
 var _ usecase.AgreementRepository = (*agreementRepoDouble)(nil)
+
+// apiTokenDouble is APITokenRepository in memory. Live means not revoked;
+// expiry is checked against the clock a test hands it (nil clock: never
+// expires), mirroring GetLiveAPIToken's WHERE clause.
+type apiTokenDouble struct {
+	rows   map[string]*domain.APIToken // keyed by string(tokenHash)
+	clock  *fixedClock
+	nextID int
+}
+
+func newAPITokenDouble() *apiTokenDouble { return &apiTokenDouble{rows: map[string]*domain.APIToken{}} }
+
+func (d *apiTokenDouble) Create(_ context.Context, tokenHash []byte, prefix string, t domain.APIToken) (domain.APIToken, error) {
+	d.nextID++
+	t.ID = fmt.Sprintf("tok-%d", d.nextID)
+	t.Prefix = prefix
+	if d.clock != nil {
+		t.CreatedAt = d.clock.Now()
+	}
+	d.rows[string(tokenHash)] = &t
+	return t, nil
+}
+
+func (d *apiTokenDouble) ByTokenHash(_ context.Context, tokenHash []byte) (domain.APIToken, error) {
+	t, ok := d.rows[string(tokenHash)]
+	if !ok || t.RevokedAt != nil || (d.clock != nil && !t.ExpiresAt.After(d.clock.Now())) {
+		return domain.APIToken{}, domain.ErrNotFound
+	}
+	return *t, nil
+}
+
+func (d *apiTokenDouble) ListForUser(_ context.Context, userID string) ([]domain.APIToken, error) {
+	var out []domain.APIToken
+	for _, t := range d.rows {
+		if t.UserID == userID && t.RevokedAt != nil == false {
+			out = append(out, *t)
+		}
+	}
+	return out, nil
+}
+
+func (d *apiTokenDouble) Revoke(_ context.Context, userID, tokenID string) error {
+	for _, t := range d.rows {
+		if t.ID == tokenID && t.UserID == userID && t.RevokedAt == nil {
+			now := time.Now()
+			t.RevokedAt = &now
+			return nil
+		}
+	}
+	return domain.ErrNotFound
+}
+
+func (d *apiTokenDouble) RevokeAllForUser(_ context.Context, userID string) error {
+	for _, t := range d.rows {
+		if t.UserID == userID && t.RevokedAt == nil {
+			now := time.Now()
+			t.RevokedAt = &now
+		}
+	}
+	return nil
+}
+
+func (d *apiTokenDouble) Touch(_ context.Context, tokenID string, at time.Time) error {
+	for _, t := range d.rows {
+		if t.ID == tokenID {
+			t.LastUsedAt = &at
+		}
+	}
+	return nil
+}
+
+func (d *apiTokenDouble) liveCount(userID string) int {
+	n := 0
+	for _, t := range d.rows {
+		if t.UserID == userID && t.RevokedAt == nil {
+			n++
+		}
+	}
+	return n
+}

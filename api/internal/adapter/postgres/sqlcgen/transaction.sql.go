@@ -101,12 +101,13 @@ const createTransaction = `-- name: CreateTransaction :one
 INSERT INTO transactions (
     household_id, kind, occurred_on, description, category_id,
     paid_by_membership_id, from_account_id, to_account_id,
-    amount_minor, amount_currency, received_amount_minor, received_amount_currency
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    amount_minor, amount_currency, received_amount_minor, received_amount_currency,
+    idempotency_key
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 RETURNING id, household_id, kind, occurred_on, description, category_id,
           paid_by_membership_id, from_account_id, to_account_id,
           amount_minor, amount_currency, received_amount_minor,
-          received_amount_currency, created_at
+          received_amount_currency, created_at, idempotency_key
 `
 
 type CreateTransactionParams struct {
@@ -122,6 +123,7 @@ type CreateTransactionParams struct {
 	AmountCurrency         string
 	ReceivedAmountMinor    *int64
 	ReceivedAmountCurrency *string
+	IdempotencyKey         *string
 }
 
 func (q *Queries) CreateTransaction(ctx context.Context, arg CreateTransactionParams) (Transaction, error) {
@@ -138,6 +140,7 @@ func (q *Queries) CreateTransaction(ctx context.Context, arg CreateTransactionPa
 		arg.AmountCurrency,
 		arg.ReceivedAmountMinor,
 		arg.ReceivedAmountCurrency,
+		arg.IdempotencyKey,
 	)
 	var i Transaction
 	err := row.Scan(
@@ -155,6 +158,7 @@ func (q *Queries) CreateTransaction(ctx context.Context, arg CreateTransactionPa
 		&i.ReceivedAmountMinor,
 		&i.ReceivedAmountCurrency,
 		&i.CreatedAt,
+		&i.IdempotencyKey,
 	)
 	return i, err
 }
@@ -284,6 +288,46 @@ func (q *Queries) GetTransaction(ctx context.Context, arg GetTransactionParams) 
 		&i.ToAccountName,
 		&i.BeforeFromOpening,
 		&i.BeforeToOpening,
+	)
+	return i, err
+}
+
+const getTransactionByIdempotencyKey = `-- name: GetTransactionByIdempotencyKey :one
+SELECT id, household_id, kind, occurred_on, description, category_id,
+       paid_by_membership_id, from_account_id, to_account_id,
+       amount_minor, amount_currency, received_amount_minor,
+       received_amount_currency, created_at, idempotency_key
+FROM transactions
+WHERE household_id = $1 AND idempotency_key = $2
+`
+
+type GetTransactionByIdempotencyKeyParams struct {
+	HouseholdID    pgtype.UUID
+	IdempotencyKey *string
+}
+
+// The replay lookup for a create that hit transactions_household_idempotency_key.
+// Household-scoped like every other read: a key is only unique within one
+// household, and one household's retry must never read another's row.
+func (q *Queries) GetTransactionByIdempotencyKey(ctx context.Context, arg GetTransactionByIdempotencyKeyParams) (Transaction, error) {
+	row := q.db.QueryRow(ctx, getTransactionByIdempotencyKey, arg.HouseholdID, arg.IdempotencyKey)
+	var i Transaction
+	err := row.Scan(
+		&i.ID,
+		&i.HouseholdID,
+		&i.Kind,
+		&i.OccurredOn,
+		&i.Description,
+		&i.CategoryID,
+		&i.PaidByMembershipID,
+		&i.FromAccountID,
+		&i.ToAccountID,
+		&i.AmountMinor,
+		&i.AmountCurrency,
+		&i.ReceivedAmountMinor,
+		&i.ReceivedAmountCurrency,
+		&i.CreatedAt,
+		&i.IdempotencyKey,
 	)
 	return i, err
 }
@@ -798,7 +842,7 @@ WHERE household_id = $1 AND id = $2
 RETURNING id, household_id, kind, occurred_on, description, category_id,
           paid_by_membership_id, from_account_id, to_account_id,
           amount_minor, amount_currency, received_amount_minor,
-          received_amount_currency, created_at
+          received_amount_currency, created_at, idempotency_key
 `
 
 type UpdateTransactionParams struct {
@@ -849,6 +893,7 @@ func (q *Queries) UpdateTransaction(ctx context.Context, arg UpdateTransactionPa
 		&i.ReceivedAmountMinor,
 		&i.ReceivedAmountCurrency,
 		&i.CreatedAt,
+		&i.IdempotencyKey,
 	)
 	return i, err
 }

@@ -50,14 +50,22 @@ const usage = `usage: hearthctl [--url=<base>] <command> [flags]
 
 commands:
   login --email=<email>        sign in; password from $HEARTH_PASSWORD or stdin
-  logout                       sign out and forget the stored session
+  login --token                sign in with a personal API token from $HEARTH_TOKEN or stdin
+  logout                       sign out and forget the stored session (or forget the token)
+  token create --name=<n> [--days=90]
+                               mint a personal API token (needs an --email login); shown once
+  token list                   your live tokens, by id and prefix
+  token revoke <id>            revoke one (needs an --email login)
   whoami                       print the signed-in user, household, membership
-  routes                       every API route, who may call it, its body shape
+  routes [--json]              every API route, who may call it, its body shape
   list <kind>                  accounts | categories | members | goals | bills |
                                transactions
   api <METHOD> <path> [--data=<json>|--data=@file]
                                call any route; path is relative to /api/v1
-  transaction add ...          write an expense, income or transfer
+  transaction add ...          write an expense, income or transfer (--key makes it retry-safe)
+  transaction import <file.csv> [--dry-run]
+                               many rows, each with an idempotency key, so the
+                               same file run twice creates nothing new
   account add ...              create an account
   bill add ...                 create a recurring bill
   goal add ...                 create a savings goal
@@ -111,13 +119,18 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return cmdLogout(ctx, client, stdout, stderr)
 	case "whoami":
 		return cmdWhoami(ctx, client, stdout)
+	case "token":
+		return cmdToken(ctx, client, rest[1:], stdout, stderr)
 	case "routes":
-		return cmdRoutes(stdout)
+		return cmdRoutes(rest[1:], stdout)
 	case "list":
 		return cmdList(ctx, client, rest[1:], stdout)
 	case "api":
 		return cmdAPI(ctx, client, rest[1:], stdout)
 	case "transaction", "account", "bill", "goal", "category":
+		if rest[0] == "transaction" && len(rest) > 1 && rest[1] == "import" {
+			return cmdImport(ctx, client, rest[2:], stdout, stderr)
+		}
 		return cmdAdd(ctx, client, rest[0], rest[1:], stdout)
 	default:
 		return fail(exitUsage, "unknown command %q\n\n%s", rest[0], usage)

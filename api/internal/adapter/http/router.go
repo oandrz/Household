@@ -58,6 +58,11 @@ type Deps struct {
 	Retros       *usecase.RetroService
 	Visions      *usecase.VisionService
 	Agreements   *usecase.AgreementService
+	// APITokens mints and revokes personal API tokens; APITokenRepo is what
+	// requireToken resolves a Bearer header with, the way Sessions is for a
+	// cookie. Both are always set in a real deployment.
+	APITokens    *usecase.APITokenService
+	APITokenRepo usecase.APITokenRepository
 	// Telegram is nil when no bot is configured. The route checks for nil
 	// rather than being conditionally registered, so the router's shape does
 	// not change with configuration and every test builds the same tree.
@@ -175,10 +180,22 @@ func NewRouter(deps Deps) http.Handler {
 			auth.Group(func(g chi.Router) {
 				g.Use(requireSession(deps))
 				g.Get("/me", handleMe(deps))
+				g.Get("/tokens", handleListAPITokens(deps))
 
 				g.Group(func(m chi.Router) {
 					m.Use(requireCSRF)
 					m.Post("/sign-out", handleSignOut(deps))
+				})
+
+				// Minting and revoking a token needs a browser session, not
+				// a token: a leaked token must not be able to make itself
+				// permanent (spec decision 7). requireCookieSession sits
+				// inside requireCSRF so the order reads guard-then-guard.
+				g.Group(func(m chi.Router) {
+					m.Use(requireCSRF)
+					m.Use(requireCookieSession)
+					m.Post("/tokens", handleCreateAPIToken(deps))
+					m.Delete("/tokens/{id}", handleRevokeAPIToken(deps))
 				})
 			})
 		})

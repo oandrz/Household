@@ -37,12 +37,25 @@ const (
 type Poller struct {
 	client      *Client
 	handler     StartHandler
+	commands    CommandHandler // nil means chat commands are off
 	offset      int64
 	baseBackoff time.Duration
 }
 
+// CommandHandler is what the poller hands a parsed chat command to; nil
+// leaves the bot a sign-in-only bot, exactly as before commands existed.
+type CommandHandler interface {
+	HandleCommand(ctx context.Context, cmd Command) error
+}
+
 func NewPoller(c *Client, h StartHandler) *Poller {
 	return &Poller{client: c, handler: h, baseBackoff: time.Second}
+}
+
+// WithCommands turns chat commands on. Returns the poller for chaining.
+func (p *Poller) WithCommands(h CommandHandler) *Poller {
+	p.commands = h
+	return p
 }
 
 // Run blocks until ctx is cancelled. It never returns on error: the API must
@@ -79,11 +92,16 @@ func (p *Poller) Run(ctx context.Context) {
 			if u.UpdateID >= p.offset {
 				p.offset = u.UpdateID + 1
 			}
-			start, ok := ParseStart(u)
-			if !ok {
+			if start, ok := ParseStart(u); ok {
+				p.dispatch(ctx, start)
 				continue
 			}
-			p.dispatch(ctx, start)
+			if p.commands == nil {
+				continue
+			}
+			if cmd, ok := ParseCommand(u); ok {
+				p.dispatchCommand(ctx, cmd)
+			}
 		}
 	}
 }
@@ -100,5 +118,18 @@ func (p *Poller) dispatch(ctx context.Context, start StartCommand) {
 	}()
 	if err := p.handler.HandleStart(ctx, start.ChatID, start.Payload); err != nil {
 		slog.Error("telegram start handler failed", "error", err)
+	}
+}
+
+// dispatchCommand recovers for the same reason dispatch does: this goroutine
+// has no middleware.Recoverer over it.
+func (p *Poller) dispatchCommand(ctx context.Context, cmd Command) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("telegram command handler panicked", "panic", r, "command", cmd.Name)
+		}
+	}()
+	if err := p.commands.HandleCommand(ctx, cmd); err != nil {
+		slog.Error("telegram command handler failed", "error", err, "command", cmd.Name)
 	}
 }

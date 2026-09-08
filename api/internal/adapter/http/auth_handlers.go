@@ -258,6 +258,13 @@ func handleConsumeMagicLink(deps Deps) http.HandlerFunc {
 // the identity the middleware already resolved from it.
 func handleSignOut(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// A token has no session to end; `hearthctl token revoke` is its
+		// sign-out. Refuse rather than clear cookies that were never sent.
+		if scope, ok := RequestScope(r); ok && scope.AuthVia != authViaSession {
+			WriteError(w, http.StatusForbidden, "SESSION_REQUIRED",
+				"This action needs a signed-in browser session, not an API token.", nil)
+			return
+		}
 		cookie, err := r.Cookie(sessionCookieName)
 		if err == nil && cookie.Value != "" {
 			if err := deps.Auth.SignOut(r.Context(), cookie.Value); err != nil {

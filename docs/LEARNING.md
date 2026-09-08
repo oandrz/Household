@@ -4767,7 +4767,74 @@ route with a missing guard has no second line of defence.
   through like any refusal, `login` has its own message that never says
   "retry", and a test pins the body on stdout, one request made, no
   credentials stored. A rule in a spec is not a behaviour until a test
-  would fail without it.
+  would fail without it. *(e)* **The dev `api` container does not rebuild
+  when you edit code on this machine.** `air` watches a volume mounted from
+  macOS into colima, and file events do not cross that boundary, so the
+  container went on serving the binary it built at start-up. The first live
+  run of `transaction import` "created 3" twice and a reused key got 201,
+  with every test green and the migration visibly applied — the old binary
+  simply did not know the header. The tell was the same one
+  `verifying-in-the-real-environment` already names: a response the code you
+  are reading cannot produce. `docker compose restart api` forces a rebuild.
+  Check the binary's build time before trusting a walk. *(f)* **Adding a
+  dependency to a service means adding it to every fixture that builds
+  one, and a fixture that compiles is not a fixture that is wired.** Giving
+  `MemberDeps` an `APITokens` port compiled cleanly with the usecase
+  fixture's literal missing the new field — Go zero-values the pointer —
+  and the first test touching it panicked on a nil receiver, one layer
+  down from where the omission was. The HTTP env caught the same omission
+  at compile time only because its Deps are passed by name into a router
+  that dereferences them at build. When a port is added, grep every
+  `XDeps{` literal, tests included, before running anything. *(g)* **The
+  Go suite has a 5-minute timeout per package and the two testcontainers
+  packages each run for about five minutes on this machine.** Running
+  targeted `http` tests while `make test-api` was already running pushed
+  `postgres` from 298s to a timeout at 300s — a red run with no red test.
+  Run the full suite alone, and read "panic: test timed out" as load, not
+  as a defect, before chasing it. *(h)* **`docker compose restart` does
+  not reload `.env`.** After the owner put a development bot's token into
+  `.env`, a restart brought the api back up still polling the production
+  bot — a container's environment is fixed when it is created, and
+  `restart` reuses the container. `docker compose up -d api` recreates it
+  and reads the file. The tell was the start-up log line naming the old
+  `bot_username`; read that line before trusting any walk that depends on
+  an environment value. *(i)* **A bot token is a single-consumer
+  resource, like a database.** With the production token in the local
+  `.env`, the dev poller lost every update to the deployed one and the
+  owner's `/balance` simply vanished — no error on their side, a
+  `Conflict` warning every minute on ours. Development gets its own bot,
+  the way it gets its own database. *(j)* **The dev compose file names
+  every environment value it passes; production reads `.env` whole.**
+  Free text shipped with `ANTHROPIC_API_KEY` documented in `.env.example`
+  and read by `config.Load`, and the dev `api` container never saw it —
+  `docker-compose.yml` lists variables one by one, and nobody added the
+  line. The start-up log said `free_text=false` with the key plainly in
+  `.env`. When a new value enters `config.Load`, grep the dev compose
+  file too; `.env.example` is not the only place a value has to be named.
+  *(k)* **An adapter's error is a log line; pass on the provider's
+  message, not its body.** The first real Claude call failed on billing,
+  and the log carried the whole response: request id, workspace id, the
+  lot. Nothing in Hearth needs either, and a log that travels (a paste
+  into a chat, a screenshot) now carries account identifiers. The
+  OpenRouter adapter reads `error.message` and the status and nothing
+  else; the test asserts a planted request id is absent. *(l)* **A
+  provider you call from the poll loop can stop the whole bot.** The
+  Telegram poller handles one update at a time, and nothing bounded how
+  long a parse could take: a free-tier queue that stalls for a minute
+  holds every chat's next message for a minute. The Commander now sets a
+  30 s deadline on every parser call, and the test checks the context
+  carries one — a mutation that swapped `WithTimeout` for `WithCancel`
+  went red. *(m)* **Probe a free model's limits before handing the walk
+  to a person.** Two Telegram walks in a row answered "could not read
+  that": first a single free model rate-limited upstream (`429`), then my
+  own fix — a four-id fallback list, which OpenRouter refuses with `400
+  'models' array must have 3 items or fewer` on every request. Both were
+  visible in one log line each, and both would have been caught by
+  running the adapter against the real API from a throwaway test before
+  asking the owner to type anything. That test now exists as a habit: the
+  third walk was preceded by it, and it read three sentences correctly.
+  A provider's documented cap is a constructor check, not a runtime
+  surprise.
 - The architecture lint **never enforced the rule it existed for**. Both branches
   only matched imports *within* the module, so third-party imports in
   `internal/domain` passed. Proven by planting `pgx` and getting exit 0.

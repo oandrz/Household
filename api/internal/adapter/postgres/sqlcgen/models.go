@@ -80,6 +80,19 @@ type AgreementSignature struct {
 	SignedAt     pgtype.Timestamptz
 }
 
+type ApiToken struct {
+	ID          pgtype.UUID
+	UserID      pgtype.UUID
+	HouseholdID pgtype.UUID
+	Name        string
+	TokenHash   []byte
+	Prefix      string
+	CreatedAt   pgtype.Timestamptz
+	ExpiresAt   pgtype.Timestamptz
+	LastUsedAt  pgtype.Timestamptz
+	RevokedAt   pgtype.Timestamptz
+}
+
 type Bill struct {
 	ID                 pgtype.UUID
 	HouseholdID        pgtype.UUID
@@ -335,6 +348,7 @@ type Transaction struct {
 	ReceivedAmountMinor    *int64
 	ReceivedAmountCurrency *string
 	CreatedAt              pgtype.Timestamptz
+	IdempotencyKey         *string
 }
 
 type User struct {

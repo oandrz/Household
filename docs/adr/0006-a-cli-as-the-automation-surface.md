@@ -43,9 +43,14 @@ second way to obtain a credential and `client.go` a second header to send.
 - An agent can do exactly what the signed-in member can, no more. A limited
   member's session gets the same 403s through the CLI as in the app. This is
   a feature: there is one authorisation model, not two.
-- The CLI never retries a sign-in (the household lockout is real) and never
-  retries a write (no idempotency keys exist). Both are stated in the
-  manual; the duplicate-on-retry gap is recorded in the feature tracker.
+- The CLI never retries a sign-in (the household lockout is real). It also
+  never retries a write on its own — but a write can now be *made* safe to
+  retry: **amended 2026-09-08, the same day**, `POST /transactions` accepts
+  an `Idempotency-Key` header (spec
+  `docs/superpowers/specs/2026-09-08-hearth-idempotent-import-design.md`),
+  `transaction add --key` and `transaction import` send one, and the
+  "duplicate on retry" gap this ADR originally recorded is closed for
+  transactions. Other creates still have no key; the tracker says so.
 - `hearthctl routes` is hand-maintained prose an agent trusts, so a test
   diffs it against `router.go` in both directions. Adding a route without
   adding its line fails `go test`.

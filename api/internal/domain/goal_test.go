@@ -12,10 +12,10 @@ func goalDate(y int, m time.Month, d int) time.Time {
 
 func TestMonthsLeftInclusive(t *testing.T) {
 	cases := []struct {
-		name        string
-		target      time.Time
-		today       time.Time
-		want        int
+		name   string
+		target time.Time
+		today  time.Time
+		want   int
 	}{
 		{"four months ahead counts both ends", goalDate(2026, time.December, 1), goalDate(2026, time.August, 1), 5},
 		{"the target month itself is one month", goalDate(2026, time.August, 1), goalDate(2026, time.August, 19), 1},
@@ -61,9 +61,9 @@ func TestRequiredMonthlyMinor(t *testing.T) {
 
 func TestGoalProgressPercent(t *testing.T) {
 	cases := []struct {
-		name                     string
-		contributed, target      int64
-		want                     int
+		name                string
+		contributed, target int64
+		want                int
 	}{
 		{"the design's Bali trip", 260000, 400000, 65},
 		{"rounds to nearest", 129000, 400000, 32}, // 32.25 -> 32

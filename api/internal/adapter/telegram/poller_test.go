@@ -250,3 +250,76 @@ func decodeJSON(r *http.Request, v any) error {
 func itoa(n int64) string {
 	return strconv.FormatInt(n, 10)
 }
+
+type commandSpy struct {
+	mu    sync.Mutex
+	calls []Command
+}
+
+func (c *commandSpy) HandleCommand(_ context.Context, cmd Command) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls = append(c.calls, cmd)
+	return nil
+}
+
+func (c *commandSpy) seen() []Command {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]Command(nil), c.calls...)
+}
+
+// A poller with commands on hands /spend and plain text to the command
+// handler (the Commander decides what text means) and /start to the start
+// handler; without WithCommands both are ignored, so a sign-in-only bot
+// stays exactly that.
+func TestPollerDispatchesChatCommandsOnlyWhenEnabled(t *testing.T) {
+	updates := `{"ok":true,"result":[
+		{"update_id":21,"message":{"text":"/start nonce-b","chat":{"id":7}}},
+		{"update_id":22,"message":{"text":"/spend 5 gum","chat":{"id":7}}},
+		{"update_id":23,"message":{"text":"hello","chat":{"id":7}}}]}`
+	newServer := func() *httptest.Server {
+		var mu sync.Mutex
+		delivered := false
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			mu.Lock()
+			first := !delivered
+			delivered = true
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			if first {
+				_, _ = w.Write([]byte(updates))
+				return
+			}
+			_, _ = w.Write([]byte(`{"ok":true,"result":[]}`))
+		}))
+	}
+
+	srv := newServer()
+	defer srv.Close()
+	starts, commands := &handlerSpy{}, &commandSpy{}
+	p := NewPoller(newClientWithBase("t", srv.URL), starts).WithCommands(commands)
+	ctx, cancel := context.WithCancel(context.Background())
+	go p.Run(ctx)
+	waitFor(t, func() bool { return len(commands.seen()) == 2 && len(starts.seen()) == 1 })
+	cancel()
+	got := commands.seen()
+	if got[0].Name != "spend" || got[0].UpdateID != 22 || got[0].ChatID != 7 || got[0].Amount != "5" {
+		t.Fatalf("dispatched %+v", got[0])
+	}
+	if got[1].Name != "text" || got[1].Description != "hello" || got[1].UpdateID != 23 {
+		t.Fatalf("plain text should arrive as a text command: %+v", got[1])
+	}
+
+	srv2 := newServer()
+	defer srv2.Close()
+	starts2, commands2 := &handlerSpy{}, &commandSpy{}
+	p2 := NewPoller(newClientWithBase("t", srv2.URL), starts2)
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	go p2.Run(ctx2)
+	waitFor(t, func() bool { return len(starts2.seen()) == 1 })
+	cancel2()
+	if len(commands2.seen()) != 0 {
+		t.Fatalf("a poller without WithCommands must not dispatch commands")
+	}
+}

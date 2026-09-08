@@ -52,6 +52,27 @@ var (
 	ErrReceivedAmountNotAllowed   = errors.New("only a transfer can record an amount received")
 	ErrCategoryKindMismatch       = errors.New("category does not match the transaction kind")
 
+	// ErrAPITokenNameInvalid and ErrAPITokenLifetimeInvalid are the two
+	// refusals of POST /auth/tokens: a blank or overlong name, and a
+	// lifetime outside (0, MaxAPITokenLifetime]. Both 422.
+	ErrAPITokenNameInvalid     = errors.New("api token name is not valid")
+	ErrAPITokenLifetimeInvalid = errors.New("api token lifetime is not valid")
+
+	// ErrIdempotencyKeyInvalid is ValidateIdempotencyKey's refusal: a
+	// caller-supplied key of the wrong shape. 422, never a silent "no key".
+	ErrIdempotencyKeyInvalid = errors.New("idempotency key is not valid")
+	// ErrIdempotencyKeyInUse is the adapter's translation of the
+	// transactions_household_idempotency_key unique violation: this
+	// household already has a transaction with this key. TransactionService
+	// turns it into either a replay or ErrIdempotencyKeyReused; it never
+	// reaches a handler.
+	ErrIdempotencyKeyInUse = errors.New("idempotency key already in use")
+	// ErrIdempotencyKeyReused is a repeated create whose key matches a stored
+	// row but whose fields do not: the caller reused a key for a different
+	// transaction. 409. Handing back the stored row instead would tell the
+	// caller its retry "worked" for something it never asked for.
+	ErrIdempotencyKeyReused = errors.New("idempotency key reused for a different transaction")
+
 	// ErrAlreadyExists mirrors ErrNotFound: a row that must be unique
 	// already exists. It exists so an adapter can translate a Postgres
 	// unique-violation (SQLSTATE 23505) into something usecase code can

@@ -20,6 +20,12 @@ type Scope struct {
 	UserID      string
 	HouseholdID string
 	Membership  domain.Membership
+	// AuthVia says which credential spoke: a browser session cookie or a
+	// personal API token. Most guards do not care -- both resolve to the
+	// same membership -- but requireCSRF skips its check for a token and
+	// requireCookieSession refuses one. Any switch over it must refuse by
+	// default; see authVia's own comment.
+	AuthVia authVia
 	// Flags is this household's resolved answer for every flag this build
 	// defines -- every key present, so a reader never has to interpret an
 	// absence.
@@ -32,6 +38,22 @@ func RequestScope(r *http.Request) (Scope, bool) {
 	scope, ok := r.Context().Value(scopeKey{}).(Scope)
 	return scope, ok
 }
+
+// authVia is the credential a request authenticated with. It is a named
+// type rather than a bool so a third kind (a signed webhook, say) cannot be
+// added without every switch over it being revisited: the zero value means
+// "not set", and anything reading it must treat that as a refusal.
+type authVia string
+
+const (
+	authViaSession authVia = "session"
+	authViaToken   authVia = "token"
+)
+
+// bearerPrefix is the Authorization scheme a token arrives under. A header
+// with any other scheme is a malformed credential and is refused; it never
+// falls through to the cookie (spec decision 4).
+const bearerPrefix = "Bearer "
 
 const sessionCookieName = "hearth_session"
 
@@ -68,9 +90,19 @@ const sessionTouchInterval = time.Hour
 // session, loads the caller's membership, and stores both as a Scope on the
 // request context. A missing or unresolvable cookie -- absent, unknown,
 // expired, or revoked -- answers 401 UNAUTHENTICATED and never calls next.
+//
+// An Authorization header, when present, is the only credential considered:
+// the request is handed to requireToken and the cookie is never read, so a
+// bad token beside a good cookie is still a 401. A caller who sent a token
+// meant to use it, and a silent fallback would hide a revoked or expired
+// token behind a browser that happens to be signed in.
 func requireSession(deps Deps) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "" {
+				requireToken(deps, next).ServeHTTP(w, r)
+				return
+			}
 			cookie, err := r.Cookie(sessionCookieName)
 			if err != nil || cookie.Value == "" {
 				WriteError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Sign in required.", nil)
@@ -155,7 +187,7 @@ func requireSession(deps Deps) func(http.Handler) http.Handler {
 				return
 			}
 
-			scope := Scope{UserID: record.UserID, HouseholdID: record.HouseholdID, Membership: membership, Flags: flags}
+			scope := Scope{UserID: record.UserID, HouseholdID: record.HouseholdID, Membership: membership, Flags: flags, AuthVia: authViaSession}
 			// The admin grant is put on the context from the same session
 			// record the scope is built from, so the two can never disagree
 			// about which session is speaking. It is carried separately

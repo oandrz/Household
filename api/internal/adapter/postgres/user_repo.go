@@ -197,9 +197,15 @@ const goalContributionRolloverUniqueConstraint = "goal_contributions_one_rollove
 // collision, archived rows included, is domain.ErrBillNameTaken -- hold.
 const billNameUniqueConstraint = "bills_household_id_name_key"
 
+// transactionIdempotencyKeyUniqueConstraint is the partial unique index from
+// 00015_transaction_idempotency_key.sql. TransactionRepository.Create's
+// contract turns a hit into domain.ErrIdempotencyKeyInUse so the service
+// can decide between a replay and a 409.
+const transactionIdempotencyKeyUniqueConstraint = "transactions_household_idempotency_key"
+
 // agreementSectionNameUniqueConstraint is the name Postgres gave
 // agreement_sections' own UNIQUE (household_id, name)
-// (migrations/00014_agreements.sql), the same "<table>_<columns>_key" default
+// (migrations/00015_agreements.sql), the same "<table>_<columns>_key" default
 // naming categoryNameUniqueConstraint's own comment explains. translate
 // checks this by name, not only by SQLSTATE 23505, so a future unique key on
 // the table cannot masquerade as a name collision (decision 19). Sections are
@@ -228,6 +234,8 @@ func translate(err error, op string) error {
 		// occupies-its-key rule categories follow (00007_goals.sql's own
 		// comment).
 		return fmt.Errorf("%s: constraint %q: %w", op, pgErr.ConstraintName, domain.ErrGoalNameTaken)
+	case errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == transactionIdempotencyKeyUniqueConstraint:
+		return fmt.Errorf("%s: constraint %q: %w", op, pgErr.ConstraintName, domain.ErrIdempotencyKeyInUse)
 	case errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == billNameUniqueConstraint:
 		// BillRepository's own contract: Create and Update both hit this on a
 		// name collision, archived rows included -- the same archived-still-

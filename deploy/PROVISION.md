@@ -181,6 +181,15 @@ Leave `DATABASE_READONLY_URL` commented out for now. It is the optional
 operator database browse, and it wants a role that does not exist yet — see
 section 10, after the first bring-up.
 
+Two more optional pairs, both off when left commented out, both explained in
+`docs/INFRASTRUCTURE.md`: `TELEGRAM_BOT_TOKEN` + `TELEGRAM_BOT_USERNAME`
+turn on Telegram sign-in and chat commands (**one token, one poller** — the
+production bot's token belongs on this box only; a developer machine uses a
+separate bot), and `OPENROUTER_API_KEY` + `OPENROUTER_MODEL` let the bot read
+a plain sentence into an expense (up to three comma-separated model ids;
+free ones cost nothing). Each pair is both-or-neither; `config.Load` refuses
+one alone.
+
 ## 9 · First bring-up
 
 ```bash
