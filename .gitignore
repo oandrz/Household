@@ -10,7 +10,10 @@ web/dist/
 .idea/
 
 # Serena's project config, language-server index and agent memories — per-developer
-.serena/
+# Serena keeps its cache, logs and generated memories here; only the project
+# configuration is worth versioning, because it roots the language servers.
+.serena/*
+!.serena/project.yml
 
 # The real production environment file. Only deploy/.env.example is tracked.
 deploy/.env
