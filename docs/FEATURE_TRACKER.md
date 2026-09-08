@@ -923,6 +923,10 @@ Built + Partial falls from 105 to **104**, and the headline now also states
 the figure that actually matters for planning: with five rows out of scope,
 **119** is this release's denominator.
 
+**2026-09-08 — §10 Automation added** (two rows, one ✅ and one ⬜) for the
+`hearthctl` command-line client, which the design never drew. Totals move to
+**87/18/16/5 = 126**; the release denominator becomes **121**.
+
 | Area | Built | Partial | Not started | Out of scope |
 |---|---|---|---|---|
 | Entry & authentication | 12 | 1 | 2 | 0 |
@@ -934,7 +938,8 @@ the figure that actually matters for planning: with five rows out of scope,
 | Family | 0 | 0 | 0 | 3 |
 | Household extras | 0 | 0 | 0 | 1 |
 | Platform administration | 7 | 1 | 0 | 1 |
-| **Total** | **86** | **18** | **15** | **5** |
+| Automation | 1 | 0 | 1 | 0 |
+| **Total** | **87** | **18** | **16** | **5** |
 
 ---
 
@@ -1762,6 +1767,21 @@ households and metrics needed one for §6).
 | Households and metrics | ✅ | Design spec §6, expanded in `docs/superpowers/specs/2026-09-02-hearth-admin-households-design.md`. Four tiles, explicit search over households and members (Telegram-only members by name, since they have no email the operator could know), most-recently-active ordering from a throttled `sessions.last_seen_at`, and a read-only drill-in with members, channel, pending invites and the household's sign-in lockout. No money on either screen, asserted by exact key sets rather than by reading the handler — financial data stays behind the database browse, so reading a customer's finances costs a deliberate second step and a second audit row. Reads tables that already exist; no analytics table, because a counter that can drift from the rows it counts is worse than a query. **Walked 2026-09-02, Task 11 of the plan — 15 of 15 criteria pass, with two caveats** (`docs/superpowers/plans/2026-09-02-hearth-admin-households-verification.md`): criterion 7's caveat was a real defect — the "Nothing matches" message's own Clear button restored the list but left the search box showing the stale query — fixed in the same commit that recorded the walk; criterion 12 was confirmed against the drill-in's own lockout callout through the API, with the browser's admin session kept alive throughout, rather than against the sign-in screen's own local error state. **Named gap, not a criterion failure:** an expired, unaccepted invite is invisible on this screen by the spec's own "pending only" rule (both the metrics tile and the drill-in's "Pending invites" list filter on `expires_at > now()`) — an operator troubleshooting a stale invite still needs `psql` |
 
 ---
+
+## 10 · Automation
+
+**Not in `design/Household Dashboard.dc.html` at all.** Added 2026-09-08 when
+the product owner asked for a way to let an AI agent drive the product. Counted
+here the way §9 is: a row that exists and works is on the map whether or not
+the design drew it. Decision and shape in
+[ADR 6](adr/0006-a-cli-as-the-automation-surface.md); manual in
+`docs/CLI.md`; spec in
+`docs/superpowers/specs/2026-09-08-hearth-cli-design.md`.
+
+| Feature | State | Notes |
+|---|---|---|
+| `hearthctl` — a command-line client of the API | ✅ | `api/cmd/hearthctl`, built by `make hearthctl`. Signs in with `POST /auth/sign-in`, stores the session and CSRF cookies in `~/.config/hearth/<host>.json` (0600, one file per host), sends `X-CSRF-Token` on every write. `login`/`logout`/`whoami`, `list <kind>`, `api <METHOD> <path> [--data]` for any route, five typed inserts (`transaction`, `account`, `bill`, `goal`, `category` `add`), and `routes` — a hand-kept table a test diffs against `router.go` both ways. Goes **through** every guard, never around them (ADR 6). **Walked against the dev stack 2026-09-08**: account, expense, income, bill, goal and category all inserted from the shell; the ledger showed both rows with the right signs and the account balance read 500000 + 650000 − 8450 = 1141550 in `list accounts` and S$11,415.50 on the Overview. Three mutations (drop the CSRF header, rename a route in the table, stop mapping 401) each turned a test red. **Known gaps, deliberate:** no retry on writes because the API has no idempotency keys, so a write that exits 4 may or may not have landed — `list` before retrying; amounts are minor units only (no `12.34` parsing); sign-up, magic link, Telegram and invite acceptance are not wrapped |
+| Personal API tokens for headless callers | ⬜ | Deferred by ADR 6, not rejected: a 30-day session covers one agent on one machine. Becomes worth its table and Bearer middleware when a headless box or a second agent needs a credential that is not a person's session. When it lands, `hearthctl login` gains a second way to obtain a credential and nothing else in the CLI changes |
 
 ## Suggested order
 

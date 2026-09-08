@@ -26,6 +26,8 @@ React + TypeScript frontend, Postgres, Docker Compose.
 - `deploy/PROVISION.md` — rebuilding the production box from an empty account.
 - `docs/HANDOVER.md` — current state, what to build next, open items.
 - `docs/GUIDE.md` — how to use the product.
+- `docs/CLI.md` — `hearthctl`, the command-line client an agent or a script
+  drives the product with. Build it with `make hearthctl`.
 - `docs/superpowers/specs/` and `docs/superpowers/plans/` — the specs and plans
   the work was built from.
 - Explain everything in simple, straightforward and easy to be understood by the junior engineer

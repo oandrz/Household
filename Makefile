@@ -106,6 +106,9 @@ reset-password: ## Set a member's password. make reset-password EMAIL=you@exampl
 unlock-household: ## Clear the seeded household's lock immediately
 	$(COMPOSE) exec api go run ./cmd/adminctl unlock-household
 
+hearthctl: ## Build the command-line client to bin/hearthctl (see docs/CLI.md)
+	cd api && go build -o ../bin/hearthctl ./cmd/hearthctl
+
 build: ## Build the production images
 	docker build --target prod -t hearth-api:latest ./api
 	docker build --target prod -t hearth-web:latest ./web
