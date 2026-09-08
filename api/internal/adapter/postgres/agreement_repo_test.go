@@ -45,8 +45,8 @@ func newAgreementRepo(t *testing.T) (*postgres.AgreementRepo, *postgres.DB, stri
 }
 
 // insertTestProposal seeds one 'add' proposal. agreement_proposals_shape
-// requires an add to carry target_agreement_id NULL, body <> '' and
-// previous_body = '', and agreement_proposals_resolution_matches_status
+// requires an add to carry target_agreement_id NULL, body <> ” and
+// previous_body = ”, and agreement_proposals_resolution_matches_status
 // requires resolved_at exactly when the status is accepted or withdrawn --
 // hence the *time.Time, which pgx encodes as SQL NULL when it is nil.
 func insertTestProposal(t *testing.T, db *postgres.DB, householdID, sectionID, byMembershipID,

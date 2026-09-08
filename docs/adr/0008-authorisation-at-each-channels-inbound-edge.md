@@ -75,6 +75,13 @@ Two supporting decisions:
   is quieter than the routes, because every reply is an outbound send a
   stranger could farm. The parser is a reader, never a writer; the write
   happens on `/yes`, through the same service and the same idempotency key.
+- **The rule has an outbound direction too.** The daily digest (stage 6)
+  sends money data with nobody asking, so "who is asking" becomes "who may
+  receive": the recipients query joins `telegram_accounts` to
+  `memberships` and keeps only `role = 'owner' AND 'money' = ANY
+  (capabilities)` — the same two predicates the Commander checks inbound,
+  and a postgres test is the proof. A digest goes only where `/balance`
+  would already be answered.
 - Chat commands were **walked against a real bot on 2026-09-08**, but only
   after the owner created a second, development bot. The first attempt used
   the production token from the local `.env`: another poller held it, the

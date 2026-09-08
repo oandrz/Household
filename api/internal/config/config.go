@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"time"
 )
 
 type Config struct {
@@ -85,6 +86,14 @@ type Config struct {
 	// the default and means commands only.
 	OpenRouterAPIKey string
 	OpenRouterModel  string
+	// NudgesAt and NudgesLocation turn the daily Telegram digest on: a local
+	// "HH:MM" and the IANA zone it is read in. Both or neither, and only
+	// with Telegram configured, since a digest with no channel is a
+	// misconfiguration rather than "off". One zone for the whole install
+	// is a known gap (the tracker names it): right for one household,
+	// wrong the day a second one signs up from another zone.
+	NudgesAt       string
+	NudgesLocation *time.Location
 }
 
 func (c Config) IsDevelopment() bool { return c.AppEnv == "development" }
@@ -99,6 +108,10 @@ func (c Config) TelegramEnabled() bool { return c.TelegramBotToken != "" }
 // either way. Load has already enforced that the key and the model come
 // together, so one of them is enough to ask.
 func (c Config) IntentParsingEnabled() bool { return c.OpenRouterAPIKey != "" }
+
+// NudgesEnabled reports whether the daily digest runs. Load has already
+// enforced that the clock and the zone come together and that Telegram is on.
+func (c Config) NudgesEnabled() bool { return c.NudgesAt != "" }
 
 // OutboxEnabled reports whether the outbound message inspector is configured.
 // When it is false the admin routes answer 503 and say which variable is
@@ -173,6 +186,23 @@ func Load() (Config, error) {
 	}
 	if (cfg.OpenRouterAPIKey == "") != (cfg.OpenRouterModel == "") {
 		return Config{}, fmt.Errorf("OPENROUTER_API_KEY and OPENROUTER_MODEL must both be set, or both left empty")
+	}
+	nudgesAt, nudgesTZ := os.Getenv("NUDGES_AT"), os.Getenv("NUDGES_TIMEZONE")
+	if (nudgesAt == "") != (nudgesTZ == "") {
+		return Config{}, fmt.Errorf("NUDGES_AT and NUDGES_TIMEZONE must both be set, or both left empty")
+	}
+	if nudgesAt != "" {
+		if !cfg.TelegramEnabled() {
+			return Config{}, fmt.Errorf("NUDGES_AT is set but Telegram is not configured; the digest has no channel")
+		}
+		if _, err := time.Parse("15:04", nudgesAt); err != nil {
+			return Config{}, fmt.Errorf(`NUDGES_AT must be a 24-hour clock like "09:00", got %q`, nudgesAt)
+		}
+		loc, err := time.LoadLocation(nudgesTZ)
+		if err != nil {
+			return Config{}, fmt.Errorf("NUDGES_TIMEZONE must be an IANA zone like Asia/Singapore, got %q", nudgesTZ)
+		}
+		cfg.NudgesAt, cfg.NudgesLocation = nudgesAt, loc
 	}
 	if cfg.MailpitAPIURL != "" {
 		parsed, err := url.Parse(cfg.MailpitAPIURL)

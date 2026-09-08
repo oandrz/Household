@@ -140,7 +140,15 @@ sentence is read into an intent, shown back, and written only on `/yes`.
 Built first on Claude; the owner's first call was refused for lack of
 credits, they chose free models, and the Claude adapter and its SDK were
 removed the same day (git has it). ✅, walked live from the owner's chat:
-a lunch row keyed by its update id, and a greeting refused. `docker compose
+a lunch row keyed by its update id, and a greeting refused. **Then the
+daily digest** (stage 6, [ADR 9](adr/0009-scheduled-work-runs-inside-the-api.md),
+migration `00017`): the bot speaks first — bills due within three days and
+budget lines past 80%, one message per owner-with-Money chat per household
+per day, at-most-once by a claimed row, `/nudges off` per chat, an
+in-process 15-minute tick behind `NUDGES_AT` + `NUDGES_TIMEZONE`. ✅,
+walked live: a bill due in two days, Telegram accepted the send, one ledger
+row, and a restart that sent nothing. The roadmap ADR 6 set is complete; one zone for
+the whole install is the digest's named gap. `docker compose
 up -d api`, not `restart`, after any `.env` change (LEARNING h).
 
 Self-serve sign-up carries no slice number on purpose: it was specified and

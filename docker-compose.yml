@@ -103,6 +103,9 @@ services:
       # env_file, so only this dev file has to name each value.
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-}
+      # The daily Telegram digest. Both or neither; refused without Telegram.
+      NUDGES_AT: ${NUDGES_AT:-}
+      NUDGES_TIMEZONE: ${NUDGES_TIMEZONE:-}
     ports: ["8080:8080"]
     volumes: ["./api:/src"]
     depends_on:
