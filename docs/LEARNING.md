@@ -4803,7 +4803,14 @@ route with a missing guard has no second line of defence.
   `.env`, the dev poller lost every update to the deployed one and the
   owner's `/balance` simply vanished — no error on their side, a
   `Conflict` warning every minute on ours. Development gets its own bot,
-  the way it gets its own database.
+  the way it gets its own database. *(j)* **The dev compose file names
+  every environment value it passes; production reads `.env` whole.**
+  Free text shipped with `ANTHROPIC_API_KEY` documented in `.env.example`
+  and read by `config.Load`, and the dev `api` container never saw it —
+  `docker-compose.yml` lists variables one by one, and nobody added the
+  line. The start-up log said `free_text=false` with the key plainly in
+  `.env`. When a new value enters `config.Load`, grep the dev compose
+  file too; `.env.example` is not the only place a value has to be named.
 - The architecture lint **never enforced the rule it existed for**. Both branches
   only matched imports *within* the module, so third-party imports in
   `internal/domain` passed. Proven by planting `pgx` and getting exit 0.
