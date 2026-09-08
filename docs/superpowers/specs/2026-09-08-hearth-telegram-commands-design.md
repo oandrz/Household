@@ -87,5 +87,7 @@ api/cmd/api/main.go                             wiring
   service with the update id and gets a receipt; replay says "Already
   logged"; refusals explained, internal errors not leaked; usage on a
   missing amount; poller dispatches only with `WithCommands`.
-- Real bot: **not walked** — see ADR 8's last consequence. 🟡 until a
-  development bot token exists for the dev stack.
+- Real bot: **walked on 2026-09-08** against `@HearthOinkDevBot` from the
+  owner's linked chat (`/balance`, `/spend 4.50 coffee`, `/recent`; ledger
+  row keyed `telegram-update-172668165`). A first attempt with the shared
+  production token failed exactly as ADR 8 describes.

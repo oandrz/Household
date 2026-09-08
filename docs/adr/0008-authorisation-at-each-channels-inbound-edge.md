@@ -68,12 +68,11 @@ Two supporting decisions:
 - The bot's writes are exactly as guarded as the browser's. A future
   Telegram capability for limited members is a change to one `if` in one
   file, mirrored on one route group.
-- Chat commands were **not walked against the real bot on 2026-09-08**: a
-  second poller holds the same `TELEGRAM_BOT_TOKEN` — the dev api's logs
-  show `terminated by other getUpdates request` every minute, and the local
-  copy of `deploy/.env` carries the token, so the production box is the
-  likely one, though that was not confirmed on the box itself. Either way a
-  local poller cannot be the sole consumer, so any walk would be flaky and
-  could hand a command to a process that ignores it. They are walked against a
-  fake Telegram server in tests and marked 🟡 in the tracker until a
-  development bot exists.
+- Chat commands were **walked against a real bot on 2026-09-08**, but only
+  after the owner created a second, development bot. The first attempt used
+  the production token from the local `.env`: another poller held it, the
+  dev api logged `terminated by other getUpdates request` every minute, and
+  the owner's `/balance` went to the other process and vanished. Telegram
+  hands each update to exactly one `getUpdates` caller, so a dev stack and a
+  deployed one can never share a bot. The dev bot lives in the local `.env`;
+  the production token stays in `deploy/.env` on the box.

@@ -4791,7 +4791,19 @@ route with a missing guard has no second line of defence.
   targeted `http` tests while `make test-api` was already running pushed
   `postgres` from 298s to a timeout at 300s — a red run with no red test.
   Run the full suite alone, and read "panic: test timed out" as load, not
-  as a defect, before chasing it.
+  as a defect, before chasing it. *(h)* **`docker compose restart` does
+  not reload `.env`.** After the owner put a development bot's token into
+  `.env`, a restart brought the api back up still polling the production
+  bot — a container's environment is fixed when it is created, and
+  `restart` reuses the container. `docker compose up -d api` recreates it
+  and reads the file. The tell was the start-up log line naming the old
+  `bot_username`; read that line before trusting any walk that depends on
+  an environment value. *(i)* **A bot token is a single-consumer
+  resource, like a database.** With the production token in the local
+  `.env`, the dev poller lost every update to the deployed one and the
+  owner's `/balance` simply vanished — no error on their side, a
+  `Conflict` warning every minute on ours. Development gets its own bot,
+  the way it gets its own database.
 - The architecture lint **never enforced the rule it existed for**. Both branches
   only matched imports *within* the module, so third-party imports in
   `internal/domain` passed. Proven by planting `pgx` and getting exit 0.

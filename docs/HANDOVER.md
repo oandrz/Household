@@ -131,13 +131,15 @@ Scope, `hearthctl token create|list|revoke` and `login --token`; walked
 live the same day. No Settings screen for tokens yet (tracker §10). **Then
 Telegram chat commands** ([ADR 8](adr/0008-authorisation-at-each-channels-inbound-edge.md)):
 `/spend`, `/income`, `/balance`, `/recent` on the existing poller, guarded at
-the adapter's edge — 🟡, not walked against the real bot because a second
-poller (most likely production, per the local `deploy/.env` copy; not
-confirmed on the box) holds the same token; a dev bot token unblocks it. **And free text through
+the adapter's edge — ✅, walked live against a development bot
+(`@HearthOinkDevBot`, token in the local `.env` only) after the shared
+production token proved unusable for a dev walk. **And free text through
 Claude** (`adapter/anthropic`, `usecase.IntentParser`): a sentence is read
 into an intent, shown back, and written only on `/yes` — 🟡, no
 `ANTHROPIC_API_KEY` on this machine so never run against the real API; a
-fake Messages API pins the request shape.
+fake Messages API pins the request shape. With the dev bot in place, a key
+in `.env` and `docker compose up -d api` (not `restart` — see LEARNING) is
+the whole unblock.
 
 Self-serve sign-up carries no slice number on purpose: it was specified and
 built between slices 1 and 2, ahead of Money (see "What to do next" below for
