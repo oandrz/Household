@@ -319,3 +319,50 @@ func TestLoadDoesNotItselfValidateTheReadonlyDSN(t *testing.T) {
 		t.Fatalf("Load rejected a legal keyword/value DSN: %v", err)
 	}
 }
+
+func TestOpenRouterValuesMustBeBothOrNeither(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("OPENROUTER_API_KEY", "sk-or-x")
+	// OPENROUTER_MODEL deliberately unset.
+	if _, err := config.Load(); err == nil {
+		t.Fatal("Load() with an OpenRouter key and no model succeeded, want an error")
+	}
+
+	setRequiredEnv(t)
+	t.Setenv("OPENROUTER_API_KEY", "")
+	t.Setenv("OPENROUTER_MODEL", "some/model:free")
+	if _, err := config.Load(); err == nil {
+		t.Fatal("Load() with an OpenRouter model and no key succeeded, want an error")
+	}
+}
+
+func TestTwoIntentProvidersAtOnceAreRefused(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-x")
+	t.Setenv("OPENROUTER_API_KEY", "sk-or-x")
+	t.Setenv("OPENROUTER_MODEL", "some/model:free")
+	if _, err := config.Load(); err == nil {
+		t.Fatal("Load() with both providers set succeeded, want an error: there must be no silent precedence")
+	}
+}
+
+func TestIntentProviderNamesTheOneConfigured(t *testing.T) {
+	setRequiredEnv(t)
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.IntentProvider() != "" || cfg.IntentParsingEnabled() {
+		t.Fatalf("nothing set: provider %q enabled %v", cfg.IntentProvider(), cfg.IntentParsingEnabled())
+	}
+
+	t.Setenv("OPENROUTER_API_KEY", "sk-or-x")
+	t.Setenv("OPENROUTER_MODEL", "some/model:free")
+	cfg, err = config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.IntentProvider() != "openrouter" || !cfg.IntentParsingEnabled() || cfg.OpenRouterModel != "some/model:free" {
+		t.Fatalf("openrouter set: provider %q model %q", cfg.IntentProvider(), cfg.OpenRouterModel)
+	}
+}

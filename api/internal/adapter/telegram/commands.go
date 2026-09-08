@@ -168,6 +168,13 @@ type pendingIntent struct {
 // twenty minutes later is more likely a reply to something else.
 const pendingTTL = 5 * time.Minute
 
+// parseTimeout caps one call to the parser. The poller handles updates one
+// at a time on its own goroutine, so a provider that stalls (a free-tier
+// queue, a slow model) would otherwise hold every chat's next message for
+// as long as the provider liked. Whichever adapter is wired, this is the
+// one ceiling; the adapters' own client timeouts are a second line.
+const parseTimeout = 30 * time.Second
+
 func NewCommander(r CallerResolver, s CommandService, sender Sender) *Commander {
 	return &Commander{resolver: r, svc: s, sender: sender, now: time.Now, pending: map[int64]pendingIntent{}}
 }
@@ -279,7 +286,9 @@ func (c *Commander) freeText(ctx context.Context, member domain.Membership, cmd 
 		slog.Error("telegram names failed", "error", err)
 		return c.sender.SendMessage(ctx, cmd.ChatID, "Could not read the accounts right now.")
 	}
-	intent, err := c.parser.ParseIntent(ctx, usecase.ParseIntentInput{Text: cmd.Description, Accounts: accounts, Categories: categories})
+	parseCtx, cancel := context.WithTimeout(ctx, parseTimeout)
+	defer cancel()
+	intent, err := c.parser.ParseIntent(parseCtx, usecase.ParseIntentInput{Text: cmd.Description, Accounts: accounts, Categories: categories})
 	if err != nil {
 		slog.Error("telegram intent parse failed", "error", err)
 		return c.sender.SendMessage(ctx, cmd.ChatID, "I could not read that right now. Use /spend <amount> <what> instead.")

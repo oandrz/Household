@@ -92,13 +92,15 @@ func (s *serviceSpy) Names(context.Context, string) ([]string, []string, error) 
 // parserStub answers every sentence with one intent, and records what it
 // was asked so a test can see the names went along.
 type parserStub struct {
-	intent usecase.Intent
-	err    error
-	asked  []usecase.ParseIntentInput
+	intent      usecase.Intent
+	err         error
+	asked       []usecase.ParseIntentInput
+	hadDeadline bool
 }
 
-func (p *parserStub) ParseIntent(_ context.Context, in usecase.ParseIntentInput) (usecase.Intent, error) {
+func (p *parserStub) ParseIntent(ctx context.Context, in usecase.ParseIntentInput) (usecase.Intent, error) {
 	p.asked = append(p.asked, in)
+	_, p.hadDeadline = ctx.Deadline()
 	return p.intent, p.err
 }
 
@@ -312,5 +314,16 @@ func TestAStrangerOrLimitedMembersSentenceIsIgnoredSilently(t *testing.T) {
 		if len(sender.sent) != 1 {
 			t.Errorf("%s: a slash command must still be answered, sent %v", name, sender.sent)
 		}
+	}
+}
+
+// The poller handles one update at a time, so a parser that never answers
+// would hold every chat. The Commander, not the adapter, sets the ceiling.
+func TestTheParserIsAlwaysCalledWithADeadline(t *testing.T) {
+	parser := &parserStub{intent: usecase.Intent{Kind: "none"}}
+	c := NewCommander(resolverStub{member: owner()}, &serviceSpy{}, &senderSpy{}).WithIntentParser(parser)
+	c.HandleCommand(context.Background(), Command{ChatID: 1, Name: "text", Description: "hello"})
+	if len(parser.asked) != 1 || !parser.hadDeadline {
+		t.Fatalf("asked=%d deadline=%v, want one call with a deadline", len(parser.asked), parser.hadDeadline)
 	}
 }

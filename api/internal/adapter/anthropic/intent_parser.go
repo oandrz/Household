@@ -2,17 +2,20 @@
 // Claude API. It exists for one job: reading a chat sentence into a
 // transaction intent (usecase.IntentParser). Nothing it returns is written
 // without the person confirming it first -- see adapter/telegram/commands.go.
+// The prompt, the tool and the reader of its arguments are shared with the
+// openrouter adapter through adapter/intent; this file owns only the Claude
+// request shape.
 package anthropic
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 
+	"github.com/andreasoentoro/hearth/api/internal/adapter/intent"
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
@@ -25,7 +28,6 @@ const (
 	// thinking counts against max_tokens, and a max_tokens stop yields no
 	// tool call, which this adapter would read as "none".
 	maxTokens = 4096
-	toolName  = "log_transaction"
 )
 
 type IntentParser struct {
@@ -49,25 +51,19 @@ func NewIntentParser(apiKey string, opts ...option.RequestOption) *IntentParser 
 // too, so the bot never writes on a model that chose to chat instead.
 func (p *IntentParser) ParseIntent(ctx context.Context, in usecase.ParseIntentInput) (usecase.Intent, error) {
 	tool := sdk.ToolParam{
-		Name:        toolName,
-		Description: sdk.String("Record what the person wants to log: one expense or income, or none if the message is not about logging money."),
+		Name:        intent.ToolName,
+		Description: sdk.String(intent.ToolDescription),
 		Strict:      sdk.Bool(true),
 		InputSchema: sdk.ToolInputSchemaParam{
-			Properties: map[string]any{
-				"kind":        map[string]any{"type": "string", "enum": []string{"expense", "income", "none"}},
-				"amount":      map[string]any{"type": "string", "description": "The amount exactly as the person wrote it, digits and an optional decimal point only, e.g. \"84.50\". Empty when kind is none."},
-				"description": map[string]any{"type": "string", "description": "What it was for, a few words. Empty when kind is none."},
-				"account":     map[string]any{"type": "string", "description": "One of the account names given, verbatim, or empty if the person did not name one."},
-				"category":    map[string]any{"type": "string", "description": "One of the category names given, verbatim, or empty if none clearly fits."},
-			},
-			Required:    []string{"kind", "amount", "description", "account", "category"},
+			Properties:  intent.Properties(),
+			Required:    intent.Required(),
 			ExtraFields: map[string]any{"additionalProperties": false},
 		},
 	}
 	resp, err := p.client.Messages.New(ctx, sdk.MessageNewParams{
 		Model:     model,
 		MaxTokens: maxTokens,
-		System:    []sdk.TextBlockParam{{Text: systemPrompt(in)}},
+		System:    []sdk.TextBlockParam{{Text: intent.SystemPrompt(in)}},
 		Messages:  []sdk.MessageParam{sdk.NewUserMessage(sdk.NewTextBlock(in.Text))},
 		Tools:     []sdk.ToolUnionParam{{OfTool: &tool}},
 		ToolChoice: sdk.ToolChoiceUnionParam{OfAuto: &sdk.ToolChoiceAutoParam{
@@ -84,40 +80,15 @@ func (p *IntentParser) ParseIntent(ctx context.Context, in usecase.ParseIntentIn
 		return usecase.Intent{Kind: "none"}, nil
 	}
 	for _, block := range resp.Content {
-		if tu, ok := block.AsAny().(sdk.ToolUseBlock); ok && tu.Name == toolName {
-			var out struct {
-				Kind, Amount, Description, Account, Category string
+		if tu, ok := block.AsAny().(sdk.ToolUseBlock); ok && tu.Name == intent.ToolName {
+			read, err := intent.ReadArguments([]byte(tu.JSON.Input.Raw()))
+			if err != nil {
+				return usecase.Intent{}, fmt.Errorf("anthropic %w", err)
 			}
-			if err := json.Unmarshal([]byte(tu.JSON.Input.Raw()), &out); err != nil {
-				return usecase.Intent{}, fmt.Errorf("anthropic tool input: %w", err)
-			}
-			switch out.Kind {
-			case "expense", "income":
-			default:
-				// Fail closed on a value the model constructed.
-				return usecase.Intent{Kind: "none"}, nil
-			}
-			return usecase.Intent{
-				Kind:        out.Kind,
-				Amount:      strings.TrimSpace(out.Amount),
-				Description: strings.TrimSpace(out.Description),
-				Account:     strings.TrimSpace(out.Account),
-				Category:    strings.TrimSpace(out.Category),
-			}, nil
+			return read, nil
 		}
 	}
 	return usecase.Intent{Kind: "none"}, nil
-}
-
-func systemPrompt(in usecase.ParseIntentInput) string {
-	var b strings.Builder
-	b.WriteString("You read one chat message from a member of a household budgeting app and call log_transaction exactly once with what they want to log. ")
-	b.WriteString("An expense is money spent; an income is money received. If the message is not about logging money, call the tool with kind \"none\" and the other fields empty. ")
-	b.WriteString("Copy the amount exactly as written, without a currency symbol. Never invent an amount. ")
-	b.WriteString("Only use an account or category name from the lists below, verbatim; leave the field empty otherwise.\n")
-	fmt.Fprintf(&b, "Accounts: %s\n", strings.Join(in.Accounts, "; "))
-	fmt.Fprintf(&b, "Categories: %s\n", strings.Join(in.Categories, "; "))
-	return b.String()
 }
 
 // sanitize strips anything URL-shaped from an SDK error. The Claude API does

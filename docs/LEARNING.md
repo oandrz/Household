@@ -4811,6 +4811,20 @@ route with a missing guard has no second line of defence.
   line. The start-up log said `free_text=false` with the key plainly in
   `.env`. When a new value enters `config.Load`, grep the dev compose
   file too; `.env.example` is not the only place a value has to be named.
+  *(k)* **An adapter's error is a log line; pass on the provider's
+  message, not its body.** The first real Claude call failed on billing,
+  and the log carried the whole response: request id, workspace id, the
+  lot. Nothing in Hearth needs either, and a log that travels (a paste
+  into a chat, a screenshot) now carries account identifiers. The
+  OpenRouter adapter reads `error.message` and the status and nothing
+  else; the test asserts a planted request id is absent. *(l)* **A
+  provider you call from the poll loop can stop the whole bot.** The
+  Telegram poller handles one update at a time, and nothing bounded how
+  long a parse could take: a free-tier queue that stalls for a minute
+  holds every chat's next message for a minute. The Commander now sets a
+  30 s deadline on every parser call, and the test checks the context
+  carries one — a mutation that swapped `WithTimeout` for `WithCancel`
+  went red.
 - The architecture lint **never enforced the rule it existed for**. Both branches
   only matched imports *within* the module, so third-party imports in
   `internal/domain` passed. Proven by planting `pgx` and getting exit 0.

@@ -58,10 +58,35 @@ as a way to log spending, beside the browser and `hearthctl`.
     sign-in links use). A slash command from the same chat still gets its
     one-sentence refusal. **No per-chat limit on parser calls** for an
     authorised owner yet — a named gap, since no key exists anywhere today.
-14. **Not walked against the real API**: no key on this machine. Tested
-    against an `httptest` fake of the Messages API that checks the request
-    shape (model, strict closed schema, tool choice, effort, no `thinking`
-    sent) and the parse of the reply. 🟡 until a key is configured.
+14. **Tested against a fake Messages API** that checks the request shape
+    (model, strict closed schema, tool choice, effort, no `thinking` sent)
+    and the parse of the reply. The first real call, once the owner added a
+    key, was refused for lack of credits (`Your credit balance is too low`),
+    which led to the next decision.
+15. **A second parser, through OpenRouter, so the feature can be free.**
+    The owner asked for an open-source model. The port already existed, so
+    this is `adapter/openrouter`: OpenRouter's OpenAI-dialect
+    `chat/completions` over plain `net/http` (no SDK, no new dependency),
+    one **forced** tool call — with `auto`, small models answer in prose and
+    every sentence would read as "none" — `max_tokens` 4096 for reasoning
+    variants, nothing dialect-specific beyond that (`strict`,
+    `parallel_tool_calls` and `reasoning` are not sent, because OpenRouter
+    forwards unknown parameters and some upstream providers refuse them).
+    Tool arguments arrive as a JSON string per the dialect but as an object
+    from some hosts; both are read. What the two adapters share — prompt,
+    schema, and the fail-closed reader of arguments — moved to
+    `adapter/intent`, so a model that invents a kind is refused identically
+    whichever spoke. Configuration: `OPENROUTER_API_KEY` + `OPENROUTER_MODEL`,
+    both or neither, never beside `ANTHROPIC_API_KEY` (refused at boot: no
+    silent precedence). **The model id is configuration, not code**, because
+    OpenRouter's free, tool-capable list changes month to month. Errors carry
+    the status and the provider's message only — the Anthropic log line that
+    prompted this carried a request id and a workspace id, which a log does
+    not need. The Commander now caps every parser call at 30 s, whichever
+    adapter: the poller handles one update at a time, and a stalled free-tier
+    queue would otherwise hold every chat. Quality is the accepted trade: an
+    open-weight model follows the schema less reliably than Claude, which is
+    what the confirm-on-`/yes` step exists for.
 
 ## Files
 
