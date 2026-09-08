@@ -50,7 +50,12 @@ const usage = `usage: hearthctl [--url=<base>] <command> [flags]
 
 commands:
   login --email=<email>        sign in; password from $HEARTH_PASSWORD or stdin
-  logout                       sign out and forget the stored session
+  login --token                sign in with a personal API token from $HEARTH_TOKEN or stdin
+  logout                       sign out and forget the stored session (or forget the token)
+  token create --name=<n> [--days=90]
+                               mint a personal API token (needs an --email login); shown once
+  token list                   your live tokens, by id and prefix
+  token revoke <id>            revoke one (needs an --email login)
   whoami                       print the signed-in user, household, membership
   routes [--json]              every API route, who may call it, its body shape
   list <kind>                  accounts | categories | members | goals | bills |
@@ -114,6 +119,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return cmdLogout(ctx, client, stdout, stderr)
 	case "whoami":
 		return cmdWhoami(ctx, client, stdout)
+	case "token":
+		return cmdToken(ctx, client, rest[1:], stdout, stderr)
 	case "routes":
 		return cmdRoutes(rest[1:], stdout)
 	case "list":

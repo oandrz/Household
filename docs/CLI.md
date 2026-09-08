@@ -23,6 +23,28 @@ HEARTH_PASSWORD='…' hearthctl login --email=andreas@example.com
 
 The session lasts 30 days and is stored in `~/.config/hearth/<host>.json`
 (mode 0600, one file per host so a dev session never mixes with production).
+
+### Or with a personal API token (headless machines, agents)
+
+A token is your own long-lived credential: it does exactly what you can do,
+and nothing a browser session cannot. Mint it from a password login, use it
+anywhere:
+
+```bash
+hearthctl login --email=you@example.com          # a browser-style session
+hearthctl token create --name="laptop cron" --days=90   # prints the token ONCE
+hearthctl token list                              # names and prefixes, never secrets
+hearthctl token revoke <id>
+
+# on the headless machine:
+HEARTH_TOKEN='hearth_…' hearthctl login --token   # proves it, then stores it
+hearthctl whoami                                  # Authorization: Bearer from here on
+```
+
+Rules to know: a token cannot create or revoke tokens, cannot sign out, and
+cannot reach `/admin` — those need a password login. It expires (90 days by
+default, 365 at most) and dies when the member is removed. `logout` on a
+token only forgets the file; revoke it from a password login to kill it.
 Set `HEARTH_CONFIG_DIR` to put it somewhere else. `hearthctl logout` revokes
 it. `hearthctl whoami` prints who you are — including your **membership id**,
 which the transaction and bill inserts take as `--paid-by`.

@@ -258,6 +258,12 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 		WriteError(w, http.StatusUnprocessableEntity, "INVALID_AS_OF", "That date is in the future.", nil)
 	case errors.Is(err, domain.ErrAccountOwnerNotInHousehold):
 		WriteError(w, http.StatusUnprocessableEntity, "INVALID_OWNER", "That person is not in this household.", nil)
+	case errors.Is(err, domain.ErrAPITokenNameInvalid):
+		WriteError(w, http.StatusUnprocessableEntity, "TOKEN_NAME_INVALID",
+			"Give the token a name of up to 80 characters.", nil)
+	case errors.Is(err, domain.ErrAPITokenLifetimeInvalid):
+		WriteError(w, http.StatusUnprocessableEntity, "TOKEN_LIFETIME_INVALID",
+			"expiresInDays must be between 1 and 365.", nil)
 	case errors.Is(err, domain.ErrIdempotencyKeyInvalid):
 		WriteError(w, http.StatusUnprocessableEntity, "IDEMPOTENCY_KEY_INVALID",
 			"Idempotency-Key must be 1 to 128 printable ASCII characters with no spaces.", nil)

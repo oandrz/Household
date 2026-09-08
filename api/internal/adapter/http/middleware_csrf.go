@@ -17,10 +17,20 @@ const csrfHeaderName = "X-CSRF-Token"
 // with subtle.ConstantTimeCompare. A missing cookie, a missing header, or a
 // mismatch all answer 403 CSRF_INVALID identically -- there is nothing a
 // caller should learn from telling the three apart.
+//
+// A request that authenticated with a personal API token skips the check.
+// CSRF is a browser problem: a cross-site form can make the browser attach
+// cookies, but it cannot attach an Authorization header, so a request that
+// proved itself with one was not forged by a page. Only a Scope whose
+// AuthVia is exactly token skips; an unset AuthVia is checked like a cookie.
 func requireCSRF(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			next.ServeHTTP(w, r)
+			return
+		}
+		if scope, ok := RequestScope(r); ok && scope.AuthVia == authViaToken {
 			next.ServeHTTP(w, r)
 			return
 		}

@@ -20,6 +20,15 @@ bin/hearthctl login --email=<member email>   # password: $HEARTH_PASSWORD or std
 The session lasts 30 days in `~/.config/hearth/<host>.json`. Production is a
 different host and therefore a different file: `--url=https://oink.mywire.org`.
 
+**Headless (cron, a scheduled agent, no person to type a password):** use a
+personal API token. A person mints it once from a password login
+(`hearthctl token create --name=<purpose>`; shown once), then the machine
+runs `HEARTH_TOKEN=… hearthctl login --token`. From then on every call sends
+`Authorization: Bearer`. A token can do what its member can do and nothing
+more; it cannot mint or revoke tokens, sign out, or reach `/admin`. If a
+token stops working (exit 2), it expired or was revoked: ask the person for
+a new one, never retry.
+
 ## The loop
 
 Every task follows the same four steps. Do not skip the first or the last.

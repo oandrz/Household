@@ -821,6 +821,8 @@ graph TD
     Public -->|"sign-up*, telegram/start"| PublicFeature["requireFeature(flag)<br/>no Scope yet — resolves the<br/>GLOBAL flag set only; 404 if off"]
     PublicFeature --> Handler
     Public -->|no| Session["requireSession<br/>reads hearth_session cookie,<br/>re-reads membership, resolves this<br/>household's flags, extends when<br/>under a day remains, then touches<br/>last_seen_at when it is null or older<br/>than an hour — best-effort, like the extend"]
+    Public -->|"no, and an Authorization<br/>header is present"| Token["requireToken<br/>Bearer hearth_… only; resolves a live<br/>api_tokens row, same membership and<br/>flags lookup, AuthVia = token.<br/>Never falls back to the cookie;<br/>no admin grant on the context"]
+    Token --> RouteKind
 
     Session --> RouteKind{"/admin subtree?"}
     RouteKind -->|yes| AdminChain["requirePlatformAdmin → auditAdmin<br/>→ requireCSRF (mutating only)<br/>→ [requireAdminGrant, granted<br/>group only] — see the diagram below"]
@@ -1087,8 +1089,11 @@ that presses `/start` is Telegram's, not the person's.
 | GET | `/auth/sign-up/{token}` | none, plus `requireFeature(signups_open)` — a half-finished sign-up must not be completable once registration closes |
 | POST | `/auth/sign-up/{token}/complete` | none, plus `requireFeature(signups_open)`, same group as the row above |
 | POST | `/auth/telegram/start` | none, plus its **own** per-IP token bucket (20/hour), separate from sign-up's, and `requireFeature(telegram_sign_in)` (global set) — takes no body and no identifier, so there is nothing to probe; **`404`** both when no bot is configured and when the flag is off, the same answer any unrouted path gets, so an install without Telegram gives nothing away and the frontend hides the control on that response (§7) |
-| GET | `/auth/me` | session |
-| POST | `/auth/sign-out` | session · CSRF |
+| GET | `/auth/me` | session (cookie or token) |
+| POST | `/auth/sign-out` | session · CSRF — **403 `SESSION_REQUIRED` to a token**: a token has no session to end |
+| GET | `/auth/tokens` | session (cookie or token) — names and prefixes only, never a secret |
+| POST | `/auth/tokens` | **cookie** session · CSRF · `requireCookieSession` — a token cannot mint a token ([ADR 7](adr/0007-personal-api-tokens.md)); the raw token is in this one response and nowhere else |
+| DELETE | `/auth/tokens/{id}` | cookie session · CSRF · `requireCookieSession` — user-scoped: another member's id is 404 |
 | GET | `/invites/{token}` | none — the token is the credential |
 | POST | `/invites/{token}/accept` | none |
 | GET | `/currencies` | none — read before a session exists (sign-up's currency select) and after one (Settings) |
@@ -2644,6 +2649,17 @@ erDiagram
         timestamptz revoked_at
         timestamptz admin_grant_expires_at "nullable — the re-auth grant; not a second cookie"
         timestamptz last_seen_at "nullable — last use, refreshed at most hourly; readers COALESCE with created_at"
+    }
+    api_tokens {
+        uuid id PK
+        uuid user_id FK "CASCADE — a token cannot outlive its person"
+        uuid household_id FK "CASCADE"
+        text name "what it is for; what a listing shows"
+        bytea token_hash "UNIQUE — SHA-256 of the whole raw hearth_… string"
+        text prefix "first 8 characters of the secret, for telling tokens apart"
+        timestamptz expires_at "NOT NULL — default 90 days, at most 365; no extend-on-use"
+        timestamptz last_used_at "nullable — touched at most hourly, like sessions"
+        timestamptz revoked_at "nullable — a stamp; the live lookup excludes it"
     }
     platform_admins {
         uuid user_id PK "also FK to users, ON DELETE CASCADE"

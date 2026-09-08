@@ -203,6 +203,31 @@ type TelegramAccountRepository interface {
 	ByChatID(ctx context.Context, chatID int64) (userID string, err error)
 }
 
+// APITokenRepository stores a member's long-lived credentials. Only the
+// hash of a token is ever persisted; the raw value is shown once and never
+// written anywhere.
+type APITokenRepository interface {
+	// Create stores one token and returns the row. tokenHash is
+	// TokenGenerator.HashToken of the raw secret; prefix is the raw
+	// secret's opening characters, for listing.
+	Create(ctx context.Context, tokenHash []byte, prefix string, t domain.APIToken) (domain.APIToken, error)
+	// ByTokenHash resolves a live token: revoked or expired is
+	// domain.ErrNotFound, indistinguishable from unknown. The middleware
+	// depends on that -- it never checks expiry itself.
+	ByTokenHash(ctx context.Context, tokenHash []byte) (domain.APIToken, error)
+	// ListForUser returns one person's live tokens, newest first.
+	ListForUser(ctx context.Context, userID string) ([]domain.APIToken, error)
+	// Revoke stamps one token, scoped to its owner: another user's id, an
+	// unknown id and an already-revoked token are all domain.ErrNotFound.
+	Revoke(ctx context.Context, userID, tokenID string) error
+	// RevokeAllForUser is the "this person is gone" call MemberService
+	// makes beside SessionRepository.RevokeAllForUser.
+	RevokeAllForUser(ctx context.Context, userID string) error
+	// Touch records the last use. Callers throttle it; the repository
+	// does not.
+	Touch(ctx context.Context, tokenID string, at time.Time) error
+}
+
 type LoginAttemptRepository interface {
 	Record(ctx context.Context, householdID, userID *string, email string, succeeded bool, at time.Time) error
 	FailuresSince(ctx context.Context, householdID string, since time.Time) ([]time.Time, error)

@@ -124,8 +124,11 @@ record. **Stacked on it, branch `hearthctl-agent` (same day):** `routes
 `POST /transactions` (migration `00015`, spec
 `docs/superpowers/specs/2026-09-08-hearth-idempotent-import-design.md`), and
 `hearthctl transaction import <file.csv>` — a keyed client-side loop, so the
-same statement imported twice creates nothing new. Both walked live. Personal
-API tokens are the deferred follow-up.
+same statement imported twice creates nothing new. Both walked live. **Then
+personal API tokens** ([ADR 7](adr/0007-personal-api-tokens.md), migration
+`00016`): `Authorization: Bearer hearth_…` resolves to the member's own
+Scope, `hearthctl token create|list|revoke` and `login --token`; walked
+live the same day. No Settings screen for tokens yet (tracker §10).
 
 Self-serve sign-up carries no slice number on purpose: it was specified and
 built between slices 1 and 2, ahead of Money (see "What to do next" below for

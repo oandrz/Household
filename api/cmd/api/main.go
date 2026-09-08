@@ -154,10 +154,13 @@ func run() error {
 		SessionTTL: httpadapter.SessionTTL,
 		BaseURL:    cfg.AppBaseURL,
 	})
+	apiTokens := postgres.NewAPITokenRepo(db)
 	memberSvc := usecase.NewMemberService(usecase.MemberDeps{
-		Members:  memberships,
-		Sessions: sessions,
+		Members:   memberships,
+		Sessions:  sessions,
+		APITokens: apiTokens,
 	})
+	apiTokenSvc := usecase.NewAPITokenService(usecase.APITokenDeps{Tokens: apiTokens, Gen: tokens, Clock: sysClock})
 	householdSvc := usecase.NewHouseholdService(usecase.HouseholdDeps{
 		Households:    households,
 		Spaces:        spaces,
@@ -307,6 +310,8 @@ func run() error {
 			Retros:         retroSvc,
 			Visions:        visionSvc,
 			Agreements:     agreementSvc,
+			APITokens:      apiTokenSvc,
+			APITokenRepo:   apiTokens,
 			Telegram:       telegramSvc,
 			Admin:          adminSvc,
 			AdminReauth:    adminReauthSvc,

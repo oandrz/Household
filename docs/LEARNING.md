@@ -4776,7 +4776,16 @@ route with a missing guard has no second line of defence.
   simply did not know the header. The tell was the same one
   `verifying-in-the-real-environment` already names: a response the code you
   are reading cannot produce. `docker compose restart api` forces a rebuild.
-  Check the binary's build time before trusting a walk.
+  Check the binary's build time before trusting a walk. *(f)* **Adding a
+  dependency to a service means adding it to every fixture that builds
+  one, and a fixture that compiles is not a fixture that is wired.** Giving
+  `MemberDeps` an `APITokens` port compiled cleanly with the usecase
+  fixture's literal missing the new field — Go zero-values the pointer —
+  and the first test touching it panicked on a nil receiver, one layer
+  down from where the omission was. The HTTP env caught the same omission
+  at compile time only because its Deps are passed by name into a router
+  that dereferences them at build. When a port is added, grep every
+  `XDeps{` literal, tests included, before running anything.
 - The architecture lint **never enforced the rule it existed for**. Both branches
   only matched imports *within* the module, so third-party imports in
   `internal/domain` passed. Proven by planting `pgx` and getting exit 0.

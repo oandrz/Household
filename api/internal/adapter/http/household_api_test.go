@@ -91,6 +91,13 @@ func TestOwnerOnlyRoutesRejectALimitedMember(t *testing.T) {
 		// Any signed-in member, owner or not, may end their own session --
 		// ownership has nothing to do with signing yourself out.
 		"POST /api/v1/auth/sign-out": true,
+		// A personal API token is the member's own credential, minted and
+		// revoked by its owner whatever their role -- a limited member's
+		// token does exactly what that limited member can do, and nothing
+		// about ownership is decided here (ADR 7). Both are user-scoped:
+		// the DELETE of another member's id is 404, never 403.
+		"POST /api/v1/auth/tokens":        true,
+		"DELETE /api/v1/auth/tokens/{id}": true,
 	}
 
 	routes, ok := env.router.(chi.Routes)

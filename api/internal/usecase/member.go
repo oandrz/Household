@@ -23,6 +23,10 @@ var ErrSessionRevocationFailed = errors.New("membership was updated but revoking
 type MemberDeps struct {
 	Members  MembershipRepository
 	Sessions SessionRepository
+	// APITokens is revoked wherever Sessions is: a member whose role
+	// changed or who was removed must not keep working through a token
+	// their browser session no longer has.
+	APITokens APITokenRepository
 }
 
 // MemberService lists and changes a household's members. Every rule about who
@@ -77,12 +81,25 @@ func (s *MemberService) Update(ctx context.Context, householdID, membershipID st
 	// reverts itself, which is worse than either outcome alone and would
 	// need its own failure handling anyway). See auth.go for the same style
 	// of documented, deliberate asymmetry.
-	if err := s.d.Sessions.RevokeAllForUser(ctx, target.Membership.UserID); err != nil {
-		slog.Error("failed to revoke sessions after a membership update",
+	if err := s.revokeCredentials(ctx, target.Membership.UserID); err != nil {
+		slog.Error("failed to revoke credentials after a membership update",
 			"error", err, "household_id", householdID, "membership_id", membershipID)
 		return fmt.Errorf("%w: %v", ErrSessionRevocationFailed, err)
 	}
 	return nil
+}
+
+// revokeCredentials is the one place "this person's access is reset" is
+// spelled out: sessions and API tokens together, so a later credential
+// type is added here and nowhere else. Both are attempted even if the first
+// fails; the first error is reported.
+func (s *MemberService) revokeCredentials(ctx context.Context, userID string) error {
+	sessErr := s.d.Sessions.RevokeAllForUser(ctx, userID)
+	tokErr := s.d.APITokens.RevokeAllForUser(ctx, userID)
+	if sessErr != nil {
+		return sessErr
+	}
+	return tokErr
 }
 
 // Remove deletes a membership, refusing to leave the household without an
@@ -115,8 +132,8 @@ func (s *MemberService) Remove(ctx context.Context, householdID, membershipID st
 	// removed member's prior session(s) may stay live a little longer than
 	// intended) for a larger one (a removal that silently un-happens, which
 	// is worse than either outcome alone).
-	if err := s.d.Sessions.RevokeAllForUser(ctx, target.Membership.UserID); err != nil {
-		slog.Error("failed to revoke sessions after a membership removal",
+	if err := s.revokeCredentials(ctx, target.Membership.UserID); err != nil {
+		slog.Error("failed to revoke credentials after a membership removal",
 			"error", err, "household_id", householdID, "membership_id", membershipID)
 		return fmt.Errorf("%w: %v", ErrSessionRevocationFailed, err)
 	}

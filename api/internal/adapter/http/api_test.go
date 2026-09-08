@@ -150,6 +150,8 @@ type testEnv struct {
 	// TestAdminLookupFailureIs500NotHidden rebuild a complete AdminService
 	// with only its Admins port swapped for a broken one.
 	users          usecase.UserRepository
+	apiTokens      usecase.APITokenRepository
+	tokens         usecase.TokenGenerator
 	platformAdmins usecase.PlatformAdminRepository
 	featureFlags   usecase.FeatureFlagRepository
 	adminAudit     usecase.AdminAuditRepository
@@ -260,7 +262,9 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		SessionTTL: httpadapter.SessionTTL,
 		BaseURL:    "http://localhost:5173",
 	})
-	memberSvc := usecase.NewMemberService(usecase.MemberDeps{Members: memberships, Sessions: sessions})
+	apiTokens := postgres.NewAPITokenRepo(db)
+	memberSvc := usecase.NewMemberService(usecase.MemberDeps{Members: memberships, Sessions: sessions, APITokens: apiTokens})
+	apiTokenSvc := usecase.NewAPITokenService(usecase.APITokenDeps{Tokens: apiTokens, Gen: tokens, Clock: clk})
 	householdSvc := usecase.NewHouseholdService(usecase.HouseholdDeps{
 		Households:    households,
 		Spaces:        spaces,
@@ -380,6 +384,8 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Retros:         retroSvc,
 		Visions:        visionSvc,
 		Agreements:     agreementSvc,
+		APITokens:      apiTokenSvc,
+		APITokenRepo:   apiTokens,
 		Admin:          adminSvc,
 		AdminReauth:    adminReauthSvc,
 		AdminDirectory: adminDirectorySvc,
@@ -398,6 +404,8 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		deps:           deps,
 		signupMailer:   sigMailer,
 		users:          users,
+		apiTokens:      apiTokens,
+		tokens:         tokens,
 		platformAdmins: platformAdminRepo,
 		featureFlags:   featureFlagRepo,
 		adminAudit:     adminAuditRepo,
