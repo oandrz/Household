@@ -1,6 +1,11 @@
--- name: CreateTelegramLinkRequest :exec
+-- CreateTelegramLinkRequest returns the new row's id, because the browser
+-- that just minted a link nonce has to poll with it and Create is the only
+-- moment that id is available -- a nonce_hash lookup afterwards would be a
+-- second way to address a row by its secret.
+-- name: CreateTelegramLinkRequest :one
 INSERT INTO telegram_link_requests (nonce_hash, expires_at, user_id)
-VALUES ($1, $2, $3);
+VALUES ($1, $2, $3)
+RETURNING id;
 
 -- ConsumeTelegramLinkRequest is the single-use gate, and it records the
 -- redeeming chat in the same statement. The guard lives here rather than in

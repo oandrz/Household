@@ -74,7 +74,11 @@ func (s *TelegramAuthService) StartLink(ctx context.Context) (TelegramStartLink,
 		return TelegramStartLink{}, fmt.Errorf("generate telegram nonce: %w", err)
 	}
 	expiresAt := s.d.Clock.Now().Add(telegramNonceTTL)
-	if err := s.d.Links.Create(ctx, "", hash, expiresAt); err != nil {
+	// The id Create now returns is unused here: a sign-in nonce is never
+	// polled by row id -- HandleStart delivers the resulting magic link
+	// straight into the chat, and the browser waiting on it never learns
+	// this row exists.
+	if _, err := s.d.Links.Create(ctx, "", hash, expiresAt); err != nil {
 		return TelegramStartLink{}, fmt.Errorf("store telegram nonce: %w", err)
 	}
 	return TelegramStartLink{

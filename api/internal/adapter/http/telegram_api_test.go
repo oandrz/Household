@@ -32,7 +32,9 @@ import (
 
 type fakeTelegramLinkRepo struct{}
 
-func (fakeTelegramLinkRepo) Create(context.Context, string, []byte, time.Time) error { return nil }
+func (fakeTelegramLinkRepo) Create(context.Context, string, []byte, time.Time) (string, error) {
+	return "link-1", nil
+}
 func (fakeTelegramLinkRepo) Consume(context.Context, []byte, int64, string) (usecase.TelegramLinkRedemption, error) {
 	panic("fakeTelegramLinkRepo: Consume should not be called by these tests")
 }

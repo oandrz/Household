@@ -196,12 +196,16 @@ type TelegramLinkRequest struct {
 // browser's sign-in request across to Telegram. Nonces are stored hashed,
 // never raw, like every other token in this system.
 type TelegramLinkRepository interface {
-	// Create stores a nonce. userID is "" for a sign-in nonce -- the browser has
-	// not said who it is -- and a user id for a link nonce minted by a signed-in
-	// member for their own account. That difference is the only thing separating
-	// the two kinds of row, so a Create that dropped it would silently turn a
-	// link into a sign-in.
-	Create(ctx context.Context, userID string, nonceHash []byte, expiresAt time.Time) error
+	// Create stores a nonce and returns the new row's id. userID is "" for a
+	// sign-in nonce -- the browser has not said who it is -- and a user id for
+	// a link nonce minted by a signed-in member for their own account. That
+	// difference is the only thing separating the two kinds of row, so a
+	// Create that dropped it would silently turn a link into a sign-in. The
+	// id is returned because TelegramLinkService.Start hands it straight back
+	// to the browser to poll with -- Create is the only moment it exists to
+	// return; a later lookup by nonce_hash would be a second way to address a
+	// row by its secret.
+	Create(ctx context.Context, userID string, nonceHash []byte, expiresAt time.Time) (string, error)
 	// Consume stamps the row consumed and records which chat redeemed it, in one
 	// statement, and returns the row's id and the user it was minted for. The
 	// chat is unknown when the nonce is minted -- the browser has not met

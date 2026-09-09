@@ -20,8 +20,12 @@ func TestTelegramLinkRequestCarriesItsUserThroughRedemption(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 
-	if err := repo.Create(ctx, user.ID, []byte("hash-1"), time.Now().Add(10*time.Minute)); err != nil {
+	id, err := repo.Create(ctx, user.ID, []byte("hash-1"), time.Now().Add(10*time.Minute))
+	if err != nil {
 		t.Fatalf("Create() = %v, want nil", err)
+	}
+	if id == "" {
+		t.Fatal("Create() returned an empty id")
 	}
 	got, err := repo.Consume(ctx, []byte("hash-1"), 8801, "andreas")
 	if err != nil {
@@ -29,6 +33,9 @@ func TestTelegramLinkRequestCarriesItsUserThroughRedemption(t *testing.T) {
 	}
 	if got.UserID != user.ID {
 		t.Fatalf("UserID = %q, want %q", got.UserID, user.ID)
+	}
+	if got.ID != id {
+		t.Fatalf("Consume() ID = %q, want the id Create() returned (%q)", got.ID, id)
 	}
 
 	row, err := repo.ByID(ctx, got.ID)
@@ -47,7 +54,7 @@ func TestSignInNonceCarriesNoUser(t *testing.T) {
 	db := openTestDB(t)
 	repo := postgres.NewTelegramLinkRepo(db)
 
-	if err := repo.Create(ctx, "", []byte("hash-2"), time.Now().Add(10*time.Minute)); err != nil {
+	if _, err := repo.Create(ctx, "", []byte("hash-2"), time.Now().Add(10*time.Minute)); err != nil {
 		t.Fatalf("Create() = %v, want nil", err)
 	}
 	got, err := repo.Consume(ctx, []byte("hash-2"), 8802, "")

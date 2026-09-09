@@ -16,12 +16,20 @@ func NewTelegramLinkRepo(db *DB) *TelegramLinkRepo {
 	return &TelegramLinkRepo{q: sqlcgen.New(db.Pool())}
 }
 
-func (r *TelegramLinkRepo) Create(ctx context.Context, userID string, nonceHash []byte, expiresAt time.Time) error {
-	return translate(r.q.CreateTelegramLinkRequest(ctx, sqlcgen.CreateTelegramLinkRequestParams{
+// Create returns the new row's id: the browser that just minted the nonce
+// has to poll with it, and this insert is the only moment that id exists to
+// hand back -- a lookup by nonce_hash afterwards would be a second way to
+// address a row by its secret.
+func (r *TelegramLinkRepo) Create(ctx context.Context, userID string, nonceHash []byte, expiresAt time.Time) (string, error) {
+	id, err := r.q.CreateTelegramLinkRequest(ctx, sqlcgen.CreateTelegramLinkRequestParams{
 		NonceHash: nonceHash,
 		ExpiresAt: timestamptz(expiresAt),
 		UserID:    nullableUUID(optionalID(userID)),
-	}), "create telegram link request")
+	})
+	if err != nil {
+		return "", translate(err, "create telegram link request")
+	}
+	return uuidToString(id), nil
 }
 
 // Consume goes through translate, so an unknown, expired or already-consumed

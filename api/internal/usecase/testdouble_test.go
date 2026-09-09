@@ -201,6 +201,15 @@ func (d *userDouble) mustCreate(t *testing.T, email, passwordHash, displayName s
 	return u
 }
 
+// addTelegramOnly writes a user with the given id and no email address --
+// the credential-less shape a Telegram sign-up leaves behind
+// (SignupRepository.Provision). TestUnlinkRefusesAnAccountWithNoEmail uses
+// it to put TelegramLinkService.Unlink in front of the one account
+// domain.ErrTelegramUnlinkWouldLockOut exists to protect.
+func (d *userDouble) addTelegramOnly(id string) {
+	d.byID[id] = usecase.StoredUser{User: domain.User{ID: id}}
+}
+
 // setMembers completes the two doubles' mutual reference: newMembershipDouble
 // already takes a *userDouble, and CreateWithMembership needs the reverse
 // direction to create the membership half of its transaction.
@@ -3519,9 +3528,15 @@ func newTelegramLinkRepoDouble(clock *fixedClock, tokens *seqTokens) *telegramLi
 	return &telegramLinkRepoDouble{clock: clock, tokens: tokens, rows: map[string]*telegramLinkRow{}}
 }
 
-func (d *telegramLinkRepoDouble) Create(_ context.Context, userID string, nonceHash []byte, expiresAt time.Time) error {
-	d.rows[string(nonceHash)] = &telegramLinkRow{CreatedAt: d.clock.Now(), ExpiresAt: expiresAt, UserID: userID}
-	return nil
+// Create returns the row's id -- string(nonceHash), the same key ByID reads
+// by (see ByID's own doc comment below) -- mirroring the real repository's
+// RETURNING id: TelegramLinkService.Start hands this straight back to the
+// browser to poll with, so a double that swallowed it could never stand in
+// for that service (see task-5-brief.md's ruling 1).
+func (d *telegramLinkRepoDouble) Create(_ context.Context, userID string, nonceHash []byte, expiresAt time.Time) (string, error) {
+	id := string(nonceHash)
+	d.rows[id] = &telegramLinkRow{CreatedAt: d.clock.Now(), ExpiresAt: expiresAt, UserID: userID}
+	return id, nil
 }
 
 // Consume mirrors ConsumeTelegramLinkRequest's guard -- nonce_hash = $1 AND
@@ -3657,6 +3672,23 @@ func (d *telegramLinkRepoDouble) ByID(_ context.Context, id string) (usecase.Tel
 		Consumed:     row.ConsumedAt != nil,
 		ExpiresAt:    row.ExpiresAt,
 	}, nil
+}
+
+// redeem stamps the row for id consumed by chatID and chatUsername, standing
+// in for the bot's /start handler calling Consume against the raw nonce --
+// which TelegramLinkService.Start's caller never sees again, only the id.
+// Unlike markConsumed (which looks a row up by its raw nonce, for
+// TelegramAuthService's own tests), redeem addresses the row the same way a
+// browser polling TelegramLinkService.Status does: by id.
+func (d *telegramLinkRepoDouble) redeem(id string, chatID int64, chatUsername string) {
+	row, ok := d.rows[id]
+	if !ok {
+		return
+	}
+	now := d.clock.Now()
+	row.ConsumedAt = &now
+	row.ChatID = chatID
+	row.ChatUsername = chatUsername
 }
 
 // CountMintsSince mirrors CountTelegramLinkMintsSince's SQL exactly: user_id
@@ -3854,6 +3886,54 @@ func newTelegramAuthService(t *testing.T) (*usecase.TelegramAuthService, *telegr
 		links: links, accounts: accounts, magicLinks: magicLinks,
 		signups: signups, sender: sender, tokens: tokens, clock: clock,
 	}
+}
+
+// --- TelegramLinkService fixture -----------------------------------------
+
+// telegramLinkDoubles holds every double newTelegramLinkService wires
+// together, so a test can reach into whichever one its assertion needs.
+type telegramLinkDoubles struct {
+	links    *telegramLinkRepoDouble
+	accounts *telegramAccountRepoDouble
+	users    *userDouble
+	tokens   *seqTokens
+	clock    *fixedClock
+}
+
+// newTelegramLinkService builds a TelegramLinkService over its own set of
+// in-memory doubles, separate from newTelegramAuthService's: this service
+// needs a UserRepository (Unlink's lockout check) and neither a
+// MagicLinkRepository nor a SignupRepository, which TelegramAuthService
+// needs and this service does not.
+//
+// It pre-creates one user with an email address. userDouble.Create's own
+// counter means that user lands on id "user-1" -- the id every test below
+// that calls Start/Confirm/Unlink as "user-1" relies on already existing
+// with somewhere else to sign in. A test exercising the locked-out case
+// (TestUnlinkRefusesAnAccountWithNoEmail) adds its own credential-less user
+// under a different id instead of touching this one.
+func newTelegramLinkService(t *testing.T) (*usecase.TelegramLinkService, *telegramLinkDoubles) {
+	t.Helper()
+
+	clock := &fixedClock{now: time.Now()}
+	tokens := &seqTokens{}
+
+	users := newUserDouble()
+	users.mustCreate(t, "andreas@hearth.family", "", "Andreas") // becomes "user-1"
+
+	links := newTelegramLinkRepoDouble(clock, tokens)
+	accounts := newTelegramAccountRepoDouble()
+
+	svc := usecase.NewTelegramLinkService(usecase.TelegramLinkDeps{
+		Links:       links,
+		Accounts:    accounts,
+		Users:       users,
+		Tokens:      tokens,
+		Clock:       clock,
+		BotUsername: "HearthBot",
+	})
+
+	return svc, &telegramLinkDoubles{links: links, accounts: accounts, users: users, tokens: tokens, clock: clock}
 }
 
 // --- Platform admin doubles: PlatformAdminRepository, FeatureFlagRepository,

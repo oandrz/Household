@@ -94,9 +94,10 @@ func (q *Queries) CreateTelegramAccount(ctx context.Context, arg CreateTelegramA
 	return err
 }
 
-const createTelegramLinkRequest = `-- name: CreateTelegramLinkRequest :exec
+const createTelegramLinkRequest = `-- name: CreateTelegramLinkRequest :one
 INSERT INTO telegram_link_requests (nonce_hash, expires_at, user_id)
 VALUES ($1, $2, $3)
+RETURNING id
 `
 
 type CreateTelegramLinkRequestParams struct {
@@ -105,9 +106,15 @@ type CreateTelegramLinkRequestParams struct {
 	UserID    pgtype.UUID
 }
 
-func (q *Queries) CreateTelegramLinkRequest(ctx context.Context, arg CreateTelegramLinkRequestParams) error {
-	_, err := q.db.Exec(ctx, createTelegramLinkRequest, arg.NonceHash, arg.ExpiresAt, arg.UserID)
-	return err
+// CreateTelegramLinkRequest returns the new row's id, because the browser
+// that just minted a link nonce has to poll with it and Create is the only
+// moment that id is available -- a nonce_hash lookup afterwards would be a
+// second way to address a row by its secret.
+func (q *Queries) CreateTelegramLinkRequest(ctx context.Context, arg CreateTelegramLinkRequestParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, createTelegramLinkRequest, arg.NonceHash, arg.ExpiresAt, arg.UserID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const deleteTelegramAccount = `-- name: DeleteTelegramAccount :exec
