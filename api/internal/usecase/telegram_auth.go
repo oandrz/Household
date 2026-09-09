@@ -154,9 +154,28 @@ func (s *TelegramAuthService) handleLinkStart(ctx context.Context, chatID int64,
 	case err == nil:
 		return s.say(ctx, chatID, telegramLinkRefusedMessage)
 	case errors.Is(err, domain.ErrNotFound):
-		return s.say(ctx, chatID, "Go back to Hearth and confirm this chat to finish connecting it.")
+		return s.handleLinkStartForUnboundChat(ctx, chatID, r.UserID)
 	default:
 		return fmt.Errorf("look up telegram account: %w", err)
+	}
+}
+
+// handleLinkStartForUnboundChat answers a link nonce redeemed from a chat
+// that has no binding of its own -- decision 2's fourth row applies here:
+// if the nonce's user already has a *different* chat bound, this chat is
+// refused with the same bland line the other refusals use, not told to go
+// confirm. Without this check the person would be sent back to Hearth
+// believing the link worked, only for Confirm to refuse them there --
+// exactly the round trip the row exists to save.
+func (s *TelegramAuthService) handleLinkStartForUnboundChat(ctx context.Context, chatID int64, userID string) error {
+	_, err := s.d.Accounts.ByUserID(ctx, userID)
+	switch {
+	case err == nil:
+		return s.say(ctx, chatID, telegramLinkRefusedMessage)
+	case errors.Is(err, domain.ErrNotFound):
+		return s.say(ctx, chatID, "Go back to Hearth and confirm this chat to finish connecting it.")
+	default:
+		return fmt.Errorf("look up telegram binding by user: %w", err)
 	}
 }
 
