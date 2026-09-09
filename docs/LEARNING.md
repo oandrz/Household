@@ -2675,6 +2675,53 @@ time, with fresh evidence**: nothing here was a failing assertion waiting to
 be written, because there was no code path to assert against in the first
 case and no coordinate system to assert legibility in for the second.
 
+**An eighth instance, the Telegram account-linking design (2026-09-09), and
+this time nothing was unwired — the whole surface worked, correctly, for
+every account except the ones that could not reach it at all.** Telegram
+sign-in, sign-up, `/spend`/`/income`/`/balance`/`/recent`, free text and the
+daily digest were each built, tested and walked live against a real bot in
+turn (§1 rows, and `docs/adr/0008-authorisation-at-each-channels-inbound-edge.md`).
+Every one of those tests, and every one of those walks, used an account that
+had signed up *from Telegram* — the only call site that ever wrote a
+`telegram_accounts` row was inside `SignupRepository.Provision`. That made
+every green suite and every "walked live" line in `FEATURE_TRACKER.md`
+completely true and completely silent about the other half of the
+population: an account that had signed up by email had no way to acquire a
+binding at all, so `/start` from its owner's own chat sent them a *sign-up*
+link — offering to create a second household — and every command and every
+digest built since was, for that person, dead code they could never trigger.
+Found only while *designing* this feature itself — the linking flow was
+proposed precisely because the gap surfaced while scoping it, not by any
+test or walk of the features already shipped
+(`docs/FEATURE_TRACKER.md`'s own row: "found while designing it,
+2026-09-09"). Nothing in this codebase's test suite for `/spend`, free text
+or the digest ever constructs an email-signup user and points a chat at it,
+because every test that needed a binding created one directly, the same
+shortcut a fixture takes for granted — so no green suite and no walk of
+those features had any way to notice the population they never tried.
+
+What is new here, beyond confirming the pattern: **the earlier seven
+instances each turn on a *control* — missing, intercepted, or wired but
+unproven — something visible on the screen or reachable by grepping the call
+graph for who calls what** (the fourth instance's own closing paragraph
+already says the grep finds nothing for the *interception* shape, and the
+sixth and seventh needed a real render, not a grep, for the same reason).
+**This one has no missing, intercepted or unproven call anywhere** — `/spend`'s
+handler, the digest's send, the free-text parser are each called correctly,
+every time, by the chat that can reach them. The gap is not in the call
+graph or the render at all, it is in *who holds the credential the call
+graph is keyed on* — a question none of the earlier instances' checks even
+ask. The mechanical check this instance adds, next to the earlier ones: for
+any capability gated on an identity binding (a
+`telegram_accounts` row, a session, an API token), ask **which existing
+population can acquire that binding today, and which cannot** — not only
+whether the code that uses the binding is reachable once held. A suite that
+always fabricates the binding as test setup will never surface an account
+type that cannot earn one through the product itself, however many times it
+is exercised. Fixed by giving the missing population a second way to acquire
+the binding — a Settings-driven link-and-confirm flow, `docs/adr/0010-binding-a-chat-needs-a-confirm.md`
+— rather than by touching any of the capabilities that were already correct.
+
 ### 16. A claim about the code is not evidence until someone checks it against the code
 
 - **The net worth trend's plan, 2026-08-19.** `docs/FEATURE_TRACKER.md`'s own
@@ -5516,9 +5563,15 @@ no test suite can hold.
    user would, not only against criteria the spec wrote down — a 15-of-15
    walk scripted from the spec still missed the spec's own wrong decision,
    a silent navigation gap and unexamined hardcoded copy (pattern 13).
-5. If it accepts caller input, ask what a caller can measure.
-6. If it writes twice, ask what happens when the second write fails.
-7. Add what you learned to this file.
-8. `git status` before you push. A file you created and never `git add`ed
+5. If the new capability is gated on an identity binding, ask which
+   *existing* population can acquire that binding today, and which cannot —
+   not only whether the code behind the binding works once held. A test
+   suite that fabricates the binding as fixture setup will never surface an
+   account type the product itself has no door for (pattern 15, eighth
+   instance).
+6. If it accepts caller input, ask what a caller can measure.
+7. If it writes twice, ask what happens when the second write fails.
+8. Add what you learned to this file.
+9. `git status` before you push. A file you created and never `git add`ed
    is present for every local check and absent from the commit — CI is the
    first thing that reads what you actually pushed.

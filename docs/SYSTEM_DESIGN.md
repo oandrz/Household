@@ -559,6 +559,7 @@ graph TD
         Invite["InviteService"]
         Signup["SignupService"]
         TelegramAuth["TelegramAuthService — delivers the magic-link<br/>and sign-up tokens the other services already<br/>mint; mints no token type of its own"]
+        TelegramLink["TelegramLinkService — Start/Status/Confirm/<br/>Unlink: connects an ALREADY-EXISTING account<br/>to a chat from Settings. Writes the binding;<br/>HandleStart above never does (ADR 10)"]
         TelegramCmd["TelegramCommandService — /spend, /income,<br/>/balance, /recent, /nudges: names to ids, amount in the<br/>account's currency, update id as the key.<br/>Takes no actor: the adapter's Commander is the guard (ADR 8)"]
         Nudge["NudgeService — the daily digest (stage 6):<br/>Compose from BillsReader + BudgetReader, RunOnce<br/>claims a nudge_deliveries row before each send.<br/>Rules, no model. Recipients query = ADR 8 outbound"]
         Member["MemberService"]
@@ -733,8 +734,8 @@ refuses (spec decision 7).
 | `RetroActionRepository` | `adapter/postgres` | Eighteenth. `Add` writes the action and its assignees in one transaction, so a bad assignee id leaves no orphan action; `carriedFrom` is validated through a join back to `retros` requiring the same household before it is trusted, and a malformed id is refused rather than silently read as SQL NULL (`docs/LEARNING.md`) — "fail closed on values you did not construct" applied to a field the client supplies directly. `OpenInMonth` backs both the modal's "Still open from July" offer and Overview's `openActionCount` |
 | `VisionRepository` | `adapter/postgres` | Nineteenth. `Get` returns `domain.ErrNotFound` for a year never set, which `VisionService` turns into the empty vision the screen renders (decision 9) — the repository never invents a row. `Save` replaces the whole document — parent upserted, every child deleted and reinserted — in one transaction, under the same two-shape version guard `RetroRepository.Update` established: `version == 0` is a create, refused with `domain.ErrVisionChanged` if a row has appeared since the caller read the empty vision; `version > 0` is an update, `WHERE version = $n`, with a zero-row result re-read to tell "the vision is gone" apart from "someone saved first." The existence check runs on the transaction's own connection, never the pool-backed `Get` — calling `Get` from inside `Save`'s own `pgx.BeginFunc` would hold one pool connection while asking the pool for a second, which starves it under concurrent saves (`docs/LEARNING.md`). A measure naming a goal outside this household is refused inside the same transaction with `domain.ErrVisionGoalUnknown` — the `vision_measures` foreign key alone only proves the goal exists *somewhere* |
 | `GoalProgressReader` | `adapter/postgres` (`*GoalRepo` already satisfies it) | Unnumbered, like `AccountLookup`/`CategoryLookup` above — a narrow port, not a repository. One method wide on purpose, the same interface-segregation reasoning as those two, for a caller in the opposite direction: `VisionService` needs one thing from Goals, the progress of a handful of goal ids, not the forty-line `GoalRepository` contract. `ProgressByIDs` returns an entry only for an id that exists in the caller's own household; a missing id is a miss, not an error — a measure whose goal was deleted renders as a label with no figure (spec decision 8), not a failed page. Counts an *archived* goal as found, deliberately: archiving is not deletion anywhere else in this product, so a measure linked to an archived goal keeps its figure |
-| `TelegramLinkRepository` | `adapter/postgres` | Twentieth. Stores the pending deep-link nonces, hashed, that carry a browser's sign-in request across to Telegram. `Consume` stamps `consumed_at` **and** records the redeeming `chat_id` in one statement, because the chat is unknown when the nonce is minted — the browser has not met Telegram yet — so redemption is the only moment the two can be joined, and a redemption that failed to record its chat would be a rate limit that silently never fires. Absent, expired or already consumed all return `domain.ErrNotFound` from one guarded `UPDATE`, the same shape `MagicLinkRepository.Consume` uses. `CountLinksSince` lives here, on the *link* repository, and not on `TelegramAccountRepository`, because the per-chat limit has to bind chats that have no account yet: a stranger repeating `/start` has no user row to count against |
-| `TelegramAccountRepository` | `adapter/postgres` | Twenty-first. `ByChatID` resolves a chat to the user it is bound to, or `domain.ErrNotFound` — which is the entire branch key of the Telegram flow: found means "send a sign-in link", not found means "send a sign-up link" (§5). The binding is written in two places: inside `SignupRepository.Provision`'s existing transaction, when a stranger creates a household from a chat, and by `Create`, when a member who already has an account connects their chat from Settings (that second caller, the linking flow's confirm step, is still to be built). `ByUserID` reads a user's own binding back and `Delete` removes it, idempotently. Both directions of the binding are `UNIQUE` in the database — one chat per user, one user per chat — and that constraint, not any check in Go, is what makes a sign-in unambiguous |
+| `TelegramLinkRepository` | `adapter/postgres` | Twentieth. Stores the pending deep-link nonces, hashed, that carry either a browser's sign-in request or a signed-in member's link request across to Telegram — the same table, told apart by `user_id` (§6). `Create(ctx, userID, nonceHash, expiresAt) (id, error)` **now returns the new row's id** — a port signature change, landed with the linking feature — because `TelegramLinkService.Start` hands that id straight back to the browser to poll `Status` with; the plain sign-in nonce (`TelegramAuthService.StartLink`) still calls `Create` with `userID ""` and simply discards the id, since a sign-in nonce is never polled by row id at all. `Consume` stamps `consumed_at` **and** records the redeeming `chat_id` **and now `chat_username`** in one statement, because the chat is unknown when the nonce is minted — the browser has not met Telegram yet — so redemption is the only moment they can be joined, and a redemption that failed to record its chat would be a rate limit that silently never fires; it returns a `TelegramLinkRedemption{ID, UserID}`, not the row itself, because `HandleStart`'s branch (link vs sign-in/sign-up) is exactly that pair. Absent, expired or already consumed all return `domain.ErrNotFound` from one guarded `UPDATE`, the same shape `MagicLinkRepository.Consume` uses. `ByID` reads one row back for the browser that minted it — deliberately with no ownership check of its own, so a caller that skipped the `row.UserID == session user` comparison is a bug in the caller, not a silently-safe repository (ADR 8: authorisation is not this layer's job). `CountLinksSince` (per chat, unchanged) still lives here rather than on `TelegramAccountRepository`, because the per-chat limit has to bind chats that have no account yet — a stranger repeating `/start` has no user row to count against. `CountMintsSince` is new and per **user**: it bounds how many link nonces one signed-in member can mint in an hour (decision 12, three), a table-growth control rather than a security one, since the session minting is already authenticated |
+| `TelegramAccountRepository` | `adapter/postgres` | Twenty-first. `ByChatID` resolves a chat to the user it is bound to, or `domain.ErrNotFound` — which is the entire branch key of the Telegram sign-in flow: found means "send a sign-in link", not found means "send a sign-up link" (§5). The binding is now written from **two** call sites, and this repository's own doc comment was rewritten to say so rather than to explain why `Create` did not exist: inside `SignupRepository.Provision`'s existing transaction, when a stranger creates a household from a chat, and by `Create(ctx, TelegramBinding) error`, called by `TelegramLinkService.Confirm` when a member who already has an account connects their chat from Settings. `Create` answers `domain.ErrAlreadyExists` for either `UNIQUE` — one chat per user, one user per chat — without distinguishing which: the caller already knows which side it was asking about (a fresh sign-up binds a chat that must be free; `Confirm` binds a user who must have no chat yet) and picks the sentence, rather than the repository guessing at intent. `ByUserID` reads a user's own binding back, `TelegramBinding{UserID, ChatID, ChatUsername, LinkedAt}`, and `Delete` removes it, idempotently — removing a binding that is not there is not an error, because the caller's goal ("this user has no chat") is already true. Both directions of the binding stay `UNIQUE` in the database, and that constraint, not any check in Go, is what makes a sign-in — and now a confirm — unambiguous |
 | `PlatformAdminRepository` | `adapter/postgres` | Twenty-second. `Get`/`Grant`/`Revoke`/`List` over `platform_admins`. `Grant` has exactly one call site in the whole repository outside test code — `adminctl`'s `runGrantPlatformAdmin` — which is the property [ADR 5](adr/0005-platform-admin-authorization.md) exists to keep true; there is no `AdminService` method that calls it, on purpose, since granting is not a decision the running service ever makes |
 | `NudgeRepository` | `adapter/postgres` | The daily digest's at-most-once ledger and opt-out ([ADR 9](adr/0009-scheduled-work-runs-inside-the-api.md)). `Recipients` is the authorisation for the outbound direction: `telegram_accounts ⋈ memberships` keeping only owners with Money whose chat has not said `/nudges off` — a postgres test plants each excluded shape. `Claim` is `INSERT … ON CONFLICT DO NOTHING` on `(chat_id, household_id, day)`, insert-first like the transaction idempotency key; `Release` deletes it after a failed send; `Prune` keeps a month. `BillsReader` and `BudgetReader` are the two narrow reads `NudgeService` declares, satisfied by the bill and budget services |
 | `APITokenRepository` | `adapter/postgres` | Personal API tokens ([ADR 7](adr/0007-personal-api-tokens.md)): `Create` stores only the SHA-256 and an 8-character prefix; `ByTokenHash` is the live lookup (revoked or expired is `ErrNotFound`, like `GetLiveSession`); `Revoke` is user-scoped so a guessed id from another member is a miss; `RevokeAllForUser` sits beside `SessionRepository.RevokeAllForUser` in `MemberService.revokeCredentials`; `Touch` is throttled by the caller to one write an hour |
@@ -1096,6 +1097,25 @@ the fourth redemption). Without it, a chat spamming `/start` would be a free
 path to burn magic-link and signup rows past any per-IP limit, because the IP
 that presses `/start` is Telegram's, not the person's.
 
+**Account linking adds a fourth limit, per *user*, at mint rather than at
+redemption.** `TelegramLinkService.Start` refuses a fourth link nonce a
+signed-in member mints inside an hour (`CountMintsSince`,
+`telegramLinkMintsPerHourLimit = 3`, `429`) — table-growth control, not a
+security control, since a session minting it is already authenticated. This
+is bound at a different point in the flow from the per-chat limit above on
+purpose: the per-chat limit bounds *redemption* and has to, because a
+stranger's chat has no user row to count against yet; the per-user limit
+bounds *minting*, which a session can now do with no chat involved at all.
+**The link branch inside `HandleStart` is taken *before* the per-chat
+`CountLinksSince` check, not after** (`docs/adr/0010-binding-a-chat-needs-a-confirm.md`'s
+sibling design decision, spec decision 4) — a link nonce that redeemed and
+carries a `user_id` is already *pending* by the time the rate limit would
+run, so checking the limit first would have the chat told "that link is
+dead" while the browser's Confirm button still worked. Redemption on this
+path mints no token at all, which is what makes skipping the per-chat check
+here safe: that check exists to stop a chat farming *sign-in and sign-up*
+rows, and a link redemption writes neither.
+
 ### Route table
 
 | Method | Path | Guards |
@@ -1107,6 +1127,11 @@ that presses `/start` is Telegram's, not the person's.
 | GET | `/auth/sign-up/{token}` | none, plus `requireFeature(signups_open)` — a half-finished sign-up must not be completable once registration closes |
 | POST | `/auth/sign-up/{token}/complete` | none, plus `requireFeature(signups_open)`, same group as the row above |
 | POST | `/auth/telegram/start` | none, plus its **own** per-IP token bucket (20/hour), separate from sign-up's, and `requireFeature(telegram_sign_in)` (global set) — takes no body and no identifier, so there is nothing to probe; **`404`** both when no bot is configured and when the flag is off, the same answer any unrouted path gets, so an install without Telegram gives nothing away and the frontend hides the control on that response (§7) |
+| GET | `/auth/telegram` | session · `requireFeature(telegram_sign_in)` · CSRF · **cookie** session (`requireCookieSession`) — one group of five routes carries all four guards, `tl.Use` in that order, including the two reads: `requireCSRF` returns early for `GET`/`HEAD`/`OPTIONS` (`middleware_csrf.go`) so the polling route needs no header and the router needs no second group. This user's own binding — connected (chat, `linkedAt`) or not; a member with no chat bound gets `200 {"connected":false}`, not a `404`, because that is the ordinary case for most members reaching Settings. `Deps.TelegramLink` nil (no bot configured) answers `404`, distinct from `Deps.Telegram` above — the sign-in route and the five link/unlink routes are gated on two different `Deps` fields, wired from the same `cfg.TelegramEnabled()` check in `main.go`, so "no bot" still answers identically on both |
+| POST | `/auth/telegram/link` | same group as the row above — mints a link nonce carrying this session's `user_id`, returns `{id, url, expiresAt}`; **`429`** on the fourth mint inside an hour (`CountMintsSince`, decision 12: per-**user**, table-growth control, not a security one — the session is already authenticated) |
+| GET | `/auth/telegram/link/{id}` | same group — the derived status of one link request the panel polls every 3s while `waiting`/`pending`: `waiting`, `pending` (+ chat `@username`), `connected`, `refused` (+ reason), `expired`. `{id}` is the row id, not the nonce; a row belonging to another member is `404`, never `403`, the same rule every other route in this API follows so a row id cannot be tested for existence |
+| POST | `/auth/telegram/link/{id}/confirm` | same group — writes the binding, re-checking everything `Status` derived (row belongs to this session, consumed, not expired, neither side already bound) because minutes can pass between a poll and a click and the other chat can be bound in between; `409` with one of `ErrTelegramChatTaken`/`ErrTelegramAlreadyLinked`/`ErrTelegramLinkNotPending` on a real conflict |
+| DELETE | `/auth/telegram` | same group — removes the binding; `200 {"connected":false}`, not `204`, so `apiFetch` never meets an ok response it cannot parse; `409 ErrTelegramUnlinkWouldLockOut` when `users.email IS NULL`, because a Telegram-only account has no other door back in (§5) |
 | GET | `/auth/me` | session (cookie or token) |
 | POST | `/auth/sign-out` | session · CSRF — **403 `SESSION_REQUIRED` to a token**: a token has no session to end |
 | GET | `/auth/tokens` | session (cookie or token) — names and prefixes only, never a secret |
@@ -1543,7 +1568,7 @@ sequenceDiagram
 
     B->>H: POST /auth/telegram/start (no body, no identifier)
     H->>T: StartLink
-    T->>L: Create(hash(nonce), now + 10 min)
+    T->>L: Create("", hash(nonce), now + 10 min) -> id (discarded — never polled)
     T-->>H: TelegramStartLink
     H-->>B: 200 with url https://t.me/BOTNAME?start=NONCE and expiresAt
     B->>C: opens t.me in a new tab, person presses Start
@@ -1552,11 +1577,15 @@ sequenceDiagram
     TG-->>P: Update
     P->>T: HandleStart(chatID, payload, username)
     T->>L: Consume(hash(payload), chatID, username) — one guarded UPDATE
-    T->>L: CountLinksSince(chatID, now - 1h)
-    alt Accounts.ByChatID finds a user
-        T->>TG: Sender.SendMessage — Tap to sign in,<br/>/sign-in/magic?token=RAW (15 min, single use)
-    else ByChatID returns ErrNotFound
-        T->>TG: Sender.SendMessage — Tap to create your household,<br/>/sign-up/RAW (24 h, single use)
+    alt redemption.UserID != "" — a LINK nonce, checked FIRST (decision 4)
+        T->>TG: handleLinkStart — writes no binding;<br/>see "connecting an existing account" below
+    else redemption.UserID == "" — an ordinary sign-in nonce
+        T->>L: CountLinksSince(chatID, now - 1h)
+        alt Accounts.ByChatID finds a user
+            T->>TG: Sender.SendMessage — Tap to sign in,<br/>/sign-in/magic?token=RAW (15 min, single use)
+        else ByChatID returns ErrNotFound
+            T->>TG: Sender.SendMessage — Tap to create your household,<br/>/sign-up/RAW (24 h, single use)
+        end
     end
     TG->>C: the bot's reply
     C->>B: person taps it — the EXISTING magic-link or sign-up<br/>handler runs, on the device holding Telegram
@@ -1594,6 +1623,25 @@ top-down it looks backwards — why spend the nonce on an attempt you are about
 to refuse? Because a refusal that left the nonce unspent would be retryable with
 the same link until the hour rolled over, which is not a limit. Spending first
 makes every refused attempt cost the caller a nonce.
+
+**The link branch is checked before that rate-limit too, and for a different
+reason than the one above.** `redemption.UserID != ""` is tested immediately
+after `Consume`, ahead of `CountLinksSince`, not only ahead of the
+sign-in/sign-up split. `CountLinksSince` exists to bound *this* path's two
+writes — a magic link, a signup row — and a link nonce mints neither: it is
+answered entirely in the chat, by `handleLinkStart`
+(`docs/adr/0010-binding-a-chat-needs-a-confirm.md`), so there is nothing here
+for that limit to protect. Ordering matters beyond tidiness: by the time
+`HandleStart` reaches this point the row is already consumed and carrying a
+`user_id`, which the browser's `Status` derives as *pending* — so refusing it
+here on a rate limit that has nothing to do with linking would tell the chat
+"that link is dead" while the browser still offered a working Confirm button.
+
+**"Connecting an existing account" is a different flow from everything above
+it, sharing only this table and this poller** — see its own subsection below.
+It is what a member reaches from *Settings*, not from a stranger's `/start`,
+and it writes a binding through a second call site `SignupRepository.Provision`
+never touches.
 
 **One refusal message covers five different situations, word for word.**
 `telegramDeadLinkMessage` — *"That sign-in link has expired. Start again from
@@ -1660,6 +1708,133 @@ address and is still relayed from Mailpit by hand on the live install. A
 shareable `t.me/…?start=inv_<token>` link is the natural follow-up and is
 deliberately not in this slice; `docs/FEATURE_TRACKER.md` carries it as a ⬜ row
 so it is a gap on the map rather than an assumption.
+
+### Telegram — connecting an existing account, and why the binding waits for a confirm
+
+The flow above only ever binds a chat that a *stranger* used to create a
+household. It leaves every account that signed up by email with no way to
+connect a chat at all — `docs/LEARNING.md` §15's eighth instance names what
+that silently cost. This flow is the second, and only other, call site that
+writes a `telegram_accounts` row: a signed-in member, from Settings.
+
+```mermaid
+sequenceDiagram
+    participant B as Settings (Browser)
+    participant H as Handler
+    participant K as TelegramLinkService
+    participant L as TelegramLinkRepo
+    participant A as TelegramAccountRepo
+    participant P as Poller
+    participant T as TelegramAuthService
+    participant TG as Telegram
+    participant C as Chat
+
+    B->>H: POST /auth/telegram/link (session · CSRF)
+    H->>K: Start(userID)
+    K->>L: CountMintsSince(userID, now-1h) — 429 at the 4th
+    K->>L: Create(userID, hash(nonce), now+10min) -> id
+    K-->>H: {id, url, expiresAt}
+    H-->>B: 200
+    B->>C: window.open(url) — t.me/BOTNAME?start=NONCE<br/>(a plain fallback link too, for a blocked popup)
+    C->>TG: /start NONCE
+    P->>TG: getUpdates (long poll)
+    TG-->>P: Update (from: chat_id, username)
+    P->>T: HandleStart -> handleLinkStart (branch, see above)
+    T->>L: Consume(hash, chatID, username) -> {id, userID}
+    Note over T,A: writes NO telegram_accounts row (ADR 10)
+    T->>TG: "Go back to Hearth and confirm this chat…"
+    TG->>C: reply
+    loop every 3s while status is waiting or pending
+        B->>H: GET /auth/telegram/link/{id}
+        H->>K: Status(userID, id)
+        K->>L: ByID(id) — 404 if not this session's own row
+        K->>A: ByUserID(userID) — bound already? checked FIRST
+        K-->>H: {status: "pending", chatUsername: "andreas"}
+    end
+    B->>H: POST /auth/telegram/link/{id}/confirm (CSRF)
+    H->>K: Confirm(userID, id)
+    K->>L: ByID(id) — row owned, consumed, not expired
+    K->>A: ByChatID(chatID) / ByUserID(userID) — RE-CHECK neither side bound
+    K->>A: Create(TelegramBinding{...})
+    K-->>H: TelegramBinding{chatUsername, linkedAt}
+    H-->>B: 200 {connected:true, chatUsername, linkedAt}
+```
+
+`T` is `TelegramAuthService`, the same service and the same poller dispatch
+as the flow above — `handleLinkStart` is one more branch inside
+`HandleStart`, not a second poller. `K` is `TelegramLinkService`, a distinct
+usecase service with its own `Start`/`Status`/`Confirm`/`Unlink`, wired
+separately in `main.go` and gated behind its own `Deps.TelegramLink` nil
+check (§4's route table). The two services share the `telegram_link_requests`
+table and nothing else.
+
+**The binding is never written at `/start`, on purpose — this is the whole
+of [ADR 10](adr/0010-binding-a-chat-needs-a-confirm.md).** A link nonce is a
+bearer credential for ten minutes: anything that can read it — a forwarded
+message, a shared screen, a synced clipboard — can redeem it. If redemption
+alone bound the chat, redeeming a leaked link would hand the redeemer's own
+chat the ability to sign in as the victim, forever, one `/start` away. So
+`handleLinkStart` records *which* chat redeemed the nonce and stops there;
+the only thing that writes the row is `Confirm`, called from inside the
+session that minted the nonce in the first place — a session a stolen link
+cannot reach, because it has neither the cookie nor the CSRF token.
+
+**There is no pending table and no status column — decision 5.** *Consumed,
+carrying a `user_id`, with no `telegram_accounts` row yet* **is** the pending
+state; `Status` derives it by reading the link row once (`ByID`) and the
+account binding once (`ByUserID`/`ByChatID`), never by writing a new one.
+`Status` derives in this order, and the order is load-bearing: **bound
+first, then refusals, then expiry.** A panel that is still polling a link that
+already connected must keep reading `connected` even after `expires_at`
+passes — checking expiry before the binding would flip a working connection
+back to "expired" ten minutes after it succeeded, which is exactly backwards.
+
+**`Confirm` re-checks everything `Status` derived, from scratch, against the
+database — not because the earlier checks were wrong, but because minutes
+pass between a poll and a click.** The other chat can be bound to someone
+else, or this user's own second pending link can win a race, in that window.
+`Create`'s `UNIQUE` constraints are the real gate; the Go-level checks ahead
+of it exist only to turn a `23505` into the right one of `ErrTelegramChatTaken`
+or `ErrTelegramAlreadyLinked` rather than a bare conflict — and when the
+`UNIQUE` that actually fires disagrees with what the pre-check saw, `Confirm`
+re-reads by chat id to find out which one really collided, rather than
+guessing.
+
+**The chat gets a bland answer in every case; the browser gets the real
+one.** Mirrors `telegramDeadLinkMessage` from the flow above and the split
+[ADR 8](adr/0008-authorisation-at-each-channels-inbound-edge.md) already
+draws: a chat holding a nonce it may have stolen must not learn whether the
+target account exists, already has a chat, or belongs to someone else — each
+of those is a probe a stranger could run. The session that minted the nonce
+has already proved who it is over HTTP, so `Status` and `Confirm` hand it a
+named `domain` error (`ErrTelegramChatTaken`, `ErrTelegramAlreadyLinked`)
+that the panel turns into a real sentence.
+
+**Two columns exist only to make the confirm screen answerable by a human.**
+`telegram_link_requests.chat_username` is stamped at redemption from
+Telegram's `message.from`, alongside `chat_id`; `telegram_accounts.chat_username`
+carries the same value onto the binding once confirmed, because the link
+request it came from is pruned within the month and the panel still has to
+name the connected chat long after that. Neither is read by any check —
+`chat_id` is what every comparison in `Confirm` and `handleLinkStart` uses —
+it is display only, for the one screen where a human, not a constraint, is
+the actual gate: "does the chat I see match the one I opened Telegram from?"
+
+**Disconnect refuses to lock anyone out.** `Unlink` reads the user first and
+refuses with `ErrTelegramUnlinkWouldLockOut` when `users.email IS NULL` — a
+Telegram-only account (the sign-up half of the flow above) has no other
+door: `GetUserByEmail` is `WHERE email = $1`, and NULL never matches a
+parameter, so there is no magic link and no `adminctl reset-password` to
+reach it. The already-tracked ⬜ "attach an email address to a Telegram-only
+account" is the fix for *those* accounts; until it exists, this guard is
+what stands between a member and a household only `make psql` can reopen.
+
+**Reconnecting the same chat does not restore a muted digest.** Disconnect
+deletes the whole `telegram_accounts` row, and `nudges_enabled` goes with
+it, so an owner who had said `/nudges off` and later relinks the same chat
+is unmuted. Accepted, not a defect: reconnecting is a deliberate act, and
+carrying the flag across a deleted row would mean keeping a tombstone whose
+only job is remembering one boolean.
 
 ### Accounts — net worth is composed on read, not stored
 
@@ -2694,6 +2869,7 @@ erDiagram
     users ||--o{ login_attempts : may_reference
     users ||--o{ invites : invited_by
     users ||--o| telegram_accounts : "may be bound to one chat (UNIQUE both ways)"
+    users ||--o{ telegram_link_requests : "may mint link nonces (nullable — a sign-in nonce names no user)"
     users ||--o| platform_admins : "may be one (UNIQUE user_id, the PK)"
     users ||--o{ admin_audit_log : acted_as
     users ||--o{ admin_reauth_attempts : "attempted (own ledger, not login_attempts)"
@@ -2807,6 +2983,7 @@ erDiagram
         bigint chat_id "NOT NULL, UNIQUE"
         timestamptz linked_at
         boolean nudges_enabled "NOT NULL DEFAULT true — /nudges off"
+        text chat_username "nullable — display only, carried from the link request that confirmed this row"
     }
     nudge_deliveries {
         bigint chat_id PK
@@ -2821,6 +2998,8 @@ erDiagram
         timestamptz consumed_at "nullable — set with chat_id, never alone"
         bigint chat_id "nullable — CHECK ties it to consumed_at"
         timestamptz created_at
+        uuid user_id FK "nullable — NULL is a sign-in nonce (00011), set is a link nonce minted by that member; ON DELETE CASCADE"
+        text chat_username "nullable — stamped with chat_id at redemption; display only, never a check"
     }
     login_attempts {
         uuid id PK
@@ -3062,13 +3241,22 @@ Notes that are not obvious from the shapes:
   `retro_action_assignees`, and every method on `VisionRepository` is scoped
   by `householdID` in SQL against the parent `visions` row for exactly that
   reason). **`telegram_link_requests` is a third shape, and the only one of
-  its kind:** it carries no `household_id`, no `user_id` and no parent to join
-  through at all — not even a nullable one — because a nonce is minted before
-  anyone is known. The browser that asks for it has no session, and the chat
-  that will redeem it has not been met yet; the row's *only* identity is the
-  hash of a secret, and `chat_id` arrives later, at redemption. Nothing may
-  ever be authorised from a row in this table on its own — its whole job is to
-  be spent once and counted.
+  its kind:** it carries no `household_id` and, until the account-linking
+  feature, carried no `user_id` either — a nonce was minted before anyone was
+  known, from a browser with no session, for a chat not yet met. That is
+  still true of a *sign-in* nonce (`user_id IS NULL`), which is why the
+  column stays nullable rather than becoming a hard foreign key: the table
+  now holds two different rows with two different provenances, told apart by
+  nothing but that one column. A *link* nonce (`user_id` set) is minted by an
+  already-authenticated session naming its own account
+  (`docs/adr/0010-binding-a-chat-needs-a-confirm.md`), so for that row's
+  lifetime the browser's identity **is** known — the identity of the chat
+  that will redeem it is what is still unknown, and `chat_id`/`chat_username`
+  still arrive later, at redemption, exactly as before. Nothing may ever be
+  authorised from either kind of row on its own; a link row additionally
+  requires the caller's own `userID` to match `row.UserID` before it means
+  anything (`ByID`'s own doc comment says the repository deliberately does
+  not check this — ADR 8, the check belongs to the caller).
 - **`platform_admins`, `feature_flags`, `admin_audit_log` and
   `admin_reauth_attempts` carry no `household_id` at all, and it is not an
   oversight, it is the point.** Every one of them answers a question about the
@@ -3478,7 +3666,12 @@ web/src/
                        NavDrawer (the below-lg off-canvas nav; lg:contents
                        restores the desktop grid unchanged), RequireAuth,
                        RequireCapability
-    settings/          members, spaces, currency, notifications
+    settings/          members, spaces, currency, notifications,
+                       TelegramPanel.tsx (connect/disconnect a chat --
+                       mints, opens the deep link with a plain-link
+                       fallback for a blocked popup, polls status every 3s,
+                       confirms; renders nothing on a 404, this install's
+                       "no bot configured" answer)
     money/             Finances page — net worth (now with its twelve-month
                        trend, NetWorthChart.tsx, inline SVG the same way
                        marriage/MoodChart.tsx draws its own line — no
@@ -4015,7 +4208,7 @@ prefix, which is what made the duplication stop being optional.
 | Seeding | `adminctl seed`, refused unless `APP_ENV=development` **and** the database host is local — both checked before the connection opens |
 | Retention | `adminctl prune --older-than=<days>` (default 30, floor 7) deletes consumed/expired `signups`, stale `login_attempts` and — closed in the whole-branch fix wave, 2026-09-01 — consumed/expired `telegram_link_requests`, the third table a stranger can grow without an account (`PruneTelegramLinkRequests` mirrors `PruneSignups`'s own retention condition exactly). `nudge_deliveries` is pruned by the api itself on its own tick, a month back. `magic_links`, `invites`, `sessions` and now `api_tokens` (revoked and expired rows are stamped, never deleted) still grow forever, a real gap rather than a decision (§6) |
 | Daily digest | **Off unless configured.** `NUDGES_AT` (local `HH:MM`) **and** `NUDGES_TIMEZONE` (IANA), both or neither, refused without Telegram; a bad clock or an unknown zone refuses the boot. A goroutine beside the poller ticks every fifteen minutes; `usecase.NudgeDue` says whether local time is past the clock and which local date to claim. One message per owner-with-Money chat per household per day, never a second one, never one that says "all fine". The start-up log line `daily digest enabled at=… timezone=…` is the tell; each send logs `nudge sent household=…`. One zone for the whole install |
-| Rate limiting | Per-address (3/hour) and a global daily ceiling (1000, reset at midnight, not a rolling 24 hours), both counted from `signups` so a restart cannot reset them — and the Telegram sign-up path counts against that **same** global ceiling, deliberately, so a flood of `/start` cannot run the shared counter up and silently stop email sign-up while having no ceiling of its own. Telegram adds two more: per-**chat**, at most 3 links delivered per hour, counted from `telegram_link_requests` (so a restart cannot reset it either), and a second per-IP bucket of 20/hour on `POST /auth/telegram/start`, in its own limiter instance so it and sign-up cannot spend each other's budget (§4). Per-IP (5/hour on sign-up) is an in-memory token bucket in the HTTP layer — process-local, spoofable in development, and keyed to the *proxy* rather than the client if a proxy is put in front of nginx without `set_real_ip_from`; Caddy is in front in production, so `web/nginx.conf` carries that directive over the compose subnet and it is verified, not assumed (both in §1). The per-IP limit binds before the global one by construction (5 × 24 = 120 ≪ 1000) so one IP alone can never exhaust the global ceiling — but that arithmetic covers only the **email** sign-up path, whose every request to `/auth/sign-up` arrives over HTTP from the stranger's own IP and passes through that 5/hour bucket on the way to the shared counter. **The Telegram sign-up path has no per-IP bound at all.** The row that actually advances the shared global counter is written by `sendSignUp` (`telegram_auth.go`), reached only from the poller processing a Telegram update — the IP on that request is Telegram's own long-poll host, not the stranger's, so no per-IP bucket sees it (the 20/hour bucket on `POST /auth/telegram/start`, above, limits only how often a *browser* can mint a nonce, a step upstream of and separate from a chat sending `/start`). What actually bounds a Telegram sign-up flood is the per-**chat** limit (3/hour, above) plus the same shared global daily ceiling the email path counts against |
+| Rate limiting | Per-address (3/hour) and a global daily ceiling (1000, reset at midnight, not a rolling 24 hours), both counted from `signups` so a restart cannot reset them — and the Telegram sign-up path counts against that **same** global ceiling, deliberately, so a flood of `/start` cannot run the shared counter up and silently stop email sign-up while having no ceiling of its own. Telegram adds two more: per-**chat**, at most 3 links delivered per hour, counted from `telegram_link_requests` (so a restart cannot reset it either), and a second per-IP bucket of 20/hour on `POST /auth/telegram/start`, in its own limiter instance so it and sign-up cannot spend each other's budget (§4). Per-IP (5/hour on sign-up) is an in-memory token bucket in the HTTP layer — process-local, spoofable in development, and keyed to the *proxy* rather than the client if a proxy is put in front of nginx without `set_real_ip_from`; Caddy is in front in production, so `web/nginx.conf` carries that directive over the compose subnet and it is verified, not assumed (both in §1). The per-IP limit binds before the global one by construction (5 × 24 = 120 ≪ 1000) so one IP alone can never exhaust the global ceiling — but that arithmetic covers only the **email** sign-up path, whose every request to `/auth/sign-up` arrives over HTTP from the stranger's own IP and passes through that 5/hour bucket on the way to the shared counter. **The Telegram sign-up path has no per-IP bound at all.** The row that actually advances the shared global counter is written by `sendSignUp` (`telegram_auth.go`), reached only from the poller processing a Telegram update — the IP on that request is Telegram's own long-poll host, not the stranger's, so no per-IP bucket sees it (the 20/hour bucket on `POST /auth/telegram/start`, above, limits only how often a *browser* can mint a nonce, a step upstream of and separate from a chat sending `/start`). What actually bounds a Telegram sign-up flood is the per-**chat** limit (3/hour, above) plus the same shared global daily ceiling the email path counts against. Account linking adds a fifth bucket, per **user**: at most 3 link nonces minted an hour (`CountMintsSince`), counted from the same `telegram_link_requests` table — a table-growth control rather than a security one, since minting requires an already-authenticated session, unlike every bucket above it |
 | Health | `/healthz` ignores the database; `/readyz` pings it |
 | Intent parsing | **Off unless configured.** `OPENROUTER_API_KEY` **and** `OPENROUTER_MODEL` set (both or neither — `config.Load` refuses one alone) means the Telegram `Commander` gets an `IntentParser` over an open-weight model through OpenRouter (`adapter/openrouter`, forced tool call, `max_tokens` 4096, 30 s client timeout; up to three comma-separated model ids, tried in order in one request, because free models are rate-limited upstream minute to minute; the ids are configuration because OpenRouter's free, tool-capable list changes month to month, and a fourth id is refused at boot since OpenRouter caps the list at three). Unset means a plain sentence to the bot from an authorised owner is answered "commands only" and a stranger's is ignored. The start-up log line names the `model` list. The key is never logged and the adapter's errors carry the status and the provider's message only — no URL, no request id. A parse is never a write: the reading is shown back and held five minutes per chat in the poller's memory, written on `/yes` with the sentence's update id as the idempotency key. Not run against the real API on this machine (no key) — tested against a fake Messages API |
 | Automation client | `hearthctl` (`api/cmd/hearthctl`, `make hearthctl`, manual in `docs/CLI.md`, decision in `docs/adr/0006-a-cli-as-the-automation-surface.md`). A plain HTTP client of this API for scripts and AI agents: signs in with `POST /auth/sign-in`, keeps the session and CSRF cookies in `~/.config/hearth/<host>.json` (0600, one file per host), sends `X-CSRF-Token` on every write. It goes **through** every guard in §4 rather than around them — deliberately unlike `adminctl`, which wires repositories directly because its commands are operator actions with no route. It never retries a sign-in (the lockout) or a write (no idempotency keys). `hearthctl routes` prints the route table below from a hand-kept list that `routes_test.go` diffs against `router.go` in both directions |
