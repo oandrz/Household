@@ -81,19 +81,6 @@ func decodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, dest any, maxBy
 	return true
 }
 
-// MapDomainError is the single table translating a domain or usecase
-// sentinel into the one error envelope every failure response uses.
-// Handlers never build an error response by hand; every failure path ends
-// here.
-//
-// It takes *http.Request, not just http.ResponseWriter, so the default,
-// unmapped-error branch can recover the chi request ID from the request's
-// context via middleware.GetReqID: chi's middleware.RequestID only injects
-// the ID into the context, it exposes no other way to read it, and there is
-// no path from a bare http.ResponseWriter back to that context. This is a
-// deliberate, narrow deviation from the signature the task brief sketches
-// (MapDomainError(w, err)) -- see the task report.
-//
 // telegramChatTakenMessage and telegramAlreadyLinkedMessage are the two
 // sentences a member can be given for the same underlying refusal, reached
 // two different ways: POST .../confirm surfaces it as one of these 409s
@@ -110,6 +97,18 @@ const (
 	telegramAlreadyLinkedMessage = "This account already has a Telegram chat. Disconnect it first."
 )
 
+// MapDomainError is the single table translating a domain or usecase
+// sentinel into the one error envelope every failure response uses.
+// Handlers never build an error response by hand; every failure path ends
+// here.
+//
+// It takes *http.Request, not just http.ResponseWriter, so the default,
+// unmapped-error branch can recover the chi request ID from the request's
+// context via middleware.GetReqID: chi's middleware.RequestID only injects
+// the ID into the context, it exposes no other way to read it, and there is
+// no path from a bare http.ResponseWriter back to that context. This is a
+// deliberate, narrow deviation from the signature the task brief sketches
+// (MapDomainError(w, err)) -- see the task report.
 func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 	if err == nil {
 		return
