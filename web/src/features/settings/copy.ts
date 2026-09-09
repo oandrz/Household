@@ -3,6 +3,7 @@
 // react-refresh/only-export-components rule never has to think about a file
 // that mixes components with other exports.
 import { limitedAccessClause } from "../auth/copy";
+import type { TelegramLinkStatus } from "./schemas";
 
 // The Members panel's description line reads "Parent · full access" for an
 // owner and "Kid · calendar & chores only" / "Kid · calendar only" for a
@@ -55,4 +56,38 @@ export function spaceAudienceLabel(space: {
 // what an unrecognised code always rendered as.
 export function currencyLabel(code: string, symbol?: string): string {
   return symbol ? `${code} (${symbol})` : code;
+}
+
+// telegramPollInterval is TanStack Query's refetchInterval rule for the
+// pending-link status query, pulled out as its own named, directly-testable
+// function: "waiting" and "pending" are the only statuses that can still
+// change on their own (the bot has not answered yet, or the person has not
+// clicked Confirm yet) -- every other status is terminal, and polling a
+// nonce that can never change again just spends the member's battery and
+// this API's rate limit for nothing.
+export function telegramPollInterval(
+  status: TelegramLinkStatus["status"] | undefined,
+): number | false {
+  return status === "waiting" || status === "pending" ? 3000 : false;
+}
+
+// linkedAt arrives as an ISO string (see telegramBindingSchema); this is the
+// only place it is ever turned into something a person reads.
+export function formatTelegramLinkedAt(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+// chatUsername is `omitempty` on the wire and optional in the schema because
+// it genuinely can be empty: the bot adapter's senderName (update.go) falls
+// back from @username to the first name and only lands on "" when Telegram
+// sent neither. Decision 7 exists to give the person one piece of evidence
+// to check a confirm against -- a bare "@" would quietly lose that evidence
+// instead of admitting there is none, so this names the gap rather than
+// hiding it.
+export function telegramChatLabel(chatUsername: string | undefined): string {
+  return chatUsername ? `@${chatUsername}` : "a Telegram chat with no username";
 }

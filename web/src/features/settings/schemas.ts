@@ -40,3 +40,30 @@ export const notificationPreferencesSchema = z.object({
   weeklyDigest: z.boolean(),
 });
 export type NotificationPreferences = z.infer<typeof notificationPreferencesSchema>;
+
+// Mirrors telegram_handlers.go's telegramBindingResponse -- what GET, POST
+// .../confirm and DELETE /auth/telegram all answer with.
+export const telegramBindingSchema = z.object({
+  connected: z.boolean(),
+  chatUsername: z.string().optional(),
+  linkedAt: z.string().optional(),
+});
+export type TelegramBinding = z.infer<typeof telegramBindingSchema>;
+
+// Mirrors telegramLinkStartResponse -- POST /auth/telegram/link's body.
+export const telegramLinkStartSchema = z.object({
+  id: z.string(),
+  url: z.string(),
+  expiresAt: z.string(),
+});
+export type TelegramLinkStart = z.infer<typeof telegramLinkStartSchema>;
+
+// status is a closed set the server owns. Parsed as an enum rather than a
+// string so an unknown value fails loudly here instead of rendering a panel
+// with no branch taken.
+export const telegramLinkStatusSchema = z.object({
+  status: z.enum(["waiting", "pending", "connected", "refused", "expired"]),
+  chatUsername: z.string().optional(),
+  reason: z.string().optional(),
+});
+export type TelegramLinkStatus = z.infer<typeof telegramLinkStatusSchema>;
