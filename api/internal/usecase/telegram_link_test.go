@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/andreasoentoro/hearth/api/internal/domain"
+	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
 func TestStartMintsALinkNonceCarryingTheMember(t *testing.T) {
@@ -123,6 +124,49 @@ func TestConfirmRefusesWhenTheMemberAlreadyHasAChat(t *testing.T) {
 	}
 }
 
+// TestConfirmRacingItsOwnEarlierConfirmReturnsTheSameBinding covers the
+// double-click / two-tabs-polling-one-link race: this call's own pre-checks
+// see nothing bound, but by the time its own Create reaches the database,
+// its own earlier request already committed the identical row. The loser
+// must not be told the chat "belongs to another account" -- that would be
+// false, since it is the same account.
+func TestConfirmRacingItsOwnEarlierConfirmReturnsTheSameBinding(t *testing.T) {
+	svc, doubles := newTelegramLinkService(t)
+	start, _ := svc.Start(context.Background(), "user-1")
+	doubles.links.redeem(start.ID, 711, "andreas")
+
+	doubles.accounts.failNextCreateWithConflict(usecase.TelegramBinding{
+		UserID: "user-1", ChatID: 711, ChatUsername: "andreas",
+	})
+
+	got, err := svc.Confirm(context.Background(), "user-1", start.ID)
+	if err != nil {
+		t.Fatalf("Confirm() = %v, want nil -- losing a race against its own earlier confirm is not an error", err)
+	}
+	if got.ChatID != 711 || got.ChatUsername != "andreas" {
+		t.Fatalf("binding = %+v, want chat 711 (andreas)", got)
+	}
+}
+
+// TestConfirmRacingASecondPendingLinkForTheSameUserReportsAlreadyLinked
+// covers the other race: two pending links for the same user confirmed
+// concurrently. By the time this Create reaches the database, the user is
+// already bound to a *different* chat, so the chat side was never the
+// problem -- the user-side UNIQUE is the one that fired.
+func TestConfirmRacingASecondPendingLinkForTheSameUserReportsAlreadyLinked(t *testing.T) {
+	svc, doubles := newTelegramLinkService(t)
+	start, _ := svc.Start(context.Background(), "user-1")
+	doubles.links.redeem(start.ID, 802, "andreas")
+
+	doubles.accounts.failNextCreateWithConflict(usecase.TelegramBinding{
+		UserID: "user-1", ChatID: 801, ChatUsername: "other-chat",
+	})
+
+	if _, err := svc.Confirm(context.Background(), "user-1", start.ID); !errors.Is(err, domain.ErrTelegramAlreadyLinked) {
+		t.Fatalf("Confirm() = %v, want domain.ErrTelegramAlreadyLinked", err)
+	}
+}
+
 func TestStatusStaysConnectedAfterTheLinkExpires(t *testing.T) {
 	svc, doubles := newTelegramLinkService(t)
 	start, _ := svc.Start(context.Background(), "user-1")
@@ -137,6 +181,90 @@ func TestStatusStaysConnectedAfterTheLinkExpires(t *testing.T) {
 	got, _ := svc.Status(context.Background(), "user-1", start.ID)
 	if got.Status != "connected" {
 		t.Fatalf("Status = %q, want \"connected\"", got.Status)
+	}
+}
+
+// TestStatusRefusesWhenTheChatIsBoundToSomeoneElse is the first of Status's
+// two "refused" branches: a chat redeemed this link, but that chat already
+// belongs to a different Hearth account.
+func TestStatusRefusesWhenTheChatIsBoundToSomeoneElse(t *testing.T) {
+	svc, doubles := newTelegramLinkService(t)
+	doubles.accounts.bind(821, "user-9")
+	start, _ := svc.Start(context.Background(), "user-1")
+	doubles.links.redeem(start.ID, 821, "andreas")
+
+	got, err := svc.Status(context.Background(), "user-1", start.ID)
+	if err != nil {
+		t.Fatalf("Status() = %v, want nil", err)
+	}
+	if got.Status != "refused" {
+		t.Fatalf("Status = %q, want \"refused\"", got.Status)
+	}
+	if got.Reason == "" {
+		t.Fatal("Reason is empty, want the chat-taken sentence")
+	}
+}
+
+// TestStatusRefusesWhenTheMemberAlreadyHasADifferentChat is Status's other
+// "refused" branch: the chat redeemed this link cleanly, but this member
+// already has a different chat connected.
+func TestStatusRefusesWhenTheMemberAlreadyHasADifferentChat(t *testing.T) {
+	svc, doubles := newTelegramLinkService(t)
+	doubles.accounts.bind(822, "user-1")
+	start, _ := svc.Start(context.Background(), "user-1")
+	doubles.links.redeem(start.ID, 823, "andreas")
+
+	got, err := svc.Status(context.Background(), "user-1", start.ID)
+	if err != nil {
+		t.Fatalf("Status() = %v, want nil", err)
+	}
+	if got.Status != "refused" {
+		t.Fatalf("Status = %q, want \"refused\"", got.Status)
+	}
+	if got.Reason == "" {
+		t.Fatal("Reason is empty, want the already-linked sentence")
+	}
+}
+
+// TestStatusCarriesNoReasonForWaitingPendingOrConnected complements the two
+// refused-branch tests above: Reason exists to give the panel a sentence for
+// the one status that needs one, so this proves the other statuses don't
+// carry a stale one forward.
+func TestStatusCarriesNoReasonForWaitingPendingOrConnected(t *testing.T) {
+	svc, doubles := newTelegramLinkService(t)
+	start, _ := svc.Start(context.Background(), "user-1")
+
+	if got, err := svc.Status(context.Background(), "user-1", start.ID); err != nil || got.Status != "waiting" || got.Reason != "" {
+		t.Fatalf("waiting: Status, err = %+v, %v, want waiting with no reason", got, err)
+	}
+
+	doubles.links.redeem(start.ID, 831, "andreas")
+	if got, err := svc.Status(context.Background(), "user-1", start.ID); err != nil || got.Status != "pending" || got.Reason != "" {
+		t.Fatalf("pending: Status, err = %+v, %v, want pending with no reason", got, err)
+	}
+
+	if _, err := svc.Confirm(context.Background(), "user-1", start.ID); err != nil {
+		t.Fatalf("Confirm() = %v, want nil", err)
+	}
+	if got, err := svc.Status(context.Background(), "user-1", start.ID); err != nil || got.Status != "connected" || got.Reason != "" {
+		t.Fatalf("connected: Status, err = %+v, %v, want connected with no reason", got, err)
+	}
+}
+
+// TestStatusCarriesNoReasonWhenExpired is the fourth status
+// TestStatusCarriesNoReasonForWaitingPendingOrConnected does not reach: an
+// unconsumed row past its expiry needs no explanation, just "start again".
+func TestStatusCarriesNoReasonWhenExpired(t *testing.T) {
+	svc, doubles := newTelegramLinkService(t)
+	start, _ := svc.Start(context.Background(), "user-1")
+	doubles.clock.Advance(11 * time.Minute)
+
+	got, err := svc.Status(context.Background(), "user-1", start.ID)
+	if err != nil {
+		t.Fatalf("Status() = %v, want nil", err)
+	}
+	if got.Status != "expired" || got.Reason != "" {
+		t.Fatalf("Status = %+v, want expired with no reason", got)
 	}
 }
 

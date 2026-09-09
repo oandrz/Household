@@ -120,12 +120,31 @@ func (s *TelegramLinkService) Confirm(ctx context.Context, userID, linkID string
 
 	binding := TelegramBinding{UserID: userID, ChatID: row.ChatID, ChatUsername: row.ChatUsername, LinkedAt: s.d.Clock.Now()}
 	if err := s.d.Accounts.Create(ctx, binding); err != nil {
-		// Both UNIQUEs arrive as ErrAlreadyExists; only this service knows
-		// which side it just checked, so it says which one lost the race.
-		if errors.Is(err, domain.ErrAlreadyExists) {
-			return TelegramBinding{}, domain.ErrTelegramChatTaken
+		if !errors.Is(err, domain.ErrAlreadyExists) {
+			return TelegramBinding{}, fmt.Errorf("create telegram account: %w", err)
 		}
-		return TelegramBinding{}, fmt.Errorf("create telegram account: %w", err)
+		// Both UNIQUEs arrive as ErrAlreadyExists, and by now this service
+		// genuinely does not know which one fired: the pre-checks above ran
+		// against state that is, at worst, this row's whole ten-minute
+		// window old, and it is the constraints -- not those checks -- that
+		// are the real gate. Re-read the chat side to find out. Bound to
+		// this same user is the idempotent case: our own earlier confirm,
+		// or a second tab open on the same link, already wrote this exact
+		// row, so hand back the binding rather than an error. Bound to
+		// someone else is the chat-side collision. Still unbound means the
+		// chat side was never the problem, so it was the user-side UNIQUE --
+		// a second pending link for this user won the race instead.
+		boundTo, chatErr := s.d.Accounts.ByChatID(ctx, row.ChatID)
+		switch {
+		case chatErr == nil && boundTo == userID:
+			return s.d.Accounts.ByUserID(ctx, userID)
+		case chatErr == nil:
+			return TelegramBinding{}, domain.ErrTelegramChatTaken
+		case errors.Is(chatErr, domain.ErrNotFound):
+			return TelegramBinding{}, domain.ErrTelegramAlreadyLinked
+		default:
+			return TelegramBinding{}, fmt.Errorf("look up telegram account by chat after conflict: %w", chatErr)
+		}
 	}
 	return binding, nil
 }

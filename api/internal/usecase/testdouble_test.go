@@ -3730,6 +3730,17 @@ var _ usecase.TelegramLinkRepository = (*telegramLinkRepoDouble)(nil)
 type telegramAccountRepoDouble struct {
 	byChatID map[int64]string                   // chatID -> userID
 	byUserID map[string]usecase.TelegramBinding // userID -> binding
+
+	// failNextCreate arms a one-shot race for the next Create call, the same
+	// one-shot pattern magicLinkDouble.failNextCreate uses. It carries the
+	// binding a concurrent request is imagined to have already committed:
+	// Create plants it into both maps (exactly what a real UNIQUE violation
+	// implies just happened underneath this call) and returns
+	// domain.ErrAlreadyExists, so a re-read afterwards -- which is what
+	// Confirm's conflict handling does -- sees precisely what a real
+	// Postgres transaction would see after losing the race, even though
+	// this call's own pre-checks, run before the race landed, saw nothing.
+	failNextCreate *usecase.TelegramBinding
 }
 
 func newTelegramAccountRepoDouble() *telegramAccountRepoDouble {
@@ -3755,11 +3766,26 @@ func (d *telegramAccountRepoDouble) ByUserID(_ context.Context, userID string) (
 	return b, nil
 }
 
+// failNextCreateWithConflict arms failNextCreate: the next Create call plants
+// conflicting -- standing in for the row a concurrent request already
+// committed -- and returns domain.ErrAlreadyExists instead of writing b.
+// Every call after that succeeds normally again.
+func (d *telegramAccountRepoDouble) failNextCreateWithConflict(conflicting usecase.TelegramBinding) {
+	d.failNextCreate = &conflicting
+}
+
 // Create mirrors the two UNIQUEs telegram_accounts enforces in Postgres --
 // one chat per user, one user per chat -- so a test exercising
 // TelegramLinkService.Confirm against this double sees the same
 // domain.ErrAlreadyExists a real database would return.
 func (d *telegramAccountRepoDouble) Create(_ context.Context, b usecase.TelegramBinding) error {
+	if d.failNextCreate != nil {
+		conflicting := *d.failNextCreate
+		d.failNextCreate = nil
+		d.byUserID[conflicting.UserID] = conflicting
+		d.byChatID[conflicting.ChatID] = conflicting.UserID
+		return domain.ErrAlreadyExists
+	}
 	if _, ok := d.byUserID[b.UserID]; ok {
 		return domain.ErrAlreadyExists
 	}
