@@ -348,15 +348,20 @@ expiresAt)`, `byID`, `countMintsSince` mirroring the SQL exactly.
 
 - [ ] **Step 8: Write the schema test**
 
-`api/internal/adapter/postgres/telegram_link_schema_test.go` — follow the
-existing `agreement_schema_test.go` for the fixture helpers:
+`api/internal/adapter/postgres/telegram_link_schema_test.go`. The fixture
+helpers this package actually has: `openTestDB(t)` opens the container-backed
+database, and a user comes from `postgres.NewUserRepo(db).Create(ctx, email,
+"", name)` — there is no `newTestDB` and no `seedUser`, so use these:
 
 ```go
 func TestTelegramLinkRequestCarriesItsUserThroughRedemption(t *testing.T) {
 	ctx := context.Background()
-	db := newTestDB(t)
+	db := openTestDB(t)
 	repo := postgres.NewTelegramLinkRepo(db)
-	user := seedUser(t, db) // an existing helper; see invite_repo_test.go
+	user, err := postgres.NewUserRepo(db).Create(ctx, "link-1@hearth.family", "", "Andreas")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
 
 	if err := repo.Create(ctx, user.ID, []byte("hash-1"), time.Now().Add(10*time.Minute)); err != nil {
 		t.Fatalf("Create() = %v, want nil", err)
@@ -382,7 +387,7 @@ func TestTelegramLinkRequestCarriesItsUserThroughRedemption(t *testing.T) {
 
 func TestSignInNonceCarriesNoUser(t *testing.T) {
 	ctx := context.Background()
-	db := newTestDB(t)
+	db := openTestDB(t)
 	repo := postgres.NewTelegramLinkRepo(db)
 
 	if err := repo.Create(ctx, "", []byte("hash-2"), time.Now().Add(10*time.Minute)); err != nil {
@@ -459,9 +464,17 @@ Append to `telegram_link_schema_test.go`:
 ```go
 func TestBindingRefusesASecondChatForTheSameUserAndASecondUserForTheSameChat(t *testing.T) {
 	ctx := context.Background()
-	db := newTestDB(t)
+	db := openTestDB(t)
 	repo := postgres.NewTelegramAccountRepo(db)
-	alice, bob := seedUser(t, db), seedUser(t, db)
+	users := postgres.NewUserRepo(db)
+	alice, err := users.Create(ctx, "alice@hearth.family", "", "Alice")
+	if err != nil {
+		t.Fatalf("create alice: %v", err)
+	}
+	bob, err := users.Create(ctx, "bob@hearth.family", "", "Bob")
+	if err != nil {
+		t.Fatalf("create bob: %v", err)
+	}
 
 	first := usecase.TelegramBinding{UserID: alice.ID, ChatID: 9001, ChatUsername: "alice"}
 	if err := repo.Create(ctx, first); err != nil {
@@ -524,10 +537,12 @@ SELECT chat_id, chat_username, linked_at FROM telegram_accounts WHERE user_id = 
 DELETE FROM telegram_accounts WHERE user_id = $1;
 ```
 
-The existing `CreateTelegramAccount` (two columns) is replaced, not added to —
-`SignupRepository.Provision` calls it and now passes `""` for the username,
-because a Telegram sign-up learns the chat from the update and has no browser
-to show a name to.
+The existing `CreateTelegramAccount` (two columns) is replaced, not added to.
+Its one existing caller is `api/internal/adapter/postgres/signup_repo.go:188`,
+inside `Provision`'s transaction; it passes `optionalText("")` for the new
+column, because a Telegram sign-up learns the chat from the update and has no
+browser to show a name to. That call site must be updated in this task or the
+package will not compile.
 
 - [ ] **Step 4: Implement the repository and the port**
 
@@ -1061,7 +1076,7 @@ func TestConfirmRefusesAfterExpiry(t *testing.T) {
 	svc, doubles := newTelegramLinkService(t)
 	start, _ := svc.Start(context.Background(), "user-1")
 	doubles.links.redeem(start.ID, 704, "andreas")
-	doubles.clock.advance(11 * time.Minute)
+	doubles.clock.Advance(11 * time.Minute)
 
 	if _, err := svc.Confirm(context.Background(), "user-1", start.ID); !errors.Is(err, domain.ErrTelegramLinkNotPending) {
 		t.Fatalf("Confirm after expiry = %v, want domain.ErrTelegramLinkNotPending", err)
@@ -1097,7 +1112,7 @@ func TestStatusStaysConnectedAfterTheLinkExpires(t *testing.T) {
 	if _, err := svc.Confirm(context.Background(), "user-1", start.ID); err != nil {
 		t.Fatalf("Confirm() = %v, want nil", err)
 	}
-	doubles.clock.advance(11 * time.Minute)
+	doubles.clock.Advance(11 * time.Minute)
 
 	// Binding first, expiry last. A panel still polling when the nonce
 	// expires must not be told its working connection expired.
@@ -1147,7 +1162,7 @@ func TestUnlinkRemovesTheBinding(t *testing.T) {
 
 Add to the doubles: `telegramLinkRepoDouble.redeem(id, chatID, username)`
 (stamps a row consumed by its id, standing in for the bot's `/start`),
-`fixedClock.advance` if it is not already there, and
+`fixedClock.Advance` already exists (testdouble_test.go:40 — capital A), and
 `userDouble.addTelegramOnly(id)` writing a user with `Email: ""`.
 
 - [ ] **Step 3: Run and watch them fail**
