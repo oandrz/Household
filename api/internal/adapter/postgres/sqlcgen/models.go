@@ -330,15 +330,18 @@ type TelegramAccount struct {
 	ChatID        int64
 	LinkedAt      pgtype.Timestamptz
 	NudgesEnabled bool
+	ChatUsername  *string
 }
 
 type TelegramLinkRequest struct {
-	ID         pgtype.UUID
-	NonceHash  []byte
-	ExpiresAt  pgtype.Timestamptz
-	ConsumedAt pgtype.Timestamptz
-	ChatID     *int64
-	CreatedAt  pgtype.Timestamptz
+	ID           pgtype.UUID
+	NonceHash    []byte
+	ExpiresAt    pgtype.Timestamptz
+	ConsumedAt   pgtype.Timestamptz
+	ChatID       *int64
+	CreatedAt    pgtype.Timestamptz
+	UserID       pgtype.UUID
+	ChatUsername *string
 }
 
 type Transaction struct {

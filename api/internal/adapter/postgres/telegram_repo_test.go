@@ -15,13 +15,13 @@ func TestTelegramLinkConsumeIsSingleUse(t *testing.T) {
 	repo := postgres.NewTelegramLinkRepo(openTestDB(t))
 	hash := []byte("nonce-hash-one")
 
-	if err := repo.Create(ctx, hash, time.Now().Add(10*time.Minute)); err != nil {
+	if _, err := repo.Create(ctx, "", hash, time.Now().Add(10*time.Minute)); err != nil {
 		t.Fatalf("Create() = %v, want nil", err)
 	}
-	if err := repo.Consume(ctx, hash, 4242); err != nil {
+	if _, err := repo.Consume(ctx, hash, 4242, ""); err != nil {
 		t.Fatalf("first Consume() = %v, want nil", err)
 	}
-	if err := repo.Consume(ctx, hash, 4242); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := repo.Consume(ctx, hash, 4242, ""); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("second Consume() = %v, want domain.ErrNotFound", err)
 	}
 }
@@ -31,10 +31,10 @@ func TestTelegramLinkConsumeRefusesAnExpiredNonce(t *testing.T) {
 	repo := postgres.NewTelegramLinkRepo(openTestDB(t))
 	hash := []byte("nonce-hash-expired")
 
-	if err := repo.Create(ctx, hash, time.Now().Add(-time.Minute)); err != nil {
+	if _, err := repo.Create(ctx, "", hash, time.Now().Add(-time.Minute)); err != nil {
 		t.Fatalf("Create() = %v, want nil", err)
 	}
-	if err := repo.Consume(ctx, hash, 4242); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := repo.Consume(ctx, hash, 4242, ""); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("Consume() on an expired nonce = %v, want domain.ErrNotFound", err)
 	}
 }
@@ -47,17 +47,17 @@ func TestTelegramLinkCountsOnlyThisChatsRedemptions(t *testing.T) {
 	since := time.Now().Add(-time.Hour)
 
 	for _, hash := range [][]byte{[]byte("c1-a"), []byte("c1-b")} {
-		if err := repo.Create(ctx, hash, time.Now().Add(10*time.Minute)); err != nil {
+		if _, err := repo.Create(ctx, "", hash, time.Now().Add(10*time.Minute)); err != nil {
 			t.Fatalf("Create() = %v", err)
 		}
-		if err := repo.Consume(ctx, hash, 1111); err != nil {
+		if _, err := repo.Consume(ctx, hash, 1111, ""); err != nil {
 			t.Fatalf("Consume() = %v", err)
 		}
 	}
-	if err := repo.Create(ctx, []byte("c2-a"), time.Now().Add(10*time.Minute)); err != nil {
+	if _, err := repo.Create(ctx, "", []byte("c2-a"), time.Now().Add(10*time.Minute)); err != nil {
 		t.Fatalf("Create() = %v", err)
 	}
-	if err := repo.Consume(ctx, []byte("c2-a"), 2222); err != nil {
+	if _, err := repo.Consume(ctx, []byte("c2-a"), 2222, ""); err != nil {
 		t.Fatalf("Consume() = %v", err)
 	}
 
@@ -85,13 +85,13 @@ func TestTelegramLinkRepoPruneLeavesLiveRows(t *testing.T) {
 	liveHash := []byte("prune-live-hash")
 	consumedHash := []byte("prune-consumed-hash")
 
-	if err := repo.Create(ctx, liveHash, time.Now().Add(24*time.Hour)); err != nil {
+	if _, err := repo.Create(ctx, "", liveHash, time.Now().Add(24*time.Hour)); err != nil {
 		t.Fatalf("Create live: %v", err)
 	}
-	if err := repo.Create(ctx, consumedHash, time.Now().Add(24*time.Hour)); err != nil {
+	if _, err := repo.Create(ctx, "", consumedHash, time.Now().Add(24*time.Hour)); err != nil {
 		t.Fatalf("Create consumed: %v", err)
 	}
-	if err := repo.Consume(ctx, consumedHash, 7777); err != nil {
+	if _, err := repo.Consume(ctx, consumedHash, 7777, ""); err != nil {
 		t.Fatalf("Consume: %v", err)
 	}
 	if _, err := pool.Exec(ctx,

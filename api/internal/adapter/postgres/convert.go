@@ -85,6 +85,25 @@ func uuidLooksValid(id string) bool {
 
 func uuidToString(u pgtype.UUID) string { return u.String() }
 
+// uuidOrEmpty renders a nullable uuid column as "" rather than the zero
+// UUID's "00000000-...", so a caller can test it with a plain == "".
+func uuidOrEmpty(u pgtype.UUID) string {
+	if !u.Valid {
+		return ""
+	}
+	return u.String()
+}
+
+// int64Or renders a nullable bigint column (emit_pointers_for_null_types
+// gives it *int64) as 0 for NULL, the same "absent means zero value"
+// convention timeOf and stringOrEmpty give their own nullable columns.
+func int64Or(n *int64) int64 {
+	if n == nil {
+		return 0
+	}
+	return *n
+}
+
 func timestamptz(t time.Time) pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: t, Valid: true}
 }

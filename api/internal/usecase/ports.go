@@ -170,18 +170,59 @@ type MagicLinkRepository interface {
 	CountSince(ctx context.Context, email string, since time.Time) (int, error)
 }
 
+// TelegramLinkRedemption is what Consume hands back: the row's id and the
+// user it was minted for, "" for a sign-in nonce. The caller's next decision
+// -- link, sign in, or sign up -- is exactly this pair.
+type TelegramLinkRedemption struct {
+	ID     string // the telegram_link_requests row id
+	UserID string // "" for a sign-in nonce; set for a link nonce
+}
+
+// TelegramLinkRequest is one row of telegram_link_requests, read back for the
+// browser that minted it. Consumed, carrying a UserID, with no
+// telegram_accounts row yet, is the pending state a confirm screen polls
+// for -- there is no separate status column (see decision 5 of the linking
+// design).
+type TelegramLinkRequest struct {
+	ID           string
+	UserID       string
+	ChatID       int64
+	ChatUsername string
+	Consumed     bool
+	ExpiresAt    time.Time
+}
+
 // TelegramLinkRepository stores the pending deep-link nonces that carry a
 // browser's sign-in request across to Telegram. Nonces are stored hashed,
 // never raw, like every other token in this system.
 type TelegramLinkRepository interface {
-	Create(ctx context.Context, nonceHash []byte, expiresAt time.Time) error
-	// Consume stamps the row consumed and records which chat redeemed it, in
-	// one statement. The chat is unknown when the nonce is minted -- the
-	// browser has not met Telegram yet -- so redemption is the only moment the
-	// two can be joined, and CountLinksSince depends on it happening here.
-	// Returns domain.ErrNotFound if the nonce is unknown, expired or already
-	// consumed; those three are deliberately indistinguishable to a caller.
-	Consume(ctx context.Context, nonceHash []byte, chatID int64) error
+	// Create stores a nonce and returns the new row's id. userID is "" for a
+	// sign-in nonce -- the browser has not said who it is -- and a user id for
+	// a link nonce minted by a signed-in member for their own account. That
+	// difference is the only thing separating the two kinds of row, so a
+	// Create that dropped it would silently turn a link into a sign-in. The
+	// id is returned because TelegramLinkService.Start hands it straight back
+	// to the browser to poll with -- Create is the only moment it exists to
+	// return; a later lookup by nonce_hash would be a second way to address a
+	// row by its secret.
+	Create(ctx context.Context, userID string, nonceHash []byte, expiresAt time.Time) (string, error)
+	// Consume stamps the row consumed and records which chat redeemed it, in one
+	// statement, and returns the row's id and the user it was minted for. The
+	// chat is unknown when the nonce is minted -- the browser has not met
+	// Telegram yet -- so redemption is the only moment the two can be joined, and
+	// CountLinksSince depends on it happening here. Returns domain.ErrNotFound if
+	// the nonce is unknown, expired or already consumed; those three are
+	// deliberately indistinguishable to a caller.
+	Consume(ctx context.Context, nonceHash []byte, chatID int64, chatUsername string) (TelegramLinkRedemption, error)
+	// ByID reads one link request for the browser that minted it. The caller must
+	// check the row's UserID against the session's own before showing anything:
+	// this method deliberately does not, because a repository that enforced
+	// ownership would be a second place authorisation lives (ADR 8).
+	ByID(ctx context.Context, id string) (TelegramLinkRequest, error)
+	// CountMintsSince counts link nonces this user has minted since a point in
+	// time, consumed or not. Bounded table growth, not a security control -- the
+	// session is already authenticated.
+	CountMintsSince(ctx context.Context, userID string, since time.Time) (int, error)
 	// CountLinksSince counts links this chat has redeemed since a point in
 	// time. It lives here rather than on TelegramAccountRepository because the
 	// per-chat limit must also bind chats that have no account yet: a stranger
@@ -193,14 +234,41 @@ type TelegramLinkRepository interface {
 	Prune(ctx context.Context, before time.Time) (int64, error)
 }
 
-// TelegramAccountRepository resolves a Telegram chat to the Hearth user it is
-// bound to. The binding itself is written inside SignupRepository.Provision's
-// transaction, which is why there is no Create method here.
+// TelegramBinding is one chat bound to one Hearth user.
+type TelegramBinding struct {
+	UserID       string
+	ChatID       int64
+	ChatUsername string
+	LinkedAt     time.Time
+}
+
+// TelegramAccountRepository is the binding between a Telegram chat and the
+// Hearth user it belongs to. Bindings are written in two places and nowhere
+// else: inside SignupRepository.Provision's transaction, when a stranger
+// creates a household from a chat, and by TelegramLinkService.Confirm, when
+// a member who already has an account connects their chat from Settings.
+// Both directions are UNIQUE in the database -- one chat per user, one user
+// per chat -- and that constraint, not any check in Go, is what makes a
+// sign-in unambiguous.
 type TelegramAccountRepository interface {
 	// ByChatID returns domain.ErrNotFound when the chat is bound to no user,
 	// which is the ordinary "this person has no account yet" case, not an error
 	// condition.
 	ByChatID(ctx context.Context, chatID int64) (userID string, err error)
+	// ByUserID returns domain.ErrNotFound when this user has no chat bound.
+	ByUserID(ctx context.Context, userID string) (TelegramBinding, error)
+	// Create returns domain.ErrAlreadyExists for either UNIQUE -- one chat per
+	// user, one user per chat. Which of the two collided is not distinguished:
+	// the caller knows which side it was asking about (a fresh sign-up binds a
+	// chat that must be free; Confirm binds a user who must have no chat yet)
+	// and chooses the sentence, rather than a repository guessing at intent.
+	// b.LinkedAt is ignored -- the store assigns it, the same as any other
+	// created-at column.
+	Create(ctx context.Context, b TelegramBinding) error
+	// Delete is idempotent: removing a binding that is not there is not an
+	// error, because the caller's goal -- this user has no chat -- is already
+	// true.
+	Delete(ctx context.Context, userID string) error
 }
 
 // NudgeRecipient is one chat that may receive one household's daily digest:

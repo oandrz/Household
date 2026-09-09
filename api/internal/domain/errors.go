@@ -285,4 +285,32 @@ var (
 	// where a logged 500 is the right answer to an impossible row.
 	ErrUnknownAgreementProposalKind   = errors.New("unknown agreement proposal kind")
 	ErrUnknownAgreementProposalStatus = errors.New("unknown agreement proposal status")
+
+	// --- Telegram account linking ---
+
+	// ErrTelegramChatTaken is a chat already bound to a different Hearth
+	// user. Named separately from ErrTelegramAlreadyLinked because the two
+	// need different sentences: one is "that phone belongs to someone else",
+	// the other is "you already have a phone".
+	ErrTelegramChatTaken = errors.New("that telegram chat is connected to another account")
+
+	// ErrTelegramAlreadyLinked is this user already having a chat. One chat
+	// per user is a database constraint; this is how it reads to a person.
+	ErrTelegramAlreadyLinked = errors.New("this account already has a telegram chat")
+
+	// ErrTelegramLinkNotPending covers a confirm before any chat redeemed
+	// the link, and a confirm after it expired. The two are one error
+	// because the panel's next instruction is the same for both: start again.
+	ErrTelegramLinkNotPending = errors.New("no chat has opened this link")
+
+	// ErrTelegramUnlinkWouldLockOut is a disconnect refused because the
+	// account has no email address. GetUserByEmail is WHERE email = $1 and
+	// NULL never matches a parameter, so a Telegram-only account that
+	// disconnects has no magic link, no password reset and no adminctl path
+	// back in -- only make psql by hand.
+	ErrTelegramUnlinkWouldLockOut = errors.New("this account has no email address to sign in with")
+
+	// ErrTelegramMintsRateLimited bounds how many link attempts one member
+	// can start in an hour. Table growth, not a security control.
+	ErrTelegramMintsRateLimited = errors.New("too many telegram link attempts")
 )

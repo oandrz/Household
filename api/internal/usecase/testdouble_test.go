@@ -201,6 +201,15 @@ func (d *userDouble) mustCreate(t *testing.T, email, passwordHash, displayName s
 	return u
 }
 
+// addTelegramOnly writes a user with the given id and no email address --
+// the credential-less shape a Telegram sign-up leaves behind
+// (SignupRepository.Provision). TestUnlinkRefusesAnAccountWithNoEmail uses
+// it to put TelegramLinkService.Unlink in front of the one account
+// domain.ErrTelegramUnlinkWouldLockOut exists to protect.
+func (d *userDouble) addTelegramOnly(id string) {
+	d.byID[id] = usecase.StoredUser{User: domain.User{ID: id}}
+}
+
 // setMembers completes the two doubles' mutual reference: newMembershipDouble
 // already takes a *userDouble, and CreateWithMembership needs the reverse
 // direction to create the membership half of its transaction.
@@ -3490,10 +3499,12 @@ var _ usecase.GoalProgressReader = (*goalProgressDouble)(nil)
 // --- TelegramLinkRepository -------------------------------------------
 
 type telegramLinkRow struct {
-	CreatedAt  time.Time
-	ExpiresAt  time.Time
-	ConsumedAt *time.Time
-	ChatID     int64
+	CreatedAt    time.Time
+	ExpiresAt    time.Time
+	ConsumedAt   *time.Time
+	ChatID       int64
+	UserID       string
+	ChatUsername string
 }
 
 // telegramLinkRepoDouble plays the same role postgres's TelegramLinkRepo
@@ -3517,9 +3528,15 @@ func newTelegramLinkRepoDouble(clock *fixedClock, tokens *seqTokens) *telegramLi
 	return &telegramLinkRepoDouble{clock: clock, tokens: tokens, rows: map[string]*telegramLinkRow{}}
 }
 
-func (d *telegramLinkRepoDouble) Create(_ context.Context, nonceHash []byte, expiresAt time.Time) error {
-	d.rows[string(nonceHash)] = &telegramLinkRow{CreatedAt: d.clock.Now(), ExpiresAt: expiresAt}
-	return nil
+// Create returns the row's id -- string(nonceHash), the same key ByID reads
+// by (see ByID's own doc comment below) -- mirroring the real repository's
+// RETURNING id: TelegramLinkService.Start hands this straight back to the
+// browser to poll with, so a double that swallowed it could never stand in
+// for that service (see task-5-brief.md's ruling 1).
+func (d *telegramLinkRepoDouble) Create(_ context.Context, userID string, nonceHash []byte, expiresAt time.Time) (string, error) {
+	id := string(nonceHash)
+	d.rows[id] = &telegramLinkRow{CreatedAt: d.clock.Now(), ExpiresAt: expiresAt, UserID: userID}
+	return id, nil
 }
 
 // Consume mirrors ConsumeTelegramLinkRequest's guard -- nonce_hash = $1 AND
@@ -3527,15 +3544,16 @@ func (d *telegramLinkRepoDouble) Create(_ context.Context, nonceHash []byte, exp
 // rather than wall time. An unknown, expired or already-consumed nonce all
 // report domain.ErrNotFound, indistinguishably, exactly as
 // TelegramLinkRepository.Consume's doc comment requires.
-func (d *telegramLinkRepoDouble) Consume(_ context.Context, nonceHash []byte, chatID int64) error {
+func (d *telegramLinkRepoDouble) Consume(_ context.Context, nonceHash []byte, chatID int64, chatUsername string) (usecase.TelegramLinkRedemption, error) {
 	row, ok := d.rows[string(nonceHash)]
 	if !ok || row.ConsumedAt != nil || !row.ExpiresAt.After(d.clock.Now()) {
-		return domain.ErrNotFound
+		return usecase.TelegramLinkRedemption{}, domain.ErrNotFound
 	}
 	now := d.clock.Now()
 	row.ConsumedAt = &now
 	row.ChatID = chatID
-	return nil
+	row.ChatUsername = chatUsername
+	return usecase.TelegramLinkRedemption{ID: string(nonceHash), UserID: row.UserID}, nil
 }
 
 // CountLinksSince mirrors CountTelegramLinksSince's SQL exactly: chat_id = $1
@@ -3590,6 +3608,20 @@ func (d *telegramLinkRepoDouble) mintLive(t *testing.T, expiresAt time.Time) str
 	return raw
 }
 
+// mintLiveFor is mintLive's link-nonce counterpart: it mints a live row that
+// names userID, standing in for a prior call to the service method (Task 5)
+// a signed-in member's Settings panel calls to start a link. mintLive itself
+// keeps minting unbound rows -- StartLink's sign-in nonces still carry no
+// user -- so the two are kept separate rather than teaching mintLive an
+// optional argument.
+func (d *telegramLinkRepoDouble) mintLiveFor(t *testing.T, userID string, expiresAt time.Time) string {
+	t.Helper()
+	d.n++
+	raw := fmt.Sprintf("nonce-%d", d.n)
+	d.rows[string(d.tokens.HashToken(raw))] = &telegramLinkRow{CreatedAt: d.clock.Now(), ExpiresAt: expiresAt, UserID: userID}
+	return raw
+}
+
 // markConsumed stamps the row for raw consumed by chatID, for a test that
 // needs a nonce which has already been redeemed once.
 func (d *telegramLinkRepoDouble) markConsumed(raw string, chatID int64) {
@@ -3622,6 +3654,59 @@ func (d *telegramLinkRepoDouble) recordRedemptions(chatID int64, n int, at time.
 	}
 }
 
+// ByID mirrors GetTelegramLinkRequest. The double has no separate uuid
+// concept of its own, so id is the same string(nonceHash) key Consume
+// returns as TelegramLinkRedemption.ID -- a caller of this double never sees
+// the difference, the same way a caller of the real repository never sees
+// that a Postgres uuid is underneath it.
+func (d *telegramLinkRepoDouble) ByID(_ context.Context, id string) (usecase.TelegramLinkRequest, error) {
+	row, ok := d.rows[id]
+	if !ok {
+		return usecase.TelegramLinkRequest{}, domain.ErrNotFound
+	}
+	return usecase.TelegramLinkRequest{
+		ID:           id,
+		UserID:       row.UserID,
+		ChatID:       row.ChatID,
+		ChatUsername: row.ChatUsername,
+		Consumed:     row.ConsumedAt != nil,
+		ExpiresAt:    row.ExpiresAt,
+	}, nil
+}
+
+// redeem stamps the row for id consumed by chatID and chatUsername, standing
+// in for the bot's /start handler calling Consume against the raw nonce --
+// which TelegramLinkService.Start's caller never sees again, only the id.
+// Unlike markConsumed (which looks a row up by its raw nonce, for
+// TelegramAuthService's own tests), redeem addresses the row the same way a
+// browser polling TelegramLinkService.Status does: by id.
+func (d *telegramLinkRepoDouble) redeem(id string, chatID int64, chatUsername string) {
+	row, ok := d.rows[id]
+	if !ok {
+		return
+	}
+	now := d.clock.Now()
+	row.ConsumedAt = &now
+	row.ChatID = chatID
+	row.ChatUsername = chatUsername
+}
+
+// CountMintsSince mirrors CountTelegramLinkMintsSince's SQL exactly: user_id
+// = $1 AND created_at >= $2, inclusive of the boundary, counting a row
+// whether or not it has been redeemed yet.
+func (d *telegramLinkRepoDouble) CountMintsSince(_ context.Context, userID string, since time.Time) (int, error) {
+	n := 0
+	for _, row := range d.rows {
+		if row.UserID != userID {
+			continue
+		}
+		if !row.CreatedAt.Before(since) {
+			n++
+		}
+	}
+	return n, nil
+}
+
 // Prune mirrors PruneTelegramLinkRequests: created_at < before AND (consumed
 // or expired). A live, unexpired row is never pruned no matter how old
 // before is -- the same shape as signupDouble.Prune, for the same table
@@ -3643,11 +3728,26 @@ var _ usecase.TelegramLinkRepository = (*telegramLinkRepoDouble)(nil)
 // --- TelegramAccountRepository -----------------------------------------
 
 type telegramAccountRepoDouble struct {
-	byChatID map[int64]string // chatID -> userID
+	byChatID map[int64]string                   // chatID -> userID
+	byUserID map[string]usecase.TelegramBinding // userID -> binding
+
+	// failNextCreate arms a one-shot race for the next Create call, the same
+	// one-shot pattern magicLinkDouble.failNextCreate uses. It carries the
+	// binding a concurrent request is imagined to have already committed:
+	// Create plants it into both maps (exactly what a real UNIQUE violation
+	// implies just happened underneath this call) and returns
+	// domain.ErrAlreadyExists, so a re-read afterwards -- which is what
+	// Confirm's conflict handling does -- sees precisely what a real
+	// Postgres transaction would see after losing the race, even though
+	// this call's own pre-checks, run before the race landed, saw nothing.
+	failNextCreate *usecase.TelegramBinding
 }
 
 func newTelegramAccountRepoDouble() *telegramAccountRepoDouble {
-	return &telegramAccountRepoDouble{byChatID: map[int64]string{}}
+	return &telegramAccountRepoDouble{
+		byChatID: map[int64]string{},
+		byUserID: map[string]usecase.TelegramBinding{},
+	}
 }
 
 func (d *telegramAccountRepoDouble) ByChatID(_ context.Context, chatID int64) (string, error) {
@@ -3658,12 +3758,68 @@ func (d *telegramAccountRepoDouble) ByChatID(_ context.Context, chatID int64) (s
 	return userID, nil
 }
 
+func (d *telegramAccountRepoDouble) ByUserID(_ context.Context, userID string) (usecase.TelegramBinding, error) {
+	b, ok := d.byUserID[userID]
+	if !ok {
+		return usecase.TelegramBinding{}, domain.ErrNotFound
+	}
+	return b, nil
+}
+
+// failNextCreateWithConflict arms failNextCreate: the next Create call plants
+// conflicting -- standing in for the row a concurrent request already
+// committed -- and returns domain.ErrAlreadyExists instead of writing b.
+// Every call after that succeeds normally again.
+func (d *telegramAccountRepoDouble) failNextCreateWithConflict(conflicting usecase.TelegramBinding) {
+	d.failNextCreate = &conflicting
+}
+
+// Create mirrors the two UNIQUEs telegram_accounts enforces in Postgres --
+// one chat per user, one user per chat -- so a test exercising
+// TelegramLinkService.Confirm against this double sees the same
+// domain.ErrAlreadyExists a real database would return.
+func (d *telegramAccountRepoDouble) Create(_ context.Context, b usecase.TelegramBinding) error {
+	if d.failNextCreate != nil {
+		conflicting := *d.failNextCreate
+		d.failNextCreate = nil
+		d.byUserID[conflicting.UserID] = conflicting
+		d.byChatID[conflicting.ChatID] = conflicting.UserID
+		return domain.ErrAlreadyExists
+	}
+	if _, ok := d.byUserID[b.UserID]; ok {
+		return domain.ErrAlreadyExists
+	}
+	if _, ok := d.byChatID[b.ChatID]; ok {
+		return domain.ErrAlreadyExists
+	}
+	// LinkedAt is assigned by the store, the same as the real repository's
+	// DEFAULT now(): a caller-supplied value on b is ignored, never trusted.
+	b.LinkedAt = time.Now()
+	d.byUserID[b.UserID] = b
+	d.byChatID[b.ChatID] = b.UserID
+	return nil
+}
+
+// Delete is idempotent, same as the real repository: removing a binding
+// that is not there is not an error.
+func (d *telegramAccountRepoDouble) Delete(_ context.Context, userID string) error {
+	b, ok := d.byUserID[userID]
+	if !ok {
+		return nil
+	}
+	delete(d.byUserID, userID)
+	delete(d.byChatID, b.ChatID)
+	return nil
+}
+
 // bind pre-populates a chat -> user binding, standing in for the binding
-// SignupRepository.Provision writes inside its own transaction (see
-// TelegramAccountRepository's doc comment in ports.go for why there is no
-// Create method here to call instead).
+// SignupRepository.Provision writes inside its own transaction. It writes
+// both maps directly, bypassing Create's uniqueness checks, because the
+// tests that call it are setting up a fixture, not exercising the binding
+// rules themselves.
 func (d *telegramAccountRepoDouble) bind(chatID int64, userID string) {
 	d.byChatID[chatID] = userID
+	d.byUserID[userID] = usecase.TelegramBinding{UserID: userID, ChatID: chatID, LinkedAt: time.Now()}
 }
 
 var _ usecase.TelegramAccountRepository = (*telegramAccountRepoDouble)(nil)
@@ -3756,6 +3912,54 @@ func newTelegramAuthService(t *testing.T) (*usecase.TelegramAuthService, *telegr
 		links: links, accounts: accounts, magicLinks: magicLinks,
 		signups: signups, sender: sender, tokens: tokens, clock: clock,
 	}
+}
+
+// --- TelegramLinkService fixture -----------------------------------------
+
+// telegramLinkDoubles holds every double newTelegramLinkService wires
+// together, so a test can reach into whichever one its assertion needs.
+type telegramLinkDoubles struct {
+	links    *telegramLinkRepoDouble
+	accounts *telegramAccountRepoDouble
+	users    *userDouble
+	tokens   *seqTokens
+	clock    *fixedClock
+}
+
+// newTelegramLinkService builds a TelegramLinkService over its own set of
+// in-memory doubles, separate from newTelegramAuthService's: this service
+// needs a UserRepository (Unlink's lockout check) and neither a
+// MagicLinkRepository nor a SignupRepository, which TelegramAuthService
+// needs and this service does not.
+//
+// It pre-creates one user with an email address. userDouble.Create's own
+// counter means that user lands on id "user-1" -- the id every test below
+// that calls Start/Confirm/Unlink as "user-1" relies on already existing
+// with somewhere else to sign in. A test exercising the locked-out case
+// (TestUnlinkRefusesAnAccountWithNoEmail) adds its own credential-less user
+// under a different id instead of touching this one.
+func newTelegramLinkService(t *testing.T) (*usecase.TelegramLinkService, *telegramLinkDoubles) {
+	t.Helper()
+
+	clock := &fixedClock{now: time.Now()}
+	tokens := &seqTokens{}
+
+	users := newUserDouble()
+	users.mustCreate(t, "andreas@hearth.family", "", "Andreas") // becomes "user-1"
+
+	links := newTelegramLinkRepoDouble(clock, tokens)
+	accounts := newTelegramAccountRepoDouble()
+
+	svc := usecase.NewTelegramLinkService(usecase.TelegramLinkDeps{
+		Links:       links,
+		Accounts:    accounts,
+		Users:       users,
+		Tokens:      tokens,
+		Clock:       clock,
+		BotUsername: "HearthBot",
+	})
+
+	return svc, &telegramLinkDoubles{links: links, accounts: accounts, users: users, tokens: tokens, clock: clock}
 }
 
 // --- Platform admin doubles: PlatformAdminRepository, FeatureFlagRepository,

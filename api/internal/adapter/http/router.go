@@ -67,6 +67,13 @@ type Deps struct {
 	// rather than being conditionally registered, so the router's shape does
 	// not change with configuration and every test builds the same tree.
 	Telegram *usecase.TelegramAuthService
+	// TelegramLink is Telegram's sibling for connecting an *existing*
+	// account to a chat rather than signing in with one. Nil for the same
+	// reason and with the same effect: every route in its group is
+	// registered unconditionally and answers 404 from inside the handler,
+	// so an install with no bot gives away nothing about whether the
+	// feature exists.
+	TelegramLink *usecase.TelegramLinkService
 	// Admin and AdminReauth are the platform-operator surface's two
 	// services. Unlike Telegram above they are never nil in a real
 	// deployment: the /admin subtree is always routed, and
@@ -175,6 +182,23 @@ func NewRouter(deps Deps) http.Handler {
 				tg.Use(rateLimitByIP(newIPRateLimiter(telegramStartsPerIPPerHour, time.Hour, now)))
 				tg.Use(requireFeature(deps, domain.FlagTelegramSignIn))
 				tg.Post("/telegram/start", handleTelegramStart(deps))
+			})
+
+			// Connecting a chat needs a browser session, not a token: a
+			// leaked token must not be able to bind a channel that outlives
+			// its own revocation (the same rule as minting a token, ADR 7).
+			// One group covers the reads too -- requireCSRF returns early for
+			// GET, HEAD and OPTIONS -- so the polling route needs no header.
+			auth.Group(func(tl chi.Router) {
+				tl.Use(requireSession(deps))
+				tl.Use(requireFeature(deps, domain.FlagTelegramSignIn))
+				tl.Use(requireCSRF)
+				tl.Use(requireCookieSession)
+				tl.Get("/telegram", handleTelegramBinding(deps))
+				tl.Delete("/telegram", handleTelegramUnlink(deps))
+				tl.Post("/telegram/link", handleTelegramLinkStart(deps))
+				tl.Get("/telegram/link/{id}", handleTelegramLinkStatus(deps))
+				tl.Post("/telegram/link/{id}/confirm", handleTelegramLinkConfirm(deps))
 			})
 
 			auth.Group(func(g chi.Router) {

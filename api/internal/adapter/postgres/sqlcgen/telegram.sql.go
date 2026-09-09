@@ -13,25 +13,53 @@ import (
 
 const consumeTelegramLinkRequest = `-- name: ConsumeTelegramLinkRequest :one
 UPDATE telegram_link_requests
-SET consumed_at = now(), chat_id = $2
+SET consumed_at = now(), chat_id = $2, chat_username = $3
 WHERE nonce_hash = $1 AND consumed_at IS NULL AND expires_at > now()
-RETURNING id
+RETURNING id, user_id
 `
 
 type ConsumeTelegramLinkRequestParams struct {
-	NonceHash []byte
-	ChatID    *int64
+	NonceHash    []byte
+	ChatID       *int64
+	ChatUsername *string
+}
+
+type ConsumeTelegramLinkRequestRow struct {
+	ID     pgtype.UUID
+	UserID pgtype.UUID
 }
 
 // ConsumeTelegramLinkRequest is the single-use gate, and it records the
 // redeeming chat in the same statement. The guard lives here rather than in
 // the caller for the same reason ConsumeSignup's does: zero rows is the
-// authoritative answer to the race between a read and this write.
-func (q *Queries) ConsumeTelegramLinkRequest(ctx context.Context, arg ConsumeTelegramLinkRequestParams) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, consumeTelegramLinkRequest, arg.NonceHash, arg.ChatID)
-	var id pgtype.UUID
-	err := row.Scan(&id)
-	return id, err
+// authoritative answer to the race between a read and this write. It now
+// returns user_id as well, because the caller's next decision -- link, sign
+// in, or sign up -- is exactly that column.
+func (q *Queries) ConsumeTelegramLinkRequest(ctx context.Context, arg ConsumeTelegramLinkRequestParams) (ConsumeTelegramLinkRequestRow, error) {
+	row := q.db.QueryRow(ctx, consumeTelegramLinkRequest, arg.NonceHash, arg.ChatID, arg.ChatUsername)
+	var i ConsumeTelegramLinkRequestRow
+	err := row.Scan(&i.ID, &i.UserID)
+	return i, err
+}
+
+const countTelegramLinkMintsSince = `-- name: CountTelegramLinkMintsSince :one
+SELECT count(*) FROM telegram_link_requests
+WHERE user_id = $1 AND created_at >= $2
+`
+
+type CountTelegramLinkMintsSinceParams struct {
+	UserID    pgtype.UUID
+	CreatedAt pgtype.Timestamptz
+}
+
+// CountTelegramLinkMintsSince bounds how many link nonces one member can
+// mint. The per-chat limit below bounds redemption; this bounds minting,
+// which a signed-in session can now do with no chat involved at all.
+func (q *Queries) CountTelegramLinkMintsSince(ctx context.Context, arg CountTelegramLinkMintsSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countTelegramLinkMintsSince, arg.UserID, arg.CreatedAt)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const countTelegramLinksSince = `-- name: CountTelegramLinksSince :one
@@ -52,31 +80,49 @@ func (q *Queries) CountTelegramLinksSince(ctx context.Context, arg CountTelegram
 }
 
 const createTelegramAccount = `-- name: CreateTelegramAccount :exec
-INSERT INTO telegram_accounts (user_id, chat_id) VALUES ($1, $2)
+INSERT INTO telegram_accounts (user_id, chat_id, chat_username) VALUES ($1, $2, $3)
 `
 
 type CreateTelegramAccountParams struct {
-	UserID pgtype.UUID
-	ChatID int64
+	UserID       pgtype.UUID
+	ChatID       int64
+	ChatUsername *string
 }
 
 func (q *Queries) CreateTelegramAccount(ctx context.Context, arg CreateTelegramAccountParams) error {
-	_, err := q.db.Exec(ctx, createTelegramAccount, arg.UserID, arg.ChatID)
+	_, err := q.db.Exec(ctx, createTelegramAccount, arg.UserID, arg.ChatID, arg.ChatUsername)
 	return err
 }
 
-const createTelegramLinkRequest = `-- name: CreateTelegramLinkRequest :exec
-INSERT INTO telegram_link_requests (nonce_hash, expires_at)
-VALUES ($1, $2)
+const createTelegramLinkRequest = `-- name: CreateTelegramLinkRequest :one
+INSERT INTO telegram_link_requests (nonce_hash, expires_at, user_id)
+VALUES ($1, $2, $3)
+RETURNING id
 `
 
 type CreateTelegramLinkRequestParams struct {
 	NonceHash []byte
 	ExpiresAt pgtype.Timestamptz
+	UserID    pgtype.UUID
 }
 
-func (q *Queries) CreateTelegramLinkRequest(ctx context.Context, arg CreateTelegramLinkRequestParams) error {
-	_, err := q.db.Exec(ctx, createTelegramLinkRequest, arg.NonceHash, arg.ExpiresAt)
+// CreateTelegramLinkRequest returns the new row's id, because the browser
+// that just minted a link nonce has to poll with it and Create is the only
+// moment that id is available -- a nonce_hash lookup afterwards would be a
+// second way to address a row by its secret.
+func (q *Queries) CreateTelegramLinkRequest(ctx context.Context, arg CreateTelegramLinkRequestParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, createTelegramLinkRequest, arg.NonceHash, arg.ExpiresAt, arg.UserID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const deleteTelegramAccount = `-- name: DeleteTelegramAccount :exec
+DELETE FROM telegram_accounts WHERE user_id = $1
+`
+
+func (q *Queries) DeleteTelegramAccount(ctx context.Context, userID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteTelegramAccount, userID)
 	return err
 }
 
@@ -89,6 +135,51 @@ func (q *Queries) GetTelegramAccountByChatID(ctx context.Context, chatID int64) 
 	var user_id pgtype.UUID
 	err := row.Scan(&user_id)
 	return user_id, err
+}
+
+const getTelegramAccountByUserID = `-- name: GetTelegramAccountByUserID :one
+SELECT chat_id, chat_username, linked_at FROM telegram_accounts WHERE user_id = $1
+`
+
+type GetTelegramAccountByUserIDRow struct {
+	ChatID       int64
+	ChatUsername *string
+	LinkedAt     pgtype.Timestamptz
+}
+
+func (q *Queries) GetTelegramAccountByUserID(ctx context.Context, userID pgtype.UUID) (GetTelegramAccountByUserIDRow, error) {
+	row := q.db.QueryRow(ctx, getTelegramAccountByUserID, userID)
+	var i GetTelegramAccountByUserIDRow
+	err := row.Scan(&i.ChatID, &i.ChatUsername, &i.LinkedAt)
+	return i, err
+}
+
+const getTelegramLinkRequest = `-- name: GetTelegramLinkRequest :one
+SELECT id, user_id, chat_id, chat_username, consumed_at, expires_at
+FROM telegram_link_requests WHERE id = $1
+`
+
+type GetTelegramLinkRequestRow struct {
+	ID           pgtype.UUID
+	UserID       pgtype.UUID
+	ChatID       *int64
+	ChatUsername *string
+	ConsumedAt   pgtype.Timestamptz
+	ExpiresAt    pgtype.Timestamptz
+}
+
+func (q *Queries) GetTelegramLinkRequest(ctx context.Context, id pgtype.UUID) (GetTelegramLinkRequestRow, error) {
+	row := q.db.QueryRow(ctx, getTelegramLinkRequest, id)
+	var i GetTelegramLinkRequestRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ChatID,
+		&i.ChatUsername,
+		&i.ConsumedAt,
+		&i.ExpiresAt,
+	)
+	return i, err
 }
 
 const pruneTelegramLinkRequests = `-- name: PruneTelegramLinkRequests :execrows

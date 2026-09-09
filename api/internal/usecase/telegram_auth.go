@@ -31,6 +31,11 @@ const (
 // app".
 const telegramDeadLinkMessage = "That sign-in link has expired. Start again from the app."
 
+// telegramLinkRefusedMessage is the answer for every link that cannot be
+// completed from this chat's side. It deliberately says nothing about why
+// and points at the browser, which can say why safely.
+const telegramLinkRefusedMessage = "Could not connect this chat. Open Hearth to see why."
+
 type TelegramAuthDeps struct {
 	Links       TelegramLinkRepository
 	Accounts    TelegramAccountRepository
@@ -69,7 +74,11 @@ func (s *TelegramAuthService) StartLink(ctx context.Context) (TelegramStartLink,
 		return TelegramStartLink{}, fmt.Errorf("generate telegram nonce: %w", err)
 	}
 	expiresAt := s.d.Clock.Now().Add(telegramNonceTTL)
-	if err := s.d.Links.Create(ctx, hash, expiresAt); err != nil {
+	// The id Create now returns is unused here: a sign-in nonce is never
+	// polled by row id -- HandleStart delivers the resulting magic link
+	// straight into the chat, and the browser waiting on it never learns
+	// this row exists.
+	if _, err := s.d.Links.Create(ctx, "", hash, expiresAt); err != nil {
 		return TelegramStartLink{}, fmt.Errorf("store telegram nonce: %w", err)
 	}
 	return TelegramStartLink{
@@ -86,16 +95,28 @@ func (s *TelegramAuthService) StartLink(ctx context.Context) (TelegramStartLink,
 // whose handler returns an error is dropped permanently and nobody is ever
 // told anything -- an ordinary refusal MUST be answered here, in the chat, or
 // it is answered nowhere.
-func (s *TelegramAuthService) HandleStart(ctx context.Context, chatID int64, payload string) error {
+func (s *TelegramAuthService) HandleStart(ctx context.Context, chatID int64, payload, username string) error {
 	now := s.d.Clock.Now()
 
 	// Consume first, then check the limit. A refused attempt still spends its
 	// nonce, so the same link cannot be retried until the hour rolls over.
-	if err := s.d.Links.Consume(ctx, s.d.Tokens.HashToken(payload), chatID); err != nil {
+	redemption, err := s.d.Links.Consume(ctx, s.d.Tokens.HashToken(payload), chatID, username)
+	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			return s.say(ctx, chatID, telegramDeadLinkMessage)
 		}
 		return fmt.Errorf("consume telegram nonce: %w", err)
+	}
+
+	// A link nonce is answered here and goes no further: it mints no token,
+	// so the per-chat limit below -- which exists to bound magic-link and
+	// signup rows -- has nothing to bound on this path. Ordering matters
+	// beyond tidiness: a rate-limited link nonce is already consumed and
+	// already carrying a user id, which the browser derives as "pending", so
+	// refusing it here would tell the chat the link was dead while the
+	// browser offered a Confirm button that worked. Decision 4 of the spec.
+	if redemption.UserID != "" {
+		return s.handleLinkStart(ctx, chatID, redemption)
 	}
 
 	count, err := s.d.Links.CountLinksSince(ctx, chatID, now.Add(-time.Hour))
@@ -117,6 +138,48 @@ func (s *TelegramAuthService) HandleStart(ctx context.Context, chatID int64, pay
 		return s.sendSignUp(ctx, chatID, now)
 	default:
 		return fmt.Errorf("look up telegram account: %w", err)
+	}
+}
+
+// handleLinkStart answers a /start that redeemed a link nonce. It writes no
+// binding: the browser session that minted the nonce confirms, and that is
+// the whole of the protection against a leaked deep link (ADR 10).
+//
+// Every refusal here is bland and identical, for the reason
+// telegramDeadLinkMessage gives: a chat holding a nonce it may have stolen
+// must not learn whether the account exists, already has a chat, or belongs
+// to someone else. The session that minted it is told the real reason,
+// because it has already proved who it is.
+func (s *TelegramAuthService) handleLinkStart(ctx context.Context, chatID int64, r TelegramLinkRedemption) error {
+	boundTo, err := s.d.Accounts.ByChatID(ctx, chatID)
+	switch {
+	case err == nil && boundTo == r.UserID:
+		return s.say(ctx, chatID, "This chat is already connected to your Hearth account.")
+	case err == nil:
+		return s.say(ctx, chatID, telegramLinkRefusedMessage)
+	case errors.Is(err, domain.ErrNotFound):
+		return s.handleLinkStartForUnboundChat(ctx, chatID, r.UserID)
+	default:
+		return fmt.Errorf("look up telegram account: %w", err)
+	}
+}
+
+// handleLinkStartForUnboundChat answers a link nonce redeemed from a chat
+// that has no binding of its own -- decision 2's fourth row applies here:
+// if the nonce's user already has a *different* chat bound, this chat is
+// refused with the same bland line the other refusals use, not told to go
+// confirm. Without this check the person would be sent back to Hearth
+// believing the link worked, only for Confirm to refuse them there --
+// exactly the round trip the row exists to save.
+func (s *TelegramAuthService) handleLinkStartForUnboundChat(ctx context.Context, chatID int64, userID string) error {
+	_, err := s.d.Accounts.ByUserID(ctx, userID)
+	switch {
+	case err == nil:
+		return s.say(ctx, chatID, telegramLinkRefusedMessage)
+	case errors.Is(err, domain.ErrNotFound):
+		return s.say(ctx, chatID, "Go back to Hearth and confirm this chat to finish connecting it.")
+	default:
+		return fmt.Errorf("look up telegram binding by user: %w", err)
 	}
 }
 

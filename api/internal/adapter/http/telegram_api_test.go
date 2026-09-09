@@ -32,9 +32,17 @@ import (
 
 type fakeTelegramLinkRepo struct{}
 
-func (fakeTelegramLinkRepo) Create(context.Context, []byte, time.Time) error { return nil }
-func (fakeTelegramLinkRepo) Consume(context.Context, []byte, int64) error {
+func (fakeTelegramLinkRepo) Create(context.Context, string, []byte, time.Time) (string, error) {
+	return "link-1", nil
+}
+func (fakeTelegramLinkRepo) Consume(context.Context, []byte, int64, string) (usecase.TelegramLinkRedemption, error) {
 	panic("fakeTelegramLinkRepo: Consume should not be called by these tests")
+}
+func (fakeTelegramLinkRepo) ByID(context.Context, string) (usecase.TelegramLinkRequest, error) {
+	panic("fakeTelegramLinkRepo: ByID should not be called by these tests")
+}
+func (fakeTelegramLinkRepo) CountMintsSince(context.Context, string, time.Time) (int, error) {
+	panic("fakeTelegramLinkRepo: CountMintsSince should not be called by these tests")
 }
 func (fakeTelegramLinkRepo) CountLinksSince(context.Context, int64, time.Time) (int, error) {
 	panic("fakeTelegramLinkRepo: CountLinksSince should not be called by these tests")
@@ -47,6 +55,15 @@ type unusedTelegramAccountRepo struct{}
 
 func (unusedTelegramAccountRepo) ByChatID(context.Context, int64) (string, error) {
 	panic("unusedTelegramAccountRepo: ByChatID should not be called by these tests")
+}
+func (unusedTelegramAccountRepo) ByUserID(context.Context, string) (usecase.TelegramBinding, error) {
+	panic("unusedTelegramAccountRepo: ByUserID should not be called by these tests")
+}
+func (unusedTelegramAccountRepo) Create(context.Context, usecase.TelegramBinding) error {
+	panic("unusedTelegramAccountRepo: Create should not be called by these tests")
+}
+func (unusedTelegramAccountRepo) Delete(context.Context, string) error {
+	panic("unusedTelegramAccountRepo: Delete should not be called by these tests")
 }
 
 type unusedMagicLinkRepo struct{}
@@ -126,8 +143,10 @@ func telegramRouter(env *testEnv, svc *usecase.TelegramAuthService) http.Handler
 
 // doOn issues a JSON request against an arbitrary router. env.do (api_test.go)
 // is pinned to env.router; the tests below need a second router built by
-// telegramRouter above.
-func doOn(h http.Handler, method, path string, body any) *httptest.ResponseRecorder {
+// telegramRouter above. cookies is variadic and optional, the same shape
+// env.do (api_test.go) already uses, so every pre-existing zero-cookie call
+// below still compiles unchanged.
+func doOn(h http.Handler, method, path string, body any, cookies ...*http.Cookie) *httptest.ResponseRecorder {
 	var reader io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -140,6 +159,34 @@ func doOn(h http.Handler, method, path string, body any) *httptest.ResponseRecor
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+// doOnAuthed is doOn's authenticated, CSRF-validated form for a router other
+// than env.router: the session cookie, the csrf cookie, and a matching
+// X-CSRF-Token header, mirroring testEnv.authed (api_test.go) for the second
+// router telegramLinkRouter below builds.
+func doOnAuthed(h http.Handler, method, path string, body any, session, csrf *http.Cookie) *httptest.ResponseRecorder {
+	var reader io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			panic(err)
+		}
+		reader = bytes.NewReader(b)
+	}
+	req := httptest.NewRequest(method, path, reader)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.AddCookie(session)
+	req.AddCookie(csrf)
+	req.Header.Set("X-CSRF-Token", csrf.Value)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec
@@ -467,5 +514,269 @@ func TestSignUpPreviewShowsTelegramChannelWithNoEmail(t *testing.T) {
 	}
 	if body["channel"] != "telegram" {
 		t.Fatalf("channel = %v, want \"telegram\"", body["channel"])
+	}
+}
+
+// --- Task 6: the routes for connecting and disconnecting a Telegram chat
+// (GET/DELETE /auth/telegram, POST /auth/telegram/link,
+// GET /auth/telegram/link/{id}, POST /auth/telegram/link/{id}/confirm) ------
+
+// telegramLinkRepoTestDouble is a minimal, stateful TelegramLinkRepository
+// double for the guard tests below. Consume, CountLinksSince and Prune are
+// the chat-side half of the flow and the prune job -- never reached from
+// these browser-route tests -- and panic like this file's other unused*
+// doubles above.
+type telegramLinkRepoTestDouble struct {
+	rows map[string]usecase.TelegramLinkRequest
+	n    int
+}
+
+func newTelegramLinkRepoTestDouble() *telegramLinkRepoTestDouble {
+	return &telegramLinkRepoTestDouble{rows: map[string]usecase.TelegramLinkRequest{}}
+}
+
+func (d *telegramLinkRepoTestDouble) Create(_ context.Context, userID string, _ []byte, expiresAt time.Time) (string, error) {
+	d.n++
+	id := fmt.Sprintf("link-test-%d", d.n)
+	d.rows[id] = usecase.TelegramLinkRequest{ID: id, UserID: userID, ExpiresAt: expiresAt}
+	return id, nil
+}
+
+func (d *telegramLinkRepoTestDouble) Consume(context.Context, []byte, int64, string) (usecase.TelegramLinkRedemption, error) {
+	panic("telegramLinkRepoTestDouble: Consume should not be called by these tests")
+}
+
+func (d *telegramLinkRepoTestDouble) ByID(_ context.Context, id string) (usecase.TelegramLinkRequest, error) {
+	row, ok := d.rows[id]
+	if !ok {
+		return usecase.TelegramLinkRequest{}, domain.ErrNotFound
+	}
+	return row, nil
+}
+
+func (d *telegramLinkRepoTestDouble) CountMintsSince(context.Context, string, time.Time) (int, error) {
+	return 0, nil
+}
+
+func (d *telegramLinkRepoTestDouble) CountLinksSince(context.Context, int64, time.Time) (int, error) {
+	panic("telegramLinkRepoTestDouble: CountLinksSince should not be called by these tests")
+}
+
+func (d *telegramLinkRepoTestDouble) Prune(context.Context, time.Time) (int64, error) {
+	panic("telegramLinkRepoTestDouble: Prune should not be called by these tests")
+}
+
+var _ usecase.TelegramLinkRepository = (*telegramLinkRepoTestDouble)(nil)
+
+// telegramAccountRepoTestDouble is a minimal, stateful TelegramAccountRepository
+// double: an empty binding table, so Status derives "waiting" for a link
+// nobody has redeemed yet -- everything the guard tests below need from it.
+type telegramAccountRepoTestDouble struct {
+	byUser map[string]usecase.TelegramBinding
+}
+
+func newTelegramAccountRepoTestDouble() *telegramAccountRepoTestDouble {
+	return &telegramAccountRepoTestDouble{byUser: map[string]usecase.TelegramBinding{}}
+}
+
+func (d *telegramAccountRepoTestDouble) ByChatID(_ context.Context, chatID int64) (string, error) {
+	for uid, b := range d.byUser {
+		if b.ChatID == chatID {
+			return uid, nil
+		}
+	}
+	return "", domain.ErrNotFound
+}
+
+func (d *telegramAccountRepoTestDouble) ByUserID(_ context.Context, userID string) (usecase.TelegramBinding, error) {
+	b, ok := d.byUser[userID]
+	if !ok {
+		return usecase.TelegramBinding{}, domain.ErrNotFound
+	}
+	return b, nil
+}
+
+func (d *telegramAccountRepoTestDouble) Create(_ context.Context, b usecase.TelegramBinding) error {
+	d.byUser[b.UserID] = b
+	return nil
+}
+
+func (d *telegramAccountRepoTestDouble) Delete(_ context.Context, userID string) error {
+	delete(d.byUser, userID)
+	return nil
+}
+
+var _ usecase.TelegramAccountRepository = (*telegramAccountRepoTestDouble)(nil)
+
+// newTelegramLinkServiceForTest builds a real TelegramLinkService for the
+// guard tests below: Start and Status are genuinely exercised (a real
+// crypto.TokenGenerator, a real clock, env's own Postgres-backed Users) over
+// the two stateful doubles above.
+func newTelegramLinkServiceForTest(env *testEnv) *usecase.TelegramLinkService {
+	return usecase.NewTelegramLinkService(usecase.TelegramLinkDeps{
+		Links:       newTelegramLinkRepoTestDouble(),
+		Accounts:    newTelegramAccountRepoTestDouble(),
+		Users:       env.users,
+		Tokens:      crypto.NewTokenGenerator(),
+		Clock:       clock.System{},
+		BotUsername: "HearthBot",
+	})
+}
+
+// telegramLinkRouter is telegramRouter's sibling for the link/unlink routes:
+// deps.TelegramLink swapped for svc, everything else shared with env's own
+// router -- the same env.deps-copy-and-swap telegramRouter above already
+// uses for Deps.Telegram.
+func telegramLinkRouter(env *testEnv, svc *usecase.TelegramLinkService) http.Handler {
+	d := env.deps
+	d.TelegramLink = svc
+	return httpadapter.NewRouter(d)
+}
+
+// telegramLinkRoutes is the exact five routes this task adds, reused by
+// every guard test below so a route added or removed here is felt by all of
+// them at once.
+var telegramLinkRoutes = []struct{ method, path string }{
+	{http.MethodGet, "/api/v1/auth/telegram"},
+	{http.MethodDelete, "/api/v1/auth/telegram"},
+	{http.MethodPost, "/api/v1/auth/telegram/link"},
+	{http.MethodGet, "/api/v1/auth/telegram/link/some-link-id"},
+	{http.MethodPost, "/api/v1/auth/telegram/link/some-link-id/confirm"},
+}
+
+// telegramLinkWriteRoutes is the three of those five that mutate, for the
+// guards (CSRF, ownership-of-guards-not-owner) that only apply to a write.
+var telegramLinkWriteRoutes = []struct{ method, path string }{
+	{http.MethodDelete, "/api/v1/auth/telegram"},
+	{http.MethodPost, "/api/v1/auth/telegram/link"},
+	{http.MethodPost, "/api/v1/auth/telegram/link/some-link-id/confirm"},
+}
+
+// TestTelegramLinkRoutesRefuseWithoutASession pins requireSession as the
+// outermost guard of the group: no cookie at all, on the default env (bot
+// unconfigured) -- and it must still be 401, not the 404 a nil
+// Deps.TelegramLink would answer, because requireSession runs before the
+// handler ever gets a chance to check that.
+func TestTelegramLinkRoutesRefuseWithoutASession(t *testing.T) {
+	env := newTestEnv(t)
+	for _, r := range telegramLinkRoutes {
+		rec := env.do(r.method, r.path, nil)
+		assertErrorResponse(t, rec, http.StatusUnauthorized, "UNAUTHENTICATED")
+	}
+}
+
+// TestTelegramLinkRoutesRefuseAnAPIToken pins requireCookieSession: a
+// personal API token authenticates the caller (requireSession succeeds) but
+// must not be able to bind or unbind a chat -- the same rule minting a
+// token itself follows (ADR 7, spec decision 8), because a leaked token
+// must not be able to make itself into a channel that outlives its own
+// revocation.
+func TestTelegramLinkRoutesRefuseAnAPIToken(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	tok := env.mustCreateToken(t, session, csrf, "telegram-guard-test")
+
+	for _, r := range telegramLinkRoutes {
+		rec := env.bearer(t, r.method, r.path, nil, tok.Token)
+		assertErrorResponse(t, rec, http.StatusForbidden, "SESSION_REQUIRED")
+	}
+}
+
+// TestTelegramLinkPostRefusesWithoutCSRF pins requireCSRF on the three
+// mutating routes: a genuinely valid session cookie, but no csrf_token
+// cookie and no X-CSRF-Token header.
+func TestTelegramLinkPostRefusesWithoutCSRF(t *testing.T) {
+	env := newTestEnv(t)
+	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	for _, r := range telegramLinkWriteRoutes {
+		rec := env.do(r.method, r.path, nil, session)
+		assertErrorResponse(t, rec, http.StatusForbidden, "CSRF_INVALID")
+	}
+}
+
+// TestTelegramLinkRoutesAre404WhenTheFlagIsOff is
+// TestTelegramSignInFlagOffAnswers404EvenWithABotConfigured's sibling for
+// this task's five routes: a bot IS configured (Deps.TelegramLink non-nil,
+// via telegramLinkRouter) but domain.FlagTelegramSignIn is switched off.
+// requireFeature sits ahead of requireCSRF in the group (router.go), so a
+// bare session cookie -- no CSRF cookie or header at all -- is enough to
+// prove the flag, not CSRF, is what answered 404 here.
+func TestTelegramLinkRoutesAre404WhenTheFlagIsOff(t *testing.T) {
+	env := newTestEnv(t)
+	router := telegramLinkRouter(env, newTelegramLinkServiceForTest(env))
+	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	// The flag defaults on, and a bot is configured: the route works. This
+	// is what makes the loop below prove the flag, not the routes being
+	// unregistered, is what answers 404 -- without it this test would still
+	// pass against an unrouted path (the RED step showed exactly that).
+	rec := doOn(router, http.MethodGet, "/api/v1/auth/telegram", nil, session)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("telegram_sign_in on = %d, want 200 (body = %s)", rec.Code, rec.Body.String())
+	}
+
+	if err := env.featureFlags.SetGlobal(context.Background(),
+		string(domain.FlagTelegramSignIn), false, ""); err != nil {
+		t.Fatalf("SetGlobal: %v", err)
+	}
+
+	for _, r := range telegramLinkRoutes {
+		rec := doOn(router, r.method, r.path, nil, session)
+		assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
+	}
+}
+
+// TestTelegramLinkRoutesAre404WithNoBotConfigured is the other of the two
+// ways this group can answer 404 -- Deps.TelegramLink itself nil, the
+// default env every other test in this file starts from -- pinned
+// separately from the flag-off test above for the same reason
+// TestTelegramStartIs404WhenTheFeatureIsOff and
+// TestTelegramSignInFlagOffAnswers404EvenWithABotConfigured are kept apart:
+// the two produce the identical wire response but exercise different gates,
+// and collapsing them into one test would let either gate be deleted with
+// nothing left to notice.
+func TestTelegramLinkRoutesAre404WithNoBotConfigured(t *testing.T) {
+	env := newTestEnv(t) // Deps.TelegramLink is nil
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	for _, r := range telegramLinkRoutes {
+		var rec *httptest.ResponseRecorder
+		if r.method == http.MethodGet {
+			rec = env.authedGet(t, r.path, session)
+		} else {
+			rec = env.authed(t, r.method, r.path, nil, session, csrf)
+		}
+		assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
+	}
+}
+
+// TestTelegramLinkPollingRouteNeedsNoCSRFHeader pins the reason all five
+// routes share one group instead of splitting reads from writes: requireCSRF
+// returns early for GET, HEAD and OPTIONS (middleware_csrf.go), so
+// GET /auth/telegram/link/{id} needs no X-CSRF-Token header at all, only the
+// session cookie. If this route were ever moved into a group that required
+// the header unconditionally, this is the test that would go red.
+func TestTelegramLinkPollingRouteNeedsNoCSRFHeader(t *testing.T) {
+	env := newTestEnv(t)
+	router := telegramLinkRouter(env, newTelegramLinkServiceForTest(env))
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	rec := doOnAuthed(router, http.MethodPost, "/api/v1/auth/telegram/link", nil, session, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("mint: %d %s", rec.Code, rec.Body.String())
+	}
+	var start struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &start); err != nil || start.ID == "" {
+		t.Fatalf("start body: %v %s", err, rec.Body.String())
+	}
+
+	// No csrf_token cookie and no X-CSRF-Token header at all -- only the
+	// session cookie.
+	rec = doOn(router, http.MethodGet, "/api/v1/auth/telegram/link/"+start.ID, nil, session)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status without a CSRF header: %d %s", rec.Code, rec.Body.String())
 	}
 }

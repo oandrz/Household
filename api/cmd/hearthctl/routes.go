@@ -48,6 +48,12 @@ var routeTable = []route{
 	{"GET", "/notification-preferences", "session", "-"},
 	{"PATCH", "/notification-preferences", "owner+csrf", `{"billReminders"?,"overspendAlerts"?,"retroReminder"?,"weeklyDigest"?}`},
 
+	{"GET", "/auth/telegram", "browser session", "-"},
+	{"DELETE", "/auth/telegram", "browser session+csrf", "-"},
+	{"POST", "/auth/telegram/link", "browser session+csrf", "-"},
+	{"GET", "/auth/telegram/link/{id}", "browser session", "-"},
+	{"POST", "/auth/telegram/link/{id}/confirm", "browser session+csrf", "-"},
+
 	{"GET", "/accounts", "money", "?include_archived=true"},
 	{"POST", "/accounts", "money+owner+csrf", `{"nickname","type","ownerMembershipId"?,"openingBalanceMinor","openingBalanceCurrency","openingBalanceAsOf","countTowardNetWorth"?,"visibleToLimitedMembers"?}`},
 	{"PATCH", "/accounts/{id}", "money+owner+csrf", `same fields, all optional`},

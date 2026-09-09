@@ -81,6 +81,22 @@ func decodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, dest any, maxBy
 	return true
 }
 
+// telegramChatTakenMessage and telegramAlreadyLinkedMessage are the two
+// sentences a member can be given for the same underlying refusal, reached
+// two different ways: POST .../confirm surfaces it as one of these 409s
+// below, and GET .../link/{id} surfaces it earlier, before a confirm is even
+// attempted, as a usecase.TelegramLinkReasonChatTaken /
+// usecase.TelegramLinkReasonAlreadyLinked code on the status response
+// (telegramLinkReasonMessage, telegram_handlers.go). The usecase layer may
+// not import this package or hold user-facing copy (internal/usecase may
+// depend only on the standard library and internal/domain), so it hands back
+// a stable code and this package -- the only one that may -- turns it into
+// words, once, for both call sites.
+const (
+	telegramChatTakenMessage     = "That Telegram chat is already connected to another Hearth account."
+	telegramAlreadyLinkedMessage = "This account already has a Telegram chat. Disconnect it first."
+)
+
 // MapDomainError is the single table translating a domain or usecase
 // sentinel into the one error envelope every failure response uses.
 // Handlers never build an error response by hand; every failure path ends
@@ -518,6 +534,19 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 	// generic, logged 500 below like ErrAmountOverflow does above, rather
 	// than getting a 4xx case that would tell a caller their request was
 	// wrong when it was not.
+	case errors.Is(err, domain.ErrTelegramChatTaken):
+		WriteError(w, http.StatusConflict, "TELEGRAM_CHAT_TAKEN", telegramChatTakenMessage, nil)
+	case errors.Is(err, domain.ErrTelegramAlreadyLinked):
+		WriteError(w, http.StatusConflict, "TELEGRAM_ALREADY_LINKED", telegramAlreadyLinkedMessage, nil)
+	case errors.Is(err, domain.ErrTelegramLinkNotPending):
+		WriteError(w, http.StatusConflict, "TELEGRAM_LINK_NOT_PENDING",
+			"No Telegram chat has opened this link, or it expired. Start again.", nil)
+	case errors.Is(err, domain.ErrTelegramUnlinkWouldLockOut):
+		WriteError(w, http.StatusConflict, "TELEGRAM_UNLINK_LOCKOUT",
+			"Add an email address to this account before disconnecting Telegram.", nil)
+	case errors.Is(err, domain.ErrTelegramMintsRateLimited):
+		WriteError(w, http.StatusTooManyRequests, "TELEGRAM_LINK_RATE_LIMITED",
+			"Too many attempts. Try again in an hour.", nil)
 	case errors.Is(err, domain.ErrAlreadyExists):
 		// Every service that means a genuine, nameable conflict already
 		// translates domain.ErrAlreadyExists into its own sentinel before

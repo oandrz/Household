@@ -18,12 +18,40 @@ type Message struct {
 	Chat struct {
 		ID int64 `json:"id"`
 	} `json:"chat"`
+	// From is absent on a channel post, so this is a pointer and every
+	// reader must handle nil. Read for display only -- the confirm screen
+	// names the chat that redeemed a link -- never to decide anything:
+	// a username is chosen by its owner and Telegram lets it change.
+	From *User `json:"from"`
+}
+
+type User struct {
+	Username  string `json:"username"`
+	FirstName string `json:"first_name"`
+}
+
+// senderName is the @username, or "" when Telegram sent none. It never falls
+// back to FirstName: the confirm screen (decision 7,
+// docs/adr/0010-binding-a-chat-needs-a-confirm.md) renders this value as
+// "@<name>", and that is the *only* evidence a member gets that the chat
+// which redeemed their link is really theirs. A first name is attacker-
+// chosen and not unique -- a chat with no @username and a first name of
+// "andreas" would render as "@andreas", indistinguishable from the real
+// handle, which forges the one piece of evidence the confirm step exists to
+// give. "" is a legitimate value the confirm screen renders honestly as "a
+// Telegram chat with no username" -- not an error.
+func senderName(m *Message) string {
+	if m.From == nil {
+		return ""
+	}
+	return m.From.Username
 }
 
 // StartCommand is a /start carrying the deep-link payload the browser minted.
 type StartCommand struct {
-	ChatID  int64
-	Payload string
+	ChatID   int64
+	Payload  string
+	Username string // Telegram's @name; "" when Telegram sent none. Never a first name -- see senderName.
 }
 
 // ParseStart returns false for everything that is not a /start, including
@@ -37,7 +65,11 @@ func ParseStart(u Update) (StartCommand, bool) {
 	command, payload, _ := strings.Cut(strings.TrimSpace(u.Message.Text), " ")
 	switch command {
 	case "/start":
-		return StartCommand{ChatID: u.Message.Chat.ID, Payload: strings.TrimSpace(payload)}, true
+		return StartCommand{
+			ChatID:   u.Message.Chat.ID,
+			Payload:  strings.TrimSpace(payload),
+			Username: senderName(u.Message),
+		}, true
 	default:
 		return StartCommand{}, false
 	}

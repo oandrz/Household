@@ -98,6 +98,18 @@ func TestOwnerOnlyRoutesRejectALimitedMember(t *testing.T) {
 		// the DELETE of another member's id is 404, never 403.
 		"POST /api/v1/auth/tokens":        true,
 		"DELETE /api/v1/auth/tokens/{id}": true,
+		// Connecting or disconnecting a Telegram chat is any member's own
+		// call, not owners only (linking design decision 10) -- a limited
+		// member's chat is already refused by the Commander's own guard and
+		// the digest's recipients query, so gating this panel on ownership
+		// would duplicate a guard that already exists one layer down. Env's
+		// router has no bot configured, so all three answer 404, not 403,
+		// regardless of who is signed in -- this walk cannot observe
+		// requireOwner one way or the other for these three, the same
+		// reasoning the Telegram sign-in entry above already gives.
+		"DELETE /api/v1/auth/telegram":                 true,
+		"POST /api/v1/auth/telegram/link":              true,
+		"POST /api/v1/auth/telegram/link/{id}/confirm": true,
 	}
 
 	routes, ok := env.router.(chi.Routes)

@@ -1,16 +1,34 @@
--- name: CreateTelegramLinkRequest :exec
-INSERT INTO telegram_link_requests (nonce_hash, expires_at)
-VALUES ($1, $2);
+-- CreateTelegramLinkRequest returns the new row's id, because the browser
+-- that just minted a link nonce has to poll with it and Create is the only
+-- moment that id is available -- a nonce_hash lookup afterwards would be a
+-- second way to address a row by its secret.
+-- name: CreateTelegramLinkRequest :one
+INSERT INTO telegram_link_requests (nonce_hash, expires_at, user_id)
+VALUES ($1, $2, $3)
+RETURNING id;
 
 -- ConsumeTelegramLinkRequest is the single-use gate, and it records the
 -- redeeming chat in the same statement. The guard lives here rather than in
 -- the caller for the same reason ConsumeSignup's does: zero rows is the
--- authoritative answer to the race between a read and this write.
+-- authoritative answer to the race between a read and this write. It now
+-- returns user_id as well, because the caller's next decision -- link, sign
+-- in, or sign up -- is exactly that column.
 -- name: ConsumeTelegramLinkRequest :one
 UPDATE telegram_link_requests
-SET consumed_at = now(), chat_id = $2
+SET consumed_at = now(), chat_id = $2, chat_username = $3
 WHERE nonce_hash = $1 AND consumed_at IS NULL AND expires_at > now()
-RETURNING id;
+RETURNING id, user_id;
+
+-- name: GetTelegramLinkRequest :one
+SELECT id, user_id, chat_id, chat_username, consumed_at, expires_at
+FROM telegram_link_requests WHERE id = $1;
+
+-- CountTelegramLinkMintsSince bounds how many link nonces one member can
+-- mint. The per-chat limit below bounds redemption; this bounds minting,
+-- which a signed-in session can now do with no chat involved at all.
+-- name: CountTelegramLinkMintsSince :one
+SELECT count(*) FROM telegram_link_requests
+WHERE user_id = $1 AND created_at >= $2;
 
 -- name: CountTelegramLinksSince :one
 SELECT count(*) FROM telegram_link_requests
@@ -20,7 +38,13 @@ WHERE chat_id = $1 AND consumed_at >= $2;
 SELECT user_id FROM telegram_accounts WHERE chat_id = $1;
 
 -- name: CreateTelegramAccount :exec
-INSERT INTO telegram_accounts (user_id, chat_id) VALUES ($1, $2);
+INSERT INTO telegram_accounts (user_id, chat_id, chat_username) VALUES ($1, $2, $3);
+
+-- name: GetTelegramAccountByUserID :one
+SELECT chat_id, chat_username, linked_at FROM telegram_accounts WHERE user_id = $1;
+
+-- name: DeleteTelegramAccount :exec
+DELETE FROM telegram_accounts WHERE user_id = $1;
 
 -- PruneTelegramLinkRequests mirrors PruneSignups exactly: same retention
 -- condition (created before the cutoff, and either already consumed or
