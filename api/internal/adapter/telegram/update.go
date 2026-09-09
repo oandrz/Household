@@ -47,7 +47,7 @@ func senderName(m *Message) string {
 type StartCommand struct {
 	ChatID   int64
 	Payload  string
-	Username string // Telegram's @name, "" when the account has none
+	Username string // Telegram's @name, falling back to the first name; "" only when Telegram sent neither
 }
 
 // ParseStart returns false for everything that is not a /start, including
