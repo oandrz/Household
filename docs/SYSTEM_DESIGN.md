@@ -755,7 +755,7 @@ refuses (spec decision 7).
 **`telegram.StartHandler` is the one interface in this system declared outside
 `usecase/ports.go`, and it points the other way.** Every port in the table above
 is declared by `usecase` and implemented by an adapter. `StartHandler` —
-`HandleStart(ctx, chatID int64, payload string) error` — is declared by the
+`HandleStart(ctx, chatID int64, payload, username string) error` — is declared by the
 *adapter*, in `poller.go`, and satisfied by `*usecase.TelegramAuthService`. That
 is a legal direction for a **driving** adapter, and `adapter/http` is the other
 one: it drives by *importing* `usecase` and holding concrete services, where
@@ -1550,8 +1550,8 @@ sequenceDiagram
     C->>TG: /start NONCE
     P->>TG: getUpdates (long poll, 50s)
     TG-->>P: Update
-    P->>T: HandleStart(chatID, payload)
-    T->>L: Consume(hash(payload), chatID) — one guarded UPDATE
+    P->>T: HandleStart(chatID, payload, username)
+    T->>L: Consume(hash(payload), chatID, username) — one guarded UPDATE
     T->>L: CountLinksSince(chatID, now - 1h)
     alt Accounts.ByChatID finds a user
         T->>TG: Sender.SendMessage — Tap to sign in,<br/>/sign-in/magic?token=RAW (15 min, single use)

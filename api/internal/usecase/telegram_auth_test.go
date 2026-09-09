@@ -43,7 +43,7 @@ func TestHandleStartSendsASignInLinkToAKnownChat(t *testing.T) {
 	doubles.accounts.bind(501, "user-1")
 	raw := doubles.links.mintLive(t, time.Now().Add(10*time.Minute))
 
-	if err := svc.HandleStart(context.Background(), 501, raw); err != nil {
+	if err := svc.HandleStart(context.Background(), 501, raw, ""); err != nil {
 		t.Fatalf("HandleStart() = %v, want nil", err)
 	}
 	sent := doubles.sender.lastTo(501)
@@ -59,7 +59,7 @@ func TestHandleStartSendsASignUpLinkToAnUnknownChat(t *testing.T) {
 	svc, doubles := newTelegramAuthService(t)
 	raw := doubles.links.mintLive(t, time.Now().Add(10*time.Minute))
 
-	if err := svc.HandleStart(context.Background(), 777, raw); err != nil {
+	if err := svc.HandleStart(context.Background(), 777, raw, ""); err != nil {
 		t.Fatalf("HandleStart() = %v, want nil", err)
 	}
 	sent := doubles.sender.lastTo(777)
@@ -68,6 +68,25 @@ func TestHandleStartSendsASignUpLinkToAnUnknownChat(t *testing.T) {
 	}
 	if doubles.signups.telegramCount(777) != 1 {
 		t.Fatalf("telegram signups created = %d, want 1", doubles.signups.telegramCount(777))
+	}
+}
+
+// HandleStart's username parameter must actually reach Links.Consume, not
+// just sit in a log line -- the redeemed row is what a future confirm screen
+// (Task 5) reads back to name the chat someone is about to approve.
+func TestHandleStartForwardsTheSenderNameToConsume(t *testing.T) {
+	svc, doubles := newTelegramAuthService(t)
+	raw := doubles.links.mintLive(t, time.Now().Add(10*time.Minute))
+
+	if err := svc.HandleStart(context.Background(), 501, raw, "andreas"); err != nil {
+		t.Fatalf("HandleStart() = %v, want nil", err)
+	}
+	row, err := doubles.links.ByID(context.Background(), string(doubles.tokens.HashToken(raw)))
+	if err != nil {
+		t.Fatalf("ByID() = %v, want nil", err)
+	}
+	if row.ChatUsername != "andreas" {
+		t.Fatalf("ChatUsername = %q, want %q", row.ChatUsername, "andreas")
 	}
 }
 
@@ -86,7 +105,7 @@ func deadNonceAnswer(t *testing.T) string {
 	t.Helper()
 	svc, doubles := newTelegramAuthService(t)
 	const probeChatID = int64(1)
-	if err := svc.HandleStart(context.Background(), probeChatID, "never-minted"); err != nil {
+	if err := svc.HandleStart(context.Background(), probeChatID, "never-minted", ""); err != nil {
 		t.Fatalf("HandleStart() = %v, want nil", err)
 	}
 	return doubles.sender.lastTo(probeChatID)
@@ -115,7 +134,7 @@ func TestHandleStartAnswersIdenticallyForEveryDeadNonce(t *testing.T) {
 	for _, mint := range []func(*telegramDoubles) string{unknown, expired, consumed} {
 		svc, doubles := newTelegramAuthService(t)
 		raw := mint(doubles)
-		if err := svc.HandleStart(context.Background(), 900, raw); err != nil {
+		if err := svc.HandleStart(context.Background(), 900, raw, ""); err != nil {
 			t.Fatalf("HandleStart() = %v, want nil", err)
 		}
 		answers = append(answers, doubles.sender.lastTo(900))
@@ -149,7 +168,7 @@ func TestHandleStartRateLimitsPerChatWithTheSameAnswer(t *testing.T) {
 	doubles.links.recordRedemptions(600, 3, time.Now().Add(-time.Minute))
 	raw := doubles.links.mintLive(t, time.Now().Add(10*time.Minute))
 
-	if err := svc.HandleStart(context.Background(), 600, raw); err != nil {
+	if err := svc.HandleStart(context.Background(), 600, raw, ""); err != nil {
 		t.Fatalf("HandleStart() = %v, want nil", err)
 	}
 	if doubles.magicLinks.countFor("user-2") != 0 {
@@ -174,7 +193,7 @@ func TestHandleStartAllowsTheThirdRedemptionWithinAnHour(t *testing.T) {
 	doubles.links.recordRedemptions(602, 2, time.Now().Add(-time.Minute))
 	raw := doubles.links.mintLive(t, time.Now().Add(10*time.Minute))
 
-	if err := svc.HandleStart(context.Background(), 602, raw); err != nil {
+	if err := svc.HandleStart(context.Background(), 602, raw, ""); err != nil {
 		t.Fatalf("HandleStart() = %v, want nil", err)
 	}
 	if doubles.magicLinks.countFor("user-3") != 1 {
@@ -189,7 +208,7 @@ func TestHandleStartSpendsTheNonceEvenWhenRateLimited(t *testing.T) {
 	doubles.links.recordRedemptions(601, 3, time.Now().Add(-time.Minute))
 	raw := doubles.links.mintLive(t, time.Now().Add(10*time.Minute))
 
-	_ = svc.HandleStart(context.Background(), 601, raw)
+	_ = svc.HandleStart(context.Background(), 601, raw, "")
 	if !doubles.links.isConsumed(raw) {
 		t.Fatal("a rate-limited attempt left its nonce unspent")
 	}
@@ -209,7 +228,7 @@ func TestHandleStartRateLimitCountsARedemptionExactlyOnTheSinceBoundary(t *testi
 	doubles.links.recordRedemptions(700, 3, cutoff)
 	raw := doubles.links.mintLive(t, doubles.clock.Now().Add(10*time.Minute))
 
-	if err := svc.HandleStart(context.Background(), 700, raw); err != nil {
+	if err := svc.HandleStart(context.Background(), 700, raw, ""); err != nil {
 		t.Fatalf("HandleStart() = %v, want nil", err)
 	}
 	if got := doubles.sender.lastTo(700); got != deadNonce {
@@ -237,7 +256,7 @@ func TestHandleStartRefusesSignUpAtTheGlobalDailyCeilingWithTheSameAnswerAsADead
 	doubles.signups.setGlobalCount(usecase.SignupGlobalDailyLimit)
 	raw := doubles.links.mintLive(t, time.Now().Add(10*time.Minute))
 
-	if err := svc.HandleStart(context.Background(), 888, raw); err != nil {
+	if err := svc.HandleStart(context.Background(), 888, raw, ""); err != nil {
 		t.Fatalf("HandleStart() = %v, want nil", err)
 	}
 	if doubles.signups.telegramCount(888) != 0 {
@@ -268,7 +287,7 @@ func TestHandleStartSendsASignUpLinkBelowTheGlobalDailyCeiling(t *testing.T) {
 	doubles.signups.setGlobalCount(usecase.SignupGlobalDailyLimit - 1)
 	raw := doubles.links.mintLive(t, time.Now().Add(10*time.Minute))
 
-	if err := svc.HandleStart(context.Background(), 889, raw); err != nil {
+	if err := svc.HandleStart(context.Background(), 889, raw, ""); err != nil {
 		t.Fatalf("HandleStart() = %v, want nil", err)
 	}
 	if doubles.signups.telegramCount(889) != 1 {

@@ -86,12 +86,12 @@ func (s *TelegramAuthService) StartLink(ctx context.Context) (TelegramStartLink,
 // whose handler returns an error is dropped permanently and nobody is ever
 // told anything -- an ordinary refusal MUST be answered here, in the chat, or
 // it is answered nowhere.
-func (s *TelegramAuthService) HandleStart(ctx context.Context, chatID int64, payload string) error {
+func (s *TelegramAuthService) HandleStart(ctx context.Context, chatID int64, payload, username string) error {
 	now := s.d.Clock.Now()
 
 	// Consume first, then check the limit. A refused attempt still spends its
 	// nonce, so the same link cannot be retried until the hour rolls over.
-	if _, err := s.d.Links.Consume(ctx, s.d.Tokens.HashToken(payload), chatID, ""); err != nil {
+	if _, err := s.d.Links.Consume(ctx, s.d.Tokens.HashToken(payload), chatID, username); err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			return s.say(ctx, chatID, telegramDeadLinkMessage)
 		}

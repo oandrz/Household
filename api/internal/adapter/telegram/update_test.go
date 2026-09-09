@@ -46,3 +46,26 @@ func TestParseStartIgnoresUpdatesWithNoMessage(t *testing.T) {
 		t.Fatal("ParseStart on a message-less update returned ok, want false")
 	}
 }
+
+func TestParseStartReadsTheSenderName(t *testing.T) {
+	u := Update{UpdateID: 7, Message: &Message{Text: "/start abc"}}
+	u.Message.Chat.ID = 501
+	u.Message.From = &User{Username: "andreas", FirstName: "Andreas"}
+
+	got, ok := ParseStart(u)
+	if !ok || got.Username != "andreas" {
+		t.Fatalf("ParseStart() = %+v, %v; want Username \"andreas\"", got, ok)
+	}
+}
+
+// Telegram omits `from` on a channel post. A nil there must not panic the
+// poller: the update is still a /start, it just names nobody.
+func TestParseStartToleratesAMissingSender(t *testing.T) {
+	u := Update{UpdateID: 8, Message: &Message{Text: "/start abc"}}
+	u.Message.Chat.ID = 502
+
+	got, ok := ParseStart(u)
+	if !ok || got.Username != "" {
+		t.Fatalf("ParseStart() = %+v, %v; want ok with an empty Username", got, ok)
+	}
+}

@@ -19,10 +19,10 @@ type handlerSpy struct {
 	panic bool
 }
 
-func (h *handlerSpy) HandleStart(_ context.Context, chatID int64, payload string) error {
+func (h *handlerSpy) HandleStart(_ context.Context, chatID int64, payload, username string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.calls = append(h.calls, StartCommand{ChatID: chatID, Payload: payload})
+	h.calls = append(h.calls, StartCommand{ChatID: chatID, Payload: payload, Username: username})
 	if h.panic {
 		panic("handler exploded")
 	}
@@ -75,6 +75,42 @@ func TestPollerDispatchesStartCommands(t *testing.T) {
 	}
 	if got[0].Payload != "nonce-a" || got[0].ChatID != 501 {
 		t.Fatalf("dispatched %+v, want chat 501 payload nonce-a", got[0])
+	}
+}
+
+// The sender's name has to survive the trip from Telegram's JSON through
+// ParseStart and dispatch to the handler -- it is what a future confirm
+// screen (Task 5) will show the person approving the link.
+func TestPollerDispatchesTheSendersUsername(t *testing.T) {
+	var mu sync.Mutex
+	delivered := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		first := !delivered
+		delivered = true
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if !first {
+			_, _ = w.Write([]byte(`{"ok":true,"result":[]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":[
+			{"update_id":13,"message":{"text":"/start nonce-b","chat":{"id":503},
+			  "from":{"username":"andreas","first_name":"Andreas"}}}]}`))
+	}))
+	defer srv.Close()
+
+	spy := &handlerSpy{}
+	p := NewPoller(newClientWithBase("t", srv.URL), spy)
+	ctx, cancel := context.WithCancel(context.Background())
+	go p.Run(ctx)
+	defer cancel()
+
+	waitFor(t, func() bool { return len(spy.seen()) == 1 })
+
+	got := spy.seen()
+	if got[0].Username != "andreas" {
+		t.Fatalf("dispatched %+v, want Username \"andreas\"", got[0])
 	}
 }
 

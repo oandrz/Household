@@ -18,12 +18,36 @@ type Message struct {
 	Chat struct {
 		ID int64 `json:"id"`
 	} `json:"chat"`
+	// From is absent on a channel post, so this is a pointer and every
+	// reader must handle nil. Read for display only -- the confirm screen
+	// names the chat that redeemed a link -- never to decide anything:
+	// a username is chosen by its owner and Telegram lets it change.
+	From *User `json:"from"`
+}
+
+type User struct {
+	Username  string `json:"username"`
+	FirstName string `json:"first_name"`
+}
+
+// senderName prefers the @username, falls back to the first name, and is ""
+// when Telegram sent neither. "" is a legitimate value the confirm screen
+// renders as "an unnamed chat" -- not an error.
+func senderName(m *Message) string {
+	if m.From == nil {
+		return ""
+	}
+	if m.From.Username != "" {
+		return m.From.Username
+	}
+	return m.From.FirstName
 }
 
 // StartCommand is a /start carrying the deep-link payload the browser minted.
 type StartCommand struct {
-	ChatID  int64
-	Payload string
+	ChatID   int64
+	Payload  string
+	Username string // Telegram's @name, "" when the account has none
 }
 
 // ParseStart returns false for everything that is not a /start, including
@@ -37,7 +61,11 @@ func ParseStart(u Update) (StartCommand, bool) {
 	command, payload, _ := strings.Cut(strings.TrimSpace(u.Message.Text), " ")
 	switch command {
 	case "/start":
-		return StartCommand{ChatID: u.Message.Chat.ID, Payload: strings.TrimSpace(payload)}, true
+		return StartCommand{
+			ChatID:   u.Message.Chat.ID,
+			Payload:  strings.TrimSpace(payload),
+			Username: senderName(u.Message),
+		}, true
 	default:
 		return StartCommand{}, false
 	}

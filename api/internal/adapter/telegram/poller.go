@@ -8,9 +8,11 @@ import (
 
 // StartHandler is what the poller hands a parsed /start to. It is declared
 // here, in the adapter, rather than imported from usecase, so this package
-// depends on a shape rather than on a concrete service.
+// depends on a shape rather than on a concrete service. username is display
+// only; the chat id is the identity, and it is the only one of the two that
+// Telegram guarantees.
 type StartHandler interface {
-	HandleStart(ctx context.Context, chatID int64, payload string) error
+	HandleStart(ctx context.Context, chatID int64, payload, username string) error
 }
 
 const (
@@ -116,7 +118,7 @@ func (p *Poller) dispatch(ctx context.Context, start StartCommand) {
 			slog.Error("telegram start handler panicked", "panic", r)
 		}
 	}()
-	if err := p.handler.HandleStart(ctx, start.ChatID, start.Payload); err != nil {
+	if err := p.handler.HandleStart(ctx, start.ChatID, start.Payload, start.Username); err != nil {
 		slog.Error("telegram start handler failed", "error", err)
 	}
 }
