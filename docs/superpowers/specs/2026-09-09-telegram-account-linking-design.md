@@ -178,12 +178,19 @@ ALTER TABLE telegram_link_requests
 ALTER TABLE telegram_link_requests
     ADD COLUMN chat_username text;
 
+-- The same name, carried onto the binding when it is confirmed. The link
+-- request it came from is pruned within the month, and the Settings panel
+-- has to keep saying which chat is connected long after that. Display only,
+-- same as above.
+ALTER TABLE telegram_accounts ADD COLUMN chat_username text;
+
 -- +goose Down
+ALTER TABLE telegram_accounts DROP COLUMN chat_username;
 ALTER TABLE telegram_link_requests DROP COLUMN chat_username;
 ALTER TABLE telegram_link_requests DROP COLUMN user_id;
 ```
 
-`telegram_accounts` is unchanged. Its two `UNIQUE` constraints — one per user,
+`telegram_accounts` is otherwise unchanged. Its two `UNIQUE` constraints — one per user,
 one per chat — remain the real gate on every write below; the service's checks
 are for the *message*, the constraints are for the *truth*.
 
@@ -218,6 +225,23 @@ first, then refusals, then expiry. A connected panel that is still polling
 when `expires_at` passes must keep reading `confirmed`; deriving expiry first
 would flip a working connection to "that link expired" ten minutes after it
 succeeded.
+
+## Errors
+
+Five named `domain` errors, because "a conflict happened" is not something a
+panel can phrase:
+
+| Error | HTTP | The panel says |
+|---|---|---|
+| `ErrTelegramChatTaken` | 409 | that chat belongs to another Hearth account |
+| `ErrTelegramAlreadyLinked` | 409 | disconnect the chat you already have first |
+| `ErrTelegramLinkNotPending` | 409 | no chat has opened this link yet, or it expired |
+| `ErrTelegramUnlinkWouldLockOut` | 409 | add an email address before disconnecting |
+| `ErrTelegramMintsRateLimited` | 429 | too many attempts, try again later |
+
+`domain.ErrAlreadyExists` — what `translate` already returns for a `23505` —
+is mapped by the *service* onto the first two, because only the service knows
+which side collided. The handler never inspects a database error.
 
 ## Ports
 
