@@ -93,6 +93,23 @@ func decodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, dest any, maxBy
 // no path from a bare http.ResponseWriter back to that context. This is a
 // deliberate, narrow deviation from the signature the task brief sketches
 // (MapDomainError(w, err)) -- see the task report.
+//
+// telegramChatTakenMessage and telegramAlreadyLinkedMessage are the two
+// sentences a member can be given for the same underlying refusal, reached
+// two different ways: POST .../confirm surfaces it as one of these 409s
+// below, and GET .../link/{id} surfaces it earlier, before a confirm is even
+// attempted, as a usecase.TelegramLinkReasonChatTaken /
+// usecase.TelegramLinkReasonAlreadyLinked code on the status response
+// (telegramLinkReasonMessage, telegram_handlers.go). The usecase layer may
+// not import this package or hold user-facing copy (internal/usecase may
+// depend only on the standard library and internal/domain), so it hands back
+// a stable code and this package -- the only one that may -- turns it into
+// words, once, for both call sites.
+const (
+	telegramChatTakenMessage     = "That Telegram chat is already connected to another Hearth account."
+	telegramAlreadyLinkedMessage = "This account already has a Telegram chat. Disconnect it first."
+)
+
 func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 	if err == nil {
 		return
@@ -519,11 +536,9 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 	// than getting a 4xx case that would tell a caller their request was
 	// wrong when it was not.
 	case errors.Is(err, domain.ErrTelegramChatTaken):
-		WriteError(w, http.StatusConflict, "TELEGRAM_CHAT_TAKEN",
-			"That Telegram chat is already connected to another Hearth account.", nil)
+		WriteError(w, http.StatusConflict, "TELEGRAM_CHAT_TAKEN", telegramChatTakenMessage, nil)
 	case errors.Is(err, domain.ErrTelegramAlreadyLinked):
-		WriteError(w, http.StatusConflict, "TELEGRAM_ALREADY_LINKED",
-			"This account already has a Telegram chat. Disconnect it first.", nil)
+		WriteError(w, http.StatusConflict, "TELEGRAM_ALREADY_LINKED", telegramAlreadyLinkedMessage, nil)
 	case errors.Is(err, domain.ErrTelegramLinkNotPending):
 		WriteError(w, http.StatusConflict, "TELEGRAM_LINK_NOT_PENDING",
 			"No Telegram chat has opened this link, or it expired. Start again.", nil)

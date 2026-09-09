@@ -82,12 +82,13 @@ export function formatTelegramLinkedAt(iso: string): string {
 }
 
 // chatUsername is `omitempty` on the wire and optional in the schema because
-// it genuinely can be empty: the bot adapter's senderName (update.go) falls
-// back from @username to the first name and only lands on "" when Telegram
-// sent neither. Decision 7 exists to give the person one piece of evidence
-// to check a confirm against -- a bare "@" would quietly lose that evidence
-// instead of admitting there is none, so this names the gap rather than
-// hiding it.
+// it genuinely can be empty: the bot adapter's senderName (update.go) is the
+// chat's @username, or "" when Telegram sent none -- deliberately never a
+// first name, which is attacker-chosen and would let a stranger's chat forge
+// the look of the expected @handle. Decision 7 exists to give the person one
+// piece of evidence to check a confirm against -- a bare "@" would quietly
+// lose that evidence instead of admitting there is none, so this names the
+// gap rather than hiding it.
 export function telegramChatLabel(chatUsername: string | undefined): string {
   return chatUsername ? `@${chatUsername}` : "a Telegram chat with no username";
 }

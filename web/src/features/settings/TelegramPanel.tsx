@@ -262,9 +262,20 @@ export function TelegramPanel() {
           )}
 
           {linkStatus.isError && (
-            <p role="alert" className="text-[11px] text-danger">
-              Couldn't check that link's status. Please try again.
-            </p>
+            <>
+              <p role="alert" className="text-[11px] text-danger">
+                Couldn't check that link's status. Please try again.
+              </p>
+              <div>
+                <button
+                  type="button"
+                  onClick={handleStartOver}
+                  className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-label sm:min-h-0"
+                >
+                  Start over
+                </button>
+              </div>
+            </>
           )}
         </div>
       )}

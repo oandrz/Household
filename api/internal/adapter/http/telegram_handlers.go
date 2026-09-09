@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/andreasoentoro/hearth/api/internal/domain"
+	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
 type telegramStartResponse struct {
@@ -34,12 +35,34 @@ type telegramLinkStartResponse struct {
 
 // telegramLinkStatusResponse is what the panel polls GET
 // /auth/telegram/link/{id} for. Reason is the sentence the panel shows for a
-// refused link. Empty for every other status, and never populated from a
-// database error -- the service chooses it (see errors.go's mapping).
+// refused link, turned from the usecase's stable code by
+// telegramLinkReasonMessage -- the service may not hold user-facing copy
+// (internal/usecase may depend only on the standard library and
+// internal/domain), so this is the one place that sentence is written, and
+// it is the same sentence errors.go's 409 mapping gives the identical
+// refusal reached through confirm. Empty for every other status.
 type telegramLinkStatusResponse struct {
 	Status       string `json:"status"`
 	ChatUsername string `json:"chatUsername,omitempty"`
 	Reason       string `json:"reason,omitempty"`
+}
+
+// telegramLinkReasonMessage turns Status's stable refusal code into the
+// sentence the panel shows. The two known codes share their wording with
+// errors.go's 409 mapping for the same refusal reached through confirm, so
+// the message exists once. An unrecognised code -- one this handler was not
+// written to expect -- answers "" rather than guessing: Reason is
+// `omitempty` on the wire, so the panel's own `reason ?? "..."` fallback
+// renders instead of a code leaking to the screen.
+func telegramLinkReasonMessage(code string) string {
+	switch code {
+	case usecase.TelegramLinkReasonChatTaken:
+		return telegramChatTakenMessage
+	case usecase.TelegramLinkReasonAlreadyLinked:
+		return telegramAlreadyLinkedMessage
+	default:
+		return ""
+	}
 }
 
 // handleTelegramStart mints the deep link that carries a sign-in request into
@@ -132,7 +155,8 @@ func handleTelegramLinkStatus(deps Deps) http.HandlerFunc {
 			return
 		}
 		WriteJSON(w, http.StatusOK, telegramLinkStatusResponse{
-			Status: status.Status, ChatUsername: status.ChatUsername, Reason: status.Reason,
+			Status: status.Status, ChatUsername: status.ChatUsername,
+			Reason: telegramLinkReasonMessage(status.Reason),
 		})
 	}
 }

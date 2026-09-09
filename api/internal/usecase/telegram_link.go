@@ -54,10 +54,22 @@ type TelegramLinkStatus struct {
 	Status       string
 	ChatUsername string
 	ChatID       int64
-	// Reason is set only for "refused" -- the sentence the panel shows,
-	// chosen by the service, never a database error.
+	// Reason is set only for "refused" -- a small stable code
+	// (TelegramLinkReasonChatTaken or TelegramLinkReasonAlreadyLinked), never
+	// a sentence and never a database error. This package may not import the
+	// http adapter, so it cannot own the copy a person reads; the HTTP layer
+	// maps the code onto the same sentence errors.go's 409 mapping uses for
+	// the identical condition reached through confirm, so the two routes
+	// never drift into saying the same refusal two different ways.
 	Reason string
 }
+
+// The two refusal codes Status.Reason can carry. Exported so the HTTP layer
+// can switch on them by name instead of repeating the string literal.
+const (
+	TelegramLinkReasonChatTaken     = "chat_taken"
+	TelegramLinkReasonAlreadyLinked = "already_linked"
+)
 
 // Start mints a link nonce and returns the deep link that carries it into
 // Telegram, plus the row id the browser polls with.
@@ -191,7 +203,7 @@ func (s *TelegramLinkService) Status(ctx context.Context, userID, linkID string)
 		if boundTo != userID {
 			return TelegramLinkStatus{
 				Status: "refused", ChatID: row.ChatID, ChatUsername: row.ChatUsername,
-				Reason: domain.ErrTelegramChatTaken.Error(),
+				Reason: TelegramLinkReasonChatTaken,
 			}, nil
 		}
 	} else if !errors.Is(err, domain.ErrNotFound) {
@@ -200,7 +212,7 @@ func (s *TelegramLinkService) Status(ctx context.Context, userID, linkID string)
 	if bound {
 		return TelegramLinkStatus{
 			Status: "refused", ChatID: row.ChatID, ChatUsername: row.ChatUsername,
-			Reason: domain.ErrTelegramAlreadyLinked.Error(),
+			Reason: TelegramLinkReasonAlreadyLinked,
 		}, nil
 	}
 

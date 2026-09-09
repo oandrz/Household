@@ -67,8 +67,13 @@ sqlc: ## Regenerate the typed queries from SQL
 
 test: test-api test-web ## Run every test suite
 
+# 20m, not the go default 10m or the 5m this used to be: internal/adapter/http
+# and internal/adapter/postgres each start a fresh testcontainer per test, not
+# once for the package, so their wall time is per-test container overhead
+# multiplied by the test count, not a slow suite -- measured at 321s and 359s
+# respectively. Don't trim this back without re-measuring both packages.
 test-api: ## Run the Go tests (needs Docker for testcontainers)
-	cd api && go test ./... -count=1 -timeout=5m
+	cd api && go test ./... -count=1 -timeout=20m
 
 # A bare `npm install` in web/ needs --legacy-peer-deps (an optional peer
 # conflict in @hookform/resolvers); `npm ci` does not need it and is clean.

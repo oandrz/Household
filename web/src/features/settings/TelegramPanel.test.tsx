@@ -149,6 +149,37 @@ describe("TelegramPanel", () => {
     expect(await screen.findByRole("button", { name: "Connect Telegram" })).toBeInTheDocument();
   });
 
+  it("still offers a way out when the status poll itself fails", async () => {
+    // Before this fix, a failed poll rendered the error line and stopped
+    // there: none of the waiting/pending/refused/expired blocks match
+    // linkStatus.isError, so there was no button at all and the only way
+    // out was a page reload. "Start over" has to render here too.
+    vi.stubGlobal("open", vi.fn());
+    stubFetchRoutes({
+      [`GET ${BINDING_URL}`]: { status: 200, body: { connected: false } },
+      [`POST ${LINK_START_URL}`]: {
+        status: 200,
+        body: { id: "link-3", url: "https://t.me/HearthBot?start=broken", expiresAt: "2026-09-09T10:10:00Z" },
+      },
+      [`GET ${linkStatusUrl("link-3")}`]: {
+        status: 500,
+        body: { error: { code: "INTERNAL", message: "Something broke." } },
+      },
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Telegram" }));
+
+    expect(
+      await screen.findByText("Couldn't check that link's status. Please try again."),
+    ).toBeInTheDocument();
+    const startOverButton = screen.getByRole("button", { name: "Start over" });
+    expect(startOverButton).toBeInTheDocument();
+
+    fireEvent.click(startOverButton);
+    expect(await screen.findByRole("button", { name: "Connect Telegram" })).toBeInTheDocument();
+  });
+
   it("shows the server's reason when the chat belongs to someone else", async () => {
     vi.stubGlobal("open", vi.fn());
     stubFetchRoutes({
@@ -162,7 +193,7 @@ describe("TelegramPanel", () => {
         body: {
           status: "refused",
           chatUsername: "stranger123",
-          reason: "That telegram chat is connected to another account.",
+          reason: "That Telegram chat is already connected to another Hearth account.",
         },
       },
     });
@@ -171,7 +202,7 @@ describe("TelegramPanel", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Connect Telegram" }));
 
     expect(
-      await screen.findByText("That telegram chat is connected to another account."),
+      await screen.findByText("That Telegram chat is already connected to another Hearth account."),
     ).toBeInTheDocument();
     // The bland-to-the-chat, specific-to-the-session asymmetry (decision 2)
     // means no Confirm control belongs on a refused link.
@@ -193,10 +224,10 @@ describe("TelegramPanel", () => {
 
   it("names the chat with no Telegram username honestly instead of a bare @", async () => {
     // Decision 7's whole point is giving the person one piece of evidence to
-    // check a confirm against -- when Telegram sent neither an @username nor
-    // a first name (update.go's senderName, "" only in that case), there is
-    // no evidence to give, and a bare "@" would hide that gap rather than
-    // admit it.
+    // check a confirm against -- when Telegram sent no @username
+    // (update.go's senderName, "" in that case -- never a first name, which
+    // is attacker-chosen), there is no evidence to give, and a bare "@"
+    // would hide that gap rather than admit it.
     vi.stubGlobal("open", vi.fn());
     stubFetchRoutes({
       [`GET ${BINDING_URL}`]: { status: 200, body: { connected: false } },

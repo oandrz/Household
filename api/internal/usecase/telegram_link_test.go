@@ -200,8 +200,8 @@ func TestStatusRefusesWhenTheChatIsBoundToSomeoneElse(t *testing.T) {
 	if got.Status != "refused" {
 		t.Fatalf("Status = %q, want \"refused\"", got.Status)
 	}
-	if got.Reason == "" {
-		t.Fatal("Reason is empty, want the chat-taken sentence")
+	if got.Reason != usecase.TelegramLinkReasonChatTaken {
+		t.Fatalf("Reason = %q, want %q", got.Reason, usecase.TelegramLinkReasonChatTaken)
 	}
 }
 
@@ -221,13 +221,13 @@ func TestStatusRefusesWhenTheMemberAlreadyHasADifferentChat(t *testing.T) {
 	if got.Status != "refused" {
 		t.Fatalf("Status = %q, want \"refused\"", got.Status)
 	}
-	if got.Reason == "" {
-		t.Fatal("Reason is empty, want the already-linked sentence")
+	if got.Reason != usecase.TelegramLinkReasonAlreadyLinked {
+		t.Fatalf("Reason = %q, want %q", got.Reason, usecase.TelegramLinkReasonAlreadyLinked)
 	}
 }
 
 // TestStatusCarriesNoReasonForWaitingPendingOrConnected complements the two
-// refused-branch tests above: Reason exists to give the panel a sentence for
+// refused-branch tests above: Reason exists to give the panel a code for
 // the one status that needs one, so this proves the other statuses don't
 // carry a stale one forward.
 func TestStatusCarriesNoReasonForWaitingPendingOrConnected(t *testing.T) {

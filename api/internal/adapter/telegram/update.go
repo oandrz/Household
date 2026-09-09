@@ -30,24 +30,28 @@ type User struct {
 	FirstName string `json:"first_name"`
 }
 
-// senderName prefers the @username, falls back to the first name, and is ""
-// when Telegram sent neither. "" is a legitimate value the confirm screen
-// renders as "an unnamed chat" -- not an error.
+// senderName is the @username, or "" when Telegram sent none. It never falls
+// back to FirstName: the confirm screen (decision 7,
+// docs/adr/0010-binding-a-chat-needs-a-confirm.md) renders this value as
+// "@<name>", and that is the *only* evidence a member gets that the chat
+// which redeemed their link is really theirs. A first name is attacker-
+// chosen and not unique -- a chat with no @username and a first name of
+// "andreas" would render as "@andreas", indistinguishable from the real
+// handle, which forges the one piece of evidence the confirm step exists to
+// give. "" is a legitimate value the confirm screen renders honestly as "a
+// Telegram chat with no username" -- not an error.
 func senderName(m *Message) string {
 	if m.From == nil {
 		return ""
 	}
-	if m.From.Username != "" {
-		return m.From.Username
-	}
-	return m.From.FirstName
+	return m.From.Username
 }
 
 // StartCommand is a /start carrying the deep-link payload the browser minted.
 type StartCommand struct {
 	ChatID   int64
 	Payload  string
-	Username string // Telegram's @name, falling back to the first name; "" only when Telegram sent neither
+	Username string // Telegram's @name; "" when Telegram sent none. Never a first name -- see senderName.
 }
 
 // ParseStart returns false for everything that is not a /start, including

@@ -58,6 +58,25 @@ func TestParseStartReadsTheSenderName(t *testing.T) {
 	}
 }
 
+// A first name is not an identifier: Telegram lets anyone set it to anything,
+// including someone else's real @username. If ParseStart fell back to it,
+// a chat with no @username and a first name of "andreas" would render on the
+// confirm screen (telegramChatLabel) as "@andreas" -- indistinguishable from
+// the genuine handle, and the confirm step's only piece of evidence
+// (docs/adr/0010-binding-a-chat-needs-a-confirm.md) would be forgeable by
+// whoever set their first name. So a first name with no @username must read
+// as "", not as a name.
+func TestParseStartRefusesAFirstNameAsTheSenderName(t *testing.T) {
+	u := Update{UpdateID: 71, Message: &Message{Text: "/start abc"}}
+	u.Message.Chat.ID = 511
+	u.Message.From = &User{FirstName: "andreas"}
+
+	got, ok := ParseStart(u)
+	if !ok || got.Username != "" {
+		t.Fatalf("ParseStart() = %+v, %v; want Username \"\" -- a first name must never stand in for the sender's @username", got, ok)
+	}
+}
+
 // Telegram omits `from` on a channel post. A nil there must not panic the
 // poller: the update is still a /start, it just names nobody.
 func TestParseStartToleratesAMissingSender(t *testing.T) {
