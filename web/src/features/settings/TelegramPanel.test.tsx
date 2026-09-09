@@ -90,9 +90,9 @@ describe("TelegramPanel", () => {
 
     // The deep link opens with the exact args the brief resolves on --
     // "_blank" and "noopener", not the popup-then-navigate trick SignInScreen
-    // uses (this panel never needs it: the click that starts the mutation
-    // still has user activation, and the URL only exists once the mutation
-    // resolves).
+    // uses. handleConnect's own comment covers the trade-off this simpler
+    // shape accepts (a WebKit popup block) and the fallback link the waiting
+    // view renders because of it.
     await waitFor(() =>
       expect(openMock).toHaveBeenCalledWith(
         "https://t.me/HearthBot?start=abc123",
@@ -215,5 +215,27 @@ describe("TelegramPanel", () => {
 
     expect(await screen.findByText("a Telegram chat with no username")).toBeInTheDocument();
     expect(screen.queryByText("@undefined")).not.toBeInTheDocument();
+  });
+
+  it("offers the deep link as a plain fallback while waiting, for a blocked popup", async () => {
+    // handleConnect's own comment: this panel's window.open runs after the
+    // mutation resolves, which WebKit's popup gate can block (unlike
+    // SignInScreen's pre-opened-tab trick). The waiting view's <a> is the
+    // mitigation -- a blocked popup still leaves a real link to click.
+    vi.stubGlobal("open", vi.fn());
+    stubFetchRoutes({
+      [`GET ${BINDING_URL}`]: { status: 200, body: { connected: false } },
+      [`POST ${LINK_START_URL}`]: {
+        status: 200,
+        body: { id: "link-6", url: "https://t.me/HearthBot?start=waiting", expiresAt: "2026-09-09T10:10:00Z" },
+      },
+      [`GET ${linkStatusUrl("link-6")}`]: { status: 200, body: { status: "waiting" } },
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Telegram" }));
+
+    const fallbackLink = await screen.findByRole("link", { name: "Open Telegram" });
+    expect(fallbackLink).toHaveAttribute("href", "https://t.me/HearthBot?start=waiting");
   });
 });
