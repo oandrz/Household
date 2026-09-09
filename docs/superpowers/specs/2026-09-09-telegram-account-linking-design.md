@@ -47,9 +47,9 @@ account that did not begin life in a chat.
    the deciding click inside a session that is already authenticated, where a
    stolen link cannot reach.
 
-   Recorded as **ADR 10**, because the step looks redundant to anyone reading
-   only the happy path, and the next person to touch this flow will otherwise
-   delete it.
+   **To be recorded as ADR 10** when the work lands (it is not written yet),
+   because the step looks redundant to anyone reading only the happy path, and
+   the next person to touch this flow will otherwise delete it.
 
 2. **The chat gets a bland answer; the minting session gets the reason.**
    Four situations can arrive at `/start` with a link nonce, and the chat is
@@ -75,7 +75,20 @@ account that did not begin life in a chat.
    *sign-in* nonce in the table they share — not a payload prefix, which stays
    free for the still-unbuilt `inv_<token>` Telegram invites row.
 
-4. **No pending table and no status column.** `Consume` already stamps
+4. **The link branch is taken before the per-chat rate limit, not after.**
+   `HandleStart` today consumes the nonce, *then* checks
+   `CountLinksSince` against `telegramLinksPerHourLimit`, and answers the
+   dead-link message when the chat is over it. A link nonce must be branched
+   on before that check, and not only before the sign-in/sign-up split, or the
+   two ends of the flow disagree: the row would be consumed and carrying a
+   `user_id`, which decision 5 derives as *pending*, so the chat would be told
+   "that link is dead" while the browser cheerfully offered a Confirm button
+   that worked. The limit is safe to skip here because of what it is for —
+   redemption on the sign-in path *mints* a magic-link or sign-up row, and
+   this path mints nothing at redemption. Decision 12's per-user cap is what
+   bounds this path, and it is applied at mint, where the session is known.
+
+5. **No pending table and no status column.** `Consume` already stamps
    `chat_id` on the row in the same statement (the table's
    `consumed_rows_name_their_chat` CHECK exists to guarantee it). *Consumed,
    carrying a `user_id`, with no `telegram_accounts` row yet* **is** the
@@ -83,13 +96,13 @@ account that did not begin life in a chat.
    "where is this link up to" is a second thing to keep consistent, and the
    row already knows.
 
-5. **The confirm lives inside the nonce's existing ten minutes.** `expires_at`
+6. **The confirm lives inside the nonce's existing ten minutes.** `expires_at`
    bounds mint → open Telegram → `/start` → confirm, all of it. Nothing
    legitimate takes longer, and it means an abandoned pending link needs no
    sweeper of its own: it expires, and `PruneTelegramLinkRequests` already
    deletes it.
 
-6. **The confirm screen names the chat.** `telegram_link_requests` gains a
+7. **The confirm screen names the chat.** `telegram_link_requests` gains a
    nullable `chat_username text`, stamped at redemption from Telegram's
    `message.from`. Without it the confirm button asks a question the person
    cannot answer — "some chat opened your link, yes or no?" — and a confirm
@@ -99,14 +112,17 @@ account that did not begin life in a chat.
    the design that widens the adapter's view of Telegram's payload, and it is
    the smallest widening that makes decision 1 mean something.
 
-7. **A browser session, not an API token.** The link and unlink routes sit
-   behind `requireSession` + `requireCSRF` + `requireCookieSession`, copying
+8. **A browser session, not an API token.** The link and unlink routes sit
+   behind `requireSession` + `requireCSRF` + `requireCookieSession`. One group
+   covers the reads too: `requireCSRF` returns early for `GET`, `HEAD` and
+   `OPTIONS` (`middleware_csrf.go:28`), so the polling route needs no header
+   and the router needs no second group. It copies
    the rule already written for minting API tokens
    ([ADR 7](../../adr/0007-personal-api-tokens.md)): a leaked token must not be
    able to make itself permanent. Binding a chat is exactly that — it would
    give the holder a channel that outlives the token's revocation.
 
-8. **Authorisation stays at the edge.** `TelegramLinkService` takes a
+9. **Authorisation stays at the edge.** `TelegramLinkService` takes a
    `userID` as the *subject it acts on*, supplied by the handler from the
    session; no service takes an actor parameter and none is added here
    ([ADR 8](../../adr/0008-authorisation-at-each-channels-inbound-edge.md)).
@@ -116,13 +132,13 @@ account that did not begin life in a chat.
    inside an `Update` over the authenticated long poll, which is the fact
    `TelegramAuthService.sendSignUp`'s comment already leans on.
 
-9. **Any member, not owners only.** A limited member's chat is already refused
+10. **Any member, not owners only.** A limited member's chat is already refused
    by the `Commander`'s own guard (owner **and** money) and by the digest's
    recipients query, so a linked non-owner chat can do nothing an owner has
    not been given. Gating the panel on ownership would duplicate a guard that
    already exists one layer down and block a member who could safely link.
 
-10. **Disconnect ships in the same slice, and refuses to lock anyone out.**
+11. **Disconnect ships in the same slice, and refuses to lock anyone out.**
     `DELETE` refuses when `users.email IS NULL`, because a Telegram-only
     account — the second kind of first-class user, created by Telegram
     sign-up — has no other door: `GetUserByEmail` is `WHERE email = $1` and
@@ -134,7 +150,7 @@ account that did not begin life in a chat.
     with no revoke path at all is worse still — a lost phone with no answer —
     which is why disconnect is not deferred.
 
-11. **Per-user mint cap of three an hour**, mirroring
+12. **Per-user mint cap of three an hour**, mirroring
     `telegramLinksPerHourLimit`. The per-chat limit already bounds
     *redemption*; this bounds *minting*, which a session can now do without a
     chat being involved at all. It is table-growth control, not a security
@@ -191,9 +207,17 @@ Every 2xx carries a JSON body; `DELETE` returns the resulting state rather
 than `204`, so `apiFetch` never meets an ok response it cannot parse.
 
 `{id}` is the `telegram_link_requests` row id, not the nonce. It is safe to
-hand to the browser because it is useless without the session: `confirm`
-requires `row.user_id == session user`, and the raw nonce it *does* need to
-protect never leaves the deep link.
+hand to the browser because it is useless without the session: both the status
+read and `confirm` require `row.user_id == session user`, and the raw nonce
+they *do* need to protect never leaves the deep link. A row belonging to
+someone else answers `404`, not `403`, on both — the same rule the rest of the
+API follows, so a row id cannot be tested for existence.
+
+**The status route derives in this order, and the order matters:** binding
+first, then refusals, then expiry. A connected panel that is still polling
+when `expires_at` passes must keep reading `confirmed`; deriving expiry first
+would flip a working connection to "that link expired" ten minutes after it
+succeeded.
 
 ## Ports
 
@@ -269,6 +293,7 @@ api/cmd/api/main.go                                  wiring
 web/src/features/settings/TelegramPanel.tsx          three states
 web/src/features/settings/SettingsPage.tsx           the panel
 web/src/features/settings/schemas.ts                 responses
+api/cmd/hearthctl/routes.go                          the five new routes
 docs/adr/0010-binding-a-chat-needs-a-confirm.md      decision 1
 ```
 
@@ -308,11 +333,22 @@ count does not move; disconnect; watch `/balance` be refused again.
 
 - **Attaching an email address to a Telegram-only account** — the sibling gap,
   already ⬜ in `FEATURE_TRACKER.md`. It is the *other* direction and it is
-  what decision 10's guard is waiting for.
+  what decision 11's guard is waiting for.
 - **Telegram invites** (`t.me/…?start=inv_<token>`) — still ⬜, still a payload
   change to the same parsing. This design leaves the `inv_` prefix free for it
   by discriminating on `user_id IS NOT NULL` instead.
 - **More than one chat per account.** `telegram_accounts` is unique in both
   directions by design; "disconnect first" is the whole answer here.
 - **`hearthctl` coverage.** Sign-up, magic link, Telegram and invite
-  acceptance are already listed as deliberate CLI gaps; this joins them.
+  acceptance are already listed as deliberate CLI gaps; this joins them. Note
+  the difference from `api/cmd/hearthctl/routes.go` in Files touched: *wrapping*
+  the flow in a command is out of scope, but the hand-kept routes table is
+  diffed against `router.go` both ways by `routes_test.go`, so five new routes
+  that are not listed there turn `make test` red.
+
+- **Preserving `/nudges off` across a relink.** Disconnecting deletes the
+  `telegram_accounts` row, and `nudges_enabled` goes with it, so an owner who
+  had muted the digest and later reconnects the same chat is unmuted. Accepted:
+  reconnecting is a deliberate act, unmuting is recoverable with one `/nudges
+  off`, and carrying the flag across a deleted row means keeping a tombstone
+  whose only job is to remember one boolean.

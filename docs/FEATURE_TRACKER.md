@@ -945,8 +945,8 @@ Telegram chat", found while designing it: the binding is written only inside
 connect a chat, and every Telegram feature built since is unreachable to
 them. A gap the map did not show is now on it: **94/18/17/5 = 134**,
 denominator **129**. **The headline above was also corrected in the same
-edit** — it still read "104 of 124 … denominator 119", the figures from
-2026-09-05, while the running total here had reached 133. It now states
+edit** — it still read "104 of 124 … denominator 119", the figures from the
+2026-09-07 recount above, while the running total here had reached 133. It now states
 Built + Partial **112** of **134**, denominator **129**, which is what this
 table sums to.
 
