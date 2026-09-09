@@ -33,7 +33,13 @@ WHERE chat_id = $1 AND consumed_at >= $2;
 SELECT user_id FROM telegram_accounts WHERE chat_id = $1;
 
 -- name: CreateTelegramAccount :exec
-INSERT INTO telegram_accounts (user_id, chat_id) VALUES ($1, $2);
+INSERT INTO telegram_accounts (user_id, chat_id, chat_username) VALUES ($1, $2, $3);
+
+-- name: GetTelegramAccountByUserID :one
+SELECT chat_id, chat_username, linked_at FROM telegram_accounts WHERE user_id = $1;
+
+-- name: DeleteTelegramAccount :exec
+DELETE FROM telegram_accounts WHERE user_id = $1;
 
 -- PruneTelegramLinkRequests mirrors PruneSignups exactly: same retention
 -- condition (created before the cutoff, and either already consumed or

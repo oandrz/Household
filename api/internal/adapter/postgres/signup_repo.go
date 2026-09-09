@@ -188,6 +188,10 @@ func (r *SignupRepo) Provision(ctx context.Context, signupID, passwordHash strin
 		if err := q.CreateTelegramAccount(ctx, sqlcgen.CreateTelegramAccountParams{
 			UserID: userRow.ID,
 			ChatID: *claimed.TelegramChatID,
+			// A Telegram sign-up has no confirm screen to show a name on --
+			// nothing here ever reads it, so the update's from.username is
+			// deliberately left unused.
+			ChatUsername: nullableText(""),
 		}); err != nil {
 			return usecase.ProvisionedHousehold{}, translate(err, "bind telegram account for signup")
 		}

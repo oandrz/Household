@@ -54,6 +54,15 @@ type unusedTelegramAccountRepo struct{}
 func (unusedTelegramAccountRepo) ByChatID(context.Context, int64) (string, error) {
 	panic("unusedTelegramAccountRepo: ByChatID should not be called by these tests")
 }
+func (unusedTelegramAccountRepo) ByUserID(context.Context, string) (usecase.TelegramBinding, error) {
+	panic("unusedTelegramAccountRepo: ByUserID should not be called by these tests")
+}
+func (unusedTelegramAccountRepo) Create(context.Context, usecase.TelegramBinding) error {
+	panic("unusedTelegramAccountRepo: Create should not be called by these tests")
+}
+func (unusedTelegramAccountRepo) Delete(context.Context, string) error {
+	panic("unusedTelegramAccountRepo: Delete should not be called by these tests")
+}
 
 type unusedMagicLinkRepo struct{}
 

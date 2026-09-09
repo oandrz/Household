@@ -230,14 +230,41 @@ type TelegramLinkRepository interface {
 	Prune(ctx context.Context, before time.Time) (int64, error)
 }
 
-// TelegramAccountRepository resolves a Telegram chat to the Hearth user it is
-// bound to. The binding itself is written inside SignupRepository.Provision's
-// transaction, which is why there is no Create method here.
+// TelegramBinding is one chat bound to one Hearth user.
+type TelegramBinding struct {
+	UserID       string
+	ChatID       int64
+	ChatUsername string
+	LinkedAt     time.Time
+}
+
+// TelegramAccountRepository is the binding between a Telegram chat and the
+// Hearth user it belongs to. Bindings are written in two places and nowhere
+// else: inside SignupRepository.Provision's transaction, when a stranger
+// creates a household from a chat, and by TelegramLinkService.Confirm, when
+// a member who already has an account connects their chat from Settings.
+// Both directions are UNIQUE in the database -- one chat per user, one user
+// per chat -- and that constraint, not any check in Go, is what makes a
+// sign-in unambiguous.
 type TelegramAccountRepository interface {
 	// ByChatID returns domain.ErrNotFound when the chat is bound to no user,
 	// which is the ordinary "this person has no account yet" case, not an error
 	// condition.
 	ByChatID(ctx context.Context, chatID int64) (userID string, err error)
+	// ByUserID returns domain.ErrNotFound when this user has no chat bound.
+	ByUserID(ctx context.Context, userID string) (TelegramBinding, error)
+	// Create returns domain.ErrAlreadyExists for either UNIQUE -- one chat per
+	// user, one user per chat. Which of the two collided is not distinguished:
+	// the caller knows which side it was asking about (a fresh sign-up binds a
+	// chat that must be free; Confirm binds a user who must have no chat yet)
+	// and chooses the sentence, rather than a repository guessing at intent.
+	// b.LinkedAt is ignored -- the store assigns it, the same as any other
+	// created-at column.
+	Create(ctx context.Context, b TelegramBinding) error
+	// Delete is idempotent: removing a binding that is not there is not an
+	// error, because the caller's goal -- this user has no chat -- is already
+	// true.
+	Delete(ctx context.Context, userID string) error
 }
 
 // NudgeRecipient is one chat that may receive one household's daily digest:

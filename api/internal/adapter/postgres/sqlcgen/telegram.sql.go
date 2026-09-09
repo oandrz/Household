@@ -80,16 +80,17 @@ func (q *Queries) CountTelegramLinksSince(ctx context.Context, arg CountTelegram
 }
 
 const createTelegramAccount = `-- name: CreateTelegramAccount :exec
-INSERT INTO telegram_accounts (user_id, chat_id) VALUES ($1, $2)
+INSERT INTO telegram_accounts (user_id, chat_id, chat_username) VALUES ($1, $2, $3)
 `
 
 type CreateTelegramAccountParams struct {
-	UserID pgtype.UUID
-	ChatID int64
+	UserID       pgtype.UUID
+	ChatID       int64
+	ChatUsername *string
 }
 
 func (q *Queries) CreateTelegramAccount(ctx context.Context, arg CreateTelegramAccountParams) error {
-	_, err := q.db.Exec(ctx, createTelegramAccount, arg.UserID, arg.ChatID)
+	_, err := q.db.Exec(ctx, createTelegramAccount, arg.UserID, arg.ChatID, arg.ChatUsername)
 	return err
 }
 
@@ -109,6 +110,15 @@ func (q *Queries) CreateTelegramLinkRequest(ctx context.Context, arg CreateTeleg
 	return err
 }
 
+const deleteTelegramAccount = `-- name: DeleteTelegramAccount :exec
+DELETE FROM telegram_accounts WHERE user_id = $1
+`
+
+func (q *Queries) DeleteTelegramAccount(ctx context.Context, userID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteTelegramAccount, userID)
+	return err
+}
+
 const getTelegramAccountByChatID = `-- name: GetTelegramAccountByChatID :one
 SELECT user_id FROM telegram_accounts WHERE chat_id = $1
 `
@@ -118,6 +128,23 @@ func (q *Queries) GetTelegramAccountByChatID(ctx context.Context, chatID int64) 
 	var user_id pgtype.UUID
 	err := row.Scan(&user_id)
 	return user_id, err
+}
+
+const getTelegramAccountByUserID = `-- name: GetTelegramAccountByUserID :one
+SELECT chat_id, chat_username, linked_at FROM telegram_accounts WHERE user_id = $1
+`
+
+type GetTelegramAccountByUserIDRow struct {
+	ChatID       int64
+	ChatUsername *string
+	LinkedAt     pgtype.Timestamptz
+}
+
+func (q *Queries) GetTelegramAccountByUserID(ctx context.Context, userID pgtype.UUID) (GetTelegramAccountByUserIDRow, error) {
+	row := q.db.QueryRow(ctx, getTelegramAccountByUserID, userID)
+	var i GetTelegramAccountByUserIDRow
+	err := row.Scan(&i.ChatID, &i.ChatUsername, &i.LinkedAt)
+	return i, err
 }
 
 const getTelegramLinkRequest = `-- name: GetTelegramLinkRequest :one

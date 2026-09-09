@@ -3696,11 +3696,15 @@ var _ usecase.TelegramLinkRepository = (*telegramLinkRepoDouble)(nil)
 // --- TelegramAccountRepository -----------------------------------------
 
 type telegramAccountRepoDouble struct {
-	byChatID map[int64]string // chatID -> userID
+	byChatID map[int64]string                   // chatID -> userID
+	byUserID map[string]usecase.TelegramBinding // userID -> binding
 }
 
 func newTelegramAccountRepoDouble() *telegramAccountRepoDouble {
-	return &telegramAccountRepoDouble{byChatID: map[int64]string{}}
+	return &telegramAccountRepoDouble{
+		byChatID: map[int64]string{},
+		byUserID: map[string]usecase.TelegramBinding{},
+	}
 }
 
 func (d *telegramAccountRepoDouble) ByChatID(_ context.Context, chatID int64) (string, error) {
@@ -3711,12 +3715,53 @@ func (d *telegramAccountRepoDouble) ByChatID(_ context.Context, chatID int64) (s
 	return userID, nil
 }
 
+func (d *telegramAccountRepoDouble) ByUserID(_ context.Context, userID string) (usecase.TelegramBinding, error) {
+	b, ok := d.byUserID[userID]
+	if !ok {
+		return usecase.TelegramBinding{}, domain.ErrNotFound
+	}
+	return b, nil
+}
+
+// Create mirrors the two UNIQUEs telegram_accounts enforces in Postgres --
+// one chat per user, one user per chat -- so a test exercising
+// TelegramLinkService.Confirm against this double sees the same
+// domain.ErrAlreadyExists a real database would return.
+func (d *telegramAccountRepoDouble) Create(_ context.Context, b usecase.TelegramBinding) error {
+	if _, ok := d.byUserID[b.UserID]; ok {
+		return domain.ErrAlreadyExists
+	}
+	if _, ok := d.byChatID[b.ChatID]; ok {
+		return domain.ErrAlreadyExists
+	}
+	// LinkedAt is assigned by the store, the same as the real repository's
+	// DEFAULT now(): a caller-supplied value on b is ignored, never trusted.
+	b.LinkedAt = time.Now()
+	d.byUserID[b.UserID] = b
+	d.byChatID[b.ChatID] = b.UserID
+	return nil
+}
+
+// Delete is idempotent, same as the real repository: removing a binding
+// that is not there is not an error.
+func (d *telegramAccountRepoDouble) Delete(_ context.Context, userID string) error {
+	b, ok := d.byUserID[userID]
+	if !ok {
+		return nil
+	}
+	delete(d.byUserID, userID)
+	delete(d.byChatID, b.ChatID)
+	return nil
+}
+
 // bind pre-populates a chat -> user binding, standing in for the binding
-// SignupRepository.Provision writes inside its own transaction (see
-// TelegramAccountRepository's doc comment in ports.go for why there is no
-// Create method here to call instead).
+// SignupRepository.Provision writes inside its own transaction. It writes
+// both maps directly, bypassing Create's uniqueness checks, because the
+// tests that call it are setting up a fixture, not exercising the binding
+// rules themselves.
 func (d *telegramAccountRepoDouble) bind(chatID int64, userID string) {
 	d.byChatID[chatID] = userID
+	d.byUserID[userID] = usecase.TelegramBinding{UserID: userID, ChatID: chatID, LinkedAt: time.Now()}
 }
 
 var _ usecase.TelegramAccountRepository = (*telegramAccountRepoDouble)(nil)
