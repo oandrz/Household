@@ -13,7 +13,7 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Out of scope — three different reasons, and **the row always says which**: marked "· not built" by the design itself; cut outright by the product owner (the audit screen, §9 — the code was deleted); or **deferred past the current release** by the product owner, meaning it is expected back later (the Family calendar, §7). A 🚫 is not a promise that something will never exist — it is a statement that it is not this release's work, and the row says what would bring it back |
 
-**Where things stand:** 112 of 134 features built or partly built — and **five of the 134 are 🚫**, so the honest denominator for this release is 129.
+**Where things stand:** 113 of 134 features built or partly built — and **five of the 134 are 🚫**, so the honest denominator for this release is 129.
 
 > **Recounted 2026-09-02**, when the four unbuilt platform-administration
 > features were given rows (section 9). The count of *built* work does not
@@ -950,9 +950,31 @@ edit** — it still read "104 of 124 … denominator 119", the figures from the
 Built + Partial **112** of **134**, denominator **129**, which is what this
 table sums to.
 
+**2026-09-09, later the same day — the row's own browser half was walked,
+and it moves ⬜ → 🟡, not ✅.** Nine of the design spec's twelve testing
+criteria pass directly (Settings shows Connect, the deep link, the
+household-count invariant, the panel naming and confirming the chat, the
+already-linked and rate-limit refusals, the expired-link refusal), plus two
+more the walk added on its own (unlink refused for an account with no
+email; a link row belonging to nobody answers 404, not 403). **Three
+criteria did not run** — the ones needing `/start` actually sent from the
+owner's own phone (the confirm-instruction reply, `/balance` answering once
+bound, and a fresh sign-up link offered again after disconnect) — because
+the walk had a browser and a database but not the owner's Telegram account
+at the keyboard. This project's bar is that ✅ means verified end to end, so
+a feature genuinely blocked on the chat side for one third of its own test
+plan is 🟡, named honestly, not ✅. Full record, including which test covers
+each of the three not walked:
+`docs/superpowers/plans/2026-09-09-telegram-account-linking-verification.md`.
+Entry & authentication becomes **12/2/2/0** (recount by symbol, not delta:
+the section's own sixteen rows counted directly, `awk`/`grep` over §1).
+Totals **94/19/16/5 = 134**, denominator **129** — every other section
+recounted the same way and unchanged, so only §1's row moved. The headline
+above now states Built + Partial **113** of **134**, denominator **129**.
+
 | Area | Built | Partial | Not started | Out of scope |
 |---|---|---|---|---|
-| Entry & authentication | 12 | 1 | 3 | 0 |
+| Entry & authentication | 12 | 2 | 2 | 0 |
 | Navigation shell | 7 | 1 | 1 | 0 |
 | Household settings | 11 | 8 | 2 | 0 |
 | Overview (home) | 8 | 2 | 1 | 0 |
@@ -962,7 +984,7 @@ table sums to.
 | Household extras | 0 | 0 | 0 | 1 |
 | Platform administration | 7 | 1 | 0 | 1 |
 | Automation | 8 | 0 | 1 | 0 |
-| **Total** | **94** | **18** | **17** | **5** |
+| **Total** | **94** | **19** | **16** | **5** |
 
 ---
 
@@ -1041,7 +1063,7 @@ The full checklist is at the end of `docs/LEARNING.md`.
 | Telegram invites — a shareable `t.me/…?start=inv_<token>` link | ⬜ | **Deliberately not built in this slice**, not an oversight. Invites still go to an email address and are still relayed from Mailpit by hand on the live install, which is one person's inconvenience on a two-person install rather than a blocker. It is the natural follow-up: the delivery channel exists now, so this is a payload change to the same `/start` parsing, not new infrastructure. Recorded here so the gap is on the map — see `docs/SYSTEM_DESIGN.md` §5 and [ADR 4](adr/0004-telegram-as-a-second-delivery-channel.md)'s Out of scope |
 | Attach an email address to a Telegram-only account | ⬜ | **Not built — found in the branch's whole-branch review, 2026-09-01.** A Telegram sign-up leaves `users.email` NULL. `GetUserByEmail` is `WHERE email = $1` and NULL never matches a parameter, so the password collected at sign-up cannot sign anyone in, `POST /auth/magic-link` has no address to send to, and `adminctl reset-password --email=` cannot address the account — Telegram becomes the only door into that household with no operator recovery path today. `SignUpCompleteScreen.tsx` now says this to the person signing up. The fix is a settings-page flow that lets a signed-in Telegram user add and verify an email, giving `GetUserByEmail` something to match; until then the only recovery an operator has is `make psql` by hand (see `docs/LEARNING.md`) |
 
-| Link an existing account to a Telegram chat | ⬜ | **Not built — found while designing it, 2026-09-09.** `telegram_accounts` rows are written in exactly one place, inside `SignupRepository.Provision`, so the binding exists only for accounts that were *born* in a chat. A member who signed up by email and then messages the bot is an unbound chat, and `HandleStart` answers an unbound chat with a **sign-up** link — the person asking to connect their phone is offered a second household instead, and `/spend`, `/balance`, the free-text intents and the daily digest are all unreachable to every email account. Designed in `docs/superpowers/specs/2026-09-09-telegram-account-linking-design.md`: a Settings panel mints a nonce carrying the member's user id, `/start` records which chat redeemed it and writes nothing, and the binding is written only when the browser that minted it confirms — the second phase is load-bearing, because a one-phase bind would turn a leaked ten-minute deep link into account takeover. Disconnect ships with it, refusing when `users.email IS NULL` so a Telegram-only account cannot close its only door (see the row above, its sibling). **Code-complete as of this same date** — migration `00018`, both repository ports, `TelegramLinkService`, the link-nonce branch in `HandleStart`, the five guarded routes and `TelegramPanel.tsx`, all reviewed and covered by usecase, HTTP and frontend tests, `docs/adr/0010-binding-a-chat-needs-a-confirm.md` written — but this row stays ⬜, not ✅, until the browser walk in `docs/superpowers/plans/2026-09-09-telegram-account-linking-verification.md` has actually run against a real bot; a suite passing is not that walk (`docs/LEARNING.md` pattern 15) |
+| Link an existing account to a Telegram chat | 🟡 | `telegram_accounts` rows used to be written in exactly one place, inside `SignupRepository.Provision`, so the binding existed only for accounts that were *born* in a chat. A member who signed up by email and then messaged the bot was an unbound chat, and `HandleStart` answered an unbound chat with a **sign-up** link — the person asking to connect their phone was offered a second household instead, and `/spend`, `/balance`, the free-text intents and the daily digest were all unreachable to every email account. Designed in `docs/superpowers/specs/2026-09-09-telegram-account-linking-design.md`: a Settings panel mints a nonce carrying the member's user id, `/start` records which chat redeemed it and writes nothing, and the binding is written only when the browser that minted it confirms — the second phase is load-bearing, because a one-phase bind would turn a leaked ten-minute deep link into account takeover. Disconnect ships with it, refusing when `users.email IS NULL` so a Telegram-only account cannot close its only door (see the row above, its sibling). Code-complete: migration `00018`, both repository ports, `TelegramLinkService`, the link-nonce branch in `HandleStart`, the five guarded routes and `TelegramPanel.tsx`, all reviewed and covered by usecase, HTTP and frontend tests, `docs/adr/0010-binding-a-chat-needs-a-confirm.md` written. **Walked in a browser 2026-09-09 — nine of twelve criteria pass, plus two more the walk found** (unlink refused for an account with no email; a foreign link row answers 404, not 403). **🟡, not ✅, because three criteria are not walked**: `/start` replying with the confirm instruction and no sign-up link, `/balance` answering once bound where it previously refused, and a fresh sign-up link being offered again after disconnect — all three need `/start` sent from the owner's own phone, which this walk's session did not have. Each is covered instead by a named unit or adapter test (`TestHandleStartWithALinkNonceLeavesTheBindingUnwritten` and its mutation for the first; `TestAnUnlinkedChatIsRefusedBeforeAnyServiceCall` + `TestBalanceFormatsEachAccountInItsCurrency` for the second; `TestUnlinkRemovesTheBinding` + `TestHandleStartSendsASignUpLinkToAnUnknownChat` for the third), not by a live chat. Full record: `docs/superpowers/plans/2026-09-09-telegram-account-linking-verification.md` |
 
 ## 2 · Navigation shell
 

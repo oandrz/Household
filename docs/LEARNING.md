@@ -2722,6 +2722,30 @@ is exercised. Fixed by giving the missing population a second way to acquire
 the binding — a Settings-driven link-and-confirm flow, `docs/adr/0010-binding-a-chat-needs-a-confirm.md`
 — rather than by touching any of the capabilities that were already correct.
 
+**The browser walk that finally exercised this fix, 2026-09-09, taught one
+more thing on top of it, about the panel built to carry it.**
+`TelegramPanel.tsx` polls its pending link's status every 3 seconds
+(`telegramPollInterval`, and the plan's own criterion 5 describes it that
+way) — true of the tab you are watching while you drive it, and false the
+moment a real person does what this exact flow asks them to: switch away to
+Telegram to press Start. TanStack Query's `refetchInterval` is paused by
+the browser whenever `document.visibilityState === "hidden"`, so the poll
+that a unit test proves fires on a timer, and that a reviewer reads as
+"every 3 seconds," simply does not run while the tab is in the background —
+precisely the interval this feature's own user is guaranteed to be away for
+it. It is not a defect: the request resumes and the panel catches up within
+one tick of the tab regaining focus, proven live in the same walk (the
+panel sat on `waiting` with the API already answering `pending`
+underneath it, then flipped the instant visibility returned) — the flow
+self-heals for the person actually using it. What it cost was time for
+whoever reads "every 3 seconds" and then debugs a background tab that
+appears frozen. **What would have caught it sooner: walking the flow the
+way a person actually performs it — leave the tab, do the thing in another
+app, come back — rather than watching only the tab you are driving,** the
+same discipline pattern 3 ("The simulated environment lied") names for
+jsdom, extended here to a real browser tab that a walk never actually
+backgrounded.
+
 ### 16. A claim about the code is not evidence until someone checks it against the code
 
 - **The net worth trend's plan, 2026-08-19.** `docs/FEATURE_TRACKER.md`'s own

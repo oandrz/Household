@@ -1,23 +1,30 @@
 # Telegram account linking — verification walkthrough
 
-> **STATUS: NOT YET RUN.** This is a walk *plan*, not a walk *result* — the
-> shape `2026-09-01-telegram-sign-in-verification.md` and
-> `2026-09-02-hearth-admin-households-verification.md` are in once they have
-> actually been walked. The code is complete, reviewed across eight tasks,
-> and `make lint && make test` is green on the tree (confirm this again
-> before starting: `git log --oneline -1` should show the docs commit this
-> file shipped in, and nothing uncommitted).
+> **STATUS: WALKED (browser half), 2026-09-09. 9 of 12 criteria pass
+> directly, plus 2 more found beyond the twelve. 3 criteria are NOT
+> WALKED** — every one of them needs `/start` sent from the owner's own
+> phone signed into Telegram, which this session did not have — **and are
+> covered instead by a named test, not by a live chat.** This is why
+> `docs/FEATURE_TRACKER.md`'s row moved ⬜ → **🟡**, not ✅: this project's
+> bar is that ✅ means verified, and a third of this feature's own test plan
+> genuinely was not.
 >
-> Running it needs the running dev stack and the owner's own Telegram
-> account — a second Telegram account for the one criterion that needs one
-> (see criterion 8's note). This file was written by an agent that did
-> **not** have either; every "Result" line below is empty on purpose, for
-> whoever runs it to fill in. Do not write a pass/fail into this file
-> without having actually done the step above it.
+> **How the walkable two-thirds were produced without a phone.** Where a
+> criterion needed a chat to have redeemed a link — moving a row from
+> `waiting` to `pending` — the row was written directly into
+> `telegram_link_requests` with the exact statement `Consume` itself issues
+> (`consumed_at`, `chat_id`, `chat_username`, in one `UPDATE`), never a raw
+> `INSERT` improvising the shape. **Everything downstream of that row —
+> `Status`'s derivation, `Confirm`'s re-checks and the binding it writes,
+> the panel's rendering, the rate limit, the expiry — is exercised for
+> real** through the actual HTTP routes and the actual browser. **Everything
+> upstream of that row — `HandleStart` itself, the poller, and Telegram's
+> own delivery of a real `/start`** — is what the three NOT WALKED criteria
+> below cover, and is not exercised by this technique at all.
 >
-> Do not mark `docs/FEATURE_TRACKER.md`'s "Link an existing account to a
-> Telegram chat" row ✅ until this file's own STATUS line is changed to say
-> the walk ran, the same rule the sign-in and households walks followed.
+> Full raw notes: `.superpowers/sdd/2026-09-09-telegram-account-linking/walk-notes.md`.
+> Two findings from the same walk that look like bugs and are not are
+> recorded at the end of this file, after the criteria.
 
 Criteria 1–12 are Step 3 of
 `.superpowers/sdd/2026-09-09-telegram-account-linking/task-8-brief.md`, which
@@ -151,6 +158,21 @@ docker compose exec postgres psql -U hearth -d hearth -c \
   "refuses again" both depend on knowing this account's exact starting
   state.
 
+**What actually happened, 2026-09-09.** The walk used
+`andreas@hearth.family` throughout (every row in `walk-notes.md` names it or
+its bound chat), and it used the synthetic-redemption technique described
+in the STATUS banner for every step that would otherwise have needed a real
+chat — including the `walk_test`/`999000111` chat used in criteria 5, 6, 8,
+which is a fabricated id, not the owner's real personal chat. Because of
+that, **Step 0's concern above was never actually exercised this time**:
+this walk never sent a real `/start` from any phone, so whether the owner's
+*genuine* Telegram chat was already bound in this Postgres volume never
+came up. It is still exactly as live a question for whoever completes
+criteria 3, 7 and 10 — re-run Step 0's query fresh before sending the first
+real `/start`, rather than assuming this walk already settled it. By the
+end of criterion 9, `andreas@hearth.family` was disconnected again, back to
+the unbound state Step 0 would have found it in at the start.
+
 **Not walked by hand at all in this file: the stolen-link takeover
 scenario decision 1 exists to prevent.** It needs a *second* Telegram
 account redeeming a link nonce minted by the first — this walk, run by one
@@ -213,7 +235,7 @@ reply from the owner's own Telegram account): **3, 4, 5, 7, 9's second half,
 needed at all): **1, 2, 6's click, 8's observable half, 11, 12's weak form,
 13, 14.**
 
-### 1. Settings shows "Not connected" with a Connect button
+### 1. Settings shows "Not connected" with a Connect button — PASS
 
 **Do:** With the chosen account signed in and unbound (Step 0), open
 Settings and find the Telegram card.
@@ -230,11 +252,15 @@ account Step 0 confirmed unbound.
 
 **Telegram needed:** No.
 
-**Result:**
+**Result:** PASS. Signed in as `andreas@hearth.family` via a real magic link
+(requested from `POST /api/v1/auth/magic-link`, read out of Mailpit — no
+credential changed). The Telegram card showed exactly: "Telegram / Connect
+a Telegram chat to get reminders and use the bot from there. / Connect
+Telegram".
 
 ---
 
-### 2. Connect opens Telegram on the bot with a `?start=` payload
+### 2. Connect opens Telegram on the bot with a `?start=` payload — PASS
 
 **Do:** Click "Connect Telegram". Watch the network panel for
 `POST /api/v1/auth/telegram/link` and the tab/window it opens.
@@ -253,11 +279,15 @@ fallback); the panel not moving to the waiting state.
 ever pressing Start in the opened tab. (This step does count toward trap 6's
 mint tally.)
 
-**Result:**
+**Result:** PASS. `POST /api/v1/auth/telegram/link` opened a new tab at
+`https://t.me/HearthOinkDevBot?start=smejlCc5-l9mc5AP4DLX0v9t97B3ZJb2ravf83JVIMo`
+and the panel moved to the waiting view. The same view also carried the
+popup-blocked fallback link ("Didn't open? Open Telegram.") — see criterion
+13 below, which this observation also answers.
 
 ---
 
-### 3. `/start` replies with the confirm instruction and no sign-up link
+### 3. `/start` replies with the confirm instruction and no sign-up link — NOT WALKED
 
 **Do:** In the Telegram tab/app that opened, press **Start**.
 
@@ -273,11 +303,20 @@ of the spec did not hold.
 
 **Telegram needed:** Yes.
 
-**Result:**
+**Result:** NOT WALKED. No phone signed into Telegram was available to this
+session, so no real `/start` was ever sent and no reply was ever read from
+the bot. **Covered instead by `TestHandleStartWithALinkNonceLeavesTheBindingUnwritten`**
+(`telegram_auth_test.go`) — it drives `HandleStart` directly with a live
+link nonce and asserts the reply contains "confirm" and mints no magic
+link, and its own comment states the property this criterion exists to
+check: "a one-phase bind would make a leaked deep link an account
+takeover." The absence of a sign-up link specifically is implied by that
+same assertion (no `signups` row is minted on this path) rather than a
+separate substring check on the reply text.
 
 ---
 
-### 4. `SELECT count(*) FROM households` is unchanged
+### 4. `SELECT count(*) FROM households` is unchanged — PASS, with a caveat
 
 **Do:** Before criterion 3's `/start` (or from a `psql` session opened
 before the walk began), record `SELECT count(*) FROM households;`. Repeat
@@ -294,11 +333,21 @@ for the same person.
 
 **Telegram needed:** Yes (it is timed around criterion 3's `/start`).
 
-**Result:**
+**Result:** PASS — households: 6 before, 6 after; signups: 8 before, 8
+after. **Caveat, said plainly:** since criterion 3's real `/start` was not
+walked, this count was taken before and after the walk's own
+synthetic-redemption write (the `Consume`-shaped `UPDATE` described in the
+STATUS banner above) rather than around a live `HandleStart` call. It
+genuinely shows the redemption row itself creates neither a household nor a
+signup — real evidence, since nothing in this codebase polls
+`telegram_link_requests` and reacts to a row appearing in it — but it does
+not, by itself, prove `HandleStart`'s link branch skips `sendSignUp` on a
+real `/start`; that half of the guarantee is what criterion 3's cited test
+covers instead.
 
 ---
 
-### 5. The panel moves to pending and names the chat
+### 5. The panel moves to pending and names the chat — PASS
 
 **Do:** Back in the browser, wait up to 3 seconds (the panel's own poll
 interval, `telegramPollInterval`) after criterion 3's `/start`.
@@ -316,11 +365,14 @@ shown does not match the account that actually sent `/start`.
 **Telegram needed:** No new Telegram action — this is the browser observing
 criterion 3's effect, but it depends on criterion 3 having happened.
 
-**Result:**
+**Result:** PASS, via the synthetic redemption in place of a live `/start`
+(STATUS banner above). The panel read: "**@walk_test** opened this link.
+Confirm it's you to finish connecting." with a Confirm button — the
+`pending` state, correctly naming the chat that redeemed it.
 
 ---
 
-### 6. Confirm writes the binding; the panel shows connected with a `linkedAt`
+### 6. Confirm writes the binding; the panel shows connected with a `linkedAt` — PASS
 
 **Do:** Click **Confirm**.
 
@@ -336,11 +388,14 @@ the panel staying on the pending screen after a `200`.
 **Telegram needed:** No — this is a browser click. (Criterion 3–5 needed
 Telegram to reach this point.)
 
-**Result:**
+**Result:** PASS. `Confirm` answered `200`; the panel read "Connected as
+**@walk_test** / Linked Sep 9, 2026 / Disconnect". The
+`telegram_accounts` row: id `4138040e…`, chat `999000111`, username
+`walk_test`.
 
 ---
 
-### 7. `/balance` in that chat now answers, where it previously refused
+### 7. `/balance` in that chat now answers, where it previously refused — NOT WALKED
 
 **Do:** **Before** criterion 3's `/start` (i.e. earlier in the walk, on the
 still-unbound chat), send `/balance` from the same Telegram account and
@@ -360,56 +415,60 @@ whole walk's premise); `/balance` still refusing *after* Confirm.
 criterion 6. **Send the "before" message early**, since it is the baseline
 this criterion needs and is easy to forget once the flow is under way.
 
-**Result:**
+**Result:** NOT WALKED. No phone signed into Telegram was available, so
+neither the "before" nor the "after" `/balance` was actually sent. **Covered
+instead by two adapter tests, composed:** `TestAnUnlinkedChatIsRefusedBeforeAnyServiceCall`
+(`commands_test.go`) proves the Commander's chat-resolution guard refuses
+before any service call for an unbound chat — it exercises `/spend` as its
+example command, but the guard it tests runs identically ahead of every
+command including `/balance`, resolving chat → membership before dispatch
+— and `TestBalanceFormatsEachAccountInItsCurrency` proves `/balance`
+answers correctly for a chat the resolver reports as linked to an owner.
+Together they prove both halves this criterion asks for, without proving
+they are the *same* chat before and after a real Confirm — that composition
+is what a live walk would add.
 
 ---
 
-### 8. A second Connect attempt is refused with "already has a Telegram chat"
+### 8. A second Connect attempt is refused with "already has a Telegram chat" — PASS
 
-**Cannot be fully walked with one Telegram account — read this before
-attempting it.** `ErrTelegramAlreadyLinked` only fires on `Confirm` when a
-**different** chat redeems a **second** pending link for a user who is
-already bound — this account only has one Telegram account to test with, so
-that exact collision cannot be produced by hand here.
+**Corrected from the original plan.** The first draft of this file assumed
+`ErrTelegramAlreadyLinked` needed a second, real Telegram account to
+produce — it does not. The chat that redeems a link nonce is identified
+purely by `chat_id`, a plain integer the service never validates against
+Telegram itself, so a second pending link can be redeemed with any unused
+`chat_id` via the same synthetic-write technique the STATUS banner
+describes, with no second phone involved at all.
 
-**What can be observed with the account already connected (do this
-part):**
+**Do:** With `andreas@hearth.family` already connected from criterion 6,
+mint a second link (`POST /api/v1/auth/telegram/link`) and redeem it with a
+synthetic row naming a **different, still-unbound** `chat_id`. Attempt
+`POST /auth/telegram/link/{id}/confirm` on that second row.
 
-**Do:** With the account still connected from criterion 6, look at the
-Settings card, and separately call `POST /api/v1/auth/telegram/link` again
-(e.g. `hearthctl api POST /auth/telegram/link`, or a second click if the
-panel still exposes one).
+**Look for:** `Status` on the second row derives `refused` with the reason
+`ErrTelegramAlreadyLinked.Error()` ("this account already has a telegram
+chat"); `Confirm` answers `409 TELEGRAM_ALREADY_LINKED`.
 
-**Look for:** The panel's connected state offers no Connect button at all —
-only Disconnect — so the UI-level "you already have one" is the absence of
-the control, not a refusal message. The API mint itself still succeeds
-(`200`, a new *waiting* link — nothing has redeemed it yet) — minting is not
-what decision 2's fourth row guards; **confirming** a second chat onto an
-already-bound user is. Sending
-`/start` from the *same, already-bound* chat against this new nonce answers
-"This chat is already connected to your Hearth account." (`handleLinkStart`'s
-same-user branch) rather than the confirm-instruction message.
+**Result:** PASS — exactly this. `Status` derived `refused` with reason
+"this account already has a telegram chat"; `Confirm` answered `409
+TELEGRAM_ALREADY_LINKED`.
 
-**Would count as failure:** The panel showing both Connect and Disconnect
-at once for a connected account; the same-chat `/start` producing the
-plain confirm-instruction message instead of the already-connected one.
+**A related but distinct scenario is still not walked, and is worth naming
+separately: `ErrTelegramChatTaken`** — a link redeemed by a chat *already
+bound to someone else*, rather than the confirming user already having a
+different chat. The notes above do not report this collision being
+produced. **Covered instead by `TestConfirmRefusesAChatSomeoneElseHasBound`**
+(usecase — binds chat `705` to `user-9`, then has `user-1` try to confirm a
+link redeemed by that same chat, asserting `ErrTelegramChatTaken`) and
+`TestHandleStartWithALinkNonceForAChatSomeoneElseOwnsSaysNothingUseful`
+(the chat-side bland answer to the same case).
 
-**Not walked by hand — the actual chat-taken refusal:** covered by
-`TestConfirmRefusesWhenTheMemberAlreadyHasAChat` (usecase, this exact
-collision), `TestStatusRefusesWhenTheMemberAlreadyHasADifferentChat`
-(the `Status` side of the same case) and
-`TestHandleStartWithALinkNonceForAUserAlreadyBoundToADifferentChatSaysNothingUseful`
-(the chat-side answer to it) — the same treatment the brief gives the
-stolen-link case, itself recorded in Step 0 above.
-
-**Telegram needed:** Only for the same-chat `/start` sub-check above; the
-mint and the missing-Connect-button parts are browser/API only.
-
-**Result:**
+**Telegram needed:** No — both the walked scenario and the still-uncovered
+one are producible with database state alone; neither needs a phone.
 
 ---
 
-### 9. Disconnect removes the binding; `/balance` refuses again
+### 9. Disconnect removes the binding; `/balance` refuses again — PASS (disconnect half only)
 
 **Do:** Click **Disconnect** on the connected panel. Confirm the panel
 returns to its unbound state. Send `/balance` from the same Telegram
@@ -429,11 +488,22 @@ did not actually clear).
 **Telegram needed:** Only for the `/balance` half; Disconnect itself is a
 browser click.
 
-**Result:**
+**Result:** PASS on the Disconnect half, which is what was actually
+checked. `DELETE /api/v1/auth/telegram` returned the panel to "Connect
+Telegram"; a direct query confirmed `andreas@hearth.family` now has no
+`telegram_accounts` row, and — worth recording since Step 0 warned this
+account's own chat sits in a shared table with the owner's pre-existing
+Telegram-only household — that other binding was left untouched.
+**The `/balance` refuses-again half was not separately verified live**, for
+the same reason as criterion 7: no phone was available. It follows from the
+binding being genuinely gone (confirmed above) plus the same Commander
+guard cited for criterion 7 (`TestAnUnlinkedChatIsRefusedBeforeAnyServiceCall`),
+which refuses any command — `/balance` included — the moment `ByChatID`
+reports no binding.
 
 ---
 
-### 10. `/start` after disconnecting offers a sign-up link again
+### 10. `/start` after disconnecting offers a sign-up link again — NOT WALKED
 
 **Do:** After criterion 9's Disconnect, send a **fresh** `/start` (not a
 replayed payload — open a new Connect flow, or use the bot's own menu/Start
@@ -457,11 +527,19 @@ count criterion 4 relied on staying flat — observe the reply's text only.
 
 **Telegram needed:** Yes.
 
-**Result:**
+**Result:** NOT WALKED. No phone signed into Telegram was available.
+**Covered instead by two tests composed:** `TestUnlinkRemovesTheBinding`
+(usecase — proves `Unlink` genuinely clears the `telegram_accounts` row)
+and `TestHandleStartSendsASignUpLinkToAnUnknownChat`
+(`telegram_auth_test.go` — proves an unbound chat's `/start` sends a
+sign-up link, `sendSignUp`'s ordinary path). Together they prove the two
+halves this criterion composes — disconnection genuinely unbinds, and an
+unbound chat gets a sign-up link — without proving it live on the *same*
+chat in one continuous session, which is what an actual walk would add.
 
 ---
 
-### 11. A fourth `POST /auth/telegram/link` within the hour answers 429
+### 11. A fourth `POST /auth/telegram/link` within the hour answers 429 — PASS
 
 **Do:** Using `hearthctl` (it holds the cookie session and CSRF token from
 `hearthctl login`, so it passes `requireCookieSession` the same as the
@@ -480,11 +558,12 @@ was miscounted, not a product defect — recount before concluding a failure).
 
 **Telegram needed:** No.
 
-**Result:**
+**Result:** PASS. Attempts 1–3 answered `200`; attempt 4 answered `429`
+`TELEGRAM_LINK_RATE_LIMITED`.
 
 ---
 
-### 12. An expired link confirms nothing and the panel says so
+### 12. An expired link confirms nothing and the panel says so — PASS
 
 **Two forms — do the weak one always; do the strong one if the walk's own
 timing allows.**
@@ -532,13 +611,57 @@ expired row; the panel continuing to poll after `expired`.
 
 **Telegram needed:** Only for the strong form.
 
-**Result (weak form):**
+**Result (weak form):** PASS. `Confirm` on an expired link answered `409
+TELEGRAM_LINK_NOT_PENDING`.
 
-**Result (strong form, if run):**
+**Result (strong form, if run):** Not separately distinguished in the walk
+notes. The notes report a single expired-link result (above) without
+stating whether the row had been consumed by a redemption first, and the
+STATUS banner's own account of the walk says a synthetic redemption was
+used only "where a redemption was needed" — the weak form needs none, so
+that is the more likely reading, but this file will not claim the strong
+form ran when nothing in the notes says so. `TestConfirmRefusesAfterExpiry`
+(cited above) is the test that pins the strong form's exact shape
+(`row.Consumed && !row.ExpiresAt.After(now)`) if a future walk wants to
+close this specifically.
 
 ---
 
-### 13. The `window.open` popup-blocked fallback link in the waiting view
+## Two checks beyond the brief's twelve, found and walked on the day
+
+Neither of these was in the brief's original list; the walk ran them
+anyway because both are directly implicated by decision 11 and by the
+route table's own 404-vs-403 rule, and both were easy to check with the
+tooling already in hand.
+
+### Unlink refused for an account with no email — PASS
+
+**Do:** With `users.email` temporarily set to `NULL` for the connected
+account (`make psql`), call `DELETE /api/v1/auth/telegram`.
+
+**Look for:** `409 ErrTelegramUnlinkWouldLockOut` — decision 11's guard: a
+Telegram-only account has no other door back in, so `Unlink` must refuse
+rather than strand it.
+
+**Result:** PASS. `DELETE` answered `409 TELEGRAM_UNLINK_LOCKOUT`. The
+temporary `NULL` and the test binding were both restored immediately
+afterwards and verified back in place — this was a real, if brief, edit to
+`andreas@hearth.family`'s own row, not a fixture.
+
+### A row belonging to nobody answers 404, not 403 — PASS
+
+**Do:** `GET /api/v1/auth/telegram/link/00000000-0000-0000-0000-000000000000`
+(a well-formed but non-existent id).
+
+**Look for:** `404`, never `403` — the same rule the design's own API
+section states: a row id must not be testable for existence by getting a
+different status for "not yours" versus "does not exist."
+
+**Result:** PASS. The request answered `404`.
+
+---
+
+### 13. The `window.open` popup-blocked fallback link in the waiting view — PARTIALLY WALKED
 
 Added by an earlier review of this feature; not in the brief's original
 twelve.
@@ -567,11 +690,22 @@ clicking it actually completes the flow (can reuse the walk's normal
 Connect attempt instead of a separate one, to conserve the mint tally from
 trap 6).
 
-**Result:**
+**Result:** PARTIALLY WALKED, not a dedicated popup-blocked test. In
+criterion 2's ordinary Connect click, `window.open` succeeded (a new tab
+opened normally — this browser was not configured to block popups) *and*
+the waiting view still rendered "Didn't open? **Open Telegram**." as a real
+link carrying `start.url`, exactly as `TelegramPanel.test.tsx`'s own test
+predicts. That confirms the fallback link exists and renders correctly
+whenever a link is waiting, regardless of whether the popup actually
+opened — but the specific trigger this criterion asks about (a browser
+that genuinely blocks the popup) was never induced, so the dead-end case
+this criterion exists to rule out was not directly exercised. Worth a
+dedicated pass in a popup-blocking browser profile before this criterion is
+called fully done.
 
 ---
 
-### 14. Whether a no-bot install ever paints the panel's heading before its 404 lands
+### 14. Whether a no-bot install ever paints the panel's heading before its 404 lands — NOT ATTEMPTED
 
 Added by an earlier review of this feature; not in the brief's original
 twelve.
@@ -605,22 +739,72 @@ screen).
 **Telegram needed:** No — this is entirely about `GET /auth/telegram`'s
 timing on a no-bot install, no Telegram account involved.
 
-**Result:**
+**Result:** NOT ATTEMPTED. This walk ran against the ordinary dev stack
+with `TELEGRAM_BOT_TOKEN`/`TELEGRAM_BOT_USERNAME` set throughout; a
+separate no-bot run was never started, so nothing here confirms or refutes
+the predicted flash. Still open for a future pass.
+
+## Findings from the walk that look like bugs and are not
+
+Both recorded in the raw notes
+(`.superpowers/sdd/2026-09-09-telegram-account-linking/walk-notes.md`),
+carried here in full because both are exactly the kind of thing the next
+person debugging "the panel is broken" would otherwise waste an hour on.
+
+**1. The panel stops polling while its tab is hidden.** TanStack Query's
+`refetchInterval` — the mechanism behind `telegramPollInterval`'s "every
+3 seconds while waiting or pending" — is paused by the browser whenever
+`document.visibilityState === "hidden"`, which is precisely the state a
+person is in the instant they switch away to Telegram to press Start. This
+is not a bug: the request resumes, and the panel catches up, the moment the
+tab becomes visible again — proven live during this walk, where the panel
+sat on the waiting view with the API already answering
+`{"status":"pending","chatUsername":"walk_test"}` underneath it, and
+flipped to the named-chat confirm view within one tick of the tab regaining
+focus. The flow this feature is actually built for — leave the tab, press
+Start in another app, come back — self-heals for free. What is worth
+writing down is that neither this plan's own criteria nor
+`telegramPollInterval`'s "every 3 seconds" description say anything about
+tab visibility, so a person watching a background tab and expecting a
+3-second update will file this as broken before it self-heals.
+
+**2. When a link is both expired and refusable another way, the panel and
+`Confirm` disagree about why.** `Status` derives refusals *before* expiry
+(the order decision 5 and this plan's §5-citing prose both call
+deliberate — a connected panel must not flip to "expired" ten minutes after
+it actually succeeded), so a link that is both `TELEGRAM_ALREADY_LINKED`-shaped
+and past its `expiresAt` still shows the panel "this account already has a
+telegram chat." `Confirm`, called directly, checks expiry first and answers
+`409 TELEGRAM_LINK_NOT_PENDING` on the same row. Both are dead ends for the
+person holding the link, and the panel's sentence is the more specific,
+more actionable one of the two — so this is working exactly as the spec's
+own derivation order intends, not a mismatch to fix. Recorded because the
+two answers disagreeing, side by side, reads like a bug until the ordering
+is understood to be chosen on purpose.
 
 ---
 
-## When every criterion passes
+## Where this leaves the feature
 
-Update, in the same change:
+Nine of the twelve brief criteria pass directly; two more checks beyond the
+twelve pass (unlink refused for an account with no email; a foreign link
+row answers 404, not 403); criterion 13 is partially confirmed; criterion
+14 was not attempted. **Three criteria — 3, 7, 10 — are NOT WALKED**, each
+because it needs the owner's own Telegram account sending something from a
+phone, which this session did not have; each is covered instead by a named
+test, cited under its own heading above. `docs/FEATURE_TRACKER.md`'s row
+moves ⬜ → **🟡** for exactly this reason, not ✅ — see that row for the
+full statement.
 
-- `docs/FEATURE_TRACKER.md`'s "Link an existing account to a Telegram chat"
-  row, ⬜ → ✅, with what the walk showed and a link to this file — following
-  the recount-by-symbol rule the file's own header states, not a delta.
-- This file's own STATUS banner, to say the walk ran, when, and against
-  which account (Step 0's decision).
-- `docs/SYSTEM_DESIGN.md`'s §5 subsection, if the walk found the diagram or
-  its prose said anything the real flow contradicted.
+**When the remaining three (and 13's dedicated form, and 14) are walked
+against a real phone:**
 
-If any criterion fails, it is a defect to fix and re-verify, not a reason to
-mark the row ✅ with a caveat unless the caveat names a real, accepted gap —
-the same standard the households and outbound-inspector walks held to.
+- `docs/FEATURE_TRACKER.md`'s row moves 🟡 → ✅, and this file's own STATUS
+  banner is updated to say so.
+- `docs/SYSTEM_DESIGN.md`'s §5 subsection is revisited if the walk found the
+  diagram or its prose said anything the real flow contradicted.
+
+If any of those three later fails when actually walked, it is a defect to
+fix and re-verify — the same standard the households and outbound-inspector
+walks held to, and the reason this row is 🟡 rather than a ✅ carrying a
+caveat.
