@@ -518,6 +518,21 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 	// generic, logged 500 below like ErrAmountOverflow does above, rather
 	// than getting a 4xx case that would tell a caller their request was
 	// wrong when it was not.
+	case errors.Is(err, domain.ErrTelegramChatTaken):
+		WriteError(w, http.StatusConflict, "TELEGRAM_CHAT_TAKEN",
+			"That Telegram chat is already connected to another Hearth account.", nil)
+	case errors.Is(err, domain.ErrTelegramAlreadyLinked):
+		WriteError(w, http.StatusConflict, "TELEGRAM_ALREADY_LINKED",
+			"This account already has a Telegram chat. Disconnect it first.", nil)
+	case errors.Is(err, domain.ErrTelegramLinkNotPending):
+		WriteError(w, http.StatusConflict, "TELEGRAM_LINK_NOT_PENDING",
+			"No Telegram chat has opened this link, or it expired. Start again.", nil)
+	case errors.Is(err, domain.ErrTelegramUnlinkWouldLockOut):
+		WriteError(w, http.StatusConflict, "TELEGRAM_UNLINK_LOCKOUT",
+			"Add an email address to this account before disconnecting Telegram.", nil)
+	case errors.Is(err, domain.ErrTelegramMintsRateLimited):
+		WriteError(w, http.StatusTooManyRequests, "TELEGRAM_LINK_RATE_LIMITED",
+			"Too many attempts. Try again in an hour.", nil)
 	case errors.Is(err, domain.ErrAlreadyExists):
 		// Every service that means a genuine, nameable conflict already
 		// translates domain.ErrAlreadyExists into its own sentinel before

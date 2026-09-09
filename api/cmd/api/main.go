@@ -179,10 +179,13 @@ func run() error {
 		SessionTTL: httpadapter.SessionTTL,
 		BaseURL:    cfg.AppBaseURL,
 	})
-	// Nil unless a bot is configured. httpadapter.Deps.Telegram being nil is
-	// what makes POST /auth/telegram/start answer 404, so "not configured" is
-	// expressed once, here, rather than re-derived by every consumer.
+	// Nil unless a bot is configured. httpadapter.Deps.Telegram and
+	// Deps.TelegramLink being nil is what makes POST /auth/telegram/start
+	// and the five /auth/telegram link/unlink routes answer 404, so "not
+	// configured" is expressed once, here, rather than re-derived by every
+	// consumer.
 	var telegramSvc *usecase.TelegramAuthService
+	var telegramLinkSvc *usecase.TelegramLinkService
 	var telegramPoller *telegram.Poller
 	var telegramClient *telegram.Client
 	if cfg.TelegramEnabled() {
@@ -204,6 +207,17 @@ func run() error {
 			BotUsername: cfg.TelegramBotUsername,
 		})
 		telegramPoller = telegram.NewPoller(client, telegramSvc)
+		// Built from the same configuration as telegramSvc above: no bot
+		// token means neither service exists, and every route either one
+		// backs answers 404 identically.
+		telegramLinkSvc = usecase.NewTelegramLinkService(usecase.TelegramLinkDeps{
+			Links:       telegramLinks,
+			Accounts:    telegramAccounts,
+			Users:       users,
+			Tokens:      tokens,
+			Clock:       sysClock,
+			BotUsername: cfg.TelegramBotUsername,
+		})
 	}
 
 	accountSvc := usecase.NewAccountService(usecase.AccountDeps{
@@ -317,6 +331,7 @@ func run() error {
 			APITokens:      apiTokenSvc,
 			APITokenRepo:   apiTokens,
 			Telegram:       telegramSvc,
+			TelegramLink:   telegramLinkSvc,
 			Admin:          adminSvc,
 			AdminReauth:    adminReauthSvc,
 			AdminDirectory: adminDirectorySvc,
