@@ -3490,10 +3490,12 @@ var _ usecase.GoalProgressReader = (*goalProgressDouble)(nil)
 // --- TelegramLinkRepository -------------------------------------------
 
 type telegramLinkRow struct {
-	CreatedAt  time.Time
-	ExpiresAt  time.Time
-	ConsumedAt *time.Time
-	ChatID     int64
+	CreatedAt    time.Time
+	ExpiresAt    time.Time
+	ConsumedAt   *time.Time
+	ChatID       int64
+	UserID       string
+	ChatUsername string
 }
 
 // telegramLinkRepoDouble plays the same role postgres's TelegramLinkRepo
@@ -3517,8 +3519,8 @@ func newTelegramLinkRepoDouble(clock *fixedClock, tokens *seqTokens) *telegramLi
 	return &telegramLinkRepoDouble{clock: clock, tokens: tokens, rows: map[string]*telegramLinkRow{}}
 }
 
-func (d *telegramLinkRepoDouble) Create(_ context.Context, nonceHash []byte, expiresAt time.Time) error {
-	d.rows[string(nonceHash)] = &telegramLinkRow{CreatedAt: d.clock.Now(), ExpiresAt: expiresAt}
+func (d *telegramLinkRepoDouble) Create(_ context.Context, userID string, nonceHash []byte, expiresAt time.Time) error {
+	d.rows[string(nonceHash)] = &telegramLinkRow{CreatedAt: d.clock.Now(), ExpiresAt: expiresAt, UserID: userID}
 	return nil
 }
 
@@ -3527,15 +3529,16 @@ func (d *telegramLinkRepoDouble) Create(_ context.Context, nonceHash []byte, exp
 // rather than wall time. An unknown, expired or already-consumed nonce all
 // report domain.ErrNotFound, indistinguishably, exactly as
 // TelegramLinkRepository.Consume's doc comment requires.
-func (d *telegramLinkRepoDouble) Consume(_ context.Context, nonceHash []byte, chatID int64) error {
+func (d *telegramLinkRepoDouble) Consume(_ context.Context, nonceHash []byte, chatID int64, chatUsername string) (usecase.TelegramLinkRedemption, error) {
 	row, ok := d.rows[string(nonceHash)]
 	if !ok || row.ConsumedAt != nil || !row.ExpiresAt.After(d.clock.Now()) {
-		return domain.ErrNotFound
+		return usecase.TelegramLinkRedemption{}, domain.ErrNotFound
 	}
 	now := d.clock.Now()
 	row.ConsumedAt = &now
 	row.ChatID = chatID
-	return nil
+	row.ChatUsername = chatUsername
+	return usecase.TelegramLinkRedemption{ID: string(nonceHash), UserID: row.UserID}, nil
 }
 
 // CountLinksSince mirrors CountTelegramLinksSince's SQL exactly: chat_id = $1
@@ -3590,6 +3593,20 @@ func (d *telegramLinkRepoDouble) mintLive(t *testing.T, expiresAt time.Time) str
 	return raw
 }
 
+// mintLiveFor is mintLive's link-nonce counterpart: it mints a live row that
+// names userID, standing in for a prior call to the service method (Task 5)
+// a signed-in member's Settings panel calls to start a link. mintLive itself
+// keeps minting unbound rows -- StartLink's sign-in nonces still carry no
+// user -- so the two are kept separate rather than teaching mintLive an
+// optional argument.
+func (d *telegramLinkRepoDouble) mintLiveFor(t *testing.T, userID string, expiresAt time.Time) string {
+	t.Helper()
+	d.n++
+	raw := fmt.Sprintf("nonce-%d", d.n)
+	d.rows[string(d.tokens.HashToken(raw))] = &telegramLinkRow{CreatedAt: d.clock.Now(), ExpiresAt: expiresAt, UserID: userID}
+	return raw
+}
+
 // markConsumed stamps the row for raw consumed by chatID, for a test that
 // needs a nonce which has already been redeemed once.
 func (d *telegramLinkRepoDouble) markConsumed(raw string, chatID int64) {
@@ -3620,6 +3637,42 @@ func (d *telegramLinkRepoDouble) recordRedemptions(chatID int64, n int, at time.
 			CreatedAt: at, ExpiresAt: at.Add(time.Hour), ConsumedAt: &consumedAt, ChatID: chatID,
 		}
 	}
+}
+
+// ByID mirrors GetTelegramLinkRequest. The double has no separate uuid
+// concept of its own, so id is the same string(nonceHash) key Consume
+// returns as TelegramLinkRedemption.ID -- a caller of this double never sees
+// the difference, the same way a caller of the real repository never sees
+// that a Postgres uuid is underneath it.
+func (d *telegramLinkRepoDouble) ByID(_ context.Context, id string) (usecase.TelegramLinkRequest, error) {
+	row, ok := d.rows[id]
+	if !ok {
+		return usecase.TelegramLinkRequest{}, domain.ErrNotFound
+	}
+	return usecase.TelegramLinkRequest{
+		ID:           id,
+		UserID:       row.UserID,
+		ChatID:       row.ChatID,
+		ChatUsername: row.ChatUsername,
+		Consumed:     row.ConsumedAt != nil,
+		ExpiresAt:    row.ExpiresAt,
+	}, nil
+}
+
+// CountMintsSince mirrors CountTelegramLinkMintsSince's SQL exactly: user_id
+// = $1 AND created_at >= $2, inclusive of the boundary, counting a row
+// whether or not it has been redeemed yet.
+func (d *telegramLinkRepoDouble) CountMintsSince(_ context.Context, userID string, since time.Time) (int, error) {
+	n := 0
+	for _, row := range d.rows {
+		if row.UserID != userID {
+			continue
+		}
+		if !row.CreatedAt.Before(since) {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // Prune mirrors PruneTelegramLinkRequests: created_at < before AND (consumed

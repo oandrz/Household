@@ -32,9 +32,15 @@ import (
 
 type fakeTelegramLinkRepo struct{}
 
-func (fakeTelegramLinkRepo) Create(context.Context, []byte, time.Time) error { return nil }
-func (fakeTelegramLinkRepo) Consume(context.Context, []byte, int64) error {
+func (fakeTelegramLinkRepo) Create(context.Context, string, []byte, time.Time) error { return nil }
+func (fakeTelegramLinkRepo) Consume(context.Context, []byte, int64, string) (usecase.TelegramLinkRedemption, error) {
 	panic("fakeTelegramLinkRepo: Consume should not be called by these tests")
+}
+func (fakeTelegramLinkRepo) ByID(context.Context, string) (usecase.TelegramLinkRequest, error) {
+	panic("fakeTelegramLinkRepo: ByID should not be called by these tests")
+}
+func (fakeTelegramLinkRepo) CountMintsSince(context.Context, string, time.Time) (int, error) {
+	panic("fakeTelegramLinkRepo: CountMintsSince should not be called by these tests")
 }
 func (fakeTelegramLinkRepo) CountLinksSince(context.Context, int64, time.Time) (int, error) {
 	panic("fakeTelegramLinkRepo: CountLinksSince should not be called by these tests")

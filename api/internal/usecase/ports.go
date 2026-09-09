@@ -170,18 +170,55 @@ type MagicLinkRepository interface {
 	CountSince(ctx context.Context, email string, since time.Time) (int, error)
 }
 
+// TelegramLinkRedemption is what Consume hands back: the row's id and the
+// user it was minted for, "" for a sign-in nonce. The caller's next decision
+// -- link, sign in, or sign up -- is exactly this pair.
+type TelegramLinkRedemption struct {
+	ID     string // the telegram_link_requests row id
+	UserID string // "" for a sign-in nonce; set for a link nonce
+}
+
+// TelegramLinkRequest is one row of telegram_link_requests, read back for the
+// browser that minted it. Consumed, carrying a UserID, with no
+// telegram_accounts row yet, is the pending state a confirm screen polls
+// for -- there is no separate status column (see decision 5 of the linking
+// design).
+type TelegramLinkRequest struct {
+	ID           string
+	UserID       string
+	ChatID       int64
+	ChatUsername string
+	Consumed     bool
+	ExpiresAt    time.Time
+}
+
 // TelegramLinkRepository stores the pending deep-link nonces that carry a
 // browser's sign-in request across to Telegram. Nonces are stored hashed,
 // never raw, like every other token in this system.
 type TelegramLinkRepository interface {
-	Create(ctx context.Context, nonceHash []byte, expiresAt time.Time) error
-	// Consume stamps the row consumed and records which chat redeemed it, in
-	// one statement. The chat is unknown when the nonce is minted -- the
-	// browser has not met Telegram yet -- so redemption is the only moment the
-	// two can be joined, and CountLinksSince depends on it happening here.
-	// Returns domain.ErrNotFound if the nonce is unknown, expired or already
-	// consumed; those three are deliberately indistinguishable to a caller.
-	Consume(ctx context.Context, nonceHash []byte, chatID int64) error
+	// Create stores a nonce. userID is "" for a sign-in nonce -- the browser has
+	// not said who it is -- and a user id for a link nonce minted by a signed-in
+	// member for their own account. That difference is the only thing separating
+	// the two kinds of row, so a Create that dropped it would silently turn a
+	// link into a sign-in.
+	Create(ctx context.Context, userID string, nonceHash []byte, expiresAt time.Time) error
+	// Consume stamps the row consumed and records which chat redeemed it, in one
+	// statement, and returns the row's id and the user it was minted for. The
+	// chat is unknown when the nonce is minted -- the browser has not met
+	// Telegram yet -- so redemption is the only moment the two can be joined, and
+	// CountLinksSince depends on it happening here. Returns domain.ErrNotFound if
+	// the nonce is unknown, expired or already consumed; those three are
+	// deliberately indistinguishable to a caller.
+	Consume(ctx context.Context, nonceHash []byte, chatID int64, chatUsername string) (TelegramLinkRedemption, error)
+	// ByID reads one link request for the browser that minted it. The caller must
+	// check the row's UserID against the session's own before showing anything:
+	// this method deliberately does not, because a repository that enforced
+	// ownership would be a second place authorisation lives (ADR 8).
+	ByID(ctx context.Context, id string) (TelegramLinkRequest, error)
+	// CountMintsSince counts link nonces this user has minted since a point in
+	// time, consumed or not. Bounded table growth, not a security control -- the
+	// session is already authenticated.
+	CountMintsSince(ctx context.Context, userID string, since time.Time) (int, error)
 	// CountLinksSince counts links this chat has redeemed since a point in
 	// time. It lives here rather than on TelegramAccountRepository because the
 	// per-chat limit must also bind chats that have no account yet: a stranger

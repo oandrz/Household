@@ -69,7 +69,7 @@ func (s *TelegramAuthService) StartLink(ctx context.Context) (TelegramStartLink,
 		return TelegramStartLink{}, fmt.Errorf("generate telegram nonce: %w", err)
 	}
 	expiresAt := s.d.Clock.Now().Add(telegramNonceTTL)
-	if err := s.d.Links.Create(ctx, hash, expiresAt); err != nil {
+	if err := s.d.Links.Create(ctx, "", hash, expiresAt); err != nil {
 		return TelegramStartLink{}, fmt.Errorf("store telegram nonce: %w", err)
 	}
 	return TelegramStartLink{
@@ -91,7 +91,7 @@ func (s *TelegramAuthService) HandleStart(ctx context.Context, chatID int64, pay
 
 	// Consume first, then check the limit. A refused attempt still spends its
 	// nonce, so the same link cannot be retried until the hour rolls over.
-	if err := s.d.Links.Consume(ctx, s.d.Tokens.HashToken(payload), chatID); err != nil {
+	if _, err := s.d.Links.Consume(ctx, s.d.Tokens.HashToken(payload), chatID, ""); err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			return s.say(ctx, chatID, telegramDeadLinkMessage)
 		}
