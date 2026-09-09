@@ -2,10 +2,12 @@ package usecase_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/andreasoentoro/hearth/api/internal/domain"
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
@@ -299,5 +301,70 @@ func TestHandleStartSendsASignUpLinkBelowTheGlobalDailyCeiling(t *testing.T) {
 	// nobody about it -- would leave the createCount assertion above green.
 	if sent := doubles.sender.lastTo(889); !strings.Contains(sent, "/sign-up/") {
 		t.Fatalf("message = %q, want the sign-up URL", sent)
+	}
+}
+
+func TestHandleStartWithALinkNonceLeavesTheBindingUnwritten(t *testing.T) {
+	svc, doubles := newTelegramAuthService(t)
+	raw := doubles.links.mintLiveFor(t, "user-7", time.Now().Add(10*time.Minute))
+
+	if err := svc.HandleStart(context.Background(), 601, raw, "andreas"); err != nil {
+		t.Fatalf("HandleStart() = %v, want nil", err)
+	}
+	// The whole design in one assertion: the chat is recorded, and the
+	// binding is not written until the browser that minted the nonce says so.
+	// A one-phase bind would make a leaked deep link an account takeover.
+	if _, err := doubles.accounts.ByChatID(context.Background(), 601); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("binding after /start = %v, want it still unwritten", err)
+	}
+	if got := doubles.sender.lastTo(601); !strings.Contains(got, "confirm") {
+		t.Fatalf("message = %q, want it to send the person back to Hearth to confirm", got)
+	}
+	if doubles.magicLinks.countFor("user-7") != 0 {
+		t.Fatal("a magic link was minted; a link nonce must mint no token at all")
+	}
+}
+
+// Decision 2 of the design: a chat that already belongs to someone else's
+// account gets the same bland refusal as every other case a stolen nonce
+// could probe with. It must not learn that the target account exists, let
+// alone that a different chat already holds it -- and the existing binding
+// must not move just because someone else's nonce turned up here.
+func TestHandleStartWithALinkNonceForAChatSomeoneElseOwnsSaysNothingUseful(t *testing.T) {
+	svc, doubles := newTelegramAuthService(t)
+	doubles.accounts.bind(602, "someone-else")
+	raw := doubles.links.mintLiveFor(t, "user-7", time.Now().Add(10*time.Minute))
+
+	if err := svc.HandleStart(context.Background(), 602, raw, "andreas"); err != nil {
+		t.Fatalf("HandleStart() = %v, want nil", err)
+	}
+	if got := doubles.sender.lastTo(602); !strings.Contains(got, "Open Hearth") {
+		t.Fatalf("message = %q, want the bland refusal", got)
+	}
+	if bound, err := doubles.accounts.ByChatID(context.Background(), 602); err != nil || bound != "someone-else" {
+		t.Fatalf("binding for chat 602 = (%q, %v), want it untouched at %q", bound, err, "someone-else")
+	}
+	if doubles.magicLinks.countFor("user-7") != 0 {
+		t.Fatal("a magic link was minted for a link nonce that was refused")
+	}
+}
+
+func TestHandleStartAnswersALinkNonceBeforeTheRateLimitBites(t *testing.T) {
+	svc, doubles := newTelegramAuthService(t)
+	// Four redemptions from one chat: the fourth is over the 3/hour limit.
+	for i := 0; i < 3; i++ {
+		raw := doubles.links.mintLive(t, time.Now().Add(10*time.Minute))
+		_ = svc.HandleStart(context.Background(), 603, raw, "")
+	}
+	raw := doubles.links.mintLiveFor(t, "user-7", time.Now().Add(10*time.Minute))
+
+	if err := svc.HandleStart(context.Background(), 603, raw, "andreas"); err != nil {
+		t.Fatalf("HandleStart() = %v, want nil", err)
+	}
+	// The two ends of the flow must agree. If the limit ran first, the row
+	// would be consumed and carrying a user id -- which the browser derives
+	// as pending -- while the chat had been told the link was dead.
+	if got := doubles.sender.lastTo(603); strings.Contains(got, "expired") {
+		t.Fatalf("message = %q, want the confirm instruction, not the dead-link line", got)
 	}
 }
