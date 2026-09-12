@@ -148,7 +148,7 @@ func TestRecordEventRequiresAPrimaryAmountForAForeignCurrencyHolding(t *testing.
 	_, err := f.svc.RecordEvent(context.Background(), domain.HoldingEvent{
 		HoldingID: h.ID, HouseholdID: f.householdID, Kind: domain.HoldingAcquisition,
 		Quantity: qty(t, 10), Amount: money(t, 50000, "USD"), OccurredOn: holdingDay(1),
-	})
+	}, holdingDay(28))
 	if !errors.Is(err, domain.ErrHoldingPrimaryAmountRequired) {
 		t.Fatalf("error = %v, want ErrHoldingPrimaryAmountRequired", err)
 	}
@@ -161,7 +161,7 @@ func TestRecordEventRefusesAnAmountInTheWrongCurrency(t *testing.T) {
 	_, err := f.svc.RecordEvent(context.Background(), domain.HoldingEvent{
 		HoldingID: h.ID, HouseholdID: f.householdID, Kind: domain.HoldingAcquisition,
 		Quantity: qty(t, 10), Amount: money(t, 1000, "USD"), OccurredOn: holdingDay(1),
-	})
+	}, holdingDay(28))
 	if !errors.Is(err, domain.ErrCurrencyMismatch) {
 		t.Fatalf("error = %v, want ErrCurrencyMismatch", err)
 	}
@@ -180,7 +180,7 @@ func TestRecordEventRefusesAnArchivedHolding(t *testing.T) {
 	_, err := f.svc.RecordEvent(context.Background(), domain.HoldingEvent{
 		HoldingID: h.ID, HouseholdID: f.householdID, Kind: domain.HoldingAcquisition,
 		Quantity: qty(t, 10), Amount: money(t, 1000, "SGD"), OccurredOn: holdingDay(3),
-	})
+	}, holdingDay(28))
 	if !errors.Is(err, domain.ErrHoldingArchived) {
 		t.Fatalf("error = %v, want ErrHoldingArchived", err)
 	}
@@ -195,14 +195,14 @@ func TestRecordEventRefusesADisposalLargerThanThePosition(t *testing.T) {
 	if _, err := f.svc.RecordEvent(ctx, domain.HoldingEvent{
 		HoldingID: h.ID, HouseholdID: f.householdID, Kind: domain.HoldingAcquisition,
 		Quantity: qty(t, 10), Amount: money(t, 1000, "SGD"), OccurredOn: holdingDay(1),
-	}); err != nil {
+	}, holdingDay(28)); err != nil {
 		t.Fatalf("buy: %v", err)
 	}
 
 	_, err := f.svc.RecordEvent(ctx, domain.HoldingEvent{
 		HoldingID: h.ID, HouseholdID: f.householdID, Kind: domain.HoldingDisposal,
 		Quantity: qty(t, 11), Amount: money(t, 5000, "SGD"), OccurredOn: holdingDay(2),
-	})
+	}, holdingDay(28))
 	if !errors.Is(err, domain.ErrHoldingOversold) {
 		t.Fatalf("error = %v, want ErrHoldingOversold", err)
 	}
@@ -218,14 +218,14 @@ func TestDeleteEventRefusesWhenItWouldLeaveTheRemainderOversold(t *testing.T) {
 	buy, err := f.svc.RecordEvent(ctx, domain.HoldingEvent{
 		HoldingID: h.ID, HouseholdID: f.householdID, Kind: domain.HoldingAcquisition,
 		Quantity: qty(t, 10), Amount: money(t, 1000, "SGD"), OccurredOn: holdingDay(1),
-	})
+	}, holdingDay(28))
 	if err != nil {
 		t.Fatalf("buy: %v", err)
 	}
 	if _, err := f.svc.RecordEvent(ctx, domain.HoldingEvent{
 		HoldingID: h.ID, HouseholdID: f.householdID, Kind: domain.HoldingDisposal,
 		Quantity: qty(t, 5), Amount: money(t, 1500, "SGD"), OccurredOn: holdingDay(2),
-	}); err != nil {
+	}, holdingDay(28)); err != nil {
 		t.Fatalf("sell: %v", err)
 	}
 
@@ -257,7 +257,7 @@ func TestPortfolioFoldsEachHoldingFromItsOwnEventsOnly(t *testing.T) {
 		if _, err := f.svc.RecordEvent(ctx, domain.HoldingEvent{
 			HoldingID: e.holding, HouseholdID: f.householdID, Kind: domain.HoldingAcquisition,
 			Quantity: qty(t, e.units), Amount: money(t, e.minor, "SGD"), OccurredOn: holdingDay(e.day),
-		}); err != nil {
+		}, holdingDay(28)); err != nil {
 			t.Fatalf("record: %v", err)
 		}
 	}
@@ -292,7 +292,7 @@ func TestAHoldingWithNoValuationHasNoMarketValueRatherThanZero(t *testing.T) {
 	if _, err := f.svc.RecordEvent(ctx, domain.HoldingEvent{
 		HoldingID: h.ID, HouseholdID: f.householdID, Kind: domain.HoldingAcquisition,
 		Quantity: qty(t, 10), Amount: money(t, 1000, "SGD"), OccurredOn: holdingDay(1),
-	}); err != nil {
+	}, holdingDay(28)); err != nil {
 		t.Fatalf("buy: %v", err)
 	}
 
@@ -315,13 +315,13 @@ func TestAPricedHoldingCarriesItsMarketValueAndTheDateOfThatPrice(t *testing.T) 
 	if _, err := f.svc.RecordEvent(ctx, domain.HoldingEvent{
 		HoldingID: h.ID, HouseholdID: f.householdID, Kind: domain.HoldingAcquisition,
 		Quantity: qty(t, 10), Amount: money(t, 1000, "SGD"), OccurredOn: holdingDay(1),
-	}); err != nil {
+	}, holdingDay(28)); err != nil {
 		t.Fatalf("buy: %v", err)
 	}
 	if _, err := f.svc.RecordValuation(ctx, domain.Valuation{
 		HoldingID: h.ID, HouseholdID: f.householdID,
 		UnitPrice: money(t, 250, "SGD"), AsOf: holdingDay(5),
-	}); err != nil {
+	}, holdingDay(28)); err != nil {
 		t.Fatalf("RecordValuation: %v", err)
 	}
 
@@ -348,7 +348,7 @@ func TestRecordValuationRefusesAPriceInTheWrongCurrency(t *testing.T) {
 	_, err := f.svc.RecordValuation(context.Background(), domain.Valuation{
 		HoldingID: h.ID, HouseholdID: f.householdID,
 		UnitPrice: money(t, 250, "USD"), AsOf: holdingDay(5),
-	})
+	}, holdingDay(28))
 	if !errors.Is(err, domain.ErrCurrencyMismatch) {
 		t.Fatalf("error = %v, want ErrCurrencyMismatch", err)
 	}
@@ -368,14 +368,14 @@ func TestAForeignHoldingCarriesItsValueInBothCurrencies(t *testing.T) {
 		HoldingID: h.ID, HouseholdID: f.householdID, Kind: domain.HoldingAcquisition,
 		Quantity: qty(t, 10), Amount: money(t, 50000, "USD"),
 		PrimaryAmount: &primaryCost, OccurredOn: holdingDay(1),
-	}); err != nil {
+	}, holdingDay(28)); err != nil {
 		t.Fatalf("buy: %v", err)
 	}
 	primaryPrice := money(t, 6800, "SGD")
 	if _, err := f.svc.RecordValuation(ctx, domain.Valuation{
 		HoldingID: h.ID, HouseholdID: f.householdID,
 		UnitPrice: money(t, 5200, "USD"), PrimaryUnitPrice: &primaryPrice, AsOf: holdingDay(5),
-	}); err != nil {
+	}, holdingDay(28)); err != nil {
 		t.Fatalf("RecordValuation: %v", err)
 	}
 
@@ -405,13 +405,13 @@ func TestAHoldingAlreadyInPrimaryCurrencyReportsOneFigure(t *testing.T) {
 	if _, err := f.svc.RecordEvent(ctx, domain.HoldingEvent{
 		HoldingID: h.ID, HouseholdID: f.householdID, Kind: domain.HoldingAcquisition,
 		Quantity: qty(t, 10), Amount: money(t, 1000, "SGD"), OccurredOn: holdingDay(1),
-	}); err != nil {
+	}, holdingDay(28)); err != nil {
 		t.Fatalf("buy: %v", err)
 	}
 	if _, err := f.svc.RecordValuation(ctx, domain.Valuation{
 		HoldingID: h.ID, HouseholdID: f.householdID,
 		UnitPrice: money(t, 250, "SGD"), AsOf: holdingDay(5),
-	}); err != nil {
+	}, holdingDay(28)); err != nil {
 		t.Fatalf("RecordValuation: %v", err)
 	}
 
@@ -435,7 +435,7 @@ func TestAnArchivedHoldingStillReportsWhatItHeld(t *testing.T) {
 	if _, err := f.svc.RecordEvent(ctx, domain.HoldingEvent{
 		HoldingID: h.ID, HouseholdID: f.householdID, Kind: domain.HoldingAcquisition,
 		Quantity: qty(t, 10), Amount: money(t, 1000, "SGD"), OccurredOn: holdingDay(1),
-	}); err != nil {
+	}, holdingDay(28)); err != nil {
 		t.Fatalf("buy: %v", err)
 	}
 	if _, err := f.svc.SetArchived(ctx, f.householdID, h.ID, true, holdingDay(2)); err != nil {
@@ -463,6 +463,52 @@ func TestAnArchivedHoldingStillReportsWhatItHeld(t *testing.T) {
 	}
 	if all.Holdings[0].Position.Cost.Amount != 1000 {
 		t.Fatalf("archived holding reports cost %d, want 1000", all.Holdings[0].Position.Cost.Amount)
+	}
+}
+
+// Accounts already refuse a future opening balance (ErrOpeningBalanceInFuture),
+// and the reason applies here with more force: ListLatestValuations orders by
+// as_of, so a price mistyped as 2030 wins forever. The holding's market value
+// is then pinned to a number nobody can explain, and the "as of" label on the
+// page reads a date in the future without comment.
+func TestRecordValuationRefusesADateInTheFuture(t *testing.T) {
+	f := newHoldingFixture(t, "SGD")
+	h := f.create(t, "D05", "SGD")
+
+	_, err := f.svc.RecordValuation(context.Background(), domain.Valuation{
+		HoldingID: h.ID, HouseholdID: f.householdID,
+		UnitPrice: money(t, 250, "SGD"), AsOf: holdingDay(20),
+	}, holdingDay(10))
+	if !errors.Is(err, domain.ErrHoldingDateInFuture) {
+		t.Fatalf("error = %v, want ErrHoldingDateInFuture", err)
+	}
+}
+
+// Today itself is not the future. A household recording this morning's
+// purchase must not be refused -- the bug this project has already shipped
+// three times is an off-by-one at exactly this boundary.
+func TestRecordValuationAcceptsToday(t *testing.T) {
+	f := newHoldingFixture(t, "SGD")
+	h := f.create(t, "D05", "SGD")
+
+	if _, err := f.svc.RecordValuation(context.Background(), domain.Valuation{
+		HoldingID: h.ID, HouseholdID: f.householdID,
+		UnitPrice: money(t, 250, "SGD"), AsOf: holdingDay(10),
+	}, holdingDay(10)); err != nil {
+		t.Fatalf("today's date was refused: %v", err)
+	}
+}
+
+func TestRecordEventRefusesADateInTheFuture(t *testing.T) {
+	f := newHoldingFixture(t, "SGD")
+	h := f.create(t, "D05", "SGD")
+
+	_, err := f.svc.RecordEvent(context.Background(), domain.HoldingEvent{
+		HoldingID: h.ID, HouseholdID: f.householdID, Kind: domain.HoldingAcquisition,
+		Quantity: qty(t, 10), Amount: money(t, 1000, "SGD"), OccurredOn: holdingDay(20),
+	}, holdingDay(10))
+	if !errors.Is(err, domain.ErrHoldingDateInFuture) {
+		t.Fatalf("error = %v, want ErrHoldingDateInFuture", err)
 	}
 }
 

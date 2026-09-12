@@ -1807,6 +1807,23 @@ type HoldingEventRepository interface {
 	// per holding.
 	ListByHousehold(ctx context.Context, householdID string) ([]domain.HoldingEvent, error)
 	Insert(ctx context.Context, e domain.HoldingEvent) (domain.HoldingEvent, error)
+	// InsertWithFold is Insert with the holding's invariant held ACROSS the
+	// write, and it is what a service must use for anything the fold can
+	// refuse. The implementation locks the holding, lists its events in the
+	// same transaction, calls fold with them, and inserts only if fold returns
+	// nil -- so a second writer blocks and then folds the first one's result
+	// rather than a stale copy.
+	//
+	// Reading, folding and writing as three separate calls is NOT equivalent:
+	// two sales of 30 from a holding of 50 would each pass and both commit,
+	// leaving events that cannot be folded at all. fold is the caller's own
+	// rule (domain.Holding.Position); this port owns the transaction and the
+	// lock, never the rule.
+	InsertWithFold(ctx context.Context, e domain.HoldingEvent, fold func([]domain.HoldingEvent) error) (domain.HoldingEvent, error)
+	// DeleteWithFold is the same guarantee in the other direction: removing a
+	// purchase a later sale was costed against must not be able to race a
+	// concurrent write. fold receives the events that WOULD remain.
+	DeleteWithFold(ctx context.Context, householdID, holdingID, eventID string, fold func([]domain.HoldingEvent) error) error
 	// Delete reports domain.ErrNotFound when the event is not this
 	// household's, rather than silently succeeding.
 	Delete(ctx context.Context, householdID, eventID string) error

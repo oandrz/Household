@@ -343,6 +343,8 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 		// than a dead end -- the writeGoalNameConflict precedent.
 		WriteError(w, http.StatusConflict, "HOLDING_NAME_TAKEN",
 			"This account already has a holding with that name.", nil)
+	case errors.Is(err, domain.ErrHoldingDateInFuture):
+		WriteError(w, http.StatusUnprocessableEntity, "INVALID_DATE", "That date is in the future.", nil)
 	case errors.Is(err, domain.ErrHoldingNameRequired):
 		WriteError(w, http.StatusUnprocessableEntity, "HOLDING_NAME_REQUIRED",
 			"Give this holding a name.", nil)

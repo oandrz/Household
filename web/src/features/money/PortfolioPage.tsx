@@ -75,7 +75,10 @@ export function PortfolioPage() {
         </button>
       </header>
 
-      {holdings.data?.notInNetWorth ? (
+      {/* Gated on isSuccess as well as the flag, so the banner does not appear
+          a beat after the page does -- it is either shown with the figures it
+          qualifies, or not at all. */}
+      {holdings.isSuccess && holdings.data.notInNetWorth ? (
         <p className="mt-5 rounded-xl border border-hairline bg-surface px-4 py-3 text-[12.5px] leading-snug text-muted" data-testid="not-in-net-worth">
           Holdings are not counted in your net worth yet. The figures here stand
           on their own.

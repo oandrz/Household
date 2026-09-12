@@ -506,6 +506,29 @@ func (q *Queries) ListValuations(ctx context.Context, arg ListValuationsParams) 
 	return items, nil
 }
 
+const lockHolding = `-- name: LockHolding :one
+SELECT currency FROM holdings
+WHERE household_id = $1 AND id = $2
+FOR UPDATE
+`
+
+type LockHoldingParams struct {
+	HouseholdID pgtype.UUID
+	ID          pgtype.UUID
+}
+
+// LockHolding takes a row lock on one holding so that two writers folding its
+// events cannot both pass a check the other is about to invalidate. It returns
+// the currency only because a query must return something; the lock is the
+// point. Callers use it inside a transaction with InsertHoldingEvent or
+// DeleteHoldingEvent -- see HoldingEventRepository.InsertWithFold.
+func (q *Queries) LockHolding(ctx context.Context, arg LockHoldingParams) (string, error) {
+	row := q.db.QueryRow(ctx, lockHolding, arg.HouseholdID, arg.ID)
+	var currency string
+	err := row.Scan(&currency)
+	return currency, err
+}
+
 const setHoldingArchived = `-- name: SetHoldingArchived :one
 UPDATE holdings
 SET archived_at = $3::timestamptz, updated_at = now()

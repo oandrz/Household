@@ -44,6 +44,12 @@ export const holdingSchema = z.object({
   currency: z.string(),
   archivedAt: z.string().nullable(),
 
+  // heldNano is the exact integer, for a caller doing exact arithmetic -- but
+  // JavaScript numbers lose precision above 2^53 (9.007e15), which a holding
+  // of more than ~9 million units would exceed (1e16 nano). Nothing renders
+  // from it today and nothing should: `held` above is the string the server
+  // formatted, and it is exact at any size. Read this one only for comparison,
+  // never for display.
   heldNano: z.number(),
   held: z.string(),
   costMinor: z.number(),

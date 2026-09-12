@@ -51,6 +51,16 @@ RETURNING id, household_id, account_id, name, instrument, unit, currency, archiv
 SELECT COUNT(*)::bigint FROM holdings
 WHERE household_id = $1 AND account_id = $2 AND archived_at IS NULL;
 
+-- LockHolding takes a row lock on one holding so that two writers folding its
+-- events cannot both pass a check the other is about to invalidate. It returns
+-- the currency only because a query must return something; the lock is the
+-- point. Callers use it inside a transaction with InsertHoldingEvent or
+-- DeleteHoldingEvent -- see HoldingEventRepository.InsertWithFold.
+-- name: LockHolding :one
+SELECT currency FROM holdings
+WHERE household_id = $1 AND id = $2
+FOR UPDATE;
+
 -- name: InsertHoldingEvent :one
 INSERT INTO holding_events (holding_id, household_id, kind, quantity_nano, amount_minor,
                             primary_amount_minor, primary_currency, occurred_on, note)

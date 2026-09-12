@@ -169,6 +169,54 @@ func (d *holdingEventRepoDouble) Insert(_ context.Context, e domain.HoldingEvent
 	return e, nil
 }
 
+// InsertWithFold mirrors the real repository's contract: fold sees the events
+// that WOULD exist, and the insert happens only if it accepts. A single
+// goroutine cannot exercise the lock, so what this double pins is the
+// ordering -- fold before write, and fold's refusal preventing the write.
+// The lock itself is proved against a real Postgres in
+// postgres/holding_repo_test.go's racing-disposals test.
+func (d *holdingEventRepoDouble) InsertWithFold(
+	ctx context.Context,
+	e domain.HoldingEvent,
+	fold func([]domain.HoldingEvent) error,
+) (domain.HoldingEvent, error) {
+	existing, err := d.ListByHolding(ctx, e.HouseholdID, e.HoldingID)
+	if err != nil {
+		return domain.HoldingEvent{}, err
+	}
+	if err := fold(append(existing, e)); err != nil {
+		return domain.HoldingEvent{}, err
+	}
+	return d.Insert(ctx, e)
+}
+
+func (d *holdingEventRepoDouble) DeleteWithFold(
+	ctx context.Context,
+	householdID, holdingID, eventID string,
+	fold func([]domain.HoldingEvent) error,
+) error {
+	existing, err := d.ListByHolding(ctx, householdID, holdingID)
+	if err != nil {
+		return err
+	}
+	remaining := make([]domain.HoldingEvent, 0, len(existing))
+	found := false
+	for _, e := range existing {
+		if e.ID == eventID {
+			found = true
+			continue
+		}
+		remaining = append(remaining, e)
+	}
+	if !found {
+		return domain.ErrNotFound
+	}
+	if err := fold(remaining); err != nil {
+		return err
+	}
+	return d.Delete(ctx, householdID, eventID)
+}
+
 func (d *holdingEventRepoDouble) Delete(_ context.Context, householdID, eventID string) error {
 	for i, e := range d.rows {
 		if e.ID == eventID && e.HouseholdID == householdID {

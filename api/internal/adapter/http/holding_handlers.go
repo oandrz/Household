@@ -232,8 +232,20 @@ func setHoldingArchived(deps Deps, archived bool) http.HandlerFunc {
 	}
 }
 
-// writeOneHolding re-reads the portfolio so a write answers with the same
-// shape a read does, derived figures included. A write's own return value
+// writeOneHolding re-reads the WHOLE portfolio so a write answers with the same
+// shape a read does, derived figures included.
+//
+// The cost is deliberate and worth stating, because it is not obvious: every
+// write here issues three queries (all holdings, all events, all valuations)
+// and folds every position, to return one row. Recording ten lots therefore
+// costs ten full portfolio reads. At a household's scale -- single-digit
+// holdings, tens of events -- that is free, and the alternative is a write
+// response whose figures are computed differently from a read's, which is how
+// the two drift apart.
+//
+// It stops being free somewhere around a household with hundreds of events,
+// where the answer is a per-holding read rather than a portfolio one. Until
+// then the simplicity is worth more than the queries. A write's own return value
 // carries the stored row but not the fold or the price -- the same reason
 // writeGoal re-reads rather than converting what Create handed back.
 func writeOneHolding(w http.ResponseWriter, r *http.Request, deps Deps, householdID, holdingID string, status int) {
@@ -378,7 +390,7 @@ func handleCreateHoldingEvent(deps Deps) http.HandlerFunc {
 			}
 			event.PrimaryAmount = &primary
 		}
-		if _, err := deps.Holdings.RecordEvent(r.Context(), event); err != nil {
+		if _, err := deps.Holdings.RecordEvent(r.Context(), event, deps.Clock.Now()); err != nil {
 			MapDomainError(w, r, err)
 			return
 		}
@@ -472,7 +484,7 @@ func handleCreateHoldingValuation(deps Deps) http.HandlerFunc {
 			}
 			valuation.PrimaryUnitPrice = &primary
 		}
-		if _, err := deps.Holdings.RecordValuation(r.Context(), valuation); err != nil {
+		if _, err := deps.Holdings.RecordValuation(r.Context(), valuation, deps.Clock.Now()); err != nil {
 			MapDomainError(w, r, err)
 			return
 		}

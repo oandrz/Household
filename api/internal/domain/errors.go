@@ -69,6 +69,14 @@ var (
 	// and categories rule.
 	ErrHoldingNameTaken = errors.New("a holding with that name already exists in this account")
 	ErrHoldingNameRequired = errors.New("a holding name is required")
+	// ErrHoldingDateInFuture is the sibling of ErrOpeningBalanceInFuture, and
+	// matters more here: latest-price lookups order by as_of, so a price
+	// mistyped as 2030 outranks every real one forever and pins the holding's
+	// market value to a figure nobody can explain. Today is not the future --
+	// this project has shipped an off-by-one at exactly that boundary three
+	// times (see LEARNING's timezone pattern), so the comparison is on the
+	// calendar day, not the instant.
+	ErrHoldingDateInFuture = errors.New("that date is in the future")
 	// ErrHoldingAccountNotInvestment fails closed on the account's type rather
 	// than trusting a screen to have offered only the right accounts. The
 	// sibling rule lives in AccountService: an account holding live holdings

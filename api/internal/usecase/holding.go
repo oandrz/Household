@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -156,7 +157,13 @@ func (s *HoldingService) SetArchived(ctx context.Context, householdID, holdingID
 // RecordEvent validates an acquisition or disposal against its holding and
 // the household's primary currency, then refuses it if it would leave the
 // position oversold.
-func (s *HoldingService) RecordEvent(ctx context.Context, e domain.HoldingEvent) (domain.HoldingEvent, error) {
+// RecordEvent takes today as a parameter rather than reading a clock here, so
+// the behaviour is deterministic in a test and the caller's clock port stays
+// the single source of time -- the rule SetArchived and GoalService follow.
+func (s *HoldingService) RecordEvent(ctx context.Context, e domain.HoldingEvent, today time.Time) (domain.HoldingEvent, error) {
+	if err := refuseFutureDate(e.OccurredOn, today); err != nil {
+		return domain.HoldingEvent{}, err
+	}
 	holding, err := s.d.Holdings.Get(ctx, e.HouseholdID, e.HoldingID)
 	if err != nil {
 		return domain.HoldingEvent{}, err
@@ -172,19 +179,18 @@ func (s *HoldingService) RecordEvent(ctx context.Context, e domain.HoldingEvent)
 		return domain.HoldingEvent{}, err
 	}
 
-	// Re-fold with the new event applied rather than trusting a running total
-	// held somewhere else. Overselling is caught here, at the point of
-	// recording, because a ledger that cannot be folded is a screen that
-	// cannot render -- and the household would only discover it on the next
-	// page load.
-	existing, err := s.d.Events.ListByHolding(ctx, e.HouseholdID, e.HoldingID)
-	if err != nil {
-		return domain.HoldingEvent{}, err
-	}
-	if _, err := holding.Position(append(existing, e)); err != nil {
-		return domain.HoldingEvent{}, err
-	}
-	return s.d.Events.Insert(ctx, e)
+	// Overselling is caught at the point of recording, because a ledger that
+	// cannot be folded is a screen that cannot render, and the household would
+	// only discover it on the next page load.
+	//
+	// The fold runs INSIDE the write's own transaction, not as a separate read
+	// before it: two sales of 30 from a holding of 50 are each legal alone and
+	// illegal together, and checking then writing lets both through. The rule
+	// stays here; InsertWithFold supplies the lock.
+	return s.d.Events.InsertWithFold(ctx, e, func(withThisOne []domain.HoldingEvent) error {
+		_, err := holding.Position(withThisOne)
+		return err
+	})
 }
 
 // DeleteEvent refuses a delete that would leave the REMAINING events unable to
@@ -196,29 +202,19 @@ func (s *HoldingService) DeleteEvent(ctx context.Context, householdID, holdingID
 	if err != nil {
 		return err
 	}
-	existing, err := s.d.Events.ListByHolding(ctx, householdID, holdingID)
-	if err != nil {
+	// Same reasoning as RecordEvent: the remainder is folded inside the
+	// delete's own transaction, so a concurrent write cannot slip between the
+	// check and the removal.
+	return s.d.Events.DeleteWithFold(ctx, householdID, holdingID, eventID, func(remaining []domain.HoldingEvent) error {
+		_, err := holding.Position(remaining)
 		return err
-	}
-	remaining := make([]domain.HoldingEvent, 0, len(existing))
-	found := false
-	for _, e := range existing {
-		if e.ID == eventID {
-			found = true
-			continue
-		}
-		remaining = append(remaining, e)
-	}
-	if !found {
-		return domain.ErrNotFound
-	}
-	if _, err := holding.Position(remaining); err != nil {
-		return err
-	}
-	return s.d.Events.Delete(ctx, householdID, eventID)
+	})
 }
 
-func (s *HoldingService) RecordValuation(ctx context.Context, v domain.Valuation) (domain.Valuation, error) {
+func (s *HoldingService) RecordValuation(ctx context.Context, v domain.Valuation, today time.Time) (domain.Valuation, error) {
+	if err := refuseFutureDate(v.AsOf, today); err != nil {
+		return domain.Valuation{}, err
+	}
 	holding, err := s.d.Holdings.Get(ctx, v.HouseholdID, v.HoldingID)
 	if err != nil {
 		return domain.Valuation{}, err
@@ -318,4 +314,17 @@ func (s *HoldingService) primaryCurrency(ctx context.Context, householdID string
 		return "", err
 	}
 	return household.PrimaryCurrency, nil
+}
+
+// refuseFutureDate compares CALENDAR DAYS, not instants. A household recording
+// this morning's purchase must not be refused because the clock reads a later
+// hour, and this project has already shipped that off-by-one three times in
+// its date handling.
+func refuseFutureDate(date, today time.Time) error {
+	d := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
+	t := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
+	if d.After(t) {
+		return fmt.Errorf("%w: %s", domain.ErrHoldingDateInFuture, d.Format(time.DateOnly))
+	}
+	return nil
 }

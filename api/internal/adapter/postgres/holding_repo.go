@@ -4,7 +4,9 @@ import (
 	"context"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres/sqlcgen"
 	"github.com/andreasoentoro/hearth/api/internal/domain"
@@ -148,9 +150,18 @@ func toHolding(id, householdID, accountID pgtype.UUID, name, instrument, unit, c
 	}, nil
 }
 
-type HoldingEventRepo struct{ q *sqlcgen.Queries }
+// HoldingEventRepo keeps the pool alongside the pool-backed *sqlcgen.Queries,
+// like GoalRepo and BudgetRepo, because InsertWithFold and DeleteWithFold each
+// begin their own transaction -- something a *sqlcgen.Queries built once at
+// construction time cannot do on its own.
+type HoldingEventRepo struct {
+	q    *sqlcgen.Queries
+	pool *pgxpool.Pool
+}
 
-func NewHoldingEventRepo(db *DB) *HoldingEventRepo { return &HoldingEventRepo{q: sqlcgen.New(db.Pool())} }
+func NewHoldingEventRepo(db *DB) *HoldingEventRepo {
+	return &HoldingEventRepo{q: sqlcgen.New(db.Pool()), pool: db.Pool()}
+}
 
 func (r *HoldingEventRepo) ListByHolding(ctx context.Context, householdID, holdingID string) ([]domain.HoldingEvent, error) {
 	rows, err := r.q.ListHoldingEvents(ctx, sqlcgen.ListHoldingEventsParams{
@@ -205,6 +216,155 @@ func (r *HoldingEventRepo) Insert(ctx context.Context, e domain.HoldingEvent) (d
 		primaryMinor, primaryCurrency = &amount, &currency
 	}
 	row, err := r.q.InsertHoldingEvent(ctx, sqlcgen.InsertHoldingEventParams{
+		HoldingID:          uuid(e.HoldingID),
+		HouseholdID:        uuid(e.HouseholdID),
+		Kind:               string(e.Kind),
+		QuantityNano:       e.Quantity.Nano(),
+		AmountMinor:        e.Amount.Amount,
+		PrimaryAmountMinor: primaryMinor,
+		PrimaryCurrency:    primaryCurrency,
+		OccurredOn:         dateOnly(e.OccurredOn),
+		Note:               e.Note,
+	})
+	if err != nil {
+		return domain.HoldingEvent{}, translate(err, "insert holding event")
+	}
+	return toHoldingEvent(eventRow{
+		ID: row.ID, HoldingID: row.HoldingID, HouseholdID: row.HouseholdID, Kind: row.Kind,
+		QuantityNano: row.QuantityNano, AmountMinor: row.AmountMinor,
+		PrimaryAmountMinor: row.PrimaryAmountMinor, PrimaryCurrency: row.PrimaryCurrency,
+		OccurredOn: row.OccurredOn, Note: row.Note, Currency: e.Amount.Currency,
+	})
+}
+
+// InsertWithFold is Insert with the holding's invariant held across the write.
+//
+// It locks the holding row, lists that holding's events inside the same
+// transaction, and hands them to fold -- the caller's own rule, which is
+// domain.Holding.Position. Only if fold accepts does the insert happen, and
+// the lock is not released until the transaction commits. A second writer
+// blocks on the lock and therefore folds the FIRST one's result, not a stale
+// copy of it.
+//
+// Without this, two sales of 30 from a holding of 50 each fold against the
+// same 50 and both commit, leaving events that cannot be folded at all -- a
+// page that throws every time it loads, fixable only from the page that is
+// broken. The fold stays in the domain; this method owns the transaction and
+// the lock, never the rule.
+func (r *HoldingEventRepo) InsertWithFold(
+	ctx context.Context,
+	e domain.HoldingEvent,
+	fold func([]domain.HoldingEvent) error,
+) (domain.HoldingEvent, error) {
+	var inserted domain.HoldingEvent
+	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		q := r.q.WithTx(tx)
+		if _, err := q.LockHolding(ctx, sqlcgen.LockHoldingParams{
+			HouseholdID: uuid(e.HouseholdID),
+			ID:          uuid(e.HoldingID),
+		}); err != nil {
+			return translate(err, "lock holding")
+		}
+		existing, err := listEventsTx(ctx, q, e.HouseholdID, e.HoldingID)
+		if err != nil {
+			return err
+		}
+		if err := fold(append(existing, e)); err != nil {
+			return err
+		}
+		inserted, err = insertEventTx(ctx, q, e)
+		return err
+	})
+	if err != nil {
+		return domain.HoldingEvent{}, err
+	}
+	return inserted, nil
+}
+
+// DeleteWithFold is Delete with the same guarantee in the other direction:
+// removing a purchase a later sale was costed against would leave the
+// remainder unfoldable, and the check has to hold until the row is gone.
+func (r *HoldingEventRepo) DeleteWithFold(
+	ctx context.Context,
+	householdID, holdingID, eventID string,
+	fold func([]domain.HoldingEvent) error,
+) error {
+	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		q := r.q.WithTx(tx)
+		if _, err := q.LockHolding(ctx, sqlcgen.LockHoldingParams{
+			HouseholdID: uuid(householdID),
+			ID:          uuid(holdingID),
+		}); err != nil {
+			return translate(err, "lock holding")
+		}
+		existing, err := listEventsTx(ctx, q, householdID, holdingID)
+		if err != nil {
+			return err
+		}
+		remaining := make([]domain.HoldingEvent, 0, len(existing))
+		found := false
+		for _, e := range existing {
+			if e.ID == eventID {
+				found = true
+				continue
+			}
+			remaining = append(remaining, e)
+		}
+		if !found {
+			return domain.ErrNotFound
+		}
+		if err := fold(remaining); err != nil {
+			return err
+		}
+		n, err := q.DeleteHoldingEvent(ctx, sqlcgen.DeleteHoldingEventParams{
+			HouseholdID: uuid(householdID),
+			ID:          uuid(eventID),
+		})
+		if err != nil {
+			return translate(err, "delete holding event")
+		}
+		if n == 0 {
+			return domain.ErrNotFound
+		}
+		return nil
+	})
+}
+
+// listEventsTx and insertEventTx are the transaction-scoped halves of
+// ListByHolding and Insert, so the guarded methods above reuse the same
+// conversion rather than a second copy of it.
+func listEventsTx(ctx context.Context, q *sqlcgen.Queries, householdID, holdingID string) ([]domain.HoldingEvent, error) {
+	rows, err := q.ListHoldingEvents(ctx, sqlcgen.ListHoldingEventsParams{
+		HouseholdID: uuid(householdID),
+		HoldingID:   uuid(holdingID),
+	})
+	if err != nil {
+		return nil, translate(err, "list holding events")
+	}
+	out := make([]domain.HoldingEvent, 0, len(rows))
+	for _, row := range rows {
+		e, err := toHoldingEvent(eventRow{
+			ID: row.ID, HoldingID: row.HoldingID, HouseholdID: row.HouseholdID, Kind: row.Kind,
+			QuantityNano: row.QuantityNano, AmountMinor: row.AmountMinor,
+			PrimaryAmountMinor: row.PrimaryAmountMinor, PrimaryCurrency: row.PrimaryCurrency,
+			OccurredOn: row.OccurredOn, Note: row.Note, Currency: row.Currency,
+		})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
+func insertEventTx(ctx context.Context, q *sqlcgen.Queries, e domain.HoldingEvent) (domain.HoldingEvent, error) {
+	var primaryMinor *int64
+	var primaryCurrency *string
+	if e.PrimaryAmount != nil {
+		amount, currency := e.PrimaryAmount.Amount, e.PrimaryAmount.Currency
+		primaryMinor, primaryCurrency = &amount, &currency
+	}
+	row, err := q.InsertHoldingEvent(ctx, sqlcgen.InsertHoldingEventParams{
 		HoldingID:          uuid(e.HoldingID),
 		HouseholdID:        uuid(e.HouseholdID),
 		Kind:               string(e.Kind),

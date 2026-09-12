@@ -266,6 +266,21 @@ export function HoldingLotsPanel({
   );
 }
 
+// The LOCAL calendar day, never toISOString().slice(0, 10) -- that renders in
+// UTC, so east of Greenwich it returns yesterday for the first hours of every
+// day. In Singapore (UTC+8) that is midnight to 08:00, and a price stamped a
+// day early can be silently outranked by an older one, because
+// ListLatestValuations orders by as_of.
+//
+// This repo has shipped this exact mistake three times before (f61407d,
+// f17be2d, and the plan correction behind them); AccountModal.tsx and
+// GoalContributionsPanel.tsx each carry this same helper for the same reason.
+// Each keeps its own copy deliberately rather than coupling three features'
+// date handling through one import.
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }

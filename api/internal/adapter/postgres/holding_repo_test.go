@@ -3,7 +3,9 @@ package postgres_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres"
 	"github.com/andreasoentoro/hearth/api/internal/domain"
@@ -430,6 +432,94 @@ func TestDeletingAnotherHouseholdsEventIsNotFound(t *testing.T) {
 
 	if err := events.Delete(ctx, mine, e.ID); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("Delete across households: error = %v, want ErrNotFound", err)
+	}
+}
+
+// Two sales of the same holding, racing. Each on its own is legal -- 30 of 50
+// grams -- and together they are not: 60 of 50. Without a lock both fold
+// against the same 50 and both commit, leaving a holding whose events cannot
+// be folded at all, which is a page that throws every time it loads and can
+// only be fixed from the page that is broken.
+//
+// InsertWithFold is what closes that: it locks the holding row, lists the
+// events inside the same transaction, and inserts only if the caller's fold
+// accepts them. The fold itself stays in the domain -- the repository owns the
+// transaction and the lock, never the rule.
+func TestTwoRacingDisposalsCannotBothCommit(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	holdings := postgres.NewHoldingRepo(db)
+	events := postgres.NewHoldingEventRepo(db)
+	householdID := insertTestHousehold(t, db)
+	accountID := insertTestInvestmentAccount(t, db, householdID, "Brokerage")
+	h, err := holdings.Create(ctx, newTestHolding(householdID, accountID, "D05"))
+	if err != nil {
+		t.Fatalf("Create holding: %v", err)
+	}
+	if _, err := events.InsertWithFold(ctx, domain.HoldingEvent{
+		HoldingID: h.ID, HouseholdID: householdID, Kind: domain.HoldingAcquisition,
+		Quantity: testQuantity(t, 50), Amount: moneyOf(5000), OccurredOn: july(1),
+	}, func([]domain.HoldingEvent) error { return nil }); err != nil {
+		t.Fatalf("buy: %v", err)
+	}
+
+	// The fold deliberately sleeps, to hold the check-to-write window open long
+	// enough for the two goroutines to genuinely overlap. Without it they
+	// serialise by luck and the test passes even with no lock at all -- which
+	// is exactly what happened the first time this was written, and what a
+	// mutation run caught.
+	//
+	// With the lock: the second writer blocks inside LockHolding before it ever
+	// reaches fold, and folds the first one's committed result.
+	// Without it: both fold the same starting position, both sleep, both write.
+	sell := func() error {
+		_, err := events.InsertWithFold(ctx, domain.HoldingEvent{
+			HoldingID: h.ID, HouseholdID: householdID, Kind: domain.HoldingDisposal,
+			Quantity: testQuantity(t, 30), Amount: moneyOf(4000), OccurredOn: july(2),
+		}, func(existing []domain.HoldingEvent) error {
+			time.Sleep(300 * time.Millisecond)
+			// The real fold: the service passes exactly this.
+			_, err := h.Position(existing)
+			return err
+		})
+		return err
+	}
+
+	results := make(chan error, 2)
+	var start sync.WaitGroup
+	start.Add(1)
+	for i := 0; i < 2; i++ {
+		go func() {
+			start.Wait()
+			results <- sell()
+		}()
+	}
+	start.Done()
+	first, second := <-results, <-results
+
+	oversold := 0
+	for _, err := range []error{first, second} {
+		if errors.Is(err, domain.ErrHoldingOversold) {
+			oversold++
+		} else if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	if oversold != 1 {
+		t.Fatalf("%d of 2 racing sales were refused, want exactly 1 (errors: %v, %v)", oversold, first, second)
+	}
+
+	// And the surviving position must still fold.
+	after, err := events.ListByHolding(ctx, householdID, h.ID)
+	if err != nil {
+		t.Fatalf("ListByHolding: %v", err)
+	}
+	position, err := h.Position(after)
+	if err != nil {
+		t.Fatalf("the holding no longer folds after the race: %v", err)
+	}
+	if position.Held.Nano() != 20*domain.QuantityScale {
+		t.Fatalf("Held = %d, want 20 units (50 bought, 30 sold once)", position.Held.Nano())
 	}
 }
 
