@@ -98,12 +98,20 @@ function invalidateHoldings(queryClient: QueryClient) {
 
 // An event or a valuation moves the holding's own figures AND the list's, so
 // both are invalidated together.
+//
+// The PERIOD REPORT is invalidated here too, and it is the one that is easy to
+// forget: it lives on its own query key, so nothing about refetching the
+// portfolio reaches it. Without this line the sequence the owner actually
+// performs -- open the report, see "no price recorded in this period", go back
+// and record one, return -- serves the cached report and still says no price.
+// The feature would look broken while being correct on the server.
 function invalidateAfterEventWrite(queryClient: QueryClient, holdingId: string) {
   return Promise.all([
     queryClient.invalidateQueries({ queryKey: holdingsQueryKey(false) }),
     queryClient.invalidateQueries({ queryKey: holdingsQueryKey(true) }),
     queryClient.invalidateQueries({ queryKey: holdingEventsQueryKey(holdingId) }),
     queryClient.invalidateQueries({ queryKey: holdingValuationsQueryKey(holdingId) }),
+    queryClient.invalidateQueries({ queryKey: ["portfolio-report"] }),
   ]);
 }
 
