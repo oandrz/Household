@@ -255,9 +255,11 @@ func TestAQuantityFinerThanABillionthIsRefused(t *testing.T) {
 	}
 }
 
-// Another household's holding id must read as ABSENT at the wire, not as
-// forbidden -- a 403 would confirm the row exists.
-func TestAnotherHouseholdsHoldingIsNotFound(t *testing.T) {
+// An id this household does not have reads as ABSENT, never as forbidden -- a
+// 403 would confirm the row exists somewhere. (The cross-household case proper
+// is covered where the rows can actually be created, in
+// postgres/holding_repo_test.go.)
+func TestAnUnknownHoldingIdIsNotFound(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
 

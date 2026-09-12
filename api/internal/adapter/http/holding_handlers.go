@@ -41,9 +41,16 @@ type holdingDTO struct {
 	// reason instead of a number -- the same rule the net worth card follows
 	// when a primary-currency change strands an account. ValuedAt is null in
 	// that case, and otherwise says how stale the price is.
-	MarketValueMinor int64      `json:"marketValueMinor"`
-	HasMarketValue   bool       `json:"hasMarketValue"`
-	ValuedAt         *string    `json:"valuedAt"`
+	MarketValueMinor int64   `json:"marketValueMinor"`
+	HasMarketValue   bool    `json:"hasMarketValue"`
+	ValuedAt         *string `json:"valuedAt"`
+
+	// The same value in the household's own currency, present only when the
+	// holding is not already in it. Null means "this holding is already in
+	// your currency", not "we could not work it out" -- so the screen shows
+	// one figure rather than two identical ones.
+	PrimaryMarketValueMinor *int64  `json:"primaryMarketValueMinor"`
+	PrimaryCurrency         *string `json:"primaryCurrency"`
 }
 
 // portfolioResponse carries NotInNetWorth as a literal wire-level fact rather
@@ -103,6 +110,10 @@ func toHoldingDTO(v usecase.HoldingPositionView) holdingDTO {
 	if v.HasMarketValue {
 		asOf := v.ValuedAt.Format(holdingDateLayout)
 		dto.MarketValueMinor, dto.HasMarketValue, dto.ValuedAt = v.MarketValue.Amount, true, &asOf
+		if v.HasPrimaryMarketValue {
+			amount, currency := v.PrimaryMarketValue.Amount, v.PrimaryMarketValue.Currency
+			dto.PrimaryMarketValueMinor, dto.PrimaryCurrency = &amount, &currency
+		}
 	}
 	return dto
 }
@@ -110,7 +121,10 @@ func toHoldingDTO(v usecase.HoldingPositionView) holdingDTO {
 func handleListHoldings(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
-		view, err := deps.Holdings.Portfolio(r.Context(), scope.HouseholdID)
+		// include_archived is a union, not a filter swap, and is spelled the
+		// way accounts and goals spell it.
+		includeArchived := r.URL.Query().Get("include_archived") == "true"
+		view, err := deps.Holdings.Portfolio(r.Context(), scope.HouseholdID, includeArchived)
 		if err != nil {
 			MapDomainError(w, r, err)
 			return
@@ -162,7 +176,7 @@ func handleCreateHolding(deps Deps) http.HandlerFunc {
 			Currency:    currency,
 		})
 		if err != nil {
-			MapDomainError(w, r, err)
+			writeHoldingNameConflict(w, r, deps, scope.HouseholdID, req.AccountID, req.Name, err)
 			return
 		}
 		writeOneHolding(w, r, deps, scope.HouseholdID, created.ID, http.StatusCreated)
@@ -223,7 +237,11 @@ func setHoldingArchived(deps Deps, archived bool) http.HandlerFunc {
 // carries the stored row but not the fold or the price -- the same reason
 // writeGoal re-reads rather than converting what Create handed back.
 func writeOneHolding(w http.ResponseWriter, r *http.Request, deps Deps, householdID, holdingID string, status int) {
-	view, err := deps.Holdings.Portfolio(r.Context(), householdID)
+	// includeArchived is true unconditionally here, and that matters: archiving
+	// answers with the holding it just archived, and folding it as if it were
+	// live is what stops that response claiming the position was always empty.
+	// An archived holding still held what it held.
+	view, err := deps.Holdings.Portfolio(r.Context(), householdID, true)
 	if err != nil {
 		MapDomainError(w, r, err)
 		return
@@ -234,15 +252,39 @@ func writeOneHolding(w http.ResponseWriter, r *http.Request, deps Deps, househol
 			return
 		}
 	}
-	// An archived holding is not in the portfolio view, which lists live ones
-	// only -- so archiving answers from the stored row instead of 404ing on
-	// the thing it just archived.
-	holding, err := deps.Holdings.Get(r.Context(), householdID, holdingID)
-	if err != nil {
+	MapDomainError(w, r, domain.ErrNotFound)
+}
+
+// writeHoldingNameConflict turns the plain 409 into one the modal can act on
+// when the colliding holding turns out to be ARCHIVED: it carries that
+// holding's id, so the screen offers Restore rather than a dead end. Archived
+// rows still occupy their name (archived_at is not part of the unique key), so
+// without this, re-adding something the household archived last year is a
+// refusal with no way forward -- and the household cannot see the row that is
+// blocking them.
+//
+// The precedent and the shape are goal_handlers.go's writeGoalNameConflict. As
+// there, a failure to look the archived row up falls back to the plain error
+// rather than replacing one problem with another.
+func writeHoldingNameConflict(w http.ResponseWriter, r *http.Request, deps Deps, householdID, accountID, name string, err error) {
+	if !errors.Is(err, domain.ErrHoldingNameTaken) {
 		MapDomainError(w, r, err)
 		return
 	}
-	WriteJSON(w, status, holdingResponse{Holding: toHoldingDTO(usecase.HoldingPositionView{Holding: holding})})
+	view, listErr := deps.Holdings.List(r.Context(), householdID, true)
+	if listErr != nil {
+		MapDomainError(w, r, err)
+		return
+	}
+	for _, rec := range view {
+		if rec.Holding.AccountID == accountID && rec.Holding.Name == strings.TrimSpace(name) && rec.Holding.IsArchived() {
+			WriteError(w, http.StatusConflict, "HOLDING_NAME_TAKEN",
+				"You archived a holding with that name in this account. Restore it instead?",
+				map[string]any{"archivedHoldingId": rec.Holding.ID})
+			return
+		}
+	}
+	MapDomainError(w, r, err)
 }
 
 func handleListHoldingEvents(deps Deps) http.HandlerFunc {
@@ -446,7 +488,3 @@ func parseHoldingDate(w http.ResponseWriter, r *http.Request, text string) (time
 	}
 	return d, true
 }
-
-// errHoldingNotFound keeps the linter honest about the sentinel being used in
-// this file's own guard paths.
-var _ = errors.Is

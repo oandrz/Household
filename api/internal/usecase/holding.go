@@ -30,6 +30,19 @@ type HoldingPositionView struct {
 	MarketValue    domain.Money
 	HasMarketValue bool
 	ValuedAt       time.Time
+
+	// PrimaryMarketValue is the same figure in the household's own currency,
+	// present only when the holding is NOT already in it. The PRD's rule: a US
+	// stock up 5% in USD while SGD gained 6% against USD made the household
+	// poorer, and the primary figure is the one that says so -- while the
+	// native figure beside it still says whether the pick was good.
+	//
+	// It comes from the valuation's own primary unit price, which the owner
+	// supplied, never from a rate: this product has no dated rate source.
+	// HasPrimaryMarketValue false means "this holding is already in your
+	// currency", not "we could not work it out".
+	PrimaryMarketValue    domain.Money
+	HasPrimaryMarketValue bool
 }
 
 // PortfolioView is the whole portfolio screen in one response.
@@ -242,8 +255,8 @@ func (s *HoldingService) ListValuations(ctx context.Context, householdID, holdin
 // each position in memory. The events arrive already ordered by the
 // repository's own contract (occurred_on, created_at, id), which is what makes
 // the fold's answer deterministic for same-day events.
-func (s *HoldingService) Portfolio(ctx context.Context, householdID string) (PortfolioView, error) {
-	records, err := s.d.Holdings.List(ctx, householdID, false)
+func (s *HoldingService) Portfolio(ctx context.Context, householdID string, includeArchived bool) (PortfolioView, error) {
+	records, err := s.d.Holdings.List(ctx, householdID, includeArchived)
 	if err != nil {
 		return PortfolioView{}, err
 	}
@@ -286,6 +299,13 @@ func (s *HoldingService) Portfolio(ctx context.Context, householdID string) (Por
 				return PortfolioView{}, err
 			}
 			view.MarketValue, view.HasMarketValue, view.ValuedAt = value, true, price.AsOf
+			if price.PrimaryUnitPrice != nil {
+				primary, err := price.PrimaryUnitPrice.Mul(position.Held)
+				if err != nil {
+					return PortfolioView{}, err
+				}
+				view.PrimaryMarketValue, view.HasPrimaryMarketValue = primary, true
+			}
 		}
 		out = append(out, view)
 	}

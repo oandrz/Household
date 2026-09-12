@@ -262,7 +262,7 @@ func TestPortfolioFoldsEachHoldingFromItsOwnEventsOnly(t *testing.T) {
 		}
 	}
 
-	view, err := f.svc.Portfolio(ctx, f.householdID)
+	view, err := f.svc.Portfolio(ctx, f.householdID, false)
 	if err != nil {
 		t.Fatalf("Portfolio: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestAHoldingWithNoValuationHasNoMarketValueRatherThanZero(t *testing.T) {
 		t.Fatalf("buy: %v", err)
 	}
 
-	view, err := f.svc.Portfolio(ctx, f.householdID)
+	view, err := f.svc.Portfolio(ctx, f.householdID, false)
 	if err != nil {
 		t.Fatalf("Portfolio: %v", err)
 	}
@@ -325,7 +325,7 @@ func TestAPricedHoldingCarriesItsMarketValueAndTheDateOfThatPrice(t *testing.T) 
 		t.Fatalf("RecordValuation: %v", err)
 	}
 
-	view, err := f.svc.Portfolio(ctx, f.householdID)
+	view, err := f.svc.Portfolio(ctx, f.householdID, false)
 	if err != nil {
 		t.Fatalf("Portfolio: %v", err)
 	}
@@ -353,3 +353,116 @@ func TestRecordValuationRefusesAPriceInTheWrongCurrency(t *testing.T) {
 		t.Fatalf("error = %v, want ErrCurrencyMismatch", err)
 	}
 }
+
+// The PRD reports every figure in the household's primary currency with the
+// instrument's own beside it: a US stock up 5% in USD while SGD gained 6%
+// against USD made the household poorer, and the primary figure has to say so.
+// The valuation carries both prices, so the view carries both values.
+func TestAForeignHoldingCarriesItsValueInBothCurrencies(t *testing.T) {
+	f := newHoldingFixture(t, "SGD")
+	ctx := context.Background()
+	h := f.create(t, "VOO", "USD")
+
+	primaryCost := money(t, 67500, "SGD")
+	if _, err := f.svc.RecordEvent(ctx, domain.HoldingEvent{
+		HoldingID: h.ID, HouseholdID: f.householdID, Kind: domain.HoldingAcquisition,
+		Quantity: qty(t, 10), Amount: money(t, 50000, "USD"),
+		PrimaryAmount: &primaryCost, OccurredOn: holdingDay(1),
+	}); err != nil {
+		t.Fatalf("buy: %v", err)
+	}
+	primaryPrice := money(t, 6800, "SGD")
+	if _, err := f.svc.RecordValuation(ctx, domain.Valuation{
+		HoldingID: h.ID, HouseholdID: f.householdID,
+		UnitPrice: money(t, 5200, "USD"), PrimaryUnitPrice: &primaryPrice, AsOf: holdingDay(5),
+	}); err != nil {
+		t.Fatalf("RecordValuation: %v", err)
+	}
+
+	view, err := f.svc.Portfolio(ctx, f.householdID, false)
+	if err != nil {
+		t.Fatalf("Portfolio: %v", err)
+	}
+	got := view.Holdings[0]
+	if got.MarketValue.Amount != 52000 || got.MarketValue.Currency != "USD" {
+		t.Fatalf("native market value = %+v, want 52000 USD", got.MarketValue)
+	}
+	if !got.HasPrimaryMarketValue {
+		t.Fatal("HasPrimaryMarketValue = false; a foreign holding must report its own currency AND the household's")
+	}
+	if got.PrimaryMarketValue.Amount != 68000 || got.PrimaryMarketValue.Currency != "SGD" {
+		t.Fatalf("primary market value = %+v, want 68000 SGD", got.PrimaryMarketValue)
+	}
+}
+
+// A holding already in the household's currency carries ONE figure, not two
+// identical ones -- the same reason its events refuse a redundant primary
+// amount.
+func TestAHoldingAlreadyInPrimaryCurrencyReportsOneFigure(t *testing.T) {
+	f := newHoldingFixture(t, "SGD")
+	ctx := context.Background()
+	h := f.create(t, "D05", "SGD")
+	if _, err := f.svc.RecordEvent(ctx, domain.HoldingEvent{
+		HoldingID: h.ID, HouseholdID: f.householdID, Kind: domain.HoldingAcquisition,
+		Quantity: qty(t, 10), Amount: money(t, 1000, "SGD"), OccurredOn: holdingDay(1),
+	}); err != nil {
+		t.Fatalf("buy: %v", err)
+	}
+	if _, err := f.svc.RecordValuation(ctx, domain.Valuation{
+		HoldingID: h.ID, HouseholdID: f.householdID,
+		UnitPrice: money(t, 250, "SGD"), AsOf: holdingDay(5),
+	}); err != nil {
+		t.Fatalf("RecordValuation: %v", err)
+	}
+
+	view, err := f.svc.Portfolio(ctx, f.householdID, false)
+	if err != nil {
+		t.Fatalf("Portfolio: %v", err)
+	}
+	if view.Holdings[0].HasPrimaryMarketValue {
+		t.Fatal("HasPrimaryMarketValue = true for a holding already in the primary currency")
+	}
+}
+
+// An archived holding still folds to its real position. Archiving is how a
+// household retires a position it no longer wants on the page; it is not a
+// claim that the position was always empty, and reporting held 0 / cost 0
+// would be exactly that claim.
+func TestAnArchivedHoldingStillReportsWhatItHeld(t *testing.T) {
+	f := newHoldingFixture(t, "SGD")
+	ctx := context.Background()
+	h := f.create(t, "D05", "SGD")
+	if _, err := f.svc.RecordEvent(ctx, domain.HoldingEvent{
+		HoldingID: h.ID, HouseholdID: f.householdID, Kind: domain.HoldingAcquisition,
+		Quantity: qty(t, 10), Amount: money(t, 1000, "SGD"), OccurredOn: holdingDay(1),
+	}); err != nil {
+		t.Fatalf("buy: %v", err)
+	}
+	if _, err := f.svc.SetArchived(ctx, f.householdID, h.ID, true, holdingDay(2)); err != nil {
+		t.Fatalf("SetArchived: %v", err)
+	}
+
+	live, err := f.svc.Portfolio(ctx, f.householdID, false)
+	if err != nil {
+		t.Fatalf("Portfolio(live): %v", err)
+	}
+	if len(live.Holdings) != 0 {
+		t.Fatalf("live portfolio has %d holdings, want 0", len(live.Holdings))
+	}
+
+	all, err := f.svc.Portfolio(ctx, f.householdID, true)
+	if err != nil {
+		t.Fatalf("Portfolio(all): %v", err)
+	}
+	if len(all.Holdings) != 1 {
+		t.Fatalf("portfolio with archived has %d holdings, want 1", len(all.Holdings))
+	}
+	if all.Holdings[0].Position.Held.Nano() != 10*domain.QuantityScale {
+		t.Fatalf("archived holding reports %d units; archiving must not empty a position",
+			all.Holdings[0].Position.Held.Nano())
+	}
+	if all.Holdings[0].Position.Cost.Amount != 1000 {
+		t.Fatalf("archived holding reports cost %d, want 1000", all.Holdings[0].Position.Cost.Amount)
+	}
+}
+

@@ -175,6 +175,11 @@ func FormatQuantity(q Quantity) string {
 	return strconv.FormatInt(whole, 10) + "." + digits
 }
 
+// Mul is Quantity.Value read from the price's side, for a caller holding a
+// price and asking what a quantity of it is worth. It is the same call and
+// the same arithmetic, named for the direction the caller is thinking in.
+func (m Money) Mul(q Quantity) (Money, error) { return q.Value(m) }
+
 // Prorate returns the share of m that corresponds to part out of whole. It is
 // what takes a disposal's cost out of a holding's cost pool: selling 5 of 20
 // units removes exactly a quarter of what those 20 units cost, which is what
