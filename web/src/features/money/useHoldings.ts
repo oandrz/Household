@@ -89,10 +89,16 @@ async function fetchPortfolio(includeArchived: boolean): Promise<PortfolioRespon
 // Both variants, the useGoals.ts invalidateGoals shape and for its reason: a
 // write performed while the screen shows one (live only, or live-and-archived)
 // must not leave the other stale for the next toggle.
+//
+// The period report too, for the reason invalidateAfterEventWrite gives at
+// length: it lists every holding the household has and prints each one's name,
+// so a holding added or renamed here changes what that screen should say even
+// though no figure on it moved.
 function invalidateHoldings(queryClient: QueryClient) {
   return Promise.all([
     queryClient.invalidateQueries({ queryKey: holdingsQueryKey(false) }),
     queryClient.invalidateQueries({ queryKey: holdingsQueryKey(true) }),
+    queryClient.invalidateQueries({ queryKey: ["portfolio-report"] }),
   ]);
 }
 

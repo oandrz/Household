@@ -90,4 +90,40 @@ describe("useHoldings write invalidation", () => {
 
     await waitFor(() => expect(invalidatedTheReport(invalidated)).toBe(true));
   });
+
+  // The holding itself, not one of its entries. The report lists every holding
+  // the household has, archived ones included, and it prints the NAME -- so a
+  // holding created or renamed while the report sits in cache leaves the report
+  // showing a list that is missing a row or labelling one with a name nobody
+  // uses any more.
+  it("refetches the period report after a holding is added", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/holdings": { status: 200, body: { holdings: [], notInNetWorth: true } },
+      "POST /api/v1/holdings": { status: 201, body: { holding: null } },
+    });
+    const { wrapper, invalidated } = harness();
+    const { result } = renderHook(() => useHoldings({ includeArchived: false }), { wrapper });
+
+    await result.current.createHolding.mutateAsync({
+      accountId: "a1",
+      name: "Gold bar",
+      instrument: "gold",
+      unit: "gram",
+    });
+
+    await waitFor(() => expect(invalidatedTheReport(invalidated)).toBe(true));
+  });
+
+  it("refetches the period report after a holding is renamed", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/holdings": { status: 200, body: { holdings: [], notInNetWorth: true } },
+      "PATCH /api/v1/holdings/h1": { status: 200, body: { holding: null } },
+    });
+    const { wrapper, invalidated } = harness();
+    const { result } = renderHook(() => useHoldings({ includeArchived: false }), { wrapper });
+
+    await result.current.updateHolding.mutateAsync({ id: "h1", body: { name: "Gold 1oz" } });
+
+    await waitFor(() => expect(invalidatedTheReport(invalidated)).toBe(true));
+  });
 });
