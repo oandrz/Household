@@ -122,7 +122,13 @@ describe("useHoldings write invalidation", () => {
     const { wrapper, invalidated } = harness();
     const { result } = renderHook(() => useHoldings({ includeArchived: false }), { wrapper });
 
-    await result.current.updateHolding.mutateAsync({ id: "h1", body: { name: "Gold 1oz" } });
+    // The whole body, because the route is a PUT wearing a PATCH's name here:
+    // UpdateHoldingBody carries every editable field and the modal sends all
+    // three. Only the name matters to this test.
+    await result.current.updateHolding.mutateAsync({
+      id: "h1",
+      body: { name: "Gold 1oz", instrument: "gold", unit: "gram" },
+    });
 
     await waitFor(() => expect(invalidatedTheReport(invalidated)).toBe(true));
   });

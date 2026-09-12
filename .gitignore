@@ -29,3 +29,6 @@ deploy/.previous-image-tag
 .playwright-mcp/
 # make hearthctl builds here
 /bin/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
