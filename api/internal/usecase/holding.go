@@ -188,7 +188,7 @@ func (s *HoldingService) RecordEvent(ctx context.Context, e domain.HoldingEvent,
 	// illegal together, and checking then writing lets both through. The rule
 	// stays here; InsertWithFold supplies the lock.
 	return s.d.Events.InsertWithFold(ctx, e, func(withThisOne []domain.HoldingEvent) error {
-		_, err := holding.Position(withThisOne)
+		_, err := holding.Position(withThisOne, primaryCurrency)
 		return err
 	})
 }
@@ -202,11 +202,18 @@ func (s *HoldingService) DeleteEvent(ctx context.Context, householdID, holdingID
 	if err != nil {
 		return err
 	}
+	// The fold needs the household's currency for its primary pool even here,
+	// where only the error is read: a pool has to know what it is denominated
+	// in before it can refuse an amount in something else.
+	primaryCurrency, err := s.primaryCurrency(ctx, householdID)
+	if err != nil {
+		return err
+	}
 	// Same reasoning as RecordEvent: the remainder is folded inside the
 	// delete's own transaction, so a concurrent write cannot slip between the
 	// check and the removal.
 	return s.d.Events.DeleteWithFold(ctx, householdID, holdingID, eventID, func(remaining []domain.HoldingEvent) error {
-		_, err := holding.Position(remaining)
+		_, err := holding.Position(remaining, primaryCurrency)
 		return err
 	})
 }
@@ -264,6 +271,12 @@ func (s *HoldingService) Portfolio(ctx context.Context, householdID string, incl
 	if err != nil {
 		return PortfolioView{}, err
 	}
+	// Looked up once for the whole screen rather than per holding: it is the
+	// same answer for every row, and the fold's primary pool needs it.
+	primaryCurrency, err := s.primaryCurrency(ctx, householdID)
+	if err != nil {
+		return PortfolioView{}, err
+	}
 
 	// Grouping preserves the order the repository returned, because that order
 	// is the fold's tie-break for events sharing a date.
@@ -278,7 +291,7 @@ func (s *HoldingService) Portfolio(ctx context.Context, householdID string, incl
 
 	out := make([]HoldingPositionView, 0, len(records))
 	for _, rec := range records {
-		position, err := rec.Holding.Position(byHolding[rec.Holding.ID])
+		position, err := rec.Holding.Position(byHolding[rec.Holding.ID], primaryCurrency)
 		if err != nil {
 			return PortfolioView{}, err
 		}

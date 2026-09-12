@@ -230,7 +230,7 @@ func TestProrateDoesNotOverflowOnALargeIDRPool(t *testing.T) {
 // --- the fold ---------------------------------------------------------------
 
 func TestPositionOfASingleAcquisitionIsItsQuantityAndItsCost(t *testing.T) {
-	p, err := sgdHolding().Position([]domain.HoldingEvent{buy(t, 1, 10, 1000)})
+	p, err := sgdHolding().Position([]domain.HoldingEvent{buy(t, 1, 10, 1000)}, "SGD")
 	if err != nil {
 		t.Fatalf("Position: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestADisposalLeavesTheAverageCostAloneAndAnAcquisitionMovesIt(t *testing.T)
 	h := sgdHolding()
 
 	// 10 @ 100 then 10 @ 200 -> 20 units costing 3000, an average of 150.
-	afterBuys, err := h.Position([]domain.HoldingEvent{buy(t, 1, 10, 1000), buy(t, 2, 10, 2000)})
+	afterBuys, err := h.Position([]domain.HoldingEvent{buy(t, 1, 10, 1000), buy(t, 2, 10, 2000)}, "SGD")
 	if err != nil {
 		t.Fatalf("Position: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestADisposalLeavesTheAverageCostAloneAndAnAcquisitionMovesIt(t *testing.T)
 	// like 150, to prove it does not leak into the average.
 	afterSale, err := h.Position([]domain.HoldingEvent{
 		buy(t, 1, 10, 1000), buy(t, 2, 10, 2000), sell(t, 3, 5, 9999),
-	})
+	}, "SGD")
 	if err != nil {
 		t.Fatalf("Position: %v", err)
 	}
@@ -280,7 +280,7 @@ func TestADisposalLeavesTheAverageCostAloneAndAnAcquisitionMovesIt(t *testing.T)
 	// A further buy at 300 does move it: 2250 + 3000 = 5250 over 25 units.
 	afterBuyAgain, err := h.Position([]domain.HoldingEvent{
 		buy(t, 1, 10, 1000), buy(t, 2, 10, 2000), sell(t, 3, 5, 9999), buy(t, 4, 10, 3000),
-	})
+	}, "SGD")
 	if err != nil {
 		t.Fatalf("Position: %v", err)
 	}
@@ -295,12 +295,12 @@ func TestADisposalLeavesTheAverageCostAloneAndAnAcquisitionMovesIt(t *testing.T)
 // used one average for everything would get it wrong.
 func TestRealisedGainUsesTheAverageAtTheTimeOfEachSale(t *testing.T) {
 	p, err := sgdHolding().Position([]domain.HoldingEvent{
-		buy(t, 1, 10, 1000),  // avg 100
-		buy(t, 2, 10, 2000),  // avg 150 over 20
-		sell(t, 3, 5, 1500),  // cost 750, realised 750; 15 left at 2250
-		buy(t, 4, 10, 3000),  // avg 210 over 25
-		sell(t, 5, 5, 2000),  // cost 1050, realised 950; total 1700
-	})
+		buy(t, 1, 10, 1000), // avg 100
+		buy(t, 2, 10, 2000), // avg 150 over 20
+		sell(t, 3, 5, 1500), // cost 750, realised 750; 15 left at 2250
+		buy(t, 4, 10, 3000), // avg 210 over 25
+		sell(t, 5, 5, 2000), // cost 1050, realised 950; total 1700
+	}, "SGD")
 	if err != nil {
 		t.Fatalf("Position: %v", err)
 	}
@@ -327,11 +327,11 @@ func TestPositionFoldsInDateOrderNotSliceOrder(t *testing.T) {
 		sell(t, 3, 5, 1500), buy(t, 2, 10, 2000), buy(t, 1, 10, 1000),
 	}
 
-	want, err := sgdHolding().Position(inOrder)
+	want, err := sgdHolding().Position(inOrder, "SGD")
 	if err != nil {
 		t.Fatalf("Position(inOrder): %v", err)
 	}
-	got, err := sgdHolding().Position(shuffled)
+	got, err := sgdHolding().Position(shuffled, "SGD")
 	if err != nil {
 		t.Fatalf("Position(shuffled): %v", err)
 	}
@@ -347,7 +347,7 @@ func TestPositionFoldsInDateOrderNotSliceOrder(t *testing.T) {
 func TestPositionRefusesToSellMoreThanIsHeld(t *testing.T) {
 	_, err := sgdHolding().Position([]domain.HoldingEvent{
 		buy(t, 1, 10, 1000), sell(t, 2, 11, 5000),
-	})
+	}, "SGD")
 	if !errors.Is(err, domain.ErrHoldingOversold) {
 		t.Fatalf("Position error = %v, want ErrHoldingOversold", err)
 	}
@@ -357,7 +357,7 @@ func TestPositionOfAHoldingWithNoEventsIsZeroInItsOwnCurrency(t *testing.T) {
 	h := sgdHolding()
 	h.Currency = "IDR"
 
-	p, err := h.Position(nil)
+	p, err := h.Position(nil, "SGD")
 	if err != nil {
 		t.Fatalf("Position: %v", err)
 	}
@@ -388,11 +388,11 @@ func TestPositionKeepsSliceOrderForEventsOnTheSameDay(t *testing.T) {
 	buyThenSell := []domain.HoldingEvent{base, buy(t, 1, 10, 2000), sell(t, 1, 5, 1500)}
 	sellThenBuy := []domain.HoldingEvent{base, sell(t, 1, 5, 1500), buy(t, 1, 10, 2000)}
 
-	first, err := sgdHolding().Position(buyThenSell)
+	first, err := sgdHolding().Position(buyThenSell, "SGD")
 	if err != nil {
 		t.Fatalf("Position(buyThenSell): %v", err)
 	}
-	second, err := sgdHolding().Position(sellThenBuy)
+	second, err := sgdHolding().Position(sellThenBuy, "SGD")
 	if err != nil {
 		t.Fatalf("Position(sellThenBuy): %v", err)
 	}
@@ -445,7 +445,7 @@ func TestPositionKeepsSameDayOrderWhenTheSortHasRealWorkToDo(t *testing.T) {
 		i++
 	}
 
-	p, err := sgdHolding().Position(events)
+	p, err := sgdHolding().Position(events, "SGD")
 	if err != nil {
 		t.Fatalf("Position: %v", err)
 	}
@@ -514,5 +514,155 @@ func TestValuationRefusesANegativeUnitPrice(t *testing.T) {
 func TestValuationRefusesAPriceInTheWrongCurrency(t *testing.T) {
 	if err := valuation(t, 1, 250).Validate("USD", "SGD"); !errors.Is(err, domain.ErrCurrencyMismatch) {
 		t.Fatalf("error = %v, want ErrCurrencyMismatch", err)
+	}
+}
+
+// --- the primary-currency pool ----------------------------------------------
+//
+// A holding in a currency the household does not keep its books in carries two
+// cost pools, folded side by side: the native one, and the household's own.
+// The second is not derivable from the first afterwards, which is the whole
+// reason it is folded rather than converted -- see the tests below.
+
+func usdHolding() domain.Holding {
+	return domain.Holding{
+		Name:       "US stock",
+		Instrument: domain.InstrumentStock,
+		Unit:       "share",
+		Currency:   "USD",
+	}
+}
+
+func money(t *testing.T, minor int64, currency string) domain.Money {
+	t.Helper()
+	m, err := domain.NewMoney(minor, currency)
+	if err != nil {
+		t.Fatalf("NewMoney(%d, %s): %v", minor, currency, err)
+	}
+	return m
+}
+
+// buyUSD is an acquisition of a USD holding by a household whose books are in
+// SGD: the amount that left the brokerage in USD, and the amount that left the
+// bank in SGD, both recorded because the owner knows both.
+func buyUSD(t *testing.T, day int, qty, usdMinor, sgdMinor int64) domain.HoldingEvent {
+	t.Helper()
+	primary := money(t, sgdMinor, "SGD")
+	return domain.HoldingEvent{
+		Kind:          domain.HoldingAcquisition,
+		Quantity:      units(t, qty),
+		Amount:        money(t, usdMinor, "USD"),
+		PrimaryAmount: &primary,
+		OccurredOn:    on(day),
+	}
+}
+
+func sellUSD(t *testing.T, day int, qty, usdMinor, sgdMinor int64) domain.HoldingEvent {
+	t.Helper()
+	primary := money(t, sgdMinor, "SGD")
+	return domain.HoldingEvent{
+		Kind:          domain.HoldingDisposal,
+		Quantity:      units(t, qty),
+		Amount:        money(t, usdMinor, "USD"),
+		PrimaryAmount: &primary,
+		OccurredOn:    on(day),
+	}
+}
+
+// The test the whole decision rests on. Two lots bought at the same USD price
+// but different exchange rates blend to an SGD cost per unit that is neither
+// rate: S$135.00 and S$130.00 per unit average to S$132.50. No single rate
+// applied to the USD realised figure produces the SGD one, which is why the
+// primary pool is folded rather than converted after the fact.
+func TestRealisedInPrimaryCurrencyUsesTheBlendedRateNotTheLatestOne(t *testing.T) {
+	h := usdHolding()
+	events := []domain.HoldingEvent{
+		buyUSD(t, 1, 10, 100000, 135000), // US$1,000.00 cost S$1,350.00
+		buyUSD(t, 2, 10, 100000, 130000), // US$1,000.00 cost S$1,300.00
+		sellUSD(t, 3, 10, 120000, 160000),
+	}
+
+	p, err := h.Position(events, "SGD")
+	if err != nil {
+		t.Fatalf("Position: %v", err)
+	}
+
+	// Native: cost pool US$2,000.00, half of it leaves, realised is
+	// US$1,200.00 - US$1,000.00.
+	if p.Realised.Amount != 20000 || p.Realised.Currency != "USD" {
+		t.Errorf("Realised = %d %s, want 20000 USD", p.Realised.Amount, p.Realised.Currency)
+	}
+	// Primary: cost pool S$2,650.00, half of it -- S$1,325.00, ten units at
+	// the blended S$132.50 -- leaves against S$1,600.00 of proceeds.
+	if p.RealisedPrimary.Amount != 27500 || p.RealisedPrimary.Currency != "SGD" {
+		t.Errorf("RealisedPrimary = %d %s, want 27500 SGD", p.RealisedPrimary.Amount, p.RealisedPrimary.Currency)
+	}
+	// What is still held cost the other half of the blended pool, which is
+	// what keeps the average per unit unchanged by the sale.
+	if p.CostPrimary.Amount != 132500 || p.CostPrimary.Currency != "SGD" {
+		t.Errorf("CostPrimary = %d %s, want 132500 SGD", p.CostPrimary.Amount, p.CostPrimary.Currency)
+	}
+	if p.Cost.Amount != 100000 || p.Cost.Currency != "USD" {
+		t.Errorf("Cost = %d %s, want 100000 USD", p.Cost.Amount, p.Cost.Currency)
+	}
+}
+
+// A holding already in the household's currency carries no second amount --
+// validatePrimaryAmount refuses one, because two figures for the same number
+// can disagree later with nothing to say which is true. The fold fills the
+// primary pool from the native one instead, so every caller reads the primary
+// figures without asking which case it is in.
+func TestAHoldingAlreadyInThePrimaryCurrencyFillsBothPoolsFromOneAmount(t *testing.T) {
+	h := sgdHolding()
+	p, err := h.Position([]domain.HoldingEvent{
+		buy(t, 1, 10, 100000),
+		sell(t, 2, 4, 50000),
+	}, "SGD")
+	if err != nil {
+		t.Fatalf("Position: %v", err)
+	}
+
+	if p.CostPrimary != p.Cost {
+		t.Errorf("CostPrimary = %v, want it to equal Cost %v", p.CostPrimary, p.Cost)
+	}
+	if p.RealisedPrimary != p.Realised {
+		t.Errorf("RealisedPrimary = %v, want it to equal Realised %v", p.RealisedPrimary, p.Realised)
+	}
+}
+
+// An empty holding's primary pool is zero in the HOUSEHOLD's currency, not in
+// the holding's. A zero carrying the wrong currency code fails at the first
+// Add rather than at the point it was built, three calls away from the cause.
+func TestAnEmptyPositionsPrimaryPoolIsInTheHouseholdsCurrency(t *testing.T) {
+	p, err := usdHolding().Position(nil, "SGD")
+	if err != nil {
+		t.Fatalf("Position: %v", err)
+	}
+	if p.CostPrimary.Currency != "SGD" || p.CostPrimary.Amount != 0 {
+		t.Errorf("CostPrimary = %d %s, want 0 SGD", p.CostPrimary.Amount, p.CostPrimary.Currency)
+	}
+	if p.RealisedPrimary.Currency != "SGD" || p.RealisedPrimary.Amount != 0 {
+		t.Errorf("RealisedPrimary = %d %s, want 0 SGD", p.RealisedPrimary.Amount, p.RealisedPrimary.Currency)
+	}
+	if p.Cost.Currency != "USD" {
+		t.Errorf("Cost currency = %s, want USD", p.Cost.Currency)
+	}
+}
+
+// The fold reads rows it did not construct. A primary amount in a third
+// currency is refused rather than added into the household's pool -- the
+// fail-closed rule CLAUDE.md states for any value arriving from a database
+// column.
+func TestTheFoldRefusesAPrimaryAmountInSomeOtherCurrency(t *testing.T) {
+	wrong := money(t, 999, "IDR")
+	events := []domain.HoldingEvent{{
+		Kind:          domain.HoldingAcquisition,
+		Quantity:      units(t, 1),
+		Amount:        money(t, 100, "USD"),
+		PrimaryAmount: &wrong,
+		OccurredOn:    on(1),
+	}}
+	if _, err := usdHolding().Position(events, "SGD"); err == nil {
+		t.Fatal("a primary amount in IDR must not fold into an SGD pool")
 	}
 }

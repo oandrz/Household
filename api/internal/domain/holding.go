@@ -198,32 +198,111 @@ func (v Valuation) MarketValue(held Quantity) (Money, error) {
 }
 
 // Position is what a holding's events add up to: how much is still held, what
-// that remainder cost, and what selling has already realised. All three are in
-// the holding's own currency.
+// that remainder cost, and what selling has already realised. Each of those
+// costs is carried TWICE -- once in the holding's own currency, once in the
+// household's -- because the second cannot be derived from the first
+// afterwards. Two lots bought at the same USD price under different exchange
+// rates blend to an SGD cost per unit that is neither rate, and no single rate
+// applied to the USD figure reproduces it.
 //
 // Cost is the cost of what is STILL held, not of everything ever bought -- the
 // part belonging to sold units has already moved into Realised. That is what
-// makes Cost divided by Held the average cost at any moment.
+// makes Cost divided by Held the average cost at any moment. CostPrimary and
+// RealisedPrimary say the same thing about the household's own money, which is
+// the figure that answers "did this make us richer".
 type Position struct {
 	Held     Quantity
 	Cost     Money
 	Realised Money
+
+	CostPrimary     Money
+	RealisedPrimary Money
+}
+
+// costPool is one currency's side of the fold. The fold keeps two and runs
+// identical arithmetic on each, so this is a type rather than the same eight
+// lines written out twice -- the disposal branch in particular is where the
+// average-cost basis lives, and two copies of it is two places to drift.
+type costPool struct {
+	cost     Money
+	realised Money
+}
+
+func (p costPool) acquire(amount Money) (costPool, error) {
+	next, err := p.cost.Add(amount)
+	if err != nil {
+		return costPool{}, err
+	}
+	p.cost = next
+	return p, nil
+}
+
+// dispose moves the share of the pool belonging to the units leaving it out of
+// cost and into realised. part and whole are the quantity sold and the
+// quantity held BEFORE the sale, so the average cost of what remains is
+// unchanged -- the asymmetry average-cost basis depends on.
+func (p costPool) dispose(proceeds Money, part, whole Quantity) (costPool, error) {
+	costOut, err := p.cost.Prorate(part, whole)
+	if err != nil {
+		return costPool{}, err
+	}
+	negated := Money{Amount: -costOut.Amount, Currency: costOut.Currency}
+	gain, err := proceeds.Add(negated)
+	if err != nil {
+		return costPool{}, err
+	}
+	realised, err := p.realised.Add(gain)
+	if err != nil {
+		return costPool{}, err
+	}
+	cost, err := p.cost.Add(negated)
+	if err != nil {
+		return costPool{}, err
+	}
+	return costPool{cost: cost, realised: realised}, nil
+}
+
+// inPrimary is the event's amount in the household's own currency: the
+// separately recorded one when the holding is in some other currency, and the
+// native amount itself when it is not.
+//
+// A nil PrimaryAmount means "this holding is already in the household's
+// currency" -- the contract validatePrimaryAmount enforces on the way in. If a
+// row ever reaches here with a nil primary amount and a native currency that
+// is NOT the household's, the Add in the pool refuses it rather than silently
+// treating dollars as Singapore dollars.
+func (e HoldingEvent) inPrimary() Money {
+	if e.PrimaryAmount != nil {
+		return *e.PrimaryAmount
+	}
+	return e.Amount
 }
 
 // Position folds the events into what they add up to, on the average-cost basis
 // the PRD pins (not FIFO: "the first gram" is not a thing that exists).
 //
+// primaryCurrency is the household's own, and is what the second pool is
+// denominated in. It is a parameter rather than a field on Holding because a
+// household's primary currency can change while a holding's cannot -- the
+// figures are recomputed under the new one, not restated.
+//
 // It sorts by date itself rather than trusting the caller. A repository
 // returning rows in insertion order, or a caller appending a backdated
 // correction, would otherwise produce a different answer for the same holding,
 // and the difference would be silent.
-func (h Holding) Position(events []HoldingEvent) (Position, error) {
-	zero := Money{Amount: 0, Currency: h.Currency}
+func (h Holding) Position(events []HoldingEvent, primaryCurrency string) (Position, error) {
 	held, err := NewQuantity(0)
 	if err != nil {
 		return Position{}, err
 	}
-	p := Position{Held: held, Cost: zero, Realised: zero}
+	native := costPool{
+		cost:     Money{Amount: 0, Currency: h.Currency},
+		realised: Money{Amount: 0, Currency: h.Currency},
+	}
+	primary := costPool{
+		cost:     Money{Amount: 0, Currency: primaryCurrency},
+		realised: Money{Amount: 0, Currency: primaryCurrency},
+	}
 
 	// Copy before sorting: the caller's slice is theirs, and reordering it
 	// under them is the kind of surprise that shows up three files away.
@@ -236,50 +315,39 @@ func (h Holding) Position(events []HoldingEvent) (Position, error) {
 	for _, e := range ordered {
 		switch e.Kind {
 		case HoldingAcquisition:
-			nextHeld, err := NewQuantity(p.Held.Nano() + e.Quantity.Nano())
+			nextHeld, err := NewQuantity(held.Nano() + e.Quantity.Nano())
 			if err != nil {
 				return Position{}, err
 			}
-			nextCost, err := p.Cost.Add(e.Amount)
-			if err != nil {
+			if native, err = native.acquire(e.Amount); err != nil {
 				return Position{}, err
 			}
-			p.Held, p.Cost = nextHeld, nextCost
+			if primary, err = primary.acquire(e.inPrimary()); err != nil {
+				return Position{}, err
+			}
+			held = nextHeld
 
 		case HoldingDisposal:
-			if e.Quantity.Nano() > p.Held.Nano() {
+			if e.Quantity.Nano() > held.Nano() {
 				return Position{}, fmt.Errorf("%w: %d of %d on %s",
-					ErrHoldingOversold, e.Quantity.Nano(), p.Held.Nano(), e.OccurredOn.Format(time.DateOnly))
+					ErrHoldingOversold, e.Quantity.Nano(), held.Nano(), e.OccurredOn.Format(time.DateOnly))
 			}
-			// The cost leaving the pool is proportional to the quantity
-			// leaving it, which is precisely what keeps the average cost of
-			// the remainder unchanged -- the asymmetry average cost depends
-			// on. It is computed against the pool as it stands at THIS event,
-			// which is why the fold has to be ordered.
-			costOut, err := p.Cost.Prorate(e.Quantity, p.Held)
-			if err != nil {
+			// Both pools are prorated against the holding as it stands at
+			// THIS event, which is why the fold has to be ordered.
+			if native, err = native.dispose(e.Amount, e.Quantity, held); err != nil {
 				return Position{}, err
 			}
-			gain, err := e.Amount.Add(Money{Amount: -costOut.Amount, Currency: costOut.Currency})
-			if err != nil {
-				return Position{}, err
-			}
-			realised, err := p.Realised.Add(gain)
-			if err != nil {
+			if primary, err = primary.dispose(e.inPrimary(), e.Quantity, held); err != nil {
 				return Position{}, err
 			}
 			// Subtracting through NewQuantity rather than raw int64 is what
 			// makes a negative holding unrepresentable rather than merely
 			// unlikely.
-			nextHeld, err := NewQuantity(p.Held.Nano() - e.Quantity.Nano())
+			nextHeld, err := NewQuantity(held.Nano() - e.Quantity.Nano())
 			if err != nil {
 				return Position{}, err
 			}
-			nextCost, err := p.Cost.Add(Money{Amount: -costOut.Amount, Currency: costOut.Currency})
-			if err != nil {
-				return Position{}, err
-			}
-			p.Held, p.Cost, p.Realised = nextHeld, nextCost, realised
+			held = nextHeld
 
 		default:
 			// A kind that is neither reaches here only from a row this
@@ -288,5 +356,12 @@ func (h Holding) Position(events []HoldingEvent) (Position, error) {
 			return Position{}, fmt.Errorf("%w: %q", ErrUnknownHoldingEventKind, e.Kind)
 		}
 	}
-	return p, nil
+
+	return Position{
+		Held:            held,
+		Cost:            native.cost,
+		Realised:        native.realised,
+		CostPrimary:     primary.cost,
+		RealisedPrimary: primary.realised,
+	}, nil
 }

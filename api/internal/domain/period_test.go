@@ -46,8 +46,8 @@ func TestParsePeriodKindRefusesAnythingElse(t *testing.T) {
 // test that derives the boundary the same way the code does proves nothing.
 func TestQuarterStartsAndEndsOnTheCalendarQuarter(t *testing.T) {
 	cases := []struct {
-		index       int
-		start, end  time.Time
+		index      int
+		start, end time.Time
 	}{
 		{1, utcDay(2026, time.January, 1), utcDay(2026, time.March, 31)},
 		{2, utcDay(2026, time.April, 1), utcDay(2026, time.June, 30)},

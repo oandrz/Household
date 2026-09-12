@@ -67,7 +67,7 @@ var (
 	// two brokerages is ordinary. Archived holdings still occupy their name, so
 	// a collision with one offers restore rather than a bare 409 -- the goals
 	// and categories rule.
-	ErrHoldingNameTaken = errors.New("a holding with that name already exists in this account")
+	ErrHoldingNameTaken    = errors.New("a holding with that name already exists in this account")
 	ErrHoldingNameRequired = errors.New("a holding name is required")
 	// ErrHoldingDateInFuture is the sibling of ErrOpeningBalanceInFuture, and
 	// matters more here: latest-price lookups order by as_of, so a price
