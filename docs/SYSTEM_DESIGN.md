@@ -24,15 +24,16 @@ clamping a stored anchor day rather than the date itself (§5), and whose
 place in Money something outside Transactions writes its ledger — so Budget,
 Spending by person and net worth all move the moment a bill is settled.
 **A sixth Money feature now exists that the design does not draw: Portfolio** —
-investment holdings with fractional quantities, average-cost basis, and a dated
-price per holding. `design/Household Dashboard.dc.html` shows "Investments &
-CPF" only as a slice of the net-worth breakdown, so this is milestone 1 of
-`.claude/prds/investment-portfolio-tracking.prd.md` rather than a design
-feature. **It is deliberately invisible to net worth and to the twelve-month
-trend** — the page says so on its face — because folding holdings in is
-milestone 3 and needs a decision first about whether an investment account also
-carries uninvested cash. The period report (quarter, half-year, year) and the
-moomoo import are milestones 2 and 4 and are **not built**.
+investment holdings with fractional quantities, average-cost basis, a dated
+price per holding, and a **period report** saying what each holding earned over
+a quarter, a half-year or a year. `design/Household Dashboard.dc.html` shows
+"Investments & CPF" only as a slice of the net-worth breakdown, so this is
+milestones 1 and 2 of `.claude/prds/investment-portfolio-tracking.prd.md`
+rather than a design feature. **It is deliberately invisible to net worth and
+to the twelve-month trend** — both pages say so on their face — because folding
+holdings in is milestone 3 and needs a decision first about whether an
+investment account also carries uninvested cash. The moomoo import is milestone
+4 and is **not built**.
 Marriage's first feature, Retros, is code-complete, reviewed and now walked:
 its three tables and their relationships (§6), its route group and both
 guards (§4), and its frontend — `RetrosPage.tsx`'s five screen states, a real
@@ -740,7 +741,8 @@ refuses (spec decision 7).
 | `GoalRepository` | `adapter/postgres` | Fifteenth. `List`/`Get` return each goal's stored fields plus the one figure only SQL can cheaply supply — the summed `contributed` — leaving percent, status and required-monthly to `domain.` arithmetic in the service; `Create` writes the goal and, when a starting balance is given, its opening contribution in one transaction, so a goal with a missing opening contribution cannot exist; `DeleteContribution` clears a rolled-over month's stamp in the same transaction as the delete when the row being removed is that month's rollover (§5). The port's own doc comment carries a warning no other repository needs: `goal_contributions.household_id` has no database-level constraint tying it to its own `goal_id`'s household, so every method that reads or writes a contribution filters by `household_id` **and** `goal_id` together, never by contribution id alone |
 | `BillRepository` | `adapter/postgres` | Sixteenth. `List`'s `includeArchived` is the same UNION-not-filter-swap contract as `AccountRepository`/`GoalRepository`. `RecordPayment` writes the expense (`transactions`), the payment (`bill_payments`) and the advanced `next_due` in one transaction — a bill left advanced with no payment, or a payment with no expense, is not a state this port can produce; `UndoPayment` reverses all three the same way, refusing any payment that is not the bill's most recent with `*domain.BillPaymentNotLatestError`. `MonthTotals` cannot come from `bills` alone — a bill already paid this month has `next_due` in the *next* one — so it unions `bill_payments` (by `due_on`) with still-unpaid live bills (by `next_due`); the two halves filter archived bills differently on purpose (§5). `bill_payments.household_id` carries the same unenforced-by-the-database warning as `goal_contributions`: every method filters by `household_id` **and** `bill_id` together, never by payment id alone (§6) |
 | `HoldingRepository`, `HoldingEventRepository`, `HoldingValuationRepository` | `adapter/postgres` (all three in `holding_repo.go`) | Seventeenth to nineteenth — three narrow ports over three tables rather than one object with fifteen methods, the same interface-segregation rule the nine before them follow. `HoldingRepository.List`'s `includeArchived` is the UNION-not-filter-swap contract again. **`HoldingEventRepository` is the one worth reading twice.** `ListByHolding` returns events ordered `(occurred_on, created_at, id)` and the port's doc comment calls that a CONTRACT, not a preference: `occurred_on` is a date, so buying and selling the same morning is a tie, and `domain.Holding.Position` sorts *stably* — it keeps whatever order it is handed. On identical same-day events, buy-then-sell realises 750 where sell-then-buy realises 1000, so the repository's ORDER BY is what makes a household's realised gain deterministic. `InsertWithFold`/`DeleteWithFold` exist because reading, folding and writing as three calls is not equivalent to doing them atomically: they take a row lock on the holding, list its events inside the same transaction, and hand them to the caller's fold, writing only if it accepts. The fold stays in the domain; the port owns the transaction and the lock, never the rule (§5) |
-| `HoldingCounter` | `adapter/postgres` (`*HoldingRepo` already satisfies it) | Unnumbered, like `AccountLookup`/`GoalProgressReader` — a narrow port for one question asked in the opposite direction. `AccountService` patches an account's `Type` freely, so without this an owner could turn a brokerage into a cash account while it still held 300g of gold, leaving holdings anchored to a type `HoldingService` would never have accepted. One method: does this account still hold anything. `AccountDeps.Holdings` is **required, not optional** — a nil there would silently disable the guard, and a guard you can switch off by forgetting a field is not a guard |
+| `HoldingIncomeRepository` | `adapter/postgres` (`holding_repo.go`) | Twentieth. The dividends a holding paid and the charges made against it. **It has no ordering contract and no fold-inside-the-write**, and the contrast with `HoldingEventRepository` directly above is the point: income enters no average-cost pool, so no invariant spans two rows, no order changes the answer, and there is nothing for a lock to protect. Addition is commutative; the event fold is not |
+| `HoldingCounter` | `adapter/postgres` (`*HoldingRepo` already satisfies it) | Unnumbered, like `AccountLookup`/`GoalProgressReader` — a narrow port for one question asked in the opposite direction. It now answers two: whether an ACCOUNT still holds anything (which stops an account's type changing under its holdings), and whether a HOUSEHOLD does (which stops its primary currency changing under them — every holding event records its cost in the currency the books were kept in at the time, and nothing in the data can restate it). `AccountService` patches an account's `Type` freely, so without this an owner could turn a brokerage into a cash account while it still held 300g of gold, leaving holdings anchored to a type `HoldingService` would never have accepted. One method: does this account still hold anything. `AccountDeps.Holdings` is **required, not optional** — a nil there would silently disable the guard, and a guard you can switch off by forgetting a field is not a guard |
 | `AccountLookup`, `CategoryLookup` | `adapter/postgres` (`*AccountRepo` and `*CategoryRepo` already satisfy them) | Narrower ports `TransactionService` depends on instead of the full repositories above — interface segregation: it needs an account's currency and household, and whether a category id belongs to this household and what kind it is, never `List` or `EnsureSeeded`. `BillService.MarkPaid` depends on this same `AccountLookup`, for the same reason and to the same effect: the pay-from account's currency, not a value Bills stores of its own (§5). `BillService.Create`/`Update` depend on the same `CategoryLookup` too: a bill's category is copied onto the real expense `MarkPaid` writes, so it has to satisfy the ledger's own rule — this household's, and an expense category — or the spend lands in Budget's `Spent` and in no category row at all |
 | `RetroRepository` | `adapter/postgres` | Seventeenth. `Create` answers `ErrAlreadyExists` on the `UNIQUE(household_id, month)` clash; `Update` takes the caller-normalised month and version it loaded, and tells "the retro is gone" (`ErrNotFound`, from a recheck read) from "someone saved first" (`ErrRetroChanged`, from a zero-row `UPDATE ... WHERE version = $n`) apart — never merges (§5); `Complete` is idempotent on the caller's own `at`; `DeleteDraft` puts `WHERE completed_at IS NULL` in the SQL itself, not a service `if`, so a zero-row match on a finished retro is `ErrNotFound`, not a silent no-op (`docs/LEARNING.md`'s Bills `SetBillNextDue` entry is the same defect shape this port was built to avoid) |
 | `RetroActionRepository` | `adapter/postgres` | Eighteenth. `Add` writes the action and its assignees in one transaction, so a bad assignee id leaves no orphan action; `carriedFrom` is validated through a join back to `retros` requiring the same household before it is trusted, and a malformed id is refused rather than silently read as SQL NULL (`docs/LEARNING.md`) — "fail closed on values you did not construct" applied to a field the client supplies directly. `OpenInMonth` backs both the modal's "Still open from July" offer and Overview's `openActionCount` |
@@ -1195,6 +1197,10 @@ rows, and a link redemption writes neither.
 | DELETE | `/holdings/{id}/events/{eventId}` | session · money · owner · CSRF |
 | POST | `/holdings/{id}/valuations` | session · money · owner · CSRF — POST but it **upserts**, and answers **200, never 201**: one price per holding per day, so a second write for the same date is a correction rather than a new thing |
 | DELETE | `/holdings/{id}/valuations/{valuationId}` | session · money · owner · CSRF — routed, but no screen calls it yet (`docs/FEATURE_TRACKER.md` names the gap) |
+| GET | `/holdings/report` | session · money · owner — `?kind=quarter\|half\|year`, `?count=` optional. **Registered before the `/holdings/{id}/…` routes and not shadowed by them**: chi prefers a static segment over a parameter, and a test says so rather than a comment hoping so. The window length defaults on the SERVER (6 quarters, 4 halves, 3 years) because the browser holding a second copy of that rule would be free to drift from the one the chart's bar budget was chosen against |
+| GET | `/holdings/{id}/income` | session · money · owner |
+| POST | `/holdings/{id}/income` | session · money · owner · CSRF — 201, and it does **not** upsert the way a valuation does: two dividends in one quarter are two payments, not a correction of each other |
+| DELETE | `/holdings/{id}/income/{incomeId}` | session · money · owner · CSRF |
 | GET | `/bills` | session · money · owner — same reasoning as the transactions/categories/budgets/goals reads above |
 | POST | `/bills` | session · money · owner · CSRF |
 | PATCH | `/bills/{id}` | session · money · owner · CSRF |
@@ -2458,6 +2464,55 @@ response carries `notInNetWorth: true` as a wire-level fact so the page states
 it rather than hard-coding the sentence — when milestone 3 folds holdings in,
 the flag changes on the server and the banner follows.
 
+#### The period report — folded from the beginning, twice per period
+
+`GET /holdings/report` answers what each holding earned over each of the last
+N periods. It reads the household's whole history once — every holding
+(archived included), every event, every income row, every price — groups those
+by holding, and computes in memory.
+
+**Each period is measured at both of its ends, and each end is folded from the
+beginning of the holding's life**, never from the period boundary: average cost
+depends on everything bought before the window, so a fold that started at the
+boundary would price a sale off the wrong basis, silently, and only for
+holdings bought earlier. Twelve quarters is therefore twenty-four full folds
+per holding. At a household's scale that is microseconds; `HoldingService.Report`
+says in a comment where it stops being free and that the answer is folding in
+SQL rather than a cache, because two paths computing the same figure is how
+this report and the portfolio screen would begin to disagree.
+
+Each end is `(market value of what is held) − (cost of what is held)`, and the
+period's unrealised figure is the difference between the two ends. That shape
+is what makes the PRD's central rule — *buying more must never read as profit*
+— true by construction rather than by a correcting term: a purchase adds the
+same amount to both sides and moves the figure by exactly zero.
+
+**A price serves a boundary only if it was recorded inside the window that
+boundary closes**, and a period opens where the previous one closed, so the
+windows chain. A price typed today therefore cannot rewrite a quarter somebody
+has already read. Holding nothing at an end needs no price at all — that end is
+provably zero, which is what stops every mid-period purchase from blanking.
+
+**Blanking is per component.** When a needed price is missing, `unrealised` and
+`total` come back null with a `reason`; `realised`, `income` and `fees` are
+still there, because no price is involved in computing them. A quarter where
+the household sold at a profit and forgot to type a price is not an unknowable
+quarter.
+
+**Income never enters the fold.** `holding_income` is a separate table rather
+than a third `holding_events.kind`: a dividend changes neither what is held nor
+what it cost, so folding it through the average-cost pool would make every
+disposal after it realise the wrong number. The report sums it beside the
+position instead. Fees are stored positive and subtracted there.
+
+**Every figure is carried in two currencies, folded rather than converted.**
+`domain.Position` keeps a second cost pool in the household's own currency,
+filled from the primary-currency amount the owner recorded on each event. Two
+lots of the same US stock bought at different exchange rates blend to an SGD
+cost per unit that is neither rate, so no single rate applied to the USD
+realised figure reproduces it. This is also why the household's primary
+currency cannot change while it holds anything (§3, `HoldingCounter`).
+
 ### Retros — one shared draft, a version guard that a tick deliberately bypasses
 
 ```mermaid
@@ -2927,6 +2982,7 @@ erDiagram
     accounts ||--o{ holdings : "holds"
     holdings ||--o{ holding_events : "bought and sold"
     holdings ||--o{ holding_valuations : "priced on a day"
+    holdings ||--o{ holding_income : "paid out and charged"
     households ||--o{ goal_contributions : scopes
     goals ||--o{ budgets : "may receive a rollover (nullable)"
     households ||--o{ bills : has
@@ -3223,6 +3279,19 @@ erDiagram
         text note
         timestamptz created_at
     }
+
+    holding_income {
+        uuid id PK
+        uuid holding_id FK
+        uuid household_id FK "redundant, scoped by both — as above"
+        text kind "CHECK income | fee — both stored POSITIVE, the report subtracts fees"
+        bigint amount_minor "CHECK greater than zero, unlike holding_events where the QUANTITY carries that rule"
+        bigint primary_amount_minor "nullable — NULL together with the currency, by CHECK"
+        char primary_currency "nullable"
+        date received_on "the day the money moved, not the day it was typed"
+        text note
+        timestamptz created_at
+    }
     bills {
         uuid id PK
         uuid household_id FK
@@ -3367,6 +3436,14 @@ Notes that are not obvious from the shapes:
   handed for a tie. The index and `ListHoldingEvents`' matching ORDER BY are
   therefore what make the answer deterministic: on identical same-day events,
   buy-then-sell realises 750 where sell-then-buy realises 1000.
+- **`holding_income` has no fold index, and that absence is deliberate.** It
+  looks like an omission beside `holding_events_fold_idx` directly above, so
+  the migration says why: income is summed over a period and addition is
+  commutative, so no order changes the answer. The event fold is the opposite —
+  two same-day rows in the other order realise a different gain. An index
+  shaped like the fold's would invite a reader to go looking for a fold that
+  does not exist. Its index is `(household_id, holding_id, received_on)`, which
+  is the read the report actually does.
 - **`quantity_nano` is billionths of a unit, and the scale is not a constant to
   change.** A quantity is genuinely fractional — 300.5 grams, half a share —
   and `float64` never enters this product's monetary path, so it is an integer

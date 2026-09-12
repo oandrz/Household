@@ -13,8 +13,17 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Out of scope — three different reasons, and **the row always says which**: marked "· not built" by the design itself; cut outright by the product owner (the audit screen, §9 — the code was deleted); or **deferred past the current release** by the product owner, meaning it is expected back later (the Family calendar, §7). A 🚫 is not a promise that something will never exist — it is a statement that it is not this release's work, and the row says what would bring it back |
 
-**Where things stand:** 119 of 140 features built or partly built — and **five of the 140 are 🚫**, so the honest denominator for this release is 135.
+**Where things stand:** 125 of 146 features built or partly built — and **five of the 146 are 🚫**, so the honest denominator for this release is 141.
 
+> **Recounted 2026-09-12**, when milestone 2 of the portfolio added six rows
+> (the period report, dividends and fees, per-component blanking, the bar
+> chart, both-currency figures, and the primary-currency lock). ✅ 99 → 105,
+> total 140 → 146. Counted by walking every table row's state column with a
+> split on UNESCAPED pipes only -- `/nudges on\|off` carries an escaped one,
+> and a naive split shifts every column after it, which is how a previous
+> count came out wrong. The method was checked against the old totals before
+> the new rows were added, and reproduced 99/20/16/5 exactly.
+>
 > **Recounted 2026-09-02**, when the four unbuilt platform-administration
 > features were given rows (section 9). The count of *built* work does not
 > move — 77 ✅ and 17 🟡, unchanged — but the denominator does, because four
@@ -1004,13 +1013,13 @@ above now states Built + Partial **113** of **134**, denominator **129**.
 | Navigation shell | 7 | 1 | 1 | 0 |
 | Household settings | 11 | 8 | 2 | 0 |
 | Overview (home) | 8 | 2 | 1 | 0 |
-| Money | 30 | 4 | 7 | 0 |
+| Money | 36 | 4 | 7 | 0 |
 | Marriage | 16 | 2 | 2 | 0 |
 | Family | 0 | 0 | 0 | 3 |
 | Household extras | 0 | 0 | 0 | 1 |
 | Platform administration | 7 | 1 | 0 | 1 |
 | Automation | 8 | 0 | 1 | 0 |
-| **Total** | **99** | **20** | **16** | **5** |
+| **Total** | **105** | **20** | **16** | **5** |
 
 ---
 
@@ -1211,15 +1220,15 @@ code *and* a walk confirming it. All five Money features are now walked.
 | Custom account types | ⬜ |
 | Warning in Settings before a primary-currency change strands every account | ⬜ |
 
-**Portfolio — investment holdings.** Six rows the design does not draw at all:
-`design/Household Dashboard.dc.html` shows "Investments & CPF" only as a slice
-of the net-worth breakdown, so there is no portfolio screen anywhere in it.
-These are added under this file's own rule for work the design does not
-describe. Milestone 1 of `.claude/prds/investment-portfolio-tracking.prd.md`;
-the period report (quarter/half/year profit) and the moomoo import are
-milestones 2 and 4 and are **not** listed as ⬜ rows here, because the PRD is a
-plan rather than the design this file measures against — they arrive as rows
-when they are built.
+**Portfolio — investment holdings.** Eleven rows the design does not draw at
+all: `design/Household Dashboard.dc.html` shows "Investments & CPF" only as a
+slice of the net-worth breakdown, so there is no portfolio screen anywhere in
+it. These are added under this file's own rule for work the design does not
+describe. Milestones 1 and 2 of
+`.claude/prds/investment-portfolio-tracking.prd.md`; net worth (milestone 3)
+and the moomoo import (milestone 4) are **not** listed as ⬜ rows here, because
+the PRD is a plan rather than the design this file measures against — they
+arrive as rows when they are built.
 
 | Feature | State |
 |---|---|
@@ -1230,10 +1239,26 @@ when they are built.
 | Archive and restore a holding | ✅ — a holding is never deleted: its events and valuations reference it, and a sold-out position is still part of the year's realised profit. An archived holding still reports what it held, rather than zeros |
 | Holdings are **not** in net worth | 🟡 — deliberate, and the gap is the point. Milestone 1 keeps holdings out of net worth and the twelve-month trend; the page says so on its face, reading a `notInNetWorth` flag from the server rather than hardcoding the sentence. Folding them in is milestone 3 and needs its own decision about whether an investment account also carries uninvested cash (PRD open question 7). Walked: net worth read S$11,425.50 before and after S$26,000 of gold was recorded |
 
+| Period report — profit per holding, per quarter / half-year / year | ✅ — `/money/portfolio/report`. Total return split three ways, each end of a period measured as (market value − cost of what is held), so **buying more can never read as profit**: a purchase adds the same amount to both sides and moves the figure by exactly zero. Walked 2026-09-12: gold up S$495 unrealised, S$1,000 realised, S$45 income, S$5 fees, total S$1,535 |
+| Dividends and fees, recorded against a holding | ✅ — their own table, deliberately not a third `holding_events.kind`: income changes neither what is held nor what it cost, so folding it through the average-cost pool would make every disposal after a dividend realise the wrong number. Both kinds stored **positive**; the report subtracts fees. Brokerage on a trade needs no row — an acquisition already records the whole amount that left the bank |
+| A period that cannot be valued blanks **per component**, with a reason | ✅ — unrealised and the total blank; realised and income still report, because no price is involved in either. A boundary price must be dated inside the period it closes (a March price is not what June was worth) and a boundary holding nothing needs no price at all. Walked: a holding with trades and no price showed "—" plus the sentence, and S$20.00 realised beside it |
+| Bar chart comparing periods over time | ✅ — hand-built inline SVG, no charting dependency (the third in this codebase to make that call). Grouped by period, one bar per holding; losses below a zero baseline; a figure that cannot be known draws **no bar**, never a zero-height one. Q/H/Y toggle, and the window length is the server's (6/4/3) so the browser holds no second copy of the rule |
+| Every figure in the household's own currency, with the native beside it | ✅ — the fold carries two cost pools rather than converting afterwards. Two lots of the same USD stock bought at different exchange rates blend to an SGD cost per unit that is neither rate, so no single rate applied to the USD figure reproduces it. A US stock flat in USD while SGD strengthened reports a loss, which is the figure that answers "did this make us richer" |
+| The primary currency is locked while the household holds investments | ✅ — every holding event records its cost in the currency the household kept books in at the time, and nothing in the data can restate it. Changing it would strand every holding, making the portfolio page throw on load — the only screen that could fix it. Refused at the edit instead, archived holdings counted; a household holding nothing still chooses freely |
+
 **Known gap, recorded rather than built:** `DELETE /holdings/{id}/valuations/{id}`
 exists and no screen exposes it. Correcting a price for the *same* day works —
 that is the upsert — so the common case is covered; a price recorded against the
 *wrong* day cannot be removed from the page.
+
+**Known gap, found in the browser walk on 2026-09-12:** the chart puts every
+holding on one linear axis, so a single holding of a wildly different size
+flattens the rest. A test position costing S$123 billion beside a S$1,495 gold
+bar left the gold's bars as a one-pixel sliver on the zero line — the chart was
+arithmetically right and visually useless. Households whose holdings are within
+an order of magnitude of each other are unaffected, which is most of them; the
+fix when it is needed is a per-holding axis or a log scale, and both are a
+design decision rather than a bug fix.
 
 **The 12-month trend shipped 2026-08-19, and the note that used to sit here
 was wrong.** It used to say the trend "needs balance snapshots: a second

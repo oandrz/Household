@@ -23,9 +23,9 @@ gets rebuilt.
 
 ### 1. Fixing an instance rarely fixes the class
 
-This happened **twenty times** — one bullet each below, and the count is the
-number of bullets, so recount it when you add one (it had already drifted by
-one before the UX-repair round noticed). Almost every time, the fix was
+This happened **twenty-one times** — one bullet each below, and the count is
+the number of bullets, so recount it when you add one (it had already drifted
+by one before the UX-repair round noticed). Almost every time, the fix was
 correct and the sibling kept the bug; two of them are the variant where
 nothing was broken at all until a field's or a product's meaning moved under
 a reader nobody thought to look at, and one is the variant where an earlier
@@ -473,6 +473,41 @@ count stays the number of bullets.)
   that exposed the bug (a button) protects that control, not the state
   transition underneath it (a version moving); the same transition reached
   through any other door is exactly as unguarded as it always was.**
+- **A calendar day read in the wrong location, seventh instance, and
+  the first caught before it shipped.** `domain.Period.Contains` converted
+  to UTC before reading the date, which moves 00:30 on 1 January in
+  Singapore back into the previous year. `budget.go`'s `startOfMonth`, two
+  files away, reads the date in the value's own location and says why in a
+  comment. Written up in full below.
+
+The **seventh date instance, 2026-09-12 — and the first one a test caught
+before it shipped.** `domain.Period.Contains` needs the calendar day a
+timestamp falls on, and the first implementation wrote the obvious thing:
+
+```go
+utc := t.UTC()
+return time.Date(utc.Year(), utc.Month(), utc.Day(), …)
+```
+
+Converting to UTC *before* reading the date moves 00:30 on 1 January in
+Singapore back to 31 December — filing a trade in the wrong year for the eight
+hours a day this household is ahead of UTC. `budget.go`'s `startOfMonth`, which
+this was written beside, reads `t.Year()` and `t.Month()` in the value's own
+location precisely to avoid that, and its comment says so.
+
+What was different this time: the test was written first and asserted a
+Singapore-zone timestamp, so the defect was RED before any code shipped rather
+than being found in a browser eight hours later. The sibling was still not read
+— the test was what stood in for reading it.
+
+**The other half of this is still open, and is a product decision rather than a
+bug.** `PeriodsEndingOn` is handed `Clock.Now()`, which on a UTC server is a
+UTC instant: at 01:00 Singapore time on 1 October, the "current quarter" is
+still Q3 for eight hours. The same asymmetry makes `priceAgeLabel` say "priced
+yesterday" for a price the owner typed a minute ago. Nothing in Hearth stores a
+household timezone (`usecase/account.go:165`,
+`transaction_repo.go:318` both record this), so the fix is that feature, not a
+patch here.
 
 ### 2. A test that cannot fail protects nothing
 
@@ -3575,6 +3610,86 @@ tree flattens what a screen renders:
 - An entry row rendered `S$10,050.002026-07-02` — the amount and date with
   nothing between them, because the row had no layout at all. In the
   accessibility snapshot the two are separate nodes and read fine.
+
+### 21. A mutation that preserves proportions is invisible to a test that only checks proportions
+
+Found 2026-09-12, mutation-testing the period-return bar chart.
+
+The chart measures every bar from a zero baseline, so a loss draws below the
+line. The obvious mutation is to measure from the smallest figure instead:
+
+```ts
+const min = Math.min(0, ...values);   // correct
+const min = Math.min(...values);      // mutation
+```
+
+It **survived twice.** The first test had a +2000 and a −2000, where the
+floating minimum equals the real one. The second test asserted that a 1000 and
+a 3000 draw in a 1:3 ratio — and that stays true under the mutation, because
+the height of a bar works out to `value / span * H` either way. The scale
+changes; the proportions do not.
+
+What the mutation actually breaks is **containment**: the axis lands at y=181
+in a plot that ends at y=124, so every bar is drawn off the bottom of the
+chart. The test that kills it publishes the plot floor as a data attribute and
+asserts that the baseline and every bar stay inside it.
+
+**The rule: when a mutation survives, ask what the broken version still gets
+right.** A ratio, a sort order, a count and a type are all things a wrong
+implementation frequently preserves. The assertion has to name the property
+that actually differs — here, where the drawing lands, not how the bars relate
+to each other.
+
+### 22. A derived screen on its own query key is invalidated by nobody
+
+Found 2026-09-12, by review, one step before a browser walk that would have
+passed.
+
+The period report is derived from events, prices and income, and lives on the
+query key `["portfolio-report"]`. `useHoldings`' write helpers invalidated the
+holdings list, the events list and the valuations list — every key the
+*portfolio* screen reads. None of them touched the report.
+
+So the sequence the owner actually performs failed:
+
+1. open the report, read "No price recorded in this period"
+2. go back, record today's price
+3. return to the report — **still says no price**
+
+Correct on the server, wrong on the screen, and self-healing after
+`staleTime`, which is the worst shape a defect can have: intermittent and
+unreproducible for whoever reports it.
+
+**A browser walk would not have caught it either**, because a walk that
+navigates by typing a URL or reloading gets a fresh fetch. It is only visible
+when moving between two screens through the app's own links, which is exactly
+how a person uses it.
+
+**The rule: when a write changes a figure, list every query key that renders
+that figure — not every key the current screen reads.** A screen the write does
+not open is still a screen the write invalidates.
+
+### 23. A dependency added to a service is wired in main.go and forgotten in the test's own Deps
+
+Found 2026-09-12 — and this is the **second** time in two milestones, in the
+same file.
+
+`HoldingDeps` gained an `Income` repository. `cmd/api/main.go` was updated.
+`internal/adapter/http/api_test.go`, which builds its own `Deps` for the test
+environment, was not — so every new route panicked on a nil interface and
+answered 500. Milestone 1 did the identical thing when the `Holdings` service
+itself was added.
+
+The galling part: one commit earlier, the same milestone added `Holdings` to
+`HouseholdDeps` and wrote a comment in `api_test.go` saying *"Wired here as
+well as in main.go on purpose: a dependency added to one and not the other is
+how milestone 1 shipped routes that 500ed only under test."* The comment was
+written, and then the next dependency was added to one place.
+
+**A comment is not a mechanism.** What caught it was an HTTP test hitting the
+route; what would catch it earlier is the compiler, if `Deps` were constructed
+by one shared helper rather than two literals — which is the real fix and is
+not yet made.
 
 ## Catalogue by area
 
