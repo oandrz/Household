@@ -3,7 +3,7 @@
 **Source plan**: [`.claude/plans/investment-portfolio-tracking-m2.plan.md`](../plans/investment-portfolio-tracking-m2.plan.md)
 **Source PRD**: [`.claude/prds/investment-portfolio-tracking.prd.md`](../prds/investment-portfolio-tracking.prd.md)
 **Branch**: `hearth-portfolio-holdings` (unmerged; milestone 1 sits on the same branch)
-**Commits**: `b435132..9b06e10`, seventeen commits (this report and the lint fix after it included)
+**Commits**: `b435132` to the branch tip — every commit on `hearth-portfolio-holdings` after milestone 1's last. A count is deliberately not given here: it drifted twice while this file was being written, which is the same prose-drift the tracker's recount notes exist for.
 
 This report is the index to what the tests prove. The test code is the proof;
 this file says which behaviour each piece of it pins, so the answer survives a
@@ -251,7 +251,7 @@ Recorded rather than quietly dropped:
 
 ## Merge evidence
 
-If these seventeen commits are squashed, the RED/GREEN summary above is the
+If this branch is squashed, the RED/GREEN summary above is the
 record. The short version: every task began with a failing test (compile-time
 RED for the three new domain files, runtime RED everywhere else), each fix
 commit re-ran the same target to GREEN, and the eight surviving mutations —
