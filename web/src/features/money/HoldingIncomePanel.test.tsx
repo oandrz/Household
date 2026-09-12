@@ -22,7 +22,7 @@ const holding: Holding = {
   unit: "gram",
   currency: "SGD",
   held: "49.5",
-  heldNano: "49500000000",
+  heldNano: 49500000000,
   costMinor: 594000,
   marketValueMinor: 643500,
   hasMarketValue: true,
