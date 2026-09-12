@@ -105,6 +105,15 @@ func (s *HoldingService) requireInvestmentAccount(ctx context.Context, household
 	return nil
 }
 
+// Get is the single holding, for a caller that needs its currency before it
+// can build a money value for an event or a price -- an event carries its
+// holding's currency but does not state it. The service re-validates whatever
+// that caller then sends, so this read builds a request rather than being
+// trusted as one.
+func (s *HoldingService) Get(ctx context.Context, householdID, holdingID string) (domain.Holding, error) {
+	return s.d.Holdings.Get(ctx, householdID, holdingID)
+}
+
 func (s *HoldingService) List(ctx context.Context, householdID string, includeArchived bool) ([]HoldingRecord, error) {
 	return s.d.Holdings.List(ctx, householdID, includeArchived)
 }

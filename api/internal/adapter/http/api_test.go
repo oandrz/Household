@@ -302,6 +302,13 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Clock:        clk,
 	})
 	goalRepo := postgres.NewGoalRepo(db)
+	holdingSvc := usecase.NewHoldingService(usecase.HoldingDeps{
+		Holdings:   postgres.NewHoldingRepo(db),
+		Events:     postgres.NewHoldingEventRepo(db),
+		Valuations: postgres.NewHoldingValuationRepo(db),
+		Accounts:   accountRepo,
+		Households: households,
+	})
 	goalSvc := usecase.NewGoalService(usecase.GoalDeps{
 		Goals:      goalRepo,
 		Households: households,
@@ -381,6 +388,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Categories:     categorySvc,
 		Budgets:        budgetSvc,
 		Goals:          goalSvc,
+		Holdings:       holdingSvc,
 		Bills:          billSvc,
 		Retros:         retroSvc,
 		Visions:        visionSvc,

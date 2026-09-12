@@ -184,3 +184,80 @@ func TestValueRefusesANegativeUnitPrice(t *testing.T) {
 		t.Fatalf("Value error = %v, want ErrInvalidMoney", err)
 	}
 }
+
+// A quantity crosses the wire as a STRING, the way a person types it -- "300.5"
+// grams, "0.5" of a share. It must never cross as nano units for a browser to
+// divide by 1e9: that division is float64 arithmetic on a figure a money screen
+// shows, which is the defect docs/LEARNING.md already records (333333 * 0.3
+// === 99999.90000000001 in JavaScript). ParseQuantity and FormatQuantity are
+// the pair that keeps that division out of both ends.
+func TestParseQuantityReadsWhatAPersonWouldType(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int64
+	}{
+		{"300.5", 300_500_000_000},
+		{"1", domain.QuantityScale},
+		{"0.5", domain.QuantityScale / 2},
+		{"0.000000001", 1},          // one billionth, the smallest representable
+		{"10,000", 10_000 * domain.QuantityScale}, // thousands separators, as ParseAmount allows
+		{" 2.25 ", 2_250_000_000},   // surrounding space
+		{"0", 0},
+		{".5", domain.QuantityScale / 2},
+	}
+	for _, c := range cases {
+		got, err := domain.ParseQuantity(c.in)
+		if err != nil {
+			t.Fatalf("ParseQuantity(%q): %v", c.in, err)
+		}
+		if got.Nano() != c.want {
+			t.Fatalf("ParseQuantity(%q) = %d, want %d", c.in, got.Nano(), c.want)
+		}
+	}
+}
+
+func TestParseQuantityRefusesWhatItCannotRepresent(t *testing.T) {
+	// Ten decimal places is finer than a nano unit. Silently truncating it
+	// would accept a number and store a different one, which is worse than
+	// refusing -- the household would have typed one figure and be shown
+	// another.
+	for _, s := range []string{"", "   ", "abc", "-1", "1.2.3", "0.0000000001", "1e9", "1.", "--1"} {
+		if _, err := domain.ParseQuantity(s); err == nil {
+			t.Fatalf("ParseQuantity(%q) was accepted; it must be refused", s)
+		}
+	}
+}
+
+// FormatQuantity is ParseQuantity's inverse for display, and trims the zeros
+// nobody wants to read: 300.5 grams is not "300.500000000".
+func TestFormatQuantityRoundTripsAndTrimsTrailingZeros(t *testing.T) {
+	cases := []struct {
+		nano int64
+		want string
+	}{
+		{300_500_000_000, "300.5"},
+		{domain.QuantityScale, "1"},
+		{0, "0"},
+		{1, "0.000000001"},
+		{2_250_000_000, "2.25"},
+	}
+	for _, c := range cases {
+		q, err := domain.NewQuantity(c.nano)
+		if err != nil {
+			t.Fatalf("NewQuantity(%d): %v", c.nano, err)
+		}
+		if got := domain.FormatQuantity(q); got != c.want {
+			t.Fatalf("FormatQuantity(%d) = %q, want %q", c.nano, got, c.want)
+		}
+		// The round trip is the point: whatever a screen shows must parse back
+		// to the same stored figure.
+		back, err := domain.ParseQuantity(c.want)
+		if err != nil {
+			t.Fatalf("ParseQuantity(%q): %v", c.want, err)
+		}
+		if back.Nano() != c.nano {
+			t.Fatalf("round trip of %d gave %d", c.nano, back.Nano())
+		}
+	}
+}
+

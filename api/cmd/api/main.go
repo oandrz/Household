@@ -239,7 +239,7 @@ func run() error {
 		Accounts:   accountRepo,
 		Households: households,
 	})
-	_ = holdingSvc // mounted with the portfolio routes in the next task
+
 	categorySvc := usecase.NewCategoryService(categoryRepo)
 	transactionSvc := usecase.NewTransactionService(usecase.TransactionDeps{
 		Transactions: transactionRepo,
@@ -338,6 +338,7 @@ func run() error {
 			Categories:     categorySvc,
 			Budgets:        budgetSvc,
 			Goals:          goalSvc,
+		Holdings:     holdingSvc,
 			Bills:          billSvc,
 			Retros:         retroSvc,
 			Visions:        visionSvc,

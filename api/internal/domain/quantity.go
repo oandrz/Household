@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
+	"strconv"
+	"strings"
 )
 
 // QuantityScale is how many stored units make one whole unit of a thing held:
@@ -103,6 +105,74 @@ func (q Quantity) Value(unitPrice Money) (Money, error) {
 	}
 
 	return Money{Amount: int64(quo), Currency: unitPrice.Currency}, nil
+}
+
+// ParseQuantity reads a quantity the way a person types it -- "300.5" grams,
+// "0.5" of a share -- into nano units.
+//
+// It is a sibling of ParseAmount rather than a call to it, and deliberately so:
+// ParseAmount caps its scale at six decimal places and refuses zero, because a
+// transaction of nothing is not a transaction. Neither rule fits here. A
+// quantity has nine places, and zero is a real quantity -- a holding sold down
+// to nothing still has to be readable. Bending ParseAmount to cover both would
+// give one function two contracts.
+//
+// It refuses rather than rounds, for ParseAmount's reason: "0.0000000001" means
+// the person and the product disagree about what can be represented, and
+// silently dropping the last digit would store a different number from the one
+// that was typed. A sign is refused too -- a disposal is its own event kind,
+// never a negative acquisition.
+func ParseQuantity(text string) (Quantity, error) {
+	const places = 9 // QuantityScale is 10^9
+
+	s := strings.ReplaceAll(strings.TrimSpace(text), ",", "")
+	if s == "" {
+		return Quantity{}, fmt.Errorf("%w: %q", ErrInvalidQuantity, text)
+	}
+	whole, frac, hasPoint := strings.Cut(s, ".")
+	if whole == "" {
+		whole = "0"
+	}
+	if hasPoint && frac == "" {
+		return Quantity{}, fmt.Errorf("%w: %q", ErrInvalidQuantity, text)
+	}
+	if len(frac) > places {
+		return Quantity{}, fmt.Errorf("%w: %q is finer than a billionth", ErrInvalidQuantity, text)
+	}
+	frac += strings.Repeat("0", places-len(frac))
+	digits := whole + frac
+	if len(digits) > 18 {
+		return Quantity{}, fmt.Errorf("%w: %q is too large", ErrInvalidQuantity, text)
+	}
+	var n int64
+	for _, ch := range digits {
+		if ch < '0' || ch > '9' {
+			return Quantity{}, fmt.Errorf("%w: %q", ErrInvalidQuantity, text)
+		}
+		n = n*10 + int64(ch-'0')
+	}
+	return NewQuantity(n)
+}
+
+// FormatQuantity renders a quantity the way ParseQuantity would read it back,
+// trimming the zeros nobody wants: 300.5 grams is not "300.500000000".
+//
+// This pair exists so that a browser NEVER divides by 1e9 to show a quantity.
+// That division is float64 arithmetic on a figure a money screen displays, and
+// docs/LEARNING.md already records what that costs: 333333 * 0.3 evaluates to
+// 99999.90000000001 in JavaScript, and a pool floored one unit low. The string
+// crosses the wire already formatted, and comes back as a string to be parsed
+// here in integers.
+func FormatQuantity(q Quantity) string {
+	whole := q.nano / QuantityScale
+	frac := q.nano % QuantityScale
+	if frac == 0 {
+		return strconv.FormatInt(whole, 10)
+	}
+	// %09d keeps the leading zeros a fraction needs -- 1 nano unit is
+	// "000000001", not "1".
+	digits := strings.TrimRight(fmt.Sprintf("%09d", frac), "0")
+	return strconv.FormatInt(whole, 10) + "." + digits
 }
 
 // Prorate returns the share of m that corresponds to part out of whole. It is

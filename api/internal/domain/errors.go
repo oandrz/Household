@@ -31,6 +31,11 @@ var (
 	// is recorded as its own event with its own positive quantity, never as a
 	// negative holding.
 	ErrQuantityNegative = errors.New("a quantity cannot be negative")
+	// ErrInvalidQuantity is ParseQuantity's refusal -- a quantity that is not a
+	// number, carries a sign, or is finer than a billionth. Separate from
+	// ErrInvalidMoney because a quantity is not money and a screen's message
+	// for one is wrong for the other.
+	ErrInvalidQuantity = errors.New("that is not a quantity")
 
 	// ErrProrateWholeNotPositive is Money.Prorate's refusal to divide a cost
 	// pool by an empty holding. Returning zero instead would report that a

@@ -54,6 +54,7 @@ type Deps struct {
 	Categories   *usecase.CategoryService
 	Budgets      *usecase.BudgetService
 	Goals        *usecase.GoalService
+	Holdings     *usecase.HoldingService
 	Bills        *usecase.BillService
 	Retros       *usecase.RetroService
 	Visions      *usecase.VisionService
@@ -365,6 +366,35 @@ func NewRouter(deps Deps) http.Handler {
 					w.Post("/goals/{id}/restore", handleRestoreGoal(deps))
 					w.Post("/goals/{id}/contributions", handleAddGoalContribution(deps))
 					w.Delete("/goals/{id}/contributions/{contributionId}", handleDeleteGoalContribution(deps))
+				})
+
+				// Holdings sit in the same money+owner group as
+				// transactions, goals and budgets, and for the reason the
+				// txn group's own comment above gives: a portfolio is a
+				// table whose every figure is money, so a limited member
+				// reading it with every number blanked would see a page that
+				// looks broken rather than a page that is private. 403 is
+				// the honest answer, and it means no redaction code exists
+				// here to forget to apply.
+				txn.Get("/holdings", handleListHoldings(deps))
+				txn.Get("/holdings/{id}/events", handleListHoldingEvents(deps))
+				txn.Get("/holdings/{id}/valuations", handleListHoldingValuations(deps))
+
+				txn.Group(func(w chi.Router) {
+					w.Use(requireCSRF)
+					w.Post("/holdings", handleCreateHolding(deps))
+					w.Patch("/holdings/{id}", handleUpdateHolding(deps))
+					// Archive and restore are their own routes rather than a
+					// field on PATCH, for the reason accounts, categories and
+					// goals give above.
+					w.Post("/holdings/{id}/archive", handleArchiveHolding(deps))
+					w.Post("/holdings/{id}/restore", handleRestoreHolding(deps))
+					w.Post("/holdings/{id}/events", handleCreateHoldingEvent(deps))
+					w.Delete("/holdings/{id}/events/{eventId}", handleDeleteHoldingEvent(deps))
+					// POST, but it upserts: one price per holding per day, so
+					// a second write for the same date is a correction. The
+					// handler answers 200 rather than 201 for that reason.
+					w.Post("/holdings/{id}/valuations", handleCreateHoldingValuation(deps))
 				})
 
 				// Bills sit in the same money+owner group as transactions,

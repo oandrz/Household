@@ -1,0 +1,452 @@
+package httpadapter
+
+import (
+	"errors"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/andreasoentoro/hearth/api/internal/domain"
+	"github.com/andreasoentoro/hearth/api/internal/usecase"
+)
+
+// holdingDTO is one holding as the portfolio screen sees it.
+//
+// Quantity crosses the wire as BOTH a string and its nano integer, and that is
+// deliberate. The string is what a screen renders; the integer is what a
+// caller that does exact arithmetic reads. The browser must never divide the
+// integer by 1e9 to get the string -- that is float64 arithmetic on a figure a
+// money screen shows, and docs/LEARNING.md records what it costs
+// (333333 * 0.3 === 99999.90000000001 in JavaScript). Sending both keeps the
+// division on this side, in integers.
+type holdingDTO struct {
+	ID          string     `json:"id"`
+	AccountID   string     `json:"accountId"`
+	AccountName string     `json:"accountName"`
+	Name        string     `json:"name"`
+	Instrument  string     `json:"instrument"`
+	Unit        string     `json:"unit"`
+	Currency    string     `json:"currency"`
+	ArchivedAt  *time.Time `json:"archivedAt"`
+
+	HeldNano     int64  `json:"heldNano"`
+	Held         string `json:"held"`
+	CostMinor    int64  `json:"costMinor"`
+	RealisedMinor int64 `json:"realisedMinor"`
+
+	// HasMarketValue false means NO figure, not a figure of zero. A holding
+	// nobody has priced is unknowable, not worthless, and the screen shows the
+	// reason instead of a number -- the same rule the net worth card follows
+	// when a primary-currency change strands an account. ValuedAt is null in
+	// that case, and otherwise says how stale the price is.
+	MarketValueMinor int64      `json:"marketValueMinor"`
+	HasMarketValue   bool       `json:"hasMarketValue"`
+	ValuedAt         *string    `json:"valuedAt"`
+}
+
+// portfolioResponse carries NotInNetWorth as a literal wire-level fact rather
+// than letting the page hard-code it. Milestone 1 deliberately keeps holdings
+// out of net worth and the twelve-month trend, and the page says so on its
+// face; when milestone 3 changes that, this flag changes with the server and
+// the label follows.
+type portfolioResponse struct {
+	Holdings      []holdingDTO `json:"holdings"`
+	NotInNetWorth bool         `json:"notInNetWorth"`
+}
+
+type holdingResponse struct {
+	Holding holdingDTO `json:"holding"`
+}
+
+type holdingEventDTO struct {
+	ID                 string  `json:"id"`
+	Kind               string  `json:"kind"`
+	QuantityNano       int64   `json:"quantityNano"`
+	Quantity           string  `json:"quantity"`
+	AmountMinor        int64   `json:"amountMinor"`
+	Currency           string  `json:"currency"`
+	PrimaryAmountMinor *int64  `json:"primaryAmountMinor"`
+	PrimaryCurrency    *string `json:"primaryCurrency"`
+	OccurredOn         string  `json:"occurredOn"`
+	Note               string  `json:"note"`
+}
+
+type holdingValuationDTO struct {
+	ID                    string  `json:"id"`
+	UnitPriceMinor        int64   `json:"unitPriceMinor"`
+	Currency              string  `json:"currency"`
+	PrimaryUnitPriceMinor *int64  `json:"primaryUnitPriceMinor"`
+	PrimaryCurrency       *string `json:"primaryCurrency"`
+	AsOf                  string  `json:"asOf"`
+	Note                  string  `json:"note"`
+}
+
+const holdingDateLayout = "2006-01-02"
+
+func toHoldingDTO(v usecase.HoldingPositionView) holdingDTO {
+	dto := holdingDTO{
+		ID:            v.Holding.ID,
+		AccountID:     v.Holding.AccountID,
+		AccountName:   v.AccountName,
+		Name:          v.Holding.Name,
+		Instrument:    string(v.Holding.Instrument),
+		Unit:          v.Holding.Unit,
+		Currency:      v.Holding.Currency,
+		ArchivedAt:    v.Holding.ArchivedAt,
+		HeldNano:      v.Position.Held.Nano(),
+		Held:          domain.FormatQuantity(v.Position.Held),
+		CostMinor:     v.Position.Cost.Amount,
+		RealisedMinor: v.Position.Realised.Amount,
+	}
+	if v.HasMarketValue {
+		asOf := v.ValuedAt.Format(holdingDateLayout)
+		dto.MarketValueMinor, dto.HasMarketValue, dto.ValuedAt = v.MarketValue.Amount, true, &asOf
+	}
+	return dto
+}
+
+func handleListHoldings(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope, _ := RequestScope(r)
+		view, err := deps.Holdings.Portfolio(r.Context(), scope.HouseholdID)
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		out := make([]holdingDTO, 0, len(view.Holdings))
+		for _, h := range view.Holdings {
+			out = append(out, toHoldingDTO(h))
+		}
+		WriteJSON(w, http.StatusOK, portfolioResponse{Holdings: out, NotInNetWorth: true})
+	}
+}
+
+type createHoldingRequest struct {
+	AccountID  string `json:"accountId"`
+	Name       string `json:"name"`
+	Instrument string `json:"instrument"`
+	Unit       string `json:"unit"`
+	Currency   string `json:"currency"`
+}
+
+func handleCreateHolding(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope, _ := RequestScope(r)
+		var req createHoldingRequest
+		if !decodeJSONBody(w, r, &req) {
+			return
+		}
+		instrument, err := domain.ParseInstrumentKind(strings.TrimSpace(req.Instrument))
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		currency := strings.TrimSpace(req.Currency)
+		if currency == "" {
+			household, err := deps.Households.Get(r.Context(), scope.HouseholdID)
+			if err != nil {
+				MapDomainError(w, r, err)
+				return
+			}
+			currency = household.PrimaryCurrency
+		}
+
+		created, err := deps.Holdings.Create(r.Context(), domain.Holding{
+			HouseholdID: scope.HouseholdID,
+			AccountID:   req.AccountID,
+			Name:        req.Name,
+			Instrument:  instrument,
+			Unit:        req.Unit,
+			Currency:    currency,
+		})
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		writeOneHolding(w, r, deps, scope.HouseholdID, created.ID, http.StatusCreated)
+	}
+}
+
+type updateHoldingRequest struct {
+	Name       string `json:"name"`
+	Instrument string `json:"instrument"`
+	Unit       string `json:"unit"`
+}
+
+func handleUpdateHolding(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope, _ := RequestScope(r)
+		id := chi.URLParam(r, "id")
+		var req updateHoldingRequest
+		if !decodeJSONBody(w, r, &req) {
+			return
+		}
+		instrument, err := domain.ParseInstrumentKind(strings.TrimSpace(req.Instrument))
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		if _, err := deps.Holdings.Update(r.Context(), domain.Holding{
+			ID: id, HouseholdID: scope.HouseholdID,
+			Name: req.Name, Instrument: instrument, Unit: req.Unit,
+		}); err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		writeOneHolding(w, r, deps, scope.HouseholdID, id, http.StatusOK)
+	}
+}
+
+// Archive and restore are their own routes rather than a field on PATCH, the
+// same reasoning accounts, categories and goals follow: if archiving were
+// patchable, an ordinary rename that happened to include the field would
+// archive the holding as a side effect of saving a name.
+func handleArchiveHolding(deps Deps) http.HandlerFunc { return setHoldingArchived(deps, true) }
+func handleRestoreHolding(deps Deps) http.HandlerFunc { return setHoldingArchived(deps, false) }
+
+func setHoldingArchived(deps Deps, archived bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope, _ := RequestScope(r)
+		id := chi.URLParam(r, "id")
+		if _, err := deps.Holdings.SetArchived(r.Context(), scope.HouseholdID, id, archived, deps.Clock.Now()); err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		writeOneHolding(w, r, deps, scope.HouseholdID, id, http.StatusOK)
+	}
+}
+
+// writeOneHolding re-reads the portfolio so a write answers with the same
+// shape a read does, derived figures included. A write's own return value
+// carries the stored row but not the fold or the price -- the same reason
+// writeGoal re-reads rather than converting what Create handed back.
+func writeOneHolding(w http.ResponseWriter, r *http.Request, deps Deps, householdID, holdingID string, status int) {
+	view, err := deps.Holdings.Portfolio(r.Context(), householdID)
+	if err != nil {
+		MapDomainError(w, r, err)
+		return
+	}
+	for _, h := range view.Holdings {
+		if h.Holding.ID == holdingID {
+			WriteJSON(w, status, holdingResponse{Holding: toHoldingDTO(h)})
+			return
+		}
+	}
+	// An archived holding is not in the portfolio view, which lists live ones
+	// only -- so archiving answers from the stored row instead of 404ing on
+	// the thing it just archived.
+	holding, err := deps.Holdings.Get(r.Context(), householdID, holdingID)
+	if err != nil {
+		MapDomainError(w, r, err)
+		return
+	}
+	WriteJSON(w, status, holdingResponse{Holding: toHoldingDTO(usecase.HoldingPositionView{Holding: holding})})
+}
+
+func handleListHoldingEvents(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope, _ := RequestScope(r)
+		events, err := deps.Holdings.ListEvents(r.Context(), scope.HouseholdID, chi.URLParam(r, "id"))
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		out := make([]holdingEventDTO, 0, len(events))
+		for _, e := range events {
+			dto := holdingEventDTO{
+				ID: e.ID, Kind: string(e.Kind),
+				QuantityNano: e.Quantity.Nano(), Quantity: domain.FormatQuantity(e.Quantity),
+				AmountMinor: e.Amount.Amount, Currency: e.Amount.Currency,
+				OccurredOn: e.OccurredOn.Format(holdingDateLayout), Note: e.Note,
+			}
+			if e.PrimaryAmount != nil {
+				amount, currency := e.PrimaryAmount.Amount, e.PrimaryAmount.Currency
+				dto.PrimaryAmountMinor, dto.PrimaryCurrency = &amount, &currency
+			}
+			out = append(out, dto)
+		}
+		WriteJSON(w, http.StatusOK, map[string]any{"events": out})
+	}
+}
+
+type createHoldingEventRequest struct {
+	Kind               string  `json:"kind"`
+	Quantity           string  `json:"quantity"`
+	AmountMinor        int64   `json:"amountMinor"`
+	PrimaryAmountMinor *int64  `json:"primaryAmountMinor"`
+	OccurredOn         string  `json:"occurredOn"`
+	Note               string  `json:"note"`
+}
+
+func handleCreateHoldingEvent(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope, _ := RequestScope(r)
+		holdingID := chi.URLParam(r, "id")
+		var req createHoldingEventRequest
+		if !decodeJSONBody(w, r, &req) {
+			return
+		}
+		kind, err := domain.ParseHoldingEventKind(strings.TrimSpace(req.Kind))
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		// The string-to-nano conversion lives here, at the edge, so nothing
+		// above this layer ever handles a quantity as text.
+		quantity, err := domain.ParseQuantity(req.Quantity)
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		occurredOn, ok := parseHoldingDate(w, r, req.OccurredOn)
+		if !ok {
+			return
+		}
+		// The holding is read for its currency, which an event carries but
+		// does not state: an event is denominated in its holding's currency by
+		// construction. The service re-reads and re-validates, so this read is
+		// for building the request, not for trusting.
+		holding, err := deps.Holdings.Get(r.Context(), scope.HouseholdID, holdingID)
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		amount, err := domain.NewMoney(req.AmountMinor, holding.Currency)
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		event := domain.HoldingEvent{
+			HoldingID: holdingID, HouseholdID: scope.HouseholdID, Kind: kind,
+			Quantity: quantity, Amount: amount,
+			OccurredOn: occurredOn, Note: req.Note,
+		}
+		if req.PrimaryAmountMinor != nil {
+			household, err := deps.Households.Get(r.Context(), scope.HouseholdID)
+			if err != nil {
+				MapDomainError(w, r, err)
+				return
+			}
+			primary, err := domain.NewMoney(*req.PrimaryAmountMinor, household.PrimaryCurrency)
+			if err != nil {
+				MapDomainError(w, r, err)
+				return
+			}
+			event.PrimaryAmount = &primary
+		}
+		if _, err := deps.Holdings.RecordEvent(r.Context(), event); err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		writeOneHolding(w, r, deps, scope.HouseholdID, holdingID, http.StatusCreated)
+	}
+}
+
+func handleDeleteHoldingEvent(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope, _ := RequestScope(r)
+		holdingID := chi.URLParam(r, "id")
+		if err := deps.Holdings.DeleteEvent(r.Context(), scope.HouseholdID, holdingID, chi.URLParam(r, "eventId")); err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		writeOneHolding(w, r, deps, scope.HouseholdID, holdingID, http.StatusOK)
+	}
+}
+
+func handleListHoldingValuations(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope, _ := RequestScope(r)
+		valuations, err := deps.Holdings.ListValuations(r.Context(), scope.HouseholdID, chi.URLParam(r, "id"))
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		out := make([]holdingValuationDTO, 0, len(valuations))
+		for _, v := range valuations {
+			dto := holdingValuationDTO{
+				ID: v.ID, UnitPriceMinor: v.UnitPrice.Amount, Currency: v.UnitPrice.Currency,
+				AsOf: v.AsOf.Format(holdingDateLayout), Note: v.Note,
+			}
+			if v.PrimaryUnitPrice != nil {
+				amount, currency := v.PrimaryUnitPrice.Amount, v.PrimaryUnitPrice.Currency
+				dto.PrimaryUnitPriceMinor, dto.PrimaryCurrency = &amount, &currency
+			}
+			out = append(out, dto)
+		}
+		WriteJSON(w, http.StatusOK, map[string]any{"valuations": out})
+	}
+}
+
+type createValuationRequest struct {
+	UnitPriceMinor        int64  `json:"unitPriceMinor"`
+	PrimaryUnitPriceMinor *int64 `json:"primaryUnitPriceMinor"`
+	AsOf                  string `json:"asOf"`
+	Note                  string `json:"note"`
+}
+
+// Recording a valuation answers 200, never 201: one price per holding per day
+// means a second write for the same date replaces the first rather than
+// creating anything. Saying "Created" for a correction would be a lie the
+// frontend could act on.
+func handleCreateHoldingValuation(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope, _ := RequestScope(r)
+		holdingID := chi.URLParam(r, "id")
+		var req createValuationRequest
+		if !decodeJSONBody(w, r, &req) {
+			return
+		}
+		asOf, ok := parseHoldingDate(w, r, req.AsOf)
+		if !ok {
+			return
+		}
+		holding, err := deps.Holdings.Get(r.Context(), scope.HouseholdID, holdingID)
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		price, err := domain.NewMoney(req.UnitPriceMinor, holding.Currency)
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		valuation := domain.Valuation{
+			HoldingID: holdingID, HouseholdID: scope.HouseholdID,
+			UnitPrice: price, AsOf: asOf, Note: req.Note,
+		}
+		if req.PrimaryUnitPriceMinor != nil {
+			household, err := deps.Households.Get(r.Context(), scope.HouseholdID)
+			if err != nil {
+				MapDomainError(w, r, err)
+				return
+			}
+			primary, err := domain.NewMoney(*req.PrimaryUnitPriceMinor, household.PrimaryCurrency)
+			if err != nil {
+				MapDomainError(w, r, err)
+				return
+			}
+			valuation.PrimaryUnitPrice = &primary
+		}
+		if _, err := deps.Holdings.RecordValuation(r.Context(), valuation); err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		writeOneHolding(w, r, deps, scope.HouseholdID, holdingID, http.StatusOK)
+	}
+}
+
+func parseHoldingDate(w http.ResponseWriter, r *http.Request, text string) (time.Time, bool) {
+	d, err := time.Parse(holdingDateLayout, strings.TrimSpace(text))
+	if err != nil {
+		WriteError(w, http.StatusUnprocessableEntity, "INVALID_DATE", "Enter a date as YYYY-MM-DD.", nil)
+		return time.Time{}, false
+	}
+	return d, true
+}
+
+// errHoldingNotFound keeps the linter honest about the sentinel being used in
+// this file's own guard paths.
+var _ = errors.Is
