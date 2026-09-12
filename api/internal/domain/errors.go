@@ -57,6 +57,12 @@ var (
 	// number, and refused when it would duplicate the native one.
 	ErrHoldingPrimaryAmountRequired   = errors.New("a holding not in the primary currency needs its primary-currency amount")
 	ErrHoldingPrimaryAmountNotAllowed = errors.New("a holding already in the primary currency must not carry a second amount")
+	// ErrHoldingNameTaken is the UNIQUE (account_id, name) collision, scoped to
+	// the account rather than the household because holding the same ticker in
+	// two brokerages is ordinary. Archived holdings still occupy their name, so
+	// a collision with one offers restore rather than a bare 409 -- the goals
+	// and categories rule.
+	ErrHoldingNameTaken = errors.New("a holding with that name already exists in this account")
 
 	ErrUnknownAccountType         = errors.New("unknown account type")
 	ErrAccountNicknameRequired    = errors.New("an account nickname is required")

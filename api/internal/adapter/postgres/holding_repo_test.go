@@ -1,0 +1,435 @@
+package postgres_test
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres"
+	"github.com/andreasoentoro/hearth/api/internal/domain"
+)
+
+func insertTestInvestmentAccount(t *testing.T, db *postgres.DB, householdID, nickname string) string {
+	t.Helper()
+	var id string
+	err := db.Pool().QueryRow(context.Background(),
+		`INSERT INTO accounts (household_id, nickname, type, opening_balance_minor,
+		                       opening_balance_currency, opening_balance_as_of)
+		 VALUES ($1, $2, 'investment', 0, 'SGD', DATE '2026-07-01') RETURNING id`,
+		householdID, nickname).Scan(&id)
+	if err != nil {
+		t.Fatalf("insert investment account %s: %v", nickname, err)
+	}
+	return id
+}
+
+func newTestHolding(householdID, accountID, name string) domain.Holding {
+	return domain.Holding{
+		HouseholdID: householdID,
+		AccountID:   accountID,
+		Name:        name,
+		Instrument:  domain.InstrumentStock,
+		Unit:        "share",
+		Currency:    "SGD",
+	}
+}
+
+func testQuantity(t *testing.T, units int64) domain.Quantity {
+	t.Helper()
+	q, err := domain.NewQuantity(units * domain.QuantityScale)
+	if err != nil {
+		t.Fatalf("NewQuantity: %v", err)
+	}
+	return q
+}
+
+func TestHoldingCreateAndGetRoundTrip(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewHoldingRepo(db)
+	householdID := insertTestHousehold(t, db)
+	accountID := insertTestInvestmentAccount(t, db, householdID, "Brokerage")
+
+	created, err := repo.Create(ctx, newTestHolding(householdID, accountID, "D05"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	got, err := repo.Get(ctx, householdID, created.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Name != "D05" || got.Currency != "SGD" || got.Instrument != domain.InstrumentStock || got.Unit != "share" {
+		t.Fatalf("got %+v, want the holding as created", got)
+	}
+	if got.AccountID != accountID {
+		t.Fatalf("AccountID = %q, want %q", got.AccountID, accountID)
+	}
+}
+
+// A holding id belonging to another household must read as ABSENT, never as
+// forbidden -- a 403 would confirm the row exists.
+func TestHoldingGetFromAnotherHouseholdIsNotFound(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewHoldingRepo(db)
+	mine := insertTestHousehold(t, db)
+	theirs := insertTestHousehold(t, db)
+	theirAccount := insertTestInvestmentAccount(t, db, theirs, "Their brokerage")
+
+	created, err := repo.Create(ctx, newTestHolding(theirs, theirAccount, "D05"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if _, err := repo.Get(ctx, mine, created.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Get across households: error = %v, want ErrNotFound", err)
+	}
+}
+
+// The unique key is (account_id, name), NOT (household_id, name): holding the
+// same ticker in two brokerages is ordinary and they are genuinely different
+// positions with different cost bases.
+func TestHoldingNameIsUniquePerAccountNotPerHousehold(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewHoldingRepo(db)
+	householdID := insertTestHousehold(t, db)
+	first := insertTestInvestmentAccount(t, db, householdID, "Brokerage A")
+	second := insertTestInvestmentAccount(t, db, householdID, "Brokerage B")
+
+	if _, err := repo.Create(ctx, newTestHolding(householdID, first, "D05")); err != nil {
+		t.Fatalf("Create in first account: %v", err)
+	}
+	if _, err := repo.Create(ctx, newTestHolding(householdID, second, "D05")); err != nil {
+		t.Fatalf("the same name in a SECOND account must be allowed: %v", err)
+	}
+	if _, err := repo.Create(ctx, newTestHolding(householdID, first, "D05")); !errors.Is(err, domain.ErrHoldingNameTaken) {
+		t.Fatalf("duplicate in the same account: error = %v, want ErrHoldingNameTaken", err)
+	}
+}
+
+// An archived holding still occupies its name, so the collision offers restore
+// rather than silently creating a second one -- the goals and categories rule.
+func TestAnArchivedHoldingStillOccupiesItsName(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewHoldingRepo(db)
+	householdID := insertTestHousehold(t, db)
+	accountID := insertTestInvestmentAccount(t, db, householdID, "Brokerage")
+
+	created, err := repo.Create(ctx, newTestHolding(householdID, accountID, "D05"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	archivedAt := july(5)
+	if _, err := repo.SetArchived(ctx, householdID, created.ID, &archivedAt); err != nil {
+		t.Fatalf("SetArchived: %v", err)
+	}
+
+	if _, err := repo.Create(ctx, newTestHolding(householdID, accountID, "D05")); !errors.Is(err, domain.ErrHoldingNameTaken) {
+		t.Fatalf("error = %v, want ErrHoldingNameTaken", err)
+	}
+}
+
+func TestHoldingListCarriesItsAccountNameAndArchivedFlag(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewHoldingRepo(db)
+	householdID := insertTestHousehold(t, db)
+	accountID := insertTestInvestmentAccount(t, db, householdID, "Brokerage")
+	if _, err := repo.Create(ctx, newTestHolding(householdID, accountID, "D05")); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	records, err := repo.List(ctx, householdID, false)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("len = %d, want 1", len(records))
+	}
+	if records[0].AccountName != "Brokerage" {
+		t.Fatalf("AccountName = %q, want Brokerage", records[0].AccountName)
+	}
+	if records[0].AccountArchived {
+		t.Fatal("AccountArchived = true, want false")
+	}
+}
+
+// includeArchived is a UNION, not a filter swap: true returns live AND
+// archived together, never archived instead.
+func TestHoldingListIncludeArchivedReturnsBoth(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewHoldingRepo(db)
+	householdID := insertTestHousehold(t, db)
+	accountID := insertTestInvestmentAccount(t, db, householdID, "Brokerage")
+
+	live, _ := repo.Create(ctx, newTestHolding(householdID, accountID, "Alive"))
+	gone, _ := repo.Create(ctx, newTestHolding(householdID, accountID, "Gone"))
+	archivedAt := july(5)
+	if _, err := repo.SetArchived(ctx, householdID, gone.ID, &archivedAt); err != nil {
+		t.Fatalf("SetArchived: %v", err)
+	}
+
+	liveOnly, err := repo.List(ctx, householdID, false)
+	if err != nil {
+		t.Fatalf("List(false): %v", err)
+	}
+	if len(liveOnly) != 1 || liveOnly[0].Holding.ID != live.ID {
+		t.Fatalf("List(false) = %d rows, want just the live one", len(liveOnly))
+	}
+
+	both, err := repo.List(ctx, householdID, true)
+	if err != nil {
+		t.Fatalf("List(true): %v", err)
+	}
+	if len(both) != 2 {
+		t.Fatalf("List(true) = %d rows, want 2 -- includeArchived is a union, not a swap", len(both))
+	}
+}
+
+func TestCountLiveForAccountIgnoresArchivedHoldings(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := postgres.NewHoldingRepo(db)
+	householdID := insertTestHousehold(t, db)
+	accountID := insertTestInvestmentAccount(t, db, householdID, "Brokerage")
+
+	if _, err := repo.Create(ctx, newTestHolding(householdID, accountID, "Alive")); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	gone, _ := repo.Create(ctx, newTestHolding(householdID, accountID, "Gone"))
+	archivedAt := july(5)
+	if _, err := repo.SetArchived(ctx, householdID, gone.ID, &archivedAt); err != nil {
+		t.Fatalf("SetArchived: %v", err)
+	}
+
+	n, err := repo.CountLiveForAccount(ctx, householdID, accountID)
+	if err != nil {
+		t.Fatalf("CountLiveForAccount: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("count = %d, want 1", n)
+	}
+}
+
+// THE ordering contract. occurred_on is a date, so two events share one when
+// a household buys and sells the same morning, and domain.Holding.Position
+// sorts stably -- it keeps whatever order it is handed for a tie. So the tie
+// has to be broken here, by the order the events were actually recorded in.
+// Return them any other way and realised gain changes silently.
+func TestHoldingEventsComeBackInRecordedOrderForTheSameDay(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	holdings := postgres.NewHoldingRepo(db)
+	events := postgres.NewHoldingEventRepo(db)
+	householdID := insertTestHousehold(t, db)
+	accountID := insertTestInvestmentAccount(t, db, householdID, "Brokerage")
+	h, err := holdings.Create(ctx, newTestHolding(householdID, accountID, "D05"))
+	if err != nil {
+		t.Fatalf("Create holding: %v", err)
+	}
+
+	sameDay := july(5)
+	first, err := events.Insert(ctx, domain.HoldingEvent{
+		HoldingID: h.ID, HouseholdID: householdID, Kind: domain.HoldingAcquisition,
+		Quantity: testQuantity(t, 10), Amount: moneyOf(1000), OccurredOn: sameDay,
+	})
+	if err != nil {
+		t.Fatalf("Insert first: %v", err)
+	}
+	second, err := events.Insert(ctx, domain.HoldingEvent{
+		HoldingID: h.ID, HouseholdID: householdID, Kind: domain.HoldingDisposal,
+		Quantity: testQuantity(t, 5), Amount: moneyOf(1500), OccurredOn: sameDay,
+	})
+	if err != nil {
+		t.Fatalf("Insert second: %v", err)
+	}
+
+	got, err := events.ListByHolding(ctx, householdID, h.ID)
+	if err != nil {
+		t.Fatalf("ListByHolding: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].ID != first.ID || got[1].ID != second.ID {
+		t.Fatalf("order = %q,%q; want %q,%q -- same-day events must come back in the order recorded",
+			got[0].ID, got[1].ID, first.ID, second.ID)
+	}
+	// The fold reads these directly, so the round trip has to preserve what it
+	// folds on, not merely the ids.
+	if got[0].Quantity.Nano() != 10*domain.QuantityScale || got[0].Amount.Amount != 1000 {
+		t.Fatalf("first event round-tripped as %+v", got[0])
+	}
+	if got[0].Amount.Currency != "SGD" {
+		t.Fatalf("Currency = %q, want SGD -- an event is denominated in its holding's currency",
+			got[0].Amount.Currency)
+	}
+}
+
+// A cross-currency event stores its primary-currency twin AND that currency's
+// code, because unlike a transfer's ReceivedAmount there is no account to join
+// the code from.
+func TestHoldingEventRoundTripsItsPrimaryAmountAndCurrency(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	holdings := postgres.NewHoldingRepo(db)
+	events := postgres.NewHoldingEventRepo(db)
+	householdID := insertTestHousehold(t, db)
+	accountID := insertTestInvestmentAccount(t, db, householdID, "Brokerage")
+	usd := newTestHolding(householdID, accountID, "VOO")
+	usd.Currency = "USD"
+	h, err := holdings.Create(ctx, usd)
+	if err != nil {
+		t.Fatalf("Create holding: %v", err)
+	}
+
+	native, _ := domain.NewMoney(50000, "USD")
+	primary, _ := domain.NewMoney(67500, "SGD")
+	if _, err := events.Insert(ctx, domain.HoldingEvent{
+		HoldingID: h.ID, HouseholdID: householdID, Kind: domain.HoldingAcquisition,
+		Quantity: testQuantity(t, 10), Amount: native, PrimaryAmount: &primary,
+		OccurredOn: july(5),
+	}); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	got, err := events.ListByHolding(ctx, householdID, h.ID)
+	if err != nil {
+		t.Fatalf("ListByHolding: %v", err)
+	}
+	if got[0].PrimaryAmount == nil {
+		t.Fatal("PrimaryAmount = nil, want the SGD figure back")
+	}
+	if got[0].PrimaryAmount.Amount != 67500 || got[0].PrimaryAmount.Currency != "SGD" {
+		t.Fatalf("PrimaryAmount = %+v, want 67500 SGD", *got[0].PrimaryAmount)
+	}
+}
+
+// A same-currency event stores no primary amount at all, and must come back as
+// nil rather than as a zero Money -- Money.Add refuses a zero-value currency,
+// so a zero here would fail on first use.
+func TestASameCurrencyEventHasNoPrimaryAmountOnTheWayBack(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	holdings := postgres.NewHoldingRepo(db)
+	events := postgres.NewHoldingEventRepo(db)
+	householdID := insertTestHousehold(t, db)
+	accountID := insertTestInvestmentAccount(t, db, householdID, "Brokerage")
+	h, _ := holdings.Create(ctx, newTestHolding(householdID, accountID, "D05"))
+
+	if _, err := events.Insert(ctx, domain.HoldingEvent{
+		HoldingID: h.ID, HouseholdID: householdID, Kind: domain.HoldingAcquisition,
+		Quantity: testQuantity(t, 10), Amount: moneyOf(1000), OccurredOn: july(5),
+	}); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	got, _ := events.ListByHolding(ctx, householdID, h.ID)
+	if got[0].PrimaryAmount != nil {
+		t.Fatalf("PrimaryAmount = %+v, want nil", *got[0].PrimaryAmount)
+	}
+}
+
+// One price per holding per day: re-entering a day's price is a correction,
+// not a second opinion.
+func TestValuationUpsertReplacesTheSameDayRatherThanAddingASecond(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	holdings := postgres.NewHoldingRepo(db)
+	valuations := postgres.NewHoldingValuationRepo(db)
+	householdID := insertTestHousehold(t, db)
+	accountID := insertTestInvestmentAccount(t, db, householdID, "Brokerage")
+	h, _ := holdings.Create(ctx, newTestHolding(householdID, accountID, "D05"))
+
+	asOf := july(5)
+	if _, err := valuations.Upsert(ctx, domain.Valuation{
+		HoldingID: h.ID, HouseholdID: householdID, UnitPrice: moneyOf(100), AsOf: asOf,
+	}); err != nil {
+		t.Fatalf("Upsert first: %v", err)
+	}
+	if _, err := valuations.Upsert(ctx, domain.Valuation{
+		HoldingID: h.ID, HouseholdID: householdID, UnitPrice: moneyOf(250), AsOf: asOf,
+	}); err != nil {
+		t.Fatalf("Upsert correction: %v", err)
+	}
+
+	got, err := valuations.ListByHolding(ctx, householdID, h.ID)
+	if err != nil {
+		t.Fatalf("ListByHolding: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1 -- a second price for one day is a correction", len(got))
+	}
+	if got[0].UnitPrice.Amount != 250 {
+		t.Fatalf("UnitPrice = %d, want 250", got[0].UnitPrice.Amount)
+	}
+}
+
+// ListLatest gives at most one row per holding, and NO row for a holding that
+// has never been priced -- the caller has to be able to say "no price
+// recorded" rather than show a figure of zero.
+func TestListLatestValuationsSkipsAHoldingWithNoPrice(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	holdings := postgres.NewHoldingRepo(db)
+	valuations := postgres.NewHoldingValuationRepo(db)
+	householdID := insertTestHousehold(t, db)
+	accountID := insertTestInvestmentAccount(t, db, householdID, "Brokerage")
+	priced, _ := holdings.Create(ctx, newTestHolding(householdID, accountID, "Priced"))
+	if _, err := holdings.Create(ctx, newTestHolding(householdID, accountID, "Unpriced")); err != nil {
+		t.Fatalf("Create unpriced: %v", err)
+	}
+
+	for _, v := range []struct {
+		day   int
+		minor int64
+	}{{4, 100}, {6, 300}, {5, 200}} {
+		if _, err := valuations.Upsert(ctx, domain.Valuation{
+			HoldingID: priced.ID, HouseholdID: householdID,
+			UnitPrice: moneyOf(v.minor), AsOf: july(v.day),
+		}); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+	}
+
+	latest, err := valuations.ListLatest(ctx, householdID)
+	if err != nil {
+		t.Fatalf("ListLatest: %v", err)
+	}
+	if len(latest) != 1 {
+		t.Fatalf("len = %d, want 1 -- an unpriced holding must produce no row at all", len(latest))
+	}
+	if latest[0].UnitPrice.Amount != 300 {
+		t.Fatalf("UnitPrice = %d, want 300 (the newest as_of, not the newest write)", latest[0].UnitPrice.Amount)
+	}
+	if !latest[0].AsOf.Equal(july(6)) {
+		t.Fatalf("AsOf = %v, want %v", latest[0].AsOf, july(6))
+	}
+}
+
+func TestDeletingAnotherHouseholdsEventIsNotFound(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	holdings := postgres.NewHoldingRepo(db)
+	events := postgres.NewHoldingEventRepo(db)
+	mine := insertTestHousehold(t, db)
+	theirs := insertTestHousehold(t, db)
+	theirAccount := insertTestInvestmentAccount(t, db, theirs, "Theirs")
+	h, _ := holdings.Create(ctx, newTestHolding(theirs, theirAccount, "D05"))
+	e, err := events.Insert(ctx, domain.HoldingEvent{
+		HoldingID: h.ID, HouseholdID: theirs, Kind: domain.HoldingAcquisition,
+		Quantity: testQuantity(t, 1), Amount: moneyOf(100), OccurredOn: july(5),
+	})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	if err := events.Delete(ctx, mine, e.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Delete across households: error = %v, want ErrNotFound", err)
+	}
+}
+
