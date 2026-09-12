@@ -92,16 +92,22 @@ func (q *Queries) CreateHolding(ctx context.Context, arg CreateHoldingParams) (H
 }
 
 const deleteHoldingEvent = `-- name: DeleteHoldingEvent :execrows
-DELETE FROM holding_events WHERE household_id = $1 AND id = $2
+DELETE FROM holding_events
+WHERE household_id = $1 AND holding_id = $2 AND id = $3
 `
 
 type DeleteHoldingEventParams struct {
 	HouseholdID pgtype.UUID
+	HoldingID   pgtype.UUID
 	ID          pgtype.UUID
 }
 
+// Scoped to the HOLDING as well as the household: see DeleteHoldingIncome's
+// comment. It matters more here, because DeleteWithFold re-folds the named
+// holding's remaining events -- deleting another holding's row would check the
+// wrong fold and could leave the row's own holding unable to fold at all.
 func (q *Queries) DeleteHoldingEvent(ctx context.Context, arg DeleteHoldingEventParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteHoldingEvent, arg.HouseholdID, arg.ID)
+	result, err := q.db.Exec(ctx, deleteHoldingEvent, arg.HouseholdID, arg.HoldingID, arg.ID)
 	if err != nil {
 		return 0, err
 	}

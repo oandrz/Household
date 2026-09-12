@@ -225,12 +225,12 @@ func (d *holdingEventRepoDouble) DeleteWithFold(
 	if err := fold(remaining); err != nil {
 		return err
 	}
-	return d.Delete(ctx, householdID, eventID)
+	return d.Delete(ctx, householdID, holdingID, eventID)
 }
 
-func (d *holdingEventRepoDouble) Delete(_ context.Context, householdID, eventID string) error {
+func (d *holdingEventRepoDouble) Delete(_ context.Context, householdID, holdingID, eventID string) error {
 	for i, e := range d.rows {
-		if e.ID == eventID && e.HouseholdID == householdID {
+		if e.ID == eventID && e.HouseholdID == householdID && e.HoldingID == holdingID {
 			d.rows = append(d.rows[:i], d.rows[i+1:]...)
 			return nil
 		}
@@ -355,9 +355,12 @@ func (d *holdingIncomeRepoDouble) ListByHousehold(_ context.Context, householdID
 	return out, nil
 }
 
-func (d *holdingIncomeRepoDouble) Delete(_ context.Context, householdID, incomeID string) error {
+// The holding is part of the match, exactly as the SQL is: a double that
+// matched on less than the real query would let a scoping bug pass every
+// service test.
+func (d *holdingIncomeRepoDouble) Delete(_ context.Context, householdID, holdingID, incomeID string) error {
 	for i, r := range d.rows {
-		if r.ID == incomeID && r.HouseholdID == householdID {
+		if r.ID == incomeID && r.HouseholdID == householdID && r.HoldingID == holdingID {
 			d.rows = append(d.rows[:i], d.rows[i+1:]...)
 			return nil
 		}

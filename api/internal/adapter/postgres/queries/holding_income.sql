@@ -30,5 +30,10 @@ JOIN holdings h ON h.id = i.holding_id
 WHERE i.household_id = $1
 ORDER BY i.holding_id, i.received_on, i.id;
 
+-- DeleteHoldingIncome is scoped to the HOLDING as well as the household, so a
+-- request naming one holding cannot remove another's row. The household alone
+-- would be enough to keep the households apart -- this is about the URL and
+-- the database agreeing on which holding is being edited.
 -- name: DeleteHoldingIncome :execrows
-DELETE FROM holding_income WHERE household_id = $1 AND id = $2;
+DELETE FROM holding_income
+WHERE household_id = $1 AND holding_id = $2 AND id = $3;

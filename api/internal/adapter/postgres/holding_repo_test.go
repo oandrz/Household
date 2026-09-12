@@ -430,7 +430,7 @@ func TestDeletingAnotherHouseholdsEventIsNotFound(t *testing.T) {
 		t.Fatalf("Insert: %v", err)
 	}
 
-	if err := events.Delete(ctx, mine, e.ID); !errors.Is(err, domain.ErrNotFound) {
+	if err := events.Delete(ctx, mine, h.ID, e.ID); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("Delete across households: error = %v, want ErrNotFound", err)
 	}
 }
@@ -614,7 +614,7 @@ func TestDeletingAnAbsentIncomeRowIsNotFound(t *testing.T) {
 	incomeRepo := postgres.NewHoldingIncomeRepo(db)
 	householdID := insertTestHousehold(t, db)
 
-	err := incomeRepo.Delete(ctx, householdID, "00000000-0000-0000-0000-000000000000")
+	err := incomeRepo.Delete(ctx, householdID, "00000000-0000-0000-0000-000000000000", "00000000-0000-0000-0000-000000000000")
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("err = %v, want domain.ErrNotFound", err)
 	}

@@ -12,16 +12,22 @@ import (
 )
 
 const deleteHoldingIncome = `-- name: DeleteHoldingIncome :execrows
-DELETE FROM holding_income WHERE household_id = $1 AND id = $2
+DELETE FROM holding_income
+WHERE household_id = $1 AND holding_id = $2 AND id = $3
 `
 
 type DeleteHoldingIncomeParams struct {
 	HouseholdID pgtype.UUID
+	HoldingID   pgtype.UUID
 	ID          pgtype.UUID
 }
 
+// DeleteHoldingIncome is scoped to the HOLDING as well as the household, so a
+// request naming one holding cannot remove another's row. The household alone
+// would be enough to keep the households apart -- this is about the URL and
+// the database agreeing on which holding is being edited.
 func (q *Queries) DeleteHoldingIncome(ctx context.Context, arg DeleteHoldingIncomeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteHoldingIncome, arg.HouseholdID, arg.ID)
+	result, err := q.db.Exec(ctx, deleteHoldingIncome, arg.HouseholdID, arg.HoldingID, arg.ID)
 	if err != nil {
 		return 0, err
 	}

@@ -675,3 +675,123 @@ func TestAHouseholdHoldingInvestmentsCannotChangeCurrency(t *testing.T) {
 		t.Fatalf("rename = %d, want 200 (body = %s)", rec.Code, rec.Body.String())
 	}
 }
+
+// A child row belongs to the holding in the URL, not merely to the household.
+// Both deletes used to scope on (household_id, id) alone, so a request naming
+// holding A and a row of holding B succeeded -- inside one household, so no
+// disclosure, but the URL said one thing and the database did another. The UI
+// never sends such a request; that is exactly why nothing caught it.
+func TestDeletingAChildRowThroughTheWrongHoldingIsNotFound(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	account := newHoldingAccount(t, env, session, csrf, "Brokerage", "investment")
+	first := newHolding(t, env, session, csrf, account, "D05")
+	second := newHolding(t, env, session, csrf, account, "Gold bar")
+
+	// An income row and an event, both on the FIRST holding.
+	rec := env.authed(t, http.MethodPost, "/api/v1/holdings/"+first+"/income", map[string]any{
+		"kind": "income", "amountMinor": 4500, "receivedOn": serverToday(), "note": "",
+	}, session, csrf)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create income = %d (body = %s)", rec.Code, rec.Body.String())
+	}
+	incomeID := decodeID(t, rec, "income")
+
+	rec = env.authed(t, http.MethodPost, "/api/v1/holdings/"+first+"/events", map[string]any{
+		"kind": "acquisition", "quantity": "10", "amountMinor": 10000,
+		"occurredOn": serverToday(), "note": "",
+	}, session, csrf)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create event = %d (body = %s)", rec.Code, rec.Body.String())
+	}
+
+	rec = env.authed(t, http.MethodGet, "/api/v1/holdings/"+first+"/events", nil, session, csrf)
+	var events struct {
+		Events []struct {
+			ID string `json:"id"`
+		} `json:"events"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &events); err != nil {
+		t.Fatalf("decode events: %v", err)
+	}
+	if len(events.Events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events.Events))
+	}
+	eventID := events.Events[0].ID
+
+	// Both deletes name the SECOND holding, which owns neither row.
+	//
+	// The two halves are not equally load-bearing, and saying so here saves the
+	// next reader the experiment. The INCOME half is the one that was broken:
+	// it failed with a 204 before the query gained its holding scope. The EVENT
+	// half already passed, because DeleteWithFold lists the named holding's
+	// events first and refuses an id that is not among them -- the scoped SQL
+	// behind it is a second lock on a door that was shut. Mutating that SQL
+	// therefore does not turn this test red, and that is the correct outcome
+	// rather than a gap in it.
+	rec = env.authed(t, http.MethodDelete, "/api/v1/holdings/"+second+"/income/"+incomeID, nil, session, csrf)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("income delete via the wrong holding = %d, want 404 (body = %s)", rec.Code, rec.Body.String())
+	}
+	rec = env.authed(t, http.MethodDelete, "/api/v1/holdings/"+second+"/events/"+eventID, nil, session, csrf)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("event delete via the wrong holding = %d, want 404 (body = %s)", rec.Code, rec.Body.String())
+	}
+
+	// And the rows are still there, which is the half a 404 alone does not
+	// prove: a delete that removed the row and then reported not-found would
+	// pass every assertion above.
+	rec = env.authed(t, http.MethodGet, "/api/v1/holdings/"+first+"/income", nil, session, csrf)
+	var income struct {
+		Income []struct {
+			ID string `json:"id"`
+		} `json:"income"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &income); err != nil {
+		t.Fatalf("decode income: %v", err)
+	}
+	if len(income.Income) != 1 {
+		t.Fatalf("income rows = %d, want 1 -- the delete removed it anyway", len(income.Income))
+	}
+	rec = env.authed(t, http.MethodGet, "/api/v1/holdings/"+first+"/events", nil, session, csrf)
+	if err := json.Unmarshal(rec.Body.Bytes(), &events); err != nil {
+		t.Fatalf("decode events: %v", err)
+	}
+	if len(events.Events) != 1 {
+		t.Fatalf("event rows = %d, want 1 -- the delete removed it anyway", len(events.Events))
+	}
+
+	// The right pairing still works, so this is a scoping fix and not a
+	// blanket refusal.
+	rec = env.authed(t, http.MethodDelete, "/api/v1/holdings/"+first+"/income/"+incomeID, nil, session, csrf)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("income delete via its own holding = %d, want 204 (body = %s)", rec.Code, rec.Body.String())
+	}
+}
+
+// newHolding creates a holding and returns its id.
+func newHolding(t *testing.T, env *testEnv, session, csrf *http.Cookie, accountID, name string) string {
+	t.Helper()
+	rec := env.authed(t, http.MethodPost, "/api/v1/holdings", map[string]any{
+		"accountId": accountID, "name": name, "instrument": "stock", "unit": "share",
+	}, session, csrf)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create holding %s: %d (body = %s)", name, rec.Code, rec.Body.String())
+	}
+	return decodeID(t, rec, "holding")
+}
+
+// decodeID reads {"<key>":{"id":…}}, the shape every holding write answers with.
+func decodeID(t *testing.T, rec *httptest.ResponseRecorder, key string) string {
+	t.Helper()
+	var body map[string]struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode %s: %v", key, err)
+	}
+	if body[key].ID == "" {
+		t.Fatalf("%s has no id (body = %s)", key, rec.Body.String())
+	}
+	return body[key].ID
+}

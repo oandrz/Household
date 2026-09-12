@@ -1830,8 +1830,12 @@ type HoldingEventRepository interface {
 	// concurrent write. fold receives the events that WOULD remain.
 	DeleteWithFold(ctx context.Context, householdID, holdingID, eventID string, fold func([]domain.HoldingEvent) error) error
 	// Delete reports domain.ErrNotFound when the event is not this
-	// household's, rather than silently succeeding.
-	Delete(ctx context.Context, householdID, eventID string) error
+	// household's AND this holding's, rather than silently succeeding. Both
+	// halves of that scope are load-bearing: the household keeps two families
+	// apart, and the holding keeps the URL honest -- a caller naming holding A
+	// must not be able to remove a row of holding B, whose fold would then
+	// never have been checked.
+	Delete(ctx context.Context, householdID, holdingID, eventID string) error
 }
 
 // HoldingValuationRepository stores what one unit of a holding was worth on a
@@ -1872,7 +1876,9 @@ type HoldingIncomeRepository interface {
 	Insert(ctx context.Context, i domain.HoldingIncome) (domain.HoldingIncome, error)
 	ListByHolding(ctx context.Context, householdID, holdingID string) ([]domain.HoldingIncome, error)
 	ListByHousehold(ctx context.Context, householdID string) ([]domain.HoldingIncome, error)
-	// Delete returns domain.ErrNotFound when the row is not this household's,
-	// never a silent success.
-	Delete(ctx context.Context, householdID, incomeID string) error
+	// Delete returns domain.ErrNotFound when the row is not this household's
+	// and this holding's, never a silent success. See
+	// HoldingEventRepository.Delete for why the holding is part of the scope
+	// and not only the household.
+	Delete(ctx context.Context, householdID, holdingID, incomeID string) error
 }

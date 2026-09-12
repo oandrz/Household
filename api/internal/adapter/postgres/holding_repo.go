@@ -328,6 +328,7 @@ func (r *HoldingEventRepo) DeleteWithFold(
 		}
 		n, err := q.DeleteHoldingEvent(ctx, sqlcgen.DeleteHoldingEventParams{
 			HouseholdID: uuid(householdID),
+			HoldingID:   uuid(holdingID),
 			ID:          uuid(eventID),
 		})
 		if err != nil {
@@ -396,9 +397,10 @@ func insertEventTx(ctx context.Context, q *sqlcgen.Queries, e domain.HoldingEven
 	})
 }
 
-func (r *HoldingEventRepo) Delete(ctx context.Context, householdID, eventID string) error {
+func (r *HoldingEventRepo) Delete(ctx context.Context, householdID, holdingID, eventID string) error {
 	n, err := r.q.DeleteHoldingEvent(ctx, sqlcgen.DeleteHoldingEventParams{
 		HouseholdID: uuid(householdID),
+		HoldingID:   uuid(holdingID),
 		ID:          uuid(eventID),
 	})
 	if err != nil {
@@ -707,9 +709,10 @@ func (r *HoldingIncomeRepo) ListByHousehold(ctx context.Context, householdID str
 	return out, nil
 }
 
-func (r *HoldingIncomeRepo) Delete(ctx context.Context, householdID, incomeID string) error {
+func (r *HoldingIncomeRepo) Delete(ctx context.Context, householdID, holdingID, incomeID string) error {
 	n, err := r.q.DeleteHoldingIncome(ctx, sqlcgen.DeleteHoldingIncomeParams{
 		HouseholdID: uuid(householdID),
+		HoldingID:   uuid(holdingID),
 		ID:          uuid(incomeID),
 	})
 	if err != nil {

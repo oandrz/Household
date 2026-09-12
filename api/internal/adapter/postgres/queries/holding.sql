@@ -106,8 +106,13 @@ JOIN holdings h ON h.id = e.holding_id
 WHERE e.household_id = $1
 ORDER BY e.holding_id, e.occurred_on, e.created_at, e.id;
 
+-- Scoped to the HOLDING as well as the household: see DeleteHoldingIncome's
+-- comment. It matters more here, because DeleteWithFold re-folds the named
+-- holding's remaining events -- deleting another holding's row would check the
+-- wrong fold and could leave the row's own holding unable to fold at all.
 -- name: DeleteHoldingEvent :execrows
-DELETE FROM holding_events WHERE household_id = $1 AND id = $2;
+DELETE FROM holding_events
+WHERE household_id = $1 AND holding_id = $2 AND id = $3;
 
 -- UpsertValuation writes one price per holding per day. Re-entering a day's
 -- price is a correction, not a second opinion, so the UNIQUE (holding_id,

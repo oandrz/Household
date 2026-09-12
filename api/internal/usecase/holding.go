@@ -413,11 +413,16 @@ func (s *HoldingService) ListIncome(ctx context.Context, householdID, holdingID 
 
 // DeleteIncome needs no fold check, unlike DeleteEvent: removing a dividend
 // cannot leave the remaining rows unable to fold, because they never folded.
+//
+// The holding is read first so that a row under a holding this household does
+// not own is a 404 rather than a delete that matches nothing, and the holding
+// is passed DOWN as well: the repository scopes on it, so naming one holding
+// cannot remove another's row.
 func (s *HoldingService) DeleteIncome(ctx context.Context, householdID, holdingID, incomeID string) error {
 	if _, err := s.d.Holdings.Get(ctx, householdID, holdingID); err != nil {
 		return err
 	}
-	return s.d.Income.Delete(ctx, householdID, incomeID)
+	return s.d.Income.Delete(ctx, householdID, holdingID, incomeID)
 }
 
 // Report is the period screen: what each holding earned over each of the last
