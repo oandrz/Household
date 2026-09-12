@@ -90,10 +90,34 @@ func TestValueDoesNotOverflowOnAnOrdinaryIDRHolding(t *testing.T) {
 	}
 }
 
+// The IDR case above overflows an int64 but its product (1e19) still fits in a
+// uint64, so it does not on its own prove the high word of the 128-bit product
+// is used -- an implementation that truncated to 64 bits would pass it. A
+// larger, still-real position does need the high word: 100,000 shares (1,000
+// IDX lots) at Rp 10,000 is a product of 1e20, past 2^64 = 1.845e19. Without
+// this case, dropping to a single 64-bit word is a mutation the suite misses.
+func TestValueUsesTheHighWordOfThe128BitProduct(t *testing.T) {
+	const shares = 100_000
+	q, err := domain.NewQuantity(shares * domain.QuantityScale)
+	if err != nil {
+		t.Fatalf("NewQuantity: %v", err)
+	}
+	price, _ := domain.NewMoney(10_000*100, "IDR")
+
+	v, err := q.Value(price)
+	if err != nil {
+		t.Fatalf("Value: %v", err)
+	}
+	const want = int64(shares) * 10_000 * 100 // Rp 1,000,000,000 in minor units
+	if v.Amount != want {
+		t.Fatalf("Amount = %d, want %d", v.Amount, want)
+	}
+}
+
 // Rounding is half away from zero, the same rule usecase.Rate.Apply already
 // uses. One rounding rule in this codebase, not two.
 func TestValueRoundsHalfAwayFromZero(t *testing.T) {
-	half := domain.QuantityScale / 2 // 0.5 of a unit
+	var half int64 = domain.QuantityScale / 2 // 0.5 of a unit
 
 	cases := []struct {
 		name       string

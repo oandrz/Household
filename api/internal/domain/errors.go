@@ -25,6 +25,13 @@ var (
 	ErrInvalidMoney                 = errors.New("money value is invalid")
 	ErrOwnerMustHoldAllCapabilities = errors.New("an owner must hold every capability")
 
+	// ErrQuantityNegative is NewQuantity's refusal. A holding's quantity is how
+	// much of a thing is held, so negative is not a smaller amount -- it is a
+	// different claim, and one no screen in this product can render. A disposal
+	// is recorded as its own event with its own positive quantity, never as a
+	// negative holding.
+	ErrQuantityNegative = errors.New("a quantity cannot be negative")
+
 	ErrUnknownAccountType         = errors.New("unknown account type")
 	ErrAccountNicknameRequired    = errors.New("an account nickname is required")
 	ErrLiabilityBalanceNegative   = errors.New("a debt's balance is the amount owed and cannot be negative")
