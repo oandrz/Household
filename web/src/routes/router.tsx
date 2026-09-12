@@ -101,6 +101,7 @@ import { BillsPage } from "../features/money/BillsPage";
 import { BudgetPage } from "../features/money/BudgetPage";
 import { FinancesPage } from "../features/money/FinancesPage";
 import { GoalsPage } from "../features/money/GoalsPage";
+import { PortfolioPage } from "../features/money/PortfolioPage";
 import { TransactionsPage } from "../features/money/TransactionsPage";
 import { OverviewPage } from "../features/overview/OverviewPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
@@ -259,6 +260,16 @@ const moneyGoalsRoute = createRoute({
   getParentRoute: () => moneyGuardRoute,
   path: "goals",
   component: GoalsPage,
+});
+// A sibling of moneyGoalsRoute, same reasoning: nested under moneyGuardRoute
+// (not the shell) so RequireCapability still runs. The portfolio is as much
+// "the household's money" as a goal card, and the server agrees -- every
+// /holdings route sits in the money+owner group, so a member without the
+// capability is refused there too rather than relying on this guard alone.
+const moneyPortfolioRoute = createRoute({
+  getParentRoute: () => moneyGuardRoute,
+  path: "portfolio",
+  component: PortfolioPage,
 });
 // A sibling of moneyGoalsRoute, same reasoning: nested under moneyGuardRoute
 // (not the shell) so RequireCapability still runs. Bills was
@@ -694,6 +705,7 @@ export const routeTree = rootRoute.addChildren([
         moneyTransactionsRoute,
         moneyBudgetRoute,
         moneyGoalsRoute,
+        moneyPortfolioRoute,
         moneyBillsRoute,
       ]),
       marriageGuardRoute.addChildren([

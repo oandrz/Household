@@ -148,10 +148,11 @@ describe("AppShell", () => {
     renderShell();
     await screen.findByRole("button", { name: "Open navigation" });
 
-    // Money expands to five links and no more; a second Sidebar instance
-    // would double every one of them.
+    // Money expands to six links and no more; a second Sidebar instance
+    // would double every one of them. (Six since Portfolio joined Finances,
+    // Transactions, Budget, Goals and Bills.)
     const links = await screen.findAllByTestId("sidebar-space");
-    expect(links).toHaveLength(5);
+    expect(links).toHaveLength(6);
   });
 
   it("puts a skip link ahead of the navigation, pointing at the page content", async () => {
