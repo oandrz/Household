@@ -377,8 +377,14 @@ func NewRouter(deps Deps) http.Handler {
 				// the honest answer, and it means no redaction code exists
 				// here to forget to apply.
 				txn.Get("/holdings", handleListHoldings(deps))
+				// Registered beside the /holdings/{id}/... routes and not
+				// shadowed by them: chi prefers a static segment over a
+				// parameter, so "report" is never read as an id. There is a
+				// test that says so rather than a comment hoping so.
+				txn.Get("/holdings/report", handleHoldingReport(deps))
 				txn.Get("/holdings/{id}/events", handleListHoldingEvents(deps))
 				txn.Get("/holdings/{id}/valuations", handleListHoldingValuations(deps))
+				txn.Get("/holdings/{id}/income", handleListHoldingIncome(deps))
 
 				txn.Group(func(w chi.Router) {
 					w.Use(requireCSRF)
@@ -395,6 +401,11 @@ func NewRouter(deps Deps) http.Handler {
 					// a second write for the same date is a correction. The
 					// handler answers 200 rather than 201 for that reason.
 					w.Post("/holdings/{id}/valuations", handleCreateHoldingValuation(deps))
+					// Income does not upsert the way a valuation does: two
+					// dividends in one quarter are two payments, not a
+					// correction of each other.
+					w.Post("/holdings/{id}/income", handleCreateHoldingIncome(deps))
+					w.Delete("/holdings/{id}/income/{incomeId}", handleDeleteHoldingIncome(deps))
 				})
 
 				// Bills sit in the same money+owner group as transactions,

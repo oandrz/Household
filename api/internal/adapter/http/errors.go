@@ -354,6 +354,23 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, domain.ErrAccountHasHoldings):
 		WriteError(w, http.StatusUnprocessableEntity, "ACCOUNT_HAS_HOLDINGS",
 			"This account holds investments, so its type cannot change. Archive or move them first.", nil)
+	case errors.Is(err, domain.ErrUnknownPeriodKind):
+		WriteError(w, http.StatusBadRequest, "INVALID_PERIOD_KIND",
+			"Ask for a quarter, a half or a year.", nil)
+	case errors.Is(err, domain.ErrPeriodCountOutOfRange):
+		// 400 rather than 422: this is a query parameter the caller chose, not
+		// a value the household typed into a form.
+		WriteError(w, http.StatusBadRequest, "INVALID_PERIOD_COUNT",
+			"That is more history than this report draws. Ask for between 1 and 12 periods.", nil)
+	case errors.Is(err, domain.ErrUnknownIncomeKind):
+		WriteError(w, http.StatusUnprocessableEntity, "UNKNOWN_INCOME_KIND",
+			"Record this as income or as a fee.", nil)
+	case errors.Is(err, domain.ErrHoldingIncomeAmountNotPositive):
+		WriteError(w, http.StatusUnprocessableEntity, "INCOME_AMOUNT_NOT_POSITIVE",
+			"Enter how much was paid. A fee is entered as a positive amount and comes off the total.", nil)
+	case errors.Is(err, domain.ErrPrimaryCurrencyHeldByHoldings):
+		WriteError(w, http.StatusUnprocessableEntity, "PRIMARY_CURRENCY_HELD_BY_HOLDINGS",
+			"Your currency cannot change while you hold investments: every holding records what it cost in the currency you kept books in at the time, and nothing here can restate that.", nil)
 	case errors.Is(err, domain.ErrHoldingArchived):
 		WriteError(w, http.StatusUnprocessableEntity, "HOLDING_ARCHIVED",
 			"This holding is archived. Restore it before recording anything against it.", nil)

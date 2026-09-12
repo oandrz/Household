@@ -3,6 +3,7 @@ package httpadapter
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,10 +32,10 @@ type holdingDTO struct {
 	Currency    string     `json:"currency"`
 	ArchivedAt  *time.Time `json:"archivedAt"`
 
-	HeldNano     int64  `json:"heldNano"`
-	Held         string `json:"held"`
-	CostMinor    int64  `json:"costMinor"`
-	RealisedMinor int64 `json:"realisedMinor"`
+	HeldNano      int64  `json:"heldNano"`
+	Held          string `json:"held"`
+	CostMinor     int64  `json:"costMinor"`
+	RealisedMinor int64  `json:"realisedMinor"`
 
 	// HasMarketValue false means NO figure, not a figure of zero. A holding
 	// nobody has priced is unknowable, not worthless, and the screen shows the
@@ -326,12 +327,12 @@ func handleListHoldingEvents(deps Deps) http.HandlerFunc {
 }
 
 type createHoldingEventRequest struct {
-	Kind               string  `json:"kind"`
-	Quantity           string  `json:"quantity"`
-	AmountMinor        int64   `json:"amountMinor"`
-	PrimaryAmountMinor *int64  `json:"primaryAmountMinor"`
-	OccurredOn         string  `json:"occurredOn"`
-	Note               string  `json:"note"`
+	Kind               string `json:"kind"`
+	Quantity           string `json:"quantity"`
+	AmountMinor        int64  `json:"amountMinor"`
+	PrimaryAmountMinor *int64 `json:"primaryAmountMinor"`
+	OccurredOn         string `json:"occurredOn"`
+	Note               string `json:"note"`
 }
 
 func handleCreateHoldingEvent(deps Deps) http.HandlerFunc {
@@ -499,4 +500,298 @@ func parseHoldingDate(w http.ResponseWriter, r *http.Request, text string) (time
 		return time.Time{}, false
 	}
 	return d, true
+}
+
+// --- income and the period report -------------------------------------------
+
+type holdingIncomeDTO struct {
+	ID                 string  `json:"id"`
+	Kind               string  `json:"kind"`
+	AmountMinor        int64   `json:"amountMinor"`
+	Currency           string  `json:"currency"`
+	PrimaryAmountMinor *int64  `json:"primaryAmountMinor"`
+	PrimaryCurrency    *string `json:"primaryCurrency"`
+	ReceivedOn         string  `json:"receivedOn"`
+	Note               string  `json:"note"`
+}
+
+func toHoldingIncomeDTO(i domain.HoldingIncome) holdingIncomeDTO {
+	dto := holdingIncomeDTO{
+		ID:          i.ID,
+		Kind:        string(i.Kind),
+		AmountMinor: i.Amount.Amount,
+		Currency:    i.Amount.Currency,
+		ReceivedOn:  i.ReceivedOn.Format(holdingDateLayout),
+		Note:        i.Note,
+	}
+	if i.PrimaryAmount != nil {
+		amount, currency := i.PrimaryAmount.Amount, i.PrimaryAmount.Currency
+		dto.PrimaryAmountMinor, dto.PrimaryCurrency = &amount, &currency
+	}
+	return dto
+}
+
+type createIncomeRequest struct {
+	Kind               string `json:"kind"`
+	AmountMinor        int64  `json:"amountMinor"`
+	PrimaryAmountMinor *int64 `json:"primaryAmountMinor"`
+	ReceivedOn         string `json:"receivedOn"`
+	Note               string `json:"note"`
+}
+
+func handleListHoldingIncome(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope, _ := RequestScope(r)
+		rows, err := deps.Holdings.ListIncome(r.Context(), scope.HouseholdID, chi.URLParam(r, "id"))
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		out := make([]holdingIncomeDTO, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, toHoldingIncomeDTO(row))
+		}
+		WriteJSON(w, http.StatusOK, map[string]any{"income": out})
+	}
+}
+
+func handleCreateHoldingIncome(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope, _ := RequestScope(r)
+		holdingID := chi.URLParam(r, "id")
+		var req createIncomeRequest
+		if !decodeJSONBody(w, r, &req) {
+			return
+		}
+		receivedOn, ok := parseHoldingDate(w, r, req.ReceivedOn)
+		if !ok {
+			return
+		}
+		kind, err := domain.ParseIncomeKind(req.Kind)
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		holding, err := deps.Holdings.Get(r.Context(), scope.HouseholdID, holdingID)
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		// The amount is denominated in the HOLDING's currency, never in one the
+		// request chose. A dividend arrives in whatever the holding pays in.
+		amount, err := domain.NewMoney(req.AmountMinor, holding.Currency)
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		income := domain.HoldingIncome{
+			HoldingID: holdingID, HouseholdID: scope.HouseholdID, Kind: kind,
+			Amount: amount, ReceivedOn: receivedOn, Note: req.Note,
+		}
+		if req.PrimaryAmountMinor != nil {
+			household, err := deps.Households.Get(r.Context(), scope.HouseholdID)
+			if err != nil {
+				MapDomainError(w, r, err)
+				return
+			}
+			primary, err := domain.NewMoney(*req.PrimaryAmountMinor, household.PrimaryCurrency)
+			if err != nil {
+				MapDomainError(w, r, err)
+				return
+			}
+			income.PrimaryAmount = &primary
+		}
+		created, err := deps.Holdings.RecordIncome(r.Context(), income, deps.Clock.Now())
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		WriteJSON(w, http.StatusCreated, map[string]any{"income": toHoldingIncomeDTO(created)})
+	}
+}
+
+func handleDeleteHoldingIncome(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope, _ := RequestScope(r)
+		err := deps.Holdings.DeleteIncome(r.Context(), scope.HouseholdID,
+			chi.URLParam(r, "id"), chi.URLParam(r, "incomeId"))
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// componentDTO is one figure in both currencies. The primary one is the
+// household's own and is what answers "did this make us richer"; the native one
+// sits beside it so the owner can still tell whether the PICK was good and the
+// exchange rate was the problem.
+type componentDTO struct {
+	NativeMinor  int64 `json:"nativeMinor"`
+	PrimaryMinor int64 `json:"primaryMinor"`
+}
+
+func toComponentDTO(c domain.ReturnComponent) componentDTO {
+	return componentDTO{NativeMinor: c.Native.Amount, PrimaryMinor: c.Primary.Amount}
+}
+
+func toComponentPointer(c *domain.ReturnComponent) *componentDTO {
+	if c == nil {
+		return nil
+	}
+	dto := toComponentDTO(*c)
+	return &dto
+}
+
+// periodReturnDTO is one holding's figures for one period.
+//
+// unrealised and total are NULL rather than zero when they cannot be known,
+// and `reason` says which price was missing. A screen must render the reason,
+// never a zero: a quarter nobody priced is unknowable, not flat. realised,
+// income and fees are always present -- no price is involved in them, so a
+// missing valuation cannot take them away.
+type periodReturnDTO struct {
+	Unrealised *componentDTO `json:"unrealised"`
+	Realised   componentDTO  `json:"realised"`
+	Income     componentDTO  `json:"income"`
+	Fees       componentDTO  `json:"fees"`
+	Total      *componentDTO `json:"total"`
+	Reason     string        `json:"reason"`
+
+	// The days each end was measured at, as dates rather than as a "we have a
+	// price" boolean: a screen that only knows a price EXISTS cannot say how
+	// stale it is, and stale valuations are this feature's top product risk.
+	// Null means no price was consulted, which is what holding nothing at that
+	// end means.
+	OpeningPriceAsOf *string `json:"openingPriceAsOf"`
+	ClosingPriceAsOf *string `json:"closingPriceAsOf"`
+}
+
+type reportPeriodDTO struct {
+	Kind  string `json:"kind"`
+	Year  int    `json:"year"`
+	Index int    `json:"index"`
+	Label string `json:"label"`
+	Start string `json:"start"`
+	End   string `json:"end"`
+	// Current marks the period the household is still living in, which the
+	// screen labels "to date" rather than presenting as a closed result.
+	Current bool `json:"current"`
+}
+
+type reportHoldingDTO struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	AccountName string            `json:"accountName"`
+	Instrument  string            `json:"instrument"`
+	Unit        string            `json:"unit"`
+	Currency    string            `json:"currency"`
+	Archived    bool              `json:"archived"`
+	Returns     []periodReturnDTO `json:"returns"`
+}
+
+// reportResponse carries the periods once and every holding's figures aligned
+// to them by POSITION. A chart reads the two together by index rather than
+// matching labels, which is also what stops a holding with a gap in its
+// history shifting its own bars.
+type reportResponse struct {
+	Kind            string             `json:"kind"`
+	PrimaryCurrency string             `json:"primaryCurrency"`
+	Periods         []reportPeriodDTO  `json:"periods"`
+	Holdings        []reportHoldingDTO `json:"holdings"`
+}
+
+// defaultReportPeriods is how far back each kind looks when the request does
+// not say. It lives HERE rather than in the frontend because a default in the
+// browser would be a second copy of the window rule, free to drift from this
+// one -- and because the chart's own bar budget is what these numbers are
+// chosen against.
+var defaultReportPeriods = map[domain.PeriodKind]int{
+	domain.PeriodQuarter: 6,
+	domain.PeriodHalf:    4,
+	domain.PeriodYear:    3,
+}
+
+func handleHoldingReport(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope, _ := RequestScope(r)
+		kind, err := domain.ParsePeriodKind(r.URL.Query().Get("kind"))
+		if err != nil {
+			WriteError(w, http.StatusBadRequest, "INVALID_PERIOD_KIND",
+				"Ask for a quarter, a half or a year.", nil)
+			return
+		}
+		count := defaultReportPeriods[kind]
+		if raw := r.URL.Query().Get("count"); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil {
+				WriteError(w, http.StatusBadRequest, "INVALID_PERIOD_COUNT",
+					"How many periods? Give a number.", nil)
+				return
+			}
+			count = parsed
+		}
+
+		view, err := deps.Holdings.Report(r.Context(), scope.HouseholdID, kind, count, deps.Clock.Now())
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+
+		periods := make([]reportPeriodDTO, 0, len(view.Periods))
+		for _, p := range view.Periods {
+			periods = append(periods, reportPeriodDTO{
+				Kind:    string(p.Kind()),
+				Year:    p.Year(),
+				Index:   p.Index(),
+				Label:   p.Label(),
+				Start:   p.Start().Format(holdingDateLayout),
+				End:     p.End().Format(holdingDateLayout),
+				Current: p.IsCurrent(deps.Clock.Now()),
+			})
+		}
+
+		holdings := make([]reportHoldingDTO, 0, len(view.Holdings))
+		for _, row := range view.Holdings {
+			returns := make([]periodReturnDTO, 0, len(row.Returns))
+			for _, ret := range row.Returns {
+				returns = append(returns, periodReturnDTO{
+					Unrealised:       toComponentPointer(ret.Unrealised),
+					Realised:         toComponentDTO(ret.Realised),
+					Income:           toComponentDTO(ret.Income),
+					Fees:             toComponentDTO(ret.Fees),
+					Total:            toComponentPointer(ret.Total),
+					Reason:           string(ret.Reason),
+					OpeningPriceAsOf: formatHoldingDate(ret.OpeningPriceAsOf),
+					ClosingPriceAsOf: formatHoldingDate(ret.ClosingPriceAsOf),
+				})
+			}
+			holdings = append(holdings, reportHoldingDTO{
+				ID:          row.Holding.ID,
+				Name:        row.Holding.Name,
+				AccountName: row.AccountName,
+				Instrument:  string(row.Holding.Instrument),
+				Unit:        row.Holding.Unit,
+				Currency:    row.Holding.Currency,
+				Archived:    row.Holding.IsArchived(),
+				Returns:     returns,
+			})
+		}
+
+		WriteJSON(w, http.StatusOK, reportResponse{
+			Kind:            string(kind),
+			PrimaryCurrency: view.PrimaryCurrency,
+			Periods:         periods,
+			Holdings:        holdings,
+		})
+	}
+}
+
+func formatHoldingDate(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	out := t.Format(holdingDateLayout)
+	return &out
 }

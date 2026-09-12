@@ -237,6 +237,7 @@ func run() error {
 		Holdings:   holdingRepo,
 		Events:     holdingEventRepo,
 		Valuations: holdingValuationRepo,
+		Income:     postgres.NewHoldingIncomeRepo(db),
 		Accounts:   accountRepo,
 		Households: households,
 	})
@@ -339,7 +340,7 @@ func run() error {
 			Categories:     categorySvc,
 			Budgets:        budgetSvc,
 			Goals:          goalSvc,
-		Holdings:     holdingSvc,
+			Holdings:       holdingSvc,
 			Bills:          billSvc,
 			Retros:         retroSvc,
 			Visions:        visionSvc,

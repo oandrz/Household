@@ -426,12 +426,25 @@ func (s *HoldingService) DeleteIncome(ctx context.Context, householdID, holdingI
 //
 // It reads the household's WHOLE history once -- every holding, every event,
 // every income row, every price -- and computes in memory, rather than issuing
-// a query per holding per period. At this scale (single-digit holdings, tens of
-// events) that is a handful of rows and the simplest thing that is correct.
-// It stops being free somewhere around a household with hundreds of events
-// across dozens of holdings, at which point the fix is a query that folds in
-// SQL, not a cache: the numbers must not be allowed to disagree with the
-// portfolio screen's.
+// a query per holding per period.
+//
+// The work is bigger than "one fold per holding", so here is its real shape.
+// Each period needs the position at BOTH of its ends, and each of those is
+// folded from the beginning of the holding's life, because average cost
+// depends on everything before the window. That is `count x 2` folds per
+// holding, each of them O(n log n) in that holding's events: twelve quarters
+// is twenty-four full folds. Position also copies and re-sorts the slice every
+// time, which the repository's ordering already guarantees -- so at this scale
+// the sort is 24x redundant work that is nonetheless kept, because it is the
+// fold's own defence against a caller that did not order, and correctness that
+// depends on a caller's diligence is not correctness.
+//
+// At a household's scale (single-digit holdings, tens of events) all of that
+// is a handful of rows and microseconds, and it is the simplest thing that is
+// correct. It stops being free at maybe a thousand events across dozens of
+// holdings, where the answer is a query that folds in SQL -- not a cache: two
+// paths computing the same figure is how the report and the portfolio screen
+// would start disagreeing.
 //
 // Archived holdings are included. Selling out of something and tidying it away
 // does not unmake the profit it realised that quarter, and dropping it would

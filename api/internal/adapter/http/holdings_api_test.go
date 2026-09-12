@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 type holdingBody struct {
@@ -56,6 +57,10 @@ func TestHoldingRoutesRequireMoneyAndOwner(t *testing.T) {
 		{http.MethodPost, "/api/v1/holdings/" + zeroUUID + "/events", http.StatusBadRequest},
 		{http.MethodDelete, "/api/v1/holdings/" + zeroUUID + "/events/" + zeroUUID, http.StatusNotFound},
 		{http.MethodPost, "/api/v1/holdings/" + zeroUUID + "/valuations", http.StatusBadRequest},
+		{http.MethodGet, "/api/v1/holdings/report?kind=quarter", http.StatusOK},
+		{http.MethodGet, "/api/v1/holdings/" + zeroUUID + "/income", http.StatusNotFound},
+		{http.MethodPost, "/api/v1/holdings/" + zeroUUID + "/income", http.StatusBadRequest},
+		{http.MethodDelete, "/api/v1/holdings/" + zeroUUID + "/income/" + zeroUUID, http.StatusNotFound},
 	}
 
 	for _, route := range routes {
@@ -333,4 +338,307 @@ func bodyHasCode(rec *httptest.ResponseRecorder, want string) bool {
 		return false
 	}
 	return body.Error.Code == want
+}
+
+// --- the period report and income at the wire --------------------------------
+
+type componentBody struct {
+	NativeMinor  int64 `json:"nativeMinor"`
+	PrimaryMinor int64 `json:"primaryMinor"`
+}
+
+type periodReturnBody struct {
+	Unrealised       *componentBody `json:"unrealised"`
+	Realised         componentBody  `json:"realised"`
+	Income           componentBody  `json:"income"`
+	Fees             componentBody  `json:"fees"`
+	Total            *componentBody `json:"total"`
+	Reason           string         `json:"reason"`
+	OpeningPriceAsOf *string        `json:"openingPriceAsOf"`
+	ClosingPriceAsOf *string        `json:"closingPriceAsOf"`
+}
+
+type reportPeriodBody struct {
+	Kind    string `json:"kind"`
+	Year    int    `json:"year"`
+	Index   int    `json:"index"`
+	Label   string `json:"label"`
+	Start   string `json:"start"`
+	End     string `json:"end"`
+	Current bool   `json:"current"`
+}
+
+type reportHoldingBody struct {
+	ID       string             `json:"id"`
+	Name     string             `json:"name"`
+	Currency string             `json:"currency"`
+	Returns  []periodReturnBody `json:"returns"`
+}
+
+type reportBody struct {
+	Kind            string              `json:"kind"`
+	PrimaryCurrency string              `json:"primaryCurrency"`
+	Periods         []reportPeriodBody  `json:"periods"`
+	Holdings        []reportHoldingBody `json:"holdings"`
+}
+
+func decodeReport(t *testing.T, rec *httptest.ResponseRecorder) reportBody {
+	t.Helper()
+	var body reportBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode report: %v (body = %s)", err, rec.Body.String())
+	}
+	return body
+}
+
+// today in UTC, which is what the server's clock compares a date against. The
+// report tests date their rows today so that the period containing them is
+// always the current one -- a hard-coded month would put this test in a
+// different quarter depending on when it runs.
+func serverToday() string { return time.Now().UTC().Format("2006-01-02") }
+
+// /holdings/report must not be swallowed by the /holdings/{id}/... routes
+// registered beside it. If it were, this would be an id lookup and 404.
+func TestTheReportRouteIsNotAnIdLookup(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	rec := env.authed(t, http.MethodGet, "/api/v1/holdings/report?kind=quarter", nil, session, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("report = %d, want 200 (body = %s)", rec.Code, rec.Body.String())
+	}
+	if len(decodeReport(t, rec).Periods) == 0 {
+		t.Fatal("the report answered with no periods at all")
+	}
+}
+
+// The window length has ONE home, and it is the server. A frontend default
+// would be a second copy of the rule, free to drift from this one.
+func TestTheReportDefaultsItsWindowPerPeriodKind(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	for _, c := range []struct {
+		kind string
+		want int
+	}{{"quarter", 6}, {"half", 4}, {"year", 3}} {
+		rec := env.authed(t, http.MethodGet, "/api/v1/holdings/report?kind="+c.kind, nil, session, csrf)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s report = %d (body = %s)", c.kind, rec.Code, rec.Body.String())
+		}
+		body := decodeReport(t, rec)
+		if len(body.Periods) != c.want {
+			t.Errorf("%s: got %d periods, want the server's default of %d", c.kind, len(body.Periods), c.want)
+		}
+		if body.Kind != c.kind {
+			t.Errorf("kind = %q, want %q", body.Kind, c.kind)
+		}
+		if !body.Periods[len(body.Periods)-1].Current {
+			t.Errorf("%s: the last period must be the one the household is in", c.kind)
+		}
+	}
+}
+
+func TestTheReportRefusesAKindOrCountItCannotDraw(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	for _, query := range []string{"?kind=month", "?kind=quarter&count=0", "?kind=quarter&count=99", "?kind=quarter&count=many", ""} {
+		rec := env.authed(t, http.MethodGet, "/api/v1/holdings/report"+query, nil, session, csrf)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%q = %d, want 400 (body = %s)", query, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+// The whole report in one round trip: a holding bought and priced today, a
+// dividend and a fee, read back as the three components plus their total --
+// and the date the closing price carries, so the screen can say how old it is.
+func TestTheReportCarriesEveryComponentAndThePriceDates(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	account := newHoldingAccount(t, env, session, csrf, "Brokerage", "investment")
+	today := serverToday()
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/holdings", map[string]any{
+		"accountId": account, "name": "Gold bar", "instrument": "gold", "unit": "gram",
+	}, session, csrf)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d (body = %s)", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		Holding holdingBody `json:"holding"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	id := created.Holding.ID
+
+	// 10 grams for S$1,000.00, worth S$120.00 each today: S$200.00 unrealised.
+	rec = env.authed(t, http.MethodPost, "/api/v1/holdings/"+id+"/events", map[string]any{
+		"kind": "acquisition", "quantity": "10", "amountMinor": 100000, "occurredOn": today,
+	}, session, csrf)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("buy = %d (body = %s)", rec.Code, rec.Body.String())
+	}
+	rec = env.authed(t, http.MethodPost, "/api/v1/holdings/"+id+"/valuations", map[string]any{
+		"unitPriceMinor": 12000, "asOf": today,
+	}, session, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("valuation = %d (body = %s)", rec.Code, rec.Body.String())
+	}
+	for _, row := range []struct {
+		kind  string
+		minor int64
+	}{{"income", 4500}, {"fee", 500}} {
+		rec = env.authed(t, http.MethodPost, "/api/v1/holdings/"+id+"/income", map[string]any{
+			"kind": row.kind, "amountMinor": row.minor, "receivedOn": today,
+		}, session, csrf)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("%s = %d (body = %s)", row.kind, rec.Code, rec.Body.String())
+		}
+	}
+
+	rec = env.authed(t, http.MethodGet, "/api/v1/holdings/report?kind=quarter&count=2", nil, session, csrf)
+	body := decodeReport(t, rec)
+	if body.PrimaryCurrency != "SGD" {
+		t.Fatalf("primaryCurrency = %q, want SGD", body.PrimaryCurrency)
+	}
+	if len(body.Holdings) != 1 || len(body.Holdings[0].Returns) != 2 {
+		t.Fatalf("got %d holdings with %d returns, want 1 with 2", len(body.Holdings), len(body.Holdings[0].Returns))
+	}
+	current := body.Holdings[0].Returns[1]
+
+	if current.Unrealised == nil || current.Unrealised.NativeMinor != 20000 {
+		t.Errorf("unrealised = %v, want 20000", current.Unrealised)
+	}
+	if current.Income.NativeMinor != 4500 || current.Fees.NativeMinor != 500 {
+		t.Errorf("income = %d, fees = %d, want 4500 and 500", current.Income.NativeMinor, current.Fees.NativeMinor)
+	}
+	// Fees are reported positive and already taken out of the total.
+	if current.Total == nil || current.Total.NativeMinor != 24000 {
+		t.Errorf("total = %v, want 24000", current.Total)
+	}
+	// The date crosses the wire as a date, not as a boolean. A screen that
+	// only knows a price EXISTS cannot say how stale it is, which is this
+	// feature's top product risk.
+	if current.ClosingPriceAsOf == nil || *current.ClosingPriceAsOf != today {
+		t.Errorf("closingPriceAsOf = %v, want %q", current.ClosingPriceAsOf, today)
+	}
+	// Nothing was held at the open, so no price was consulted there.
+	if current.OpeningPriceAsOf != nil {
+		t.Errorf("openingPriceAsOf = %v, want null", current.OpeningPriceAsOf)
+	}
+	if current.Reason != "" {
+		t.Errorf("reason = %q, want empty on a computable period", current.Reason)
+	}
+	// The quarter before this holding existed reports ZERO, and reports it
+	// without a reason: nothing was held at either end, so nothing needed a
+	// price and nothing was earned. That is knowable, unlike a quarter that
+	// was held through and never priced -- which blanks instead.
+	previous := body.Holdings[0].Returns[0]
+	if previous.Unrealised == nil || previous.Unrealised.NativeMinor != 0 {
+		t.Errorf("the previous quarter = %+v, want a provable zero", previous.Unrealised)
+	}
+	if previous.Reason != "" {
+		t.Errorf("reason = %q, want none -- holding nothing is not unknowable", previous.Reason)
+	}
+	if previous.ClosingPriceAsOf != nil {
+		t.Errorf("closingPriceAsOf = %v, want null -- no price was consulted", previous.ClosingPriceAsOf)
+	}
+}
+
+func TestIncomeRoundTripsAndDeletes(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	account := newHoldingAccount(t, env, session, csrf, "Brokerage", "investment")
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/holdings", map[string]any{
+		"accountId": account, "name": "D05", "instrument": "stock", "unit": "share",
+	}, session, csrf)
+	var created struct {
+		Holding holdingBody `json:"holding"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	id := created.Holding.ID
+
+	rec = env.authed(t, http.MethodPost, "/api/v1/holdings/"+id+"/income", map[string]any{
+		"kind": "income", "amountMinor": 4500, "receivedOn": serverToday(), "note": "Q3 dividend",
+	}, session, csrf)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create income = %d (body = %s)", rec.Code, rec.Body.String())
+	}
+	var one struct {
+		Income struct {
+			ID          string `json:"id"`
+			Kind        string `json:"kind"`
+			AmountMinor int64  `json:"amountMinor"`
+			Currency    string `json:"currency"`
+			ReceivedOn  string `json:"receivedOn"`
+			Note        string `json:"note"`
+		} `json:"income"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &one); err != nil {
+		t.Fatalf("decode income: %v", err)
+	}
+	if one.Income.Currency != "SGD" || one.Income.AmountMinor != 4500 || one.Income.Note != "Q3 dividend" {
+		t.Fatalf("created income = %+v", one.Income)
+	}
+
+	rec = env.authed(t, http.MethodGet, "/api/v1/holdings/"+id+"/income", nil, session, csrf)
+	var list struct {
+		Income []struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+		} `json:"income"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(list.Income) != 1 || list.Income[0].Kind != "income" {
+		t.Fatalf("list = %+v, want the one dividend", list.Income)
+	}
+
+	rec = env.authed(t, http.MethodDelete, "/api/v1/holdings/"+id+"/income/"+one.Income.ID, nil, session, csrf)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete = %d, want 204 (body = %s)", rec.Code, rec.Body.String())
+	}
+	rec = env.authed(t, http.MethodGet, "/api/v1/holdings/"+id+"/income", nil, session, csrf)
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode list after delete: %v", err)
+	}
+	if len(list.Income) != 0 {
+		t.Fatalf("list after delete = %+v, want empty", list.Income)
+	}
+}
+
+// A dividend dated tomorrow is a typo, refused at the wire and not only in a
+// unit test -- the same guard events and valuations carry.
+func TestFutureDatedIncomeIsRefusedAtTheWire(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	account := newHoldingAccount(t, env, session, csrf, "Brokerage", "investment")
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/holdings", map[string]any{
+		"accountId": account, "name": "D05", "instrument": "stock", "unit": "share",
+	}, session, csrf)
+	var created struct {
+		Holding holdingBody `json:"holding"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	tomorrow := time.Now().UTC().AddDate(0, 0, 2).Format("2006-01-02")
+	rec = env.authed(t, http.MethodPost, "/api/v1/holdings/"+created.Holding.ID+"/income", map[string]any{
+		"kind": "income", "amountMinor": 4500, "receivedOn": tomorrow,
+	}, session, csrf)
+	// 422, not 400: the request is well formed and the date is simply not
+	// allowed -- the same answer a future-dated event and valuation already
+	// give (errors.go maps ErrHoldingDateInFuture once, for all three).
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("future-dated income = %d, want 422 (body = %s)", rec.Code, rec.Body.String())
+	}
 }

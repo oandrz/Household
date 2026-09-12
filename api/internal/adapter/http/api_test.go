@@ -310,6 +310,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Holdings:   postgres.NewHoldingRepo(db),
 		Events:     postgres.NewHoldingEventRepo(db),
 		Valuations: postgres.NewHoldingValuationRepo(db),
+		Income:     postgres.NewHoldingIncomeRepo(db),
 		Accounts:   accountRepo,
 		Households: households,
 	})

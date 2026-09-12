@@ -107,3 +107,105 @@ export type HoldingValuation = z.infer<typeof holdingValuationSchema>;
 export const holdingValuationsResponseSchema = z.object({
   valuations: z.array(holdingValuationSchema),
 });
+
+// --- income, and the period report -------------------------------------------
+
+// Mirrors domain.IncomeKind. Both are stored POSITIVE and the report subtracts
+// the fees -- a negative amount is refused everywhere in this product, and one
+// exception is how a rule stops being a rule.
+export const incomeKindSchema = z.enum(["income", "fee"]);
+export type IncomeKind = z.infer<typeof incomeKindSchema>;
+
+export const holdingIncomeSchema = z.object({
+  id: z.string(),
+  kind: incomeKindSchema,
+  amountMinor: z.number(),
+  currency: z.string(),
+  primaryAmountMinor: z.number().nullable(),
+  primaryCurrency: z.string().nullable(),
+  receivedOn: z.string(),
+  note: z.string(),
+});
+export type HoldingIncome = z.infer<typeof holdingIncomeSchema>;
+
+export const holdingIncomeResponseSchema = z.object({ income: z.array(holdingIncomeSchema) });
+
+// Mirrors domain.PeriodKind. "half" is a calendar half-year (H1, H2), not a
+// rolling six months.
+export const periodKindSchema = z.enum(["quarter", "half", "year"]);
+export type PeriodKind = z.infer<typeof periodKindSchema>;
+
+// Mirrors domain.BlankReason, with "" for a period that computed fine. The
+// empty string is a real value on the wire rather than an absent field, so a
+// screen switches on it instead of testing for undefined.
+export const blankReasonSchema = z.enum(["", "no_opening_price", "no_closing_price"]);
+export type BlankReason = z.infer<typeof blankReasonSchema>;
+
+// One figure in both currencies. The primary one is the household's own and is
+// what answers "did this make us richer"; the native one sits beside it so the
+// owner can still tell whether the PICK was good and the exchange rate was the
+// problem.
+export const returnComponentSchema = z.object({
+  nativeMinor: z.number(),
+  primaryMinor: z.number(),
+});
+export type ReturnComponent = z.infer<typeof returnComponentSchema>;
+
+// periodReturnSchema mirrors periodReturnDTO.
+//
+// `unrealised` and `total` are NULL rather than zero when they cannot be
+// known, and `reason` says which price was missing. A screen must render the
+// reason, never a zero: a quarter nobody priced is unknowable, not flat --
+// the same rule the net worth card follows. `realised`, `income` and `fees`
+// are always present, because no price is involved in computing them.
+//
+// The price dates are dates, not booleans, so the screen can say how OLD the
+// figure is. Null means no price was consulted at that end, which is what
+// holding nothing there means -- not a price that is missing.
+export const periodReturnSchema = z.object({
+  unrealised: returnComponentSchema.nullable(),
+  realised: returnComponentSchema,
+  income: returnComponentSchema,
+  fees: returnComponentSchema,
+  total: returnComponentSchema.nullable(),
+  reason: blankReasonSchema,
+  openingPriceAsOf: z.string().nullable(),
+  closingPriceAsOf: z.string().nullable(),
+});
+export type PeriodReturn = z.infer<typeof periodReturnSchema>;
+
+export const reportPeriodSchema = z.object({
+  kind: periodKindSchema,
+  year: z.number(),
+  index: z.number(),
+  label: z.string(),
+  start: z.string(),
+  end: z.string(),
+  // The period the household is still living in, which the screen labels "to
+  // date" rather than presenting as a closed result.
+  current: z.boolean(),
+});
+export type ReportPeriod = z.infer<typeof reportPeriodSchema>;
+
+// `returns` is index-aligned with the response's `periods`. The chart reads
+// the two together by POSITION rather than matching labels, which is what
+// stops a holding with a gap in its history shifting its own bars.
+export const reportHoldingSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  accountName: z.string(),
+  instrument: instrumentKindSchema,
+  unit: z.string(),
+  currency: z.string(),
+  archived: z.boolean(),
+  returns: z.array(periodReturnSchema),
+});
+export type ReportHolding = z.infer<typeof reportHoldingSchema>;
+
+export const portfolioReportSchema = z.object({
+  kind: periodKindSchema,
+  primaryCurrency: z.string(),
+  periods: z.array(reportPeriodSchema),
+  holdings: z.array(reportHoldingSchema),
+});
+export type PortfolioReport = z.infer<typeof portfolioReportSchema>;
