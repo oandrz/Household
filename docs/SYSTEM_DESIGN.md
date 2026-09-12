@@ -23,6 +23,16 @@ clamping a stored anchor day rather than the date itself (§5), and whose
 "mark paid" writes a real expense transaction into `transactions` — the one
 place in Money something outside Transactions writes its ledger — so Budget,
 Spending by person and net worth all move the moment a bill is settled.
+**A sixth Money feature now exists that the design does not draw: Portfolio** —
+investment holdings with fractional quantities, average-cost basis, and a dated
+price per holding. `design/Household Dashboard.dc.html` shows "Investments &
+CPF" only as a slice of the net-worth breakdown, so this is milestone 1 of
+`.claude/prds/investment-portfolio-tracking.prd.md` rather than a design
+feature. **It is deliberately invisible to net worth and to the twelve-month
+trend** — the page says so on its face — because folding holdings in is
+milestone 3 and needs a decision first about whether an investment account also
+carries uninvested cash. The period report (quarter, half-year, year) and the
+moomoo import are milestones 2 and 4 and are **not built**.
 Marriage's first feature, Retros, is code-complete, reviewed and now walked:
 its three tables and their relationships (§6), its route group and both
 guards (§4), and its frontend — `RetrosPage.tsx`'s five screen states, a real
@@ -729,6 +739,8 @@ refuses (spec decision 7).
 | `BudgetRepository` | `adapter/postgres` | Fourteenth. `Get` returns `domain.ErrNotFound` for an unbudgeted month, which the service turns into the empty state, not an error; `Upsert` replaces one household-month wholesale in a single transaction — parent row upserted on `(household_id, month)`, every existing line deleted, every new line inserted, category ownership validated first — never a merge, so a category the caller left out of the payload is unambiguously gone after the call; `History` returns the closed months in range that actually have a budget row, never zero-filled; `RollOverToGoal` writes a `goal_contributions` row **and** stamps `budgets.rolled_over_at`/`rollover_goal_id` in one transaction — the stamp is a conditional `UPDATE ... WHERE rolled_over_at IS NULL`, so a second concurrent call finds no row to update and answers `ErrRolloverAlreadyDone` rather than writing a second contribution (§5) |
 | `GoalRepository` | `adapter/postgres` | Fifteenth. `List`/`Get` return each goal's stored fields plus the one figure only SQL can cheaply supply — the summed `contributed` — leaving percent, status and required-monthly to `domain.` arithmetic in the service; `Create` writes the goal and, when a starting balance is given, its opening contribution in one transaction, so a goal with a missing opening contribution cannot exist; `DeleteContribution` clears a rolled-over month's stamp in the same transaction as the delete when the row being removed is that month's rollover (§5). The port's own doc comment carries a warning no other repository needs: `goal_contributions.household_id` has no database-level constraint tying it to its own `goal_id`'s household, so every method that reads or writes a contribution filters by `household_id` **and** `goal_id` together, never by contribution id alone |
 | `BillRepository` | `adapter/postgres` | Sixteenth. `List`'s `includeArchived` is the same UNION-not-filter-swap contract as `AccountRepository`/`GoalRepository`. `RecordPayment` writes the expense (`transactions`), the payment (`bill_payments`) and the advanced `next_due` in one transaction — a bill left advanced with no payment, or a payment with no expense, is not a state this port can produce; `UndoPayment` reverses all three the same way, refusing any payment that is not the bill's most recent with `*domain.BillPaymentNotLatestError`. `MonthTotals` cannot come from `bills` alone — a bill already paid this month has `next_due` in the *next* one — so it unions `bill_payments` (by `due_on`) with still-unpaid live bills (by `next_due`); the two halves filter archived bills differently on purpose (§5). `bill_payments.household_id` carries the same unenforced-by-the-database warning as `goal_contributions`: every method filters by `household_id` **and** `bill_id` together, never by payment id alone (§6) |
+| `HoldingRepository`, `HoldingEventRepository`, `HoldingValuationRepository` | `adapter/postgres` (all three in `holding_repo.go`) | Seventeenth to nineteenth — three narrow ports over three tables rather than one object with fifteen methods, the same interface-segregation rule the nine before them follow. `HoldingRepository.List`'s `includeArchived` is the UNION-not-filter-swap contract again. **`HoldingEventRepository` is the one worth reading twice.** `ListByHolding` returns events ordered `(occurred_on, created_at, id)` and the port's doc comment calls that a CONTRACT, not a preference: `occurred_on` is a date, so buying and selling the same morning is a tie, and `domain.Holding.Position` sorts *stably* — it keeps whatever order it is handed. On identical same-day events, buy-then-sell realises 750 where sell-then-buy realises 1000, so the repository's ORDER BY is what makes a household's realised gain deterministic. `InsertWithFold`/`DeleteWithFold` exist because reading, folding and writing as three calls is not equivalent to doing them atomically: they take a row lock on the holding, list its events inside the same transaction, and hand them to the caller's fold, writing only if it accepts. The fold stays in the domain; the port owns the transaction and the lock, never the rule (§5) |
+| `HoldingCounter` | `adapter/postgres` (`*HoldingRepo` already satisfies it) | Unnumbered, like `AccountLookup`/`GoalProgressReader` — a narrow port for one question asked in the opposite direction. `AccountService` patches an account's `Type` freely, so without this an owner could turn a brokerage into a cash account while it still held 300g of gold, leaving holdings anchored to a type `HoldingService` would never have accepted. One method: does this account still hold anything. `AccountDeps.Holdings` is **required, not optional** — a nil there would silently disable the guard, and a guard you can switch off by forgetting a field is not a guard |
 | `AccountLookup`, `CategoryLookup` | `adapter/postgres` (`*AccountRepo` and `*CategoryRepo` already satisfy them) | Narrower ports `TransactionService` depends on instead of the full repositories above — interface segregation: it needs an account's currency and household, and whether a category id belongs to this household and what kind it is, never `List` or `EnsureSeeded`. `BillService.MarkPaid` depends on this same `AccountLookup`, for the same reason and to the same effect: the pay-from account's currency, not a value Bills stores of its own (§5). `BillService.Create`/`Update` depend on the same `CategoryLookup` too: a bill's category is copied onto the real expense `MarkPaid` writes, so it has to satisfy the ledger's own rule — this household's, and an expense category — or the spend lands in Budget's `Spent` and in no category row at all |
 | `RetroRepository` | `adapter/postgres` | Seventeenth. `Create` answers `ErrAlreadyExists` on the `UNIQUE(household_id, month)` clash; `Update` takes the caller-normalised month and version it loaded, and tells "the retro is gone" (`ErrNotFound`, from a recheck read) from "someone saved first" (`ErrRetroChanged`, from a zero-row `UPDATE ... WHERE version = $n`) apart — never merges (§5); `Complete` is idempotent on the caller's own `at`; `DeleteDraft` puts `WHERE completed_at IS NULL` in the SQL itself, not a service `if`, so a zero-row match on a finished retro is `ErrNotFound`, not a silent no-op (`docs/LEARNING.md`'s Bills `SetBillNextDue` entry is the same defect shape this port was built to avoid) |
 | `RetroActionRepository` | `adapter/postgres` | Eighteenth. `Add` writes the action and its assignees in one transaction, so a bad assignee id leaves no orphan action; `carriedFrom` is validated through a join back to `retros` requiring the same household before it is trusted, and a malformed id is refused rather than silently read as SQL NULL (`docs/LEARNING.md`) — "fail closed on values you did not construct" applied to a field the client supplies directly. `OpenInMonth` backs both the modal's "Still open from July" offer and Overview's `openActionCount` |
@@ -842,7 +854,7 @@ graph TD
     RequireFeature --> Cap
 
     Cap -->|"accounts: money"| RequireCap["requireCapability(money)<br/>403 unless the caller's membership has it"]
-    Cap -->|"transactions, categories,<br/>budgets, goals, bills: money AND owner —<br/>reads included"| RequireCapTxn["requireCapability(money)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
+    Cap -->|"transactions, categories,<br/>budgets, goals, bills, holdings: money AND owner —<br/>reads included"| RequireCapTxn["requireCapability(money)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
     Cap -->|"retros, marriage/vision,<br/>marriage/agreements:<br/>marriage AND owner — reads included"| RequireCapRetro["requireCapability(marriage)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
     Cap -->|"no — most routes"| Safe{"GET or HEAD?"}
     RequireCap --> Safe
@@ -1027,7 +1039,7 @@ first time the *server* enforces one. `/marriage`'s route was deleted in
 `/marriage/retros`, and the server-side gate below is the enforcement either
 way regardless of which routes the frontend happens to offer.)
 
-**Transactions, categories, budgets, goals, bills and retros are the routes
+**Transactions, categories, budgets, goals, bills, holdings and retros are the routes
 where `requireOwner` gates a `GET`.** Every other owner-gated route in this
 table only reaches `requireOwner` after the `CSRF` check, which by
 construction means never on a read. These groups instead run
@@ -1174,6 +1186,15 @@ rows, and a link redemption writes neither.
 | POST | `/goals/{id}/archive`, `/goals/{id}/restore` | session · money · owner · CSRF |
 | POST | `/goals/{id}/contributions` | session · money · owner · CSRF |
 | DELETE | `/goals/{id}/contributions/{contributionId}` | session · money · owner · CSRF |
+| GET | `/holdings` | session · money · owner — a portfolio is a table whose every figure is money, so the same reasoning as the transactions/goals reads above: blanking every number leaves a page that reads as broken rather than private. `?include_archived=true` is a union, not a filter swap |
+| GET | `/holdings/{id}/events`, `/holdings/{id}/valuations` | session · money · owner |
+| POST | `/holdings` | session · money · owner · CSRF |
+| PATCH | `/holdings/{id}` | session · money · owner · CSRF — name, instrument and unit only; currency and account are recreate-only, because a holding's currency is what every one of its events is denominated in and moving it between accounts would move money with no ledger row to say so |
+| POST | `/holdings/{id}/archive`, `/holdings/{id}/restore` | session · money · owner · CSRF |
+| POST | `/holdings/{id}/events` | session · money · owner · CSRF |
+| DELETE | `/holdings/{id}/events/{eventId}` | session · money · owner · CSRF |
+| POST | `/holdings/{id}/valuations` | session · money · owner · CSRF — POST but it **upserts**, and answers **200, never 201**: one price per holding per day, so a second write for the same date is a correction rather than a new thing |
+| DELETE | `/holdings/{id}/valuations/{valuationId}` | session · money · owner · CSRF — routed, but no screen calls it yet (`docs/FEATURE_TRACKER.md` names the gap) |
 | GET | `/bills` | session · money · owner — same reasoning as the transactions/categories/budgets/goals reads above |
 | POST | `/bills` | session · money · owner · CSRF |
 | PATCH | `/bills/{id}` | session · money · owner · CSRF |
@@ -2371,6 +2392,72 @@ bill autopaying with no named person makes that the common case, not the
 exception, so the grouping now emits an explicit `Unattributed` row rather
 than silently under-counting the month's spend.
 
+### Portfolio — the position is folded on read, and the fold runs inside the write
+
+A holding stores no running total. What it holds, what that cost and what
+selling has realised are all folded from its events on every read, the same
+"composed on read, not stored" choice Accounts makes for net worth — and for the
+same reason: a stored total is a second source of truth that drifts.
+
+```mermaid
+sequenceDiagram
+    participant W as Web
+    participant H as "HTTP: money + owner"
+    participant S as HoldingService
+    participant R as "HoldingEventRepo"
+    participant DB as Postgres
+
+    W->>H: "POST /holdings/{id}/events"
+    H->>S: "RecordEvent(event, today)"
+    S->>S: "refuse a future date"
+    S->>S: "Validate against the holding's currency<br/>and the household's primary"
+    S->>R: "InsertWithFold(event, fold)"
+    R->>DB: BEGIN
+    R->>DB: "SELECT ... FROM holdings FOR UPDATE"
+    Note over R,DB: A second writer blocks HERE, before it<br/>can fold a position the first is consuming
+    R->>DB: "SELECT events ORDER BY (occurred_on, created_at, id)"
+    R-->>S: "fold(existing + this one)"
+    S->>S: "domain.Holding.Position — refuses an oversell"
+    R->>DB: "INSERT the event, then COMMIT"
+    R-->>W: "the whole holding, re-folded"
+```
+
+**Three things in that diagram are the feature, and each looks like a detail.**
+
+**The lock is not decoration.** Reading the events, folding them and inserting as
+three separate calls is not equivalent to doing them atomically: two sales of 30
+from a holding of 50 are each legal alone and illegal together, so both would
+fold the same starting position and both commit — leaving events that cannot be
+folded at all, which is a page that throws every time it loads and can only be
+fixed from the page that is broken. `InsertWithFold` holds the row lock from
+before the fold until after the insert. `DeleteWithFold` does the same in the
+other direction, for removing a purchase a later sale was costed against.
+
+**The fold stays in the domain.** The repository owns the transaction and the
+lock; the rule it enforces is the caller's own closure, which is
+`domain.Holding.Position`. An adapter that decided what "oversold" means would
+be authorisation's mistake in a different costume.
+
+**The ORDER BY is a contract.** `occurred_on` is a date, so buying and selling
+the same morning is a tie, and `Position` sorts *stably* — it keeps whatever
+order it is handed. The repository breaks the tie by the order the events were
+actually recorded, and the answer depends on it: on identical same-day events,
+buy-then-sell realises 750 where sell-then-buy realises 1000.
+
+Reads compose the same way. `GET /holdings` issues three queries — every
+holding, every event, every latest price — and folds each position in memory,
+rather than one query per holding. A holding nobody has priced comes back with
+**no** market value rather than a zero one: `hasMarketValue: false` and a null
+`valuedAt`, so the screen says "No price recorded" instead of claiming the
+holding is worthless. Producing that absence is the service's job, not the
+handler's, and not the page's.
+
+**Holdings are deliberately absent from net worth.** Nothing here touches
+`accounts`, the net worth composition above, or the twelve-month trend. The
+response carries `notInNetWorth: true` as a wire-level fact so the page states
+it rather than hard-coding the sentence — when milestone 3 folds holdings in,
+the flag changes on the server and the banner follows.
+
 ### Retros — one shared draft, a version guard that a tick deliberately bypasses
 
 ```mermaid
@@ -2837,6 +2924,9 @@ erDiagram
     categories ||--o{ budget_lines : caps
     households ||--o{ goals : has
     goals ||--o{ goal_contributions : has
+    accounts ||--o{ holdings : "holds"
+    holdings ||--o{ holding_events : "bought and sold"
+    holdings ||--o{ holding_valuations : "priced on a day"
     households ||--o{ goal_contributions : scopes
     goals ||--o{ budgets : "may receive a rollover (nullable)"
     households ||--o{ bills : has
@@ -3094,6 +3184,45 @@ erDiagram
         date source_budget_month "nullable — set only for source=budget_rollover"
         timestamptz created_at
     }
+
+    holdings {
+        uuid id PK
+        uuid household_id FK
+        uuid account_id FK "no ON DELETE — accounts archive, never delete"
+        text name
+        text instrument "CHECK stock | gold | other"
+        text unit "share, gram, unit — a label; nothing computes with it"
+        char currency "per row, like goals — a holding accumulates for years"
+        timestamptz archived_at "nullable — archived, never deleted"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    holding_events {
+        uuid id PK
+        uuid holding_id FK
+        uuid household_id FK "redundant with the holding's own — every read scopes by both"
+        text kind "CHECK acquisition | disposal — income is deliberately NOT one"
+        bigint quantity_nano "billionths of a unit; CHECK greater than zero"
+        bigint amount_minor "the WHOLE event, not a unit price"
+        bigint primary_amount_minor "nullable — the same event in the household's currency"
+        char primary_currency "nullable — NULL together with the amount, by CHECK"
+        date occurred_on
+        text note
+        timestamptz created_at
+    }
+
+    holding_valuations {
+        uuid id PK
+        uuid holding_id FK
+        uuid household_id FK "redundant, scoped by both — as above"
+        bigint unit_price_minor "PER UNIT, unlike holding_events.amount_minor"
+        bigint primary_unit_price_minor "nullable"
+        char primary_currency "nullable — NULL together, by CHECK"
+        date as_of "the day the price was TRUE, not the day it was typed"
+        text note
+        timestamptz created_at
+    }
     bills {
         uuid id PK
         uuid household_id FK
@@ -3220,6 +3349,40 @@ erDiagram
 
 Notes that are not obvious from the shapes:
 
+- **The holdings tables touch nothing that already exists.** No column was added
+  to `accounts`, nothing reads a holding into a balance, and net worth and the
+  twelve-month trend are untouched by design. That is milestone 1's whole
+  boundary; folding holdings into net worth is milestone 3 and needs its own
+  decision about whether an investment account also carries uninvested cash.
+  `holdings.account_id` exists so that decision has its join already, and
+  carries no `ON DELETE` clause because accounts are archived, never deleted.
+- **`holdings` is unique on `(account_id, name)`, not `(household_id, name)`.**
+  Holding the same ticker in two brokerages is ordinary, and they are genuinely
+  different positions with different cost bases. Scoping the key to the
+  household would make the ordinary case unrepresentable.
+- **`holding_events_fold_idx` is `(holding_id, occurred_on, created_at, id)`
+  and the last two columns are not noise.** `occurred_on` is a date, so two
+  events share one whenever a household buys and sells the same morning, and
+  `domain.Holding.Position` sorts *stably* — it keeps whatever order it is
+  handed for a tie. The index and `ListHoldingEvents`' matching ORDER BY are
+  therefore what make the answer deterministic: on identical same-day events,
+  buy-then-sell realises 750 where sell-then-buy realises 1000.
+- **`quantity_nano` is billionths of a unit, and the scale is not a constant to
+  change.** A quantity is genuinely fractional — 300.5 grams, half a share —
+  and `float64` never enters this product's monetary path, so it is an integer
+  here for the reason money is. Changing the scale silently restates every
+  stored row; it would need a migration that rewrites the column.
+- **`primary_amount_minor` carries its own `primary_currency`, unlike a
+  transfer's `received_amount`.** A transfer gets its code from the to-account
+  join; a holding event has no account to join one from. Without the stored
+  code, a household changing its primary currency would leave these figures
+  silently meaning something they no longer mean. Both columns are NULL
+  together, by CHECK.
+- **`holding_valuations` is unique on `(holding_id, as_of)`** — one price per
+  day, so re-entering a day's price is a correction rather than a second
+  opinion, and no report has to choose between two rows for one date. A future
+  `as_of` is refused in the service: latest-price lookups order by `as_of`, so
+  one price mistyped as 2030 would outrank every real one forever.
 - **Only hashes are stored** — passwords, session tokens, magic-link tokens,
   invite tokens and sign-up tokens. A raw token exists in memory and in an
   email, never in a column.
@@ -4065,7 +4228,7 @@ recent-transactions strip — five newest, reading through the same
 `useTransactions({})` query the Transactions page's own default (unfiltered)
 state resolves to, so the two share one cache entry rather than the strip
 standing up a second endpoint. `/money/transactions`, `/money/budget`,
-`/money/goals` and `/money/bills` are all real routes, siblings of `/money`
+`/money/goals`, `/money/portfolio` and `/money/bills` are all real routes, siblings of `/money`
 nested under the same `moneyGuardRoute` (a literal path segment beats a
 catch-all, so each was declared and added to that route's children ahead of
 the splat while one still existed). **`/money/$` itself is gone.** Bills was
@@ -4133,7 +4296,31 @@ flag rather than being called unconditionally: a limited member must not
 fire a request that can only 403 and cache the failure. Second,
 **the absent `summary` is the only signal the frontend has** that a caller may
 not see amounts, so the page must never synthesise one; a zero there would be a
-claim about the household's money. The middle row of that table is the one that
+claim about the household's money.
+
+**`/money/portfolio` follows the same file shape as Goals** — a page, a modal, a
+child-ledger panel, one hook and its Zod schemas — and carries two rules of its
+own worth naming here, because both are invisible from the component and both
+were shipped wrong first.
+
+A **quantity is a string end to end.** It is typed into a text input, sent
+verbatim, and rendered from the string the server formatted; nothing on the
+client divides `heldNano` by 1e9 or multiplies a typed figure up to it. That
+conversion is `float64` arithmetic on a figure a money screen shows, which is
+the defect `docs/LEARNING.md` records this codebase shipping once already
+(`333333 * 0.3 === 99999.90000000001`). The DTO carries both the integer and
+the formatted string so the division stays on the server, in integers.
+
+**Three branches are rendered from what the server said, never from logic
+invented on the page:** `hasMarketValue` false means "No price recorded" and
+never a zero, because a holding nobody has priced is unknowable rather than
+worthless; `notInNetWorth` is the banner, so when milestone 3 folds holdings in
+the flag changes server-side and the sentence disappears without a frontend
+edit; and `valuedAt` shows how stale the price is, because valuations going
+quietly stale is this feature's largest product risk. Each has a test that
+renders the page with the flag both ways.
+
+The middle row of that table is the one that
 shipped broken — it rendered nothing at all until a browser walk found it, and
 every unit test passed both before and after, because each asserted only that
 something was *absent* (see `docs/LEARNING.md` pattern 2).

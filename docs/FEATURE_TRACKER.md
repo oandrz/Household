@@ -13,7 +13,7 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Out of scope — three different reasons, and **the row always says which**: marked "· not built" by the design itself; cut outright by the product owner (the audit screen, §9 — the code was deleted); or **deferred past the current release** by the product owner, meaning it is expected back later (the Family calendar, §7). A 🚫 is not a promise that something will never exist — it is a statement that it is not this release's work, and the row says what would bring it back |
 
-**Where things stand:** 113 of 134 features built or partly built — and **five of the 134 are 🚫**, so the honest denominator for this release is 129.
+**Where things stand:** 119 of 140 features built or partly built — and **five of the 140 are 🚫**, so the honest denominator for this release is 135.
 
 > **Recounted 2026-09-02**, when the four unbuilt platform-administration
 > features were given rows (section 9). The count of *built* work does not
@@ -972,19 +972,45 @@ Totals **94/19/16/5 = 134**, denominator **129** — every other section
 recounted the same way and unchanged, so only §1's row moved. The headline
 above now states Built + Partial **113** of **134**, denominator **129**.
 
+> **The portfolio update, 2026-09-12 — six rows the design does not draw.**
+> `design/Household Dashboard.dc.html` shows "Investments & CPF" only as a
+> slice of the net-worth breakdown; there is no portfolio screen in it
+> anywhere. Milestone 1 of the investment PRD builds one, so the rows are
+> added under this file's own rule for work the design does not describe.
+> Five are ✅ and one is 🟡 — "Holdings are **not** in net worth", whose gap
+> is deliberate and named, since folding them in is milestone 3 and needs a
+> decision about uninvested cash first.
+>
+> **Recounted, not adjusted by hand** — and the recount found a second thing
+> worth recording. A script counting the first status symbol in each row's
+> own State cell disagreed with the stated totals by exactly one, in
+> Automation. The stated total was **right** and the script was wrong: the
+> `/nudges on\|off` row carries an ESCAPED PIPE in its feature name, and
+> splitting a row on every `|` shifts each column after it, so that row's
+> state was read out of the Notes cell and counted as nothing. Any future
+> recount has to split on unescaped pipes only. This file already records
+> that adjusting by delta produces wrong numbers; it can now also record
+> that a naive recount does.
+>
+> With that fixed the script reproduces the previous totals exactly
+> (94/19/16/5 = 134), which is what makes the new ones trustworthy:
+> 12/2/2/0, 7/1/1/0, 11/8/2/0, 8/2/1/0, **30/4/7/0**, 16/2/2/0, 0/0/0/3,
+> 0/0/0/1, 7/1/0/1, 8/0/1/0 — **99/20/16/5 = 140**, Built + Partial **119**,
+> denominator **135**. Only Money moved.
+
 | Area | Built | Partial | Not started | Out of scope |
 |---|---|---|---|---|
 | Entry & authentication | 12 | 2 | 2 | 0 |
 | Navigation shell | 7 | 1 | 1 | 0 |
 | Household settings | 11 | 8 | 2 | 0 |
 | Overview (home) | 8 | 2 | 1 | 0 |
-| Money | 25 | 3 | 7 | 0 |
+| Money | 30 | 4 | 7 | 0 |
 | Marriage | 16 | 2 | 2 | 0 |
 | Family | 0 | 0 | 0 | 3 |
 | Household extras | 0 | 0 | 0 | 1 |
 | Platform administration | 7 | 1 | 0 | 1 |
 | Automation | 8 | 0 | 1 | 0 |
-| **Total** | **94** | **19** | **16** | **5** |
+| **Total** | **99** | **20** | **16** | **5** |
 
 ---
 
@@ -1184,6 +1210,30 @@ code *and* a walk confirming it. All five Money features are now walked.
 | Archive and restore | ✅ |
 | Custom account types | ⬜ |
 | Warning in Settings before a primary-currency change strands every account | ⬜ |
+
+**Portfolio — investment holdings.** Six rows the design does not draw at all:
+`design/Household Dashboard.dc.html` shows "Investments & CPF" only as a slice
+of the net-worth breakdown, so there is no portfolio screen anywhere in it.
+These are added under this file's own rule for work the design does not
+describe. Milestone 1 of `.claude/prds/investment-portfolio-tracking.prd.md`;
+the period report (quarter/half/year profit) and the moomoo import are
+milestones 2 and 4 and are **not** listed as ⬜ rows here, because the PRD is a
+plan rather than the design this file measures against — they arrive as rows
+when they are built.
+
+| Feature | State |
+|---|---|
+| Portfolio page — holdings with position, cost and market value | ✅ — `/money/portfolio`, behind the same money+owner guard as the ledger (a table whose every figure is money reads as broken with all of them blanked, so a limited member is refused outright rather than served a page of holes). Walked 2026-09-12: 100.5g + 99.5g of gold read back as exactly `200 gram`, cost S$21,990.00, worth S$26,000.00 at S$130/g |
+| Holdings in an investment account, with fractional quantities | ✅ — `domain.Quantity` is an int64 count of billionths, so 300.5 grams and half a share are both exact and `float64` never enters the path. Valuation multiplies through a 128-bit intermediate (`math/bits`), because the int64 version refuses an ordinary Indonesian position: 10,000 shares at Rp 10,000 is 1e19, past the int64 ceiling of 9.223e18 |
+| Purchases and sales, with average-cost basis | ✅ — a disposal takes its cost out of the pool in exact proportion, so it never moves the average; an acquisition does. Realised gain uses the average **at the time of that sale**. Same-day events fold in the order they were recorded, fixed by `ListHoldingEvents`' `ORDER BY (occurred_on, created_at, id)` — on identical events, buy-then-sell realises 750 where sell-then-buy realises 1000, so that clause is a contract, not a preference. Overselling is refused inside the write's own transaction (`InsertWithFold`, `SELECT … FOR UPDATE`), and so is deleting a purchase a later sale was costed against |
+| Dated valuations — one price per holding per day | ✅ — re-entering a day's price replaces it rather than joining it, so no report has to choose between two rows for one day. A future date is refused (`ErrHoldingDateInFuture`): latest-price lookups order by `as_of`, so one price mistyped as 2030 would outrank every real one forever — demonstrated live during the walk before the guard existed, as "Worth now S$49,450.50 as of 2030-01-01" |
+| Archive and restore a holding | ✅ — a holding is never deleted: its events and valuations reference it, and a sold-out position is still part of the year's realised profit. An archived holding still reports what it held, rather than zeros |
+| Holdings are **not** in net worth | 🟡 — deliberate, and the gap is the point. Milestone 1 keeps holdings out of net worth and the twelve-month trend; the page says so on its face, reading a `notInNetWorth` flag from the server rather than hardcoding the sentence. Folding them in is milestone 3 and needs its own decision about whether an investment account also carries uninvested cash (PRD open question 7). Walked: net worth read S$11,425.50 before and after S$26,000 of gold was recorded |
+
+**Known gap, recorded rather than built:** `DELETE /holdings/{id}/valuations/{id}`
+exists and no screen exposes it. Correcting a price for the *same* day works —
+that is the upsert — so the common case is covered; a price recorded against the
+*wrong* day cannot be removed from the page.
 
 **The 12-month trend shipped 2026-08-19, and the note that used to sit here
 was wrong.** It used to say the trend "needs balance snapshots: a second

@@ -98,6 +98,36 @@ fix in the same branch *created* the sibling.
   first February. Storing the anchor separately and clamping *it* fresh each
   time — 31 Jan → 28 Feb → 31 Mar — is what keeps the drift from compounding.
 
+  **A sixth instance, 2026-09-12, and the first one a code review caught
+  rather than a walk or a reviewer reading a diff: the portfolio's own
+  `today()`.** `HoldingLotsPanel.tsx` defaulted every purchase, sale and
+  price date with `new Date().toISOString().slice(0, 10)` — which renders in
+  UTC. East of Greenwich that returns *yesterday* for the first hours of
+  every day; in Singapore, midnight to 08:00. Worse than a wrong label,
+  because latest-price lookups order by `as_of`: a price stamped a day early
+  can be silently outranked by an older one.
+
+  What makes this the sharpest instance is that **the fix already existed
+  twice in the same directory, each copy carrying a comment explaining
+  itself.** `AccountModal.tsx` and `GoalContributionsPanel.tsx` both read
+  local calendar components, and `AccountModal.test.tsx` carries a test that
+  names this very pattern and the two commits behind it. A seventh file was
+  written next to them without either being read. The class had been
+  identified, documented, tested and commented — and still recurred, because
+  none of that is reachable from "I need today's date" unless you go looking.
+
+  Two things would have caught it and neither was in place: a test asserting
+  the default value (the new `HoldingLotsPanel.test.tsx`, which fails at
+  `Asia/Singapore` 16:00 UTC on 1 Jan), and reading a sibling before writing
+  a helper that every sibling already has. **The cheap rule: a date helper is
+  never new code.** Before writing one, grep the directory for `today` — in
+  this repo the answer is always already there.
+
+  The browser walk could not catch it, and that is worth stating precisely
+  rather than as a caveat: the walk ran at 22:00 local, where UTC and local
+  agree on the date. A walk proves what it touches at the moment it touches
+  it, and a clock bug is invisible for sixteen hours a day.
+
   **A sixth instance, in the layer above, and the reason to distrust a comment
   that says two things match.** `BillService.toView` computes `Overdue` through
   `domain.IsOverdue` → `domain.startOfDay`, which converts to UTC (the fix
@@ -3465,6 +3495,86 @@ narrower question than "does this class exist elsewhere," and the class
 turned out to live one layer down from where the grep was aimed.
 
 ---
+
+### 19. A concurrency test that does not force the overlap passes without the lock
+
+Found 2026-09-12, on the portfolio's oversell guard.
+
+`RecordEvent` read a holding's events, folded them, and then inserted — three
+separate calls with nothing holding a lock between them. Two sales of 30 from a
+holding of 50 are each legal alone and illegal together, so both could fold the
+same starting position and both commit, leaving events that cannot be folded at
+all: a page that throws every time it loads, fixable only from the page that is
+broken.
+
+The fix was `InsertWithFold` — lock the holding row, list its events and run the
+caller's fold inside the write's own transaction. **The test is the lesson.**
+The first version spawned two goroutines through a `sync.WaitGroup` barrier and
+asserted exactly one was refused. It passed. It also passed with `FOR UPDATE`
+deleted from the query — because two goroutines doing microseconds of work
+serialise by luck, and the race the test was named for never happened.
+
+A mutation run caught that, and nothing else would have. The test looked
+rigorous: real Postgres, real goroutines, a barrier, an exact assertion. What it
+lacked was any reason for the two transactions to actually overlap.
+
+Making it real took one line — `time.Sleep(300ms)` **inside the fold closure**,
+which is the window between the check and the write. With the lock, the second
+writer blocks inside `LockHolding` before it ever reaches the fold. Without it,
+both fold the same position, both sleep, both write, and the mutation now fails
+loudly: `0 of 2 racing sales were refused, want exactly 1`.
+
+**The rule: a concurrency test must widen the window it is testing, or it is
+testing scheduling luck.** A barrier at the start is not enough — it makes both
+goroutines *begin* together, which is not the same as making them *overlap*. The
+sleep belongs at the point the invariant is vulnerable, not at the entry.
+
+And the meta-lesson, which this file keeps earning: the mutation run is not a
+formality after a passing test. Three of the mutations across this feature
+survived first time, and each one was a test that proved less than its name
+claimed.
+
+### 20. Every test can pass while the page has no styling at all
+
+Found 2026-09-12, in the browser walk of the portfolio screen.
+
+Three new components were written with semantic class names — `holding-row`,
+`field`, `button button--primary` — in a project that is **Tailwind**, where
+every other component composes utility classes from the tokens in `index.css`.
+Those class names matched no CSS anywhere in the repo. The page was entirely
+unstyled.
+
+838 frontend tests passed. `tsc --noEmit` passed. `eslint` passed. The
+accessibility snapshot read perfectly, and every assertion about behaviour —
+figures, branches, error messages — was correct, because all of it was.
+
+**None of those tools can see a stylesheet that does not exist.** Testing
+Library queries the accessibility tree, which is structure and text; it has no
+opinion about whether a rule matched. A typo'd class name is not a type error
+and not a lint error, because both are valid strings.
+
+What found it: opening the page. What confirmed it in one command:
+
+```bash
+grep -rn "holding-row\|lot-row" web/src/**/*.css   # nothing
+```
+
+**The rule: before writing a component, read a sibling's `className`.** The
+styling system is not discoverable from the component you are writing — only
+from the one next to it. This is the same failure as the timezone helper above
+(pattern 1's sixth instance, the same day): both were written next to files that
+already had the answer, and neither sibling was opened.
+
+Two smaller things the same walk found, for the same reason — the accessibility
+tree flattens what a screen renders:
+
+- Money read `SGD 21,990.00` where every other money screen reads `S$21,990.00`.
+  `formatMoney`'s third argument is the currency symbol, and without it the
+  function falls back to the bare code. Every sibling passes it via a `symbolFor`
+  lookup; none of mine did.
+- An entry row rendered `S$10,050.002026-07-02` — the amount and date with
+  nothing between them, because the row had no layout at all. In the
+  accessibility snapshot the two are separate nodes and read fine.
 
 ## Catalogue by area
 
