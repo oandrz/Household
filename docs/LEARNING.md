@@ -23,7 +23,7 @@ gets rebuilt.
 
 ### 1. Fixing an instance rarely fixes the class
 
-This happened **twenty-one times** — one bullet each below, and the count is
+This happened **twenty-two times** — one bullet each below, and the count is
 the number of bullets, so recount it when you add one (it had already drifted
 by one before the UX-repair round noticed). Almost every time, the fix was
 correct and the sibling kept the bug; two of them are the variant where
@@ -479,6 +479,13 @@ count stays the number of bullets.)
   Singapore back into the previous year. `budget.go`'s `startOfMonth`, two
   files away, reads the date in the value's own location and says why in a
   comment. Written up in full below.
+- **A cache invalidation fixed on the event writes, missed on the holding
+  writes.** `invalidateAfterEventWrite` was taught to refetch the period
+  report (`ed93d26`); `invalidateHoldings` — create, rename, archive, restore —
+  sat eleven lines above it and was not. The report lists every holding and
+  prints its name, so adding or renaming one left the cached report short a row
+  or labelling one with a dead name. Found by grepping for the shape of the
+  first fix, which is checklist step 3, rather than by hitting it: `dacc4c1`.
 
 The **seventh date instance, 2026-09-12 — and the first one a test caught
 before it shipped.** `domain.Period.Contains` needs the calendar day a
@@ -3668,6 +3675,18 @@ how a person uses it.
 **The rule: when a write changes a figure, list every query key that renders
 that figure — not every key the current screen reads.** A screen the write does
 not open is still a screen the write invalidates.
+
+**Then check the siblings of the fix itself.** The fix above went into
+`invalidateAfterEventWrite`. `invalidateHoldings` — the helper for create,
+rename, archive and restore — sits eleven lines above it and was left alone,
+because the reasoning had been "a *figure* moved". A name is not a figure, and
+the report prints names; a holding renamed while the report sat in cache showed
+the old one, and a holding added never appeared at all. So the rule has a
+second half: **a write that changes what a derived screen would *say*
+invalidates it, not only a write that changes what it would compute.** Both
+fixes are one line each (`ed93d26`, `dacc4c1`); the second was found by
+grepping for the shape of the first, which is step 3 of the checklist at the
+end of this file.
 
 ### 23. A dependency added to a service is wired in main.go and forgotten in the test's own Deps
 

@@ -1220,7 +1220,7 @@ code *and* a walk confirming it. All five Money features are now walked.
 | Custom account types | ⬜ |
 | Warning in Settings before a primary-currency change strands every account | ⬜ |
 
-**Portfolio — investment holdings.** Eleven rows the design does not draw at
+**Portfolio — investment holdings.** Twelve rows the design does not draw at
 all: `design/Household Dashboard.dc.html` shows "Investments & CPF" only as a
 slice of the net-worth breakdown, so there is no portfolio screen anywhere in
 it. These are added under this file's own rule for work the design does not
