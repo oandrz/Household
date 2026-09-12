@@ -17,6 +17,7 @@
 //                   this feature's largest product risk, so the age is shown
 //                   beside the figure rather than being available on request.
 import { useState } from "react";
+import { useCurrencies } from "../auth/useAuth";
 import { PageContainer } from "../../components/PageContainer";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { formatMoney } from "./formatMoney";
@@ -34,6 +35,13 @@ const INSTRUMENT_LABEL: Record<Holding["instrument"], string> = {
 export function PortfolioPage() {
   const [includeArchived, setIncludeArchived] = useState(false);
   const holdings = useHoldings({ includeArchived });
+  const currencies = useCurrencies();
+  // Every money figure on this page goes through the household's own symbol
+  // table. Without it formatMoney falls back to the bare code ("SGD 26,000.00"),
+  // which is not what any other money screen shows -- BillsPage.tsx's own
+  // symbolFor, restated.
+  const symbolFor = (currency: string) =>
+    currencies.data?.currencies.find((c) => c.code === currency)?.symbol;
   const [modalHolding, setModalHolding] = useState<Holding | "new" | null>(null);
   // A separate state slot from modalHolding rather than a union sharing it:
   // the two surfaces can never be open for the same click, and keeping them
@@ -55,26 +63,26 @@ export function PortfolioPage() {
 
   return (
     <PageContainer>
-      <header className="page-header">
+      <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1>Portfolio</h1>
-          <p className="page-header__subtitle">
+          <h1 className="text-[23px] font-semibold tracking-[-0.02em] text-ink">Portfolio</h1>
+          <p className="mt-1 text-[13px] text-muted">
             What you hold, what it cost, and what it is worth.
           </p>
         </div>
-        <button type="button" className="button button--primary" onClick={() => setModalHolding("new")}>
+        <button type="button" className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0" onClick={() => setModalHolding("new")}>
           Add holding
         </button>
       </header>
 
       {holdings.data?.notInNetWorth ? (
-        <p className="callout callout--info" data-testid="not-in-net-worth">
+        <p className="mt-5 rounded-xl border border-hairline bg-surface px-4 py-3 text-[12.5px] leading-snug text-muted" data-testid="not-in-net-worth">
           Holdings are not counted in your net worth yet. The figures here stand
           on their own.
         </p>
       ) : null}
 
-      <div className="page-controls">
+      <div className="mt-5 flex items-center gap-1.5 text-[11px] text-muted">
         <ToggleSwitch
           label="Show archived"
           checked={includeArchived}
@@ -82,32 +90,33 @@ export function PortfolioPage() {
         />
       </div>
 
-      {holdings.isPending ? <p>Loading your holdings…</p> : null}
+      {holdings.isPending ? <p className="mt-5 text-xs text-muted">Loading your holdings…</p> : null}
       {holdings.isError ? (
-        <p className="form-error" role="alert">
+        <p className="mt-5 text-xs text-danger" role="alert">
           Your holdings could not be loaded. Try again in a moment.
         </p>
       ) : null}
 
       {holdings.isSuccess && rows.length === 0 ? (
-        <div className="empty-state">
-          <h2>Nothing here yet</h2>
-          <p>
+        <div className="mt-5 rounded-xl border border-hairline bg-card p-[22px]">
+          <h2 className="text-[15px] font-semibold text-ink">Nothing here yet</h2>
+          <p className="mt-1.5 text-[13px] text-muted">
             Add a holding for each thing you own — a stock, gold, anything with a
             price — then record what you paid and what it is worth today.
           </p>
-          <button type="button" className="button button--primary" onClick={() => setModalHolding("new")}>
+          <button type="button" className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0" onClick={() => setModalHolding("new")}>
             Add your first holding
           </button>
         </div>
       ) : null}
 
       {rows.length > 0 ? (
-        <ul className="holding-list">
+        <ul className="mt-5 flex flex-col gap-3">
           {rows.map((holding) => (
             <HoldingRow
               key={holding.id}
               holding={holding}
+              symbolFor={symbolFor}
               busy={pendingIds.has(holding.id)}
               onEdit={() => setModalHolding(holding)}
               onOpenLots={() => setLotsHolding(holding)}
@@ -150,61 +159,62 @@ export function PortfolioPage() {
 
 function HoldingRow(props: {
   holding: Holding;
+  symbolFor: (currency: string) => string | undefined;
   busy: boolean;
   onEdit: () => void;
   onOpenLots: () => void;
   onArchive: () => void;
   onRestore: () => void;
 }) {
-  const { holding, busy } = props;
+  const { holding, busy, symbolFor } = props;
   const archived = holding.archivedAt !== null;
 
   return (
-    <li className={archived ? "holding-row holding-row--archived" : "holding-row"}>
-      <div className="holding-row__identity">
-        <h2 className="holding-row__name">
+    <li className={`flex flex-col gap-4 rounded-xl border border-hairline bg-card p-[22px] ${archived ? "opacity-60" : ""}`}>
+      <div className="flex items-baseline justify-between gap-2">
+        <h2 className="text-[15px] font-semibold text-ink">
           {holding.name}
-          {archived ? <span className="badge"> (archived)</span> : null}
+          {archived ? <span className="ml-1 text-[11px] font-normal text-muted"> (archived)</span> : null}
         </h2>
-        <p className="holding-row__meta">
+        <p className="text-[11.5px] text-muted">
           {INSTRUMENT_LABEL[holding.instrument]} · {holding.accountName}
         </p>
       </div>
 
-      <dl className="holding-row__figures">
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
         <div>
-          <dt>Held</dt>
+          <dt className="text-[11px] text-muted">Held</dt>
           {/* The server formatted this string. Nothing here divides heldNano. */}
-          <dd>
+          <dd className="mt-0.5 text-[14px] text-ink">
             {holding.held} {holding.unit}
           </dd>
         </div>
         <div>
-          <dt>Cost</dt>
-          <dd>{formatMoney(holding.costMinor, holding.currency)}</dd>
+          <dt className="text-[11px] text-muted">Cost</dt>
+          <dd className="mt-0.5 text-[14px] text-ink">{formatMoney(holding.costMinor, holding.currency, symbolFor(holding.currency))}</dd>
         </div>
         <div>
-          <dt>Worth now</dt>
-          <dd>
+          <dt className="text-[11px] text-muted">Worth now</dt>
+          <dd className="mt-0.5 text-[14px] text-ink">
             {holding.hasMarketValue ? (
               <>
-                {formatMoney(holding.marketValueMinor, holding.currency)}
+                {formatMoney(holding.marketValueMinor, holding.currency, symbolFor(holding.currency))}
                 {/* The household's own currency beside the instrument's, but
                     only when they differ -- a US stock up in USD while SGD
                     gained against USD made the household poorer, and the
                     primary figure is the one that says so. */}
                 {holding.primaryMarketValueMinor !== null && holding.primaryCurrency !== null ? (
-                  <span className="holding-row__primary">
+                  <span className="text-[12px] text-muted">
                     {" "}
-                    ≈ {formatMoney(holding.primaryMarketValueMinor, holding.primaryCurrency)}
+                    ≈ {formatMoney(holding.primaryMarketValueMinor, holding.primaryCurrency, symbolFor(holding.primaryCurrency))}
                   </span>
                 ) : null}
-                <span className="holding-row__as-of"> as of {holding.valuedAt}</span>
+                <span className="block text-[11px] text-muted"> as of {holding.valuedAt}</span>
               </>
             ) : (
               // Never a zero. "No price recorded" is a different claim from
               // "worth nothing", and the page has to make the right one.
-              <span className="holding-row__no-value" data-testid="no-price">
+              <span className="text-[13px] text-muted" data-testid="no-price">
                 No price recorded
               </span>
             )}
@@ -212,25 +222,25 @@ function HoldingRow(props: {
         </div>
         {holding.realisedMinor !== 0 ? (
           <div>
-            <dt>Realised</dt>
-            <dd>{formatMoney(holding.realisedMinor, holding.currency)}</dd>
+            <dt className="text-[11px] text-muted">Realised</dt>
+            <dd className="mt-0.5 text-[14px] text-ink">{formatMoney(holding.realisedMinor, holding.currency, symbolFor(holding.currency))}</dd>
           </div>
         ) : null}
       </dl>
 
-      <div className="holding-row__actions">
-        <button type="button" className="button" onClick={props.onOpenLots}>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0" onClick={props.onOpenLots}>
           Entries &amp; prices
         </button>
-        <button type="button" className="button" onClick={props.onEdit}>
+        <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0" onClick={props.onEdit}>
           Edit
         </button>
         {archived ? (
-          <button type="button" className="button" onClick={props.onRestore} disabled={busy}>
+          <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0" onClick={props.onRestore} disabled={busy}>
             Restore
           </button>
         ) : (
-          <button type="button" className="button" onClick={props.onArchive} disabled={busy}>
+          <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0" onClick={props.onArchive} disabled={busy}>
             Archive
           </button>
         )}

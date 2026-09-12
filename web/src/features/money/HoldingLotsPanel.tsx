@@ -9,6 +9,7 @@
 // parses it in integers and sends back a formatted string to render.
 import { useState, type FormEvent } from "react";
 import { ApiError } from "../../api/client";
+import { useCurrencies } from "../auth/useAuth";
 import { Modal } from "../../components/Modal";
 import { formatMoney, toMinorUnits } from "./formatMoney";
 import { useHoldingEvents, useHoldingValuations, useHoldings } from "./useHoldings";
@@ -21,6 +22,11 @@ export function HoldingLotsPanel({
   holding: Holding;
   onClose: () => void;
 }) {
+  const currencies = useCurrencies();
+  // BillsPage.tsx's symbolFor, for its reason: without the symbol formatMoney
+  // falls back to the bare currency code, which no other money screen shows.
+  const symbolFor = (currency: string) =>
+    currencies.data?.currencies.find((c) => c.code === currency)?.symbol;
   const events = useHoldingEvents(holding.id);
   const valuations = useHoldingValuations(holding.id);
   // enabled: false -- this panel never reads the portfolio list itself, it only
@@ -88,13 +94,13 @@ export function HoldingLotsPanel({
 
   return (
     <Modal open onClose={onClose} title={`${holding.name} — entries & prices`} wide>
-      <section className="panel-section">
-        <h3>Record a purchase or sale</h3>
-        <form onSubmit={submitEvent} className="form form--inline">
-          <label className="field">
-            <span className="field__label">Kind</span>
+      <section className="mt-2 flex flex-col gap-3 border-t border-hairline pt-4 first:mt-0 first:border-0 first:pt-0">
+        <h3 className="text-[13px] font-semibold text-ink">Record a purchase or sale</h3>
+        <form onSubmit={submitEvent} className="flex flex-wrap items-end gap-3">
+          <label className="flex flex-1 min-w-[9rem] flex-col gap-1.5">
+            <span className="text-xs font-semibold text-label">Kind</span>
             <select
-              className="field__input"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
               value={kind}
               onChange={(e) => setKind(e.target.value as HoldingEventKind)}
             >
@@ -102,10 +108,10 @@ export function HoldingLotsPanel({
               <option value="disposal">Sold</option>
             </select>
           </label>
-          <label className="field">
-            <span className="field__label">How many {holding.unit}s</span>
+          <label className="flex flex-1 min-w-[9rem] flex-col gap-1.5">
+            <span className="text-xs font-semibold text-label">How many {holding.unit}s</span>
             <input
-              className="field__input"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
               type="text"
               inputMode="decimal"
               value={quantity}
@@ -114,12 +120,12 @@ export function HoldingLotsPanel({
               required
             />
           </label>
-          <label className="field">
-            <span className="field__label">
+          <label className="flex flex-1 min-w-[9rem] flex-col gap-1.5">
+            <span className="text-xs font-semibold text-label">
               {kind === "acquisition" ? "Total paid" : "Total received"} ({holding.currency})
             </span>
             <input
-              className="field__input"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
               type="text"
               inputMode="decimal"
               value={amount}
@@ -128,47 +134,47 @@ export function HoldingLotsPanel({
               required
             />
           </label>
-          <label className="field">
-            <span className="field__label">On</span>
+          <label className="flex flex-1 min-w-[9rem] flex-col gap-1.5">
+            <span className="text-xs font-semibold text-label">On</span>
             <input
-              className="field__input"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
               type="date"
               value={occurredOn}
               onChange={(e) => setOccurredOn(e.target.value)}
               required
             />
           </label>
-          <button type="submit" className="button button--primary" disabled={recordEvent.isPending}>
+          <button type="submit" className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0" disabled={recordEvent.isPending}>
             Record
           </button>
         </form>
         {eventError !== null ? (
-          <p className="form-error" role="alert">
+          <p className="text-xs leading-snug text-danger" role="alert">
             {eventError}
           </p>
         ) : null}
 
         {events.data?.events.length ? (
-          <ul className="lot-list">
+          <ul className="flex flex-col gap-1.5">
             {events.data.events.map((event) => (
-              <li key={event.id} className="lot-row">
-                <span className="lot-row__kind">
+              <li key={event.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-surface px-3 py-2 text-[12.5px]">
+                <span className="font-semibold text-ink">
                   {event.kind === "acquisition" ? "Bought" : "Sold"}
                 </span>
                 {/* The server formatted this string; nothing here divides. */}
-                <span className="lot-row__quantity">
+                <span className="text-ink">
                   {event.quantity} {holding.unit}
                 </span>
-                <span className="lot-row__amount">
-                  {formatMoney(event.amountMinor, event.currency)}
+                <span className="text-ink">
+                  {formatMoney(event.amountMinor, event.currency, symbolFor(event.currency))}
                 </span>
-                <span className="lot-row__date">{event.occurredOn}</span>
+                <span className="text-muted">{event.occurredOn}</span>
                 {confirmingDelete === event.id ? (
-                  <span className="lot-row__confirm">
+                  <span className="flex flex-wrap items-center gap-2 text-muted">
                     Remove this entry?
                     <button
                       type="button"
-                      className="button button--danger"
+                      className="min-h-11 rounded-lg bg-danger px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0"
                       onClick={async () => {
                         try {
                           await deleteEvent.mutateAsync({ id: holding.id, eventId: event.id });
@@ -183,12 +189,12 @@ export function HoldingLotsPanel({
                     >
                       Remove
                     </button>
-                    <button type="button" className="button" onClick={() => setConfirmingDelete(null)}>
+                    <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0" onClick={() => setConfirmingDelete(null)}>
                       Keep
                     </button>
                   </span>
                 ) : (
-                  <button type="button" className="button" onClick={() => setConfirmingDelete(event.id)}>
+                  <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0" onClick={() => setConfirmingDelete(event.id)}>
                     Remove
                   </button>
                 )}
@@ -196,21 +202,21 @@ export function HoldingLotsPanel({
             ))}
           </ul>
         ) : (
-          <p className="empty-note">No entries yet.</p>
+          <p className="text-xs text-muted">No entries yet.</p>
         )}
       </section>
 
-      <section className="panel-section">
-        <h3>Record a price</h3>
-        <p className="panel-section__hint">
+      <section className="mt-2 flex flex-col gap-3 border-t border-hairline pt-4 first:mt-0 first:border-0 first:pt-0">
+        <h3 className="text-[13px] font-semibold text-ink">Record a price</h3>
+        <p className="text-[11.5px] leading-snug text-muted">
           What one {holding.unit} was worth on a given day. Re-entering a day's
           price replaces it.
         </p>
-        <form onSubmit={submitPrice} className="form form--inline">
-          <label className="field">
-            <span className="field__label">Price per {holding.unit} ({holding.currency})</span>
+        <form onSubmit={submitPrice} className="flex flex-wrap items-end gap-3">
+          <label className="flex flex-1 min-w-[9rem] flex-col gap-1.5">
+            <span className="text-xs font-semibold text-label">Price per {holding.unit} ({holding.currency})</span>
             <input
-              className="field__input"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
               type="text"
               inputMode="decimal"
               value={price}
@@ -219,10 +225,10 @@ export function HoldingLotsPanel({
               required
             />
           </label>
-          <label className="field">
-            <span className="field__label">As of</span>
+          <label className="flex flex-1 min-w-[9rem] flex-col gap-1.5">
+            <span className="text-xs font-semibold text-label">As of</span>
             <input
-              className="field__input"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
               type="date"
               value={asOf}
               onChange={(e) => setAsOf(e.target.value)}
@@ -231,29 +237,29 @@ export function HoldingLotsPanel({
           </label>
           <button
             type="submit"
-            className="button button--primary"
+            className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0"
             disabled={recordValuation.isPending}
           >
             Save price
           </button>
         </form>
         {priceError !== null ? (
-          <p className="form-error" role="alert">
+          <p className="text-xs leading-snug text-danger" role="alert">
             {priceError}
           </p>
         ) : null}
 
         {valuations.data?.valuations.length ? (
-          <ul className="price-list">
+          <ul className="flex flex-col gap-1.5">
             {valuations.data.valuations.map((valuation) => (
-              <li key={valuation.id} className="price-row">
-                <span>{formatMoney(valuation.unitPriceMinor, valuation.currency)}</span>
-                <span className="price-row__date">as of {valuation.asOf}</span>
+              <li key={valuation.id} className="flex flex-wrap items-center gap-x-3 rounded-lg bg-surface px-3 py-2 text-[12.5px] text-ink">
+                <span>{formatMoney(valuation.unitPriceMinor, valuation.currency, symbolFor(valuation.currency))}</span>
+                <span className="text-muted">as of {valuation.asOf}</span>
               </li>
             ))}
           </ul>
         ) : (
-          <p className="empty-note">No prices recorded yet.</p>
+          <p className="text-xs text-muted">No prices recorded yet.</p>
         )}
       </section>
     </Modal>

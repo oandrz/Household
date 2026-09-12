@@ -79,12 +79,12 @@ export function HoldingModal({
 
   return (
     <Modal open onClose={onClose} title={isEditing ? "Edit holding" : "Add a holding"}>
-      <form onSubmit={onSubmit} className="form">
+      <form onSubmit={onSubmit} className="flex flex-col gap-4">
         {!isEditing ? (
-          <label className="field">
-            <span className="field__label">Account</span>
+          <label className="flex flex-1 min-w-[9rem] flex-col gap-1.5">
+            <span className="text-xs font-semibold text-label">Account</span>
             <select
-              className="field__input"
+              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
               value={accountId}
               onChange={(e) => setAccountId(e.target.value)}
               required
@@ -97,7 +97,7 @@ export function HoldingModal({
               ))}
             </select>
             {accounts.isSuccess && investmentAccounts.length === 0 ? (
-              <span className="field__hint">
+              <span className="text-[11.5px] leading-snug text-muted">
                 You have no investment accounts yet. Add one on Finances first —
                 holdings live inside one.
               </span>
@@ -105,10 +105,10 @@ export function HoldingModal({
           </label>
         ) : null}
 
-        <label className="field">
-          <span className="field__label">Name</span>
+        <label className="flex flex-1 min-w-[9rem] flex-col gap-1.5">
+          <span className="text-xs font-semibold text-label">Name</span>
           <input
-            className="field__input"
+            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="D05, Gold bar, …"
@@ -116,10 +116,10 @@ export function HoldingModal({
           />
         </label>
 
-        <label className="field">
-          <span className="field__label">Kind</span>
+        <label className="flex flex-1 min-w-[9rem] flex-col gap-1.5">
+          <span className="text-xs font-semibold text-label">Kind</span>
           <select
-            className="field__input"
+            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             value={instrument}
             onChange={(e) => onInstrumentChange(e.target.value as InstrumentKind)}
           >
@@ -131,29 +131,29 @@ export function HoldingModal({
           </select>
         </label>
 
-        <label className="field">
-          <span className="field__label">Counted in</span>
+        <label className="flex flex-1 min-w-[9rem] flex-col gap-1.5">
+          <span className="text-xs font-semibold text-label">Counted in</span>
           <input
-            className="field__input"
+            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
             value={unit}
             onChange={(e) => setUnit(e.target.value)}
             placeholder="share, gram, unit"
             required
           />
-          <span className="field__hint">What one of it is called — shares, grams, units.</span>
+          <span className="text-[11.5px] leading-snug text-muted">What one of it is called — shares, grams, units.</span>
         </label>
 
         {error !== null ? (
-          <p className="form-error" role="alert">
+          <p className="text-xs leading-snug text-danger" role="alert">
             {error}
           </p>
         ) : null}
 
-        <div className="form__actions">
-          <button type="button" className="button" onClick={onClose}>
+        <div className="flex justify-end gap-2">
+          <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" className="button button--primary" disabled={busy}>
+          <button type="submit" className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0" disabled={busy}>
             {isEditing ? "Save" : "Add holding"}
           </button>
         </div>
