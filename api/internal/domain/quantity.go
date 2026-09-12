@@ -104,3 +104,64 @@ func (q Quantity) Value(unitPrice Money) (Money, error) {
 
 	return Money{Amount: int64(quo), Currency: unitPrice.Currency}, nil
 }
+
+// Prorate returns the share of m that corresponds to part out of whole. It is
+// what takes a disposal's cost out of a holding's cost pool: selling 5 of 20
+// units removes exactly a quarter of what those 20 units cost, which is what
+// keeps the average cost of the remainder unchanged.
+//
+// It is deliberately not "compute an average, then multiply". An average cost
+// per nano unit is a fraction far below one minor unit -- 3000 minor over 20
+// units is 0.00000015 per nano -- so computing it first truncates it to zero
+// and every disposal would cost nothing. Multiplying before dividing keeps the
+// precision, at the price of needing the same 128-bit intermediate
+// Quantity.Value needs, and for the same reason.
+func (m Money) Prorate(part, whole Quantity) (Money, error) {
+	if m.Currency == "" {
+		return Money{}, fmt.Errorf("%w: a Money zero value has no currency", ErrInvalidMoney)
+	}
+	if whole.nano <= 0 {
+		return Money{}, fmt.Errorf("%w: %d", ErrProrateWholeNotPositive, whole.nano)
+	}
+	if part.nano > whole.nano {
+		return Money{}, fmt.Errorf("%w: %d of %d", ErrProratePartExceedsWhole, part.nano, whole.nano)
+	}
+
+	// The sign lives on the amount, never on a quantity: NewQuantity refuses a
+	// negative one, so only m.Amount can be below zero. Taking the magnitude
+	// here and restoring the sign at the end keeps the 128-bit arithmetic
+	// unsigned, which is the only form math/bits offers.
+	negative := m.Amount < 0
+	magnitude := uint64(m.Amount)
+	if negative {
+		// Negating math.MinInt64 in an int64 returns itself, so the magnitude
+		// is taken in uint64, which has room for it. The same care String()
+		// already takes for the same reason.
+		magnitude = uint64(-(m.Amount + 1)) + 1
+	}
+
+	hi, lo := bits.Mul64(magnitude, uint64(part.nano))
+	// part <= whole was checked above, so the quotient cannot exceed the
+	// magnitude and this guard can only fire on a Money that was already
+	// beyond reach. It stays because bits.Div64 panics rather than erroring,
+	// and a panic on a monetary path is worse than the overflow it replaces.
+	if hi >= uint64(whole.nano) {
+		return Money{}, fmt.Errorf("%w: %d prorated by %d/%d", ErrAmountOverflow, m.Amount, part.nano, whole.nano)
+	}
+	quo, rem := bits.Div64(hi, lo, uint64(whole.nano))
+
+	// Half away from zero, matching Quantity.Value and usecase.Rate.Apply.
+	if rem*2 >= uint64(whole.nano) {
+		quo++
+	}
+	if negative {
+		if quo > uint64(math.MaxInt64)+1 {
+			return Money{}, fmt.Errorf("%w: %d prorated by %d/%d", ErrAmountOverflow, m.Amount, part.nano, whole.nano)
+		}
+		return Money{Amount: -int64(quo - 1) - 1, Currency: m.Currency}, nil
+	}
+	if quo > math.MaxInt64 {
+		return Money{}, fmt.Errorf("%w: %d prorated by %d/%d", ErrAmountOverflow, m.Amount, part.nano, whole.nano)
+	}
+	return Money{Amount: int64(quo), Currency: m.Currency}, nil
+}

@@ -32,6 +32,32 @@ var (
 	// negative holding.
 	ErrQuantityNegative = errors.New("a quantity cannot be negative")
 
+	// ErrProrateWholeNotPositive is Money.Prorate's refusal to divide a cost
+	// pool by an empty holding. Returning zero instead would report that a
+	// disposal cost nothing, which reads on screen as pure profit.
+	ErrProrateWholeNotPositive = errors.New("cannot prorate across a zero quantity")
+	// ErrProratePartExceedsWhole keeps Prorate's own refusal separate from the
+	// holding fold's ErrHoldingOversold. They fire on the same shape but mean
+	// different things -- one is "this proportion is not a proportion", the
+	// other is "this household does not own that much" -- and collapsing them
+	// into one error made each guard untestable, because either alone still
+	// produced the error the test looked for.
+	ErrProratePartExceedsWhole = errors.New("cannot prorate more than the whole")
+
+	// The holding errors. ErrHoldingOversold is the fold refusing to sell more
+	// than is held: the alternative is a negative quantity, which NewQuantity
+	// already refuses, and a position no screen can render.
+	ErrUnknownInstrumentKind           = errors.New("unknown instrument kind")
+	ErrUnknownHoldingEventKind         = errors.New("unknown holding event kind")
+	ErrHoldingOversold                 = errors.New("cannot dispose of more than is held")
+	ErrHoldingEventQuantityNotPositive = errors.New("a holding event must move a positive quantity")
+	// The two sides of the cross-currency rule, mirroring
+	// ErrReceivedAmountRequired and ErrReceivedAmountNotAllowed on transfers:
+	// the primary-currency figure is required exactly when it is a different
+	// number, and refused when it would duplicate the native one.
+	ErrHoldingPrimaryAmountRequired   = errors.New("a holding not in the primary currency needs its primary-currency amount")
+	ErrHoldingPrimaryAmountNotAllowed = errors.New("a holding already in the primary currency must not carry a second amount")
+
 	ErrUnknownAccountType         = errors.New("unknown account type")
 	ErrAccountNicknameRequired    = errors.New("an account nickname is required")
 	ErrLiabilityBalanceNegative   = errors.New("a debt's balance is the amount owed and cannot be negative")

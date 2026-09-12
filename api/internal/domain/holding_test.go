@@ -183,6 +183,18 @@ func TestProrateRefusesAnEmptyWhole(t *testing.T) {
 	}
 }
 
+// Prorate's own refusal is deliberately NOT ErrHoldingOversold. Both guards
+// fire on the same shape, but this one means "that is not a proportion" while
+// the fold's means "this household does not own that much" -- and while they
+// shared an error, removing either one left the other still producing it, so
+// neither guard was actually pinned. Found by mutation testing.
+func TestProrateRefusesAPartLargerThanTheWhole(t *testing.T) {
+	pool := sgdAmount(t, 3000)
+	if _, err := pool.Prorate(units(t, 21), units(t, 20)); !errors.Is(err, domain.ErrProratePartExceedsWhole) {
+		t.Fatalf("error = %v, want ErrProratePartExceedsWhole", err)
+	}
+}
+
 // Prorate multiplies a money amount by a nano quantity, so it hits the same
 // 128-bit intermediate Quantity.Value does, and must not overflow on figures a
 // real IDR portfolio produces. Rp 1,000,000,000 (1e11 minor) across 100,000
