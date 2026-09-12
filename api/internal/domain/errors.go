@@ -89,6 +89,12 @@ var (
 	ErrUnknownPeriodKind     = errors.New("unknown period kind")
 	ErrPeriodIndexOutOfRange = errors.New("that period does not exist in a year")
 	ErrPeriodCountOutOfRange = errors.New("a report covers at least one period")
+
+	// Holding income. A fee is stored positive and subtracted when a period is
+	// summed, so a zero row is the only meaningless one -- there is nothing to
+	// record when nothing changed hands.
+	ErrUnknownIncomeKind              = errors.New("unknown holding income kind")
+	ErrHoldingIncomeAmountNotPositive = errors.New("a holding income row must move a positive amount")
 	// ErrHoldingArchived is the same rule an archived goal follows: restoring
 	// is a deliberate act, and writing to an archived holding would silently
 	// un-retire a position the household said was finished.
