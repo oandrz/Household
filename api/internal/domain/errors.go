@@ -82,6 +82,13 @@ var (
 	// sibling rule lives in AccountService: an account holding live holdings
 	// cannot have its type changed out from under them.
 	ErrHoldingAccountNotInvestment = errors.New("a holding belongs in an investment account")
+
+	// The reporting periods. ErrPeriodIndexOutOfRange is a fifth quarter or a
+	// zeroth half -- refused at construction so that no arithmetic downstream
+	// has to wonder whether the period it holds is real.
+	ErrUnknownPeriodKind     = errors.New("unknown period kind")
+	ErrPeriodIndexOutOfRange = errors.New("that period does not exist in a year")
+	ErrPeriodCountOutOfRange = errors.New("a report covers at least one period")
 	// ErrHoldingArchived is the same rule an archived goal follows: restoring
 	// is a deliberate act, and writing to an archived holding would silently
 	// un-retire a position the household said was finished.
