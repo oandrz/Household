@@ -3721,12 +3721,29 @@ discarded bool leaves an empty household id that every query below trusts.
 Unreachable behind `requireSession` -- but the failure mode differs by route,
 and that is the part worth carrying: a lookup answers 404 for an empty
 household, which is wrong and loud; a REPORT answers 200 with no rows, which
-tells someone who never signed in that they own nothing. The internal test
-written for it showed the handler did not merely fail to refuse, it panicked.
+tells someone who never signed in that they own nothing. (Under the internal
+test, whose `Deps` are empty, the report handler panicked on a nil dependency
+rather than returning anything -- that is the test's environment, not the
+product's.)
 
 The rule already existed -- CLAUDE.md's "fail closed on values you did not
 construct" -- and the cost of honouring it was two lines a handler behind one
 helper. A discarded bool is the quietest way to not honour it.
+
+**And the part this entry exists to admit.** The grep that found those thirteen
+was scoped to one file. Run across the package it returns **56 more, in eleven
+other handler files** -- retros, goals, agreements, bills, telegram,
+transactions, categories, budgets, accounts, api tokens, vision. Only
+`household_handlers.go` ever wrote the refusal. So this is pattern 1 happening
+inside the write-up of pattern 24: a rule stated as honoured while fifty-six
+call sites still discard the bool.
+
+They are not fixed here, deliberately -- that is a package-wide change to
+eleven files nobody reviewed in this pass, and widening a fix to files outside
+the reviewed diff is its own failure. `requireScope` now exists for them to
+adopt. **The count is the point: a helper with two users and fifty-six
+non-users has not changed the codebase's habit, only the holdings corner of
+it.**
 
 ### 23. A dependency added to a service is wired in main.go and forgotten in the test's own Deps
 

@@ -154,6 +154,11 @@ is a real phone surface.
   the legend pairs each colour with its name, and the table below repeats every
   figure — so nothing is available only in colour. Noting it because six hues
   is already the honest limit and a seventh holding silently reuses the first.
+- **L8 — `HoldingEventRepository.Delete` has no caller outside tests.** The
+  product deletes through `DeleteWithFold`; the plain method is dead port
+  surface, established while explaining why a mutation of it survived. Left in
+  place: it carries a repository test proving cross-household refusal, and
+  removing a port method is outside what this review was asked to fix.
 - **L7 — Bars can overflow the plot** when `barWidth` hits its `Math.max(1, …)`
   floor (`PeriodReturnChart.tsx:96-99`), which needs roughly 150 holdings in one
   household. Recording the bound, not asking for a fix.
@@ -231,9 +236,19 @@ mutation-checked.
 | M2 | `requireScope` helper; thirteen call sites | `3ee11f4` | `TestAHoldingHandlerWithNoScopeRefuses` — the report handler did not merely fail to refuse, it **panicked** on a nil dependency |
 | M3 | The three row buttons carry `min-h-11` | `0a41a69` | Measured in the browser at 390px: 44px each, and 44px again in the confirm state |
 
-Mutations run for these fixes: six, five killed. The survivor is the event
+Mutations run for these fixes: **five, four killed.** The survivor is the event
 half of M1, for the reason in the correction above, and it is annotated at the
-assertion rather than papered over.
+assertion rather than papered over. (A sixth was attempted against the panel
+with tab indentation in a space-indented file, so it never applied; a mutation
+that does not apply proves nothing and is not counted.)
+
+**M2 is fixed for the holdings handlers only, and the package-wide number
+belongs here rather than in a footnote.** `grep -rn "scope, _ := RequestScope"`
+across `internal/adapter/http` returns **56 further call sites in eleven other
+handler files** (retro 9, goal 7, agreement 7, bill 6, telegram 5, transaction
+4, category 4, budget 4, account 4, api token 3, vision 2). They are out of the
+scope that was reviewed and approved, so they are recorded as a follow-up
+rather than swept into this diff; `requireScope` exists for them now.
 
 The LOW findings (L1–L7) are recorded and not fixed; none is reachable through
 the product.

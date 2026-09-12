@@ -197,7 +197,14 @@ had. Each was fixed test-first on this branch; the review artifact is
 | Thirteen handlers discarded the "is there a scope" answer; the report's failure mode was 200-with-no-rows | `3ee11f4` | `TestAHoldingHandlerWithNoScopeRefuses`: the handler **panicked** rather than refusing | 1 run, 1 killed |
 | The income row's buttons were below the 44px touch target every other control uses | `0a41a69` | measured at 390px in the browser | n/a |
 
-Running total for the milestone: **40 mutations, 9 survived first time.**
+Running total for the milestone: **39 mutations, 9 survived first time.** (Five
+in this round, four killed. A sixth never applied -- tab indentation against a
+space-indented file -- and a mutation that does not apply proves nothing.)
+
+**M2 is fixed for the holdings handlers only.** The same `scope, _ :=
+RequestScope(r)` appears 56 more times across eleven other handler files in that
+package. Out of the reviewed scope, so recorded as a follow-up rather than
+widened into this branch -- see the review artifact and LEARNING pattern 24.
 
 Two more test stubs compiled only under vitest and were caught by `make lint`
 (`9b06e10`, `c91c171`) — a partial `UpdateHoldingBody` and a `heldNano` typed as
