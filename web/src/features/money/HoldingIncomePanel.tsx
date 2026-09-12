@@ -167,20 +167,35 @@ export function HoldingIncomePanel({
                 {row.note ? <span className="ml-2 text-muted">{row.note}</span> : null}
               </span>
               {confirmingDelete === row.id ? (
-                <span className="flex items-center gap-2">
+                <span className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    className="text-[12px] font-semibold text-danger"
+                    className="min-h-11 rounded-lg bg-danger px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0"
                     onClick={async () => {
-                      await deleteIncome.mutateAsync({ id: holding.id, incomeId: row.id });
-                      setConfirmingDelete(null);
+                      // Caught, like HoldingLotsPanel.tsx's own delete and
+                      // unlike the first version of this one: an awaited
+                      // mutation with no catch leaves the row on screen, the
+                      // confirmation stuck open, nothing said, and an unhandled
+                      // rejection in the console. The person concludes the
+                      // button is broken.
+                      try {
+                        await deleteIncome.mutateAsync({ id: holding.id, incomeId: row.id });
+                      } catch (err) {
+                        setError(
+                          err instanceof ApiError ? err.message : "That entry could not be removed.",
+                        );
+                      } finally {
+                        // Either way: a confirmation left open after the answer
+                        // arrived is a second trap.
+                        setConfirmingDelete(null);
+                      }
                     }}
                   >
                     Really remove
                   </button>
                   <button
                     type="button"
-                    className="text-[12px] text-muted"
+                    className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0"
                     onClick={() => setConfirmingDelete(null)}
                   >
                     Keep
@@ -189,7 +204,7 @@ export function HoldingIncomePanel({
               ) : (
                 <button
                   type="button"
-                  className="text-[12px] text-muted"
+                  className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0"
                   onClick={() => setConfirmingDelete(row.id)}
                 >
                   Remove
