@@ -100,6 +100,25 @@ func (p Period) End() time.Time {
 	return p.Start().AddDate(0, p.monthsEach(), 0).AddDate(0, 0, -1)
 }
 
+// Previous is the period of the same kind immediately before this one. It is
+// what supplies a period's OPENING value: a quarter opens at the value it
+// closed the previous quarter on, so the two chain and no separate rule is
+// needed for the first day of a year.
+func (p Period) Previous() Period {
+	index, year := p.index-1, p.year
+	if index < 1 {
+		index = periodsPerYear[p.kind]
+		year--
+	}
+	// The index came from a valid Period and is back in range, so this cannot
+	// fail; the error is dropped rather than propagated into every caller.
+	previous, err := NewPeriod(p.kind, year, index)
+	if err != nil {
+		return p
+	}
+	return previous
+}
+
 // Contains judges the DAY, not the instant. A timestamp recorded at 23:00 in
 // Singapore on 30 June is 15:00 UTC on 30 June, and both are the last day of
 // H1; comparing instants would put it in H2 for anyone who typed it after

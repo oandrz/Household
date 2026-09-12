@@ -199,9 +199,9 @@ func TestParseQuantityReadsWhatAPersonWouldType(t *testing.T) {
 		{"300.5", 300_500_000_000},
 		{"1", domain.QuantityScale},
 		{"0.5", domain.QuantityScale / 2},
-		{"0.000000001", 1},          // one billionth, the smallest representable
+		{"0.000000001", 1},                        // one billionth, the smallest representable
 		{"10,000", 10_000 * domain.QuantityScale}, // thousands separators, as ParseAmount allows
-		{" 2.25 ", 2_250_000_000},   // surrounding space
+		{" 2.25 ", 2_250_000_000},                 // surrounding space
 		{"0", 0},
 		{".5", domain.QuantityScale / 2},
 	}
@@ -260,4 +260,3 @@ func TestFormatQuantityRoundTripsAndTrimsTrailingZeros(t *testing.T) {
 		}
 	}
 }
-

@@ -357,3 +357,99 @@ func TestTheReturnCarriesThePeriodItIsFor(t *testing.T) {
 		t.Errorf("period = %q, want Q3 2026", r.Period.Label())
 	}
 }
+
+// --- the boundaries themselves ----------------------------------------------
+//
+// The four tests below exist because a mutation survived without them: the
+// first and last days of a period, two prices inside one window, and a period
+// whose previous one is in another year. Every one of those is a place an
+// off-by-one lives, and this repository has recorded six of them.
+
+// An event on the period's FIRST day belongs to the period, not to the one
+// before it. Folded the other way, this holding would look like it was already
+// held at the open and would demand a price for a quarter it did not exist in.
+func TestAnEventOnTheFirstDayOfThePeriodIsInsideIt(t *testing.T) {
+	r := mustReturn(t, sgdHolding(), quarter(t, 2),
+		[]domain.HoldingEvent{buyOn(t, d(time.April, 1), 10, 100000)},
+		nil,
+		[]domain.Valuation{priceOn(t, d(time.June, 30), 12000)},
+		"SGD")
+
+	if r.Unrealised == nil {
+		t.Fatalf("bought on 1 April, so nothing was held at the open: blanked with %q", r.Reason)
+	}
+	if r.Unrealised.Native.Amount != 20000 {
+		t.Errorf("unrealised = %d, want 20000", r.Unrealised.Native.Amount)
+	}
+}
+
+// An event on the period's LAST day belongs to the period. A quarter's final
+// day is a day the household was still trading on, and dropping it would move
+// that sale into the next quarter -- where its basis no longer exists.
+func TestAnEventOnTheLastDayOfThePeriodIsInsideIt(t *testing.T) {
+	r := mustReturn(t, sgdHolding(), quarter(t, 2),
+		[]domain.HoldingEvent{
+			buyOn(t, d(time.January, 5), 10, 100000),
+			sellOn(t, d(time.June, 30), 10, 130000), // the last day of Q2
+		},
+		nil,
+		[]domain.Valuation{priceOn(t, d(time.March, 31), 10000)},
+		"SGD")
+
+	if r.Realised.Native.Amount != 30000 {
+		t.Errorf("realised = %d, want 30000 -- the sale is inside Q2", r.Realised.Native.Amount)
+	}
+	if r.Unrealised == nil {
+		t.Fatalf("nothing is held after that sale, so no closing price is needed: blanked with %q", r.Reason)
+	}
+	if r.Total == nil || r.Total.Native.Amount != 30000 {
+		t.Errorf("total = %v, want 30000", r.Total)
+	}
+}
+
+// When a window holds several prices it is the LAST one that closes it. Both
+// ends are tested at once here: an earlier price sits inside each window, and
+// picking either of them changes the answer.
+func TestTheNEWESTPriceInEachWindowIsTheOneThatCounts(t *testing.T) {
+	r := mustReturn(t, sgdHolding(), quarter(t, 2),
+		[]domain.HoldingEvent{buyOn(t, d(time.January, 5), 10, 100000)},
+		nil,
+		[]domain.Valuation{
+			priceOn(t, d(time.January, 10), 5000), // Q1, superseded
+			priceOn(t, d(time.March, 31), 10000),  // Q1, opens Q2 at S$1,000.00
+			priceOn(t, d(time.April, 15), 11000),  // Q2, superseded
+			priceOn(t, d(time.June, 30), 12000),   // Q2, closes it at S$1,200.00
+		},
+		"SGD")
+
+	if r.Unrealised == nil {
+		t.Fatalf("blanked with %q", r.Reason)
+	}
+	if r.Unrealised.Native.Amount != 20000 {
+		t.Errorf("unrealised = %d, want 20000 -- the newest price in each window", r.Unrealised.Native.Amount)
+	}
+}
+
+// The first quarter of a year opens where the fourth quarter of the PREVIOUS
+// one closed. A Previous() that decremented the index without the year would
+// look for the opening price in Q4 of this year, which has not happened yet.
+func TestTheFirstQuarterOfAYearOpensWhereTheLastOneClosed(t *testing.T) {
+	december := time.Date(2025, time.December, 1, 0, 0, 0, 0, time.UTC)
+	newYearsEve := time.Date(2025, time.December, 31, 0, 0, 0, 0, time.UTC)
+
+	r := mustReturn(t, sgdHolding(), quarter(t, 1),
+		[]domain.HoldingEvent{buyOn(t, december, 10, 100000)},
+		nil,
+		[]domain.Valuation{
+			priceOn(t, newYearsEve, 10000),       // Q4 2025 closes, so Q1 2026 opens
+			priceOn(t, d(time.March, 31), 12000), // and Q1 2026 closes
+		},
+		"SGD")
+
+	if r.Unrealised == nil {
+		t.Fatalf("Q1 2026 opens at the Q4 2025 price: blanked with %q", r.Reason)
+	}
+	if r.Unrealised.Native.Amount != 20000 {
+		t.Errorf("unrealised = %d, want 20000", r.Unrealised.Native.Amount)
+	}
+}

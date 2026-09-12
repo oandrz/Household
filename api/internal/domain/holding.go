@@ -197,6 +197,20 @@ func (v Valuation) MarketValue(held Quantity) (Money, error) {
 	return held.Value(v.UnitPrice)
 }
 
+// PrimaryMarketValue is the same figure in the household's own currency, from
+// the price the owner recorded in that currency -- never from the native price
+// with a rate applied, because this product has no dated rate source.
+//
+// A nil PrimaryUnitPrice means the holding is already in the household's
+// currency, the contract validatePrimaryAmount enforces on the way in, so the
+// native price is the primary one.
+func (v Valuation) PrimaryMarketValue(held Quantity) (Money, error) {
+	if v.PrimaryUnitPrice != nil {
+		return held.Value(*v.PrimaryUnitPrice)
+	}
+	return held.Value(v.UnitPrice)
+}
+
 // Position is what a holding's events add up to: how much is still held, what
 // that remainder cost, and what selling has already realised. Each of those
 // costs is carried TWICE -- once in the holding's own currency, once in the
