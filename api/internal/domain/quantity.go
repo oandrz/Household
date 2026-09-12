@@ -120,6 +120,15 @@ func (m Money) Prorate(part, whole Quantity) (Money, error) {
 	if m.Currency == "" {
 		return Money{}, fmt.Errorf("%w: a Money zero value has no currency", ErrInvalidMoney)
 	}
+	// A cost pool is never negative here: a holding event refuses a negative
+	// amount, and a disposal's cost is capped at the pool it leaves. Refusing
+	// outright is better than carrying two's-complement sign handling that
+	// nothing exercises -- untested cleverness on a monetary path is what the
+	// house rule against it is for. The day a caller genuinely needs to
+	// prorate a negative, it can be added WITH a test.
+	if m.Amount < 0 {
+		return Money{}, fmt.Errorf("%w: cannot prorate a negative amount, got %d", ErrInvalidMoney, m.Amount)
+	}
 	if whole.nano <= 0 {
 		return Money{}, fmt.Errorf("%w: %d", ErrProrateWholeNotPositive, whole.nano)
 	}
@@ -127,20 +136,9 @@ func (m Money) Prorate(part, whole Quantity) (Money, error) {
 		return Money{}, fmt.Errorf("%w: %d of %d", ErrProratePartExceedsWhole, part.nano, whole.nano)
 	}
 
-	// The sign lives on the amount, never on a quantity: NewQuantity refuses a
-	// negative one, so only m.Amount can be below zero. Taking the magnitude
-	// here and restoring the sign at the end keeps the 128-bit arithmetic
-	// unsigned, which is the only form math/bits offers.
-	negative := m.Amount < 0
-	magnitude := uint64(m.Amount)
-	if negative {
-		// Negating math.MinInt64 in an int64 returns itself, so the magnitude
-		// is taken in uint64, which has room for it. The same care String()
-		// already takes for the same reason.
-		magnitude = uint64(-(m.Amount + 1)) + 1
-	}
-
-	hi, lo := bits.Mul64(magnitude, uint64(part.nano))
+	// Both operands are non-negative by the checks above, so the 128-bit
+	// arithmetic stays unsigned -- the only form math/bits offers.
+	hi, lo := bits.Mul64(uint64(m.Amount), uint64(part.nano))
 	// part <= whole was checked above, so the quotient cannot exceed the
 	// magnitude and this guard can only fire on a Money that was already
 	// beyond reach. It stays because bits.Div64 panics rather than erroring,
@@ -153,12 +151,6 @@ func (m Money) Prorate(part, whole Quantity) (Money, error) {
 	// Half away from zero, matching Quantity.Value and usecase.Rate.Apply.
 	if rem*2 >= uint64(whole.nano) {
 		quo++
-	}
-	if negative {
-		if quo > uint64(math.MaxInt64)+1 {
-			return Money{}, fmt.Errorf("%w: %d prorated by %d/%d", ErrAmountOverflow, m.Amount, part.nano, whole.nano)
-		}
-		return Money{Amount: -int64(quo - 1) - 1, Currency: m.Currency}, nil
 	}
 	if quo > math.MaxInt64 {
 		return Money{}, fmt.Errorf("%w: %d prorated by %d/%d", ErrAmountOverflow, m.Amount, part.nano, whole.nano)

@@ -183,6 +183,18 @@ func TestProrateRefusesAnEmptyWhole(t *testing.T) {
 	}
 }
 
+// A cost pool is never negative: events refuse a negative amount, and a
+// disposal's cost is capped at the pool it comes out of. Prorate therefore
+// refuses a negative amount outright rather than carrying sign-handling code
+// that nothing exercises -- untested two's-complement care on a monetary path
+// is exactly what "no cleverness in security-sensitive code" is about.
+func TestProrateRefusesANegativeAmount(t *testing.T) {
+	pool := sgdAmount(t, -100)
+	if _, err := pool.Prorate(units(t, 1), units(t, 2)); !errors.Is(err, domain.ErrInvalidMoney) {
+		t.Fatalf("error = %v, want ErrInvalidMoney", err)
+	}
+}
+
 // Prorate's own refusal is deliberately NOT ErrHoldingOversold. Both guards
 // fire on the same shape, but this one means "that is not a proportion" while
 // the fold's means "this household does not own that much" -- and while they
@@ -357,5 +369,150 @@ func TestPositionOfAHoldingWithNoEventsIsZeroInItsOwnCurrency(t *testing.T) {
 	// start or the first Add against them fails.
 	if p.Cost.Currency != "IDR" || p.Realised.Currency != "IDR" {
 		t.Fatalf("currencies = %q/%q, want IDR", p.Cost.Currency, p.Realised.Currency)
+	}
+}
+
+// Two events on the same day are a real case -- occurred_on is a date, so
+// buying and selling the same morning share one -- and the order between them
+// changes the answer: buying first dilutes the average the sale is costed
+// against. Buy-then-sell realises 750 here; sell-then-buy realises 1000.
+//
+// The fold sorts stably, so a tie keeps the caller's order. That makes the
+// REPOSITORY's ordering load-bearing, which is why HoldingEventRepository's
+// contract fixes it at (occurred_on, created_at, id) -- the order the events
+// were actually recorded in. This test pins the domain half of that bargain:
+// if the sort ever stops being stable, the repository's guarantee stops
+// meaning anything and this fails.
+func TestPositionKeepsSliceOrderForEventsOnTheSameDay(t *testing.T) {
+	base := buy(t, 1, 10, 1000)
+	buyThenSell := []domain.HoldingEvent{base, buy(t, 1, 10, 2000), sell(t, 1, 5, 1500)}
+	sellThenBuy := []domain.HoldingEvent{base, sell(t, 1, 5, 1500), buy(t, 1, 10, 2000)}
+
+	first, err := sgdHolding().Position(buyThenSell)
+	if err != nil {
+		t.Fatalf("Position(buyThenSell): %v", err)
+	}
+	second, err := sgdHolding().Position(sellThenBuy)
+	if err != nil {
+		t.Fatalf("Position(sellThenBuy): %v", err)
+	}
+
+	if first.Realised.Amount != 750 {
+		t.Fatalf("buy-then-sell realised = %d, want 750", first.Realised.Amount)
+	}
+	if second.Realised.Amount != 1000 {
+		t.Fatalf("sell-then-buy realised = %d, want 1000 -- a stable sort must keep slice order on a tie", second.Realised.Amount)
+	}
+}
+
+// The test above pins the two answers but not the mechanism. Pinning the
+// stability itself needs care: Go's sort.Slice leaves an all-equal slice
+// completely untouched (pdqsort spots the already-sorted run), so a dozen
+// events on one day cannot tell a stable sort from an unstable one. Ties
+// inside a slice that genuinely needs sorting are a different matter -- there
+// sort.Slice does reorder equal keys, from about a dozen elements up.
+//
+// So this case mixes two days. The disposal sits second among the day-one
+// events, and nine more day-one acquisitions follow it, with day-two
+// acquisitions scattered through the slice so the sort has real work to do.
+// In recorded order the sale is costed against ten units at an average of 100:
+// 500 of cost leaves and 1000 is realised. Let it drift past the later
+// day-one buys and it is costed against a much larger pool, and the realised
+// figure moves -- same events, same days, different answer.
+func TestPositionKeepsSameDayOrderWhenTheSortHasRealWorkToDo(t *testing.T) {
+	dayOne := []domain.HoldingEvent{buy(t, 1, 10, 1000), sell(t, 1, 5, 1500)}
+	for i := 0; i < 9; i++ {
+		dayOne = append(dayOne, buy(t, 1, 1, 200))
+	}
+	dayTwo := make([]domain.HoldingEvent, 0, 6)
+	for i := 0; i < 6; i++ {
+		dayTwo = append(dayTwo, buy(t, 2, 1, 300))
+	}
+
+	// Scatter the later day through the slice, keeping each day's own order.
+	// Built by walking a fixed length rather than draining two cursors, so the
+	// loop cannot fail to terminate.
+	events := make([]domain.HoldingEvent, 0, len(dayOne)+len(dayTwo))
+	i, j := 0, 0
+	for len(events) < cap(events) {
+		takeDayTwo := (len(events)%3 == 2 && j < len(dayTwo)) || i == len(dayOne)
+		if takeDayTwo {
+			events = append(events, dayTwo[j])
+			j++
+			continue
+		}
+		events = append(events, dayOne[i])
+		i++
+	}
+
+	p, err := sgdHolding().Position(events)
+	if err != nil {
+		t.Fatalf("Position: %v", err)
+	}
+	if p.Realised.Amount != 1000 {
+		t.Fatalf("Realised = %d, want 1000 -- same-day events must stay in the order they were recorded", p.Realised.Amount)
+	}
+	if p.Held.Nano() != 20*domain.QuantityScale {
+		t.Fatalf("Held = %d, want 20 units", p.Held.Nano())
+	}
+	if p.Cost.Amount != 4100 {
+		t.Fatalf("Cost = %d, want 4100", p.Cost.Amount)
+	}
+}
+
+// --- valuations --------------------------------------------------------------
+
+func valuation(t *testing.T, day int, unitPriceMinor int64) domain.Valuation {
+	t.Helper()
+	return domain.Valuation{UnitPrice: sgdAmount(t, unitPriceMinor), AsOf: on(day)}
+}
+
+func TestMarketValueIsTheHeldQuantityAtTheValuationPrice(t *testing.T) {
+	v := valuation(t, 1, 250)
+
+	got, err := v.MarketValue(units(t, 20))
+	if err != nil {
+		t.Fatalf("MarketValue: %v", err)
+	}
+	if got.Amount != 5000 {
+		t.Fatalf("Amount = %d, want 5000", got.Amount)
+	}
+	if got.Currency != "SGD" {
+		t.Fatalf("Currency = %q, want SGD", got.Currency)
+	}
+}
+
+// A valuation carries the same cross-currency rule its holding's events do,
+// because it is the same question: a figure in USD needs its primary-currency
+// twin, and one already in primary must not carry a second. The rule lives in
+// one place so the two cannot drift.
+func TestValuationCarriesTheSameCrossCurrencyRuleAsAnEvent(t *testing.T) {
+	crossNoPrimary := domain.Valuation{AsOf: on(1)}
+	crossNoPrimary.UnitPrice, _ = domain.NewMoney(250, "USD")
+	if err := crossNoPrimary.Validate("USD", "SGD"); !errors.Is(err, domain.ErrHoldingPrimaryAmountRequired) {
+		t.Fatalf("cross-currency with no primary: error = %v, want ErrHoldingPrimaryAmountRequired", err)
+	}
+
+	samePlusPrimary := valuation(t, 1, 250)
+	p := sgdAmount(t, 250)
+	samePlusPrimary.PrimaryUnitPrice = &p
+	if err := samePlusPrimary.Validate("SGD", "SGD"); !errors.Is(err, domain.ErrHoldingPrimaryAmountNotAllowed) {
+		t.Fatalf("same-currency with a primary: error = %v, want ErrHoldingPrimaryAmountNotAllowed", err)
+	}
+
+	if err := valuation(t, 1, 250).Validate("SGD", "SGD"); err != nil {
+		t.Fatalf("same-currency, no primary: %v", err)
+	}
+}
+
+func TestValuationRefusesANegativeUnitPrice(t *testing.T) {
+	if err := valuation(t, 1, -1).Validate("SGD", "SGD"); !errors.Is(err, domain.ErrInvalidMoney) {
+		t.Fatalf("error = %v, want ErrInvalidMoney", err)
+	}
+}
+
+func TestValuationRefusesAPriceInTheWrongCurrency(t *testing.T) {
+	if err := valuation(t, 1, 250).Validate("USD", "SGD"); !errors.Is(err, domain.ErrCurrencyMismatch) {
+		t.Fatalf("error = %v, want ErrCurrencyMismatch", err)
 	}
 }

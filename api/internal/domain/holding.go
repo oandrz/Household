@@ -127,23 +127,74 @@ func (e HoldingEvent) Validate(holdingCurrency, primaryCurrency string) error {
 		return fmt.Errorf("%w: an event amount cannot be negative, got %d", ErrInvalidMoney, e.Amount.Amount)
 	}
 
+	return validatePrimaryAmount(e.PrimaryAmount, holdingCurrency, primaryCurrency)
+}
+
+// validatePrimaryAmount is the cross-currency rule both a holding event and a
+// valuation obey, in one place so the two cannot drift apart. It is the same
+// contract Transaction.ReceivedAmount carries: the primary-currency figure is
+// required exactly when it is a different number from the native one, and
+// refused when it would merely duplicate it.
+//
+// The figure is stored rather than a rate because this product has no dated
+// rate source -- and because what the owner actually knows is the amount that
+// left their bank, not the ratio behind it.
+func validatePrimaryAmount(primary *Money, holdingCurrency, primaryCurrency string) error {
 	if holdingCurrency == primaryCurrency {
-		if e.PrimaryAmount != nil {
+		if primary != nil {
 			return ErrHoldingPrimaryAmountNotAllowed
 		}
 		return nil
 	}
-	if e.PrimaryAmount == nil {
+	if primary == nil {
 		return ErrHoldingPrimaryAmountRequired
 	}
-	if e.PrimaryAmount.Currency != primaryCurrency {
+	if primary.Currency != primaryCurrency {
 		return fmt.Errorf("%w: primary amount is %s, primary currency is %s",
-			ErrCurrencyMismatch, e.PrimaryAmount.Currency, primaryCurrency)
+			ErrCurrencyMismatch, primary.Currency, primaryCurrency)
 	}
-	if e.PrimaryAmount.Amount < 0 {
-		return fmt.Errorf("%w: a primary amount cannot be negative, got %d", ErrInvalidMoney, e.PrimaryAmount.Amount)
+	if primary.Amount < 0 {
+		return fmt.Errorf("%w: a primary amount cannot be negative, got %d", ErrInvalidMoney, primary.Amount)
 	}
 	return nil
+}
+
+// Valuation is what one unit of a holding was worth on a given day. It is the
+// other half of what a portfolio screen needs: Position says how much is held
+// and what it cost, a Valuation says what it is worth now.
+//
+// UnitPrice is per unit, unlike HoldingEvent.Amount which is the whole event.
+// A price is genuinely per-unit -- it is what the owner reads off a screen --
+// whereas a lot's cost is the total that left their account.
+//
+// AsOf is the day the price was true, not the day it was typed. The two differ
+// whenever someone backfills a quarter, and the report needs the former.
+type Valuation struct {
+	ID               string
+	HoldingID        string
+	HouseholdID      string
+	UnitPrice        Money
+	PrimaryUnitPrice *Money
+	AsOf             time.Time
+	Note             string
+}
+
+// Validate applies the same cross-currency rule a holding event obeys.
+func (v Valuation) Validate(holdingCurrency, primaryCurrency string) error {
+	if v.UnitPrice.Currency != holdingCurrency {
+		return fmt.Errorf("%w: valuation is %s, holding is %s", ErrCurrencyMismatch, v.UnitPrice.Currency, holdingCurrency)
+	}
+	if v.UnitPrice.Amount < 0 {
+		return fmt.Errorf("%w: a unit price cannot be negative, got %d", ErrInvalidMoney, v.UnitPrice.Amount)
+	}
+	return validatePrimaryAmount(v.PrimaryUnitPrice, holdingCurrency, primaryCurrency)
+}
+
+// MarketValue is what held is worth at this valuation's price. It is a thin
+// wrapper over Quantity.Value and deliberately adds no arithmetic of its own --
+// there is one multiply in this package and this is not a second one.
+func (v Valuation) MarketValue(held Quantity) (Money, error) {
+	return held.Value(v.UnitPrice)
 }
 
 // Position is what a holding's events add up to: how much is still held, what
