@@ -197,6 +197,19 @@ had. Each was fixed test-first on this branch; the review artifact is
 | Thirteen handlers discarded the "is there a scope" answer; the report's failure mode was 200-with-no-rows | `3ee11f4` | `TestAHoldingHandlerWithNoScopeRefuses`: the handler **panicked** rather than refusing | 1 run, 1 killed |
 | The income row's buttons were below the 44px touch target every other control uses | `0a41a69` | measured at 390px in the browser | n/a |
 
+Walked at 390px after the fix, both directions of the changed control:
+
+- **Failure path** — covered by `HoldingIncomePanel.test.tsx`, which is where a
+  422 can actually be forced.
+- **Success path** — walked in the browser. Removed the S$5 "Vault storage" fee:
+  the row disappeared, no alert appeared, the confirmation cleared back to a
+  single "Remove", and the console stayed clean. Following the in-app link to
+  the report then showed Gold bar's Q3 2026 row as
+  `S$495.00 · S$1,000.00 · S$45.00 · S$0.00 · S$1,540.00` — fees down to zero
+  and the total up by exactly the S$5 that was removed, which is also the
+  income-write invalidation doing its job through a delete rather than a
+  create.
+
 Running total for the milestone: **39 mutations, 9 survived first time.** (Five
 in this round, four killed. A sixth never applied -- tab indentation against a
 space-indented file -- and a mutation that does not apply proves nothing.)
