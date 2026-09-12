@@ -121,7 +121,10 @@ func toHoldingDTO(v usecase.HoldingPositionView) holdingDTO {
 
 func handleListHoldings(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		scope, _ := RequestScope(r)
+		scope, ok := requireScope(w, r)
+		if !ok {
+			return
+		}
 		// include_archived is a union, not a filter swap, and is spelled the
 		// way accounts and goals spell it.
 		includeArchived := r.URL.Query().Get("include_archived") == "true"
@@ -148,7 +151,10 @@ type createHoldingRequest struct {
 
 func handleCreateHolding(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		scope, _ := RequestScope(r)
+		scope, ok := requireScope(w, r)
+		if !ok {
+			return
+		}
 		var req createHoldingRequest
 		if !decodeJSONBody(w, r, &req) {
 			return
@@ -192,7 +198,10 @@ type updateHoldingRequest struct {
 
 func handleUpdateHolding(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		scope, _ := RequestScope(r)
+		scope, ok := requireScope(w, r)
+		if !ok {
+			return
+		}
 		id := chi.URLParam(r, "id")
 		var req updateHoldingRequest
 		if !decodeJSONBody(w, r, &req) {
@@ -223,7 +232,10 @@ func handleRestoreHolding(deps Deps) http.HandlerFunc { return setHoldingArchive
 
 func setHoldingArchived(deps Deps, archived bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		scope, _ := RequestScope(r)
+		scope, ok := requireScope(w, r)
+		if !ok {
+			return
+		}
 		id := chi.URLParam(r, "id")
 		if _, err := deps.Holdings.SetArchived(r.Context(), scope.HouseholdID, id, archived, deps.Clock.Now()); err != nil {
 			MapDomainError(w, r, err)
@@ -302,7 +314,10 @@ func writeHoldingNameConflict(w http.ResponseWriter, r *http.Request, deps Deps,
 
 func handleListHoldingEvents(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		scope, _ := RequestScope(r)
+		scope, ok := requireScope(w, r)
+		if !ok {
+			return
+		}
 		events, err := deps.Holdings.ListEvents(r.Context(), scope.HouseholdID, chi.URLParam(r, "id"))
 		if err != nil {
 			MapDomainError(w, r, err)
@@ -337,7 +352,10 @@ type createHoldingEventRequest struct {
 
 func handleCreateHoldingEvent(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		scope, _ := RequestScope(r)
+		scope, ok := requireScope(w, r)
+		if !ok {
+			return
+		}
 		holdingID := chi.URLParam(r, "id")
 		var req createHoldingEventRequest
 		if !decodeJSONBody(w, r, &req) {
@@ -401,7 +419,10 @@ func handleCreateHoldingEvent(deps Deps) http.HandlerFunc {
 
 func handleDeleteHoldingEvent(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		scope, _ := RequestScope(r)
+		scope, ok := requireScope(w, r)
+		if !ok {
+			return
+		}
 		holdingID := chi.URLParam(r, "id")
 		if err := deps.Holdings.DeleteEvent(r.Context(), scope.HouseholdID, holdingID, chi.URLParam(r, "eventId")); err != nil {
 			MapDomainError(w, r, err)
@@ -413,7 +434,10 @@ func handleDeleteHoldingEvent(deps Deps) http.HandlerFunc {
 
 func handleListHoldingValuations(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		scope, _ := RequestScope(r)
+		scope, ok := requireScope(w, r)
+		if !ok {
+			return
+		}
 		valuations, err := deps.Holdings.ListValuations(r.Context(), scope.HouseholdID, chi.URLParam(r, "id"))
 		if err != nil {
 			MapDomainError(w, r, err)
@@ -448,7 +472,10 @@ type createValuationRequest struct {
 // frontend could act on.
 func handleCreateHoldingValuation(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		scope, _ := RequestScope(r)
+		scope, ok := requireScope(w, r)
+		if !ok {
+			return
+		}
 		holdingID := chi.URLParam(r, "id")
 		var req createValuationRequest
 		if !decodeJSONBody(w, r, &req) {
@@ -541,7 +568,10 @@ type createIncomeRequest struct {
 
 func handleListHoldingIncome(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		scope, _ := RequestScope(r)
+		scope, ok := requireScope(w, r)
+		if !ok {
+			return
+		}
 		rows, err := deps.Holdings.ListIncome(r.Context(), scope.HouseholdID, chi.URLParam(r, "id"))
 		if err != nil {
 			MapDomainError(w, r, err)
@@ -557,7 +587,10 @@ func handleListHoldingIncome(deps Deps) http.HandlerFunc {
 
 func handleCreateHoldingIncome(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		scope, _ := RequestScope(r)
+		scope, ok := requireScope(w, r)
+		if !ok {
+			return
+		}
 		holdingID := chi.URLParam(r, "id")
 		var req createIncomeRequest
 		if !decodeJSONBody(w, r, &req) {
@@ -612,7 +645,10 @@ func handleCreateHoldingIncome(deps Deps) http.HandlerFunc {
 
 func handleDeleteHoldingIncome(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		scope, _ := RequestScope(r)
+		scope, ok := requireScope(w, r)
+		if !ok {
+			return
+		}
 		err := deps.Holdings.DeleteIncome(r.Context(), scope.HouseholdID,
 			chi.URLParam(r, "id"), chi.URLParam(r, "incomeId"))
 		if err != nil {
@@ -715,7 +751,10 @@ var defaultReportPeriods = map[domain.PeriodKind]int{
 
 func handleHoldingReport(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		scope, _ := RequestScope(r)
+		scope, ok := requireScope(w, r)
+		if !ok {
+			return
+		}
 		kind, err := domain.ParsePeriodKind(r.URL.Query().Get("kind"))
 		if err != nil {
 			WriteError(w, http.StatusBadRequest, "INVALID_PERIOD_KIND",
