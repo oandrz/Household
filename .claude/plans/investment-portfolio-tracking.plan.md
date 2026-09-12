@@ -195,7 +195,7 @@ The IDR figures above are the test case, named in the test.
 ### Task 1: `domain.Quantity` and exact valuation
 - **Action**: `Quantity` as int64 nano units with a constructor refusing negatives; `Value(unitPrice Money) (Money, error)` doing the 128-bit multiply above. Write the scale choice and the `bits.Div64` panic guard as comments **at the point someone would change them**.
 - **Mirror**: `ports.go:718-751` — `Rate.Apply`'s rounding and `mulOverflows`' written-out edge case.
-- **Validate**: `go test ./internal/domain -run Quantity`. Must include the 10,000 × Rp 10,000 case; it must produce a value, not `ErrAmountOverflow`.
+- **Validate**: `go test ./internal/domain -run 'Quantity|Value'` — the narrower `-run Quantity` silently matches only the constructor tests, not the `TestValue*` ones. Must include the 10,000 × Rp 10,000 case (produces a value, not `ErrAmountOverflow`) **and** a 100,000-share case, whose product passes 2⁶⁴ and so actually exercises the 128-bit high word — the smaller case alone passes a 64-bit truncation.
 
 ### Task 2: The domain types
 - **Action**: `Holding` (account, name, instrument kind, unit label, currency), `HoldingLot` (an acquisition or a disposal: quantity, native amount, optional primary amount, date), `Valuation` (unit price, as-of date). `InstrumentKind` = stock | gold | other. Average-cost basis as a pure function over lots. "Other" is quantity 1 × its value, so there is **one** arithmetic path, not two.
