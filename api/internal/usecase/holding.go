@@ -63,6 +63,7 @@ type HoldingDeps struct {
 	Holdings   HoldingRepository
 	Events     HoldingEventRepository
 	Valuations HoldingValuationRepository
+	Income     HoldingIncomeRepository
 	Accounts   AccountLookup
 	Households HouseholdRepository
 }
@@ -340,4 +341,172 @@ func refuseFutureDate(date, today time.Time) error {
 		return fmt.Errorf("%w: %s", domain.ErrHoldingDateInFuture, d.Format(time.DateOnly))
 	}
 	return nil
+}
+
+// maxReportPeriods is how far back the report will go in one response.
+//
+// It is a drawing limit, not a storage one. The chart puts one bar per holding
+// inside each period, so twelve quarters against four holdings is already
+// forty-eight bars in 320 pixels -- past the point where a bar is a bar. A
+// household wanting more history wants a different screen, not a wider one.
+const maxReportPeriods = 12
+
+// HoldingReportRow is one holding's whole row in the report: the holding
+// itself, and what it earned in each period.
+//
+// Returns is index-aligned with PortfolioReportView.Periods. A chart reads the
+// two together by position rather than matching on labels, which is also what
+// stops a holding with a gap in its history silently shifting its own bars.
+type HoldingReportRow struct {
+	Holding     domain.Holding
+	AccountName string
+	Returns     []domain.PeriodReturn
+}
+
+// PortfolioReportView is the whole report screen in one response.
+//
+// It carries no household total, for the reason PortfolioView carries none:
+// a total would have to convert every holding into the primary currency, and
+// this product has no dated rate source. The per-holding primary figures are
+// each recorded by the owner; a sum across them would be, too -- but a sum
+// that blanks whenever any one holding blanks is worse than no sum at all,
+// because it reads as a zero in the season somebody forgot to type a price.
+type PortfolioReportView struct {
+	Periods         []domain.Period
+	PrimaryCurrency string
+	Holdings        []HoldingReportRow
+}
+
+// RecordIncome stores one dividend, coupon or charge. It takes today for the
+// same reason RecordEvent does -- the caller's clock port stays the single
+// source of time.
+func (s *HoldingService) RecordIncome(ctx context.Context, i domain.HoldingIncome, today time.Time) (domain.HoldingIncome, error) {
+	if err := refuseFutureDate(i.ReceivedOn, today); err != nil {
+		return domain.HoldingIncome{}, err
+	}
+	holding, err := s.d.Holdings.Get(ctx, i.HouseholdID, i.HoldingID)
+	if err != nil {
+		return domain.HoldingIncome{}, err
+	}
+	if holding.IsArchived() {
+		return domain.HoldingIncome{}, domain.ErrHoldingArchived
+	}
+	primaryCurrency, err := s.primaryCurrency(ctx, i.HouseholdID)
+	if err != nil {
+		return domain.HoldingIncome{}, err
+	}
+	if err := i.Validate(holding.Currency, primaryCurrency); err != nil {
+		return domain.HoldingIncome{}, err
+	}
+	// No fold, no lock, no transaction: income enters no pool, so no invariant
+	// spans two rows here and there is nothing a concurrent write could
+	// invalidate. Contrast RecordEvent, which folds inside its own write.
+	return s.d.Income.Insert(ctx, i)
+}
+
+func (s *HoldingService) ListIncome(ctx context.Context, householdID, holdingID string) ([]domain.HoldingIncome, error) {
+	if _, err := s.d.Holdings.Get(ctx, householdID, holdingID); err != nil {
+		return nil, err
+	}
+	return s.d.Income.ListByHolding(ctx, householdID, holdingID)
+}
+
+// DeleteIncome needs no fold check, unlike DeleteEvent: removing a dividend
+// cannot leave the remaining rows unable to fold, because they never folded.
+func (s *HoldingService) DeleteIncome(ctx context.Context, householdID, holdingID, incomeID string) error {
+	if _, err := s.d.Holdings.Get(ctx, householdID, holdingID); err != nil {
+		return err
+	}
+	return s.d.Income.Delete(ctx, householdID, incomeID)
+}
+
+// Report is the period screen: what each holding earned over each of the last
+// `count` periods of this kind, ending with the one the household is currently
+// living in.
+//
+// It reads the household's WHOLE history once -- every holding, every event,
+// every income row, every price -- and computes in memory, rather than issuing
+// a query per holding per period. At this scale (single-digit holdings, tens of
+// events) that is a handful of rows and the simplest thing that is correct.
+// It stops being free somewhere around a household with hundreds of events
+// across dozens of holdings, at which point the fix is a query that folds in
+// SQL, not a cache: the numbers must not be allowed to disagree with the
+// portfolio screen's.
+//
+// Archived holdings are included. Selling out of something and tidying it away
+// does not unmake the profit it realised that quarter, and dropping it would
+// silently change a closed period's answer.
+func (s *HoldingService) Report(ctx context.Context, householdID string, kind domain.PeriodKind, count int, today time.Time) (PortfolioReportView, error) {
+	if _, err := domain.ParsePeriodKind(string(kind)); err != nil {
+		return PortfolioReportView{}, err
+	}
+	if count < 1 || count > maxReportPeriods {
+		return PortfolioReportView{}, fmt.Errorf("%w: %d, the report draws at most %d",
+			domain.ErrPeriodCountOutOfRange, count, maxReportPeriods)
+	}
+	periods, err := domain.PeriodsEndingOn(kind, today, count)
+	if err != nil {
+		return PortfolioReportView{}, err
+	}
+
+	records, err := s.d.Holdings.List(ctx, householdID, true)
+	if err != nil {
+		return PortfolioReportView{}, err
+	}
+	events, err := s.d.Events.ListByHousehold(ctx, householdID)
+	if err != nil {
+		return PortfolioReportView{}, err
+	}
+	income, err := s.d.Income.ListByHousehold(ctx, householdID)
+	if err != nil {
+		return PortfolioReportView{}, err
+	}
+	prices, err := s.d.Valuations.ListForHousehold(ctx, householdID)
+	if err != nil {
+		return PortfolioReportView{}, err
+	}
+	primaryCurrency, err := s.primaryCurrency(ctx, householdID)
+	if err != nil {
+		return PortfolioReportView{}, err
+	}
+
+	// Grouping is this function's real job, and getting it wrong would blend
+	// two positions into one answer that looks plausible. Each map preserves
+	// the order its read returned, which for events is the fold's tie-break
+	// for rows sharing a date.
+	eventsOf := make(map[string][]domain.HoldingEvent, len(records))
+	for _, e := range events {
+		eventsOf[e.HoldingID] = append(eventsOf[e.HoldingID], e)
+	}
+	incomeOf := make(map[string][]domain.HoldingIncome, len(records))
+	for _, i := range income {
+		incomeOf[i.HoldingID] = append(incomeOf[i.HoldingID], i)
+	}
+	pricesOf := make(map[string][]domain.Valuation, len(records))
+	for _, p := range prices {
+		pricesOf[p.HoldingID] = append(pricesOf[p.HoldingID], p)
+	}
+
+	out := PortfolioReportView{
+		Periods:         periods,
+		PrimaryCurrency: primaryCurrency,
+		Holdings:        make([]HoldingReportRow, 0, len(records)),
+	}
+	for _, rec := range records {
+		id := rec.Holding.ID
+		returns := make([]domain.PeriodReturn, 0, len(periods))
+		for _, period := range periods {
+			r, err := rec.Holding.ReturnOver(period, eventsOf[id], incomeOf[id], pricesOf[id], primaryCurrency)
+			if err != nil {
+				return PortfolioReportView{}, err
+			}
+			returns = append(returns, r)
+		}
+		out.Holdings = append(out.Holdings, HoldingReportRow{
+			Holding:     rec.Holding,
+			AccountName: rec.AccountName,
+			Returns:     returns,
+		})
+	}
+	return out, nil
 }

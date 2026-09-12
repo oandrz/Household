@@ -146,5 +146,17 @@ JOIN holdings h ON h.id = v.holding_id
 WHERE v.household_id = $1
 ORDER BY v.holding_id, v.as_of DESC, v.id;
 
+-- ListValuationsForHousehold is EVERY valuation the household has, not just
+-- the newest per holding that ListLatestValuations returns. The period report
+-- needs the whole history: a quarter is opened by a price recorded in the
+-- previous quarter, which the latest-only read has already thrown away.
+-- name: ListValuationsForHousehold :many
+SELECT v.id, v.holding_id, v.household_id, v.unit_price_minor, v.primary_unit_price_minor,
+       v.primary_currency, v.as_of, v.note, v.created_at, h.currency
+FROM holding_valuations v
+JOIN holdings h ON h.id = v.holding_id
+WHERE v.household_id = $1
+ORDER BY v.holding_id, v.as_of, v.id;
+
 -- name: DeleteValuation :execrows
 DELETE FROM holding_valuations WHERE household_id = $1 AND id = $2;

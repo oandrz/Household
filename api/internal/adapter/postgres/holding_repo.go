@@ -27,9 +27,9 @@ func NewHoldingRepo(db *DB) *HoldingRepo { return &HoldingRepo{q: sqlcgen.New(db
 // the service up -- the reason account_repo.go pins AccountRepo to
 // AccountLookup.
 var (
-	_ usecase.HoldingRepository           = (*HoldingRepo)(nil)
-	_ usecase.HoldingEventRepository      = (*HoldingEventRepo)(nil)
-	_ usecase.HoldingValuationRepository  = (*HoldingValuationRepo)(nil)
+	_ usecase.HoldingRepository          = (*HoldingRepo)(nil)
+	_ usecase.HoldingEventRepository     = (*HoldingEventRepo)(nil)
+	_ usecase.HoldingValuationRepository = (*HoldingValuationRepo)(nil)
 )
 
 func (r *HoldingRepo) List(ctx context.Context, householdID string, includeArchived bool) ([]usecase.HoldingRecord, error) {
@@ -417,13 +417,13 @@ func (r *HoldingEventRepo) Delete(ctx context.Context, householdID, eventID stri
 // generated row types differ only in whether they carry the joined currency,
 // so the conversion is written once against this rather than three times.
 type eventRow struct {
-	ID, HoldingID, HouseholdID       pgtype.UUID
-	Kind                             string
-	QuantityNano, AmountMinor        int64
-	PrimaryAmountMinor               *int64
-	PrimaryCurrency                  *string
-	OccurredOn                       pgtype.Date
-	Note, Currency                   string
+	ID, HoldingID, HouseholdID pgtype.UUID
+	Kind                       string
+	QuantityNano, AmountMinor  int64
+	PrimaryAmountMinor         *int64
+	PrimaryCurrency            *string
+	OccurredOn                 pgtype.Date
+	Note, Currency             string
 }
 
 // toHoldingEvent takes the currency from the row's own join, because
@@ -595,5 +595,173 @@ func toValuation(row valuationRow) (domain.Valuation, error) {
 		PrimaryUnitPrice: primary,
 		AsOf:             dateToTime(row.AsOf),
 		Note:             row.Note,
+	}, nil
+}
+
+// ListForHousehold is every valuation the household has, which is what the
+// period report needs: a quarter is opened by a price recorded in the quarter
+// before it, and ListLatest has already thrown that one away.
+func (r *HoldingValuationRepo) ListForHousehold(ctx context.Context, householdID string) ([]domain.Valuation, error) {
+	rows, err := r.q.ListValuationsForHousehold(ctx, uuid(householdID))
+	if err != nil {
+		return nil, translate(err, "list valuations for household")
+	}
+	out := make([]domain.Valuation, 0, len(rows))
+	for _, row := range rows {
+		v, err := toValuation(valuationRow{
+			ID: row.ID, HoldingID: row.HoldingID, HouseholdID: row.HouseholdID,
+			UnitPriceMinor: row.UnitPriceMinor, PrimaryUnitPriceMinor: row.PrimaryUnitPriceMinor,
+			PrimaryCurrency: row.PrimaryCurrency, AsOf: row.AsOf, Note: row.Note, Currency: row.Currency,
+		})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+// HoldingIncomeRepo stores the dividends a holding paid and the charges made
+// against it. It holds no pool and opens no transaction, unlike
+// HoldingEventRepo: income never enters the fold, so there is no invariant
+// across rows to protect and nothing to lock.
+type HoldingIncomeRepo struct{ q *sqlcgen.Queries }
+
+func NewHoldingIncomeRepo(db *DB) *HoldingIncomeRepo {
+	return &HoldingIncomeRepo{q: sqlcgen.New(db.Pool())}
+}
+
+func (r *HoldingIncomeRepo) Insert(ctx context.Context, i domain.HoldingIncome) (domain.HoldingIncome, error) {
+	var primaryMinor *int64
+	var primaryCurrency *string
+	if i.PrimaryAmount != nil {
+		amount, currency := i.PrimaryAmount.Amount, i.PrimaryAmount.Currency
+		primaryMinor, primaryCurrency = &amount, &currency
+	}
+	row, err := r.q.InsertHoldingIncome(ctx, sqlcgen.InsertHoldingIncomeParams{
+		HoldingID:          uuid(i.HoldingID),
+		HouseholdID:        uuid(i.HouseholdID),
+		Kind:               string(i.Kind),
+		AmountMinor:        i.Amount.Amount,
+		PrimaryAmountMinor: primaryMinor,
+		PrimaryCurrency:    primaryCurrency,
+		ReceivedOn:         dateOnly(i.ReceivedOn),
+		Note:               i.Note,
+	})
+	if err != nil {
+		return domain.HoldingIncome{}, translate(err, "insert holding income")
+	}
+	// The insert does not join the holding, so the currency comes from what
+	// was written rather than from the row -- the service has already checked
+	// the two agree.
+	return toHoldingIncome(incomeRow{
+		ID: row.ID, HoldingID: row.HoldingID, HouseholdID: row.HouseholdID,
+		Kind: row.Kind, AmountMinor: row.AmountMinor,
+		PrimaryAmountMinor: row.PrimaryAmountMinor, PrimaryCurrency: row.PrimaryCurrency,
+		ReceivedOn: row.ReceivedOn, Note: row.Note, Currency: i.Amount.Currency,
+	})
+}
+
+func (r *HoldingIncomeRepo) ListByHolding(ctx context.Context, householdID, holdingID string) ([]domain.HoldingIncome, error) {
+	rows, err := r.q.ListHoldingIncome(ctx, sqlcgen.ListHoldingIncomeParams{
+		HouseholdID: uuid(householdID),
+		HoldingID:   uuid(holdingID),
+	})
+	if err != nil {
+		return nil, translate(err, "list holding income")
+	}
+	out := make([]domain.HoldingIncome, 0, len(rows))
+	for _, row := range rows {
+		i, err := toHoldingIncome(incomeRow{
+			ID: row.ID, HoldingID: row.HoldingID, HouseholdID: row.HouseholdID,
+			Kind: row.Kind, AmountMinor: row.AmountMinor,
+			PrimaryAmountMinor: row.PrimaryAmountMinor, PrimaryCurrency: row.PrimaryCurrency,
+			ReceivedOn: row.ReceivedOn, Note: row.Note, Currency: row.Currency,
+		})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, i)
+	}
+	return out, nil
+}
+
+func (r *HoldingIncomeRepo) ListByHousehold(ctx context.Context, householdID string) ([]domain.HoldingIncome, error) {
+	rows, err := r.q.ListHoldingIncomeForHousehold(ctx, uuid(householdID))
+	if err != nil {
+		return nil, translate(err, "list holding income for household")
+	}
+	out := make([]domain.HoldingIncome, 0, len(rows))
+	for _, row := range rows {
+		i, err := toHoldingIncome(incomeRow{
+			ID: row.ID, HoldingID: row.HoldingID, HouseholdID: row.HouseholdID,
+			Kind: row.Kind, AmountMinor: row.AmountMinor,
+			PrimaryAmountMinor: row.PrimaryAmountMinor, PrimaryCurrency: row.PrimaryCurrency,
+			ReceivedOn: row.ReceivedOn, Note: row.Note, Currency: row.Currency,
+		})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, i)
+	}
+	return out, nil
+}
+
+func (r *HoldingIncomeRepo) Delete(ctx context.Context, householdID, incomeID string) error {
+	n, err := r.q.DeleteHoldingIncome(ctx, sqlcgen.DeleteHoldingIncomeParams{
+		HouseholdID: uuid(householdID),
+		ID:          uuid(incomeID),
+	})
+	if err != nil {
+		return translate(err, "delete holding income")
+	}
+	// A missing row becomes domain.ErrNotFound at this boundary and never
+	// travels further as a row count, the rule every repository here follows.
+	if n == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+// incomeRow is the shape every holding_income query returns, with the currency
+// joined from its holding -- the same convention eventRow and valuationRow
+// carry, for the same reason: the table has no currency column because a
+// payment is denominated in its holding's currency by construction.
+type incomeRow struct {
+	ID, HoldingID, HouseholdID pgtype.UUID
+	Kind                       string
+	AmountMinor                int64
+	PrimaryAmountMinor         *int64
+	PrimaryCurrency            *string
+	ReceivedOn                 pgtype.Date
+	Note, Currency             string
+}
+
+func toHoldingIncome(row incomeRow) (domain.HoldingIncome, error) {
+	kind, err := domain.ParseIncomeKind(row.Kind)
+	if err != nil {
+		return domain.HoldingIncome{}, err
+	}
+	amount, err := domain.NewMoney(row.AmountMinor, row.Currency)
+	if err != nil {
+		return domain.HoldingIncome{}, err
+	}
+	var primary *domain.Money
+	if row.PrimaryAmountMinor != nil && row.PrimaryCurrency != nil {
+		p, err := domain.NewMoney(*row.PrimaryAmountMinor, *row.PrimaryCurrency)
+		if err != nil {
+			return domain.HoldingIncome{}, err
+		}
+		primary = &p
+	}
+	return domain.HoldingIncome{
+		ID:            uuidToString(row.ID),
+		HoldingID:     uuidToString(row.HoldingID),
+		HouseholdID:   uuidToString(row.HouseholdID),
+		Kind:          kind,
+		Amount:        amount,
+		PrimaryAmount: primary,
+		ReceivedOn:    dateToTime(row.ReceivedOn),
+		Note:          row.Note,
 	}, nil
 }

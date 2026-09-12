@@ -523,3 +523,160 @@ func TestTwoRacingDisposalsCannotBothCommit(t *testing.T) {
 	}
 }
 
+// --- income and the report's valuation read ---------------------------------
+
+func TestHoldingIncomeRoundTripsBothKinds(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	holdings := postgres.NewHoldingRepo(db)
+	incomeRepo := postgres.NewHoldingIncomeRepo(db)
+	householdID := insertTestHousehold(t, db)
+	accountID := insertTestInvestmentAccount(t, db, householdID, "Brokerage")
+	h, err := holdings.Create(ctx, newTestHolding(householdID, accountID, "D05"))
+	if err != nil {
+		t.Fatalf("Create holding: %v", err)
+	}
+
+	dividend, _ := domain.NewMoney(4500, "SGD")
+	custody, _ := domain.NewMoney(250, "SGD")
+	for _, in := range []domain.HoldingIncome{
+		{HoldingID: h.ID, HouseholdID: householdID, Kind: domain.IncomeReceived,
+			Amount: dividend, ReceivedOn: july(5), Note: "H1 dividend"},
+		{HoldingID: h.ID, HouseholdID: householdID, Kind: domain.IncomeFee,
+			Amount: custody, ReceivedOn: july(9)},
+	} {
+		if _, err := incomeRepo.Insert(ctx, in); err != nil {
+			t.Fatalf("Insert %s: %v", in.Kind, err)
+		}
+	}
+
+	got, err := incomeRepo.ListByHolding(ctx, householdID, h.ID)
+	if err != nil {
+		t.Fatalf("ListByHolding: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d rows, want 2", len(got))
+	}
+	// Newest first, which is the order a panel under the holding reads them in.
+	if got[0].Kind != domain.IncomeFee || got[0].Amount.Amount != 250 {
+		t.Errorf("first row = %+v, want the 9 July fee", got[0])
+	}
+	if got[1].Kind != domain.IncomeReceived || got[1].Note != "H1 dividend" {
+		t.Errorf("second row = %+v, want the 5 July dividend", got[1])
+	}
+	// The currency comes from the holding's own column through the join; the
+	// table has none.
+	if got[0].Amount.Currency != "SGD" {
+		t.Errorf("currency = %q, want SGD from the holding", got[0].Amount.Currency)
+	}
+}
+
+func TestHoldingIncomeRoundTripsItsPrimaryAmount(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	holdings := postgres.NewHoldingRepo(db)
+	incomeRepo := postgres.NewHoldingIncomeRepo(db)
+	householdID := insertTestHousehold(t, db)
+	accountID := insertTestInvestmentAccount(t, db, householdID, "Brokerage")
+	usd := newTestHolding(householdID, accountID, "VOO")
+	usd.Currency = "USD"
+	h, err := holdings.Create(ctx, usd)
+	if err != nil {
+		t.Fatalf("Create holding: %v", err)
+	}
+
+	native, _ := domain.NewMoney(1200, "USD")
+	primary, _ := domain.NewMoney(1620, "SGD")
+	if _, err := incomeRepo.Insert(ctx, domain.HoldingIncome{
+		HoldingID: h.ID, HouseholdID: householdID, Kind: domain.IncomeReceived,
+		Amount: native, PrimaryAmount: &primary, ReceivedOn: july(5),
+	}); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	got, err := incomeRepo.ListByHousehold(ctx, householdID)
+	if err != nil {
+		t.Fatalf("ListByHousehold: %v", err)
+	}
+	if len(got) != 1 || got[0].PrimaryAmount == nil {
+		t.Fatalf("got %+v, want one row carrying its primary amount", got)
+	}
+	if got[0].PrimaryAmount.Amount != 1620 || got[0].PrimaryAmount.Currency != "SGD" {
+		t.Errorf("PrimaryAmount = %+v, want 1620 SGD", *got[0].PrimaryAmount)
+	}
+}
+
+// Deleting a row that is not there reads as absent at this boundary, never as
+// a zero row count travelling further up.
+func TestDeletingAnAbsentIncomeRowIsNotFound(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	incomeRepo := postgres.NewHoldingIncomeRepo(db)
+	householdID := insertTestHousehold(t, db)
+
+	err := incomeRepo.Delete(ctx, householdID, "00000000-0000-0000-0000-000000000000")
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("err = %v, want domain.ErrNotFound", err)
+	}
+}
+
+// The zero-amount rule is enforced in the domain AND in the schema, on purpose
+// -- the same deliberate redundancy 00007_goals.sql describes. This test is
+// what proves the CHECK is really there rather than only the Go guard.
+func TestTheSchemaRefusesAZeroIncomeAmount(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	holdings := postgres.NewHoldingRepo(db)
+	householdID := insertTestHousehold(t, db)
+	accountID := insertTestInvestmentAccount(t, db, householdID, "Brokerage")
+	h, err := holdings.Create(ctx, newTestHolding(householdID, accountID, "D05"))
+	if err != nil {
+		t.Fatalf("Create holding: %v", err)
+	}
+
+	_, err = db.Pool().Exec(ctx,
+		`INSERT INTO holding_income (holding_id, household_id, kind, amount_minor, received_on)
+		 VALUES ($1, $2, 'income', 0, DATE '2026-07-05')`, h.ID, householdID)
+	if err == nil {
+		t.Fatal("the schema accepted a zero income amount")
+	}
+}
+
+// The period report cannot use ListLatest: a quarter opens at a price recorded
+// in the quarter before it, which the latest-only read has thrown away. This
+// read keeps the whole history, oldest first per holding.
+func TestValuationsForHouseholdReturnsEveryPriceNotOnlyTheNewest(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	holdings := postgres.NewHoldingRepo(db)
+	valuations := postgres.NewHoldingValuationRepo(db)
+	householdID := insertTestHousehold(t, db)
+	accountID := insertTestInvestmentAccount(t, db, householdID, "Brokerage")
+	h, err := holdings.Create(ctx, newTestHolding(householdID, accountID, "D05"))
+	if err != nil {
+		t.Fatalf("Create holding: %v", err)
+	}
+
+	for _, day := range []int{5, 9, 1} {
+		price, _ := domain.NewMoney(int64(1000+day), "SGD")
+		if _, err := valuations.Upsert(ctx, domain.Valuation{
+			HoldingID: h.ID, HouseholdID: householdID, UnitPrice: price, AsOf: july(day),
+		}); err != nil {
+			t.Fatalf("Upsert %d July: %v", day, err)
+		}
+	}
+
+	got, err := valuations.ListForHousehold(ctx, householdID)
+	if err != nil {
+		t.Fatalf("ListForHousehold: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d prices, want all 3", len(got))
+	}
+	for i := 1; i < len(got); i++ {
+		if got[i].AsOf.Before(got[i-1].AsOf) {
+			t.Fatalf("prices came back out of order: %s before %s",
+				got[i].AsOf.Format(time.DateOnly), got[i-1].AsOf.Format(time.DateOnly))
+		}
+	}
+}

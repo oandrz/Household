@@ -44,6 +44,7 @@ type holdingFixture struct {
 	holdings    *holdingRepoDouble
 	events      *holdingEventRepoDouble
 	valuations  *valuationRepoDouble
+	income      *holdingIncomeRepoDouble
 	accounts    *accountLookupDouble
 	householdID string
 	accountID   string
@@ -61,6 +62,7 @@ func newHoldingFixture(t *testing.T, primaryCurrency string) *holdingFixture {
 		holdings:    newHoldingRepoDouble(),
 		events:      newHoldingEventRepoDouble(),
 		valuations:  newValuationRepoDouble(),
+		income:      newHoldingIncomeRepoDouble(),
 		accounts:    accounts,
 		householdID: "hh",
 		accountID:   "acct",
@@ -69,6 +71,7 @@ func newHoldingFixture(t *testing.T, primaryCurrency string) *holdingFixture {
 		Holdings:   f.holdings,
 		Events:     f.events,
 		Valuations: f.valuations,
+		Income:     f.income,
 		Accounts:   accounts,
 		Households: households,
 	})
@@ -85,6 +88,47 @@ func (f *holdingFixture) create(t *testing.T, name, currency string) domain.Hold
 		t.Fatalf("Create %s: %v", name, err)
 	}
 	return h
+}
+
+func (f *holdingFixture) buy(t *testing.T, holdingID string, when time.Time, qty, costMinor int64) {
+	t.Helper()
+	f.event(t, holdingID, domain.HoldingAcquisition, when, qty, costMinor)
+}
+
+func (f *holdingFixture) sell(t *testing.T, holdingID string, when time.Time, qty, proceedsMinor int64) {
+	t.Helper()
+	f.event(t, holdingID, domain.HoldingDisposal, when, qty, proceedsMinor)
+}
+
+func (f *holdingFixture) event(t *testing.T, holdingID string, kind domain.HoldingEventKind, when time.Time, qty, minor int64) {
+	t.Helper()
+	quantity, err := domain.NewQuantity(qty * domain.QuantityScale)
+	if err != nil {
+		t.Fatalf("NewQuantity: %v", err)
+	}
+	amount, err := domain.NewMoney(minor, "SGD")
+	if err != nil {
+		t.Fatalf("NewMoney: %v", err)
+	}
+	if _, err := f.svc.RecordEvent(context.Background(), domain.HoldingEvent{
+		HouseholdID: f.householdID, HoldingID: holdingID, Kind: kind,
+		Quantity: quantity, Amount: amount, OccurredOn: when,
+	}, reportToday); err != nil {
+		t.Fatalf("RecordEvent %s: %v", kind, err)
+	}
+}
+
+func (f *holdingFixture) price(t *testing.T, holdingID string, when time.Time, unitPriceMinor int64) {
+	t.Helper()
+	price, err := domain.NewMoney(unitPriceMinor, "SGD")
+	if err != nil {
+		t.Fatalf("NewMoney: %v", err)
+	}
+	if _, err := f.svc.RecordValuation(context.Background(), domain.Valuation{
+		HouseholdID: f.householdID, HoldingID: holdingID, UnitPrice: price, AsOf: when,
+	}, reportToday); err != nil {
+		t.Fatalf("RecordValuation: %v", err)
+	}
 }
 
 // A holding belongs in an INVESTMENT account. Fail closed on the type rather
@@ -509,5 +553,228 @@ func TestRecordEventRefusesADateInTheFuture(t *testing.T) {
 	}, holdingDay(10))
 	if !errors.Is(err, domain.ErrHoldingDateInFuture) {
 		t.Fatalf("error = %v, want ErrHoldingDateInFuture", err)
+	}
+}
+
+// --- income, and the period report ------------------------------------------
+
+func (f *holdingFixture) recordIncome(t *testing.T, holdingID string, kind domain.IncomeKind, minor int64, when time.Time) domain.HoldingIncome {
+	t.Helper()
+	amount, err := domain.NewMoney(minor, "SGD")
+	if err != nil {
+		t.Fatalf("NewMoney: %v", err)
+	}
+	in, err := f.svc.RecordIncome(context.Background(), domain.HoldingIncome{
+		HouseholdID: f.householdID, HoldingID: holdingID, Kind: kind,
+		Amount: amount, ReceivedOn: when,
+	}, reportToday)
+	if err != nil {
+		t.Fatalf("RecordIncome: %v", err)
+	}
+	return in
+}
+
+// reportToday sits inside Q3 2026, so the current period in every test below
+// is Q3 and the two before it have closed.
+var reportToday = time.Date(2026, time.August, 9, 0, 0, 0, 0, time.UTC)
+
+func reportDay(month time.Month, day int) time.Time {
+	return time.Date(2026, month, day, 0, 0, 0, 0, time.UTC)
+}
+
+// A dividend dated tomorrow is a typo, and one dated 2030 would sit in a
+// period nobody can reach. The same guard events and valuations already carry.
+func TestRecordIncomeRefusesAFutureDate(t *testing.T) {
+	f := newHoldingFixture(t, "SGD")
+	h := f.create(t, "D05", "SGD")
+	amount, _ := domain.NewMoney(4500, "SGD")
+
+	_, err := f.svc.RecordIncome(context.Background(), domain.HoldingIncome{
+		HouseholdID: f.householdID, HoldingID: h.ID, Kind: domain.IncomeReceived,
+		Amount: amount, ReceivedOn: reportToday.AddDate(0, 0, 1),
+	}, reportToday)
+	if !errors.Is(err, domain.ErrHoldingDateInFuture) {
+		t.Fatalf("error = %v, want ErrHoldingDateInFuture", err)
+	}
+}
+
+// The cross-currency rule is the holding's, not the row's: a USD holding in an
+// SGD household needs the SGD figure beside the USD one.
+func TestRecordIncomeAppliesTheHoldingsCrossCurrencyRule(t *testing.T) {
+	f := newHoldingFixture(t, "SGD")
+	h := f.create(t, "VOO", "USD")
+	usd, _ := domain.NewMoney(1200, "USD")
+
+	_, err := f.svc.RecordIncome(context.Background(), domain.HoldingIncome{
+		HouseholdID: f.householdID, HoldingID: h.ID, Kind: domain.IncomeReceived,
+		Amount: usd, ReceivedOn: reportDay(time.July, 5),
+	}, reportToday)
+	if !errors.Is(err, domain.ErrHoldingPrimaryAmountRequired) {
+		t.Fatalf("error = %v, want ErrHoldingPrimaryAmountRequired", err)
+	}
+}
+
+func TestRecordIncomeRefusesAnArchivedHolding(t *testing.T) {
+	f := newHoldingFixture(t, "SGD")
+	h := f.create(t, "D05", "SGD")
+	if _, err := f.svc.SetArchived(context.Background(), f.householdID, h.ID, true, reportToday); err != nil {
+		t.Fatalf("SetArchived: %v", err)
+	}
+	amount, _ := domain.NewMoney(4500, "SGD")
+
+	_, err := f.svc.RecordIncome(context.Background(), domain.HoldingIncome{
+		HouseholdID: f.householdID, HoldingID: h.ID, Kind: domain.IncomeReceived,
+		Amount: amount, ReceivedOn: reportDay(time.July, 5),
+	}, reportToday)
+	if !errors.Is(err, domain.ErrHoldingArchived) {
+		t.Fatalf("error = %v, want ErrHoldingArchived", err)
+	}
+}
+
+// The report is a series ending with the period the household is living in --
+// the owner's first question is "how am I doing now", and a closed-periods-only
+// report would be empty until a quarter ended.
+func TestReportEndsWithTheCurrentPeriodAndRunsOldestFirst(t *testing.T) {
+	f := newHoldingFixture(t, "SGD")
+	f.create(t, "D05", "SGD")
+
+	view, err := f.svc.Report(context.Background(), f.householdID, domain.PeriodQuarter, 3, reportToday)
+	if err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+	want := []string{"Q1 2026", "Q2 2026", "Q3 2026"}
+	if len(view.Periods) != len(want) {
+		t.Fatalf("got %d periods, want %d", len(view.Periods), len(want))
+	}
+	for i, label := range want {
+		if view.Periods[i].Label() != label {
+			t.Errorf("period %d = %q, want %q", i, view.Periods[i].Label(), label)
+		}
+	}
+	if !view.Periods[2].IsCurrent(reportToday) || view.Periods[1].IsCurrent(reportToday) {
+		t.Error("only the last period is the current one")
+	}
+	if view.PrimaryCurrency != "SGD" {
+		t.Errorf("PrimaryCurrency = %q, want SGD", view.PrimaryCurrency)
+	}
+}
+
+// Each holding's row carries one return per period, in the same order as
+// view.Periods -- which is what lets a chart read the two together without
+// matching on labels.
+func TestReportCarriesOneReturnPerPeriodPerHolding(t *testing.T) {
+	f := newHoldingFixture(t, "SGD")
+	h := f.create(t, "D05", "SGD")
+	f.buy(t, h.ID, reportDay(time.January, 5), 10, 100000)
+	f.price(t, h.ID, reportDay(time.March, 31), 10000)
+	f.price(t, h.ID, reportDay(time.June, 30), 12000)
+	f.recordIncome(t, h.ID, domain.IncomeReceived, 500, reportDay(time.May, 1))
+
+	view, err := f.svc.Report(context.Background(), f.householdID, domain.PeriodQuarter, 3, reportToday)
+	if err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+	if len(view.Holdings) != 1 {
+		t.Fatalf("got %d holdings, want 1", len(view.Holdings))
+	}
+	row := view.Holdings[0]
+	if len(row.Returns) != len(view.Periods) {
+		t.Fatalf("got %d returns for %d periods", len(row.Returns), len(view.Periods))
+	}
+
+	q2 := row.Returns[1]
+	if q2.Unrealised == nil {
+		t.Fatalf("Q2 blanked with %q", q2.Reason)
+	}
+	if q2.Unrealised.Native.Amount != 20000 {
+		t.Errorf("Q2 unrealised = %d, want 20000", q2.Unrealised.Native.Amount)
+	}
+	if q2.Income.Native.Amount != 500 {
+		t.Errorf("Q2 income = %d, want 500", q2.Income.Native.Amount)
+	}
+	// Q3 has no price of its own yet, so it cannot be valued -- and says so
+	// rather than reporting zero.
+	if row.Returns[2].Unrealised != nil {
+		t.Errorf("Q3 unrealised = %v, want blank", row.Returns[2].Unrealised)
+	}
+	if row.Returns[2].Reason != domain.ReasonNoClosingPrice {
+		t.Errorf("Q3 reason = %q, want %q", row.Returns[2].Reason, domain.ReasonNoClosingPrice)
+	}
+}
+
+// An archived holding is still in the report. Selling out of something and
+// tidying it away does not unmake the profit it realised that quarter, and
+// leaving it out would silently change a closed period's answer.
+func TestReportIncludesArchivedHoldings(t *testing.T) {
+	f := newHoldingFixture(t, "SGD")
+	h := f.create(t, "D05", "SGD")
+	f.buy(t, h.ID, reportDay(time.January, 5), 10, 100000)
+	f.sell(t, h.ID, reportDay(time.May, 20), 10, 130000)
+	if _, err := f.svc.SetArchived(context.Background(), f.householdID, h.ID, true, reportToday); err != nil {
+		t.Fatalf("SetArchived: %v", err)
+	}
+
+	view, err := f.svc.Report(context.Background(), f.householdID, domain.PeriodQuarter, 3, reportToday)
+	if err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+	if len(view.Holdings) != 1 {
+		t.Fatalf("got %d holdings, want the archived one included", len(view.Holdings))
+	}
+	if view.Holdings[0].Returns[1].Realised.Native.Amount != 30000 {
+		t.Errorf("Q2 realised = %d, want 30000", view.Holdings[0].Returns[1].Realised.Native.Amount)
+	}
+}
+
+// One holding's rows must never reach another's fold. Grouping is the service's
+// job, and getting it wrong would blend two positions into one wrong answer.
+func TestReportKeepsEachHoldingsRowsToItself(t *testing.T) {
+	f := newHoldingFixture(t, "SGD")
+	gold := f.create(t, "Gold", "SGD")
+	stock := f.create(t, "D05", "SGD")
+	f.buy(t, gold.ID, reportDay(time.January, 5), 10, 100000)
+	f.buy(t, stock.ID, reportDay(time.January, 5), 10, 500000)
+	f.price(t, gold.ID, reportDay(time.March, 31), 10000)
+	f.price(t, gold.ID, reportDay(time.June, 30), 12000)
+	f.price(t, stock.ID, reportDay(time.March, 31), 50000)
+	f.price(t, stock.ID, reportDay(time.June, 30), 50000)
+	f.recordIncome(t, gold.ID, domain.IncomeReceived, 500, reportDay(time.May, 1))
+
+	// Three periods, so index 1 is Q2 -- the quarter these prices and this
+	// dividend belong to.
+	view, err := f.svc.Report(context.Background(), f.householdID, domain.PeriodQuarter, 3, reportToday)
+	if err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+	byName := map[string]usecase.HoldingReportRow{}
+	for _, row := range view.Holdings {
+		byName[row.Holding.Name] = row
+	}
+	if got := byName["Gold"].Returns[1]; got.Income.Native.Amount != 500 {
+		t.Errorf("Gold Q2 income = %d, want 500", got.Income.Native.Amount)
+	}
+	if got := byName["D05"].Returns[1]; got.Income.Native.Amount != 0 {
+		t.Errorf("D05 Q2 income = %d, want 0 -- that dividend was the gold's", got.Income.Native.Amount)
+	}
+	if got := byName["D05"].Returns[1]; got.Unrealised == nil || got.Unrealised.Native.Amount != 0 {
+		t.Errorf("D05 Q2 unrealised = %v, want 0", got.Unrealised)
+	}
+}
+
+func TestReportRefusesACountBeyondWhatItWillDraw(t *testing.T) {
+	f := newHoldingFixture(t, "SGD")
+
+	for _, count := range []int{0, -1, 13} {
+		if _, err := f.svc.Report(context.Background(), f.householdID, domain.PeriodQuarter, count, reportToday); !errors.Is(err, domain.ErrPeriodCountOutOfRange) {
+			t.Errorf("count %d error = %v, want ErrPeriodCountOutOfRange", count, err)
+		}
+	}
+}
+
+func TestReportRefusesAPeriodKindItDoesNotKnow(t *testing.T) {
+	f := newHoldingFixture(t, "SGD")
+
+	if _, err := f.svc.Report(context.Background(), f.householdID, domain.PeriodKind("month"), 3, reportToday); !errors.Is(err, domain.ErrUnknownPeriodKind) {
+		t.Fatalf("error = %v, want ErrUnknownPeriodKind", err)
 	}
 }

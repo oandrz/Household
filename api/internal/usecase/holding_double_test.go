@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strconv"
 	"time"
@@ -260,6 +261,17 @@ func (d *valuationRepoDouble) ListByHolding(_ context.Context, householdID, hold
 // ListLatest returns at most one row per holding and NO row for a holding
 // nobody has priced -- the absence the portfolio view renders as "no price
 // recorded" rather than as a figure of zero.
+func (d *valuationRepoDouble) ListForHousehold(_ context.Context, householdID string) ([]domain.Valuation, error) {
+	out := []domain.Valuation{}
+	for _, v := range d.rows {
+		if v.HouseholdID == householdID {
+			out = append(out, v)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].AsOf.Before(out[j].AsOf) })
+	return out, nil
+}
+
 func (d *valuationRepoDouble) ListLatest(_ context.Context, householdID string) ([]domain.Valuation, error) {
 	newest := map[string]domain.Valuation{}
 	for _, v := range d.rows {
@@ -297,6 +309,55 @@ func (d *valuationRepoDouble) Upsert(_ context.Context, v domain.Valuation) (dom
 func (d *valuationRepoDouble) Delete(_ context.Context, householdID, valuationID string) error {
 	for i, v := range d.rows {
 		if v.ID == valuationID && v.HouseholdID == householdID {
+			d.rows = append(d.rows[:i], d.rows[i+1:]...)
+			return nil
+		}
+	}
+	return domain.ErrNotFound
+}
+
+// --- HoldingIncomeRepository -------------------------------------------------
+//
+// No ordering contract to honour here, unlike the event double: income is
+// summed over a period and addition is commutative, so any order is correct.
+
+type holdingIncomeRepoDouble struct {
+	rows []domain.HoldingIncome
+	n    int
+}
+
+func newHoldingIncomeRepoDouble() *holdingIncomeRepoDouble { return &holdingIncomeRepoDouble{} }
+
+func (d *holdingIncomeRepoDouble) Insert(_ context.Context, i domain.HoldingIncome) (domain.HoldingIncome, error) {
+	d.n++
+	i.ID = fmt.Sprintf("income-%d", d.n)
+	d.rows = append(d.rows, i)
+	return i, nil
+}
+
+func (d *holdingIncomeRepoDouble) ListByHolding(_ context.Context, householdID, holdingID string) ([]domain.HoldingIncome, error) {
+	out := []domain.HoldingIncome{}
+	for _, r := range d.rows {
+		if r.HouseholdID == householdID && r.HoldingID == holdingID {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (d *holdingIncomeRepoDouble) ListByHousehold(_ context.Context, householdID string) ([]domain.HoldingIncome, error) {
+	out := []domain.HoldingIncome{}
+	for _, r := range d.rows {
+		if r.HouseholdID == householdID {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (d *holdingIncomeRepoDouble) Delete(_ context.Context, householdID, incomeID string) error {
+	for i, r := range d.rows {
+		if r.ID == incomeID && r.HouseholdID == householdID {
 			d.rows = append(d.rows[:i], d.rows[i+1:]...)
 			return nil
 		}

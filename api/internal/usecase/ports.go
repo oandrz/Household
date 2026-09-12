@@ -1848,6 +1848,31 @@ type HoldingValuationRepository interface {
 	// same AsOf replaces the first. Re-entering a day's price is a
 	// correction, not a second opinion, and two rows for one day would leave
 	// the report with no way to choose between them.
+	// ListForHousehold returns EVERY valuation the household has, not one per
+	// holding. The period report needs the whole history: a quarter opens at
+	// a price recorded in the quarter before it, and ListLatest has already
+	// discarded that one.
+	ListForHousehold(ctx context.Context, householdID string) ([]domain.Valuation, error)
+	// Upsert writes one price per holding per day: a second write for the
+	// same AsOf replaces the first. Re-entering a day's price is a
+	// correction, not a second opinion, and two rows for one day would leave
+	// the report with no way to choose between them.
 	Upsert(ctx context.Context, v domain.Valuation) (domain.Valuation, error)
 	Delete(ctx context.Context, householdID, valuationID string) error
+}
+
+// HoldingIncomeRepository stores the dividends a holding paid and the charges
+// made against it.
+//
+// Unlike HoldingEventRepository there is no ordering contract here and no
+// fold-inside-the-write: income never enters the average-cost pool, so no
+// invariant spans two rows, no order changes the answer, and nothing needs a
+// lock. Any order is correct because summing a period is commutative.
+type HoldingIncomeRepository interface {
+	Insert(ctx context.Context, i domain.HoldingIncome) (domain.HoldingIncome, error)
+	ListByHolding(ctx context.Context, householdID, holdingID string) ([]domain.HoldingIncome, error)
+	ListByHousehold(ctx context.Context, householdID string) ([]domain.HoldingIncome, error)
+	// Delete returns domain.ErrNotFound when the row is not this household's,
+	// never a silent success.
+	Delete(ctx context.Context, householdID, incomeID string) error
 }

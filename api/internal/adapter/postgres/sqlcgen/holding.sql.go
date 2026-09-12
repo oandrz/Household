@@ -522,6 +522,63 @@ func (q *Queries) ListValuations(ctx context.Context, arg ListValuationsParams) 
 	return items, nil
 }
 
+const listValuationsForHousehold = `-- name: ListValuationsForHousehold :many
+SELECT v.id, v.holding_id, v.household_id, v.unit_price_minor, v.primary_unit_price_minor,
+       v.primary_currency, v.as_of, v.note, v.created_at, h.currency
+FROM holding_valuations v
+JOIN holdings h ON h.id = v.holding_id
+WHERE v.household_id = $1
+ORDER BY v.holding_id, v.as_of, v.id
+`
+
+type ListValuationsForHouseholdRow struct {
+	ID                    pgtype.UUID
+	HoldingID             pgtype.UUID
+	HouseholdID           pgtype.UUID
+	UnitPriceMinor        int64
+	PrimaryUnitPriceMinor *int64
+	PrimaryCurrency       *string
+	AsOf                  pgtype.Date
+	Note                  string
+	CreatedAt             pgtype.Timestamptz
+	Currency              string
+}
+
+// ListValuationsForHousehold is EVERY valuation the household has, not just
+// the newest per holding that ListLatestValuations returns. The period report
+// needs the whole history: a quarter is opened by a price recorded in the
+// previous quarter, which the latest-only read has already thrown away.
+func (q *Queries) ListValuationsForHousehold(ctx context.Context, householdID pgtype.UUID) ([]ListValuationsForHouseholdRow, error) {
+	rows, err := q.db.Query(ctx, listValuationsForHousehold, householdID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListValuationsForHouseholdRow
+	for rows.Next() {
+		var i ListValuationsForHouseholdRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.HoldingID,
+			&i.HouseholdID,
+			&i.UnitPriceMinor,
+			&i.PrimaryUnitPriceMinor,
+			&i.PrimaryCurrency,
+			&i.AsOf,
+			&i.Note,
+			&i.CreatedAt,
+			&i.Currency,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockHolding = `-- name: LockHolding :one
 SELECT currency FROM holdings
 WHERE household_id = $1 AND id = $2
