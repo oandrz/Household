@@ -1200,7 +1200,7 @@ rows, and a link redemption writes neither.
 | GET | `/holdings/report` | session · money · owner — `?kind=quarter\|half\|year`, `?count=` optional. **Registered before the `/holdings/{id}/…` routes and not shadowed by them**: chi prefers a static segment over a parameter, and a test says so rather than a comment hoping so. The window length defaults on the SERVER (6 quarters, 4 halves, 3 years) because the browser holding a second copy of that rule would be free to drift from the one the chart's bar budget was chosen against |
 | GET | `/holdings/{id}/income` | session · money · owner |
 | POST | `/holdings/{id}/income` | session · money · owner · CSRF — 201, and it does **not** upsert the way a valuation does: two dividends in one quarter are two payments, not a correction of each other |
-| DELETE | `/holdings/{id}/income/{incomeId}` | session · money · owner · CSRF |
+| DELETE | `/holdings/{id}/income/{incomeId}` | session · money · owner · CSRF — the `{id}` is part of the DATABASE scope, not decoration: the delete matches on `(household_id, holding_id, id)`, so a request naming one holding cannot remove another's row. `/holdings/{id}/events/{eventId}` is scoped the same way |
 | GET | `/bills` | session · money · owner — same reasoning as the transactions/categories/budgets/goals reads above |
 | POST | `/bills` | session · money · owner · CSRF |
 | PATCH | `/bills/{id}` | session · money · owner · CSRF |

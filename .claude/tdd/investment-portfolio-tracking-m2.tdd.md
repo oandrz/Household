@@ -184,6 +184,25 @@ Driven at `http://localhost:5173` before any "done" claim, per `CLAUDE.md`.
 The second is the checklist's step 3 (*"grep for the shape of anything you
 fixed; siblings are the norm here"*) doing exactly what it is there for.
 
+## Post-review fixes
+
+`/ecc:code-review` over the finished milestone found four things nothing else
+had. Each was fixed test-first on this branch; the review artifact is
+`.claude/reviews/investment-portfolio-tracking-m2-review.md`.
+
+| Finding | Fix | RED | Mutations |
+|---|---|---|---|
+| A failed dividend delete was silent — no catch, row left on screen, confirmation stuck open, unhandled rejection | `0a41a69` | new `HoldingIncomePanel.test.tsx`; vitest printed the leaked `ApiError` | 2 run, 2 killed |
+| `DELETE /holdings/{id}/income/{incomeId}` ignored `{id}`, so a row of another holding could be removed | `2d0a614` | `TestDeletingAChildRowThroughTheWrongHoldingIsNotFound`: "= 204, want 404" | 2 run, 1 killed — the event half is guarded by `DeleteWithFold` and its survival is annotated at the assertion |
+| Thirteen handlers discarded the "is there a scope" answer; the report's failure mode was 200-with-no-rows | `3ee11f4` | `TestAHoldingHandlerWithNoScopeRefuses`: the handler **panicked** rather than refusing | 1 run, 1 killed |
+| The income row's buttons were below the 44px touch target every other control uses | `0a41a69` | measured at 390px in the browser | n/a |
+
+Running total for the milestone: **40 mutations, 9 survived first time.**
+
+Two more test stubs compiled only under vitest and were caught by `make lint`
+(`9b06e10`, `c91c171`) — a partial `UpdateHoldingBody` and a `heldNano` typed as
+a string. Green tests and a green build are two different claims.
+
 ## Test specification
 
 | # | What is guaranteed | Test | Type | Result |

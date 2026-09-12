@@ -23,7 +23,7 @@ gets rebuilt.
 
 ### 1. Fixing an instance rarely fixes the class
 
-This happened **twenty-two times** — one bullet each below, and the count is
+This happened **twenty-three times** — one bullet each below, and the count is
 the number of bullets, so recount it when you add one (it had already drifted
 by one before the UX-repair round noticed). Almost every time, the fix was
 correct and the sibling kept the bug; two of them are the variant where
@@ -479,6 +479,12 @@ count stays the number of bullets.)
   Singapore back into the previous year. `budget.go`'s `startOfMonth`, two
   files away, reads the date in the value's own location and says why in a
   comment. Written up in full below.
+- **A panel that says it mirrors another one, mirroring everything but the
+  error handling.** `HoldingIncomePanel.tsx` copied `HoldingLotsPanel.tsx`'s
+  shape -- modal, ledger, in-page confirmation -- and copied its submit
+  handler's try/catch, but not its DELETE handler's. A failed delete was
+  therefore silent, in the one panel whose header names the file it was copied
+  from. Found by review, fixed in `0a41a69`.
 - **A cache invalidation fixed on the event writes, missed on the holding
   writes.** `invalidateAfterEventWrite` was taught to refetch the period
   report (`ed93d26`); `invalidateHoldings` — create, rename, archive, restore —
@@ -3687,6 +3693,40 @@ invalidates it, not only a write that changes what it would compute.** Both
 fixes are one line each (`ed93d26`, `dacc4c1`); the second was found by
 grepping for the shape of the first, which is step 3 of the checklist at the
 end of this file.
+
+### 24. A delete scoped to the parent's parent, and a scope check thrown away
+
+Found 2026-09-13, by running `/ecc:code-review` over a milestone that had
+already been walked, tested and documented. Neither defect was reachable from
+the product's own UI, which is why nothing found them earlier.
+
+**`DELETE /holdings/{id}/income/{incomeId}` ignored `{id}`.** The query scoped
+on `(household_id, id)`, so a request naming holding A removed a row of holding
+B. One household, so nothing leaked -- but the URL and the database disagreed
+about which holding was being edited, and a client that got the pairing wrong
+would corrupt a different holding's history while reporting success.
+
+The rule: **a child row is identified by its parent as well as by itself.**
+Scoping on the tenant alone is the check that keeps two families apart; it is
+not the check that keeps one family's own records straight.
+
+Worth recording alongside it: the sibling event delete looked identical and was
+NOT broken, because the path the product actually uses (`DeleteWithFold`) lists
+the named holding's rows first. The test says so at the assertion, because a
+mutation of that query does not turn it red and the next reader would otherwise
+conclude the test was weak.
+
+**`scope, _ := RequestScope(r)` in all thirteen holding handlers.** The
+discarded bool leaves an empty household id that every query below trusts.
+Unreachable behind `requireSession` -- but the failure mode differs by route,
+and that is the part worth carrying: a lookup answers 404 for an empty
+household, which is wrong and loud; a REPORT answers 200 with no rows, which
+tells someone who never signed in that they own nothing. The internal test
+written for it showed the handler did not merely fail to refuse, it panicked.
+
+The rule already existed -- CLAUDE.md's "fail closed on values you did not
+construct" -- and the cost of honouring it was two lines a handler behind one
+helper. A discarded bool is the quietest way to not honour it.
 
 ### 23. A dependency added to a service is wired in main.go and forgotten in the test's own Deps
 
