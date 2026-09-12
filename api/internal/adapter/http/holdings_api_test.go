@@ -642,3 +642,36 @@ func TestFutureDatedIncomeIsRefusedAtTheWire(t *testing.T) {
 		t.Fatalf("future-dated income = %d, want 422 (body = %s)", rec.Code, rec.Body.String())
 	}
 }
+
+// The primary-currency refusal on the SHIPPED Settings route. Milestone 2
+// stores every holding's cost in the household's primary currency as an
+// AMOUNT, not a rate, so changing that currency would silently reinterpret
+// every one of those amounts -- the guard exists for that, and like the
+// account-type guard above it is proved at the wire because the screen it
+// changes is one this milestone otherwise never touches.
+func TestAHouseholdHoldingInvestmentsCannotChangeCurrency(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	account := newHoldingAccount(t, env, session, csrf, "Brokerage", "investment")
+	rec := env.authed(t, http.MethodPost, "/api/v1/holdings", map[string]any{
+		"accountId": account, "name": "Gold", "instrument": "gold", "unit": "gram",
+	}, session, csrf)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create holding = %d (body = %s)", rec.Code, rec.Body.String())
+	}
+
+	rec = env.authed(t, http.MethodPatch, "/api/v1/household", map[string]any{"primaryCurrency": "USD"}, session, csrf)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("currency change = %d, want 422 (body = %s)", rec.Code, rec.Body.String())
+	}
+	if !bodyHasCode(rec, "PRIMARY_CURRENCY_HELD_BY_HOLDINGS") {
+		t.Fatalf("body = %s, want PRIMARY_CURRENCY_HELD_BY_HOLDINGS", rec.Body.String())
+	}
+
+	// The guard is about the PRIMARY CURRENCY, not about touching the
+	// household: every other setting on that screen still saves.
+	rec = env.authed(t, http.MethodPatch, "/api/v1/household", map[string]any{"familyName": "Oentoro"}, session, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rename = %d, want 200 (body = %s)", rec.Code, rec.Body.String())
+	}
+}
