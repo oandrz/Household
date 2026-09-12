@@ -180,7 +180,7 @@ gate. Authorisation stays at each channel's inbound edge
 | # | Milestone | Outcome | Status | Plan |
 |---|---|---|---|---|
 | 1 | Holdings exist | The owner can record what the household holds — instrument, quantity, what it cost, when acquired — and see the portfolio's current value from valuations they enter. Replaces "an investment account is a number I retype." | in-progress | [`.claude/plans/investment-portfolio-tracking.plan.md`](../plans/investment-portfolio-tracking.plan.md) |
-| 2 | The period report | The owner picks a quarter, half-year or year and reads profit per instrument, split into unrealised, realised and income, in primary currency with native beside it. **This is the milestone that tests the hypothesis** — everything before it is input and everything after is convenience. | pending | — |
+| 2 | The period report | The owner picks a quarter, half-year or year and reads profit per instrument, split into unrealised, realised and income, in primary currency with native beside it, **and a bar chart comparing those periods over time** (owner's request, 2026-09-12). Income and fees become recordable here, since profit cannot be reported without them. **This is the milestone that tests the hypothesis** — everything before it is input and everything after is convenience. | in-progress | [`.claude/plans/investment-portfolio-tracking-m2.plan.md`](../plans/investment-portfolio-tracking-m2.plan.md) |
 | 3 | Net worth tells the truth | The investment account's contribution to net worth is the portfolio's market value, so the headline figure and the 12-month trend move when the market does, not when someone remembers to retype a balance. | pending | — |
 | 4 | Stock positions arrive without typing | The owner connects a moomoo account and stock holdings, prices and (if available) trade history land in Hearth without manual entry. Gold and "other" stay manual. **Gated on the Open Questions below** — this milestone may not survive them. | pending | — |
 
@@ -191,11 +191,14 @@ last.
 
 ## Open Questions
 
-- [ ] **Does the MVP allow instruments priced in a currency the household does
-      not hold?** Today only `SGD↔IDR` converts. Restricting the MVP to
-      household currencies makes it shippable now but excludes most listed
-      stocks; including them makes a live FX source part of this feature.
-      *Needs a decision before `/plan` — it changes milestone 1's size.*
+- [x] **Does the MVP allow instruments priced in a currency the household does
+      not hold?** **Resolved — yes.** Milestone 1's Decision A settled it: every
+      money-bearing row stores the native amount **and** the primary-currency
+      amount the owner supplies, mirroring `Transaction.ReceivedAmount`. No rate
+      is stored and no dated-rate port was invented, so a live FX source is a
+      convenience that pre-fills a field rather than a correctness dependency.
+      The single `SGD↔IDR` pair in `adapter/fx/static.go` is therefore not on
+      this feature's path at all.
 - [ ] **moomoo: is it a hosted HTTP API, or does it require a locally-running
       gateway process?** `TBD — needs validation via moomoo OpenAPI
       documentation.` If it needs a persistent local gateway, it fights the
