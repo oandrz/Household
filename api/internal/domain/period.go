@@ -104,19 +104,17 @@ func (p Period) End() time.Time {
 // what supplies a period's OPENING value: a quarter opens at the value it
 // closed the previous quarter on, so the two chain and no separate rule is
 // needed for the first day of a year.
-func (p Period) Previous() Period {
+// It returns an error it is not expected to be able to produce, rather than
+// falling back to something plausible. The fallback would be THIS period,
+// which as an opening window silently measures the period against itself --
+// a wrong figure that looks like a right one, in a monetary path.
+func (p Period) Previous() (Period, error) {
 	index, year := p.index-1, p.year
 	if index < 1 {
 		index = periodsPerYear[p.kind]
 		year--
 	}
-	// The index came from a valid Period and is back in range, so this cannot
-	// fail; the error is dropped rather than propagated into every caller.
-	previous, err := NewPeriod(p.kind, year, index)
-	if err != nil {
-		return p
-	}
-	return previous
+	return NewPeriod(p.kind, year, index)
 }
 
 // Contains judges the DAY, not the instant. A timestamp recorded at 23:00 in

@@ -48,6 +48,16 @@ type PeriodReturn struct {
 	Fees       ReturnComponent
 	Total      *ReturnComponent
 	Reason     BlankReason
+
+	// The day each end was measured at, so a screen can show how old the
+	// figure is. The PRD's top product risk is valuations quietly going
+	// stale, and an age nobody can see is how that goes unnoticed.
+	//
+	// Nil means no price was used at that end -- which happens when nothing
+	// was held there, since nothing is worth nothing without asking anybody.
+	// A date there would claim a measurement nobody made.
+	OpeningPriceAsOf *time.Time
+	ClosingPriceAsOf *time.Time
 }
 
 // ReturnOver computes what this holding earned over one period.
@@ -114,7 +124,7 @@ func (h Holding) ReturnOver(
 	// The closing price is looked for first because it names the period the
 	// owner is actually looking at: "no price recorded in Q2" is something
 	// they can act on, where "no price in Q1" sends them one period back.
-	closeValue, ok, err := valueAtClose(closing.Held, prices, period, zeroNative, zeroPrimary)
+	closeValue, closedAt, ok, err := valueAtClose(closing.Held, prices, period, zeroNative, zeroPrimary)
 	if err != nil {
 		return PeriodReturn{}, err
 	}
@@ -122,11 +132,16 @@ func (h Holding) ReturnOver(
 		out.Reason = ReasonNoClosingPrice
 		return out, nil
 	}
+	out.ClosingPriceAsOf = closedAt
 	// A period's opening value is the preceding period's closing value, so the
 	// opening price has to have been recorded in that preceding period. A
 	// March price is not what June was worth: computing from it would be the
 	// stale-data failure the PRD names as its top product risk.
-	openValue, ok, err := valueAtClose(open.Held, prices, period.Previous(), zeroNative, zeroPrimary)
+	previous, err := period.Previous()
+	if err != nil {
+		return PeriodReturn{}, err
+	}
+	openValue, openedAt, ok, err := valueAtClose(open.Held, prices, previous, zeroNative, zeroPrimary)
 	if err != nil {
 		return PeriodReturn{}, err
 	}
@@ -134,6 +149,7 @@ func (h Holding) ReturnOver(
 		out.Reason = ReasonNoOpeningPrice
 		return out, nil
 	}
+	out.OpeningPriceAsOf = openedAt
 
 	closeGain, err := subtractComponent(closeValue, ReturnComponent{Native: closing.Cost, Primary: closing.CostPrimary})
 	if err != nil {
@@ -171,23 +187,27 @@ func (h Holding) ReturnOver(
 // the figure rather than producing a zero. Holding nothing is the exception:
 // nothing is worth nothing, provably, and demanding a price for it would blank
 // every holding bought mid-period -- the most common case there is.
-func valueAtClose(held Quantity, prices []Valuation, window Period, zeroNative, zeroPrimary Money) (ReturnComponent, bool, error) {
+// The third return is the day of the price that was used, which the caller
+// reports so the owner can see how old the figure is. It is nil when nothing
+// was held and therefore no price was consulted.
+func valueAtClose(held Quantity, prices []Valuation, window Period, zeroNative, zeroPrimary Money) (ReturnComponent, *time.Time, bool, error) {
 	if held.Nano() == 0 {
-		return ReturnComponent{Native: zeroNative, Primary: zeroPrimary}, true, nil
+		return ReturnComponent{Native: zeroNative, Primary: zeroPrimary}, nil, true, nil
 	}
 	price, ok := latestPriceIn(prices, window)
 	if !ok {
-		return ReturnComponent{}, false, nil
+		return ReturnComponent{}, nil, false, nil
 	}
 	native, err := price.MarketValue(held)
 	if err != nil {
-		return ReturnComponent{}, false, err
+		return ReturnComponent{}, nil, false, err
 	}
 	primary, err := price.PrimaryMarketValue(held)
 	if err != nil {
-		return ReturnComponent{}, false, err
+		return ReturnComponent{}, nil, false, err
 	}
-	return ReturnComponent{Native: native, Primary: primary}, true, nil
+	asOf := price.AsOf
+	return ReturnComponent{Native: native, Primary: primary}, &asOf, true, nil
 }
 
 // latestPriceIn is the newest valuation dated inside the window -- never one

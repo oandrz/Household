@@ -511,4 +511,3 @@ func TestRecordEventRefusesADateInTheFuture(t *testing.T) {
 		t.Fatalf("error = %v, want ErrHoldingDateInFuture", err)
 	}
 }
-

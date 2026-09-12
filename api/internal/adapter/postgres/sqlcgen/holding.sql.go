@@ -11,6 +11,22 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countHoldingsForHousehold = `-- name: CountHoldingsForHousehold :one
+SELECT COUNT(*)::bigint FROM holdings WHERE household_id = $1
+`
+
+// CountHoldingsForHousehold counts ARCHIVED holdings too, unlike its
+// per-account sibling above. It answers one question -- has this household
+// ever held anything -- which is what pins the primary currency: an archived
+// holding still has events, and those events still record their cost in the
+// currency that was primary when they were written.
+func (q *Queries) CountHoldingsForHousehold(ctx context.Context, householdID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countHoldingsForHousehold, householdID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countLiveHoldingsForAccount = `-- name: CountLiveHoldingsForAccount :one
 SELECT COUNT(*)::bigint FROM holdings
 WHERE household_id = $1 AND account_id = $2 AND archived_at IS NULL

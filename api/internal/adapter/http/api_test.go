@@ -269,6 +269,10 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Households:    households,
 		Spaces:        spaces,
 		Notifications: notifications,
+		// Wired here as well as in main.go on purpose: this file builds its
+		// own Deps, and a dependency added to one and not the other is how
+		// milestone 1 shipped routes that 500ed only under test.
+		Holdings: postgres.NewHoldingRepo(db),
 	})
 	signupSvc := usecase.NewSignupService(usecase.SignupDeps{
 		Signups:    signups,

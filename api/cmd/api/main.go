@@ -167,6 +167,7 @@ func run() error {
 	})
 	apiTokenSvc := usecase.NewAPITokenService(usecase.APITokenDeps{Tokens: apiTokens, Gen: tokens, Clock: sysClock})
 	householdSvc := usecase.NewHouseholdService(usecase.HouseholdDeps{
+		Holdings:      holdingRepo,
 		Households:    households,
 		Spaces:        spaces,
 		Notifications: notifications,

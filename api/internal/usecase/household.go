@@ -54,6 +54,10 @@ type HouseholdDeps struct {
 	Households    HouseholdRepository
 	Spaces        SpaceRepository
 	Notifications NotificationRepository
+	// Holdings is consulted for one question only -- does this household hold
+	// anything -- and only when the primary currency is being changed. See
+	// Update.
+	Holdings HoldingCounter
 }
 
 // HouseholdService covers the household settings screen: the household
@@ -94,6 +98,9 @@ func (s *HouseholdService) Get(ctx context.Context, householdID string) (domain.
 func (s *HouseholdService) Update(ctx context.Context, h domain.Household) (domain.Household, error) {
 	primary, err := normalizeCurrency(h.PrimaryCurrency)
 	if err != nil {
+		return domain.Household{}, err
+	}
+	if err := s.refusePrimaryCurrencyChangeWhileHolding(ctx, h.ID, primary); err != nil {
 		return domain.Household{}, err
 	}
 	secondary, err := normalizeCurrency(h.SecondaryCurrency)
@@ -214,4 +221,37 @@ func (s *HouseholdService) Notifications(ctx context.Context, householdID string
 
 func (s *HouseholdService) UpdateNotifications(ctx context.Context, householdID string, p NotificationPreferences) (NotificationPreferences, error) {
 	return s.d.Notifications.Upsert(ctx, householdID, p)
+}
+
+// refusePrimaryCurrencyChangeWhileHolding is the one rule the portfolio adds to
+// this screen.
+//
+// A holding event stores its cost in the household's currency AS IT WAS WHEN
+// THE EVENT WAS WRITTEN, and a valuation stores its price the same way. There
+// is nothing in that data to re-express an old figure under a new currency --
+// no rate, and no date to look one up at even if a source existed. So changing
+// the primary currency does not restate a portfolio, it strands it: the fold
+// would refuse every holding, which is a portfolio page that throws on load,
+// and the only screen that could fix it.
+//
+// Refusing at the edit is the honest version of that. It costs a household
+// nothing before it holds anything -- which is when a currency actually gets
+// chosen -- and it is why domain.Position takes the currency as a parameter
+// rather than trusting that it never moves.
+func (s *HouseholdService) refusePrimaryCurrencyChangeWhileHolding(ctx context.Context, householdID, primary string) error {
+	current, err := s.d.Households.Get(ctx, householdID)
+	if err != nil {
+		return err
+	}
+	if current.PrimaryCurrency == primary {
+		return nil
+	}
+	held, err := s.d.Holdings.CountForHousehold(ctx, householdID)
+	if err != nil {
+		return err
+	}
+	if held > 0 {
+		return domain.ErrPrimaryCurrencyHeldByHoldings
+	}
+	return nil
 }

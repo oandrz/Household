@@ -453,3 +453,47 @@ func TestTheFirstQuarterOfAYearOpensWhereTheLastOneClosed(t *testing.T) {
 		t.Errorf("unrealised = %d, want 20000", r.Unrealised.Native.Amount)
 	}
 }
+
+// --- which price was used, and how old it is --------------------------------
+
+// The report has to say which price each end was measured at: the PRD's top
+// product risk is valuations quietly going stale, and a figure whose age is
+// invisible is exactly how that goes unnoticed. The dates come from here
+// rather than being re-derived by a caller, because re-deriving them means a
+// second copy of the window rule.
+func TestTheReturnSaysWhichPriceClosedAndOpenedThePeriod(t *testing.T) {
+	r := mustReturn(t, sgdHolding(), quarter(t, 2),
+		[]domain.HoldingEvent{buyOn(t, d(time.January, 5), 10, 100000)},
+		nil,
+		[]domain.Valuation{
+			priceOn(t, d(time.March, 31), 10000),
+			priceOn(t, d(time.April, 15), 11000), // superseded inside Q2
+			priceOn(t, d(time.June, 30), 12000),
+		},
+		"SGD")
+
+	if r.OpeningPriceAsOf == nil || !r.OpeningPriceAsOf.Equal(d(time.March, 31)) {
+		t.Errorf("OpeningPriceAsOf = %v, want 2026-03-31", r.OpeningPriceAsOf)
+	}
+	if r.ClosingPriceAsOf == nil || !r.ClosingPriceAsOf.Equal(d(time.June, 30)) {
+		t.Errorf("ClosingPriceAsOf = %v, want 2026-06-30", r.ClosingPriceAsOf)
+	}
+}
+
+// Nothing held at an end means no price was used there -- the value is zero
+// because there is nothing to price, not because a price said so. A date
+// stamped on that end would claim a measurement nobody made.
+func TestAnEndWithNothingHeldNamesNoPrice(t *testing.T) {
+	r := mustReturn(t, sgdHolding(), quarter(t, 2),
+		[]domain.HoldingEvent{buyOn(t, d(time.May, 5), 10, 100000)},
+		nil,
+		[]domain.Valuation{priceOn(t, d(time.June, 30), 12000)},
+		"SGD")
+
+	if r.OpeningPriceAsOf != nil {
+		t.Errorf("OpeningPriceAsOf = %v, want none -- nothing was held at the open", r.OpeningPriceAsOf)
+	}
+	if r.ClosingPriceAsOf == nil || !r.ClosingPriceAsOf.Equal(d(time.June, 30)) {
+		t.Errorf("ClosingPriceAsOf = %v, want 2026-06-30", r.ClosingPriceAsOf)
+	}
+}

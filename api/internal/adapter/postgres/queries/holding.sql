@@ -51,6 +51,14 @@ RETURNING id, household_id, account_id, name, instrument, unit, currency, archiv
 SELECT COUNT(*)::bigint FROM holdings
 WHERE household_id = $1 AND account_id = $2 AND archived_at IS NULL;
 
+-- CountHoldingsForHousehold counts ARCHIVED holdings too, unlike its
+-- per-account sibling above. It answers one question -- has this household
+-- ever held anything -- which is what pins the primary currency: an archived
+-- holding still has events, and those events still record their cost in the
+-- currency that was primary when they were written.
+-- name: CountHoldingsForHousehold :one
+SELECT COUNT(*)::bigint FROM holdings WHERE household_id = $1;
+
 -- LockHolding takes a row lock on one holding so that two writers folding its
 -- events cannot both pass a check the other is about to invalidate. It returns
 -- the currency only because a query must return something; the lock is the

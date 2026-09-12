@@ -95,6 +95,13 @@ var (
 	// record when nothing changed hands.
 	ErrUnknownIncomeKind              = errors.New("unknown holding income kind")
 	ErrHoldingIncomeAmountNotPositive = errors.New("a holding income row must move a positive amount")
+
+	// ErrPrimaryCurrencyHeldByHoldings stops a household changing the currency
+	// it keeps its books in while it holds investments. Every holding event
+	// records its cost in the currency that was primary WHEN IT WAS WRITTEN,
+	// and nothing in the data can re-express an old figure under a new one --
+	// so the change would strand the holding rather than restate it.
+	ErrPrimaryCurrencyHeldByHoldings = errors.New("the primary currency cannot change while the household holds investments")
 	// ErrHoldingArchived is the same rule an archived goal follows: restoring
 	// is a deliberate act, and writing to an archived holding would silently
 	// un-retire a position the household said was finished.

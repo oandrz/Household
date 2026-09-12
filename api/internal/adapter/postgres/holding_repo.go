@@ -127,6 +127,16 @@ func (r *HoldingRepo) CountLiveForAccount(ctx context.Context, householdID, acco
 	return n, nil
 }
 
+// CountForHousehold includes archived holdings; see the query's own comment
+// and usecase.HoldingCounter for why.
+func (r *HoldingRepo) CountForHousehold(ctx context.Context, householdID string) (int64, error) {
+	n, err := r.q.CountHoldingsForHousehold(ctx, uuid(householdID))
+	if err != nil {
+		return 0, translate(err, "count holdings for household")
+	}
+	return n, nil
+}
+
 // toHolding runs the instrument column through the domain's own parser rather
 // than casting it. The CHECK constraint and the parser are deliberately
 // redundant: a value that somehow got past the database must still not be

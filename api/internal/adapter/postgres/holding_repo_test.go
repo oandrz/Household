@@ -479,7 +479,7 @@ func TestTwoRacingDisposalsCannotBothCommit(t *testing.T) {
 		}, func(existing []domain.HoldingEvent) error {
 			time.Sleep(300 * time.Millisecond)
 			// The real fold: the service passes exactly this.
-			_, err := h.Position(existing)
+			_, err := h.Position(existing, "SGD")
 			return err
 		})
 		return err
@@ -514,7 +514,7 @@ func TestTwoRacingDisposalsCannotBothCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListByHolding: %v", err)
 	}
-	position, err := h.Position(after)
+	position, err := h.Position(after, "SGD")
 	if err != nil {
 		t.Fatalf("the holding no longer folds after the race: %v", err)
 	}

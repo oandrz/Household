@@ -1775,14 +1775,19 @@ type HoldingRepository interface {
 	CountLiveForAccount(ctx context.Context, householdID, accountID string) (int64, error)
 }
 
-// HoldingCounter is what AccountService needs of holdings, and nothing more:
-// whether an account still holds anything. A narrow port rather than the whole
-// HoldingRepository, by the same interface-segregation rule that gives this
-// file nine small repositories instead of one object with forty methods --
-// and so that the accounts service cannot grow a dependency on holdings it
-// was never meant to have.
+// HoldingCounter is what services OUTSIDE this feature need to know about
+// holdings, and nothing more: whether an account still holds anything, and
+// whether the household holds anything at all. A narrow port rather than the
+// whole HoldingRepository, by the same interface-segregation rule that gives
+// this file nine small repositories instead of one object with forty methods
+// -- and so that the accounts and household services cannot grow a dependency
+// on holdings they were never meant to have.
 type HoldingCounter interface {
 	CountLiveForAccount(ctx context.Context, householdID, accountID string) (int64, error)
+	// CountForHousehold counts ARCHIVED holdings too. An archived holding
+	// still has events, and those events still have to fold -- archiving is
+	// how a household stops looking at something, not how it forgets it.
+	CountForHousehold(ctx context.Context, householdID string) (int64, error)
 }
 
 // HoldingEventRepository stores the acquisitions and disposals a holding is
@@ -1846,4 +1851,3 @@ type HoldingValuationRepository interface {
 	Upsert(ctx context.Context, v domain.Valuation) (domain.Valuation, error)
 	Delete(ctx context.Context, householdID, valuationID string) error
 }
-

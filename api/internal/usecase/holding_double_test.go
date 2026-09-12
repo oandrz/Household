@@ -113,6 +113,16 @@ func (d *holdingRepoDouble) SetArchived(_ context.Context, householdID, holdingI
 	return h, nil
 }
 
+func (d *holdingRepoDouble) CountForHousehold(_ context.Context, householdID string) (int64, error) {
+	var n int64
+	for _, h := range d.rows {
+		if h.HouseholdID == householdID {
+			n++ // archived included, per the port's contract
+		}
+	}
+	return n, nil
+}
+
 func (d *holdingRepoDouble) CountLiveForAccount(_ context.Context, householdID, accountID string) (int64, error) {
 	var n int64
 	for _, h := range d.rows {

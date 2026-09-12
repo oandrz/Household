@@ -130,6 +130,10 @@ func (d holdingCounterDouble) CountLiveForAccount(_ context.Context, _, _ string
 	return d.n, nil
 }
 
+func (d holdingCounterDouble) CountForHousehold(_ context.Context, _ string) (int64, error) {
+	return d.n, nil
+}
+
 func validNewAccount() usecase.NewAccount {
 	return usecase.NewAccount{
 		HouseholdID:            "h-1",
