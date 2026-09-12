@@ -101,6 +101,8 @@ import { BillsPage } from "../features/money/BillsPage";
 import { BudgetPage } from "../features/money/BudgetPage";
 import { FinancesPage } from "../features/money/FinancesPage";
 import { GoalsPage } from "../features/money/GoalsPage";
+import { PortfolioPage } from "../features/money/PortfolioPage";
+import { PortfolioReportPage } from "../features/money/PortfolioReportPage";
 import { TransactionsPage } from "../features/money/TransactionsPage";
 import { OverviewPage } from "../features/overview/OverviewPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
@@ -259,6 +261,26 @@ const moneyGoalsRoute = createRoute({
   getParentRoute: () => moneyGuardRoute,
   path: "goals",
   component: GoalsPage,
+});
+// A sibling of moneyGoalsRoute, same reasoning: nested under moneyGuardRoute
+// (not the shell) so RequireCapability still runs. The portfolio is as much
+// "the household's money" as a goal card, and the server agrees -- every
+// /holdings route sits in the money+owner group, so a member without the
+// capability is refused there too rather than relying on this guard alone.
+const moneyPortfolioRoute = createRoute({
+  getParentRoute: () => moneyGuardRoute,
+  path: "portfolio",
+  component: PortfolioPage,
+});
+// The period report is its own route rather than a section of the portfolio
+// page: the portfolio answers "what do I hold", the report answers "what did it
+// earn", and one file doing both would be the file this project's own rule
+// about the word "and" is about. Same guard, for the same reason -- every
+// /holdings route sits in the money+owner group on the server too.
+const moneyPortfolioReportRoute = createRoute({
+  getParentRoute: () => moneyGuardRoute,
+  path: "portfolio/report",
+  component: PortfolioReportPage,
 });
 // A sibling of moneyGoalsRoute, same reasoning: nested under moneyGuardRoute
 // (not the shell) so RequireCapability still runs. Bills was
@@ -694,6 +716,8 @@ export const routeTree = rootRoute.addChildren([
         moneyTransactionsRoute,
         moneyBudgetRoute,
         moneyGoalsRoute,
+        moneyPortfolioRoute,
+    moneyPortfolioReportRoute,
         moneyBillsRoute,
       ]),
       marriageGuardRoute.addChildren([

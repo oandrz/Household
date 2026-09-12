@@ -334,6 +334,69 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, domain.ErrBudgetCategoryUnknown):
 		WriteError(w, http.StatusUnprocessableEntity, "UNKNOWN_BUDGET_CATEGORY",
 			"That category could not be found.", nil)
+	// --- holdings ---------------------------------------------------------
+	case errors.Is(err, domain.ErrHoldingNameTaken):
+		// The plain case: a collision against a LIVE holding in the same
+		// account. holding_handlers.go intercepts this same sentinel before it
+		// reaches here when the colliding row is archived, and builds a richer
+		// 409 carrying that holding's id so the modal can offer Restore rather
+		// than a dead end -- the writeGoalNameConflict precedent.
+		WriteError(w, http.StatusConflict, "HOLDING_NAME_TAKEN",
+			"This account already has a holding with that name.", nil)
+	case errors.Is(err, domain.ErrHoldingDateInFuture):
+		WriteError(w, http.StatusUnprocessableEntity, "INVALID_DATE", "That date is in the future.", nil)
+	case errors.Is(err, domain.ErrHoldingNameRequired):
+		WriteError(w, http.StatusUnprocessableEntity, "HOLDING_NAME_REQUIRED",
+			"Give this holding a name.", nil)
+	case errors.Is(err, domain.ErrHoldingAccountNotInvestment):
+		WriteError(w, http.StatusUnprocessableEntity, "ACCOUNT_NOT_INVESTMENT",
+			"Holdings live in an investment account. Choose one, or change this account's type first.", nil)
+	case errors.Is(err, domain.ErrAccountHasHoldings):
+		WriteError(w, http.StatusUnprocessableEntity, "ACCOUNT_HAS_HOLDINGS",
+			"This account holds investments, so its type cannot change. Archive or move them first.", nil)
+	case errors.Is(err, domain.ErrUnknownPeriodKind):
+		WriteError(w, http.StatusBadRequest, "INVALID_PERIOD_KIND",
+			"Ask for a quarter, a half or a year.", nil)
+	case errors.Is(err, domain.ErrPeriodCountOutOfRange):
+		// 400 rather than 422: this is a query parameter the caller chose, not
+		// a value the household typed into a form.
+		WriteError(w, http.StatusBadRequest, "INVALID_PERIOD_COUNT",
+			"That is more history than this report draws. Ask for between 1 and 12 periods.", nil)
+	case errors.Is(err, domain.ErrUnknownIncomeKind):
+		WriteError(w, http.StatusUnprocessableEntity, "UNKNOWN_INCOME_KIND",
+			"Record this as income or as a fee.", nil)
+	case errors.Is(err, domain.ErrHoldingIncomeAmountNotPositive):
+		WriteError(w, http.StatusUnprocessableEntity, "INCOME_AMOUNT_NOT_POSITIVE",
+			"Enter how much was paid. A fee is entered as a positive amount and comes off the total.", nil)
+	case errors.Is(err, domain.ErrPrimaryCurrencyHeldByHoldings):
+		WriteError(w, http.StatusUnprocessableEntity, "PRIMARY_CURRENCY_HELD_BY_HOLDINGS",
+			"Your currency cannot change while you hold investments: every holding records what it cost in the currency you kept books in at the time, and nothing here can restate that.", nil)
+	case errors.Is(err, domain.ErrHoldingArchived):
+		WriteError(w, http.StatusUnprocessableEntity, "HOLDING_ARCHIVED",
+			"This holding is archived. Restore it before recording anything against it.", nil)
+	case errors.Is(err, domain.ErrHoldingOversold):
+		// Covers both directions: recording a sale bigger than the position,
+		// and deleting a purchase a later sale was costed against.
+		WriteError(w, http.StatusUnprocessableEntity, "HOLDING_OVERSOLD",
+			"That would sell more than this holding has ever held.", nil)
+	case errors.Is(err, domain.ErrHoldingEventQuantityNotPositive):
+		WriteError(w, http.StatusUnprocessableEntity, "INVALID_QUANTITY",
+			"Enter a quantity greater than zero.", nil)
+	case errors.Is(err, domain.ErrInvalidQuantity), errors.Is(err, domain.ErrQuantityNegative):
+		WriteError(w, http.StatusUnprocessableEntity, "INVALID_QUANTITY",
+			"Enter a quantity as a number, up to nine decimal places.", nil)
+	case errors.Is(err, domain.ErrUnknownInstrumentKind):
+		WriteError(w, http.StatusUnprocessableEntity, "INVALID_INSTRUMENT",
+			"That is not a kind of investment Hearth records.", nil)
+	case errors.Is(err, domain.ErrUnknownHoldingEventKind):
+		WriteError(w, http.StatusUnprocessableEntity, "INVALID_EVENT_KIND",
+			"An entry is either a purchase or a sale.", nil)
+	case errors.Is(err, domain.ErrHoldingPrimaryAmountRequired):
+		WriteError(w, http.StatusUnprocessableEntity, "PRIMARY_AMOUNT_REQUIRED",
+			"This holding is in another currency, so Hearth needs the amount in your own as well.", nil)
+	case errors.Is(err, domain.ErrHoldingPrimaryAmountNotAllowed):
+		WriteError(w, http.StatusUnprocessableEntity, "PRIMARY_AMOUNT_NOT_ALLOWED",
+			"This holding is already in your own currency, so it needs only one amount.", nil)
 	case errors.Is(err, domain.ErrGoalNameTaken):
 		// The plain case: a name collision against a LIVE goal, no restore
 		// hint to offer. goal_handlers.go's writeGoalNameConflict intercepts

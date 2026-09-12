@@ -1707,6 +1707,7 @@ type fixture struct {
 	households    *householdDouble
 	spaces        *spaceDouble
 	notifications *notificationDouble
+	holdings      *holdingCounterDouble
 	householdID   string
 	andreasID     string
 	ethanID       string
@@ -1804,10 +1805,12 @@ func newFixture(t *testing.T) *fixture {
 		BillReminders: true, OverspendAlerts: true, RetroReminder: true, WeeklyDigest: true,
 	})
 
+	holdings := &holdingCounterDouble{}
 	householdSvc := usecase.NewHouseholdService(usecase.HouseholdDeps{
 		Households:    households,
 		Spaces:        spaces,
 		Notifications: notifications,
+		Holdings:      holdings,
 	})
 
 	return &fixture{
@@ -1815,6 +1818,7 @@ func newFixture(t *testing.T) *fixture {
 		clock: clock, sessions: sessions, apiTokens: apiTokens, mailer: mailer, hasher: hasher,
 		users: users, members: members, magicLinks: magicLinks, inviteRepo: inviteRepo,
 		households: households, spaces: spaces, notifications: notifications,
+		holdings:    holdings,
 		householdID: householdID, andreasID: andreas.ID, ethanID: ethan.ID,
 	}
 }

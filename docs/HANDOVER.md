@@ -532,6 +532,26 @@ a repository; it carries doc comments that are load-bearing, not decorative
 
 ## 4. What to do next
 
+**Unmerged: `hearth-portfolio-holdings` carries milestones 1 and 2 of the
+Portfolio** (`.claude/prds/investment-portfolio-tracking.prd.md`). Holdings with
+fractional quantities and average-cost basis, dated valuations, dividends and
+fees, and the period report — profit per holding per quarter, half-year or
+year, with a hand-built bar chart. `make lint && make test` green, both
+milestones walked in a real browser (2026-09-12), 23 mutations run across the
+two. **No PR is open.** What is deliberately NOT in it:
+
+- **Net worth still excludes holdings** (milestone 3). Both pages say so on
+  their face, reading a `notInNetWorth` flag from the server. It is gated on the
+  PRD's open question 7 — whether an investment account also carries uninvested
+  cash — which is a requirements question, not a design one.
+- **moomoo** (milestone 4), gated on three unanswered questions, cheapest first:
+  does its API need a locally-running gateway process. That one can kill the
+  milestone and costs nothing to find out.
+- Two known gaps are recorded in `docs/FEATURE_TRACKER.md` rather than fixed:
+  `DELETE /holdings/{id}/valuations/{id}` has no screen, and the report's chart
+  puts every holding on one linear axis, so a holding of a wildly different
+  size flattens the rest.
+
 **The build order changed once already: self-serve sign-up shipped ahead of
 slice 2.** The original four-slice order below (Money, then Marriage, then
 Family, then Overview) was dependency-driven and none of that changed. Sign-up

@@ -29,6 +29,7 @@ func telegramCommandFixture(t *testing.T, accounts ...domain.Account) (*usecase.
 	households.put(domain.Household{ID: "house-1", PrimaryCurrency: "SGD"})
 	accountSvc := usecase.NewAccountService(usecase.AccountDeps{
 		Accounts: accountRepo, Households: households, FX: staticTestRates{}, Clock: &fixedClock{now: time.Date(2026, 9, 8, 9, 0, 0, 0, time.UTC)},
+		Holdings: holdingCounterDouble{},
 	})
 	categorySvc := usecase.NewCategoryService(&fakeCategoryRepo{categories: []domain.Category{
 		{ID: "cat-groceries", HouseholdID: "house-1", Name: "Groceries", Kind: domain.CategoryExpense},

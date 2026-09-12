@@ -23,9 +23,9 @@ gets rebuilt.
 
 ### 1. Fixing an instance rarely fixes the class
 
-This happened **twenty times** — one bullet each below, and the count is the
-number of bullets, so recount it when you add one (it had already drifted by
-one before the UX-repair round noticed). Almost every time, the fix was
+This happened **twenty-three times** — one bullet each below, and the count is
+the number of bullets, so recount it when you add one (it had already drifted
+by one before the UX-repair round noticed). Almost every time, the fix was
 correct and the sibling kept the bug; two of them are the variant where
 nothing was broken at all until a field's or a product's meaning moved under
 a reader nobody thought to look at, and one is the variant where an earlier
@@ -97,6 +97,36 @@ fix in the same branch *created* the sibling.
   on the 31st would silently become a bill due on the 28th forever after its
   first February. Storing the anchor separately and clamping *it* fresh each
   time — 31 Jan → 28 Feb → 31 Mar — is what keeps the drift from compounding.
+
+  **A sixth instance, 2026-09-12, and the first one a code review caught
+  rather than a walk or a reviewer reading a diff: the portfolio's own
+  `today()`.** `HoldingLotsPanel.tsx` defaulted every purchase, sale and
+  price date with `new Date().toISOString().slice(0, 10)` — which renders in
+  UTC. East of Greenwich that returns *yesterday* for the first hours of
+  every day; in Singapore, midnight to 08:00. Worse than a wrong label,
+  because latest-price lookups order by `as_of`: a price stamped a day early
+  can be silently outranked by an older one.
+
+  What makes this the sharpest instance is that **the fix already existed
+  twice in the same directory, each copy carrying a comment explaining
+  itself.** `AccountModal.tsx` and `GoalContributionsPanel.tsx` both read
+  local calendar components, and `AccountModal.test.tsx` carries a test that
+  names this very pattern and the two commits behind it. A seventh file was
+  written next to them without either being read. The class had been
+  identified, documented, tested and commented — and still recurred, because
+  none of that is reachable from "I need today's date" unless you go looking.
+
+  Two things would have caught it and neither was in place: a test asserting
+  the default value (the new `HoldingLotsPanel.test.tsx`, which fails at
+  `Asia/Singapore` 16:00 UTC on 1 Jan), and reading a sibling before writing
+  a helper that every sibling already has. **The cheap rule: a date helper is
+  never new code.** Before writing one, grep the directory for `today` — in
+  this repo the answer is always already there.
+
+  The browser walk could not catch it, and that is worth stating precisely
+  rather than as a caveat: the walk ran at 22:00 local, where UTC and local
+  agree on the date. A walk proves what it touches at the moment it touches
+  it, and a clock bug is invisible for sixteen hours a day.
 
   **A sixth instance, in the layer above, and the reason to distrust a comment
   that says two things match.** `BillService.toView` computes `Overdue` through
@@ -443,6 +473,54 @@ count stays the number of bullets.)
   that exposed the bug (a button) protects that control, not the state
   transition underneath it (a version moving); the same transition reached
   through any other door is exactly as unguarded as it always was.**
+- **A calendar day read in the wrong location, seventh instance, and
+  the first caught before it shipped.** `domain.Period.Contains` converted
+  to UTC before reading the date, which moves 00:30 on 1 January in
+  Singapore back into the previous year. `budget.go`'s `startOfMonth`, two
+  files away, reads the date in the value's own location and says why in a
+  comment. Written up in full below.
+- **A panel that says it mirrors another one, mirroring everything but the
+  error handling.** `HoldingIncomePanel.tsx` copied `HoldingLotsPanel.tsx`'s
+  shape -- modal, ledger, in-page confirmation -- and copied its submit
+  handler's try/catch, but not its DELETE handler's. A failed delete was
+  therefore silent, in the one panel whose header names the file it was copied
+  from. Found by review, fixed in `0a41a69`.
+- **A cache invalidation fixed on the event writes, missed on the holding
+  writes.** `invalidateAfterEventWrite` was taught to refetch the period
+  report (`ed93d26`); `invalidateHoldings` — create, rename, archive, restore —
+  sat eleven lines above it and was not. The report lists every holding and
+  prints its name, so adding or renaming one left the cached report short a row
+  or labelling one with a dead name. Found by grepping for the shape of the
+  first fix, which is checklist step 3, rather than by hitting it: `dacc4c1`.
+
+The **seventh date instance, 2026-09-12 — and the first one a test caught
+before it shipped.** `domain.Period.Contains` needs the calendar day a
+timestamp falls on, and the first implementation wrote the obvious thing:
+
+```go
+utc := t.UTC()
+return time.Date(utc.Year(), utc.Month(), utc.Day(), …)
+```
+
+Converting to UTC *before* reading the date moves 00:30 on 1 January in
+Singapore back to 31 December — filing a trade in the wrong year for the eight
+hours a day this household is ahead of UTC. `budget.go`'s `startOfMonth`, which
+this was written beside, reads `t.Year()` and `t.Month()` in the value's own
+location precisely to avoid that, and its comment says so.
+
+What was different this time: the test was written first and asserted a
+Singapore-zone timestamp, so the defect was RED before any code shipped rather
+than being found in a browser eight hours later. The sibling was still not read
+— the test was what stood in for reading it.
+
+**The other half of this is still open, and is a product decision rather than a
+bug.** `PeriodsEndingOn` is handed `Clock.Now()`, which on a UTC server is a
+UTC instant: at 01:00 Singapore time on 1 October, the "current quarter" is
+still Q3 for eight hours. The same asymmetry makes `priceAgeLabel` say "priced
+yesterday" for a price the owner typed a minute ago. Nothing in Hearth stores a
+household timezone (`usecase/account.go:165`,
+`transaction_repo.go:318` both record this), so the fix is that feature, not a
+patch here.
 
 ### 2. A test that cannot fail protects nothing
 
@@ -3465,6 +3543,229 @@ narrower question than "does this class exist elsewhere," and the class
 turned out to live one layer down from where the grep was aimed.
 
 ---
+
+### 19. A concurrency test that does not force the overlap passes without the lock
+
+Found 2026-09-12, on the portfolio's oversell guard.
+
+`RecordEvent` read a holding's events, folded them, and then inserted — three
+separate calls with nothing holding a lock between them. Two sales of 30 from a
+holding of 50 are each legal alone and illegal together, so both could fold the
+same starting position and both commit, leaving events that cannot be folded at
+all: a page that throws every time it loads, fixable only from the page that is
+broken.
+
+The fix was `InsertWithFold` — lock the holding row, list its events and run the
+caller's fold inside the write's own transaction. **The test is the lesson.**
+The first version spawned two goroutines through a `sync.WaitGroup` barrier and
+asserted exactly one was refused. It passed. It also passed with `FOR UPDATE`
+deleted from the query — because two goroutines doing microseconds of work
+serialise by luck, and the race the test was named for never happened.
+
+A mutation run caught that, and nothing else would have. The test looked
+rigorous: real Postgres, real goroutines, a barrier, an exact assertion. What it
+lacked was any reason for the two transactions to actually overlap.
+
+Making it real took one line — `time.Sleep(300ms)` **inside the fold closure**,
+which is the window between the check and the write. With the lock, the second
+writer blocks inside `LockHolding` before it ever reaches the fold. Without it,
+both fold the same position, both sleep, both write, and the mutation now fails
+loudly: `0 of 2 racing sales were refused, want exactly 1`.
+
+**The rule: a concurrency test must widen the window it is testing, or it is
+testing scheduling luck.** A barrier at the start is not enough — it makes both
+goroutines *begin* together, which is not the same as making them *overlap*. The
+sleep belongs at the point the invariant is vulnerable, not at the entry.
+
+And the meta-lesson, which this file keeps earning: the mutation run is not a
+formality after a passing test. Three of the mutations across this feature
+survived first time, and each one was a test that proved less than its name
+claimed.
+
+### 20. Every test can pass while the page has no styling at all
+
+Found 2026-09-12, in the browser walk of the portfolio screen.
+
+Three new components were written with semantic class names — `holding-row`,
+`field`, `button button--primary` — in a project that is **Tailwind**, where
+every other component composes utility classes from the tokens in `index.css`.
+Those class names matched no CSS anywhere in the repo. The page was entirely
+unstyled.
+
+838 frontend tests passed. `tsc --noEmit` passed. `eslint` passed. The
+accessibility snapshot read perfectly, and every assertion about behaviour —
+figures, branches, error messages — was correct, because all of it was.
+
+**None of those tools can see a stylesheet that does not exist.** Testing
+Library queries the accessibility tree, which is structure and text; it has no
+opinion about whether a rule matched. A typo'd class name is not a type error
+and not a lint error, because both are valid strings.
+
+What found it: opening the page. What confirmed it in one command:
+
+```bash
+grep -rn "holding-row\|lot-row" web/src/**/*.css   # nothing
+```
+
+**The rule: before writing a component, read a sibling's `className`.** The
+styling system is not discoverable from the component you are writing — only
+from the one next to it. This is the same failure as the timezone helper above
+(pattern 1's sixth instance, the same day): both were written next to files that
+already had the answer, and neither sibling was opened.
+
+Two smaller things the same walk found, for the same reason — the accessibility
+tree flattens what a screen renders:
+
+- Money read `SGD 21,990.00` where every other money screen reads `S$21,990.00`.
+  `formatMoney`'s third argument is the currency symbol, and without it the
+  function falls back to the bare code. Every sibling passes it via a `symbolFor`
+  lookup; none of mine did.
+- An entry row rendered `S$10,050.002026-07-02` — the amount and date with
+  nothing between them, because the row had no layout at all. In the
+  accessibility snapshot the two are separate nodes and read fine.
+
+### 21. A mutation that preserves proportions is invisible to a test that only checks proportions
+
+Found 2026-09-12, mutation-testing the period-return bar chart.
+
+The chart measures every bar from a zero baseline, so a loss draws below the
+line. The obvious mutation is to measure from the smallest figure instead:
+
+```ts
+const min = Math.min(0, ...values);   // correct
+const min = Math.min(...values);      // mutation
+```
+
+It **survived twice.** The first test had a +2000 and a −2000, where the
+floating minimum equals the real one. The second test asserted that a 1000 and
+a 3000 draw in a 1:3 ratio — and that stays true under the mutation, because
+the height of a bar works out to `value / span * H` either way. The scale
+changes; the proportions do not.
+
+What the mutation actually breaks is **containment**: the axis lands at y=181
+in a plot that ends at y=124, so every bar is drawn off the bottom of the
+chart. The test that kills it publishes the plot floor as a data attribute and
+asserts that the baseline and every bar stay inside it.
+
+**The rule: when a mutation survives, ask what the broken version still gets
+right.** A ratio, a sort order, a count and a type are all things a wrong
+implementation frequently preserves. The assertion has to name the property
+that actually differs — here, where the drawing lands, not how the bars relate
+to each other.
+
+### 22. A derived screen on its own query key is invalidated by nobody
+
+Found 2026-09-12, by review, one step before a browser walk that would have
+passed.
+
+The period report is derived from events, prices and income, and lives on the
+query key `["portfolio-report"]`. `useHoldings`' write helpers invalidated the
+holdings list, the events list and the valuations list — every key the
+*portfolio* screen reads. None of them touched the report.
+
+So the sequence the owner actually performs failed:
+
+1. open the report, read "No price recorded in this period"
+2. go back, record today's price
+3. return to the report — **still says no price**
+
+Correct on the server, wrong on the screen, and self-healing after
+`staleTime`, which is the worst shape a defect can have: intermittent and
+unreproducible for whoever reports it.
+
+**A browser walk would not have caught it either**, because a walk that
+navigates by typing a URL or reloading gets a fresh fetch. It is only visible
+when moving between two screens through the app's own links, which is exactly
+how a person uses it.
+
+**The rule: when a write changes a figure, list every query key that renders
+that figure — not every key the current screen reads.** A screen the write does
+not open is still a screen the write invalidates.
+
+**Then check the siblings of the fix itself.** The fix above went into
+`invalidateAfterEventWrite`. `invalidateHoldings` — the helper for create,
+rename, archive and restore — sits eleven lines above it and was left alone,
+because the reasoning had been "a *figure* moved". A name is not a figure, and
+the report prints names; a holding renamed while the report sat in cache showed
+the old one, and a holding added never appeared at all. So the rule has a
+second half: **a write that changes what a derived screen would *say*
+invalidates it, not only a write that changes what it would compute.** Both
+fixes are one line each (`ed93d26`, `dacc4c1`); the second was found by
+grepping for the shape of the first, which is step 3 of the checklist at the
+end of this file.
+
+### 24. A delete scoped to the parent's parent, and a scope check thrown away
+
+Found 2026-09-13, by running `/ecc:code-review` over a milestone that had
+already been walked, tested and documented. Neither defect was reachable from
+the product's own UI, which is why nothing found them earlier.
+
+**`DELETE /holdings/{id}/income/{incomeId}` ignored `{id}`.** The query scoped
+on `(household_id, id)`, so a request naming holding A removed a row of holding
+B. One household, so nothing leaked -- but the URL and the database disagreed
+about which holding was being edited, and a client that got the pairing wrong
+would corrupt a different holding's history while reporting success.
+
+The rule: **a child row is identified by its parent as well as by itself.**
+Scoping on the tenant alone is the check that keeps two families apart; it is
+not the check that keeps one family's own records straight.
+
+Worth recording alongside it: the sibling event delete looked identical and was
+NOT broken, because the path the product actually uses (`DeleteWithFold`) lists
+the named holding's rows first. The test says so at the assertion, because a
+mutation of that query does not turn it red and the next reader would otherwise
+conclude the test was weak.
+
+**`scope, _ := RequestScope(r)` in all thirteen holding handlers.** The
+discarded bool leaves an empty household id that every query below trusts.
+Unreachable behind `requireSession` -- but the failure mode differs by route,
+and that is the part worth carrying: a lookup answers 404 for an empty
+household, which is wrong and loud; a REPORT answers 200 with no rows, which
+tells someone who never signed in that they own nothing. (Under the internal
+test, whose `Deps` are empty, the report handler panicked on a nil dependency
+rather than returning anything -- that is the test's environment, not the
+product's.)
+
+The rule already existed -- CLAUDE.md's "fail closed on values you did not
+construct" -- and the cost of honouring it was two lines a handler behind one
+helper. A discarded bool is the quietest way to not honour it.
+
+**And the part this entry exists to admit.** The grep that found those thirteen
+was scoped to one file. Run across the package it returns **56 more, in eleven
+other handler files** -- retros, goals, agreements, bills, telegram,
+transactions, categories, budgets, accounts, api tokens, vision. Only
+`household_handlers.go` ever wrote the refusal. So this is pattern 1 happening
+inside the write-up of pattern 24: a rule stated as honoured while fifty-six
+call sites still discard the bool.
+
+They are not fixed here, deliberately -- that is a package-wide change to
+eleven files nobody reviewed in this pass, and widening a fix to files outside
+the reviewed diff is its own failure. `requireScope` now exists for them to
+adopt. **The count is the point: a helper with two users and fifty-six
+non-users has not changed the codebase's habit, only the holdings corner of
+it.**
+
+### 23. A dependency added to a service is wired in main.go and forgotten in the test's own Deps
+
+Found 2026-09-12 — and this is the **second** time in two milestones, in the
+same file.
+
+`HoldingDeps` gained an `Income` repository. `cmd/api/main.go` was updated.
+`internal/adapter/http/api_test.go`, which builds its own `Deps` for the test
+environment, was not — so every new route panicked on a nil interface and
+answered 500. Milestone 1 did the identical thing when the `Holdings` service
+itself was added.
+
+The galling part: one commit earlier, the same milestone added `Holdings` to
+`HouseholdDeps` and wrote a comment in `api_test.go` saying *"Wired here as
+well as in main.go on purpose: a dependency added to one and not the other is
+how milestone 1 shipped routes that 500ed only under test."* The comment was
+written, and then the next dependency was added to one place.
+
+**A comment is not a mechanism.** What caught it was an HTTP test hitting the
+route; what would catch it earlier is the compiler, if `Deps` were constructed
+by one shared helper rather than two literals — which is the real fix and is
+not yet made.
 
 ## Catalogue by area
 

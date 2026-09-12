@@ -39,6 +39,26 @@ func RequestScope(r *http.Request) (Scope, bool) {
 	return scope, ok
 }
 
+// requireScope is RequestScope plus the refusal, for the handlers that have
+// nothing sensible to do without a scope -- which is all of them.
+//
+// It exists because `scope, _ := RequestScope(r)` reads as harmless and is not:
+// the discarded bool leaves an EMPTY household id in a variable every query
+// below then trusts. A list route answers 404 for it, which is wrong but loud;
+// a report route answers 200 with no rows, which tells a caller who never
+// signed in that they own nothing. Fail closed on values you did not construct.
+//
+// The guard chain makes this unreachable today. It is the second lock, not the
+// first, and it costs two lines a handler.
+func requireScope(w http.ResponseWriter, r *http.Request) (Scope, bool) {
+	scope, ok := RequestScope(r)
+	if !ok {
+		WriteError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Sign in required.", nil)
+		return Scope{}, false
+	}
+	return scope, true
+}
+
 // authVia is the credential a request authenticated with. It is a named
 // type rather than a bool so a third kind (a signed webhook, say) cannot be
 // added without every switch over it being revisited: the zero value means

@@ -81,6 +81,25 @@ var routeTable = []route{
 	{"GET", "/goals/{id}/contributions", "money+owner", "-"},
 	{"POST", "/goals/{id}/contributions", "money+owner+csrf", `{"amountMinor","occurredOn","note"?,"currency"?}`},
 	{"DELETE", "/goals/{id}/contributions/{contributionId}", "money+owner+csrf", "-"},
+
+	// Holdings: the portfolio. Quantities cross as strings ("300.5"), never as
+	// nano integers to be divided in a browser; amounts are minor units like
+	// every other money field. A valuation POSTs but upserts -- one price per
+	// holding per day -- and answers 200 rather than 201 for that reason.
+	{"GET", "/holdings", "money+owner", "-"},
+	{"GET", "/holdings/report", "money+owner", `?kind=quarter|half|year&count=N (default 6|4|3, max 12)`},
+	{"POST", "/holdings", "money+owner+csrf", `{"accountId","name","instrument","unit","currency"?}`},
+	{"PATCH", "/holdings/{id}", "money+owner+csrf", `{"name","instrument","unit"}`},
+	{"POST", "/holdings/{id}/archive", "money+owner+csrf", "-"},
+	{"POST", "/holdings/{id}/restore", "money+owner+csrf", "-"},
+	{"GET", "/holdings/{id}/events", "money+owner", "-"},
+	{"POST", "/holdings/{id}/events", "money+owner+csrf", `{"kind","quantity","amountMinor","primaryAmountMinor"?,"occurredOn","note"?}`},
+	{"DELETE", "/holdings/{id}/events/{eventId}", "money+owner+csrf", "-"},
+	{"GET", "/holdings/{id}/valuations", "money+owner", "-"},
+	{"POST", "/holdings/{id}/valuations", "money+owner+csrf", `{"unitPriceMinor","primaryUnitPriceMinor"?,"asOf","note"?} -> 200, upsert`},
+	{"GET", "/holdings/{id}/income", "money+owner", "-"},
+	{"POST", "/holdings/{id}/income", "money+owner+csrf", `{"kind":"income"|"fee","amountMinor","primaryAmountMinor"?,"receivedOn","note"?}`},
+	{"DELETE", "/holdings/{id}/income/{incomeId}", "money+owner+csrf", "-"},
 	{"GET", "/bills", "money+owner", "?include_archived=true"},
 	{"POST", "/bills", "money+owner+csrf", `{"name","amountMinor","cadence","nextDue","categoryId","payFromAccountId","paidByMembershipId","autopay","isSubscription"}`},
 	{"PATCH", "/bills/{id}", "money+owner+csrf", `same fields, all optional`},

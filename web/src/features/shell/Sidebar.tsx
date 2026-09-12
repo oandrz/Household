@@ -40,6 +40,7 @@ const SPACE_PAGES: Record<string, { label: string; to: string }[]> = {
     { label: "Transactions", to: "/money/transactions" },
     { label: "Budget", to: "/money/budget" },
     { label: "Goals", to: "/money/goals" },
+    { label: "Portfolio", to: "/money/portfolio" },
     { label: "Bills", to: "/money/bills" },
   ],
   // Task 10 -- Retros is the first of Marriage's three pages

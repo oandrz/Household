@@ -49,6 +49,12 @@ type AccountDeps struct {
 	Households HouseholdRepository
 	FX         FXRateProvider
 	Clock      Clock
+	// Holdings is read only to answer "does this account still hold
+	// anything", which is what stops an account's type changing out from
+	// under its holdings. It is required, not optional: a nil here would
+	// silently disable that guard, and a guard that can be switched off by
+	// forgetting a field is not a guard.
+	Holdings HoldingCounter
 }
 
 // AccountService covers the Finances screen: the accounts themselves and the
@@ -106,6 +112,22 @@ func (s *AccountService) Update(ctx context.Context, householdID, accountID stri
 		account.Nickname = *patch.Nickname
 	}
 	if patch.Type != nil {
+		// A holding is anchored to an investment account, and HoldingService
+		// refuses to create one anywhere else. Without this the other
+		// direction is wide open: an owner could turn a brokerage into a cash
+		// account while it still held 300g of gold, leaving holdings attached
+		// to an account type that would never have accepted them. Only a
+		// CHANGE is refused -- renaming an account that holds something is
+		// fine, and so is re-setting the type it already has.
+		if domain.AccountType(*patch.Type) != account.Type {
+			held, err := s.d.Holdings.CountLiveForAccount(ctx, householdID, accountID)
+			if err != nil {
+				return domain.Account{}, err
+			}
+			if held > 0 {
+				return domain.Account{}, domain.ErrAccountHasHoldings
+			}
+		}
 		account.Type = domain.AccountType(*patch.Type)
 	}
 	if patch.OwnerMembershipID != nil {

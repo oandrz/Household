@@ -240,6 +240,7 @@ describe("Sidebar", () => {
       "Transactions",
       "Budget",
       "Goals",
+      "Portfolio",
       "Bills",
       "Garden",
     ]);
@@ -267,6 +268,7 @@ describe("Sidebar", () => {
       "Transactions",
       "Budget",
       "Goals",
+      "Portfolio",
       "Bills",
     ]);
     expect(screen.getByRole("link", { name: "Finances" })).toHaveAttribute("href", "/money");

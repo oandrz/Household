@@ -269,6 +269,10 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Households:    households,
 		Spaces:        spaces,
 		Notifications: notifications,
+		// Wired here as well as in main.go on purpose: this file builds its
+		// own Deps, and a dependency added to one and not the other is how
+		// milestone 1 shipped routes that 500ed only under test.
+		Holdings: postgres.NewHoldingRepo(db),
 	})
 	signupSvc := usecase.NewSignupService(usecase.SignupDeps{
 		Signups:    signups,
@@ -289,6 +293,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Households: households,
 		FX:         fxProvider,
 		Clock:      clk,
+		Holdings:   postgres.NewHoldingRepo(db),
 	})
 	categorySvc := usecase.NewCategoryService(categoryRepo)
 	transactionRepo := postgres.NewTransactionRepo(db)
@@ -301,6 +306,14 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Clock:        clk,
 	})
 	goalRepo := postgres.NewGoalRepo(db)
+	holdingSvc := usecase.NewHoldingService(usecase.HoldingDeps{
+		Holdings:   postgres.NewHoldingRepo(db),
+		Events:     postgres.NewHoldingEventRepo(db),
+		Valuations: postgres.NewHoldingValuationRepo(db),
+		Income:     postgres.NewHoldingIncomeRepo(db),
+		Accounts:   accountRepo,
+		Households: households,
+	})
 	goalSvc := usecase.NewGoalService(usecase.GoalDeps{
 		Goals:      goalRepo,
 		Households: households,
@@ -380,6 +393,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Categories:     categorySvc,
 		Budgets:        budgetSvc,
 		Goals:          goalSvc,
+		Holdings:       holdingSvc,
 		Bills:          billSvc,
 		Retros:         retroSvc,
 		Visions:        visionSvc,

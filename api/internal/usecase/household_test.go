@@ -331,3 +331,62 @@ func TestUpdateNotificationsRoundTripsAllFourFlags(t *testing.T) {
 		t.Fatalf("Notifications after update = %+v, want %+v", fetched, want)
 	}
 }
+
+// Changing the household's primary currency after it holds investments would
+// strand every one of them: a holding event records its cost in the
+// household's currency AT THE TIME, and there is nothing in the data to
+// re-express an old figure under a new currency. The fold would then refuse
+// the holding, which is a portfolio page that throws on every load -- and the
+// only screen that could fix it.
+//
+// So the change is refused while anything is held, rather than accepted and
+// discovered later. Everything else on the settings screen still saves.
+func TestThePrimaryCurrencyCannotChangeWhileTheHouseholdHoldsInvestments(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	current, err := f.householdSvc.Get(ctx, f.householdID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	f.holdings.n = 1
+
+	changed := current
+	changed.PrimaryCurrency = "USD"
+	if _, err := f.householdSvc.Update(ctx, changed); !errors.Is(err, domain.ErrPrimaryCurrencyHeldByHoldings) {
+		t.Fatalf("err = %v, want ErrPrimaryCurrencyHeldByHoldings", err)
+	}
+
+	fetched, err := f.householdSvc.Get(ctx, f.householdID)
+	if err != nil {
+		t.Fatalf("Get after the rejected update: %v", err)
+	}
+	if fetched.PrimaryCurrency != current.PrimaryCurrency {
+		t.Fatalf("PrimaryCurrency = %q, want %q unchanged", fetched.PrimaryCurrency, current.PrimaryCurrency)
+	}
+
+	// The rest of the settings screen is unaffected: only the currency is
+	// pinned, and only while something is held.
+	sameCurrency := current
+	sameCurrency.SecondaryCurrency = "JPY"
+	if _, err := f.householdSvc.Update(ctx, sameCurrency); err != nil {
+		t.Fatalf("an update that leaves the primary currency alone must still save: %v", err)
+	}
+}
+
+// The lock is not permanent: a household that holds nothing can still choose
+// its currency, which is the case every new household is in.
+func TestThePrimaryCurrencyStillChangesWhenNothingIsHeld(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	current, err := f.householdSvc.Get(ctx, f.householdID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	changed := current
+	changed.PrimaryCurrency = "USD"
+	if _, err := f.householdSvc.Update(ctx, changed); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+}

@@ -25,6 +25,92 @@ var (
 	ErrInvalidMoney                 = errors.New("money value is invalid")
 	ErrOwnerMustHoldAllCapabilities = errors.New("an owner must hold every capability")
 
+	// ErrQuantityNegative is NewQuantity's refusal. A holding's quantity is how
+	// much of a thing is held, so negative is not a smaller amount -- it is a
+	// different claim, and one no screen in this product can render. A disposal
+	// is recorded as its own event with its own positive quantity, never as a
+	// negative holding.
+	ErrQuantityNegative = errors.New("a quantity cannot be negative")
+	// ErrInvalidQuantity is ParseQuantity's refusal -- a quantity that is not a
+	// number, carries a sign, or is finer than a billionth. Separate from
+	// ErrInvalidMoney because a quantity is not money and a screen's message
+	// for one is wrong for the other.
+	ErrInvalidQuantity = errors.New("that is not a quantity")
+
+	// ErrProrateWholeNotPositive is Money.Prorate's refusal to divide a cost
+	// pool by an empty holding. Returning zero instead would report that a
+	// disposal cost nothing, which reads on screen as pure profit.
+	ErrProrateWholeNotPositive = errors.New("cannot prorate across a zero quantity")
+	// ErrProratePartExceedsWhole keeps Prorate's own refusal separate from the
+	// holding fold's ErrHoldingOversold. They fire on the same shape but mean
+	// different things -- one is "this proportion is not a proportion", the
+	// other is "this household does not own that much" -- and collapsing them
+	// into one error made each guard untestable, because either alone still
+	// produced the error the test looked for.
+	ErrProratePartExceedsWhole = errors.New("cannot prorate more than the whole")
+
+	// The holding errors. ErrHoldingOversold is the fold refusing to sell more
+	// than is held: the alternative is a negative quantity, which NewQuantity
+	// already refuses, and a position no screen can render.
+	ErrUnknownInstrumentKind           = errors.New("unknown instrument kind")
+	ErrUnknownHoldingEventKind         = errors.New("unknown holding event kind")
+	ErrHoldingOversold                 = errors.New("cannot dispose of more than is held")
+	ErrHoldingEventQuantityNotPositive = errors.New("a holding event must move a positive quantity")
+	// The two sides of the cross-currency rule, mirroring
+	// ErrReceivedAmountRequired and ErrReceivedAmountNotAllowed on transfers:
+	// the primary-currency figure is required exactly when it is a different
+	// number, and refused when it would duplicate the native one.
+	ErrHoldingPrimaryAmountRequired   = errors.New("a holding not in the primary currency needs its primary-currency amount")
+	ErrHoldingPrimaryAmountNotAllowed = errors.New("a holding already in the primary currency must not carry a second amount")
+	// ErrHoldingNameTaken is the UNIQUE (account_id, name) collision, scoped to
+	// the account rather than the household because holding the same ticker in
+	// two brokerages is ordinary. Archived holdings still occupy their name, so
+	// a collision with one offers restore rather than a bare 409 -- the goals
+	// and categories rule.
+	ErrHoldingNameTaken    = errors.New("a holding with that name already exists in this account")
+	ErrHoldingNameRequired = errors.New("a holding name is required")
+	// ErrHoldingDateInFuture is the sibling of ErrOpeningBalanceInFuture, and
+	// matters more here: latest-price lookups order by as_of, so a price
+	// mistyped as 2030 outranks every real one forever and pins the holding's
+	// market value to a figure nobody can explain. Today is not the future --
+	// this project has shipped an off-by-one at exactly that boundary three
+	// times (see LEARNING's timezone pattern), so the comparison is on the
+	// calendar day, not the instant.
+	ErrHoldingDateInFuture = errors.New("that date is in the future")
+	// ErrHoldingAccountNotInvestment fails closed on the account's type rather
+	// than trusting a screen to have offered only the right accounts. The
+	// sibling rule lives in AccountService: an account holding live holdings
+	// cannot have its type changed out from under them.
+	ErrHoldingAccountNotInvestment = errors.New("a holding belongs in an investment account")
+
+	// The reporting periods. ErrPeriodIndexOutOfRange is a fifth quarter or a
+	// zeroth half -- refused at construction so that no arithmetic downstream
+	// has to wonder whether the period it holds is real.
+	ErrUnknownPeriodKind     = errors.New("unknown period kind")
+	ErrPeriodIndexOutOfRange = errors.New("that period does not exist in a year")
+	ErrPeriodCountOutOfRange = errors.New("a report covers at least one period")
+
+	// Holding income. A fee is stored positive and subtracted when a period is
+	// summed, so a zero row is the only meaningless one -- there is nothing to
+	// record when nothing changed hands.
+	ErrUnknownIncomeKind              = errors.New("unknown holding income kind")
+	ErrHoldingIncomeAmountNotPositive = errors.New("a holding income row must move a positive amount")
+
+	// ErrPrimaryCurrencyHeldByHoldings stops a household changing the currency
+	// it keeps its books in while it holds investments. Every holding event
+	// records its cost in the currency that was primary WHEN IT WAS WRITTEN,
+	// and nothing in the data can re-express an old figure under a new one --
+	// so the change would strand the holding rather than restate it.
+	ErrPrimaryCurrencyHeldByHoldings = errors.New("the primary currency cannot change while the household holds investments")
+	// ErrHoldingArchived is the same rule an archived goal follows: restoring
+	// is a deliberate act, and writing to an archived holding would silently
+	// un-retire a position the household said was finished.
+	ErrHoldingArchived = errors.New("that holding is archived")
+	// ErrAccountHasHoldings refuses a type change on an account that still
+	// holds something. usecase/account.go patches Type freely, so without this
+	// a cash account could end up holding 300g of gold.
+	ErrAccountHasHoldings = errors.New("that account holds investments and cannot change type")
+
 	ErrUnknownAccountType         = errors.New("unknown account type")
 	ErrAccountNicknameRequired    = errors.New("an account nickname is required")
 	ErrLiabilityBalanceNegative   = errors.New("a debt's balance is the amount owed and cannot be negative")

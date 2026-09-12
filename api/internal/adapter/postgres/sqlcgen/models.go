@@ -182,6 +182,58 @@ type GoalContribution struct {
 	CreatedAt         pgtype.Timestamptz
 }
 
+type Holding struct {
+	ID          pgtype.UUID
+	HouseholdID pgtype.UUID
+	AccountID   pgtype.UUID
+	Name        string
+	Instrument  string
+	Unit        string
+	Currency    string
+	ArchivedAt  pgtype.Timestamptz
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+type HoldingEvent struct {
+	ID                 pgtype.UUID
+	HoldingID          pgtype.UUID
+	HouseholdID        pgtype.UUID
+	Kind               string
+	QuantityNano       int64
+	AmountMinor        int64
+	PrimaryAmountMinor *int64
+	PrimaryCurrency    *string
+	OccurredOn         pgtype.Date
+	Note               string
+	CreatedAt          pgtype.Timestamptz
+}
+
+type HoldingIncome struct {
+	ID                 pgtype.UUID
+	HoldingID          pgtype.UUID
+	HouseholdID        pgtype.UUID
+	Kind               string
+	AmountMinor        int64
+	PrimaryAmountMinor *int64
+	PrimaryCurrency    *string
+	ReceivedOn         pgtype.Date
+	Note               string
+	CreatedAt          pgtype.Timestamptz
+}
+
+type HoldingValuation struct {
+	ID                    pgtype.UUID
+	HoldingID             pgtype.UUID
+	HouseholdID           pgtype.UUID
+	UnitPriceMinor        int64
+	PrimaryUnitPriceMinor *int64
+	PrimaryCurrency       *string
+	AsOf                  pgtype.Date
+	Note                  string
+	CreatedAt             pgtype.Timestamptz
+}
+
 type Household struct {
 	ID                    pgtype.UUID
 	Name                  string

@@ -122,6 +122,27 @@ hearthctl api DELETE /transactions/<id>
 hearthctl api PUT /budgets/2026-09 --data=@budget.json
 ```
 
+The portfolio has no typed commands of its own -- it is driven entirely through
+`api`, which is why every one of its routes carries its body shape in
+`hearthctl routes`:
+
+```bash
+# what each holding earned, per quarter, ending with the one in progress
+hearthctl api GET '/holdings/report?kind=quarter'
+hearthctl api GET '/holdings/report?kind=year&count=3'
+
+# a dividend, and a custody charge -- both stored positive; the report
+# subtracts the fees
+hearthctl api POST /holdings/<id>/income \
+  --data='{"kind":"income","amountMinor":4500,"receivedOn":"2026-09-30"}'
+hearthctl api POST /holdings/<id>/income \
+  --data='{"kind":"fee","amountMinor":500,"receivedOn":"2026-09-30"}'
+```
+
+A period whose `unrealised` is `null` carries a `reason` instead: the price
+that would have measured that end was never recorded. `realised` and `income`
+are still there -- no price is involved in either.
+
 Paths are relative to `/api/v1`. The CLI adds the CSRF header on every
 non-GET; you never handle it.
 

@@ -33,8 +33,105 @@ func newAccountService(t *testing.T) (*usecase.AccountService, *fakeAccountRepo)
 		Households: households,
 		FX:         staticTestRates{},
 		Clock:      &fixedClock{now: fixedNow},
+		Holdings:   holdingCounterDouble{},
 	})
 	return svc, repo
+}
+
+// newAccountServiceHolding is newAccountService with an account that already
+// holds something, for the one rule that depends on it.
+func newAccountServiceWithHoldings(t *testing.T, count int64) (*usecase.AccountService, *fakeAccountRepo) {
+	t.Helper()
+	svc, repo := newAccountService(t)
+	_ = svc
+	households := newHouseholdDouble()
+	households.put(domain.Household{
+		ID: "h-1", Name: "Andreas & Christine", FamilyName: "Oentoro",
+		PrimaryCurrency: "SGD", ShowSecondaryCurrency: true, SecondaryCurrency: "IDR", FXRateMode: "auto",
+	})
+	return usecase.NewAccountService(usecase.AccountDeps{
+		Accounts:   repo,
+		Households: households,
+		FX:         staticTestRates{},
+		Clock:      &fixedClock{now: fixedNow},
+		Holdings:   holdingCounterDouble{n: count},
+	}), repo
+}
+
+// An account's type is patchable, so without this an owner could turn a
+// brokerage into a cash account while it still held 300g of gold -- and the
+// holdings would be anchored to an account whose type the holdings service
+// itself refuses to accept. Found while reading account.go for Task 4 of the
+// portfolio plan; the counter port exists for exactly this call.
+func TestAccountTypeCannotChangeWhileTheAccountHoldsInvestments(t *testing.T) {
+	svc, repo := newAccountServiceWithHoldings(t, 1)
+	created, err := svc.Create(context.Background(), investmentAccountInput())
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	_ = repo
+
+	cash := "cash"
+	_, err = svc.Update(context.Background(), "h-1", created.ID, usecase.AccountUpdate{Type: &cash})
+	if !errors.Is(err, domain.ErrAccountHasHoldings) {
+		t.Fatalf("error = %v, want ErrAccountHasHoldings", err)
+	}
+}
+
+// The guard is about the TYPE changing, not about touching the account at all:
+// renaming a brokerage that holds something must still work.
+func TestAnAccountWithHoldingsCanStillBeRenamed(t *testing.T) {
+	svc, _ := newAccountServiceWithHoldings(t, 1)
+	created, err := svc.Create(context.Background(), investmentAccountInput())
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	name := "Moomoo SG"
+	updated, err := svc.Update(context.Background(), "h-1", created.ID, usecase.AccountUpdate{Nickname: &name})
+	if err != nil {
+		t.Fatalf("Update nickname: %v", err)
+	}
+	if updated.Nickname != "Moomoo SG" {
+		t.Fatalf("Nickname = %q, want Moomoo SG", updated.Nickname)
+	}
+}
+
+// And an account with NO holdings changes type freely, as it always has.
+func TestAccountTypeStillChangesWhenNothingIsHeld(t *testing.T) {
+	svc, _ := newAccountServiceWithHoldings(t, 0)
+	created, err := svc.Create(context.Background(), investmentAccountInput())
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	cash := "cash"
+	updated, err := svc.Update(context.Background(), "h-1", created.ID, usecase.AccountUpdate{Type: &cash})
+	if err != nil {
+		t.Fatalf("Update type: %v", err)
+	}
+	if updated.Type != domain.AccountCash {
+		t.Fatalf("Type = %q, want cash", updated.Type)
+	}
+}
+
+func investmentAccountInput() usecase.NewAccount {
+	in := validNewAccount()
+	in.Nickname = "Brokerage"
+	in.Type = "investment"
+	return in
+}
+
+// holdingCounterDouble stands in for the holdings table: n is how many live
+// holdings the account is said to have.
+type holdingCounterDouble struct{ n int64 }
+
+func (d holdingCounterDouble) CountLiveForAccount(_ context.Context, _, _ string) (int64, error) {
+	return d.n, nil
+}
+
+func (d holdingCounterDouble) CountForHousehold(_ context.Context, _ string) (int64, error) {
+	return d.n, nil
 }
 
 func validNewAccount() usecase.NewAccount {
