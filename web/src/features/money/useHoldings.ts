@@ -6,12 +6,14 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tansta
 import { apiFetch } from "../../api/client";
 import {
   holdingEventsResponseSchema,
+  holdingIncomeResponseSchema,
   holdingResponseSchema,
   holdingValuationsResponseSchema,
   portfolioResponseSchema,
   type PortfolioResponse,
   type InstrumentKind,
   type HoldingEventKind,
+  type IncomeKind,
 } from "./holdingSchemas";
 
 // CreateHoldingBody mirrors createHoldingRequest. currency is optional: the
@@ -44,6 +46,17 @@ export type RecordEventBody = {
   note: string;
 };
 
+// RecordIncomeBody mirrors createIncomeRequest. A fee is sent POSITIVE, the
+// same as a dividend: the server subtracts fees when it sums a period, and a
+// negative amount is refused everywhere in this product.
+export type RecordIncomeBody = {
+  kind: IncomeKind;
+  amountMinor: number;
+  primaryAmountMinor?: number;
+  receivedOn: string;
+  note: string;
+};
+
 export type RecordValuationBody = {
   unitPriceMinor: number;
   primaryUnitPriceMinor?: number;
@@ -61,6 +74,10 @@ export function holdingEventsQueryKey(holdingId: string) {
 
 export function holdingValuationsQueryKey(holdingId: string) {
   return ["holding-valuations", holdingId] as const;
+}
+
+export function holdingIncomeQueryKey(holdingId: string) {
+  return ["holding-income", holdingId] as const;
 }
 
 async function fetchPortfolio(includeArchived: boolean): Promise<PortfolioResponse> {
@@ -87,6 +104,17 @@ function invalidateAfterEventWrite(queryClient: QueryClient, holdingId: string) 
     queryClient.invalidateQueries({ queryKey: holdingsQueryKey(true) }),
     queryClient.invalidateQueries({ queryKey: holdingEventsQueryKey(holdingId) }),
     queryClient.invalidateQueries({ queryKey: holdingValuationsQueryKey(holdingId) }),
+  ]);
+}
+
+// An income write changes no position -- income never enters the fold -- so it
+// invalidates its own list and the period report, and leaves the portfolio's
+// held/cost/realised figures alone. Invalidating those too would refetch the
+// whole screen to change nothing on it.
+function invalidateAfterIncomeWrite(queryClient: QueryClient, holdingId: string) {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: holdingIncomeQueryKey(holdingId) }),
+    queryClient.invalidateQueries({ queryKey: ["portfolio-report"] }),
   ]);
 }
 
@@ -159,6 +187,24 @@ export function useHoldings(options: { includeArchived: boolean; enabled?: boole
     onSuccess: (_data, variables) => invalidateAfterEventWrite(queryClient, variables.id),
   });
 
+  const recordIncome = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: RecordIncomeBody }) =>
+      apiFetch<unknown>(`/api/v1/holdings/${encodeURIComponent(id)}/income`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: (_data, variables) => invalidateAfterIncomeWrite(queryClient, variables.id),
+  });
+
+  const deleteIncome = useMutation({
+    mutationFn: ({ id, incomeId }: { id: string; incomeId: string }) =>
+      apiFetch<unknown>(
+        `/api/v1/holdings/${encodeURIComponent(id)}/income/${encodeURIComponent(incomeId)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: (_data, variables) => invalidateAfterIncomeWrite(queryClient, variables.id),
+  });
+
   return {
     ...query,
     createHolding,
@@ -168,6 +214,8 @@ export function useHoldings(options: { includeArchived: boolean; enabled?: boole
     recordEvent,
     deleteEvent,
     recordValuation,
+    recordIncome,
+    deleteIncome,
   };
 }
 
@@ -192,6 +240,19 @@ export function useHoldingValuations(holdingId: string | null) {
         `/api/v1/holdings/${encodeURIComponent(holdingId ?? "")}/valuations`,
       );
       return holdingValuationsResponseSchema.parse(body);
+    },
+    enabled: holdingId !== null,
+  });
+}
+
+export function useHoldingIncome(holdingId: string | null) {
+  return useQuery({
+    queryKey: holdingIncomeQueryKey(holdingId ?? ""),
+    queryFn: async () => {
+      const body = await apiFetch<unknown>(
+        `/api/v1/holdings/${encodeURIComponent(holdingId ?? "")}/income`,
+      );
+      return holdingIncomeResponseSchema.parse(body);
     },
     enabled: holdingId !== null,
   });

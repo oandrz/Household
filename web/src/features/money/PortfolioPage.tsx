@@ -17,12 +17,14 @@
 //                   this feature's largest product risk, so the age is shown
 //                   beside the figure rather than being available on request.
 import { useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { useCurrencies } from "../auth/useAuth";
 import { PageContainer } from "../../components/PageContainer";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { formatMoney } from "./formatMoney";
 import { HoldingModal } from "./HoldingModal";
 import { HoldingLotsPanel } from "./HoldingLotsPanel";
+import { HoldingIncomePanel } from "./HoldingIncomePanel";
 import { useHoldings } from "./useHoldings";
 import type { Holding } from "./holdingSchemas";
 
@@ -48,6 +50,9 @@ export function PortfolioPage() {
   // independent means a change to one never has to reason about the other --
   // GoalsPage.tsx's own reasoning for the same pair.
   const [lotsHolding, setLotsHolding] = useState<Holding | null>(null);
+  // A third slot rather than a union with lotsHolding, for the reason above:
+  // two surfaces that can never be open together stay independent.
+  const [incomeHolding, setIncomeHolding] = useState<Holding | null>(null);
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
 
   const markPending = (id: string, pending: boolean) => {
@@ -70,9 +75,17 @@ export function PortfolioPage() {
             What you hold, what it cost, and what it is worth.
           </p>
         </div>
-        <button type="button" className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0" onClick={() => setModalHolding("new")}>
-          Add holding
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            to="/money/portfolio/report"
+            className="min-h-11 rounded-lg border border-hairline px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0"
+          >
+            How each did
+          </Link>
+          <button type="button" className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0" onClick={() => setModalHolding("new")}>
+            Add holding
+          </button>
+        </div>
       </header>
 
       {/* Gated on isSuccess as well as the flag, so the banner does not appear
@@ -123,6 +136,7 @@ export function PortfolioPage() {
               busy={pendingIds.has(holding.id)}
               onEdit={() => setModalHolding(holding)}
               onOpenLots={() => setLotsHolding(holding)}
+              onOpenIncome={() => setIncomeHolding(holding)}
               onArchive={async () => {
                 markPending(holding.id, true);
                 try {
@@ -156,6 +170,10 @@ export function PortfolioPage() {
       {lotsHolding !== null ? (
         <HoldingLotsPanel holding={lotsHolding} onClose={() => setLotsHolding(null)} />
       ) : null}
+
+      {incomeHolding !== null ? (
+        <HoldingIncomePanel holding={incomeHolding} onClose={() => setIncomeHolding(null)} />
+      ) : null}
     </PageContainer>
   );
 }
@@ -166,6 +184,7 @@ function HoldingRow(props: {
   busy: boolean;
   onEdit: () => void;
   onOpenLots: () => void;
+  onOpenIncome: () => void;
   onArchive: () => void;
   onRestore: () => void;
 }) {
@@ -234,6 +253,9 @@ function HoldingRow(props: {
       <div className="flex flex-wrap gap-2">
         <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0" onClick={props.onOpenLots}>
           Entries &amp; prices
+        </button>
+        <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0" onClick={props.onOpenIncome}>
+          Dividends &amp; fees
         </button>
         <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0" onClick={props.onEdit}>
           Edit
