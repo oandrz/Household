@@ -289,6 +289,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Households: households,
 		FX:         fxProvider,
 		Clock:      clk,
+		Holdings:   postgres.NewHoldingRepo(db),
 	})
 	categorySvc := usecase.NewCategoryService(categoryRepo)
 	transactionRepo := postgres.NewTransactionRepo(db)

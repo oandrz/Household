@@ -105,6 +105,9 @@ func run() error {
 	notifications := postgres.NewNotificationRepo(db)
 	signups := postgres.NewSignupRepo(db)
 	accountRepo := postgres.NewAccountRepo(db)
+	holdingRepo := postgres.NewHoldingRepo(db)
+	holdingEventRepo := postgres.NewHoldingEventRepo(db)
+	holdingValuationRepo := postgres.NewHoldingValuationRepo(db)
 	categoryRepo := postgres.NewCategoryRepo(db)
 	transactionRepo := postgres.NewTransactionRepo(db)
 	budgetRepo := postgres.NewBudgetRepo(db)
@@ -225,7 +228,18 @@ func run() error {
 		Households: households,
 		FX:         fxProvider,
 		Clock:      sysClock,
+		// Read only to refuse a type change on an account that still holds
+		// investments -- see AccountDeps.Holdings.
+		Holdings: holdingRepo,
 	})
+	holdingSvc := usecase.NewHoldingService(usecase.HoldingDeps{
+		Holdings:   holdingRepo,
+		Events:     holdingEventRepo,
+		Valuations: holdingValuationRepo,
+		Accounts:   accountRepo,
+		Households: households,
+	})
+	_ = holdingSvc // mounted with the portfolio routes in the next task
 	categorySvc := usecase.NewCategoryService(categoryRepo)
 	transactionSvc := usecase.NewTransactionService(usecase.TransactionDeps{
 		Transactions: transactionRepo,

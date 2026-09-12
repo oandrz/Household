@@ -319,5 +319,6 @@ func newAccountServiceWithFX(t *testing.T, fx usecase.FXRateProvider) *usecase.A
 		Households: households,
 		FX:         fx,
 		Clock:      &fixedClock{now: fixedNow},
+		Holdings:   holdingCounterDouble{},
 	})
 }

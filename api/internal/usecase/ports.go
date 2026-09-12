@@ -1775,6 +1775,16 @@ type HoldingRepository interface {
 	CountLiveForAccount(ctx context.Context, householdID, accountID string) (int64, error)
 }
 
+// HoldingCounter is what AccountService needs of holdings, and nothing more:
+// whether an account still holds anything. A narrow port rather than the whole
+// HoldingRepository, by the same interface-segregation rule that gives this
+// file nine small repositories instead of one object with forty methods --
+// and so that the accounts service cannot grow a dependency on holdings it
+// was never meant to have.
+type HoldingCounter interface {
+	CountLiveForAccount(ctx context.Context, householdID, accountID string) (int64, error)
+}
+
 // HoldingEventRepository stores the acquisitions and disposals a holding is
 // made of. Income (a dividend) is deliberately not among them: it changes
 // neither what is held nor what it cost, so folding it here would corrupt the

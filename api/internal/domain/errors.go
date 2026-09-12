@@ -63,6 +63,20 @@ var (
 	// a collision with one offers restore rather than a bare 409 -- the goals
 	// and categories rule.
 	ErrHoldingNameTaken = errors.New("a holding with that name already exists in this account")
+	ErrHoldingNameRequired = errors.New("a holding name is required")
+	// ErrHoldingAccountNotInvestment fails closed on the account's type rather
+	// than trusting a screen to have offered only the right accounts. The
+	// sibling rule lives in AccountService: an account holding live holdings
+	// cannot have its type changed out from under them.
+	ErrHoldingAccountNotInvestment = errors.New("a holding belongs in an investment account")
+	// ErrHoldingArchived is the same rule an archived goal follows: restoring
+	// is a deliberate act, and writing to an archived holding would silently
+	// un-retire a position the household said was finished.
+	ErrHoldingArchived = errors.New("that holding is archived")
+	// ErrAccountHasHoldings refuses a type change on an account that still
+	// holds something. usecase/account.go patches Type freely, so without this
+	// a cash account could end up holding 300g of gold.
+	ErrAccountHasHoldings = errors.New("that account holds investments and cannot change type")
 
 	ErrUnknownAccountType         = errors.New("unknown account type")
 	ErrAccountNicknameRequired    = errors.New("an account nickname is required")
