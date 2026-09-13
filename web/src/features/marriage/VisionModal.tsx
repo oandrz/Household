@@ -9,6 +9,11 @@
 // the design's own plain ✕ (dc.html draws no confirm step for any of them
 // either).
 //
+// This file only composes. The draft, its seed effect, Save and
+// Reload-and-discard live in useVisionDraft.ts; each pillar, measure and
+// milestone row is PillarEditor.tsx, MeasureEditor.tsx and
+// MilestoneEditor.tsx.
+//
 // Takes `year`/`onYearChange`/the pieces of `useVision(year)` this modal
 // needs as props, rather than calling the hook itself the way RetroModal
 // calls its own useRetro(month) -- useVision.ts's own header comment is
@@ -45,10 +50,10 @@
 // This modal still detects the conflict from `err.code`, for the same
 // reason RetroModal does: `conflict` (the hook's own derived flag) is a
 // value closed over from the render that started the save, and by the time
-// this catch block runs, the hook's own onError (which sets it) has only
-// been scheduled, not necessarily flushed -- deciding what to render here
-// from that closure would risk exactly the staleness useRetro.ts's own
-// comment warns any new caller about.
+// useVisionDraft's catch block runs, the hook's own onError (which sets it)
+// has only been scheduled, not necessarily flushed -- deciding what to
+// render here from that closure would risk exactly the staleness
+// useRetro.ts's own comment warns any new caller about.
 //
 // Where this genuinely departs from RetroModal is the action offered once a
 // conflict latches. RetroModal offers none, because there is no safe way to
@@ -61,66 +66,18 @@
 // saw. The button is named for that outcome (`reloadAndDiscardChanges`), not
 // called a bare "Reload" -- a control that silently discards a household's
 // edits does not get a friendly, ambiguous label.
-import { useEffect, useId, useState } from "react";
-import { ApiError } from "../../api/client";
-import { apiErrorMessage } from "../auth/copy";
+import { useId } from "react";
+import { Field } from "../../components/Field";
+import { FIELD_CONTROL_CLASS } from "../../components/fieldClasses";
 import { Modal } from "../../components/Modal";
-import { FieldPair } from "../../components/FieldPair";
-import { CloseIcon } from "../../components/icons";
+import { ModalActions } from "../../components/ModalActions";
 import { useGoals } from "../money/useGoals";
-import type { Goal } from "../money/goalSchemas";
+import { MilestoneEditor } from "./MilestoneEditor";
+import { PillarEditor } from "./PillarEditor";
+import type { useVision } from "./useVision";
+import { useVisionDraft } from "./useVisionDraft";
 import { VISION_COPY } from "./visionCopy";
 import { currentVisionYear } from "./visionQueryKeys";
-import type { useVision, SaveVisionBody } from "./useVision";
-
-type DraftMeasure = {
-  label: string;
-  kind: "typed" | "linked";
-  current: number;
-  target: number;
-  goalId: string;
-};
-
-type DraftPillar = {
-  name: string;
-  description: string;
-  measures: DraftMeasure[];
-};
-
-type DraftMilestone = {
-  year: number;
-  title: string;
-  note: string;
-};
-
-// A measure is typed OR linked, never both -- the domain refuses the
-// ambiguous shape and so does the database's own measure_is_typed_or_linked.
-// Switching modes therefore CLEARS the other mode's inputs rather than
-// leaving them populated and hidden: a hidden value that still submits is
-// how a form sends a body its own UI never showed anyone.
-function setMeasureMode(measure: DraftMeasure, mode: "typed" | "linked"): DraftMeasure {
-  return mode === "typed"
-    ? { ...measure, kind: "typed", goalId: "", current: 0, target: 1 }
-    : { ...measure, kind: "linked", goalId: "", current: 0, target: 0 };
-}
-
-function newMeasure(): DraftMeasure {
-  return { label: "", kind: "typed", current: 0, target: 1, goalId: "" };
-}
-
-// Parses a bare, non-negative whole number typed into a plain text field --
-// never NaN, which a raw `Number(event.target.value)` produces mid-edit (an
-// empty field, a lone "-") and which would then sit in state as something
-// `JSON.stringify` turns into `null` on the very next save. `type="text"
-// inputMode="numeric"`, not `type="number"`, for the same reason every
-// numeric field elsewhere in this codebase avoids it (formatMoney.ts's own
-// convention) -- nothing here needs a spinner or the browser's own
-// scientific-notation-accepting parser, and every value stays a plain JS
-// number in state throughout, never a string re-parsed at save time.
-function parseWholeNumber(raw: string): number {
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-}
 
 // The previous, current and next calendar year, anchored on TODAY
 // (currentVisionYear()) rather than on whichever year is currently loaded --
@@ -133,298 +90,6 @@ function parseWholeNumber(raw: string): number {
 function yearOptions(): number[] {
   const current = currentVisionYear();
   return [current - 1, current, current + 1];
-}
-
-function MeasureEditor({
-  pillarIndex,
-  measureIndex,
-  measure,
-  goals,
-  onChange,
-  onRemove,
-}: {
-  pillarIndex: number;
-  measureIndex: number;
-  measure: DraftMeasure;
-  goals: Goal[];
-  onChange: (measure: DraftMeasure) => void;
-  onRemove: () => void;
-}) {
-  const idPrefix = `vision-modal-pillar-${pillarIndex}-measure-${measureIndex}`;
-  return (
-    <div data-testid="vision-modal-measure" className="flex flex-col gap-2 rounded-[10px] border border-hairline p-3">
-      <div className="flex items-center gap-2">
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <label htmlFor={`${idPrefix}-label`} className="sr-only">
-            {VISION_COPY.modalMeasureLabelLabel}
-          </label>
-          <input
-            id={`${idPrefix}-label`}
-            data-testid="vision-modal-measure-label"
-            type="text"
-            value={measure.label}
-            placeholder={VISION_COPY.modalMeasureLabelLabel}
-            onChange={(event) => onChange({ ...measure, label: event.target.value })}
-            className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] sm:min-h-0"
-          />
-        </div>
-        <button
-          type="button"
-          data-testid="vision-modal-remove-measure"
-          aria-label={VISION_COPY.removeMeasure(measure.label)}
-          onClick={onRemove}
-          className="flex h-11 w-11 flex-none items-center justify-center text-[15px] text-danger sm:h-7 sm:w-7"
-        >
-          <CloseIcon />
-        </button>
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor={`${idPrefix}-mode`} className="text-[11px] font-semibold text-label">
-          {VISION_COPY.modalMeasureModeLabel}
-        </label>
-        <select
-          id={`${idPrefix}-mode`}
-          data-testid="vision-modal-measure-mode"
-          value={measure.kind}
-          onChange={(event) => onChange(setMeasureMode(measure, event.target.value === "linked" ? "linked" : "typed"))}
-          className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] sm:min-h-0"
-        >
-          <option value="typed">{VISION_COPY.modalMeasureModeTyped}</option>
-          <option value="linked">{VISION_COPY.modalMeasureModeLinked}</option>
-        </select>
-      </div>
-
-      {/* Only the fields the current mode actually uses are ever on screen
-          -- setMeasureMode's own comment is the rule this renders; this is
-          just the other half of it (no hidden twin sitting behind the one
-          shown). */}
-      {measure.kind === "typed" ? (
-        <FieldPair>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor={`${idPrefix}-current`} className="text-[11px] font-semibold text-label">
-              {VISION_COPY.modalMeasureCurrentLabel}
-            </label>
-            <input
-              id={`${idPrefix}-current`}
-              data-testid="vision-modal-measure-current"
-              type="text"
-              inputMode="numeric"
-              value={String(measure.current)}
-              onChange={(event) => onChange({ ...measure, current: parseWholeNumber(event.target.value) })}
-              className="tabular min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] sm:min-h-0"
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor={`${idPrefix}-target`} className="text-[11px] font-semibold text-label">
-              {VISION_COPY.modalMeasureTargetLabel}
-            </label>
-            <input
-              id={`${idPrefix}-target`}
-              data-testid="vision-modal-measure-target"
-              type="text"
-              inputMode="numeric"
-              value={String(measure.target)}
-              onChange={(event) => onChange({ ...measure, target: parseWholeNumber(event.target.value) })}
-              className="tabular min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] sm:min-h-0"
-            />
-          </div>
-        </FieldPair>
-      ) : (
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor={`${idPrefix}-goal`} className="text-[11px] font-semibold text-label">
-            {VISION_COPY.modalMeasureGoalLabel}
-          </label>
-          {/* includeArchived: true -- decision 8 keeps an archived goal's
-              own link and figure alive on the read side, so the picker that
-              creates that link must be able to name one too; excluding
-              archived goals here would also strand a measure already linked
-              to one with no way for its option to render at all. */}
-          <select
-            id={`${idPrefix}-goal`}
-            data-testid="vision-modal-measure-goal"
-            value={measure.goalId}
-            onChange={(event) => onChange({ ...measure, goalId: event.target.value })}
-            className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] sm:min-h-0"
-          >
-            <option value="">{VISION_COPY.modalMeasureGoalPlaceholder}</option>
-            {goals.map((goal) => (
-              <option key={goal.id} value={goal.id}>
-                {goal.archivedAt ? `${goal.name} (archived)` : goal.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PillarEditor({
-  index,
-  pillar,
-  goals,
-  onChange,
-  onRemove,
-}: {
-  index: number;
-  pillar: DraftPillar;
-  goals: Goal[];
-  onChange: (pillar: DraftPillar) => void;
-  onRemove: () => void;
-}) {
-  const idPrefix = `vision-modal-pillar-${index}`;
-
-  function updateMeasure(measureIndex: number, next: DraftMeasure) {
-    onChange({ ...pillar, measures: pillar.measures.map((m, i) => (i === measureIndex ? next : m)) });
-  }
-  function removeMeasure(measureIndex: number) {
-    onChange({ ...pillar, measures: pillar.measures.filter((_, i) => i !== measureIndex) });
-  }
-  function addMeasure() {
-    onChange({ ...pillar, measures: [...pillar.measures, newMeasure()] });
-  }
-
-  return (
-    <div data-testid="vision-modal-pillar" className="flex flex-col gap-3 rounded-xl border border-hairline p-4">
-      <div className="flex items-start gap-2">
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <label htmlFor={`${idPrefix}-name`} className="text-xs font-semibold text-label">
-            {VISION_COPY.modalPillarNameLabel}
-          </label>
-          <input
-            id={`${idPrefix}-name`}
-            data-testid="vision-modal-pillar-name"
-            type="text"
-            value={pillar.name}
-            onChange={(event) => onChange({ ...pillar, name: event.target.value })}
-            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13px] sm:min-h-0"
-          />
-        </div>
-        <button
-          type="button"
-          data-testid="vision-modal-remove-pillar"
-          aria-label={VISION_COPY.removePillar(pillar.name)}
-          onClick={onRemove}
-          className="mt-[22px] flex h-11 w-11 flex-none items-center justify-center text-[15px] text-danger sm:h-7 sm:w-7"
-        >
-          <CloseIcon />
-        </button>
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor={`${idPrefix}-description`} className="text-xs font-semibold text-label">
-          {VISION_COPY.modalPillarDescriptionLabel}
-        </label>
-        <textarea
-          id={`${idPrefix}-description`}
-          data-testid="vision-modal-pillar-description"
-          value={pillar.description}
-          onChange={(event) => onChange({ ...pillar, description: event.target.value })}
-          rows={2}
-          className="rounded-[10px] border border-hairline bg-card px-3.5 py-2.5 text-[13px] leading-relaxed"
-        />
-      </div>
-
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted">
-            {VISION_COPY.modalMeasuresHeading}
-          </span>
-          <button
-            type="button"
-            data-testid="vision-modal-add-measure"
-            onClick={addMeasure}
-            className="text-[12px] font-semibold text-accent"
-          >
-            {VISION_COPY.addMeasure}
-          </button>
-        </div>
-        {pillar.measures.map((measure, mi) => (
-          // Index key: this array has no server id to key on either (a save
-          // deletes and reinserts every child row -- visionSchemas.ts's own
-          // comment), and add/remove here only ever appends or drops by
-          // position, never reorders.
-          <MeasureEditor
-            key={mi}
-            pillarIndex={index}
-            measureIndex={mi}
-            measure={measure}
-            goals={goals}
-            onChange={(next) => updateMeasure(mi, next)}
-            onRemove={() => removeMeasure(mi)}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function MilestoneEditor({
-  index,
-  milestone,
-  onChange,
-  onRemove,
-}: {
-  index: number;
-  milestone: DraftMilestone;
-  onChange: (milestone: DraftMilestone) => void;
-  onRemove: () => void;
-}) {
-  const idPrefix = `vision-modal-milestone-${index}`;
-  return (
-    <div data-testid="vision-modal-milestone" className="flex items-start gap-2">
-      <div className="flex w-20 flex-none flex-col gap-1">
-        <label htmlFor={`${idPrefix}-year`} className="sr-only">
-          {VISION_COPY.modalMilestoneYearLabel}
-        </label>
-        <input
-          id={`${idPrefix}-year`}
-          data-testid="vision-modal-milestone-year"
-          type="text"
-          inputMode="numeric"
-          value={String(milestone.year)}
-          onChange={(event) => onChange({ ...milestone, year: parseWholeNumber(event.target.value) })}
-          className="tabular min-h-11 rounded-lg border border-hairline bg-card px-2 py-2 text-[13px] sm:min-h-0"
-        />
-      </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <label htmlFor={`${idPrefix}-title`} className="sr-only">
-          {VISION_COPY.modalMilestoneTitleLabel}
-        </label>
-        <input
-          id={`${idPrefix}-title`}
-          data-testid="vision-modal-milestone-title"
-          type="text"
-          placeholder={VISION_COPY.modalMilestoneTitleLabel}
-          value={milestone.title}
-          onChange={(event) => onChange({ ...milestone, title: event.target.value })}
-          className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] sm:min-h-0"
-        />
-        <label htmlFor={`${idPrefix}-note`} className="sr-only">
-          {VISION_COPY.modalMilestoneNoteLabel}
-        </label>
-        <input
-          id={`${idPrefix}-note`}
-          data-testid="vision-modal-milestone-note"
-          type="text"
-          placeholder={VISION_COPY.modalMilestoneNoteLabel}
-          value={milestone.note}
-          onChange={(event) => onChange({ ...milestone, note: event.target.value })}
-          className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] sm:min-h-0"
-        />
-      </div>
-      <button
-        type="button"
-        data-testid="vision-modal-remove-milestone"
-        aria-label={VISION_COPY.removeMilestone(milestone.title)}
-        onClick={onRemove}
-        className="mt-0.5 flex h-11 w-11 flex-none items-center justify-center text-[15px] text-danger sm:h-7 sm:w-7"
-      >
-        <CloseIcon />
-      </button>
-    </div>
-  );
 }
 
 export function VisionModal({
@@ -453,180 +118,13 @@ export function VisionModal({
   const goalsQuery = useGoals({ includeArchived: true });
   const goals = goalsQuery.data?.goals ?? [];
 
-  const [theme, setTheme] = useState("");
-  const [description, setDescription] = useState("");
-  const [pillars, setPillars] = useState<DraftPillar[]>([]);
-  const [milestones, setMilestones] = useState<DraftMilestone[]>([]);
-  // Which year's document this draft was last seeded from -- null until the
-  // first load. `data.year` is always present, even on the empty document
-  // decision 9 returns for a year nobody has set (VisionService.Get's own
-  // fallback carries `Year: year`, the year that was actually requested),
-  // so this reseeds exactly once per year the household switches to and can
-  // never seed one year's fields from another's data -- a simpler and more
-  // robust key than a plain "have we ever seeded" boolean paired with its
-  // own separate effect resetting it on every `year` change.
-  const [seededYear, setSeededYear] = useState<number | null>(null);
-
-  const [hadConflict, setHadConflict] = useState(false);
-  const [isReloading, setIsReloading] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!data || data.year === seededYear) return;
-    setTheme(data.theme);
-    setDescription(data.description);
-    setPillars(
-      data.pillars.map((p) => ({
-        name: p.name,
-        description: p.description,
-        measures: p.measures.map((m) => ({
-          label: m.label,
-          // "broken" (a server-only kind -- measureKindSchema's own
-          // comment) has nothing left to edit as either typed or linked: no
-          // current/target the household ever set, and toMeasureView's own
-          // default branch (api/internal/usecase/vision.go) never fills in
-          // a goalId for this kind. Landing it as typed, with the same
-          // blank-but-valid defaults setMeasureMode's own typed branch
-          // uses, is the least surprising choice: an editable shape the
-          // household must fill in themselves, not a silently resurrected
-          // link to a goal that no longer resolves.
-          //
-          // KNOWN GAP (docs/LEARNING.md, "Vision's fifteen-criterion
-          // browser walk"): this seeds a figure -- "0 of 1" -- the
-          // household never typed, and a save that never opens this row
-          // (editing only the theme, say) resends it unchanged, silently
-          // converting "Goal removed" into a fabricated number. Dormant
-          // only because Goals has no delete route to reach MeasureBroken
-          // in the first place. handleSave's own `unresolvedLinkedMeasure`
-          // check (added for the goal-required bug) does NOT catch this --
-          // that check looks for kind === "linked" with no goalId, and this
-          // measure lands here as "typed", not "linked". The fix when Goals
-          // gains delete is not relaxing the domain (write strictly is
-          // correct) but a third seeded state: an editable row that visibly
-          // says "needs a goal or a number" and blocks Save until the
-          // household resolves it one way or the other.
-          kind: m.kind === "linked" ? "linked" : "typed",
-          current: m.kind === "typed" ? m.current : 0,
-          target: m.kind === "typed" ? m.target : m.kind === "broken" ? 1 : 0,
-          goalId: m.kind === "linked" ? m.goalId : "",
-        })),
-      })),
-    );
-    setMilestones(data.milestones.map((m) => ({ year: m.year, title: m.title, note: m.note })));
-    // A conflict or a leftover save error both describe the document THIS
-    // draft was built against -- once a fresh one has just been seeded
-    // (whether from the household's own Reload-and-discard, or simply
-    // switching to a year that happens to already be cached), neither
-    // means anything any more.
-    setHadConflict(false);
-    setSaveError(null);
-    setSeededYear(data.year);
-  }, [data, seededYear]);
+  const draft = useVisionDraft({ year, data, saveVision, reload, onClose });
 
   const themeId = useId();
   const yearSelectId = useId();
   const descriptionId = useId();
 
   const ready = !loading && !error && data !== undefined;
-
-  function currentBody(): SaveVisionBody {
-    return {
-      theme,
-      description,
-      pillars: pillars.map((p) => ({
-        name: p.name,
-        description: p.description,
-        measures: p.measures.map((m) => ({
-          label: m.label,
-          kind: m.kind,
-          current: m.current,
-          target: m.target,
-          goalId: m.goalId,
-        })),
-      })),
-      milestones: milestones.map((m) => ({ year: m.year, title: m.title, note: m.note })),
-    };
-  }
-
-  async function handleSave() {
-    setSaveError(null);
-    // The first of two client-side checks this modal makes before ever
-    // reaching the server. This one: the empty-document path (decision 9)
-    // seeds theme as "", so a brand-new household's very first Save would
-    // otherwise round-trip a 422 for something checkable in three lines.
-    // Hearth's own message, not the browser's -- this form carries no
-    // `required` attribute anywhere, per the UI-polish round's own rule
-    // that native validation is not this product's error surface.
-    if (theme.trim() === "") {
-      setSaveError(VISION_COPY.modalThemeRequired);
-      return;
-    }
-    // The second: a measure switched to "A savings goal" (setMeasureMode's
-    // linked branch) but never given one is neither typed nor linked --
-    // Validate would refuse it as ErrVisionMeasureGoalRequired, but the
-    // household's own click that reaches this state (switch the mode, then
-    // Save without picking a goal) is only two clicks away and this modal's
-    // only OTHER client-side check was the theme above, so the round trip
-    // was the household's sole feedback until now. Named here rather than
-    // left to the server round-trip.
-    const unresolvedLinkedMeasure = pillars.some((p) =>
-      p.measures.some((m) => m.kind === "linked" && m.goalId === ""),
-    );
-    if (unresolvedLinkedMeasure) {
-      setSaveError(VISION_COPY.modalMeasureGoalRequired);
-      return;
-    }
-    try {
-      await saveVision(currentBody());
-      onClose();
-    } catch (err) {
-      if (err instanceof ApiError && err.code === "VISION_CHANGED") {
-        setHadConflict(true);
-      } else {
-        setSaveError(apiErrorMessage(err, VISION_COPY.modalSaveError));
-      }
-    }
-  }
-
-  // Always closes, whether or not the refetch itself succeeded -- this
-  // control's entire point is discarding the local draft, and there is
-  // nothing left for a failed refetch to protect once that has happened.
-  // Whatever the household sees next (the page behind this modal, or a
-  // freshly reopened one) is what decides whether that refetch needs
-  // retrying, not this button.
-  async function handleReloadAndDiscard() {
-    setIsReloading(true);
-    try {
-      await reload();
-    } finally {
-      setIsReloading(false);
-      onClose();
-    }
-  }
-
-  function addPillar() {
-    setPillars((prev) => [...prev, { name: "", description: "", measures: [] }]);
-  }
-  function updatePillar(index: number, next: DraftPillar) {
-    setPillars((prev) => prev.map((p, i) => (i === index ? next : p)));
-  }
-  function removePillar(index: number) {
-    setPillars((prev) => prev.filter((_, i) => i !== index));
-  }
-
-  function addMilestone() {
-    // Seeded with the vision's own year, not today's -- a longer-horizon
-    // milestone is usually a few years out, but starting from the document
-    // being edited is a closer guess than always defaulting to whatever
-    // year the household happens to be looking at right now.
-    setMilestones((prev) => [...prev, { year, title: "", note: "" }]);
-  }
-  function updateMilestone(index: number, next: DraftMilestone) {
-    setMilestones((prev) => prev.map((m, i) => (i === index ? next : m)));
-  }
-  function removeMilestone(index: number) {
-    setMilestones((prev) => prev.filter((_, i) => i !== index));
-  }
 
   return (
     // wide: the design draws this modal at 640px (dc.html:928), not the 420px
@@ -645,8 +143,8 @@ export function VisionModal({
           // here: this modal holds a pillar-name field, a milestone-title
           // field and more besides, any one of which implicitly submits on
           // Enter if left to the browser's own default button. Save vision
-          // is `type="button"` below and reached only through its own
-          // onClick.
+          // is primaryType="button" below and reached only through its own
+          // click.
           event.preventDefault();
         }}
       >
@@ -688,9 +186,9 @@ export function VisionModal({
                     id={themeId}
                     data-testid="vision-modal-theme"
                     type="text"
-                    value={theme}
-                    onChange={(event) => setTheme(event.target.value)}
-                    className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+                    value={draft.theme}
+                    onChange={(event) => draft.setTheme(event.target.value)}
+                    className={FIELD_CONTROL_CLASS}
                   />
                 </>
               ) : loading ? (
@@ -702,16 +200,13 @@ export function VisionModal({
               ) : null}
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor={yearSelectId} className="text-xs font-semibold text-label">
-                {VISION_COPY.modalYearLabel}
-              </label>
+            <Field label={VISION_COPY.modalYearLabel} htmlFor={yearSelectId}>
               <select
                 id={yearSelectId}
                 data-testid="vision-modal-year"
                 value={year}
                 onChange={(event) => onYearChange(Number(event.target.value))}
-                className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+                className={FIELD_CONTROL_CLASS}
               >
                 {yearOptions().map((y) => (
                   <option key={y} value={y}>
@@ -719,25 +214,21 @@ export function VisionModal({
                   </option>
                 ))}
               </select>
-            </div>
+            </Field>
           </div>
 
           {ready && (
             <>
-
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor={descriptionId} className="text-xs font-semibold text-label">
-                  {VISION_COPY.modalDescriptionLabel}
-                </label>
+              <Field label={VISION_COPY.modalDescriptionLabel} htmlFor={descriptionId}>
                 <textarea
                   id={descriptionId}
                   data-testid="vision-modal-description"
-                  value={description}
-                  onChange={(event) => setDescription(event.target.value)}
+                  value={draft.description}
+                  onChange={(event) => draft.setDescription(event.target.value)}
                   rows={3}
                   className="min-h-20 rounded-[10px] border border-hairline bg-card px-3.5 py-3 text-[13px] leading-relaxed"
                 />
-              </div>
+              </Field>
 
               <div className="flex flex-col gap-2">
                 <div className="flex items-center justify-between">
@@ -745,23 +236,23 @@ export function VisionModal({
                   <button
                     type="button"
                     data-testid="vision-modal-add-pillar"
-                    onClick={addPillar}
+                    onClick={draft.addPillar}
                     className="text-xs font-semibold text-accent"
                   >
                     {VISION_COPY.addPillar}
                   </button>
                 </div>
-                {pillars.map((pillar, pi) => (
+                {draft.pillars.map((pillar, pi) => (
                   // Index key: pillarDTO carries no id either (visionSchemas.ts's
                   // own comment), for the identical reason MeasureEditor's
-                  // own list above uses one.
+                  // own list in PillarEditor.tsx uses one.
                   <PillarEditor
                     key={pi}
                     index={pi}
                     pillar={pillar}
                     goals={goals}
-                    onChange={(next) => updatePillar(pi, next)}
-                    onRemove={() => removePillar(pi)}
+                    onChange={(next) => draft.updatePillar(pi, next)}
+                    onRemove={() => draft.removePillar(pi)}
                   />
                 ))}
               </div>
@@ -772,19 +263,19 @@ export function VisionModal({
                   <button
                     type="button"
                     data-testid="vision-modal-add-milestone"
-                    onClick={addMilestone}
+                    onClick={draft.addMilestone}
                     className="text-xs font-semibold text-accent"
                   >
                     {VISION_COPY.addMilestone}
                   </button>
                 </div>
-                {milestones.map((milestone, mi) => (
+                {draft.milestones.map((milestone, mi) => (
                   <MilestoneEditor
                     key={mi}
                     index={mi}
                     milestone={milestone}
-                    onChange={(next) => updateMilestone(mi, next)}
-                    onRemove={() => removeMilestone(mi)}
+                    onChange={(next) => draft.updateMilestone(mi, next)}
+                    onRemove={() => draft.removeMilestone(mi)}
                   />
                 ))}
               </div>
@@ -794,7 +285,7 @@ export function VisionModal({
                   header comment for why, in full, and why its own action
                   calls `reload()` and then closes rather than trying to
                   resume this draft in place. */}
-              {hadConflict && (
+              {draft.hadConflict && (
                 <div
                   data-testid="vision-conflict"
                   role="alert"
@@ -804,8 +295,8 @@ export function VisionModal({
                   <button
                     type="button"
                     data-testid="vision-conflict-reload"
-                    disabled={isReloading}
-                    onClick={() => void handleReloadAndDiscard()}
+                    disabled={draft.isReloading}
+                    onClick={() => void draft.handleReloadAndDiscard()}
                     className="min-h-11 self-start rounded-lg border border-hairline px-3 py-2.5 text-[12.5px] font-semibold text-accent disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:py-1.5"
                   >
                     {VISION_COPY.reloadAndDiscardChanges}
@@ -813,32 +304,23 @@ export function VisionModal({
                 </div>
               )}
 
-              {saveError && !hadConflict && (
+              {draft.saveError && !draft.hadConflict && (
                 <p role="alert" className="text-xs leading-snug text-danger">
-                  {saveError}
+                  {draft.saveError}
                 </p>
               )}
             </>
           )}
         </div>
 
-        <div className="mt-1 flex gap-2.5">
-          <button
-            type="button"
-            onClick={onClose}
-            className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label sm:min-h-0"
-          >
-            {VISION_COPY.cancel}
-          </button>
-          <button
-            type="button"
-            disabled={!ready || isSaving || hadConflict}
-            onClick={() => void handleSave()}
-            className="min-h-11 flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
-          >
-            {VISION_COPY.saveVision}
-          </button>
-        </div>
+        <ModalActions
+          secondaryLabel={VISION_COPY.cancel}
+          onSecondary={onClose}
+          primaryLabel={VISION_COPY.saveVision}
+          primaryType="button"
+          onPrimary={() => void draft.handleSave()}
+          primaryDisabled={!ready || isSaving || draft.hadConflict}
+        />
       </form>
     </Modal>
   );

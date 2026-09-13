@@ -4,9 +4,11 @@ package config
 
 import (
 	"fmt"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -94,6 +96,12 @@ type Config struct {
 	// wrong the day a second one signs up from another zone.
 	NudgesAt       string
 	NudgesLocation *time.Location
+	// TrustedProxies are the networks allowed to tell the API who the client
+	// is, through the X-Real-IP header (TRUSTED_PROXY_CIDRS, comma-separated
+	// CIDRs). A request from anywhere else is keyed by the address that
+	// actually connected and its headers are ignored. Empty -- the default --
+	// trusts nobody; Load says why that is the safe way round.
+	TrustedProxies []netip.Prefix
 }
 
 func (c Config) IsDevelopment() bool { return c.AppEnv == "development" }
@@ -255,7 +263,43 @@ func Load() (Config, error) {
 	}
 	cfg.Argon2Threads = uint8(argon2Threads)
 
+	// TRUSTED_PROXY_CIDRS fails closed: unset trusts no proxy at all, so every
+	// request is keyed by the address that actually connected. The opposite
+	// default -- believe client-address headers from anyone -- is what chi's
+	// RealIP did, and it let any caller who reached the API directly choose
+	// the IP the sign-up limiter and the admin audit log see. Forgetting this
+	// variable now costs a limiter that counts every visitor as nginx: a loud
+	// 429 that someone reports. Forgetting it under the old default cost the
+	// limit itself, silently. A malformed entry refuses the boot rather than
+	// being skipped, because a skipped entry is that same shared bucket with
+	// nothing pointing back at the .env line.
+	trusted, err := parseTrustedProxies(os.Getenv("TRUSTED_PROXY_CIDRS"))
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.TrustedProxies = trusted
+
 	return cfg, nil
+}
+
+// parseTrustedProxies reads TRUSTED_PROXY_CIDRS: comma-separated CIDRs such
+// as "172.28.0.0/16", or "10.0.0.5/32" for a single host. A bare address is
+// refused rather than guessed at as a /32, so the operator writes the width
+// they mean.
+func parseTrustedProxies(raw string) ([]netip.Prefix, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var prefixes []netip.Prefix
+	for _, part := range strings.Split(raw, ",") {
+		entry := strings.TrimSpace(part)
+		prefix, err := netip.ParsePrefix(entry)
+		if err != nil {
+			return nil, fmt.Errorf("TRUSTED_PROXY_CIDRS must be comma-separated CIDRs like 172.28.0.0/16, got %q", entry)
+		}
+		prefixes = append(prefixes, prefix.Masked())
+	}
+	return prefixes, nil
 }
 
 func env(key, fallback string) string {

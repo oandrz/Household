@@ -129,8 +129,10 @@ type BudgetDeps struct {
 	FX           FXRateProvider
 	// Goals is read only by RollOver, to fetch the target goal before any
 	// write -- see that method's own comment for why the fetch cannot be
-	// skipped or reordered after BudgetRepository.RollOverToGoal.
-	Goals GoalRepository
+	// skipped or reordered after BudgetRepository.RollOverToGoal. It is the
+	// one-method GoalLookup, not the whole GoalRepository: the budget service
+	// has no business writing goals.
+	Goals GoalLookup
 }
 
 // BudgetService composes the Budget screen from the same ledger Transactions
@@ -198,121 +200,25 @@ func (s *BudgetService) Month(ctx context.Context, householdID string, month, to
 		return BudgetMonthView{}, err
 	}
 
-	caps := map[string]domain.Money{}
-	budgeted := zero
-	if budget != nil {
-		for _, line := range budget.Lines {
-			caps[line.CategoryID] = line.Cap
-			budgeted, err = budgeted.Add(line.Cap)
-			if err != nil {
-				return BudgetMonthView{}, err
-			}
-		}
+	caps, budgeted, err := sumCaps(budget, zero)
+	if err != nil {
+		return BudgetMonthView{}, err
 	}
 
-	spent := zero
-	spentByCategory := map[string]domain.Money{}
-	spentByPerson := map[string]domain.Money{}
-	// personOrder keeps ByPerson's row order deterministic: real members in
-	// first-appearance order (the order MonthTotals already returns in a
-	// stable way), with the unattributed key "" appended after the loop
-	// below so it always renders last -- ranging over spentByPerson directly
-	// would make the order vary run to run, and putting "" in at its own
-	// first appearance would let an unattributed transaction that happened
-	// to be dated (or entered) first jump ahead of real members.
-	var personOrder []string
-	var excluded []ExcludedTransaction
-
-	for _, view := range views {
-		t := view.Transaction
-		// Income is not spending, and a transfer is the same money arriving
-		// somewhere else -- the exact MonthSummary rule. Deleting this guard
-		// is the designated mutation: TestBudgetMonthSpentReusesTheMonthSummaryRule
-		// pins it by adding an income transaction that must not move Spent.
-		if t.Kind != domain.TransactionExpense {
-			continue
-		}
-
-		inPrimary, err := s.convert(ctx, t.Amount, primary)
-		if err != nil {
-			excluded = append(excluded, ExcludedTransaction{
-				TransactionID: t.ID,
-				Currency:      t.Amount.Currency,
-			})
-			continue
-		}
-
-		spent, err = spent.Add(inPrimary)
-		if err != nil {
-			return BudgetMonthView{}, err
-		}
-
-		if t.CategoryID != "" {
-			total := spentByCategory[t.CategoryID]
-			if total.Currency == "" {
-				total = zero
-			}
-			total, err = total.Add(inPrimary)
-			if err != nil {
-				return BudgetMonthView{}, err
-			}
-			spentByCategory[t.CategoryID] = total
-		}
-
-		// Accumulate unconditionally, keyed on the possibly-empty payer id.
-		// The old `if t.PaidByMembershipID != ""` guard here is what let
-		// this card's rows sum to less than Spent above it. `spent` a few
-		// lines up has no such guard, and this accumulator now matches it.
-		// `spentByCategory` just above DOES still guard on `t.CategoryID !=
-		// ""` -- that one is deliberate, not a sibling to copy: Categories
-		// has no "uncategorised" row for a bare category id to land in, so a
-		// transaction with no category is correctly left out of it. ByPerson
-		// is different on purpose -- it now has an unattributed bucket for
-		// exactly that case, which is the whole point of this change. Real
-		// members are recorded into personOrder as they first appear; "" is
-		// deliberately left out of that here and appended once after the
-		// loop, so it lands last regardless of when the first unattributed
-		// transaction showed up.
-		total, seen := spentByPerson[t.PaidByMembershipID]
-		if !seen {
-			total = zero
-			if t.PaidByMembershipID != "" {
-				personOrder = append(personOrder, t.PaidByMembershipID)
-			}
-		}
-		total, err = total.Add(inPrimary)
-		if err != nil {
-			return BudgetMonthView{}, err
-		}
-		spentByPerson[t.PaidByMembershipID] = total
-	}
-	if _, sawUnattributed := spentByPerson[""]; sawUnattributed {
-		personOrder = append(personOrder, "")
+	tally, err := s.tallySpend(ctx, views, primary, zero)
+	if err != nil {
+		return BudgetMonthView{}, err
 	}
 
-	categoryViews, overCount := buildCategoryViews(categories, caps, spentByCategory, zero)
+	categoryViews, overCount := buildCategoryViews(categories, caps, tally.byCategory, zero)
 
-	var byPerson []BudgetPersonView
-	if len(personOrder) > 0 {
-		names, err := s.memberNames(ctx, householdID)
-		if err != nil {
-			return BudgetMonthView{}, err
-		}
-		byPerson = make([]BudgetPersonView, 0, len(personOrder))
-		for _, membershipID := range personOrder {
-			// names[""] is never set by memberNames (it only ever keys on
-			// real membership ids), so this already comes back "" for the
-			// unattributed row with no extra case needed here.
-			byPerson = append(byPerson, BudgetPersonView{
-				MembershipID: membershipID,
-				Name:         names[membershipID],
-				Spent:        spentByPerson[membershipID],
-			})
-		}
+	byPerson, err := s.buildPersonViews(ctx, householdID, tally)
+	if err != nil {
+		return BudgetMonthView{}, err
 	}
 
-	remaining := budgeted.Amount - spent.Amount
-	percentUsed, percentOK := domain.PercentUsed(spent.Amount, budgeted.Amount)
+	remaining := budgeted.Amount - tally.spent.Amount
+	percentUsed, percentOK := domain.PercentUsed(tally.spent.Amount, budgeted.Amount)
 	daysLeft := domain.DaysLeftInMonth(month, today)
 	dailyPace, dailyPaceOK := domain.DailyPace(remaining, daysLeft)
 	// domain.DailyPace only knows Remaining and DaysLeft, so on its own it
@@ -344,7 +250,7 @@ func (s *BudgetService) Month(ctx context.Context, householdID string, month, to
 		Budget:              budget,
 		Categories:          categoryViews,
 		Budgeted:            budgeted,
-		Spent:               spent,
+		Spent:               tally.spent,
 		Remaining:           remaining,
 		PercentUsed:         percentUsed,
 		PercentOK:           percentOK,
@@ -352,12 +258,151 @@ func (s *BudgetService) Month(ctx context.Context, householdID string, month, to
 		DailyPace:           dailyPace,
 		DailyPaceOK:         dailyPaceOK,
 		ByPerson:            byPerson,
-		ExcludedNoRate:      excluded,
+		ExcludedNoRate:      tally.excluded,
 		OverCount:           overCount,
 		RolledOverAt:        rolledOverAt,
 		RolloverGoalID:      rolloverGoalID,
 		RolloverAmountMinor: rolloverAmountMinor,
 	}, nil
+}
+
+// sumCaps indexes a saved budget's cap lines by category and totals them. A
+// month with no budget row has no caps and budgets zero.
+func sumCaps(budget *domain.Budget, zero domain.Money) (map[string]domain.Money, domain.Money, error) {
+	caps := map[string]domain.Money{}
+	budgeted := zero
+	if budget == nil {
+		return caps, budgeted, nil
+	}
+	for _, line := range budget.Lines {
+		caps[line.CategoryID] = line.Cap
+		var err error
+		budgeted, err = budgeted.Add(line.Cap)
+		if err != nil {
+			return nil, domain.Money{}, err
+		}
+	}
+	return caps, budgeted, nil
+}
+
+// spendTally is one month's expense spend in the primary currency, split the
+// three ways the Budget screen shows it, plus the transactions that could not
+// be converted.
+type spendTally struct {
+	spent      domain.Money
+	byCategory map[string]domain.Money
+	byPerson   map[string]domain.Money
+	// personOrder keeps ByPerson's row order deterministic: real members in
+	// first-appearance order (the order MonthTotals already returns in a
+	// stable way), with the unattributed key "" appended after tallySpend's
+	// loop so it always renders last -- ranging over byPerson directly would
+	// make the order vary run to run, and putting "" in at its own first
+	// appearance would let an unattributed transaction that happened to be
+	// dated (or entered) first jump ahead of real members.
+	personOrder []string
+	excluded    []ExcludedTransaction
+}
+
+// tallySpend sums a month's expense transactions, converting each into primary
+// before adding it, per Month's own comment.
+func (s *BudgetService) tallySpend(ctx context.Context, views []TransactionView, primary string, zero domain.Money) (spendTally, error) {
+	tally := spendTally{
+		spent:      zero,
+		byCategory: map[string]domain.Money{},
+		byPerson:   map[string]domain.Money{},
+	}
+
+	for _, view := range views {
+		t := view.Transaction
+		// Income is not spending, and a transfer is the same money arriving
+		// somewhere else -- the exact MonthSummary rule. Deleting this guard
+		// is the designated mutation: TestBudgetMonthSpentReusesTheMonthSummaryRule
+		// pins it by adding an income transaction that must not move Spent.
+		if t.Kind != domain.TransactionExpense {
+			continue
+		}
+
+		inPrimary, err := s.convert(ctx, t.Amount, primary)
+		if err != nil {
+			tally.excluded = append(tally.excluded, ExcludedTransaction{
+				TransactionID: t.ID,
+				Currency:      t.Amount.Currency,
+			})
+			continue
+		}
+
+		tally.spent, err = tally.spent.Add(inPrimary)
+		if err != nil {
+			return spendTally{}, err
+		}
+
+		if t.CategoryID != "" {
+			total := tally.byCategory[t.CategoryID]
+			if total.Currency == "" {
+				total = zero
+			}
+			total, err = total.Add(inPrimary)
+			if err != nil {
+				return spendTally{}, err
+			}
+			tally.byCategory[t.CategoryID] = total
+		}
+
+		// Accumulate unconditionally, keyed on the possibly-empty payer id.
+		// The old `if t.PaidByMembershipID != ""` guard here is what let
+		// this card's rows sum to less than Spent above it. `tally.spent` a
+		// few lines up has no such guard, and this accumulator now matches
+		// it. `tally.byCategory` just above DOES still guard on
+		// `t.CategoryID != ""` -- that one is deliberate, not a sibling to
+		// copy: Categories has no "uncategorised" row for a bare category id
+		// to land in, so a transaction with no category is correctly left out
+		// of it. ByPerson is different on purpose -- it now has an
+		// unattributed bucket for exactly that case, which is the whole point
+		// of this change. Real members are recorded into personOrder as they
+		// first appear; "" is deliberately left out of that here and appended
+		// once after the loop, so it lands last regardless of when the first
+		// unattributed transaction showed up.
+		total, seen := tally.byPerson[t.PaidByMembershipID]
+		if !seen {
+			total = zero
+			if t.PaidByMembershipID != "" {
+				tally.personOrder = append(tally.personOrder, t.PaidByMembershipID)
+			}
+		}
+		total, err = total.Add(inPrimary)
+		if err != nil {
+			return spendTally{}, err
+		}
+		tally.byPerson[t.PaidByMembershipID] = total
+	}
+	if _, sawUnattributed := tally.byPerson[""]; sawUnattributed {
+		tally.personOrder = append(tally.personOrder, "")
+	}
+	return tally, nil
+}
+
+// buildPersonViews names each payer, in personOrder's order. With no spend at
+// all it answers nil without reading the member list.
+func (s *BudgetService) buildPersonViews(ctx context.Context, householdID string, tally spendTally) ([]BudgetPersonView, error) {
+	if len(tally.personOrder) == 0 {
+		return nil, nil
+	}
+	names, err := s.memberNames(ctx, householdID)
+	if err != nil {
+		return nil, err
+	}
+	byPerson := make([]BudgetPersonView, 0, len(tally.personOrder))
+	for _, membershipID := range tally.personOrder {
+		// names[""] is never set by memberNames (it only ever keys on
+		// real membership ids), so this already comes back "" for the
+		// unattributed row with no extra case needed here.
+		byPerson = append(byPerson, BudgetPersonView{
+			MembershipID: membershipID,
+			Name:         names[membershipID],
+			Spent:        tally.byPerson[membershipID],
+		})
+	}
+	return byPerson, nil
 }
 
 // buildCategoryViews projects the household's expense categories into the

@@ -28,11 +28,14 @@
 //   contributions ledger owns that figure; this form does not offer a
 //   second way to move it.
 import { type FormEvent, useState } from "react";
+import { Field } from "../../components/Field";
+import { FIELD_CONTROL_CLASS } from "../../components/fieldClasses";
 import { FieldPair } from "../../components/FieldPair";
 import { Modal } from "../../components/Modal";
+import { ModalActions } from "../../components/ModalActions";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { ApiError } from "../../api/client";
-import { apiErrorMessage } from "../auth/copy";
+import { apiErrorMessage } from "../../api/errorMessage";
 import type { Currency } from "../auth/schemas";
 import { describeAmountError, formatMoney, minorUnitsToInputValue, toMinorUnits } from "./formatMoney";
 import { useGoals, type CreateGoalBody, type UpdateGoalBody } from "./useGoals";
@@ -105,26 +108,26 @@ function suggestedMonthlyMinor(remainingMinor: number, monthsLeft: number): numb
   return Number((remaining + months - 1n) / months);
 }
 
-export function GoalModal({
-  mode,
-  goal,
-  currencies,
-  primaryCurrency,
-  onClose,
-  onSaved,
-}: {
-  mode: "create" | "edit";
-  // Present only when mode === "edit" -- the caller's contract (GoalsPage's
-  // own modalGoal state is "new" | Goal | null, never "edit" paired with no
-  // goal), the identical shape TransactionModal.tsx's own `initial?`
-  // documents rather than enforces with a discriminated-union prop type.
-  goal?: Goal;
+// Create mode has no goal yet; edit mode always has the one being edited. A
+// union rather than a `mode` flag beside an optional `goal` prop, so "edit
+// with no goal" cannot be written at a call site at all (GoalsPage's own
+// modalGoal state is "new" | Goal | null) and nothing in this file needs a
+// `goal!` to read it. BillModal.tsx's `BillModalMode` is the same shape.
+export type GoalModalMode = { mode: "create" } | { mode: "edit"; goal: Goal };
+
+type GoalModalProps = GoalModalMode & {
   currencies: Currency[];
   primaryCurrency: string;
   onClose: () => void;
   onSaved: () => void;
-}) {
-  const isEditing = mode === "edit";
+};
+
+export function GoalModal(props: GoalModalProps) {
+  const { currencies, primaryCurrency, onClose, onSaved } = props;
+  // The goal being edited, or null while creating -- read once from the
+  // `mode` union, so every use of it below is checked by the compiler.
+  const goal = props.mode === "edit" ? props.goal : null;
+  const isEditing = goal !== null;
   const { createGoal, updateGoal, restoreGoal } = useGoals({
     // This component only ever calls the mutations below -- it never reads
     // the list itself (every field it needs arrives via props: `goal` in
@@ -171,18 +174,24 @@ export function GoalModal({
   // zero figure: while the target amount doesn't parse to a positive
   // number, while no target month is chosen, and once a chosen target month
   // has already passed (monthsLeftInclusive's own 0-not-negative contract).
-  const parsedTargetMinor = toMinorUnits(targetAmountInput, currency);
+  //
+  // The target amount travels inside the suggestion, beside the monthly
+  // figure computed from it, so the panel below reads both off one value that
+  // is either wholly there or wholly null -- never a second, separately
+  // nullable figure it would have to assert is present.
   const suggestion = (() => {
     if (noTargetDate || targetMonthInput === "") return null;
-    if (parsedTargetMinor === null || parsedTargetMinor <= 0) return null;
+    const targetMinor = toMinorUnits(targetAmountInput, currency);
+    if (targetMinor === null || targetMinor <= 0) return null;
     // Create mode has no contributed figure yet except whatever starting
     // balance is currently typed; edit mode's real progress is the goal's
     // own contributedMinor (the starting-balance field does not exist in
     // edit mode, so there is nothing else it could be).
-    const contributedMinor = isEditing ? goal!.contributedMinor : (toMinorUnits(startingBalanceInput, currency) ?? 0);
-    const remainingMinor = Math.max(0, parsedTargetMinor - contributedMinor);
+    const contributedMinor = goal ? goal.contributedMinor : (toMinorUnits(startingBalanceInput, currency) ?? 0);
+    const remainingMinor = Math.max(0, targetMinor - contributedMinor);
     const monthsLeft = monthsLeftInclusive(targetMonthInput, currentMonthValue());
-    return suggestedMonthlyMinor(remainingMinor, monthsLeft);
+    const monthlyMinor = suggestedMonthlyMinor(remainingMinor, monthsLeft);
+    return monthlyMinor === null ? null : { targetMinor, monthlyMinor };
   })();
 
   function handleNoTargetDateToggle() {
@@ -238,7 +247,7 @@ export function GoalModal({
 
     setIsSaving(true);
     try {
-      if (isEditing) {
+      if (goal) {
         // Every field but the date is safe to resend unconditionally: none
         // of name/targetMinor/plannedMonthlyMinor is a derived figure this
         // form could restate wrongly the way AccountModal's Balance once
@@ -259,9 +268,7 @@ export function GoalModal({
         } else {
           body.targetMonth = targetMonthInput;
         }
-        // mode === "edit" guarantees the caller passed `goal` (this
-        // component's own contract, documented on the prop above).
-        await updateGoal(goal!.id, body);
+        await updateGoal(goal.id, body);
       } else {
         const body: CreateGoalBody = {
           name: trimmedName,
@@ -319,10 +326,7 @@ export function GoalModal({
   return (
     <Modal open onClose={onClose} title="Goal details">
       <form className="flex flex-col gap-4" onSubmit={handleSave}>
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="goal-modal-name" className="text-xs font-semibold text-label">
-            Goal name
-          </label>
+        <Field label="Goal name" htmlFor="goal-modal-name">
           <input
             id="goal-modal-name"
             type="text"
@@ -330,19 +334,12 @@ export function GoalModal({
             value={name}
             onChange={(event) => setName(event.target.value)}
             placeholder="e.g. Japan 2027, new sofa, rainy-day fund"
-            // min-h-11/sm:min-h-0 on every field in this modal:
-            // TransactionFilters.tsx's own SELECT_CLASS comment has the
-            // measured reason py-2.5 alone falls short of the 44px floor
-            // on a phone.
-            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+            className={FIELD_CONTROL_CLASS}
           />
-        </div>
+        </Field>
 
         <FieldPair>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="goal-modal-target-amount" className="text-xs font-semibold text-label">
-              Target amount
-            </label>
+          <Field label="Target amount" htmlFor="goal-modal-target-amount">
             <input
               id="goal-modal-target-amount"
               type="text"
@@ -350,20 +347,17 @@ export function GoalModal({
               required
               value={targetAmountInput}
               onChange={(event) => setTargetAmountInput(event.target.value)}
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              className={FIELD_CONTROL_CLASS}
             />
-          </div>
+          </Field>
 
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="goal-modal-currency" className="text-xs font-semibold text-label">
-              Currency
-            </label>
+          <Field label="Currency" htmlFor="goal-modal-currency">
             <select
               id="goal-modal-currency"
               value={currency}
               disabled={isEditing}
               onChange={(event) => setCurrency(event.target.value)}
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
+              className={`${FIELD_CONTROL_CLASS} disabled:cursor-not-allowed disabled:opacity-60`}
             >
               {!currencies.some((c) => c.code === currency) && <option value={currency}>{currency}</option>}
               {currencies.map((c) => (
@@ -382,7 +376,7 @@ export function GoalModal({
                 Currency can&apos;t change after a goal is created — every contribution already counts in it.
               </p>
             )}
-          </div>
+          </Field>
         </FieldPair>
 
         {targetError && (
@@ -391,36 +385,29 @@ export function GoalModal({
           </p>
         )}
 
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center justify-between gap-3">
-            <label htmlFor="goal-modal-target-month" className="text-xs font-semibold text-label">
-              Target month
-            </label>
+        <Field
+          label="Target month"
+          htmlFor="goal-modal-target-month"
+          error={targetMonthError}
+          labelAside={
             <div className="flex items-center gap-1.5 text-[11px] text-muted">
               <ToggleSwitch checked={noTargetDate} onChange={handleNoTargetDateToggle} label="No target date" />
               No target date
             </div>
-          </div>
+          }
+        >
           <input
             id="goal-modal-target-month"
             type="month"
             disabled={noTargetDate}
             value={targetMonthInput}
             onChange={(event) => setTargetMonthInput(event.target.value)}
-            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
+            className={`${FIELD_CONTROL_CLASS} disabled:cursor-not-allowed disabled:opacity-60`}
           />
-          {targetMonthError && (
-            <p role="alert" className="text-xs leading-snug text-danger">
-              {targetMonthError}
-            </p>
-          )}
-        </div>
+        </Field>
 
         {!isEditing && (
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="goal-modal-starting-balance" className="text-xs font-semibold text-label">
-              Starting balance
-            </label>
+          <Field label="Starting balance" htmlFor="goal-modal-starting-balance" error={startingBalanceError}>
             <input
               id="goal-modal-starting-balance"
               type="text"
@@ -428,14 +415,9 @@ export function GoalModal({
               required
               value={startingBalanceInput}
               onChange={(event) => setStartingBalanceInput(event.target.value)}
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              className={FIELD_CONTROL_CLASS}
             />
-            {startingBalanceError && (
-              <p role="alert" className="text-xs leading-snug text-danger">
-                {startingBalanceError}
-              </p>
-            )}
-          </div>
+          </Field>
         )}
 
         {/* The suggestion only -- never the editable figure below it, which
@@ -450,16 +432,13 @@ export function GoalModal({
           >
             <div className="text-[13px] font-semibold text-accent">Planned each month</div>
             <div className="mt-0.5 text-[11.5px] text-muted">
-              To hit {formatMoney(parsedTargetMinor!, currency, symbol)} by{" "}
-              {targetMonthLabel(targetMonthInput)}, save ~{formatMoney(suggestion, currency, symbol)}/mo
+              To hit {formatMoney(suggestion.targetMinor, currency, symbol)} by{" "}
+              {targetMonthLabel(targetMonthInput)}, save ~{formatMoney(suggestion.monthlyMinor, currency, symbol)}/mo
             </div>
           </div>
         )}
 
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="goal-modal-planned-monthly" className="text-xs font-semibold text-label">
-            Planned each month
-          </label>
+        <Field label="Planned each month" htmlFor="goal-modal-planned-monthly" error={plannedMonthlyError}>
           <input
             id="goal-modal-planned-monthly"
             type="text"
@@ -467,14 +446,9 @@ export function GoalModal({
             required
             value={plannedMonthlyInput}
             onChange={(event) => setPlannedMonthlyInput(event.target.value)}
-            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+            className={FIELD_CONTROL_CLASS}
           />
-          {plannedMonthlyError && (
-            <p role="alert" className="text-xs leading-snug text-danger">
-              {plannedMonthlyError}
-            </p>
-          )}
-        </div>
+        </Field>
 
         {saveError !== null && (
           <div className="flex flex-col gap-2">
@@ -497,22 +471,13 @@ export function GoalModal({
           </div>
         )}
 
-        <div className="mt-1 flex gap-2.5">
-          <button
-            type="button"
-            onClick={onClose}
-            className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label sm:min-h-0"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={isSaving}
-            className="min-h-11 flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
-          >
-            {isEditing ? "Save" : "Create goal"}
-          </button>
-        </div>
+        <ModalActions
+          secondaryLabel="Cancel"
+          onSecondary={onClose}
+          primaryLabel={isEditing ? "Save" : "Create goal"}
+          primaryType="submit"
+          primaryDisabled={isSaving}
+        />
       </form>
     </Modal>
   );

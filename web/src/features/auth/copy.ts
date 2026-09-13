@@ -1,18 +1,6 @@
 // Small copy-composition helpers shared by the auth screens. Kept in a plain
 // .ts module (not alongside a component) so eslint's
 // react-refresh/only-export-components rule never has to think about them.
-import { ApiError } from "../../api/client";
-
-// A mutation's onError handler receives `unknown`, not just ApiError -- a
-// network rejection or a schema-parse failure inside the mutationFn reaches
-// it too. Filtering those out and rendering nothing (as an earlier version
-// of this screen did) leaves the caller with no visible feedback at all, so
-// every caller of this must always get a string back: the server's own
-// message when it's an ApiError, and a generic fallback otherwise.
-export function apiErrorMessage(err: unknown, fallback: string): string {
-  return err instanceof ApiError ? err.message : fallback;
-}
-
 // Deliberately says nothing about why. The person cannot act on "Telegram
 // returned 500", and this screen's other errors follow the same rule. Only
 // reached for a non-404 failure -- a 404 (no bot configured) hides the

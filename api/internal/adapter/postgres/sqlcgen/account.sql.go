@@ -89,20 +89,9 @@ type GetAccountParams struct {
 }
 
 type GetAccountRow struct {
-	ID                      pgtype.UUID
-	HouseholdID             pgtype.UUID
-	Nickname                string
-	Type                    string
-	OwnerMembershipID       pgtype.UUID
-	OpeningBalanceMinor     int64
-	OpeningBalanceCurrency  string
-	OpeningBalanceAsOf      pgtype.Date
-	CountTowardNetWorth     bool
-	VisibleToLimitedMembers bool
-	ArchivedAt              pgtype.Timestamptz
-	CreatedAt               pgtype.Timestamptz
-	OwnerName               *string
-	BalanceMinor            int64
+	Account      Account
+	OwnerName    *string
+	BalanceMinor int64
 }
 
 // GetAccount is scoped by household_id as well as id. Every account query in
@@ -113,18 +102,18 @@ func (q *Queries) GetAccount(ctx context.Context, arg GetAccountParams) (GetAcco
 	row := q.db.QueryRow(ctx, getAccount, arg.HouseholdID, arg.ID)
 	var i GetAccountRow
 	err := row.Scan(
-		&i.ID,
-		&i.HouseholdID,
-		&i.Nickname,
-		&i.Type,
-		&i.OwnerMembershipID,
-		&i.OpeningBalanceMinor,
-		&i.OpeningBalanceCurrency,
-		&i.OpeningBalanceAsOf,
-		&i.CountTowardNetWorth,
-		&i.VisibleToLimitedMembers,
-		&i.ArchivedAt,
-		&i.CreatedAt,
+		&i.Account.ID,
+		&i.Account.HouseholdID,
+		&i.Account.Nickname,
+		&i.Account.Type,
+		&i.Account.OwnerMembershipID,
+		&i.Account.OpeningBalanceMinor,
+		&i.Account.OpeningBalanceCurrency,
+		&i.Account.OpeningBalanceAsOf,
+		&i.Account.CountTowardNetWorth,
+		&i.Account.VisibleToLimitedMembers,
+		&i.Account.ArchivedAt,
+		&i.Account.CreatedAt,
 		&i.OwnerName,
 		&i.BalanceMinor,
 	)
@@ -248,20 +237,9 @@ ORDER BY a.created_at
 `
 
 type ListAccountsRow struct {
-	ID                      pgtype.UUID
-	HouseholdID             pgtype.UUID
-	Nickname                string
-	Type                    string
-	OwnerMembershipID       pgtype.UUID
-	OpeningBalanceMinor     int64
-	OpeningBalanceCurrency  string
-	OpeningBalanceAsOf      pgtype.Date
-	CountTowardNetWorth     bool
-	VisibleToLimitedMembers bool
-	ArchivedAt              pgtype.Timestamptz
-	CreatedAt               pgtype.Timestamptz
-	OwnerName               *string
-	BalanceMinor            int64
+	Account      Account
+	OwnerName    *string
+	BalanceMinor int64
 }
 
 // ListAccounts and ListAccountsIncludingArchived are two queries rather than
@@ -281,18 +259,18 @@ func (q *Queries) ListAccounts(ctx context.Context, householdID pgtype.UUID) ([]
 	for rows.Next() {
 		var i ListAccountsRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.HouseholdID,
-			&i.Nickname,
-			&i.Type,
-			&i.OwnerMembershipID,
-			&i.OpeningBalanceMinor,
-			&i.OpeningBalanceCurrency,
-			&i.OpeningBalanceAsOf,
-			&i.CountTowardNetWorth,
-			&i.VisibleToLimitedMembers,
-			&i.ArchivedAt,
-			&i.CreatedAt,
+			&i.Account.ID,
+			&i.Account.HouseholdID,
+			&i.Account.Nickname,
+			&i.Account.Type,
+			&i.Account.OwnerMembershipID,
+			&i.Account.OpeningBalanceMinor,
+			&i.Account.OpeningBalanceCurrency,
+			&i.Account.OpeningBalanceAsOf,
+			&i.Account.CountTowardNetWorth,
+			&i.Account.VisibleToLimitedMembers,
+			&i.Account.ArchivedAt,
+			&i.Account.CreatedAt,
 			&i.OwnerName,
 			&i.BalanceMinor,
 		); err != nil {
@@ -327,20 +305,9 @@ ORDER BY a.archived_at NULLS FIRST, a.created_at
 `
 
 type ListAccountsIncludingArchivedRow struct {
-	ID                      pgtype.UUID
-	HouseholdID             pgtype.UUID
-	Nickname                string
-	Type                    string
-	OwnerMembershipID       pgtype.UUID
-	OpeningBalanceMinor     int64
-	OpeningBalanceCurrency  string
-	OpeningBalanceAsOf      pgtype.Date
-	CountTowardNetWorth     bool
-	VisibleToLimitedMembers bool
-	ArchivedAt              pgtype.Timestamptz
-	CreatedAt               pgtype.Timestamptz
-	OwnerName               *string
-	BalanceMinor            int64
+	Account      Account
+	OwnerName    *string
+	BalanceMinor int64
 }
 
 func (q *Queries) ListAccountsIncludingArchived(ctx context.Context, householdID pgtype.UUID) ([]ListAccountsIncludingArchivedRow, error) {
@@ -353,18 +320,18 @@ func (q *Queries) ListAccountsIncludingArchived(ctx context.Context, householdID
 	for rows.Next() {
 		var i ListAccountsIncludingArchivedRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.HouseholdID,
-			&i.Nickname,
-			&i.Type,
-			&i.OwnerMembershipID,
-			&i.OpeningBalanceMinor,
-			&i.OpeningBalanceCurrency,
-			&i.OpeningBalanceAsOf,
-			&i.CountTowardNetWorth,
-			&i.VisibleToLimitedMembers,
-			&i.ArchivedAt,
-			&i.CreatedAt,
+			&i.Account.ID,
+			&i.Account.HouseholdID,
+			&i.Account.Nickname,
+			&i.Account.Type,
+			&i.Account.OwnerMembershipID,
+			&i.Account.OpeningBalanceMinor,
+			&i.Account.OpeningBalanceCurrency,
+			&i.Account.OpeningBalanceAsOf,
+			&i.Account.CountTowardNetWorth,
+			&i.Account.VisibleToLimitedMembers,
+			&i.Account.ArchivedAt,
+			&i.Account.CreatedAt,
 			&i.OwnerName,
 			&i.BalanceMinor,
 		); err != nil {

@@ -36,6 +36,16 @@ in three months or someone new.
 > monetary value matched live production. **The household now survives losing
 > the box and losing the owner.**
 >
+> **A whole-tree code-quality pass, 2026-09-13, is on branch
+> `review/codebase-cleanup` and not yet deployed.** The review and every fix
+> are in `docs/reviews/2026-09-13-codebase-review.md`. One change touches
+> production configuration: the API now believes `X-Real-IP` only from a peer
+> inside `TRUSTED_PROXY_CIDRS`, which `deploy/docker-compose.prod.yml` sets to
+> `172.28.0.0/16` itself, so deploying it needs no `.env` change. After
+> deploying it, re-run the two-client check described below — two real
+> addresses must still get two independent sign-up budgets — because a subnet
+> that no longer matches would silently key every caller to nginx's address.
+>
 > Deploying is `deploy/deploy.sh <git-sha>` on the box, with `--current` and
 > `--rollback`. CI builds SHA-tagged images on every push to `main`; the box
 > never updates itself, deliberately. `deploy/README.md` is the runbook.
@@ -1267,13 +1277,13 @@ by the same index a name lookup uses):
   through needs the row `Link` in `AdminHouseholdsPage.tsx` to pass its own
   `search` down to the drill-in link instead of the drill-in reconstructing
   a blank one.
-- `router.go`'s `r.Use(middleware.RealIP)` is chi's now-deprecated `RealIP`
-  (GHSA-3fxj-6jh8-hvhx: it trusts `X-Forwarded-For`/`X-Real-IP` from any
-  caller, which matters for `clientIP`'s rate-limit keying and the admin
-  audit log). `web/nginx.conf` sitting in front and setting those headers
-  itself is what keeps this safe on the current box, but the code is one
-  misconfigured proxy away from being wrong. Open an issue rather than
-  swapping it here -- it is not part of this branch's scope.
+- **Resolved 2026-09-13:** chi's deprecated `middleware.RealIP`
+  (GHSA-3fxj-6jh8-hvhx) is gone. `trustedProxyRealIP`
+  (`api/internal/adapter/http/middleware_realip.go`) believes `X-Real-IP`
+  only from a peer inside `TRUSTED_PROXY_CIDRS` and never reads
+  `True-Client-IP` or `X-Forwarded-For`. Unset trusts nobody; production
+  sets `172.28.0.0/16` in `deploy/docker-compose.prod.yml`, which must stay
+  equal to the `hearth` network subnet and nginx's `set_real_ip_from`.
 - **Agreements' date labels render in the viewer's timezone, not the
   timestamp's own offset.** `agreementDateLabel`/`historyDateLabel`
   (`web/src/features/marriage/agreementCopy.ts`) both call
@@ -1312,14 +1322,15 @@ by the same index a name lookup uses):
   back into a locked household — fails silently by design.
 - The two production images have no wiring between them. `web/nginx.conf`
   hard-codes `proxy_pass http://api:8080`, so `hearth-web` cannot start alone.
-- **The sign-up per-IP rate limiter's fix protects the production image only.**
-  `web/nginx.conf` now sets `X-Real-IP` to `$remote_addr` and suppresses
-  `True-Client-IP` on every API-proxying location, so a client can no longer
-  spoof `chi`'s `middleware.RealIP` resolution through those headers there.
-  But `docker-compose.yml` has no nginx service at all — in development, Vite
-  proxies `/api` straight to `api:8080` with no header rewriting — so the
-  per-IP limiter stays fully spoofable in development, and the pending browser
-  walk (§1) cannot exercise the fix either way. The global daily mail ceiling
+- **In development the sign-up per-IP limiter is one shared bucket, not a
+  spoofable one (since 2026-09-13).** `docker-compose.yml` has no nginx
+  service — Vite proxies `/api` straight to `api:8080` — and dev sets no
+  `TRUSTED_PROXY_CIDRS`, so `trustedProxyRealIP` ignores any client-sent
+  `X-Real-IP` and every browser request keys to the Vite container's address.
+  Under chi's `RealIP` those headers were believed from anyone, so dev was
+  fully spoofable; now many sign-ups from one dev browser simply exhaust one
+  budget. The browser walk (§1) still cannot exercise the production chain
+  either way. The global daily mail ceiling
   (1000/day, reset at midnight, counted from `signups`) is what actually bounds
   the damage in the meantime.
 - ~~**The production image cannot administer itself, and that is a lockout
@@ -1362,7 +1373,7 @@ by the same index a name lookup uses):
   `$remote_addr` and strips `True-Client-IP` precisely so a client cannot spoof
   the limiter's key — and that comment assumes nginx is the edge. Put Caddy, a
   Cloudflare tunnel or a managed load balancer in front and `$remote_addr`
-  becomes *the proxy's* address on every request, so `middleware.RealIP` keys
+  becomes *the proxy's* address on every request, so `trustedProxyRealIP` keys
   every caller to one value and the per-IP limit becomes one global bucket.
   Per the rate-limit note above, a tripped global ceiling is silent and
   platform-wide. **Configured now, for Caddy**: `set_real_ip_from`,
@@ -1379,9 +1390,12 @@ by the same index a name lookup uses):
   nginx chain, but only by a throwaway script deleted once it passed. The
   deployment walk's own criterion 10 does not cover the gap: it exercises only
   the two-client property (two callers get two independent budgets), never the
-  forged-header case. The Go suite cannot fill this in either — it tests
-  `chi`'s `middleware.RealIP`, and the control being asserted lives in nginx's
-  config, above the Go process entirely. So a regression in nginx's header
+  forged-header case. The Go suite now covers half of it: since 2026-09-13
+  `middleware_realip_test.go` proves the API ignores `X-Real-IP` from an
+  untrusted peer and never reads `True-Client-IP` or `X-Forwarded-For`
+  (mutation-checked). The other half — nginx rewriting those headers before
+  they reach the trusted peer — lives in nginx's config, above the Go process
+  entirely. So a regression in nginx's header
   rewriting would be caught by no test and no walk criterion today. Closing
   this needs either a scripted probe kept in the repo (not just run once and
   discarded) or a criterion added to the next verification walk that sends

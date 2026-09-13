@@ -24,7 +24,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
-import { GoalModal } from "./GoalModal";
+import { GoalModal, type GoalModalMode } from "./GoalModal";
 import type { Goal } from "./goalSchemas";
 
 beforeEach(() => {
@@ -61,7 +61,7 @@ function goalFixture(overrides: Partial<Goal> = {}): Goal {
 }
 
 function renderModal(
-  props: Partial<Parameters<typeof GoalModal>[0]> = {},
+  props: GoalModalMode = { mode: "create" },
   extraRoutes: Record<string, RouteResponse | RouteResponse[]> = {},
 ) {
   const onClose = vi.fn();
@@ -70,12 +70,11 @@ function renderModal(
 
   renderWithRouter(
     <GoalModal
-      mode="create"
+      {...props}
       currencies={CURRENCIES}
       primaryCurrency="SGD"
       onClose={onClose}
       onSaved={onSaved}
-      {...props}
     />,
   );
 

@@ -4,7 +4,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ApiError, apiFetch } from "../../api/client";
+import { ApiError, apiFetch, fetchAndParse } from "../../api/client";
 import {
   currencyListSchema,
   meQuerySchema,
@@ -20,8 +20,7 @@ import {
 export const meQueryKey = ["me"] as const;
 
 async function fetchMe(): Promise<Me> {
-  const body = await apiFetch<unknown>("/api/v1/auth/me");
-  return meQuerySchema.parse(body);
+  return fetchAndParse(meQuerySchema, "/api/v1/auth/me");
 }
 
 export function useMe() {
@@ -32,11 +31,10 @@ export function useSignIn() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (vars: SignInRequest): Promise<Me> => {
-      const body = await apiFetch<unknown>("/api/v1/auth/sign-in", {
+      return fetchAndParse(meQuerySchema, "/api/v1/auth/sign-in", {
         method: "POST",
         body: JSON.stringify(vars),
       });
-      return meQuerySchema.parse(body);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: meQueryKey });
@@ -137,11 +135,11 @@ export function useConsumeMagicLink() {
 
   const mutation = useMutation({
     mutationFn: async (vars: { token: string }): Promise<Me> => {
-      const body = await apiFetch<unknown>(
+      return fetchAndParse(
+        meQuerySchema,
         "/api/v1/auth/magic-link/consume",
         { method: "POST", body: JSON.stringify(vars) },
       );
-      return meQuerySchema.parse(body);
     },
     onSuccess: (data) => {
       // setQueryData primes the cache directly and synchronously from this
@@ -171,11 +169,11 @@ export function useAcceptInvite() {
   return useMutation({
     mutationFn: async (vars: AcceptInviteRequest & { token: string }): Promise<Me> => {
       const { token, ...request } = vars;
-      const body = await apiFetch<unknown>(
+      return fetchAndParse(
+        meQuerySchema,
         `/api/v1/invites/${encodeURIComponent(token)}/accept`,
         { method: "POST", body: JSON.stringify(request) },
       );
-      return meQuerySchema.parse(body);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: meQueryKey });
@@ -199,10 +197,10 @@ export function useRequestSignUp() {
 }
 
 async function fetchSignUpPreview(token: string): Promise<SignUpPreview> {
-  const body = await apiFetch<unknown>(
+  return fetchAndParse(
+    signUpPreviewSchema,
     `/api/v1/auth/sign-up/${encodeURIComponent(token)}`,
   );
-  return signUpPreviewSchema.parse(body);
 }
 
 export function useSignUpPreview(token: string) {
@@ -217,8 +215,7 @@ export function useSignUpPreview(token: string) {
 }
 
 async function fetchCurrencies(): Promise<{ currencies: Currency[] }> {
-  const body = await apiFetch<unknown>("/api/v1/currencies");
-  return currencyListSchema.parse(body);
+  return fetchAndParse(currencyListSchema, "/api/v1/currencies");
 }
 
 // Consumed by the sign-up completion screen's currency select (Task 31); the
@@ -266,11 +263,11 @@ export function useCompleteSignUp() {
       password: string;
     }): Promise<Me> => {
       const { token, ...request } = vars;
-      const body = await apiFetch<unknown>(
+      return fetchAndParse(
+        meQuerySchema,
         `/api/v1/auth/sign-up/${encodeURIComponent(token)}/complete`,
         { method: "POST", body: JSON.stringify(request) },
       );
-      return meQuerySchema.parse(body);
     },
     onSuccess: (data) => {
       queryClient.setQueryData(meQueryKey, data);

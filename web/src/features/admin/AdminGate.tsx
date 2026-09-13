@@ -11,6 +11,7 @@
 // from). This file only has to know what each code means once it exists.
 import { type FormEvent, useState } from "react";
 import { ApiError } from "../../api/client";
+import { Field } from "../../components/Field";
 import { NotFoundScreen } from "../shell/NotFoundScreen";
 
 // Full-screen states share this shell (a centered card on the app's
@@ -60,10 +61,7 @@ function PasswordPrompt({
         Re-enter your password to open the admin surface.
       </p>
       <form className="flex flex-col gap-3.5" onSubmit={handleSubmit}>
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="admin-reauth-password" className="text-xs font-semibold text-label">
-            Password
-          </label>
+        <Field label="Password" htmlFor="admin-reauth-password">
           <input
             id="admin-reauth-password"
             type="password"
@@ -83,7 +81,7 @@ function PasswordPrompt({
               <span>{errorMessage}</span>
             </div>
           )}
-        </div>
+        </Field>
         <button
           type="submit"
           disabled={pending}

@@ -7,7 +7,7 @@
 -- come back as a row with a NULL owner name rather than vanishing.
 
 -- name: ListAccounts :many
-SELECT a.id, a.household_id, a.nickname, a.type, a.owner_membership_id, a.opening_balance_minor, a.opening_balance_currency, a.opening_balance_as_of, a.count_toward_net_worth, a.visible_to_limited_members, a.archived_at, a.created_at, u.display_name AS owner_name,
+SELECT sqlc.embed(a), u.display_name AS owner_name,
        -- balance_minor is the opening balance plus every transaction dated
        -- ON OR AFTER opening_balance_as_of. The opening balance means the
        -- figure at the START of that day (spec 2026-07-30-hearth-finance-
@@ -40,7 +40,7 @@ WHERE a.household_id = $1 AND a.archived_at IS NULL
 ORDER BY a.created_at;
 
 -- name: ListAccountsIncludingArchived :many
-SELECT a.id, a.household_id, a.nickname, a.type, a.owner_membership_id, a.opening_balance_minor, a.opening_balance_currency, a.opening_balance_as_of, a.count_toward_net_worth, a.visible_to_limited_members, a.archived_at, a.created_at, u.display_name AS owner_name,
+SELECT sqlc.embed(a), u.display_name AS owner_name,
        -- See ListAccounts above for why this is two filtered sums with
        -- >= and why the incoming side prefers received_amount_minor.
        (a.opening_balance_minor
@@ -63,7 +63,7 @@ ORDER BY a.archived_at NULLS FIRST, a.created_at;
 -- another by guessing a uuid, and the HTTP layer's session gives us the
 -- household for free.
 -- name: GetAccount :one
-SELECT a.id, a.household_id, a.nickname, a.type, a.owner_membership_id, a.opening_balance_minor, a.opening_balance_currency, a.opening_balance_as_of, a.count_toward_net_worth, a.visible_to_limited_members, a.archived_at, a.created_at, u.display_name AS owner_name,
+SELECT sqlc.embed(a), u.display_name AS owner_name,
        -- See ListAccounts above for why this is two filtered sums with
        -- >= and why the incoming side prefers received_amount_minor.
        -- Get and List must compute this the same way, or the two disagree

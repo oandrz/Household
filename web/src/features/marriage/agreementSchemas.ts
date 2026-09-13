@@ -20,17 +20,16 @@ export type AgreementKind = z.infer<typeof agreementKindSchema>;
 // enum here would fail the very click that finished the agreement. Narrowing
 // to pending/parked is ProposalCard's own switch (Task 12), never the
 // schema's job.
-export const agreementStatusSchema = z.enum(["pending", "parked", "accepted", "withdrawn"]);
+const agreementStatusSchema = z.enum(["pending", "parked", "accepted", "withdrawn"]);
 
 // number is the design's "01" as an integer, composed by the service on every
 // read and stored nowhere (spec decisions 10 and 11) -- the zero padding is
 // the browser's, so this is a plain int and never a pre-padded string.
-export const agreementSchema = z.object({
+const agreementSchema = z.object({
   id: z.string(),
   number: z.number().int(),
   body: z.string(),
 });
-export type Agreement = z.infer<typeof agreementSchema>;
 
 // Every section travels, empty ones included: the page renders the visible
 // ones and the Propose picker offers them all, off ONE array. count is its

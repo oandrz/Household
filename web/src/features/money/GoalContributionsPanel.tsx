@@ -26,9 +26,12 @@
 // that (unlike BudgetHistoryModal) owns its own query instead of receiving
 // already-fetched data as a prop.
 import { type FormEvent, useState } from "react";
+import { Field } from "../../components/Field";
+import { FIELD_CONTROL_CLASS } from "../../components/fieldClasses";
 import { FieldPair } from "../../components/FieldPair";
 import { Modal } from "../../components/Modal";
-import { apiErrorMessage } from "../auth/copy";
+import { useConfirmAction } from "../../components/useConfirmAction";
+import { apiErrorMessage } from "../../api/errorMessage";
 import { describeAmountError, formatMoney, toMinorUnits } from "./formatMoney";
 import { GOAL_COPY, contributionSourceLabel } from "./goalCopy";
 import { useGoalContributions, useGoals } from "./useGoals";
@@ -161,12 +164,11 @@ export function GoalContributionsPanel({
   const [addError, setAddError] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
 
-  const [confirmingId, setConfirmingId] = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  // Keyed by contribution id, not one shared slot -- a 404 on one row must
-  // read next to that row, not detached under whichever row happens to be
-  // last in the list (see ContributionRow's own `error` prop comment).
-  const [deleteErrors, setDeleteErrors] = useState<Record<string, string>>({});
+  // Delete's in-page confirmation, keyed by contribution id rather than one
+  // shared slot -- a 404 on one row must read next to that row, not detached
+  // under whichever row happens to be last in the list (see ContributionRow's
+  // own `error` prop comment).
+  const removal = useConfirmAction();
 
   async function handleAdd(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -203,28 +205,14 @@ export function GoalContributionsPanel({
     }
   }
 
+  // A 404 -- the row already gone in another tab -- surfaces as this row's
+  // own error rather than silently appearing to succeed: nothing here removes
+  // the row from view, and the list only ever changes via the mutation's own
+  // onSuccess-triggered refetch. useConfirmAction collapses the row back to
+  // its plain trigger regardless of outcome, and the error (when there is
+  // one) is what stays visible on this same row, not the confirm pair.
   async function handleDelete(contributionId: string) {
-    setDeleteErrors((prev) =>
-      Object.fromEntries(Object.entries(prev).filter(([id]) => id !== contributionId)),
-    );
-    setDeletingId(contributionId);
-    try {
-      await deleteContribution(goal.id, contributionId);
-    } catch (err) {
-      // A 404 -- the row already gone in another tab -- surfaces here rather
-      // than silently appearing to succeed: nothing in this catch removes
-      // the row from view, and the list only ever changes via the
-      // mutation's own onSuccess-triggered refetch.
-      const message = apiErrorMessage(err, "Something went wrong. Please try again.");
-      setDeleteErrors((prev) => ({ ...prev, [contributionId]: message }));
-    } finally {
-      setDeletingId(null);
-      // Collapses back to the plain trigger regardless of outcome --
-      // TransactionModal.tsx's own handleDelete does the same in its
-      // `finally`, and the error (when there is one) is what stays visible
-      // on this same row, not the confirm pair.
-      setConfirmingId(null);
-    }
+    await removal.confirm(() => deleteContribution(goal.id, contributionId), contributionId);
   }
 
   const rows = contributions.data?.contributions ?? [];
@@ -233,10 +221,7 @@ export function GoalContributionsPanel({
     <Modal open onClose={onClose} title={GOAL_COPY.contributionsTitle(goal.name)}>
       <form className="flex flex-col gap-4" onSubmit={handleAdd}>
         <FieldPair>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="contribution-amount" className="text-xs font-semibold text-label">
-              Amount
-            </label>
+          <Field label="Amount" htmlFor="contribution-amount">
             <input
               id="contribution-amount"
               type="text"
@@ -244,25 +229,19 @@ export function GoalContributionsPanel({
               required
               value={amountInput}
               onChange={(event) => setAmountInput(event.target.value)}
-              // min-h-11/sm:min-h-0: TransactionFilters.tsx's own
-              // SELECT_CLASS comment has the measured reason py-2.5 alone
-              // falls short of the 44px floor on a phone.
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              className={FIELD_CONTROL_CLASS}
             />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="contribution-date" className="text-xs font-semibold text-label">
-              Date
-            </label>
+          </Field>
+          <Field label="Date" htmlFor="contribution-date">
             <input
               id="contribution-date"
               type="date"
               required
               value={occurredOn}
               onChange={(event) => setOccurredOn(event.target.value)}
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              className={FIELD_CONTROL_CLASS}
             />
-          </div>
+          </Field>
         </FieldPair>
 
         {amountError && (
@@ -271,18 +250,15 @@ export function GoalContributionsPanel({
           </p>
         )}
 
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="contribution-note" className="text-xs font-semibold text-label">
-            Note
-          </label>
+        <Field label="Note" htmlFor="contribution-note">
           <input
             id="contribution-note"
             type="text"
             value={note}
             onChange={(event) => setNote(event.target.value)}
-            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+            className={FIELD_CONTROL_CLASS}
           />
-        </div>
+        </Field>
 
         {addError !== null && (
           <p role="alert" className="text-xs leading-snug text-danger">
@@ -318,11 +294,11 @@ export function GoalContributionsPanel({
             contribution={contribution}
             currency={goal.currency}
             symbol={symbol}
-            confirming={confirmingId === contribution.id}
-            deleting={deletingId === contribution.id}
-            error={deleteErrors[contribution.id] ?? null}
-            onAskToDelete={() => setConfirmingId(contribution.id)}
-            onCancelDelete={() => setConfirmingId(null)}
+            confirming={removal.isConfirming(contribution.id)}
+            deleting={removal.isPending(contribution.id)}
+            error={removal.errorFor(contribution.id)}
+            onAskToDelete={() => removal.ask(contribution.id)}
+            onCancelDelete={removal.cancel}
             onConfirmDelete={() => handleDelete(contribution.id)}
           />
         ))}

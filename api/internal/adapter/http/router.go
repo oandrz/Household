@@ -2,6 +2,7 @@ package httpadapter
 
 import (
 	"net/http"
+	"net/netip"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -112,13 +113,20 @@ type Deps struct {
 	// !cfg.IsDevelopment(): false only in development, so cookies still work
 	// over plain http on localhost.
 	Secure bool
+	// TrustedProxies are the peers whose X-Real-IP header names the client
+	// (config.Config.TrustedProxies, from TRUSTED_PROXY_CIDRS). Empty trusts
+	// nobody, which is what every test router gets by leaving it unset.
+	TrustedProxies []netip.Prefix
 }
 
 func NewRouter(deps Deps) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	// trustedProxyRealIP, not chi's middleware.RealIP -- see its own doc
+	// comment in middleware_realip.go. It runs before anything that reads the
+	// client's address (the per-IP limiters, the admin audit log).
+	r.Use(trustedProxyRealIP(deps.TrustedProxies))
 	// recoverer, not middleware.Recoverer -- see its own doc comment in
 	// middleware_recoverer.go for why chi's version (a bare, bodyless 500)
 	// is wrong for this API.

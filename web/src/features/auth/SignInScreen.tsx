@@ -11,8 +11,9 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { ApiError } from "../../api/client";
+import { apiErrorMessage } from "../../api/errorMessage";
+import { Field } from "../../components/Field";
 import {
-  apiErrorMessage,
   isPlausibleEmail,
   TELEGRAM_FALLBACK_ERROR,
   TELEGRAM_POPUP_BLOCKED_MESSAGE,
@@ -247,13 +248,7 @@ export function SignInScreen() {
           </p>
 
           <form className="flex flex-col gap-3.5" onSubmit={handleSubmit}>
-            <div className="flex flex-col gap-1.5">
-              <label
-                htmlFor="sign-in-email"
-                className="text-xs font-semibold text-label"
-              >
-                Email
-              </label>
+            <Field label="Email" htmlFor="sign-in-email">
               <input
                 id="sign-in-email"
                 type="email"
@@ -263,7 +258,7 @@ export function SignInScreen() {
                 onChange={(event) => handleEmailChange(event.target.value)}
                 className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
               />
-            </div>
+            </Field>
 
             <div className="flex flex-col gap-1.5">
               <div className="flex items-baseline justify-between">

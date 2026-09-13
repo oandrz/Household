@@ -13,16 +13,9 @@
 // deciding whether the caller belongs here second would let a non-admin's
 // browser show, however briefly, a screen that says they might.
 import { Link, Outlet, useMatchRoute } from "@tanstack/react-router";
+import { LoadingScreen } from "../../components/LoadingScreen";
 import { AdminGate } from "./AdminGate";
 import { toAdminGateError, useAdminFlags, useAdminSession } from "./useAdmin";
-
-function AdminLoadingScreen() {
-  return (
-    <main className="grid min-h-dvh place-items-center">
-      <p className="text-sm text-muted">Loading…</p>
-    </main>
-  );
-}
 
 // Each link states its own single colour class and computes its own active
 // state with useMatchRoute -- never `activeProps`, whose className is
@@ -72,7 +65,7 @@ export function AdminShell() {
   const flagsQuery = useAdminFlags();
   const reauth = useAdminSession();
 
-  if (flagsQuery.isPending) return <AdminLoadingScreen />;
+  if (flagsQuery.isPending) return <LoadingScreen />;
 
   // reauth.error first: it is the freshest signal, and the only one of the
   // two that can carry INVALID_CREDENTIALS or ADMIN_LOCKED (both answered by

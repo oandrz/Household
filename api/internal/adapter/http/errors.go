@@ -109,6 +109,9 @@ const (
 // no path from a bare http.ResponseWriter back to that context. This is a
 // deliberate, narrow deviation from the signature the task brief sketches
 // (MapDomainError(w, err)) -- see the task report.
+//
+// The table itself is domainErrorResponses, below; this function is the
+// SignInFailedError special case and the loop that walks it.
 func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 	if err == nil {
 		return
@@ -135,45 +138,132 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 		return
 	}
 
-	switch {
-	case errors.Is(err, domain.ErrInvalidCredentials):
-		WriteError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "That email or password is incorrect.", nil)
-	case errors.Is(err, domain.ErrAdminLocked):
+	for _, row := range domainErrorResponses {
+		if !matchesAny(err, row.sentinels) {
+			continue
+		}
+		if row.internal {
+			logAndWriteInternal(w, r, err)
+			return
+		}
+		if row.logAs != "" {
+			slog.Error(row.logAs, "error", err, "request_id", middleware.GetReqID(r.Context()))
+		}
+		WriteError(w, row.status, row.code, row.message, nil)
+		return
+	}
+	logAndWriteInternal(w, r, err)
+}
+
+// domainErrorResponse is one row of MapDomainError's table: the sentinels
+// that select it and the error envelope it answers with.
+type domainErrorResponse struct {
+	sentinels []error
+	status    int
+	code      string
+	message   string
+	// logAs, when set, logs the error under this message before answering.
+	// For a row whose response body is deliberately generic, that log line is
+	// the only place the wrapped cause survives.
+	logAs string
+	// internal answers the generic, logged 500 instead of status, code and
+	// message: the sentinel means a calculation went wrong, not that the
+	// request was bad, and it has a row only so the log names the cause.
+	internal bool
+}
+
+func matchesAny(err error, sentinels []error) bool {
+	for _, sentinel := range sentinels {
+		if errors.Is(err, sentinel) {
+			return true
+		}
+	}
+	return false
+}
+
+// domainErrorResponses is every sentinel the API answers with something more
+// specific than a 500, IN ORDER. Rows are tried top to bottom and the first
+// match wins, exactly as the switch this table replaced did, and the order is
+// load-bearing: errors.Is walks wrapped errors, so one error can match more
+// than one row. *domain.BillNotPayableError and *domain.BillPaymentNotLatestError
+// both unwrap to domain.ErrForbidden, and a sentinel a service translated out
+// of domain.ErrAlreadyExists must be answered by its own row, which is why
+// ALREADY_EXISTS sits last. Add a new row where its meaning belongs, above
+// any more general row it could also match.
+//
+// A sentinel with no row falls through to the logged 500. Several are absent
+// on purpose, and the comments where their rows would sit say why.
+var domainErrorResponses = []domainErrorResponse{
+	{
+		sentinels: []error{domain.ErrInvalidCredentials},
+		status:    http.StatusUnauthorized,
+		code:      "INVALID_CREDENTIALS",
+		message:   "That email or password is incorrect.",
+	},
+	{
 		// Deliberately its own code and its own message, never folded into
 		// HOUSEHOLD_LOCKED below: the two locks are counted in separate
 		// ledgers on purpose (see the admin_reauth_attempts comment in
 		// 00012_admin.sql), and telling an operator their *household* is
 		// locked when only the admin surface is would send them to reset a
 		// password that is working fine.
-		WriteError(w, http.StatusLocked, "ADMIN_LOCKED",
-			"Too many failed attempts. Try again in a few minutes.", nil)
-	case errors.Is(err, domain.ErrHouseholdLocked):
-		WriteError(w, http.StatusLocked, "HOUSEHOLD_LOCKED",
-			"This household is temporarily locked after too many failed sign-in attempts.", nil)
-	case errors.Is(err, domain.ErrNotFound):
-		WriteError(w, http.StatusNotFound, "NOT_FOUND", "That could not be found.", nil)
-	case errors.Is(err, domain.ErrForbidden):
-		WriteError(w, http.StatusForbidden, "FORBIDDEN", "You do not have permission to do that.", nil)
-	case errors.Is(err, domain.ErrLastOwner):
-		WriteError(w, http.StatusConflict, "LAST_OWNER", "A household must keep at least one owner.", nil)
-	case errors.Is(err, domain.ErrLimitedCannotHoldMarriage),
-		errors.Is(err, domain.ErrOwnerMustHoldAllCapabilities),
-		errors.Is(err, domain.ErrUnknownCapability):
-		WriteError(w, http.StatusUnprocessableEntity, "INVALID_CAPABILITIES",
-			"That capability set is not valid for this role.", nil)
-	case errors.Is(err, domain.ErrUnknownRole):
-		WriteError(w, http.StatusUnprocessableEntity, "INVALID_ROLE", "That role is not recognised.", nil)
-	case errors.Is(err, domain.ErrUnknownFlag):
-		WriteError(w, http.StatusUnprocessableEntity, "UNKNOWN_FLAG",
-			"That feature flag does not exist in this build.", nil)
-	case errors.Is(err, domain.ErrAmountOverflow):
+		sentinels: []error{domain.ErrAdminLocked},
+		status:    http.StatusLocked,
+		code:      "ADMIN_LOCKED",
+		message:   "Too many failed attempts. Try again in a few minutes.",
+	},
+	{
+		sentinels: []error{domain.ErrHouseholdLocked},
+		status:    http.StatusLocked,
+		code:      "HOUSEHOLD_LOCKED",
+		message:   "This household is temporarily locked after too many failed sign-in attempts.",
+	},
+	{
+		sentinels: []error{domain.ErrNotFound},
+		status:    http.StatusNotFound,
+		code:      "NOT_FOUND",
+		message:   "That could not be found.",
+	},
+	{
+		sentinels: []error{domain.ErrForbidden},
+		status:    http.StatusForbidden,
+		code:      "FORBIDDEN",
+		message:   "You do not have permission to do that.",
+	},
+	{
+		sentinels: []error{domain.ErrLastOwner},
+		status:    http.StatusConflict,
+		code:      "LAST_OWNER",
+		message:   "A household must keep at least one owner.",
+	},
+	{
+		sentinels: []error{domain.ErrLimitedCannotHoldMarriage, domain.ErrOwnerMustHoldAllCapabilities, domain.ErrUnknownCapability},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_CAPABILITIES",
+		message:   "That capability set is not valid for this role.",
+	},
+	{
+		sentinels: []error{domain.ErrUnknownRole},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_ROLE",
+		message:   "That role is not recognised.",
+	},
+	{
+		sentinels: []error{domain.ErrUnknownFlag},
+		status:    http.StatusUnprocessableEntity,
+		code:      "UNKNOWN_FLAG",
+		message:   "That feature flag does not exist in this build.",
+	},
+	{
 		// Reaching the HTTP layer means a calculation is wrong, not that the
 		// caller sent a bad request -- nothing on this API surface accepts a
 		// caller-supplied amount that could overflow. Handled like the
 		// default branch (logged, generic 500) with its own case only so the
 		// log line names the specific cause.
-		logAndWriteInternal(w, r, err)
-	case errors.Is(err, domain.ErrInvalidMoney):
+		sentinels: []error{domain.ErrAmountOverflow},
+		internal:  true,
+	},
+	{
 		// Unlike ErrAmountOverflow above, this is no longer only an internal-
 		// arithmetic signal: HouseholdService.Update (Task 15) wraps a
 		// caller-supplied currency code's domain.NewMoney failure in this
@@ -181,34 +271,78 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 		// a typo in PATCH /household's primaryCurrency or secondaryCurrency
 		// field reaches here too. That is an ordinary bad request, not a
 		// calculation gone wrong, and must not 500.
-		WriteError(w, http.StatusUnprocessableEntity, "INVALID_CURRENCY",
-			"That currency code is not valid.", nil)
-	case errors.Is(err, domain.ErrInviteExpired):
-		WriteError(w, http.StatusGone, "INVITE_EXPIRED", "This invite has expired.", nil)
-	case errors.Is(err, domain.ErrInviteRequiresEmail):
-		WriteError(w, http.StatusUnprocessableEntity, "INVITE_REQUIRES_EMAIL",
-			"An invite requires an email address.", nil)
-	case errors.Is(err, usecase.ErrPasswordTooShort):
-		WriteError(w, http.StatusUnprocessableEntity, "PASSWORD_TOO_SHORT",
-			"Password must be at least 12 characters.", nil)
-	case errors.Is(err, usecase.ErrPasswordTooLong):
-		WriteError(w, http.StatusUnprocessableEntity, "PASSWORD_TOO_LONG",
-			"Password must be at most 256 characters.", nil)
-	case errors.Is(err, domain.ErrInviteAlreadyAccepted):
-		WriteError(w, http.StatusConflict, "INVITE_ALREADY_ACCEPTED", "This invite has already been accepted.", nil)
-	case errors.Is(err, domain.ErrTokenExpired):
-		WriteError(w, http.StatusGone, "TOKEN_EXPIRED", "This link has expired or has already been used.", nil)
-	case errors.Is(err, domain.ErrRateLimited):
-		WriteError(w, http.StatusTooManyRequests, "RATE_LIMITED", "Too many requests. Try again later.", nil)
-	case errors.Is(err, usecase.ErrSpaceNameTaken):
-		WriteError(w, http.StatusConflict, "SPACE_NAME_TAKEN", "A space with that name already exists.", nil)
-	case errors.Is(err, usecase.ErrSpaceVisibilityNotSupported):
-		WriteError(w, http.StatusUnprocessableEntity, "INVALID_VISIBILITY", "That visibility is not supported yet.", nil)
-	case errors.Is(err, usecase.ErrSpaceNameRequired):
-		WriteError(w, http.StatusUnprocessableEntity, "SPACE_NAME_REQUIRED", "A space name is required.", nil)
-	case errors.Is(err, usecase.ErrInvalidFXRateMode):
-		WriteError(w, http.StatusUnprocessableEntity, "INVALID_FX_RATE_MODE", "That FX rate mode is not valid.", nil)
-	case errors.Is(err, usecase.ErrOutboxUnavailable):
+		sentinels: []error{domain.ErrInvalidMoney},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_CURRENCY",
+		message:   "That currency code is not valid.",
+	},
+	{
+		sentinels: []error{domain.ErrInviteExpired},
+		status:    http.StatusGone,
+		code:      "INVITE_EXPIRED",
+		message:   "This invite has expired.",
+	},
+	{
+		sentinels: []error{domain.ErrInviteRequiresEmail},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVITE_REQUIRES_EMAIL",
+		message:   "An invite requires an email address.",
+	},
+	{
+		sentinels: []error{usecase.ErrPasswordTooShort},
+		status:    http.StatusUnprocessableEntity,
+		code:      "PASSWORD_TOO_SHORT",
+		message:   "Password must be at least 12 characters.",
+	},
+	{
+		sentinels: []error{usecase.ErrPasswordTooLong},
+		status:    http.StatusUnprocessableEntity,
+		code:      "PASSWORD_TOO_LONG",
+		message:   "Password must be at most 256 characters.",
+	},
+	{
+		sentinels: []error{domain.ErrInviteAlreadyAccepted},
+		status:    http.StatusConflict,
+		code:      "INVITE_ALREADY_ACCEPTED",
+		message:   "This invite has already been accepted.",
+	},
+	{
+		sentinels: []error{domain.ErrTokenExpired},
+		status:    http.StatusGone,
+		code:      "TOKEN_EXPIRED",
+		message:   "This link has expired or has already been used.",
+	},
+	{
+		sentinels: []error{domain.ErrRateLimited},
+		status:    http.StatusTooManyRequests,
+		code:      "RATE_LIMITED",
+		message:   "Too many requests. Try again later.",
+	},
+	{
+		sentinels: []error{usecase.ErrSpaceNameTaken},
+		status:    http.StatusConflict,
+		code:      "SPACE_NAME_TAKEN",
+		message:   "A space with that name already exists.",
+	},
+	{
+		sentinels: []error{usecase.ErrSpaceVisibilityNotSupported},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_VISIBILITY",
+		message:   "That visibility is not supported yet.",
+	},
+	{
+		sentinels: []error{usecase.ErrSpaceNameRequired},
+		status:    http.StatusUnprocessableEntity,
+		code:      "SPACE_NAME_REQUIRED",
+		message:   "A space name is required.",
+	},
+	{
+		sentinels: []error{usecase.ErrInvalidFXRateMode},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_FX_RATE_MODE",
+		message:   "That FX rate mode is not valid.",
+	},
+	{
 		// 502 rather than 500: the failure is upstream of this service, not
 		// a bug in it. That is not always "go look at Mailpit, not here",
 		// though -- a stray path segment in MAILPIT_API_URL surfaces as this
@@ -219,10 +353,13 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 		// means "set the variable", the other means "the container is
 		// down", and collapsing them would send the operator to fix the
 		// wrong thing.
-		slog.Error("mail outbox unavailable", "error", err, "request_id", middleware.GetReqID(r.Context()))
-		WriteError(w, http.StatusBadGateway, "MAIL_UPSTREAM_UNAVAILABLE",
-			"Mailpit is not answering. The messages are not lost — the reader is.", nil)
-	case errors.Is(err, usecase.ErrBrowseUnavailable):
+		sentinels: []error{usecase.ErrOutboxUnavailable},
+		logAs:     "mail outbox unavailable",
+		status:    http.StatusBadGateway,
+		code:      "MAIL_UPSTREAM_UNAVAILABLE",
+		message:   "Mailpit is not answering. The messages are not lost — the reader is.",
+	},
+	{
 		// 503 rather than 502: unlike the mail inspector, the failure is not
 		// upstream of this service in another process -- it is this
 		// install's own second connection, and the advice is "look at
@@ -239,165 +376,318 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 		// record them -- dropping the log would throw away the only thing
 		// that distinguishes a dead connection from a statement timeout
 		// from a revoked privilege.
-		slog.Error("database browse unavailable", "error", err, "request_id", middleware.GetReqID(r.Context()))
-		WriteError(w, http.StatusServiceUnavailable, "DB_BROWSE_UNAVAILABLE",
-			"The database browse cannot reach its read-only connection.", nil)
-	case errors.Is(err, usecase.ErrInvalidOffset):
+		sentinels: []error{usecase.ErrBrowseUnavailable},
+		logAs:     "database browse unavailable",
+		status:    http.StatusServiceUnavailable,
+		code:      "DB_BROWSE_UNAVAILABLE",
+		message:   "The database browse cannot reach its read-only connection.",
+	},
+	{
 		// Defence in depth: the handler already refuses a negative offset
 		// with the same code, and this covers any other caller of the
 		// service.
-		WriteError(w, http.StatusBadRequest, "INVALID_RANGE",
-			"offset must not be negative.", nil)
-	case errors.Is(err, usecase.ErrInviteeAlreadyRegistered):
-		WriteError(w, http.StatusConflict, "EMAIL_ALREADY_REGISTERED",
-			"An account with that email address already exists.", nil)
-	case errors.Is(err, usecase.ErrSignupAlreadyUsed):
+		sentinels: []error{usecase.ErrInvalidOffset},
+		status:    http.StatusBadRequest,
+		code:      "INVALID_RANGE",
+		message:   "offset must not be negative.",
+	},
+	{
+		sentinels: []error{usecase.ErrInviteeAlreadyRegistered},
+		status:    http.StatusConflict,
+		code:      "EMAIL_ALREADY_REGISTERED",
+		message:   "An account with that email address already exists.",
+	},
+	{
 		// Deliberately not folded into ALREADY_EXISTS, whose copy ("That
 		// already exists.") tells the holder of a spent sign-up link nothing
 		// useful, and whose own comment scopes it to a write race.
-		WriteError(w, http.StatusConflict, "SIGNUP_ALREADY_USED",
-			"This link has already been used. Try signing in instead.", nil)
-	case errors.Is(err, usecase.ErrHouseholdNameRequired):
-		WriteError(w, http.StatusUnprocessableEntity, "HOUSEHOLD_NAME_REQUIRED",
-			"A household name is required.", nil)
-	case errors.Is(err, usecase.ErrDisplayNameRequired):
-		WriteError(w, http.StatusUnprocessableEntity, "DISPLAY_NAME_REQUIRED",
-			"Your name is required.", nil)
-	case errors.Is(err, domain.ErrAccountNicknameRequired):
-		WriteError(w, http.StatusUnprocessableEntity, "NICKNAME_REQUIRED", "An account name is required.", nil)
-	case errors.Is(err, domain.ErrUnknownAccountType):
-		WriteError(w, http.StatusUnprocessableEntity, "INVALID_TYPE", "That account type is not recognised.", nil)
-	case errors.Is(err, domain.ErrLiabilityBalanceNegative):
-		WriteError(w, http.StatusUnprocessableEntity, "INVALID_BALANCE",
-			"Enter what you owe as a positive amount — Hearth subtracts it for you.", nil)
-	case errors.Is(err, domain.ErrOpeningBalanceInFuture):
-		WriteError(w, http.StatusUnprocessableEntity, "INVALID_AS_OF", "That date is in the future.", nil)
-	case errors.Is(err, domain.ErrAccountOwnerNotInHousehold):
-		WriteError(w, http.StatusUnprocessableEntity, "INVALID_OWNER", "That person is not in this household.", nil)
-	case errors.Is(err, domain.ErrAPITokenNameInvalid):
-		WriteError(w, http.StatusUnprocessableEntity, "TOKEN_NAME_INVALID",
-			"Give the token a name of up to 80 characters.", nil)
-	case errors.Is(err, domain.ErrAPITokenLifetimeInvalid):
-		WriteError(w, http.StatusUnprocessableEntity, "TOKEN_LIFETIME_INVALID",
-			"expiresInDays must be between 1 and 365.", nil)
-	case errors.Is(err, domain.ErrIdempotencyKeyInvalid):
-		WriteError(w, http.StatusUnprocessableEntity, "IDEMPOTENCY_KEY_INVALID",
-			"Idempotency-Key must be 1 to 128 printable ASCII characters with no spaces.", nil)
-	case errors.Is(err, domain.ErrIdempotencyKeyInUse):
+		sentinels: []error{usecase.ErrSignupAlreadyUsed},
+		status:    http.StatusConflict,
+		code:      "SIGNUP_ALREADY_USED",
+		message:   "This link has already been used. Try signing in instead.",
+	},
+	{
+		sentinels: []error{usecase.ErrHouseholdNameRequired},
+		status:    http.StatusUnprocessableEntity,
+		code:      "HOUSEHOLD_NAME_REQUIRED",
+		message:   "A household name is required.",
+	},
+	{
+		sentinels: []error{usecase.ErrDisplayNameRequired},
+		status:    http.StatusUnprocessableEntity,
+		code:      "DISPLAY_NAME_REQUIRED",
+		message:   "Your name is required.",
+	},
+	{
+		sentinels: []error{domain.ErrAccountNicknameRequired},
+		status:    http.StatusUnprocessableEntity,
+		code:      "NICKNAME_REQUIRED",
+		message:   "An account name is required.",
+	},
+	{
+		sentinels: []error{domain.ErrUnknownAccountType},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_TYPE",
+		message:   "That account type is not recognised.",
+	},
+	{
+		sentinels: []error{domain.ErrLiabilityBalanceNegative},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_BALANCE",
+		message:   "Enter what you owe as a positive amount — Hearth subtracts it for you.",
+	},
+	{
+		sentinels: []error{domain.ErrOpeningBalanceInFuture},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_AS_OF",
+		message:   "That date is in the future.",
+	},
+	{
+		sentinels: []error{domain.ErrAccountOwnerNotInHousehold},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_OWNER",
+		message:   "That person is not in this household.",
+	},
+	{
+		sentinels: []error{domain.ErrAPITokenNameInvalid},
+		status:    http.StatusUnprocessableEntity,
+		code:      "TOKEN_NAME_INVALID",
+		message:   "Give the token a name of up to 80 characters.",
+	},
+	{
+		sentinels: []error{domain.ErrAPITokenLifetimeInvalid},
+		status:    http.StatusUnprocessableEntity,
+		code:      "TOKEN_LIFETIME_INVALID",
+		message:   "expiresInDays must be between 1 and 365.",
+	},
+	{
+		sentinels: []error{domain.ErrIdempotencyKeyInvalid},
+		status:    http.StatusUnprocessableEntity,
+		code:      "IDEMPOTENCY_KEY_INVALID",
+		message:   "Idempotency-Key must be 1 to 128 printable ASCII characters with no spaces.",
+	},
+	{
 		// Only reachable on the race the service comments on: the index
 		// said the key exists, the lookup found nothing, so the row was
 		// deleted in between. A 409 that says "retry" is honest; a 500 is
 		// not.
-		WriteError(w, http.StatusConflict, "IDEMPOTENCY_KEY_IN_USE",
-			"This Idempotency-Key was in use a moment ago and is now free. Retry the request.", nil)
-	case errors.Is(err, domain.ErrIdempotencyKeyReused):
-		WriteError(w, http.StatusConflict, "IDEMPOTENCY_KEY_REUSED",
-			"This Idempotency-Key was already used for a different transaction. Use a new key.", nil)
-	case errors.Is(err, domain.ErrTransactionDescriptionRequired):
-		WriteError(w, http.StatusUnprocessableEntity, "DESCRIPTION_REQUIRED",
-			"Give this transaction a description.", nil)
-	case errors.Is(err, domain.ErrUnknownTransactionKind):
-		WriteError(w, http.StatusUnprocessableEntity, "INVALID_KIND",
-			"That is not a kind of transaction Hearth records.", nil)
-	case errors.Is(err, domain.ErrTransactionAmountNotPositive):
-		WriteError(w, http.StatusUnprocessableEntity, "INVALID_AMOUNT",
-			"Enter an amount greater than zero. Whether it adds or subtracts comes from the kind.", nil)
+		sentinels: []error{domain.ErrIdempotencyKeyInUse},
+		status:    http.StatusConflict,
+		code:      "IDEMPOTENCY_KEY_IN_USE",
+		message:   "This Idempotency-Key was in use a moment ago and is now free. Retry the request.",
+	},
+	{
+		sentinels: []error{domain.ErrIdempotencyKeyReused},
+		status:    http.StatusConflict,
+		code:      "IDEMPOTENCY_KEY_REUSED",
+		message:   "This Idempotency-Key was already used for a different transaction. Use a new key.",
+	},
+	{
+		sentinels: []error{domain.ErrTransactionDescriptionRequired},
+		status:    http.StatusUnprocessableEntity,
+		code:      "DESCRIPTION_REQUIRED",
+		message:   "Give this transaction a description.",
+	},
+	{
+		sentinels: []error{domain.ErrUnknownTransactionKind},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_KIND",
+		message:   "That is not a kind of transaction Hearth records.",
+	},
+	{
+		sentinels: []error{domain.ErrTransactionAmountNotPositive},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_AMOUNT",
+		message:   "Enter an amount greater than zero. Whether it adds or subtracts comes from the kind.",
+	},
 	// One message for every wrong-account shape, including an account in
 	// another household: separate ones would tell a caller which ids are real
 	// elsewhere.
-	case errors.Is(err, domain.ErrTransactionAccountsInvalid):
-		WriteError(w, http.StatusUnprocessableEntity, "INVALID_ACCOUNTS",
-			"Choose accounts that match this kind of transaction.", nil)
-	case errors.Is(err, domain.ErrReceivedAmountRequired):
-		WriteError(w, http.StatusUnprocessableEntity, "RECEIVED_AMOUNT_REQUIRED",
-			"These accounts are in different currencies. Enter what actually arrived.", nil)
-	case errors.Is(err, domain.ErrReceivedAmountNotAllowed):
-		WriteError(w, http.StatusUnprocessableEntity, "RECEIVED_AMOUNT_NOT_ALLOWED",
-			"Only a transfer records an amount received.", nil)
-	case errors.Is(err, domain.ErrCategoryKindMismatch):
-		WriteError(w, http.StatusUnprocessableEntity, "INVALID_CATEGORY",
-			"That category does not belong to this kind of transaction.", nil)
-	case errors.Is(err, domain.ErrUnknownCategoryKind):
-		WriteError(w, http.StatusUnprocessableEntity, "INVALID_CATEGORY",
-			"That category does not belong to this kind of transaction.", nil)
-	case errors.Is(err, domain.ErrCategoryNameTaken):
-		WriteError(w, http.StatusConflict, "CATEGORY_NAME_TAKEN", "A category with that name already exists.", nil)
-	case errors.Is(err, domain.ErrCategoryNameRequired):
-		WriteError(w, http.StatusUnprocessableEntity, "CATEGORY_NAME_REQUIRED", "A category name is required.", nil)
-	case errors.Is(err, domain.ErrBudgetLineDuplicate):
-		WriteError(w, http.StatusUnprocessableEntity, "DUPLICATE_BUDGET_LINE",
-			"Each category can only appear once in a budget.", nil)
-	case errors.Is(err, domain.ErrBudgetCapNegative):
-		WriteError(w, http.StatusUnprocessableEntity, "NEGATIVE_BUDGET_CAP", "A budget cap cannot be negative.", nil)
-	case errors.Is(err, domain.ErrBudgetIncomeNegative):
-		WriteError(w, http.StatusUnprocessableEntity, "NEGATIVE_BUDGET_INCOME", "Expected income cannot be negative.", nil)
-	case errors.Is(err, domain.ErrBudgetCategoryUnknown):
-		WriteError(w, http.StatusUnprocessableEntity, "UNKNOWN_BUDGET_CATEGORY",
-			"That category could not be found.", nil)
+	{
+		sentinels: []error{domain.ErrTransactionAccountsInvalid},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_ACCOUNTS",
+		message:   "Choose accounts that match this kind of transaction.",
+	},
+	{
+		sentinels: []error{domain.ErrReceivedAmountRequired},
+		status:    http.StatusUnprocessableEntity,
+		code:      "RECEIVED_AMOUNT_REQUIRED",
+		message:   "These accounts are in different currencies. Enter what actually arrived.",
+	},
+	{
+		sentinels: []error{domain.ErrReceivedAmountNotAllowed},
+		status:    http.StatusUnprocessableEntity,
+		code:      "RECEIVED_AMOUNT_NOT_ALLOWED",
+		message:   "Only a transfer records an amount received.",
+	},
+	{
+		sentinels: []error{domain.ErrCategoryKindMismatch},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_CATEGORY",
+		message:   "That category does not belong to this kind of transaction.",
+	},
+	{
+		sentinels: []error{domain.ErrUnknownCategoryKind},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_CATEGORY",
+		message:   "That category does not belong to this kind of transaction.",
+	},
+	{
+		sentinels: []error{domain.ErrCategoryNameTaken},
+		status:    http.StatusConflict,
+		code:      "CATEGORY_NAME_TAKEN",
+		message:   "A category with that name already exists.",
+	},
+	{
+		sentinels: []error{domain.ErrCategoryNameRequired},
+		status:    http.StatusUnprocessableEntity,
+		code:      "CATEGORY_NAME_REQUIRED",
+		message:   "A category name is required.",
+	},
+	{
+		sentinels: []error{domain.ErrBudgetLineDuplicate},
+		status:    http.StatusUnprocessableEntity,
+		code:      "DUPLICATE_BUDGET_LINE",
+		message:   "Each category can only appear once in a budget.",
+	},
+	{
+		sentinels: []error{domain.ErrBudgetCapNegative},
+		status:    http.StatusUnprocessableEntity,
+		code:      "NEGATIVE_BUDGET_CAP",
+		message:   "A budget cap cannot be negative.",
+	},
+	{
+		sentinels: []error{domain.ErrBudgetIncomeNegative},
+		status:    http.StatusUnprocessableEntity,
+		code:      "NEGATIVE_BUDGET_INCOME",
+		message:   "Expected income cannot be negative.",
+	},
+	{
+		sentinels: []error{domain.ErrBudgetCategoryUnknown},
+		status:    http.StatusUnprocessableEntity,
+		code:      "UNKNOWN_BUDGET_CATEGORY",
+		message:   "That category could not be found.",
+	},
 	// --- holdings ---------------------------------------------------------
-	case errors.Is(err, domain.ErrHoldingNameTaken):
+	{
 		// The plain case: a collision against a LIVE holding in the same
 		// account. holding_handlers.go intercepts this same sentinel before it
 		// reaches here when the colliding row is archived, and builds a richer
 		// 409 carrying that holding's id so the modal can offer Restore rather
 		// than a dead end -- the writeGoalNameConflict precedent.
-		WriteError(w, http.StatusConflict, "HOLDING_NAME_TAKEN",
-			"This account already has a holding with that name.", nil)
-	case errors.Is(err, domain.ErrHoldingDateInFuture):
-		WriteError(w, http.StatusUnprocessableEntity, "INVALID_DATE", "That date is in the future.", nil)
-	case errors.Is(err, domain.ErrHoldingNameRequired):
-		WriteError(w, http.StatusUnprocessableEntity, "HOLDING_NAME_REQUIRED",
-			"Give this holding a name.", nil)
-	case errors.Is(err, domain.ErrHoldingAccountNotInvestment):
-		WriteError(w, http.StatusUnprocessableEntity, "ACCOUNT_NOT_INVESTMENT",
-			"Holdings live in an investment account. Choose one, or change this account's type first.", nil)
-	case errors.Is(err, domain.ErrAccountHasHoldings):
-		WriteError(w, http.StatusUnprocessableEntity, "ACCOUNT_HAS_HOLDINGS",
-			"This account holds investments, so its type cannot change. Archive or move them first.", nil)
-	case errors.Is(err, domain.ErrUnknownPeriodKind):
-		WriteError(w, http.StatusBadRequest, "INVALID_PERIOD_KIND",
-			"Ask for a quarter, a half or a year.", nil)
-	case errors.Is(err, domain.ErrPeriodCountOutOfRange):
+		sentinels: []error{domain.ErrHoldingNameTaken},
+		status:    http.StatusConflict,
+		code:      "HOLDING_NAME_TAKEN",
+		message:   "This account already has a holding with that name.",
+	},
+	{
+		sentinels: []error{domain.ErrHoldingDateInFuture},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_DATE",
+		message:   "That date is in the future.",
+	},
+	{
+		sentinels: []error{domain.ErrHoldingNameRequired},
+		status:    http.StatusUnprocessableEntity,
+		code:      "HOLDING_NAME_REQUIRED",
+		message:   "Give this holding a name.",
+	},
+	{
+		sentinels: []error{domain.ErrHoldingAccountNotInvestment},
+		status:    http.StatusUnprocessableEntity,
+		code:      "ACCOUNT_NOT_INVESTMENT",
+		message:   "Holdings live in an investment account. Choose one, or change this account's type first.",
+	},
+	{
+		sentinels: []error{domain.ErrAccountHasHoldings},
+		status:    http.StatusUnprocessableEntity,
+		code:      "ACCOUNT_HAS_HOLDINGS",
+		message:   "This account holds investments, so its type cannot change. Archive or move them first.",
+	},
+	{
+		sentinels: []error{domain.ErrUnknownPeriodKind},
+		status:    http.StatusBadRequest,
+		code:      "INVALID_PERIOD_KIND",
+		message:   "Ask for a quarter, a half or a year.",
+	},
+	{
 		// 400 rather than 422: this is a query parameter the caller chose, not
 		// a value the household typed into a form.
-		WriteError(w, http.StatusBadRequest, "INVALID_PERIOD_COUNT",
-			"That is more history than this report draws. Ask for between 1 and 12 periods.", nil)
-	case errors.Is(err, domain.ErrUnknownIncomeKind):
-		WriteError(w, http.StatusUnprocessableEntity, "UNKNOWN_INCOME_KIND",
-			"Record this as income or as a fee.", nil)
-	case errors.Is(err, domain.ErrHoldingIncomeAmountNotPositive):
-		WriteError(w, http.StatusUnprocessableEntity, "INCOME_AMOUNT_NOT_POSITIVE",
-			"Enter how much was paid. A fee is entered as a positive amount and comes off the total.", nil)
-	case errors.Is(err, domain.ErrPrimaryCurrencyHeldByHoldings):
-		WriteError(w, http.StatusUnprocessableEntity, "PRIMARY_CURRENCY_HELD_BY_HOLDINGS",
-			"Your currency cannot change while you hold investments: every holding records what it cost in the currency you kept books in at the time, and nothing here can restate that.", nil)
-	case errors.Is(err, domain.ErrHoldingArchived):
-		WriteError(w, http.StatusUnprocessableEntity, "HOLDING_ARCHIVED",
-			"This holding is archived. Restore it before recording anything against it.", nil)
-	case errors.Is(err, domain.ErrHoldingOversold):
+		sentinels: []error{domain.ErrPeriodCountOutOfRange},
+		status:    http.StatusBadRequest,
+		code:      "INVALID_PERIOD_COUNT",
+		message:   "That is more history than this report draws. Ask for between 1 and 12 periods.",
+	},
+	{
+		sentinels: []error{domain.ErrUnknownIncomeKind},
+		status:    http.StatusUnprocessableEntity,
+		code:      "UNKNOWN_INCOME_KIND",
+		message:   "Record this as income or as a fee.",
+	},
+	{
+		sentinels: []error{domain.ErrHoldingIncomeAmountNotPositive},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INCOME_AMOUNT_NOT_POSITIVE",
+		message:   "Enter how much was paid. A fee is entered as a positive amount and comes off the total.",
+	},
+	{
+		sentinels: []error{domain.ErrPrimaryCurrencyHeldByHoldings},
+		status:    http.StatusUnprocessableEntity,
+		code:      "PRIMARY_CURRENCY_HELD_BY_HOLDINGS",
+		message:   "Your currency cannot change while you hold investments: every holding records what it cost in the currency you kept books in at the time, and nothing here can restate that.",
+	},
+	{
+		sentinels: []error{domain.ErrHoldingArchived},
+		status:    http.StatusUnprocessableEntity,
+		code:      "HOLDING_ARCHIVED",
+		message:   "This holding is archived. Restore it before recording anything against it.",
+	},
+	{
 		// Covers both directions: recording a sale bigger than the position,
 		// and deleting a purchase a later sale was costed against.
-		WriteError(w, http.StatusUnprocessableEntity, "HOLDING_OVERSOLD",
-			"That would sell more than this holding has ever held.", nil)
-	case errors.Is(err, domain.ErrHoldingEventQuantityNotPositive):
-		WriteError(w, http.StatusUnprocessableEntity, "INVALID_QUANTITY",
-			"Enter a quantity greater than zero.", nil)
-	case errors.Is(err, domain.ErrInvalidQuantity), errors.Is(err, domain.ErrQuantityNegative):
-		WriteError(w, http.StatusUnprocessableEntity, "INVALID_QUANTITY",
-			"Enter a quantity as a number, up to nine decimal places.", nil)
-	case errors.Is(err, domain.ErrUnknownInstrumentKind):
-		WriteError(w, http.StatusUnprocessableEntity, "INVALID_INSTRUMENT",
-			"That is not a kind of investment Hearth records.", nil)
-	case errors.Is(err, domain.ErrUnknownHoldingEventKind):
-		WriteError(w, http.StatusUnprocessableEntity, "INVALID_EVENT_KIND",
-			"An entry is either a purchase or a sale.", nil)
-	case errors.Is(err, domain.ErrHoldingPrimaryAmountRequired):
-		WriteError(w, http.StatusUnprocessableEntity, "PRIMARY_AMOUNT_REQUIRED",
-			"This holding is in another currency, so Hearth needs the amount in your own as well.", nil)
-	case errors.Is(err, domain.ErrHoldingPrimaryAmountNotAllowed):
-		WriteError(w, http.StatusUnprocessableEntity, "PRIMARY_AMOUNT_NOT_ALLOWED",
-			"This holding is already in your own currency, so it needs only one amount.", nil)
-	case errors.Is(err, domain.ErrGoalNameTaken):
+		sentinels: []error{domain.ErrHoldingOversold},
+		status:    http.StatusUnprocessableEntity,
+		code:      "HOLDING_OVERSOLD",
+		message:   "That would sell more than this holding has ever held.",
+	},
+	{
+		sentinels: []error{domain.ErrHoldingEventQuantityNotPositive},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_QUANTITY",
+		message:   "Enter a quantity greater than zero.",
+	},
+	{
+		sentinels: []error{domain.ErrInvalidQuantity, domain.ErrQuantityNegative},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_QUANTITY",
+		message:   "Enter a quantity as a number, up to nine decimal places.",
+	},
+	{
+		sentinels: []error{domain.ErrUnknownInstrumentKind},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_INSTRUMENT",
+		message:   "That is not a kind of investment Hearth records.",
+	},
+	{
+		sentinels: []error{domain.ErrUnknownHoldingEventKind},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_EVENT_KIND",
+		message:   "An entry is either a purchase or a sale.",
+	},
+	{
+		sentinels: []error{domain.ErrHoldingPrimaryAmountRequired},
+		status:    http.StatusUnprocessableEntity,
+		code:      "PRIMARY_AMOUNT_REQUIRED",
+		message:   "This holding is in another currency, so Hearth needs the amount in your own as well.",
+	},
+	{
+		sentinels: []error{domain.ErrHoldingPrimaryAmountNotAllowed},
+		status:    http.StatusUnprocessableEntity,
+		code:      "PRIMARY_AMOUNT_NOT_ALLOWED",
+		message:   "This holding is already in your own currency, so it needs only one amount.",
+	},
+	{
 		// The plain case: a name collision against a LIVE goal, no restore
 		// hint to offer. goal_handlers.go's writeGoalNameConflict intercepts
 		// this same sentinel before it reaches here whenever the colliding
@@ -405,42 +695,90 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 		// archived goal's id in details, so the New/Edit modal can offer
 		// Restore instead of a dead end) using this case's own message and
 		// status as its fallback if that lookup itself fails.
-		WriteError(w, http.StatusConflict, "GOAL_NAME_TAKEN", "A goal with that name already exists.", nil)
-	case errors.Is(err, domain.ErrGoalNameRequired):
-		WriteError(w, http.StatusUnprocessableEntity, "GOAL_NAME_REQUIRED", "A goal name is required.", nil)
-	case errors.Is(err, domain.ErrGoalTargetNotPositive):
-		WriteError(w, http.StatusUnprocessableEntity, "GOAL_TARGET_NOT_POSITIVE",
-			"Enter a target greater than zero.", nil)
-	case errors.Is(err, domain.ErrGoalPlannedMonthlyNegative):
-		WriteError(w, http.StatusUnprocessableEntity, "GOAL_PLANNED_MONTHLY_NEGATIVE",
-			"Planned monthly cannot be negative.", nil)
-	case errors.Is(err, domain.ErrGoalCurrencyImmutable):
-		WriteError(w, http.StatusUnprocessableEntity, "GOAL_CURRENCY_IMMUTABLE",
-			"A goal's currency cannot be changed after it is created.", nil)
-	case errors.Is(err, domain.ErrGoalArchived):
-		WriteError(w, http.StatusUnprocessableEntity, "GOAL_ARCHIVED", "That goal is archived.", nil)
-	case errors.Is(err, domain.ErrContributionAmountZero):
-		WriteError(w, http.StatusUnprocessableEntity, "CONTRIBUTION_AMOUNT_ZERO",
-			"Enter an amount other than zero.", nil)
-	case errors.Is(err, domain.ErrRolloverMonthOpen):
-		WriteError(w, http.StatusUnprocessableEntity, "ROLLOVER_MONTH_OPEN",
-			"Only a closed month can be rolled over.", nil)
-	case errors.Is(err, domain.ErrRolloverNothingUnspent):
-		WriteError(w, http.StatusUnprocessableEntity, "ROLLOVER_NOTHING_UNSPENT",
-			"That month has nothing unspent to roll over.", nil)
-	case errors.Is(err, domain.ErrRolloverCurrencyMismatch):
-		WriteError(w, http.StatusUnprocessableEntity, "ROLLOVER_CURRENCY_MISMATCH",
-			"Only a goal in the household's primary currency can receive a rollover.", nil)
-	case errors.Is(err, domain.ErrRolloverAlreadyDone):
-		WriteError(w, http.StatusConflict, "ROLLOVER_ALREADY_DONE", "That month has already been rolled over.", nil)
-	case errors.Is(err, domain.ErrUnknownCadence):
-		WriteError(w, http.StatusUnprocessableEntity, "INVALID_CADENCE", "That cadence is not recognised.", nil)
-	case errors.Is(err, domain.ErrBillNameRequired):
-		WriteError(w, http.StatusUnprocessableEntity, "BILL_NAME_REQUIRED", "A bill name is required.", nil)
-	case errors.Is(err, domain.ErrBillAmountNotPositive):
-		WriteError(w, http.StatusUnprocessableEntity, "BILL_AMOUNT_NOT_POSITIVE",
-			"Enter an amount greater than zero.", nil)
-	case errors.Is(err, domain.ErrBillNameTaken):
+		sentinels: []error{domain.ErrGoalNameTaken},
+		status:    http.StatusConflict,
+		code:      "GOAL_NAME_TAKEN",
+		message:   "A goal with that name already exists.",
+	},
+	{
+		sentinels: []error{domain.ErrGoalNameRequired},
+		status:    http.StatusUnprocessableEntity,
+		code:      "GOAL_NAME_REQUIRED",
+		message:   "A goal name is required.",
+	},
+	{
+		sentinels: []error{domain.ErrGoalTargetNotPositive},
+		status:    http.StatusUnprocessableEntity,
+		code:      "GOAL_TARGET_NOT_POSITIVE",
+		message:   "Enter a target greater than zero.",
+	},
+	{
+		sentinels: []error{domain.ErrGoalPlannedMonthlyNegative},
+		status:    http.StatusUnprocessableEntity,
+		code:      "GOAL_PLANNED_MONTHLY_NEGATIVE",
+		message:   "Planned monthly cannot be negative.",
+	},
+	{
+		sentinels: []error{domain.ErrGoalCurrencyImmutable},
+		status:    http.StatusUnprocessableEntity,
+		code:      "GOAL_CURRENCY_IMMUTABLE",
+		message:   "A goal's currency cannot be changed after it is created.",
+	},
+	{
+		sentinels: []error{domain.ErrGoalArchived},
+		status:    http.StatusUnprocessableEntity,
+		code:      "GOAL_ARCHIVED",
+		message:   "That goal is archived.",
+	},
+	{
+		sentinels: []error{domain.ErrContributionAmountZero},
+		status:    http.StatusUnprocessableEntity,
+		code:      "CONTRIBUTION_AMOUNT_ZERO",
+		message:   "Enter an amount other than zero.",
+	},
+	{
+		sentinels: []error{domain.ErrRolloverMonthOpen},
+		status:    http.StatusUnprocessableEntity,
+		code:      "ROLLOVER_MONTH_OPEN",
+		message:   "Only a closed month can be rolled over.",
+	},
+	{
+		sentinels: []error{domain.ErrRolloverNothingUnspent},
+		status:    http.StatusUnprocessableEntity,
+		code:      "ROLLOVER_NOTHING_UNSPENT",
+		message:   "That month has nothing unspent to roll over.",
+	},
+	{
+		sentinels: []error{domain.ErrRolloverCurrencyMismatch},
+		status:    http.StatusUnprocessableEntity,
+		code:      "ROLLOVER_CURRENCY_MISMATCH",
+		message:   "Only a goal in the household's primary currency can receive a rollover.",
+	},
+	{
+		sentinels: []error{domain.ErrRolloverAlreadyDone},
+		status:    http.StatusConflict,
+		code:      "ROLLOVER_ALREADY_DONE",
+		message:   "That month has already been rolled over.",
+	},
+	{
+		sentinels: []error{domain.ErrUnknownCadence},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_CADENCE",
+		message:   "That cadence is not recognised.",
+	},
+	{
+		sentinels: []error{domain.ErrBillNameRequired},
+		status:    http.StatusUnprocessableEntity,
+		code:      "BILL_NAME_REQUIRED",
+		message:   "A bill name is required.",
+	},
+	{
+		sentinels: []error{domain.ErrBillAmountNotPositive},
+		status:    http.StatusUnprocessableEntity,
+		code:      "BILL_AMOUNT_NOT_POSITIVE",
+		message:   "Enter an amount greater than zero.",
+	},
+	{
 		// The plain case: a name collision against a LIVE bill, no restore
 		// hint to offer. bill_handlers.go's writeBillWriteError intercepts
 		// this same sentinel before it reaches here whenever the colliding
@@ -449,21 +787,31 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 		// Restore instead of a dead end) using this case's own message and
 		// status as its fallback if that lookup itself fails -- the
 		// ErrGoalNameTaken precedent above, applied to bills.
-		WriteError(w, http.StatusConflict, "BILL_NAME_TAKEN", "A bill with that name already exists.", nil)
-	case errors.Is(err, domain.ErrBillCurrencyImmutable):
+		sentinels: []error{domain.ErrBillNameTaken},
+		status:    http.StatusConflict,
+		code:      "BILL_NAME_TAKEN",
+		message:   "A bill with that name already exists.",
+	},
+	{
 		// bill_handlers.go's handleUpdateBill intercepts this same sentinel
 		// before it reaches here whenever the request carries a
 		// payFromAccountId, building a 422 that names both currencies
 		// (BillService.Update's own doc comment says that message is
 		// deliberately the HTTP layer's job, not the service's). This case
 		// is the fallback for whenever that lookup itself cannot complete.
-		WriteError(w, http.StatusUnprocessableEntity, "BILL_CURRENCY_IMMUTABLE",
-			"A bill's currency cannot be changed after it is created.", nil)
+		sentinels: []error{domain.ErrBillCurrencyImmutable},
+		status:    http.StatusUnprocessableEntity,
+		code:      "BILL_CURRENCY_IMMUTABLE",
+		message:   "A bill's currency cannot be changed after it is created.",
+	},
 	// --- Retros (Task 8) --------------------------------------------------
-	case errors.Is(err, domain.ErrRetroChanged):
-		WriteError(w, http.StatusConflict, "RETRO_CHANGED",
-			"Someone else saved this retro while you were editing it. Reload to see their changes.", nil)
-	case errors.Is(err, domain.ErrRetroNothingToStart):
+	{
+		sentinels: []error{domain.ErrRetroChanged},
+		status:    http.StatusConflict,
+		code:      "RETRO_CHANGED",
+		message:   "Someone else saved this retro while you were editing it. Reload to see their changes.",
+	},
+	{
 		// Deliberately its own code, not RETRO_EXISTS: the two conflicts have
 		// different causes and want different copy. RETRO_EXISTS
 		// (handleStartRetro's own case, ahead of MapDomainError -- see its
@@ -473,71 +821,129 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 		// to reach (it would not be rendered -- RetrosView.StartMonth would
 		// already be nil), so it needs its own message rather than
 		// "someone already started it," which would be actively wrong here.
-		WriteError(w, http.StatusConflict, "RETRO_NOTHING_TO_START",
-			"Both this month and last month already have a retro.", nil)
-	case errors.Is(err, domain.ErrInvalidMood):
-		WriteError(w, http.StatusBadRequest, "INVALID_MOOD", "That is not a mood we can record.", nil)
-	case errors.Is(err, domain.ErrRetroActionBodyRequired):
-		WriteError(w, http.StatusBadRequest, "RETRO_ACTION_BODY_REQUIRED",
-			"Give this action some text before saving it.", nil)
+		sentinels: []error{domain.ErrRetroNothingToStart},
+		status:    http.StatusConflict,
+		code:      "RETRO_NOTHING_TO_START",
+		message:   "Both this month and last month already have a retro.",
+	},
+	{
+		sentinels: []error{domain.ErrInvalidMood},
+		status:    http.StatusBadRequest,
+		code:      "INVALID_MOOD",
+		message:   "That is not a mood we can record.",
+	},
+	{
+		sentinels: []error{domain.ErrRetroActionBodyRequired},
+		status:    http.StatusBadRequest,
+		code:      "RETRO_ACTION_BODY_REQUIRED",
+		message:   "Give this action some text before saving it.",
+	},
 	// --- Vision (Task 9) ----------------------------------------------------
-	case errors.Is(err, domain.ErrVisionChanged):
-		WriteError(w, http.StatusConflict, "VISION_CHANGED",
-			"This vision changed while you were editing it. Reload and try again.", nil)
-	case errors.Is(err, domain.ErrVisionGoalUnknown):
-		WriteError(w, http.StatusUnprocessableEntity, "VISION_GOAL_UNKNOWN",
-			"That savings goal is not one of this household's.", nil)
-	case errors.Is(err, domain.ErrVisionThemeRequired):
-		WriteError(w, http.StatusUnprocessableEntity, "VISION_THEME_REQUIRED",
-			"Give this year a theme.", nil)
-	case errors.Is(err, domain.ErrVisionMeasureAmbiguous):
-		WriteError(w, http.StatusUnprocessableEntity, "VISION_MEASURE_INVALID",
-			"A measure is either a number you keep, or a savings goal — not both.", nil)
-	case errors.Is(err, domain.ErrVisionMeasureGoalRequired):
+	{
+		sentinels: []error{domain.ErrVisionChanged},
+		status:    http.StatusConflict,
+		code:      "VISION_CHANGED",
+		message:   "This vision changed while you were editing it. Reload and try again.",
+	},
+	{
+		sentinels: []error{domain.ErrVisionGoalUnknown},
+		status:    http.StatusUnprocessableEntity,
+		code:      "VISION_GOAL_UNKNOWN",
+		message:   "That savings goal is not one of this household's.",
+	},
+	{
+		sentinels: []error{domain.ErrVisionThemeRequired},
+		status:    http.StatusUnprocessableEntity,
+		code:      "VISION_THEME_REQUIRED",
+		message:   "Give this year a theme.",
+	},
+	{
+		sentinels: []error{domain.ErrVisionMeasureAmbiguous},
+		status:    http.StatusUnprocessableEntity,
+		code:      "VISION_MEASURE_INVALID",
+		message:   "A measure is either a number you keep, or a savings goal — not both.",
+	},
+	{
 		// Deliberately its own code, not VISION_MEASURE_INVALID: that
 		// message tells a household they picked BOTH a number and a goal,
 		// which is actively wrong here -- switching a measure to "A savings
 		// goal" and saving without choosing one means they picked NEITHER.
 		// Same reasoning RETRO_NOTHING_TO_START's own comment gives for not
 		// reusing RETRO_EXISTS: two different causes want different copy.
-		WriteError(w, http.StatusUnprocessableEntity, "VISION_MEASURE_GOAL_REQUIRED",
-			"Pick a savings goal for that measure, or switch it back to a number you keep.", nil)
-	case errors.Is(err, domain.ErrVisionThemeTooLong):
-		WriteError(w, http.StatusUnprocessableEntity, "VISION_INVALID",
-			"A vision theme can be at most 120 characters.", nil)
-	case errors.Is(err, domain.ErrVisionDescriptionTooLong):
-		WriteError(w, http.StatusUnprocessableEntity, "VISION_INVALID",
-			"A vision description can be at most 2,000 characters.", nil)
-	case errors.Is(err, domain.ErrVisionYearOutOfRange):
+		sentinels: []error{domain.ErrVisionMeasureGoalRequired},
+		status:    http.StatusUnprocessableEntity,
+		code:      "VISION_MEASURE_GOAL_REQUIRED",
+		message:   "Pick a savings goal for that measure, or switch it back to a number you keep.",
+	},
+	{
+		sentinels: []error{domain.ErrVisionThemeTooLong},
+		status:    http.StatusUnprocessableEntity,
+		code:      "VISION_INVALID",
+		message:   "A vision theme can be at most 120 characters.",
+	},
+	{
+		sentinels: []error{domain.ErrVisionDescriptionTooLong},
+		status:    http.StatusUnprocessableEntity,
+		code:      "VISION_INVALID",
+		message:   "A vision description can be at most 2,000 characters.",
+	},
+	{
 		// Shared by both a vision's own year and a milestone's (Vision.Validate
 		// returns this sentinel for either), so the message names neither
 		// specifically.
-		WriteError(w, http.StatusUnprocessableEntity, "VISION_INVALID",
-			"Choose a year between 1900 and 2200.", nil)
-	case errors.Is(err, domain.ErrVisionPillarNameRequired):
-		WriteError(w, http.StatusUnprocessableEntity, "VISION_INVALID",
-			"Give this pillar a name.", nil)
-	case errors.Is(err, domain.ErrVisionMeasureLabelRequired):
-		WriteError(w, http.StatusUnprocessableEntity, "VISION_INVALID",
-			"Give this measure a label.", nil)
-	case errors.Is(err, domain.ErrVisionMeasureTargetNotPositive):
-		WriteError(w, http.StatusUnprocessableEntity, "VISION_INVALID",
-			"A measure's target must be greater than zero.", nil)
-	case errors.Is(err, domain.ErrVisionMeasureCurrentNegative):
-		WriteError(w, http.StatusUnprocessableEntity, "VISION_INVALID",
-			"A measure's current value cannot be negative.", nil)
-	case errors.Is(err, domain.ErrVisionMilestoneTitleRequired):
-		WriteError(w, http.StatusUnprocessableEntity, "VISION_INVALID",
-			"Give this milestone a title.", nil)
-	case errors.Is(err, domain.ErrVisionTooManyPillars):
-		WriteError(w, http.StatusUnprocessableEntity, "VISION_INVALID",
-			"A vision can have at most 12 pillars.", nil)
-	case errors.Is(err, domain.ErrVisionTooManyMeasures):
-		WriteError(w, http.StatusUnprocessableEntity, "VISION_INVALID",
-			"A pillar can have at most 8 measures.", nil)
-	case errors.Is(err, domain.ErrVisionTooManyMilestones):
-		WriteError(w, http.StatusUnprocessableEntity, "VISION_INVALID",
-			"A vision can have at most 24 milestones.", nil)
+		sentinels: []error{domain.ErrVisionYearOutOfRange},
+		status:    http.StatusUnprocessableEntity,
+		code:      "VISION_INVALID",
+		message:   "Choose a year between 1900 and 2200.",
+	},
+	{
+		sentinels: []error{domain.ErrVisionPillarNameRequired},
+		status:    http.StatusUnprocessableEntity,
+		code:      "VISION_INVALID",
+		message:   "Give this pillar a name.",
+	},
+	{
+		sentinels: []error{domain.ErrVisionMeasureLabelRequired},
+		status:    http.StatusUnprocessableEntity,
+		code:      "VISION_INVALID",
+		message:   "Give this measure a label.",
+	},
+	{
+		sentinels: []error{domain.ErrVisionMeasureTargetNotPositive},
+		status:    http.StatusUnprocessableEntity,
+		code:      "VISION_INVALID",
+		message:   "A measure's target must be greater than zero.",
+	},
+	{
+		sentinels: []error{domain.ErrVisionMeasureCurrentNegative},
+		status:    http.StatusUnprocessableEntity,
+		code:      "VISION_INVALID",
+		message:   "A measure's current value cannot be negative.",
+	},
+	{
+		sentinels: []error{domain.ErrVisionMilestoneTitleRequired},
+		status:    http.StatusUnprocessableEntity,
+		code:      "VISION_INVALID",
+		message:   "Give this milestone a title.",
+	},
+	{
+		sentinels: []error{domain.ErrVisionTooManyPillars},
+		status:    http.StatusUnprocessableEntity,
+		code:      "VISION_INVALID",
+		message:   "A vision can have at most 12 pillars.",
+	},
+	{
+		sentinels: []error{domain.ErrVisionTooManyMeasures},
+		status:    http.StatusUnprocessableEntity,
+		code:      "VISION_INVALID",
+		message:   "A pillar can have at most 8 measures.",
+	},
+	{
+		sentinels: []error{domain.ErrVisionTooManyMilestones},
+		status:    http.StatusUnprocessableEntity,
+		code:      "VISION_INVALID",
+		message:   "A vision can have at most 24 milestones.",
+	},
 	// --- Agreements ---------------------------------------------------------
 	// domain.ErrUnknownAgreementProposalKind and
 	// domain.ErrUnknownAgreementProposalStatus are deliberately absent from
@@ -548,47 +954,83 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 	// database column -- a row no migration allows and no writer here wrote --
 	// and the logged 500 below is the right answer to an impossible row, not a
 	// 4xx telling a household their request was wrong when it was not.
-	case errors.Is(err, domain.ErrAgreementsNeedTwoOwners):
-		WriteError(w, http.StatusConflict, "AGREEMENTS_NEED_TWO_OWNERS",
-			"Agreements need at least two owners.", nil)
-	case errors.Is(err, domain.ErrAgreementChanged):
-		WriteError(w, http.StatusConflict, "AGREEMENT_CHANGED",
-			"The agreement this was written against has changed, so nothing was signed.", nil)
-	case errors.Is(err, domain.ErrAgreementNotOpen):
-		WriteError(w, http.StatusConflict, "AGREEMENT_PROPOSAL_RESOLVED",
-			"This change was already settled. Reload to see it.", nil)
-	case errors.Is(err, domain.ErrAgreementSectionNameTaken):
-		WriteError(w, http.StatusConflict, "AGREEMENT_SECTION_NAME_TAKEN",
-			"You already have a section with that name.", nil)
-	case errors.Is(err, domain.ErrAgreementSectionNameRequired):
-		WriteError(w, http.StatusUnprocessableEntity, "AGREEMENT_SECTION_NAME_REQUIRED",
-			"Give this section a name.", nil)
-	case errors.Is(err, domain.ErrAgreementSectionNameTooLong):
-		WriteError(w, http.StatusUnprocessableEntity, "AGREEMENT_SECTION_NAME_TOO_LONG",
-			"That section name is too long.", nil)
-	case errors.Is(err, domain.ErrAgreementProposalShapeInvalid):
-		WriteError(w, http.StatusUnprocessableEntity, "AGREEMENT_PROPOSAL_SHAPE_INVALID",
-			"That is not a change we can propose.", nil)
-	case errors.Is(err, domain.ErrAgreementEditUnchanged):
-		WriteError(w, http.StatusUnprocessableEntity, "AGREEMENT_EDIT_UNCHANGED",
-			"This wording is the same as the agreement it changes.", nil)
-	case errors.Is(err, domain.ErrAgreementBodyRequired):
-		WriteError(w, http.StatusUnprocessableEntity, "AGREEMENT_BODY_REQUIRED",
-			"Write the agreement before proposing it.", nil)
-	case errors.Is(err, domain.ErrAgreementBodyTooLong):
-		WriteError(w, http.StatusUnprocessableEntity, "AGREEMENT_BODY_TOO_LONG",
-			"That agreement is too long.", nil)
+	{
+		sentinels: []error{domain.ErrAgreementsNeedTwoOwners},
+		status:    http.StatusConflict,
+		code:      "AGREEMENTS_NEED_TWO_OWNERS",
+		message:   "Agreements need at least two owners.",
+	},
+	{
+		sentinels: []error{domain.ErrAgreementChanged},
+		status:    http.StatusConflict,
+		code:      "AGREEMENT_CHANGED",
+		message:   "The agreement this was written against has changed, so nothing was signed.",
+	},
+	{
+		sentinels: []error{domain.ErrAgreementNotOpen},
+		status:    http.StatusConflict,
+		code:      "AGREEMENT_PROPOSAL_RESOLVED",
+		message:   "This change was already settled. Reload to see it.",
+	},
+	{
+		sentinels: []error{domain.ErrAgreementSectionNameTaken},
+		status:    http.StatusConflict,
+		code:      "AGREEMENT_SECTION_NAME_TAKEN",
+		message:   "You already have a section with that name.",
+	},
+	{
+		sentinels: []error{domain.ErrAgreementSectionNameRequired},
+		status:    http.StatusUnprocessableEntity,
+		code:      "AGREEMENT_SECTION_NAME_REQUIRED",
+		message:   "Give this section a name.",
+	},
+	{
+		sentinels: []error{domain.ErrAgreementSectionNameTooLong},
+		status:    http.StatusUnprocessableEntity,
+		code:      "AGREEMENT_SECTION_NAME_TOO_LONG",
+		message:   "That section name is too long.",
+	},
+	{
+		sentinels: []error{domain.ErrAgreementProposalShapeInvalid},
+		status:    http.StatusUnprocessableEntity,
+		code:      "AGREEMENT_PROPOSAL_SHAPE_INVALID",
+		message:   "That is not a change we can propose.",
+	},
+	{
+		sentinels: []error{domain.ErrAgreementEditUnchanged},
+		status:    http.StatusUnprocessableEntity,
+		code:      "AGREEMENT_EDIT_UNCHANGED",
+		message:   "This wording is the same as the agreement it changes.",
+	},
+	{
+		sentinels: []error{domain.ErrAgreementBodyRequired},
+		status:    http.StatusUnprocessableEntity,
+		code:      "AGREEMENT_BODY_REQUIRED",
+		message:   "Write the agreement before proposing it.",
+	},
+	{
+		sentinels: []error{domain.ErrAgreementBodyTooLong},
+		status:    http.StatusUnprocessableEntity,
+		code:      "AGREEMENT_BODY_TOO_LONG",
+		message:   "That agreement is too long.",
+	},
 	// The two note caps get two codes rather than one shared "note too long",
 	// because they are different fields on different screens: the proposal's
 	// note is in the Propose modal, the park note in the card's Discuss
 	// expander, and a 422 that cannot say which field is a 422 the screen
 	// cannot place.
-	case errors.Is(err, domain.ErrAgreementNoteTooLong):
-		WriteError(w, http.StatusUnprocessableEntity, "AGREEMENT_NOTE_TOO_LONG",
-			"That note is too long.", nil)
-	case errors.Is(err, domain.ErrAgreementParkNoteTooLong):
-		WriteError(w, http.StatusUnprocessableEntity, "AGREEMENT_PARK_NOTE_TOO_LONG",
-			"That note is too long.", nil)
+	{
+		sentinels: []error{domain.ErrAgreementNoteTooLong},
+		status:    http.StatusUnprocessableEntity,
+		code:      "AGREEMENT_NOTE_TOO_LONG",
+		message:   "That note is too long.",
+	},
+	{
+		sentinels: []error{domain.ErrAgreementParkNoteTooLong},
+		status:    http.StatusUnprocessableEntity,
+		code:      "AGREEMENT_PARK_NOTE_TOO_LONG",
+		message:   "That note is too long.",
+	},
 	// domain.ErrUnknownContributionSource has no case here, deliberately: it
 	// means a goal_contributions row holds a source value this code never
 	// wrote (ParseContributionSource's own doc comment), which is a real
@@ -597,26 +1039,43 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 	// generic, logged 500 below like ErrAmountOverflow does above, rather
 	// than getting a 4xx case that would tell a caller their request was
 	// wrong when it was not.
-	case errors.Is(err, domain.ErrTelegramChatTaken):
-		WriteError(w, http.StatusConflict, "TELEGRAM_CHAT_TAKEN", telegramChatTakenMessage, nil)
-	case errors.Is(err, domain.ErrTelegramAlreadyLinked):
-		WriteError(w, http.StatusConflict, "TELEGRAM_ALREADY_LINKED", telegramAlreadyLinkedMessage, nil)
-	case errors.Is(err, domain.ErrTelegramLinkNotPending):
-		WriteError(w, http.StatusConflict, "TELEGRAM_LINK_NOT_PENDING",
-			"No Telegram chat has opened this link, or it expired. Start again.", nil)
-	case errors.Is(err, domain.ErrTelegramUnlinkWouldLockOut):
-		WriteError(w, http.StatusConflict, "TELEGRAM_UNLINK_LOCKOUT",
-			"Add an email address to this account before disconnecting Telegram.", nil)
-	case errors.Is(err, domain.ErrTelegramMintsRateLimited):
-		WriteError(w, http.StatusTooManyRequests, "TELEGRAM_LINK_RATE_LIMITED",
-			"Too many attempts. Try again in an hour.", nil)
-	case errors.Is(err, domain.ErrAlreadyExists):
+	{
+		sentinels: []error{domain.ErrTelegramChatTaken},
+		status:    http.StatusConflict,
+		code:      "TELEGRAM_CHAT_TAKEN",
+		message:   telegramChatTakenMessage,
+	},
+	{
+		sentinels: []error{domain.ErrTelegramAlreadyLinked},
+		status:    http.StatusConflict,
+		code:      "TELEGRAM_ALREADY_LINKED",
+		message:   telegramAlreadyLinkedMessage,
+	},
+	{
+		sentinels: []error{domain.ErrTelegramLinkNotPending},
+		status:    http.StatusConflict,
+		code:      "TELEGRAM_LINK_NOT_PENDING",
+		message:   "No Telegram chat has opened this link, or it expired. Start again.",
+	},
+	{
+		sentinels: []error{domain.ErrTelegramUnlinkWouldLockOut},
+		status:    http.StatusConflict,
+		code:      "TELEGRAM_UNLINK_LOCKOUT",
+		message:   "Add an email address to this account before disconnecting Telegram.",
+	},
+	{
+		sentinels: []error{domain.ErrTelegramMintsRateLimited},
+		status:    http.StatusTooManyRequests,
+		code:      "TELEGRAM_LINK_RATE_LIMITED",
+		message:   "Too many attempts. Try again in an hour.",
+	},
+	{
 		// Every service that means a genuine, nameable conflict already
 		// translates domain.ErrAlreadyExists into its own sentinel before
 		// this function ever sees it (e.g. HouseholdService.CreateSpace ->
 		// ErrSpaceNameTaken, InviteService.Create -> ErrInviteeAlreadyRegistered
 		// above) -- both get their own, more specific case, and are matched
-		// first because errors.Is walks in switch-case order. This case is
+		// first because errors.Is walks in table order. This case is
 		// the backstop for the race those specific translations cannot
 		// close by themselves: two callers hitting the same unique
 		// constraint at once, only one of which had a pre-check to lose.
@@ -628,10 +1087,11 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 		// race: it is a real, if rare, conflict a retry can't paper over,
 		// not an internal bug, so 409 is the right answer whenever nothing
 		// more specific already caught it.
-		WriteError(w, http.StatusConflict, "ALREADY_EXISTS", "That already exists.", nil)
-	default:
-		logAndWriteInternal(w, r, err)
-	}
+		sentinels: []error{domain.ErrAlreadyExists},
+		status:    http.StatusConflict,
+		code:      "ALREADY_EXISTS",
+		message:   "That already exists.",
+	},
 }
 
 // logAndWriteInternal logs the real error -- which is never returned to the

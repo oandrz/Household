@@ -10,7 +10,7 @@
 // here or there -- see that file's own header comment for why a plain
 // cross-import between the two hook files doesn't work.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiFetch } from "../../api/client";
+import { fetchAndParse } from "../../api/client";
 import { retroListQueryKey, retroQueryKey } from "./retroQueryKeys";
 import {
   retroWriteResponseSchema,
@@ -20,8 +20,7 @@ import {
 } from "./retroSchemas";
 
 async function fetchRetros(): Promise<RetrosResponse> {
-  const body = await apiFetch<unknown>("/api/v1/retros");
-  return retrosResponseSchema.parse(body);
+  return fetchAndParse(retrosResponseSchema, "/api/v1/retros");
 }
 
 // useRetros() loads the whole Retros history screen: every summary row, the
@@ -54,8 +53,7 @@ export function useRetros() {
   // closes.
   const startRetroMutation = useMutation({
     mutationFn: async (): Promise<Retro> => {
-      const raw = await apiFetch<unknown>("/api/v1/retros", { method: "POST" });
-      return retroWriteResponseSchema.parse(raw).retro;
+      return (await fetchAndParse(retroWriteResponseSchema, "/api/v1/retros", { method: "POST" })).retro;
     },
     onSuccess: (created) =>
       Promise.all([

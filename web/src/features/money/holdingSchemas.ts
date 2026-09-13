@@ -73,11 +73,10 @@ export const portfolioResponseSchema = z.object({
 });
 export type PortfolioResponse = z.infer<typeof portfolioResponseSchema>;
 
-export const holdingResponseSchema = z.object({ holding: holdingSchema });
 
 // quantity is a string here for holdingSchema's reason, restated: it crosses
 // the wire as the person typed it.
-export const holdingEventSchema = z.object({
+const holdingEventSchema = z.object({
   id: z.string(),
   kind: holdingEventKindSchema,
   quantityNano: z.number(),
@@ -89,11 +88,10 @@ export const holdingEventSchema = z.object({
   occurredOn: z.string(),
   note: z.string(),
 });
-export type HoldingEvent = z.infer<typeof holdingEventSchema>;
 
 export const holdingEventsResponseSchema = z.object({ events: z.array(holdingEventSchema) });
 
-export const holdingValuationSchema = z.object({
+const holdingValuationSchema = z.object({
   id: z.string(),
   unitPriceMinor: z.number(),
   currency: z.string(),
@@ -102,7 +100,6 @@ export const holdingValuationSchema = z.object({
   asOf: z.string(),
   note: z.string(),
 });
-export type HoldingValuation = z.infer<typeof holdingValuationSchema>;
 
 export const holdingValuationsResponseSchema = z.object({
   valuations: z.array(holdingValuationSchema),
@@ -116,7 +113,7 @@ export const holdingValuationsResponseSchema = z.object({
 export const incomeKindSchema = z.enum(["income", "fee"]);
 export type IncomeKind = z.infer<typeof incomeKindSchema>;
 
-export const holdingIncomeSchema = z.object({
+const holdingIncomeSchema = z.object({
   id: z.string(),
   kind: incomeKindSchema,
   amountMinor: z.number(),
@@ -126,7 +123,6 @@ export const holdingIncomeSchema = z.object({
   receivedOn: z.string(),
   note: z.string(),
 });
-export type HoldingIncome = z.infer<typeof holdingIncomeSchema>;
 
 export const holdingIncomeResponseSchema = z.object({ income: z.array(holdingIncomeSchema) });
 
@@ -145,11 +141,10 @@ export type BlankReason = z.infer<typeof blankReasonSchema>;
 // what answers "did this make us richer"; the native one sits beside it so the
 // owner can still tell whether the PICK was good and the exchange rate was the
 // problem.
-export const returnComponentSchema = z.object({
+const returnComponentSchema = z.object({
   nativeMinor: z.number(),
   primaryMinor: z.number(),
 });
-export type ReturnComponent = z.infer<typeof returnComponentSchema>;
 
 // periodReturnSchema mirrors periodReturnDTO.
 //

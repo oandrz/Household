@@ -360,6 +360,7 @@ func run() error {
 			Tokens:         tokens,
 			Clock:          sysClock,
 			Secure:         !cfg.IsDevelopment(),
+			TrustedProxies: cfg.TrustedProxies,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 		// ReadTimeout bounds the whole request, not just its headers:

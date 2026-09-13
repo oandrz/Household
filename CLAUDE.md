@@ -95,6 +95,12 @@ at `/Volumes/Oink_Machine/.local/opt/go-v1.24.2/bin`. Add it before running
 `go` directly, or any `make` target (`make lint`, `make test`) that shells out
 to it.
 
+That binary is 1.24.2, but `api/go.mod` asks for `go 1.25.7`. Inside `api/`
+the default `GOTOOLCHAIN=auto` downloads and uses 1.25.7, so `make` works. A
+tool run with `go run some/tool@version` is built outside the module and does
+not switch, so it fails on every package with `package requires newer Go
+version go1.25` — set `GOTOOLCHAIN=go1.25.7` for those (`make lint-dead` does).
+
 ## How code here is written
 
 These are requirements, not preferences. A feature that works but nobody can

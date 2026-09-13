@@ -34,8 +34,7 @@ func (b *browserStub) Rows(_ context.Context, table string, limit, offset int) (
 
 // The clamp lives in the service and not in the port, whose contract passes
 // the limit straight through to SQL's LIMIT: a caller-supplied limit reaching
-// that unbounded is how one request ends up reading a whole table. Same
-// reasoning as AdminService.RecentAudit.
+// that unbounded is how one request ends up reading a whole table.
 func TestRowsClampsTheLimit(t *testing.T) {
 	cases := []struct {
 		name string

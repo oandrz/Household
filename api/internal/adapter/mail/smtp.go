@@ -38,8 +38,8 @@ type SMTPMailer struct {
 // SMTPFrom, baseURL is AppBaseURL, username and password are SMTPUsername
 // and SMTPPassword (both "" means no SMTP AUTH is attempted at all), and
 // tlsMode is SMTPTLSMode ("none", "opportunistic" or "mandatory" -- anything
-// else falls back to NoTLS, but config.Load already rejects any other value,
-// so that fallback is unreachable outside a test that constructs this
+// else falls back to TLSMandatory, but config.Load already rejects any other
+// value, so that fallback is unreachable outside a test that constructs this
 // mailer directly with a bad string).
 func NewSMTPMailer(addr, from, baseURL, username, password, tlsMode string) *SMTPMailer {
 	host, port := splitAddr(addr)
@@ -58,8 +58,12 @@ func tlsPolicyFromMode(mode string) gomail.TLSPolicy {
 		return gomail.TLSMandatory
 	case "opportunistic":
 		return gomail.TLSOpportunistic
-	default:
+	case "none":
 		return gomail.NoTLS
+	default:
+		// Fail closed: a mode this code does not recognise must never mean
+		// "send sign-in links in plain text".
+		return gomail.TLSMandatory
 	}
 }
 

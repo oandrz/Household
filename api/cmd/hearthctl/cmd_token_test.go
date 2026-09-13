@@ -33,7 +33,7 @@ func TestLoginWithTokenProvesItBeforeStoring(t *testing.T) {
 			w.Write([]byte(`{"user":{"email":"a@example.com"}}`))
 			return
 		}
-		http.Error(w, `{"error":{"code":"UNAUTHENTICATED"}}`, 401)
+		http.Error(w, `{"error":{"code":"UNAUTHENTICATED"}}`, http.StatusUnauthorized)
 	}
 	_, _, err := run_(t, srv.URL, "", "login", "--token")
 	if exitCode(t, err) != exitSignInAgain {

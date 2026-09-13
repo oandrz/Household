@@ -5,25 +5,10 @@
 // entry to invalidate, per the task's "each panel owns its own mutation and
 // query" instruction.
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { z } from "zod";
-import { apiFetch } from "../../api/client";
-import { spaceSchema } from "../auth/schemas";
 import { useMe } from "../auth/useAuth";
 import { spaceAudienceLabel } from "./copy";
 import { NewSpaceModal } from "./NewSpaceModal";
-
-const spacesListSchema = z.array(spaceSchema);
-type Space = z.infer<typeof spaceSchema>;
-
-async function fetchSpaces(): Promise<Space[]> {
-  const body = await apiFetch<unknown>("/api/v1/spaces");
-  return spacesListSchema.parse(body);
-}
-
-function useSpaces() {
-  return useQuery({ queryKey: ["spaces"], queryFn: fetchSpaces });
-}
+import { useSpaces } from "./useSpaces";
 
 export function SpacesPanel() {
   const me = useMe();

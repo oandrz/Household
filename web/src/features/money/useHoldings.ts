@@ -3,11 +3,10 @@
 // include_archived union shape (live-and-archived from one endpoint, toggled
 // by a query parameter), so holdingsQueryKey is modelled on goalsQueryKey.
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { apiFetch } from "../../api/client";
+import { apiFetch, fetchAndParse } from "../../api/client";
 import {
   holdingEventsResponseSchema,
   holdingIncomeResponseSchema,
-  holdingResponseSchema,
   holdingValuationsResponseSchema,
   portfolioResponseSchema,
   type PortfolioResponse,
@@ -37,7 +36,7 @@ export type UpdateHoldingBody = {
 // exactly what the person typed, sent verbatim. Converting it to nano units
 // here would put the 1e9 division on the client, which is the float64 defect
 // holdingSchemas.ts's own comment names.
-export type RecordEventBody = {
+type RecordEventBody = {
   kind: HoldingEventKind;
   quantity: string;
   amountMinor: number;
@@ -49,7 +48,7 @@ export type RecordEventBody = {
 // RecordIncomeBody mirrors createIncomeRequest. A fee is sent POSITIVE, the
 // same as a dividend: the server subtracts fees when it sums a period, and a
 // negative amount is refused everywhere in this product.
-export type RecordIncomeBody = {
+type RecordIncomeBody = {
   kind: IncomeKind;
   amountMinor: number;
   primaryAmountMinor?: number;
@@ -57,33 +56,32 @@ export type RecordIncomeBody = {
   note: string;
 };
 
-export type RecordValuationBody = {
+type RecordValuationBody = {
   unitPriceMinor: number;
   primaryUnitPriceMinor?: number;
   asOf: string;
   note: string;
 };
 
-export function holdingsQueryKey(includeArchived: boolean) {
+function holdingsQueryKey(includeArchived: boolean) {
   return ["holdings", { includeArchived }] as const;
 }
 
-export function holdingEventsQueryKey(holdingId: string) {
+function holdingEventsQueryKey(holdingId: string) {
   return ["holding-events", holdingId] as const;
 }
 
-export function holdingValuationsQueryKey(holdingId: string) {
+function holdingValuationsQueryKey(holdingId: string) {
   return ["holding-valuations", holdingId] as const;
 }
 
-export function holdingIncomeQueryKey(holdingId: string) {
+function holdingIncomeQueryKey(holdingId: string) {
   return ["holding-income", holdingId] as const;
 }
 
 async function fetchPortfolio(includeArchived: boolean): Promise<PortfolioResponse> {
   const suffix = includeArchived ? "?include_archived=true" : "";
-  const body = await apiFetch<unknown>(`/api/v1/holdings${suffix}`);
-  return portfolioResponseSchema.parse(body);
+  return fetchAndParse(portfolioResponseSchema, `/api/v1/holdings${suffix}`);
 }
 
 // Both variants, the useGoals.ts invalidateGoals shape and for its reason: a
@@ -237,10 +235,10 @@ export function useHoldingEvents(holdingId: string | null) {
   return useQuery({
     queryKey: holdingEventsQueryKey(holdingId ?? ""),
     queryFn: async () => {
-      const body = await apiFetch<unknown>(
+      return fetchAndParse(
+        holdingEventsResponseSchema,
         `/api/v1/holdings/${encodeURIComponent(holdingId ?? "")}/events`,
       );
-      return holdingEventsResponseSchema.parse(body);
     },
     enabled: holdingId !== null,
   });
@@ -250,10 +248,10 @@ export function useHoldingValuations(holdingId: string | null) {
   return useQuery({
     queryKey: holdingValuationsQueryKey(holdingId ?? ""),
     queryFn: async () => {
-      const body = await apiFetch<unknown>(
+      return fetchAndParse(
+        holdingValuationsResponseSchema,
         `/api/v1/holdings/${encodeURIComponent(holdingId ?? "")}/valuations`,
       );
-      return holdingValuationsResponseSchema.parse(body);
     },
     enabled: holdingId !== null,
   });
@@ -263,15 +261,11 @@ export function useHoldingIncome(holdingId: string | null) {
   return useQuery({
     queryKey: holdingIncomeQueryKey(holdingId ?? ""),
     queryFn: async () => {
-      const body = await apiFetch<unknown>(
+      return fetchAndParse(
+        holdingIncomeResponseSchema,
         `/api/v1/holdings/${encodeURIComponent(holdingId ?? "")}/income`,
       );
-      return holdingIncomeResponseSchema.parse(body);
     },
     enabled: holdingId !== null,
   });
 }
-
-// Re-exported so a caller that already imports the hook does not need a second
-// import for the write response shape.
-export { holdingResponseSchema };

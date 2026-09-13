@@ -88,7 +88,6 @@ const trendSchema = z.object({
 });
 
 export type TrendPoint = z.infer<typeof trendPointSchema>;
-export type Trend = z.infer<typeof trendSchema>;
 
 const computableSummarySchema = z.object({
   currency: z.string(),

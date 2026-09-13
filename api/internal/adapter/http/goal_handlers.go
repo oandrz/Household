@@ -1,7 +1,6 @@
 package httpadapter
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -138,12 +137,8 @@ type addContributionRequest struct {
 // failure, written directly since neither caller has anything else useful to
 // add.
 func parseGoalMonth(w http.ResponseWriter, raw string) (time.Time, bool) {
-	t, err := time.Parse(monthLayout, raw)
-	if err != nil {
-		WriteError(w, http.StatusBadRequest, "INVALID_MONTH", "That month could not be read. Use YYYY-MM.", nil)
-		return time.Time{}, false
-	}
-	return t, true
+	return parseTimeOrRefuse(w, raw, monthLayout,
+		http.StatusBadRequest, "INVALID_MONTH", "That month could not be read. Use YYYY-MM.")
 }
 
 // handleListGoals serves the whole Goals screen: every card (live only by
@@ -264,14 +259,11 @@ func handleUpdateGoal(deps Deps) http.HandlerFunc {
 		today := deps.Clock.Now()
 
 		if req.Currency != nil {
-			views, err := listGoalViews(r.Context(), deps, scope.HouseholdID, today)
+			// A goal that is not in this household is MapDomainError's own
+			// 404 NOT_FOUND, the same body this check always answered.
+			current, err := deps.Goals.View(r.Context(), scope.HouseholdID, id, today)
 			if err != nil {
 				MapDomainError(w, r, err)
-				return
-			}
-			current, found := findGoalViewByID(views, id)
-			if !found {
-				WriteError(w, http.StatusNotFound, "NOT_FOUND", "That could not be found.", nil)
 				return
 			}
 			wireCurrency := strings.ToUpper(strings.TrimSpace(*req.Currency))
@@ -344,14 +336,11 @@ func handleAddGoalContribution(deps Deps) http.HandlerFunc {
 		goalID := chi.URLParam(r, "id")
 
 		if req.Currency != nil {
-			views, err := listGoalViews(r.Context(), deps, scope.HouseholdID, deps.Clock.Now())
+			// A goal that is not in this household is MapDomainError's own
+			// 404 NOT_FOUND, the same body this check always answered.
+			current, err := deps.Goals.View(r.Context(), scope.HouseholdID, goalID, deps.Clock.Now())
 			if err != nil {
 				MapDomainError(w, r, err)
-				return
-			}
-			current, found := findGoalViewByID(views, goalID)
-			if !found {
-				WriteError(w, http.StatusNotFound, "NOT_FOUND", "That could not be found.", nil)
 				return
 			}
 			wireCurrency := strings.ToUpper(strings.TrimSpace(*req.Currency))
@@ -404,31 +393,6 @@ func handleDeleteGoalContribution(deps Deps) http.HandlerFunc {
 	}
 }
 
-// listGoalViews is GoalService.List's live-and-archived union, stripped down
-// to the slice callers below actually want. GoalService exposes no
-// single-goal getter (it never needed one before this task: List already
-// composes everything the screen shows in one call), so this is the one
-// lookup every helper in this file that needs to inspect a specific existing
-// goal -- the currency pre-checks, the archived-name conflict lookup, and
-// writeGoal's re-read -- shares, rather than three call sites each reaching
-// for List on their own.
-func listGoalViews(ctx context.Context, deps Deps, householdID string, today time.Time) ([]usecase.GoalView, error) {
-	view, err := deps.Goals.List(ctx, householdID, true, today)
-	if err != nil {
-		return nil, err
-	}
-	return view.Goals, nil
-}
-
-func findGoalViewByID(views []usecase.GoalView, id string) (usecase.GoalView, bool) {
-	for _, v := range views {
-		if v.Goal.ID == id {
-			return v, true
-		}
-	}
-	return usecase.GoalView{}, false
-}
-
 // findArchivedGoalByName is writeGoalNameConflict's lookup: among every goal
 // this collision could be against, the one whose exact (trimmed) name
 // matches and which is archived -- the row a Restore action could actually
@@ -443,26 +407,21 @@ func findArchivedGoalByName(views []usecase.GoalView, name string) (usecase.Goal
 	return usecase.GoalView{}, false
 }
 
-// writeGoal re-reads the goal through listGoalViews so every write response
-// carries the derived figures (contributed, percent, status, required
-// monthly) that Create/Update/SetArchived's own return values do not --
-// GoalService.List is what computes them, and a handler computing them
-// itself would be exactly the arithmetic this layer is not allowed to do.
-// The same "re-read after write" shape writeAccount and writeTransaction
-// already use, for the same reason: the write call's own return value is
-// never quite enough to answer with.
+// writeGoal re-reads the goal through GoalService.View so every write
+// response carries the derived figures (contributed, percent, status,
+// required monthly) that Create/Update/SetArchived's own return values do not
+// -- GoalService computes them, and a handler computing them itself would be
+// exactly the arithmetic this layer is not allowed to do. The same "re-read
+// after write" shape writeAccount and writeTransaction already use, for the
+// same reason: the write call's own return value is never quite enough to
+// answer with.
 //
-// includeArchived is always true here (via listGoalViews), which is what
-// lets archive and restore re-read successfully -- a re-read that filtered
-// archived goals out would 404 its own just-completed archive.
+// View reads archived goals too, which is what lets archive and restore
+// re-read successfully -- a re-read that skipped archived goals would 404 its
+// own just-completed archive.
 func writeGoal(w http.ResponseWriter, r *http.Request, deps Deps, householdID, goalID string, today time.Time, status int) {
-	views, err := listGoalViews(r.Context(), deps, householdID, today)
-	if err != nil {
-		MapDomainError(w, r, err)
-		return
-	}
-	view, found := findGoalViewByID(views, goalID)
-	if !found {
+	view, err := deps.Goals.View(r.Context(), householdID, goalID, today)
+	if errors.Is(err, domain.ErrNotFound) {
 		// The write that got us here (Create/Update/SetArchived) already
 		// succeeded and already checked existence on the way in -- a miss on
 		// this immediate re-read is not a client mistake to explain with 404,
@@ -470,6 +429,10 @@ func writeGoal(w http.ResponseWriter, r *http.Request, deps Deps, householdID, g
 		// logged-500 path is what says so rather than reporting a successful
 		// write as "not found."
 		logAndWriteInternal(w, r, fmt.Errorf("goal %s not found on the re-read immediately after a successful write", goalID))
+		return
+	}
+	if err != nil {
+		MapDomainError(w, r, err)
 		return
 	}
 	WriteJSON(w, status, goalResponse{Goal: toGoalDTO(view)})
@@ -489,8 +452,10 @@ func writeGoalNameConflict(w http.ResponseWriter, r *http.Request, deps Deps, ho
 		MapDomainError(w, r, err)
 		return
 	}
-	if views, listErr := listGoalViews(r.Context(), deps, householdID, today); listErr == nil {
-		if archived, ok := findArchivedGoalByName(views, attemptedName); ok {
+	// A name search is genuinely about every goal, archived ones included, so
+	// this is the one lookup in the file that still reads the whole list.
+	if page, listErr := deps.Goals.List(r.Context(), householdID, true, today); listErr == nil {
+		if archived, ok := findArchivedGoalByName(page.Goals, attemptedName); ok {
 			WriteError(w, http.StatusConflict, "GOAL_NAME_TAKEN",
 				fmt.Sprintf("%q is the name of an archived goal. Restore it, or choose a different name.",
 					strings.TrimSpace(attemptedName)),

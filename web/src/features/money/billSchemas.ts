@@ -7,11 +7,13 @@
 // recorded the field lists this file was checked against line by line.
 import { z } from "zod";
 
-// cadenceSchema mirrors domain.Cadence. Kept private to this file -- Bill's
-// own inferred `cadence` field already carries this union everywhere a
-// caller needs it, the same reason goalSchemas.ts never exports
-// goalStatusSchema either.
+// cadenceSchema mirrors domain.Cadence. The schema stays private to this file
+// -- Bill's own inferred `cadence` field already carries this union everywhere
+// a caller needs the type, the same reason goalSchemas.ts never exports
+// goalStatusSchema either. Its values are exported as BILL_CADENCES so
+// BillModal's cadence <select> can refuse anything outside them (parseEnum).
 const cadenceSchema = z.enum(["one_off", "monthly", "quarterly", "yearly"]);
+export const BILL_CADENCES = cadenceSchema.options;
 
 // billSchema mirrors billDTO -- one row on the Bills screen, and also the
 // shape every write route answers inside {"bill": ...} (billResponseSchema

@@ -5,7 +5,7 @@
 // rather than reaching a screen the spec says never shows money.
 import { z } from "zod";
 
-export const adminMemberMatchSchema = z
+const adminMemberMatchSchema = z
   .object({ memberName: z.string(), memberEmail: z.string().nullable() })
   .strict();
 
@@ -24,7 +24,7 @@ export const adminHouseholdListingSchema = z
   .strict();
 export type AdminHouseholdListing = z.infer<typeof adminHouseholdListingSchema>;
 
-export const adminDirectoryMetricsSchema = z
+const adminDirectoryMetricsSchema = z
   .object({
     households: z.number().int(),
     activeHouseholds7d: z.number().int(),
@@ -61,7 +61,7 @@ export const adminHouseholdMemberSchema = z
   .strict();
 export type AdminHouseholdMember = z.infer<typeof adminHouseholdMemberSchema>;
 
-export const adminPendingInviteSchema = z
+const adminPendingInviteSchema = z
   .object({
     name: z.string(),
     email: z.string(),

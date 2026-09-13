@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -179,24 +180,58 @@ func toNotificationPreferences(row sqlcgen.NotificationPreference) usecase.Notif
 	}
 }
 
-// toRole and toCapabilities convert already-validated database columns
-// directly: migrations/00002_identity.sql's CHECK constraints (role,
+// toRole and toCapabilities refuse values this code did not write -- the
+// fail-closed rule every other enum column read in this package follows
+// (toBill's cadence, toCategory's kind, admin_directory_repo's member roles).
+// migrations/00002_identity.sql's CHECK constraints (role,
 // capabilities_are_known, limited_members_have_no_marriage,
-// owners_hold_all_capabilities) are the enforcement point for rows already
-// in the table, so re-running domain.ParseRole / domain.ParseCapabilities on
-// every read would just repeat a check the schema already guarantees — and
-// ParseCapabilities would reject an empty slice's caller-facing sibling,
-// domain.Space.RequiredCapability's "" for no-capability-required, which is
-// a legitimate stored value (see toDomainSpace) but not a legitimate member
-// of Capabilities.
-func toRole(s string) domain.Role { return domain.Role(s) }
-
-func toCapabilities(ss []string) domain.Capabilities {
-	caps := make(domain.Capabilities, len(ss))
-	for i, s := range ss {
-		caps[i] = domain.Capability(s)
+// owners_hold_all_capabilities) are the first gate; parsing on read is the
+// second, and costs a string compare.
+//
+// This reverses an earlier choice to trust the CHECKs alone (2026-09-13
+// review). A role is the input to authorisation at every inbound edge, so an
+// impossible one must fail the request, not reach a guard that compares it
+// with "owner" and quietly treats it as something else.
+//
+// domain.Space.RequiredCapability's "" (no capability required) is a
+// legitimate stored value ParseCapabilities would refuse, which is why
+// toDomainSpace does not go through toCapabilities.
+func toRole(s string) (domain.Role, error) {
+	role, err := domain.ParseRole(s)
+	if err != nil {
+		return "", fmt.Errorf("postgres: membership role: %w", err)
 	}
-	return caps
+	return role, nil
+}
+
+func toCapabilities(ss []string) (domain.Capabilities, error) {
+	caps, err := domain.ParseCapabilities(ss)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: membership capabilities: %w", err)
+	}
+	return caps, nil
+}
+
+// toMembership builds a domain.Membership from the columns every membership
+// query returns. It takes plain fields rather than a generated row struct for
+// the reason toGoal gives: each query has its own sqlc row type over the same
+// columns.
+func toMembership(id, householdID, userID pgtype.UUID, role string, capabilities []string) (domain.Membership, error) {
+	r, err := toRole(role)
+	if err != nil {
+		return domain.Membership{}, err
+	}
+	caps, err := toCapabilities(capabilities)
+	if err != nil {
+		return domain.Membership{}, err
+	}
+	return domain.Membership{
+		ID:           uuidToString(id),
+		HouseholdID:  uuidToString(householdID),
+		UserID:       uuidToString(userID),
+		Role:         r,
+		Capabilities: caps,
+	}, nil
 }
 
 // dateOnly converts a domain time into the pgtype.Date that

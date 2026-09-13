@@ -582,7 +582,7 @@ describe("RetrosPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Discard draft" }));
     fireEvent.click(await screen.findByRole("button", { name: "Yes, discard it" }));
 
-    // The modal closes on success (RetroModal.tsx's own handleDiscardDraft),
+    // The modal closes on success (DiscardDraftControl.tsx's own handleDiscardDraft),
     // the list refetches (afterWrite's own retroListQueryKey invalidation),
     // and both halves of "the page reflects the retro being gone" hold: the
     // row is gone, and the Start button -- absent before, since August

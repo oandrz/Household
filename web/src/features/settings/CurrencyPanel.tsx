@@ -9,13 +9,11 @@
 // without a mockup precedent, added because of that gap rather than
 // because the design asked for it.
 import { type FormEvent, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiFetch } from "../../api/client";
-import { apiErrorMessage } from "../auth/copy";
-import { householdSchema, type Household } from "../auth/schemas";
+import { apiErrorMessage } from "../../api/errorMessage";
 import { useCurrencies, useMe } from "../auth/useAuth";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { currencyLabel } from "./copy";
+import { useHousehold, useUpdateHousehold } from "./useHousehold";
 
 // Mirrors the backend's own rule (api/internal/domain/money.go's NewMoney:
 // "currency must be three letters" and "must be uppercase") so an obviously
@@ -24,44 +22,6 @@ import { currencyLabel } from "./copy";
 // reject (an uppercase three-letter code that isn't a real currency, say);
 // this is a client-side head start, not a replacement for it.
 const CURRENCY_CODE_PATTERN = /^[A-Z]{3}$/;
-
-async function fetchHousehold(): Promise<Household> {
-  const body = await apiFetch<unknown>("/api/v1/household");
-  return householdSchema.parse(body);
-}
-
-function useHousehold() {
-  return useQuery({ queryKey: ["household"], queryFn: fetchHousehold });
-}
-
-function useUpdateHousehold() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (
-      vars: { showSecondaryCurrency: boolean } | { primaryCurrency: string },
-    ): Promise<Household> => {
-      const body = await apiFetch<unknown>("/api/v1/household", {
-        method: "PATCH",
-        body: JSON.stringify(vars),
-      });
-      return householdSchema.parse(body);
-    },
-    // Returns (rather than fires-and-forgets) the invalidation promises: a
-    // mutation's onSuccess return value is awaited by TanStack Query before
-    // the mutation is considered settled, which is what `isPending` (the
-    // toggle's disabled condition below) reflects. Without this, the PATCH
-    // response arriving would immediately re-enable the toggle while
-    // ['household'] was still serving its stale cached value -- a second
-    // click in that gap would compute `!household.data.showSecondaryCurrency`
-    // from the same pre-click value the first click already read.
-    onSuccess: () => {
-      return Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["household"] }),
-        queryClient.invalidateQueries({ queryKey: ["me"] }),
-      ]);
-    },
-  });
-}
 
 export function CurrencyPanel() {
   const me = useMe();

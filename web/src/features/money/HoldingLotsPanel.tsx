@@ -10,10 +10,13 @@
 import { useState, type FormEvent } from "react";
 import { ApiError } from "../../api/client";
 import { useCurrencies } from "../auth/useAuth";
+import { FIELD_CONTROL_CLASS } from "../../components/fieldClasses";
 import { Modal } from "../../components/Modal";
+import { useConfirmAction } from "../../components/useConfirmAction";
 import { formatMoney, toMinorUnits } from "./formatMoney";
 import { useHoldingEvents, useHoldingValuations, useHoldings } from "./useHoldings";
-import type { Holding, HoldingEventKind } from "./holdingSchemas";
+import { parseEnum } from "../../lib/parseEnum";
+import { holdingEventKindSchema, type Holding, type HoldingEventKind } from "./holdingSchemas";
 
 export function HoldingLotsPanel({
   holding,
@@ -49,8 +52,8 @@ export function HoldingLotsPanel({
 
   // An in-page confirmation, never window.confirm: a native dialog blocks the
   // page and, in this project, blocks browser automation outright.
-  // TransactionModal.tsx's Delete control is the precedent.
-  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+  // TransactionModal.tsx's Delete control is the precedent. Keyed by entry id.
+  const entryRemoval = useConfirmAction();
 
   const submitEvent = async (e: FormEvent) => {
     e.preventDefault();
@@ -100,9 +103,9 @@ export function HoldingLotsPanel({
           <label className="flex flex-1 min-w-[9rem] flex-col gap-1.5">
             <span className="text-xs font-semibold text-label">Kind</span>
             <select
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              className={FIELD_CONTROL_CLASS}
               value={kind}
-              onChange={(e) => setKind(e.target.value as HoldingEventKind)}
+              onChange={(e) => setKind(parseEnum(e.target.value, holdingEventKindSchema.options, kind))}
             >
               <option value="acquisition">Bought</option>
               <option value="disposal">Sold</option>
@@ -111,7 +114,7 @@ export function HoldingLotsPanel({
           <label className="flex flex-1 min-w-[9rem] flex-col gap-1.5">
             <span className="text-xs font-semibold text-label">How many {holding.unit}s</span>
             <input
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              className={FIELD_CONTROL_CLASS}
               type="text"
               inputMode="decimal"
               value={quantity}
@@ -125,7 +128,7 @@ export function HoldingLotsPanel({
               {kind === "acquisition" ? "Total paid" : "Total received"} ({holding.currency})
             </span>
             <input
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              className={FIELD_CONTROL_CLASS}
               type="text"
               inputMode="decimal"
               value={amount}
@@ -137,7 +140,7 @@ export function HoldingLotsPanel({
           <label className="flex flex-1 min-w-[9rem] flex-col gap-1.5">
             <span className="text-xs font-semibold text-label">On</span>
             <input
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              className={FIELD_CONTROL_CLASS}
               type="date"
               value={occurredOn}
               onChange={(e) => setOccurredOn(e.target.value)}
@@ -169,32 +172,42 @@ export function HoldingLotsPanel({
                   {formatMoney(event.amountMinor, event.currency, symbolFor(event.currency))}
                 </span>
                 <span className="text-muted">{event.occurredOn}</span>
-                {confirmingDelete === event.id ? (
+                {entryRemoval.isConfirming(event.id) ? (
                   <span className="flex flex-wrap items-center gap-2 text-muted">
                     Remove this entry?
                     <button
                       type="button"
-                      className="min-h-11 rounded-lg bg-danger px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0"
-                      onClick={async () => {
-                        try {
-                          await deleteEvent.mutateAsync({ id: holding.id, eventId: event.id });
-                          setConfirmingDelete(null);
-                        } catch (err) {
-                          setEventError(
-                            err instanceof ApiError ? err.message : "That entry could not be removed.",
-                          );
-                          setConfirmingDelete(null);
-                        }
-                      }}
+                      // Off while this entry's DELETE is in flight, so a double
+                      // click cannot send a second request for an entry the
+                      // first one is already removing. It reads the hook's
+                      // per-entry flag, not deleteEvent.isPending: one mutation
+                      // serves every row, so its flag would grey every row.
+                      disabled={entryRemoval.isPending(event.id)}
+                      className="min-h-11 rounded-lg bg-danger px-3.5 py-2 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
+                      onClick={() =>
+                        void entryRemoval.confirm(async () => {
+                          // A failure shows in this section's own error line,
+                          // shared with the form above, so it is caught here
+                          // rather than kept against the row. The hook closes
+                          // the confirmation either way.
+                          try {
+                            await deleteEvent.mutateAsync({ id: holding.id, eventId: event.id });
+                          } catch (err) {
+                            setEventError(
+                              err instanceof ApiError ? err.message : "That entry could not be removed.",
+                            );
+                          }
+                        }, event.id)
+                      }
                     >
                       Remove
                     </button>
-                    <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0" onClick={() => setConfirmingDelete(null)}>
+                    <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0" onClick={entryRemoval.cancel}>
                       Keep
                     </button>
                   </span>
                 ) : (
-                  <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0" onClick={() => setConfirmingDelete(event.id)}>
+                  <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0" onClick={() => entryRemoval.ask(event.id)}>
                     Remove
                   </button>
                 )}
@@ -216,7 +229,7 @@ export function HoldingLotsPanel({
           <label className="flex flex-1 min-w-[9rem] flex-col gap-1.5">
             <span className="text-xs font-semibold text-label">Price per {holding.unit} ({holding.currency})</span>
             <input
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              className={FIELD_CONTROL_CLASS}
               type="text"
               inputMode="decimal"
               value={price}
@@ -228,7 +241,7 @@ export function HoldingLotsPanel({
           <label className="flex flex-1 min-w-[9rem] flex-col gap-1.5">
             <span className="text-xs font-semibold text-label">As of</span>
             <input
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              className={FIELD_CONTROL_CLASS}
               type="date"
               value={asOf}
               onChange={(e) => setAsOf(e.target.value)}

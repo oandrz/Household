@@ -11,7 +11,7 @@
 // see that file's own header comment for why.
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { ApiError, apiFetch } from "../../api/client";
+import { ApiError, apiFetch, fetchAndParse } from "../../api/client";
 import { retroListQueryKey, retroQueryKey } from "./retroQueryKeys";
 import {
   retroActionResponseSchema,
@@ -23,8 +23,7 @@ import {
 } from "./retroSchemas";
 
 async function fetchRetro(month: string): Promise<RetroDetailResponse> {
-  const body = await apiFetch<unknown>(`/api/v1/retros/${encodeURIComponent(month)}`);
-  return retroDetailResponseSchema.parse(body);
+  return fetchAndParse(retroDetailResponseSchema, `/api/v1/retros/${encodeURIComponent(month)}`);
 }
 
 // SaveRetroBody is a partial patch of PATCH /retros/{month}'s own fields.
@@ -65,7 +64,7 @@ export type SaveRetroBody = Partial<{
 // minus one, because the backend does not return which month a carriedFrom
 // id actually belongs to; passing anything but that list's own ids breaks
 // the label silently, not loudly. Full reasoning is on `previousMonthName`.
-export type AddRetroActionBody = {
+type AddRetroActionBody = {
   body: string;
   assigneeMembershipIds?: string[];
   carriedFrom?: string;
@@ -160,11 +159,10 @@ export function useRetro(month: string) {
         notes: body.notes ?? current.retro.notes,
         version: current.retro.version,
       };
-      const raw = await apiFetch<unknown>(`/api/v1/retros/${encodeURIComponent(month)}`, {
+      return (await fetchAndParse(retroWriteResponseSchema, `/api/v1/retros/${encodeURIComponent(month)}`, {
         method: "PATCH",
         body: JSON.stringify(payload),
-      });
-      return retroWriteResponseSchema.parse(raw).retro;
+      })).retro;
     },
     onSuccess: afterWrite,
     // RETRO_CHANGED means another tab saved this same retro first -- the
@@ -210,15 +208,14 @@ export function useRetro(month: string) {
 
   const addActionMutation = useMutation({
     mutationFn: async (body: AddRetroActionBody): Promise<RetroAction> => {
-      const raw = await apiFetch<unknown>(`/api/v1/retros/${encodeURIComponent(month)}/actions`, {
+      return (await fetchAndParse(retroActionResponseSchema, `/api/v1/retros/${encodeURIComponent(month)}/actions`, {
         method: "POST",
         body: JSON.stringify({
           body: body.body,
           assigneeMembershipIds: body.assigneeMembershipIds ?? [],
           carriedFrom: body.carriedFrom ?? "",
         }),
-      });
-      return retroActionResponseSchema.parse(raw).action;
+      })).action;
     },
     onSuccess: afterWrite,
   });
