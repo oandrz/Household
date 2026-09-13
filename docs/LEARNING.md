@@ -3249,6 +3249,27 @@ backgrounded.
   closing sentence, needed again on four separate floors across these two
   tasks because a route landing on a branch between one measurement and the
   next is invisible to arithmetic and visible only to a re-run.
+- **`docs/SYSTEM_DESIGN.md` contradicted itself for about four weeks, found
+  2026-09-13 — a claim about the production box this time, written twice.**
+  §1's production topology said "there are no backups … no `age` key, bucket,
+  `rclone` remote or cron exists on this box" while §8's Backups row, further
+  down the same file, said "running nightly since 2026-08-15" — both true once,
+  and only one rewritten when backups went live. The same section still said
+  Telegram's code was "not deployed here yet", called the read-only browse "on
+  branch `admin-db-browse`" long after `a44b111` merged, and still said no
+  migration had reached the production database; §8 said `hearthctl` "never
+  retries a write (no idempotency keys)" after `Idempotency-Key` shipped in
+  #22. None of it was caught by a review, because no change touched those
+  paragraphs — an unrelated refresh of `docs/architecture.html` read §1 against
+  `docs/INFRASTRUCTURE.md` and `docs/HANDOVER.md` and found the disagreement.
+  Two things would have caught it sooner. **A deploy-state sentence ("not
+  deployed here", "no bot configured") is a claim about a machine the
+  repository cannot see**, so it goes stale with no commit touching it; write
+  the condition instead — "reaches the box once `deploy/deploy.sh` has run with
+  that SHA; `IMAGE_TAG` on the box says" — which stays true. And **when the
+  state a document describes changes, grep the whole document for the old
+  wording**, not only the section you came to edit: a fact stated in two
+  sections drifts exactly the way a floor stated in two tests does.
 
 **Treat a citation the way you'd treat a test assertion: something the next
 reader can verify against the thing it names, not something to trust because

@@ -152,9 +152,9 @@ route, fixed with `flex-wrap` on `AdminShell.tsx`'s nav and pinned by a
 mutation-checked `AdminShell.test.tsx`. See
 `docs/superpowers/plans/2026-09-04-hearth-outbound-inspector-verification.md`.
 
-**The operator's read-only database browse is on branch `admin-db-browse`,
-open as [PR #18](https://github.com/oandrz/Household/pull/18) and not merged,
-2026-09-04 — code-complete, reviewed, and walked: its fifteen-criterion
+**The operator's read-only database browse is merged to `main` as `a44b111`,
+[PR #18](https://github.com/oandrz/Household/pull/18), 2026-09-04 —
+code-complete, reviewed, and walked: its fifteen-criterion
 browser walk ran the same day and passed 15 of 15**
 (`docs/superpowers/plans/2026-09-04-hearth-database-browse-verification.md`),
 so the diagrams it touches carry no caveat that the other features' do not.
@@ -187,9 +187,10 @@ what was verified on the live box and what was not.
 **Backups run nightly to Cloudflare R2**, `age`-encrypted with a key that is
 deliberately not on the box, and the restore path has been exercised end to end
 against a real backup — all eleven tables and every monetary value came back
-intact. What is still missing is the **escrow**: no second person holds the
-private key, so no restore has ever been performed by anyone but the owner.
-§8's Backups row carries both halves.
+intact. **The escrow exists and has been used**: a printed copy of the key is
+held outside this machine, and on 2026-08-15 a restore was run from that paper
+copy alone (`docs/INFRASTRUCTURE.md`, "The escrow envelope"). §8's Backups row
+carries the detail.
 
 ---
 
@@ -217,7 +218,7 @@ graph TD
 
     Browser -->|"same origin, cookies"| Web
     Web -->|"proxy /api/v1"| API
-    CLI -->|"HTTP :8080 directly, the same<br/>session + CSRF cookies, no proxy"| API
+    CLI -->|"HTTP :8080 directly, no proxy —<br/>session + CSRF cookies, or a Bearer API token"| API
     API -->|"DATABASE_URL — the application pool,<br/>reads and writes, MaxConns 10"| PG
     API -->|"DATABASE_READONLY_URL — the browse pool,<br/>SELECT-only role, MaxConns 3"| PG
     API -->|SMTP| Mail
@@ -245,8 +246,10 @@ topology diagram, below), so it stays capable of being left unset: unset,
 the arrow simply does not fire, `Deps.AdminOutbox` is nil, and the two
 routes it backs answer `503`.
 
-**Telegram is the only arrow here that leaves the machine, and it points
-outward.** Bot updates arrive by `getUpdates` long-polling *from inside* the
+**Telegram and OpenRouter are the only arrows here that leave the machine,
+and both point outward.** OpenRouter is called only from the Telegram chat
+handler — `main.go` builds the parser inside the Telegram branch — so with no
+bot configured it is never called. Bot updates arrive by `getUpdates` long-polling *from inside* the
 `api` process — there is no webhook, so no new route faces the internet and
 nothing has to be re-registered when the hostname changes (which on a free DDNS
 hostname is a live possibility). The alternative, `POST /telegram/webhook`,
@@ -254,11 +257,14 @@ would have been a public unauthenticated route whose only guard is a shared
 secret header, in a codebase whose rule is that a route without its guard has
 no second line of defence.
 
-**The two Telegram values reach the container from `.env`, and they are the
-only two in `docker-compose.yml` that do.** Every other value for the dev `api`
-service is written into the compose file directly; a bot token is a credential,
-so it is passed through as `${TELEGRAM_BOT_TOKEN:-}` instead, defaulting to
-empty so a machine with no `.env` still boots with the feature off. Without that
+**Six values reach the dev container from `.env`, and they are the only ones
+in `docker-compose.yml` that do:** the Telegram pair, the OpenRouter pair and
+the digest pair (`NUDGES_AT`, `NUDGES_TIMEZONE`). Every other value for the dev
+`api` service is written into the compose file directly; a bot token or an API
+key is a credential, so each is passed through as `${TELEGRAM_BOT_TOKEN:-}`
+instead, defaulting to empty so a machine with no `.env` still boots with the
+feature off. The digest pair is not a secret; it travels the same way because
+it means nothing without the bot. Without that
 passthrough the Docker path would read a token in `.env` and never see it —
 `make dev-local` sources `.env` itself and would have worked, `make dev` would
 not, and the only symptom is a `404` and a button that hides itself. In
@@ -374,12 +380,16 @@ worth carrying:
   migrations already applied, and the reason a deploy must go through
   `deploy/deploy.sh` rather than a reboot.
 
-One thing here is genuinely not built rather than merely undeployed: **there
-are no backups**. `deploy/backup.sh` and `deploy/restore.sh` exist and the
-restore has been rehearsed on a laptop, but no `age` key, bucket, `rclone`
-remote or cron exists on this box. The `Backup` node below is drawn because the
-script targets it, not because anything has been written there. Until that
-changes, losing the box loses the household.
+**Backups run nightly, since 2026-08-15.** The `deploy` user's crontab runs
+`deploy/backup.sh` at 19:17 UTC (03:17 in Singapore; cron on this box ignores
+`CRON_TZ` — `docs/INFRASTRUCTURE.md`): `pg_dump`, gzip, `age`, an `rclone`
+upload to Cloudflare R2, and only then a heartbeat ping to healthchecks.io, so a
+run that fails anywhere stays silent and the missing ping is the alarm. The
+private key is not on the box, so a stolen box yields ciphertext. A real backup
+has been pulled back out of R2 and restored — once with the owner's key and
+once with the key typed off the escrowed paper copy — and all eleven tables and
+every monetary value came back. R2 keeps each dump 90 days, behind a 30-day
+bucket lock.
 
 `docs/adr/0002-first-production-host.md` carries why this shape was chosen and
 why the region moved to the EU; `deploy/README.md` is the runbook for operating
@@ -388,12 +398,13 @@ it.
 ```mermaid
 graph TD
     Browser["Browser"]
+    CLI["hearthctl — a script's or an agent's client"]
     LE["Let's Encrypt"]
 
     subgraph host["One VPS — Hetzner CX23, Falkenstein, live"]
         Caddy["caddy :443<br/>terminates TLS, renews certs"]
         Nginx["web — nginx :80<br/>serves the SPA, proxies /api"]
-        API["api — Go service :8080<br/>distroless, no shell"]
+        API["api — Go service :8080<br/>distroless, no shell<br/>the Telegram poller and the digest tick run inside it"]
         PG[("postgres — volume, not published")]
         Mailpit["mailpit — mail stops here<br/>UI bound to 127.0.0.1:8025 only"]
         Admin["admin image — runs on the box<br/>goose + adminctl, api/Dockerfile target 'admin'"]
@@ -401,23 +412,26 @@ graph TD
 
     Operator["Operator's laptop"]
     Backup[("Cloudflare R2 — nightly<br/>age-encrypted, key not on the box")]
-    TG["api.telegram.org<br/>code not deployed here yet, and<br/>no bot configured in deploy/.env"]
+    TG["api.telegram.org<br/>off unless TELEGRAM_BOT_TOKEN is set —<br/>check the box, see INFRASTRUCTURE.md"]
+    ORT["openrouter.ai<br/>off unless OPENROUTER_API_KEY<br/>and OPENROUTER_MODEL are set"]
 
     Browser -->|HTTPS| Caddy
+    CLI -->|"HTTPS — session cookies<br/>or a Bearer API token"| Caddy
     Caddy -->|"HTTP, one origin"| Nginx
     Nginx -->|"/api/v1, /healthz, /readyz"| API
     API -->|"DATABASE_URL — the application pool"| PG
     API -.->|"DATABASE_READONLY_URL — the browse pool;<br/>unset on this box by the owner's decision,<br/>and the role is not created here yet"| PG
     API -->|"SMTP, plaintext, never leaves the host"| Mailpit
-    API -.->|"HTTP GET, /admin/mail —<br/>code not deployed here yet"| Mailpit
+    API -.->|"HTTP GET, /admin/mail — needs MAILPIT_API_URL<br/>and a build at or after 3eddbe2"| Mailpit
     Operator -.->|"SSH tunnel, port 8025 — the fallback<br/>for when the API itself is broken"| Mailpit
     Caddy -.->|"ACME HTTP-01"| LE
     Admin -.->|"migrations, unlock, prune"| PG
-    PG -.-> Backup
-    API -.->|"only once TELEGRAM_BOT_TOKEN is set"| TG
+    PG -.->|"nightly backup.sh from the host crontab —<br/>pg_dump, gzip, age, rclone"| Backup
+    API -.->|"getUpdates long-poll; sendMessage —<br/>sign-in links, chat replies, the daily digest"| TG
+    API -.->|"POST /chat/completions —<br/>free-text chat messages, only with a bot"| ORT
 ```
 
-Seven things about this shape are not obvious from the boxes.
+Ten things about this shape are not obvious from the boxes.
 
 **Mail stops at the box, and that is deliberate rather than unfinished.** There
 is no relay in this diagram because the install runs on a free DDNS hostname
@@ -480,30 +494,40 @@ those commands is written out in `deploy/README.md`.
 
 The dashes on this node do **not** mean "missing" — `Caddy -.-> LE` and
 `PG -.-> Backup` use them too, for occasional rather than request-path traffic.
-What has not happened is that none of it has run on a real box: the images are
-built by CI and the amd64 `goose` binary has been executed under emulation, but
-no migration has been applied to a production database. That is a deployment
-gap, not a capability gap — during a lockout there *is* a recovery path, and it
-is `adminctl unlock-household`.
+The `migrate` half has run for real: every migration was applied to the
+production database on first boot and again across a deploy, a rollback and a
+redeploy on 2026-08-15, and `goose status` has been run through the `admin`
+image (§8). The `adminctl` subcommands are still unexercised on the box — but
+during a lockout there *is* a recovery path, and it is
+`adminctl unlock-household`.
 
-**The Telegram node is drawn dashed because it is a capability this box has and
-does not use.** Two separate reasons, and both hold: this change has not been
-deployed to the box yet, and `deploy/.env` there sets neither
-`TELEGRAM_BOT_TOKEN` nor `TELEGRAM_BOT_USERNAME` — so even after a deploy,
-`config.Load` leaves the feature off, `POST /api/v1/auth/telegram/start` answers
-`404` and the poller is never started. Turning it on is two `.env` values and a restart of a build that
-carries migration `00011_telegram` — no code change, and no inbound port,
-because the connection is outbound. It is drawn
-rather than omitted because the shape an operator needs to know is that
-switching it on puts **a third party on the recovery path**: every sign-in and
-sign-up link sent over Telegram is readable by Telegram, exactly as every link
-in Mailpit is readable by whoever can reach that inbox.
-`docs/INFRASTRUCTURE.md` carries that as a dependency row rather than leaving
-it as a diagram footnote.
+**The Telegram node is drawn dashed because it is off unless configured, and
+this file cannot tell you whether the box configures it.** With
+`TELEGRAM_BOT_TOKEN` and `TELEGRAM_BOT_USERNAME` both empty, `config.Load`
+leaves the feature off, `POST /api/v1/auth/telegram/start` answers `404` and
+the poller is never started. What the box's own `deploy/.env` says has changed
+at least once, and `docs/INFRASTRUCTURE.md`'s Telegram row records it with its
+uncertainty — check the box, not this page. Turning it on is two `.env` values
+and `docker compose up -d api` (not `restart`, which keeps the old environment)
+on a build that carries the Telegram migrations — no code change, and no
+inbound port, because the connection is outbound. It is drawn rather than
+omitted because the shape an operator needs to know is that switching it on
+puts **a third party on the recovery path**: every sign-in and sign-up link
+sent over Telegram is readable by Telegram, exactly as every link in Mailpit is
+readable by whoever can reach that inbox. `docs/INFRASTRUCTURE.md` carries that
+as a dependency row rather than leaving it as a diagram footnote. **Since
+2026-09-08 the same connection carries household data too, not only links:**
+`/balance` and `/recent` answer in the chat, and the daily digest sends bill
+names and amounts and budget categories with what was spent against them
+(`usecase/nudge.go`). Commands are refused to anyone but an owner with Money
+([ADR 8](adr/0008-authorisation-at-each-channels-inbound-edge.md)), but what is
+sent is readable by Telegram all the same.
 
-**The new `api -.-> Mailpit` arrow is merged as `3eddbe2` (PR #17,
-2026-09-04) and not deployed to this box yet**, the same "capability, not
-yet traffic" shape the Telegram arrow already has above. It is the operator's
+**The second `api -.-> Mailpit` arrow is merged as `3eddbe2` (PR #17,
+2026-09-04), and reaches the box only once `deploy/deploy.sh` has run with that
+SHA or later** — this file does not know whether it has; `IMAGE_TAG` in the
+box's `deploy/.env` does. It is the same "capability, check the box for
+traffic" shape the Telegram arrow has above. It is the operator's
 outbound message inspector: `GET /admin/mail` and `GET /admin/mail/{id}`
 read Mailpit's own HTTP API — `/api/v1/messages` and `/api/v1/message/{id}`,
 never `/api/v1/message/{id}/link-check`, which issues a real request to
@@ -521,9 +545,8 @@ route, fixed with `flex-wrap` on `AdminShell.tsx`'s nav (see
 `docs/superpowers/plans/2026-09-04-hearth-outbound-inspector-verification.md`).
 
 **The second `api -.-> postgres` arrow is the operator's database browse, and
-it is dashed for a reason no other dashed arrow here has: the code exists on
-branch `admin-db-browse` and the *decision* is that this box stays without
-it.** The product owner chose on 2026-09-04 to ship it dark — merge and
+it is dashed for a reason no other dashed arrow here has: the code is merged
+(`a44b111`, PR #18) and the *decision* is that this box stays without it.** The product owner chose on 2026-09-04 to ship it dark — merge and
 deploy with `DATABASE_READONLY_URL` unset — so the deployed panel says it is
 not configured and names the variable, and no `hearth_readonly` role exists
 on this database. Two consequences worth stating rather than leaving to be
@@ -537,6 +560,39 @@ it is idempotent, so "after every restore" is the whole rule
 (`deploy/README.md`'s Restoring). This is the admin surface's first genuinely
 infrastructural dependency, and the reason the browse was always sequenced
 last of the four.
+
+**`hearthctl` is a second client through the same front door, not a side
+door.** Port 8080 is not published here — unlike development, where the first
+diagram in this section shows it calling `api` directly — so in production it
+speaks HTTPS to the public origin, and Caddy, nginx's header rewriting and every
+guard in §4 apply to it exactly as they do to the browser. That is deliberately
+unlike `adminctl`, which runs inside the `admin` image and talks to Postgres
+directly. On a headless machine it signs in with a personal API token
+([ADR 7](adr/0007-personal-api-tokens.md)): `Authorization: Bearer hearth_…`,
+which needs no CSRF header and can never reach `/admin` or mint more tokens.
+The repository records its walks against the development stack, not against
+this box. §8's Automation client row has the rest.
+
+**Two kinds of scheduled work run on this box, deliberately in two places.**
+The backup is the host's crontab (`deploy/crontab.example`): a `pg_dump` of the
+whole database that needs nothing from `api`. The daily digest is a goroutine
+inside `api`, beside the Telegram poller
+([ADR 9](adr/0009-scheduled-work-runs-inside-the-api.md)): it acts on a
+member's behalf, and cron would have needed either a direct database path or a
+new shared-secret endpoint to do that. It ticks every fifteen minutes and a
+claimed row in `nudge_deliveries` decides whether a tick sends anything, so a
+restart delays the day's message by at most fifteen minutes and never sends it
+twice. It is off unless `NUDGES_AT` and `NUDGES_TIMEZONE` are set, and needs the
+Telegram pair — which is why it has no arrow of its own: it leaves through the
+Telegram one.
+
+**`openrouter.ai` is the one outbound call that carries what a person typed.**
+A plain sentence sent to the bot goes to an open-weight model through
+OpenRouter, comes back as a proposed expense or income, is shown to the person,
+and is written only when they answer `/yes`. It is off unless
+`OPENROUTER_API_KEY` and `OPENROUTER_MODEL` are both set, and `main.go` builds
+it only inside the Telegram branch, so with no bot it is never called.
+`docs/INFRASTRUCTURE.md` records where the key lived as of 2026-09-08.
 
 ---
 
@@ -4466,20 +4522,20 @@ prefix, which is what made the duplication stop being optional.
 | Generated SQL | sqlc, from `internal/adapter/postgres/queries/*.sql` — `make sqlc` |
 | Sessions | opaque random token, hashed at rest, 30 days, extended on use, revocable |
 | CSRF | double-submit cookie, compared in constant time, mutating methods only |
-| Mail | Mailpit in development **and, for now, in production too** — the first install runs on a free DDNS hostname whose DNS refuses `TXT` records, so DKIM cannot be published and no hosted relay will verify it (`docs/adr/0003-mail-stays-on-the-box.md`). **Read two ways now:** the operator's `/admin/mail` (code-complete on branch `admin-outbox`, 2026-09-04, not yet deployed here), which reads Mailpit's HTTP API and writes an audit row per message opened; and by hand over an SSH tunnel, which stays the fallback for when the API itself is unreachable — the inbox is an authentication bypass either way, so 8025 is bound to `127.0.0.1` only. `SMTP_TLS_MODE=none` is set explicitly, since it defaults to `mandatory` outside development and Mailpit speaks plaintext. TLS policy and credentials come from config, so a real relay is four `.env` values and no code |
-| Telegram | **Off unless configured**, and both values travel together: `config.Load` refuses a boot where exactly one of `TELEGRAM_BOT_TOKEN`/`TELEGRAM_BOT_USERNAME` is set, the same both-or-neither rule `SMTP_USERNAME`/`SMTP_PASSWORD` already follow, because a half-configured channel misbehaves silently. Both empty — which is what `deploy/.env` on the production box says, and this change is not deployed there yet in any case — means `POST /auth/telegram/start` answers `404`, the poller never starts, and `adminctl` (which runs `config.Load` before every subcommand) is unaffected. **Exactly one process may call `getUpdates`:** Telegram hands each update to a single caller, so a second `api` replica would silently steal updates and the symptom would be "sign-in works about half the time" — an operational constraint on ever scaling this service horizontally, not just a code comment (§1). Outbound only; no webhook, so nothing new faces the internet. The bot token is never logged in any branch, including error paths — `client.go` builds its errors from the method name rather than the request URL, because Telegram's own API URLs embed the token in the path and a `*url.Error` carries that URL |
+| Mail | Mailpit in development **and, for now, in production too** — the first install runs on a free DDNS hostname whose DNS refuses `TXT` records, so DKIM cannot be published and no hosted relay will verify it (`docs/adr/0003-mail-stays-on-the-box.md`). **Read two ways now:** the operator's `/admin/mail` (merged as `3eddbe2`, PR #17, 2026-09-04; on the box only once `deploy/deploy.sh` has run with that SHA or later — §1), which reads Mailpit's HTTP API and writes an audit row per message opened; and by hand over an SSH tunnel, which stays the fallback for when the API itself is unreachable — the inbox is an authentication bypass either way, so 8025 is bound to `127.0.0.1` only. `SMTP_TLS_MODE=none` is set explicitly, since it defaults to `mandatory` outside development and Mailpit speaks plaintext. TLS policy and credentials come from config, so a real relay is four `.env` values and no code |
+| Telegram | **Off unless configured**, and both values travel together: `config.Load` refuses a boot where exactly one of `TELEGRAM_BOT_TOKEN`/`TELEGRAM_BOT_USERNAME` is set, the same both-or-neither rule `SMTP_USERNAME`/`SMTP_PASSWORD` already follow, because a half-configured channel misbehaves silently. Both empty means `POST /auth/telegram/start` answers `404`, the poller never starts, and `adminctl` (which runs `config.Load` before every subcommand) is unaffected; whether the production box sets them is recorded, with its uncertainty, in `docs/INFRASTRUCTURE.md` (§1). Chat commands, free-text parsing and the daily digest all hang off this same switch, so none of them runs without it. **Exactly one process may call `getUpdates`:** Telegram hands each update to a single caller, so a second `api` replica would silently steal updates and the symptom would be "sign-in works about half the time" — an operational constraint on ever scaling this service horizontally, not just a code comment (§1). Outbound only; no webhook, so nothing new faces the internet. The bot token is never logged in any branch, including error paths — `client.go` builds its errors from the method name rather than the request URL, because Telegram's own API URLs embed the token in the path and a `*url.Error` carries that URL |
 | Database browse | **Off unless configured, and off on the production box today by the owner's decision.** `DATABASE_READONLY_URL` points at `hearth_readonly`, a `SELECT`-only role created by `deploy/readonly-role.sql` during provisioning — **not by a migration**, because a role is cluster-level rather than schema, and for the same reason it is in **no backup this product takes** (`backup.sh` dumps one database with `--no-privileges`), so a restore re-runs that script. Idempotent, so "after every restore" is the whole rule. Unset means both `/admin/db/*` routes answer `503 DB_BROWSE_NOT_CONFIGURED` naming the variable; there is deliberately **no fallback to `DATABASE_URL`**, so a half-provisioned box degrades to "you cannot use this panel", never to "you are using it through the read-write connection". Set but unparseable, or set to a role that can write, **refuses the boot** — `OpenReadOnly` runs a privilege check in `AfterConnect`, so it holds on every connection the pool opens, not only the first. Set but merely unreachable does **not** refuse the boot: that is restore day, and taking the household product down over an operator panel would invert the promise. It answers `503 DB_BROWSE_UNAVAILABLE` instead, from a stand-in browser that carries the boot failure so the log says why (§3). Turning it on in production is `deploy/PROVISION.md` §10, not a deploy |
 | Seeding | `adminctl seed`, refused unless `APP_ENV=development` **and** the database host is local — both checked before the connection opens |
 | Retention | `adminctl prune --older-than=<days>` (default 30, floor 7) deletes consumed/expired `signups`, stale `login_attempts` and — closed in the whole-branch fix wave, 2026-09-01 — consumed/expired `telegram_link_requests`, the third table a stranger can grow without an account (`PruneTelegramLinkRequests` mirrors `PruneSignups`'s own retention condition exactly). `nudge_deliveries` is pruned by the api itself on its own tick, a month back. `magic_links`, `invites`, `sessions` and now `api_tokens` (revoked and expired rows are stamped, never deleted) still grow forever, a real gap rather than a decision (§6) |
 | Daily digest | **Off unless configured.** `NUDGES_AT` (local `HH:MM`) **and** `NUDGES_TIMEZONE` (IANA), both or neither, refused without Telegram; a bad clock or an unknown zone refuses the boot. A goroutine beside the poller ticks every fifteen minutes; `usecase.NudgeDue` says whether local time is past the clock and which local date to claim. One message per owner-with-Money chat per household per day, never a second one, never one that says "all fine". The start-up log line `daily digest enabled at=… timezone=…` is the tell; each send logs `nudge sent household=…`. One zone for the whole install |
 | Rate limiting | Per-address (3/hour) and a global daily ceiling (1000, reset at midnight, not a rolling 24 hours), both counted from `signups` so a restart cannot reset them — and the Telegram sign-up path counts against that **same** global ceiling, deliberately, so a flood of `/start` cannot run the shared counter up and silently stop email sign-up while having no ceiling of its own. Telegram adds two more: per-**chat**, at most 3 links delivered per hour, counted from `telegram_link_requests` (so a restart cannot reset it either), and a second per-IP bucket of 20/hour on `POST /auth/telegram/start`, in its own limiter instance so it and sign-up cannot spend each other's budget (§4). Per-IP (5/hour on sign-up) is an in-memory token bucket in the HTTP layer — process-local, spoofable in development, and keyed to the *proxy* rather than the client if a proxy is put in front of nginx without `set_real_ip_from`; Caddy is in front in production, so `web/nginx.conf` carries that directive over the compose subnet and it is verified, not assumed (both in §1). The per-IP limit binds before the global one by construction (5 × 24 = 120 ≪ 1000) so one IP alone can never exhaust the global ceiling — but that arithmetic covers only the **email** sign-up path, whose every request to `/auth/sign-up` arrives over HTTP from the stranger's own IP and passes through that 5/hour bucket on the way to the shared counter. **The Telegram sign-up path has no per-IP bound at all.** The row that actually advances the shared global counter is written by `sendSignUp` (`telegram_auth.go`), reached only from the poller processing a Telegram update — the IP on that request is Telegram's own long-poll host, not the stranger's, so no per-IP bucket sees it (the 20/hour bucket on `POST /auth/telegram/start`, above, limits only how often a *browser* can mint a nonce, a step upstream of and separate from a chat sending `/start`). What actually bounds a Telegram sign-up flood is the per-**chat** limit (3/hour, above) plus the same shared global daily ceiling the email path counts against. Account linking adds a fifth bucket, per **user**: at most 3 link nonces minted an hour (`CountMintsSince`), counted from the same `telegram_link_requests` table — a table-growth control rather than a security one, since minting requires an already-authenticated session, unlike every bucket above it |
 | Health | `/healthz` ignores the database; `/readyz` pings it |
-| Intent parsing | **Off unless configured.** `OPENROUTER_API_KEY` **and** `OPENROUTER_MODEL` set (both or neither — `config.Load` refuses one alone) means the Telegram `Commander` gets an `IntentParser` over an open-weight model through OpenRouter (`adapter/openrouter`, forced tool call, `max_tokens` 4096, 30 s client timeout; up to three comma-separated model ids, tried in order in one request, because free models are rate-limited upstream minute to minute; the ids are configuration because OpenRouter's free, tool-capable list changes month to month, and a fourth id is refused at boot since OpenRouter caps the list at three). Unset means a plain sentence to the bot from an authorised owner is answered "commands only" and a stranger's is ignored. The start-up log line names the `model` list. The key is never logged and the adapter's errors carry the status and the provider's message only — no URL, no request id. A parse is never a write: the reading is shown back and held five minutes per chat in the poller's memory, written on `/yes` with the sentence's update id as the idempotency key. Not run against the real API on this machine (no key) — tested against a fake Messages API |
-| Automation client | `hearthctl` (`api/cmd/hearthctl`, `make hearthctl`, manual in `docs/CLI.md`, decision in `docs/adr/0006-a-cli-as-the-automation-surface.md`). A plain HTTP client of this API for scripts and AI agents: signs in with `POST /auth/sign-in`, keeps the session and CSRF cookies in `~/.config/hearth/<host>.json` (0600, one file per host), sends `X-CSRF-Token` on every write. It goes **through** every guard in §4 rather than around them — deliberately unlike `adminctl`, which wires repositories directly because its commands are operator actions with no route. It never retries a sign-in (the lockout) or a write (no idempotency keys). `hearthctl routes` prints the route table below from a hand-kept list that `routes_test.go` diffs against `router.go` in both directions |
+| Intent parsing | **Off unless configured.** `OPENROUTER_API_KEY` **and** `OPENROUTER_MODEL` set (both or neither — `config.Load` refuses one alone) means the Telegram `Commander` gets an `IntentParser` over an open-weight model through OpenRouter (`adapter/openrouter`, forced tool call, `max_tokens` 4096, 30 s client timeout; up to three comma-separated model ids, tried in order in one request, because free models are rate-limited upstream minute to minute; the ids are configuration because OpenRouter's free, tool-capable list changes month to month, and a fourth id is refused at boot since OpenRouter caps the list at three). Unset means a plain sentence to the bot from an authorised owner is answered "commands only" and a stranger's is ignored. The start-up log line names the `model` list. The key is never logged and the adapter's errors carry the status and the provider's message only — no URL, no request id. A parse is never a write: the reading is shown back and held five minutes per chat in the poller's memory, written on `/yes` with the sentence's update id as the idempotency key. Walked live on 2026-09-08 from the owner's chat against a development bot and a free model — a lunch row keyed by its update id, and a greeting refused (`docs/HANDOVER.md`); the adapter's tests run against `fakeChat`, an `httptest` stand-in for the chat-completions endpoint |
+| Automation client | `hearthctl` (`api/cmd/hearthctl`, `make hearthctl`, manual in `docs/CLI.md`, decision in `docs/adr/0006-a-cli-as-the-automation-surface.md`). A plain HTTP client of this API for scripts and AI agents: signs in with `POST /auth/sign-in`, keeps the session and CSRF cookies in `~/.config/hearth/<host>.json` (0600, one file per host), sends `X-CSRF-Token` on every write — or, on a headless machine, stores a personal API token (`login --token`, [ADR 7](adr/0007-personal-api-tokens.md)) and sends `Authorization: Bearer hearth_…` instead, which needs no CSRF header and cannot reach `/admin` or create or revoke tokens. It goes **through** every guard in §4 rather than around them — deliberately unlike `adminctl`, which wires repositories directly because its commands are operator actions with no route. It never retries anything itself: a repeated sign-in spends the household lockout, and a write is safe to repeat only with an `Idempotency-Key` on `POST /transactions` — `transaction add --key`, or `transaction import`, which keys every row so the same file run twice creates nothing new (`docs/CLI.md`). `hearthctl routes` prints the route table below from a hand-kept list that `routes_test.go` diffs against `router.go` in both directions |
 | Hosting | **Live since 2026-08-15** at <https://oink.mywire.org> — one Hetzner CX23 in Falkenstein running `deploy/docker-compose.prod.yml` (project `hearth-prod`, deliberately not the dev stack's `hearth`). `docs/adr/0002-first-production-host.md` carries the choice and its 2026-08-15 amendment: `CPX11` was renamed out of existence and Singapore does not sell the cheap `CX` line, so the region moved to the EU and the household now crosses ~195 ms of ocean — measured from the owner's network, not estimated. Follows `docs/adr/0001-optimise-for-exit-cost.md`: hosts are picked for how cheaply we can leave them |
 | Deploying | `deploy/deploy.sh <git-sha>` — one command, plus `--current` and `--rollback`. CI builds three SHA-tagged images on every push to `main`; **the box never updates itself**, by design (spec decision 3), because rollback is image-only and a bad migration needs a restore rather than a rollback. The script refuses `latest` and refuses a tag absent from the registry **before** it writes `.env`, so a typo cannot leave the file pointing at something unpullable; it records the previous tag before changing anything, so `--rollback` survives a run that dies partway; and it verifies rather than assumes — `migrate` exited `0` (checked with `ps -a`, since Compose hides exited one-shot services), nothing restart-looping, `/readyz` answering on the public domain. Every guard and a full deploy/rollback/redeploy round trip were exercised on the live box on 2026-08-15 |
 | TLS | Caddy in front, automatic Let's Encrypt issuance and renewal (§1). **Issued first try on 2026-08-15** for `oink.mywire.org` and verified from outside (`ssl_verify_result 0`, `http://` → `308`); it survives a reboot from the `caddy-data` volume without re-issuing. Neither `api` nor `web` terminates TLS itself, and both are unusable without something that does — cookies are `Secure` outside development, confirmed on the wire: `HttpOnly; Secure; SameSite=Lax` |
-| Backups | **Running nightly since 2026-08-15**, and the recovery loop is proven with real values, not just row counts. `deploy/backup.sh` dumps in **plain SQL** (readable by any future Postgres and by a human), gzips, encrypts with `age` and uploads to Cloudflare R2, pinging a heartbeat only after a successful upload. The private key is **not on the box** — only the public recipient — so a box compromise yields ciphertext. `deploy/restore.sh` is the reverse, with a fail-closed guard refusing any DSN that looks like the live database; a restore from the real R2 object reproduced all eleven tables and every monetary value exactly. The cron was tested as cron runs it (`env -i`, crontab `PATH` only), which matters because cron's default `PATH` excludes `/usr/local/bin` where `rclone` lives. 🟡 **Two gaps remain:** the escrow envelope does not exist, so no restore has ever used a *second* person's copy of the key; and no lifecycle rule prunes old dumps yet |
+| Backups | **Running nightly since 2026-08-15**, and the recovery loop is proven with real values, not just row counts. `deploy/backup.sh` dumps in **plain SQL** (readable by any future Postgres and by a human), gzips, encrypts with `age` and uploads to Cloudflare R2, pinging a heartbeat only after a successful upload. The private key is **not on the box** — only the public recipient — so a box compromise yields ciphertext. `deploy/restore.sh` is the reverse, with a fail-closed guard refusing any DSN that looks like the live database; a restore from the real R2 object reproduced all eleven tables and every monetary value exactly. The cron was tested as cron runs it (`env -i`, crontab `PATH` only), which matters because cron's default `PATH` excludes `/usr/local/bin` where `rclone` lives. **The escrow exists and has been used:** on 2026-08-15 a restore ran from the key typed off the printed copy alone. R2 carries a 90-day lifecycle rule and a 30-day bucket lock, verified on the box — a delete refused, an upload accepted the same minute; `docs/INFRASTRUCTURE.md` says why 30 must stay below 90 |
 | Production administration | **Proven on the live box.** `api/Dockerfile`'s `admin` target puts `goose` and `adminctl` on the same distroless base as `api`, and `deploy/docker-compose.prod.yml` wires it two ways: the one-shot `migrate` service `api` waits on, and a `profiles: [manual]` `admin` service for `unlock-household`, `reset-password`, `create-invite` and `prune`. All eighteen migrations were applied to the production database by the `migrate` service on first boot and re-applied cleanly across a deploy, a rollback and a redeploy. `goose status` has been run against the live database through the `admin` image. The `adminctl` subcommands remain unexercised in production — every one is written out in `deploy/README.md` |
 
 ---
