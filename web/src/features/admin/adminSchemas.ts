@@ -6,7 +6,7 @@ import { z } from "zod";
 // adminFlagOverrideSchema mirrors flagOverrideDTO -- one household's
 // departure from the global value, or from the compile-time default if no
 // global value is set either.
-export const adminFlagOverrideSchema = z.object({
+const adminFlagOverrideSchema = z.object({
   householdId: z.string(),
   householdName: z.string(),
   enabled: z.boolean(),

@@ -2,12 +2,9 @@ package postgres
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -106,12 +103,10 @@ func (r *UserRepo) CreateWithMembership(ctx context.Context, email, passwordHash
 	}
 
 	user := toStoredUser(userRow.ID, userRow.Email, userRow.PasswordHash, userRow.DisplayName, userRow.AvatarInitial).User
-	membership := domain.Membership{
-		ID:           uuidToString(membershipRow.ID),
-		HouseholdID:  uuidToString(membershipRow.HouseholdID),
-		UserID:       uuidToString(membershipRow.UserID),
-		Role:         toRole(membershipRow.Role),
-		Capabilities: toCapabilities(membershipRow.Capabilities),
+	membership, err := toMembership(membershipRow.ID, membershipRow.HouseholdID, membershipRow.UserID,
+		membershipRow.Role, membershipRow.Capabilities)
+	if err != nil {
+		return domain.User{}, domain.Membership{}, err
 	}
 	return user, membership, nil
 }
@@ -157,140 +152,4 @@ func initialOf(displayName string) string {
 	}
 	first := []rune(name)[0]
 	return cases.Upper(language.Und).String(string(first))
-}
-
-// pgUniqueViolation is the Postgres SQLSTATE for a unique-constraint
-// violation (23505). See
-// https://www.postgresql.org/docs/current/errcodes-appendix.html.
-const pgUniqueViolation = "23505"
-
-// categoryNameUniqueConstraint is the name Postgres gave categories' own
-// UNIQUE (household_id, name) (migrations/00005_transactions.sql), Postgres's
-// default naming for an unnamed table constraint: "<table>_<columns>_key".
-// translate checks this by name, not only by SQLSTATE 23505, so a future
-// unique key on categories (or any other 23505 whose message happens to
-// mention the table) cannot masquerade as a name collision.
-const categoryNameUniqueConstraint = "categories_household_id_name_key"
-
-// goalNameUniqueConstraint is the name Postgres gave goals' own UNIQUE
-// (household_id, name) (migrations/00007_goals.sql), the same default naming
-// categoryNameUniqueConstraint's own comment explains. translate checks this
-// by name, not only by SQLSTATE 23505, so a future unique key on goals cannot
-// masquerade as a name collision -- the brief's own instruction for
-// GoalRepo.Create and GoalRepo.Update.
-const goalNameUniqueConstraint = "goals_household_id_name_key"
-
-// goalContributionRolloverUniqueConstraint is the name
-// 00007_goals.sql gave goal_contributions' own partial unique index on
-// (household_id, source_budget_month) WHERE source = 'budget_rollover' --
-// the belt-and-braces beside BudgetRepo.RollOverToGoal's conditional UPDATE
-// that index's own migration comment describes. translate checks this by
-// name, the same categoryNameUniqueConstraint/goalNameUniqueConstraint
-// pattern, so a concurrent pair of rollovers that both somehow reach the
-// INSERT cannot surface as an unmapped 500.
-const goalContributionRolloverUniqueConstraint = "goal_contributions_one_rollover_per_month"
-
-// billNameUniqueConstraint is the name Postgres gave bills' own UNIQUE
-// (household_id, name) (migrations/00008_bills.sql), the same default naming
-// categoryNameUniqueConstraint's own comment explains. translate checks this
-// by name so BillRepository.Create and .Update's own doc comments -- a name
-// collision, archived rows included, is domain.ErrBillNameTaken -- hold.
-const billNameUniqueConstraint = "bills_household_id_name_key"
-
-// transactionIdempotencyKeyUniqueConstraint is the partial unique index from
-// 00015_transaction_idempotency_key.sql. TransactionRepository.Create's
-// contract turns a hit into domain.ErrIdempotencyKeyInUse so the service
-// can decide between a replay and a 409.
-const transactionIdempotencyKeyUniqueConstraint = "transactions_household_idempotency_key"
-
-// agreementSectionNameUniqueConstraint is the name Postgres gave
-// agreement_sections' own UNIQUE (household_id, name)
-// (migrations/00015_agreements.sql), the same "<table>_<columns>_key" default
-// naming categoryNameUniqueConstraint's own comment explains. translate
-// checks this by name, not only by SQLSTATE 23505, so a future unique key on
-// the table cannot masquerade as a name collision (decision 19). Sections are
-// never deleted, so a name is never freed once taken.
-const agreementSectionNameUniqueConstraint = "agreement_sections_household_id_name_key"
-
-// Scoped to the ACCOUNT, not the household: holding the same ticker in two
-// brokerages is ordinary, and they are genuinely different positions with
-// different cost bases (00019_holdings.sql).
-const holdingNameUniqueConstraint = "holdings_account_id_name_key"
-
-// translate converts driver errors into domain errors so nothing above the
-// adapter layer ever sees pgx types.
-func translate(err error, op string) error {
-	var pgErr *pgconn.PgError
-	switch {
-	case err == nil:
-		return nil
-	case errors.Is(err, pgx.ErrNoRows):
-		return domain.ErrNotFound
-	case errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == categoryNameUniqueConstraint:
-		// CategoryRepository's own contract (usecase/ports.go) wants a
-		// sentinel specific to this one constraint, not the generic
-		// ErrAlreadyExists below -- Create and Rename both hit this on a
-		// name collision, archived rows included, since archived_at is not
-		// part of the unique key.
-		return fmt.Errorf("%s: constraint %q: %w", op, pgErr.ConstraintName, domain.ErrCategoryNameTaken)
-	case errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == goalNameUniqueConstraint:
-		// GoalRepository's own contract: Create and Update both hit this on a
-		// name collision, archived rows included -- the same archived-still-
-		// occupies-its-key rule categories follow (00007_goals.sql's own
-		// comment).
-		return fmt.Errorf("%s: constraint %q: %w", op, pgErr.ConstraintName, domain.ErrGoalNameTaken)
-	case errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == transactionIdempotencyKeyUniqueConstraint:
-		return fmt.Errorf("%s: constraint %q: %w", op, pgErr.ConstraintName, domain.ErrIdempotencyKeyInUse)
-	case errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == billNameUniqueConstraint:
-		// BillRepository's own contract: Create and Update both hit this on a
-		// name collision, archived rows included -- the same archived-still-
-		// occupies-its-key rule categories and goals follow.
-		return fmt.Errorf("%s: constraint %q: %w", op, pgErr.ConstraintName, domain.ErrBillNameTaken)
-	case errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == goalContributionRolloverUniqueConstraint:
-		// BudgetRepo.RollOverToGoal's own doc comment: a concurrent pair
-		// that both reach the INSERT must not surface as a raw 23505.
-		// StampBudgetRollover's conditional UPDATE is the first line of
-		// defence and normally catches this before the INSERT is ever
-		// attempted; this index is what makes a future code path that
-		// forgets the conditional UPDATE fail safely instead of silently.
-		return fmt.Errorf("%s: constraint %q: %w", op, pgErr.ConstraintName, domain.ErrRolloverAlreadyDone)
-	case errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == holdingNameUniqueConstraint:
-		// HoldingRepository.Create's own contract: a name collision inside one
-		// account, archived holdings included, since archived_at is not part
-		// of the key -- the same archived-still-occupies-its-key rule
-		// categories, goals and bills follow. The screen has to be able to
-		// offer restore rather than show a bare 409.
-		return fmt.Errorf("%s: constraint %q: %w", op, pgErr.ConstraintName, domain.ErrHoldingNameTaken)
-	case errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == agreementSectionNameUniqueConstraint:
-		// AgreementRepository.CreateSection's own contract: the unique index
-		// decides the collision, never a pre-read, and the screen has to be
-		// able to say "you already have a section called that" rather than
-		// showing whatever generic message ALREADY_EXISTS carries.
-		return fmt.Errorf("%s: constraint %q: %w", op, pgErr.ConstraintName, domain.ErrAgreementSectionNameTaken)
-	case errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation:
-		// Mirrors ErrNotFound's translation: a caller-testable domain
-		// sentinel rather than a generic wrapped driver error, so
-		// usecase-level code can distinguish "this already exists" from
-		// any other failure with errors.Is. Task 15's CreateSpace is the
-		// first caller: its own pre-check (list, then compare keys) closes
-		// the common case, but two concurrent creates deriving the same
-		// key can both pass that check before either insert lands, and the
-		// database's UNIQUE (household_id, key) constraint is the
-		// authoritative backstop for that race.
-		//
-		// op and pgErr.ConstraintName are folded into the message -- not
-		// just discarded the way a bare `return domain.ErrAlreadyExists`
-		// would -- because this is the one class of error with a typed
-		// sentinel a caller can match against, which makes it exactly the
-		// case where losing the diagnostic (which operation, which
-		// constraint) would be missed most: every log line for it would
-		// otherwise read "already exists" with no way to tell CreateSpace's
-		// key collision apart from CreateUser's email collision. %w keeps it
-		// errors.Is-matchable against domain.ErrAlreadyExists despite the
-		// wrapping, exactly as the default branch below already does for
-		// every other error.
-		return fmt.Errorf("%s: constraint %q: %w", op, pgErr.ConstraintName, domain.ErrAlreadyExists)
-	default:
-		return fmt.Errorf("%s: %w", op, err)
-	}
 }

@@ -250,8 +250,7 @@ export function GoalsPage() {
           own with no extra call needed here. */}
       {modalGoal && currencies.data && (
         <GoalModal
-          mode={modalGoal === "new" ? "create" : "edit"}
-          goal={modalGoal === "new" ? undefined : modalGoal}
+          {...(modalGoal === "new" ? { mode: "create" as const } : { mode: "edit" as const, goal: modalGoal })}
           currencies={currencies.data.currencies}
           primaryCurrency={data.currency}
           onClose={() => setModalGoal(null)}

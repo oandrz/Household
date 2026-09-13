@@ -171,8 +171,8 @@ ORDER BY p.paid_on DESC, b.name;
 -- transaction. UNIQUE (bill_id, due_on) is the backstop that refuses a
 -- double-clicked Mark paid; it has no name of its own
 -- (00008_bills.sql), so translate's generic 23505 branch is what turns it
--- into domain.ErrAlreadyExists, not a named-constraint case like
--- billNameUniqueConstraint.
+-- into domain.ErrAlreadyExists, not a named entry in translate.go's
+-- uniqueConstraintErrors like bills' own name key.
 -- name: CreateBillPayment :one
 INSERT INTO bill_payments (bill_id, household_id, due_on, paid_on, amount_minor, transaction_id)
 VALUES ($1, $2, $3, $4, $5, $6)

@@ -13,7 +13,9 @@
 // the design gates them on authNotCreate.
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { apiErrorMessage, isPlausibleEmail } from "./copy";
+import { apiErrorMessage } from "../../api/errorMessage";
+import { Field } from "../../components/Field";
+import { isPlausibleEmail } from "./copy";
 import { CheckYourEmailPanel } from "./CheckYourEmailPanel";
 import { useRequestSignUp } from "./useAuth";
 
@@ -156,10 +158,7 @@ export function SignUpScreen() {
           </p>
 
           <form className="flex flex-col gap-3.5" onSubmit={handleSubmit}>
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="sign-up-email" className="text-xs font-semibold text-label">
-                Email
-              </label>
+            <Field label="Email" htmlFor="sign-up-email">
               <input
                 id="sign-up-email"
                 type="email"
@@ -182,7 +181,7 @@ export function SignUpScreen() {
                   <span>{inlineErrorMessage}</span>
                 </div>
               )}
-            </div>
+            </Field>
 
             <button
               type="submit"

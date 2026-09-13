@@ -150,36 +150,3 @@ func TestOverviewSortsOrphanedRowsFromBothLayers(t *testing.T) {
 		}
 	}
 }
-
-// TestRecentAuditClampsTheLimit pins decision 2 from the task brief:
-// AdminAuditRepository.Recent takes whatever limit it is given and passes it
-// straight to SQL's LIMIT clause (see fakeAuditRepo's own doc comment), so
-// the clamp has to happen in AdminService or nothing bounds it at all.
-func TestRecentAuditClampsTheLimit(t *testing.T) {
-	audit := newFakeAuditRepo()
-	svc := usecase.NewAdminService(usecase.AdminDeps{
-		Admins: newFakeAdminRepo(), Flags: newFakeFlagRepo(),
-		Audit: audit, Clock: &fixedClock{now: adminServiceNow},
-	})
-
-	if _, err := svc.RecentAudit(context.Background(), 10_000); err != nil {
-		t.Fatalf("RecentAudit(10000): %v", err)
-	}
-	if audit.lastLimit != 500 {
-		t.Fatalf("RecentAudit(10000) reached the repository as limit=%d, want it capped at 500", audit.lastLimit)
-	}
-
-	if _, err := svc.RecentAudit(context.Background(), 0); err != nil {
-		t.Fatalf("RecentAudit(0): %v", err)
-	}
-	if audit.lastLimit != 50 {
-		t.Fatalf("RecentAudit(0) reached the repository as limit=%d, want the default of 50", audit.lastLimit)
-	}
-
-	if _, err := svc.RecentAudit(context.Background(), -5); err != nil {
-		t.Fatalf("RecentAudit(-5): %v", err)
-	}
-	if audit.lastLimit != 50 {
-		t.Fatalf("RecentAudit(-5) reached the repository as limit=%d, want the default of 50", audit.lastLimit)
-	}
-}

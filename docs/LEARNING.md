@@ -3508,7 +3508,7 @@ an ordinary alt-tab, no action added, nobody clicking anything in this
 household's own session — refetches the identical query the identical way.
 Neither trigger was reproduced live in this walk — see the methodology
 paragraph below — but `addAction` is a confirmed-reachable in-modal path in
-Retros specifically (`RetroModal.tsx:242, 281`), while plain window focus is
+Retros specifically (`RetroModal.tsx:242, 281` at the time; since 2026-09-13 those two call sites are `CarryOverList.tsx` and `AddActionComposer.tsx`), while plain window focus is
 the wider trigger that reaches Retros, Vision, and any future screen built
 on the same `useState`-draft-plus-live-version shape, read off the query
 defaults rather than watched firing.
@@ -3533,7 +3533,9 @@ reason.
 the Vision tracker row: everything above this line about `useRetro.ts`,
 `useVision.ts` and the `staleTime`/`refetchOnWindowFocus` trigger was
 confirmed by reading `useRetro.ts:144-161`, `RetroModal.tsx:140-148` (and its
-two `addAction` call sites at 242 and 281), `useVision.ts:101-113`,
+two `addAction` call sites at 242 and 281 -- line numbers as they were then; since
+2026-09-13 the seed effect is in `useRetroDraft.ts` and the call sites in
+`CarryOverList.tsx` and `AddActionComposer.tsx`), `useVision.ts:101-113`,
 `retro.sql`'s own queries, and `main.tsx:11` — not by reproducing a silent
 overwrite end to end the way this pattern's OWN opening defect was
 eventually reproduced.** Neither Retros' nor Vision's route was watched
@@ -4255,7 +4257,10 @@ route with a missing guard has no second line of defence.
   the first thing in this codebase that ever made `clientIP` a security
   decision, and it is exactly as strong as the edge's header rewriting, no
   stronger: one `curl -H "X-Real-IP: <vary>"` per request defeats it unless
-  the proxy blanks the client-supplied headers first.
+  the proxy blanks the client-supplied headers first. *(2026-09-13: replaced by
+  `trustedProxyRealIP`, which reads `X-Real-IP` only from a peer inside
+  `TRUSTED_PROXY_CIDRS` and never reads the other two — see the Tooling entry
+  on fixing the whole-tree review.)*
 - `signUpRequestsPerIPPerHour` (10/hour) and `usecase.SignupGlobalDailyLimit`
   (200/day) each shipped correct and reviewed on their own, and did not
   compose: one IP, entirely inside its own hourly budget, could exhaust the
@@ -5431,6 +5436,31 @@ route with a missing guard has no second line of defence.
   itself — the fix for a documented trap is not writing it down a sixth
   time, it is reading it before the first `docker exec` of the next task
   that meets it.
+  **A sixth instance, the 2026-09-13 code-quality pass: a browser walk that
+  "passed" on pre-fix code.** The pass fixed three frontend defects and
+  mutation-checked a unit test for each. It then walked the app and recorded
+  a pass, including "opened both Holding confirm pairs" and a retro discard.
+  A second walk, the same afternoon, forced the retro's DELETE to return a
+  500 and saw no error message until "Discard draft" was clicked again. That
+  is exactly the defect `DiscardDraftControl.tsx` had been fixed for. The
+  file on disk and inside `hearth-web-1` was correct. Vite was still serving
+  the module it had compiled before the edit: the container started at
+  02:52Z and the edit landed at 02:59Z. `curl` on `HoldingIncomePanel.tsx`
+  found no `rowRemoval.isPending(row.id)`, so both Holding double-click fixes
+  were missing from the browser too. `docker restart hearth-web-1` fixed it,
+  and on fresh code all three behaved as their tests say. What is new this
+  time:
+  - **The stale modules were the fixes themselves,** so the first walk
+    never exercised the code it was recorded as verifying.
+  - **The first probe for the fix gave a false negative.** It searched the
+    served `DiscardDraftControl.tsx` for a comment, but that comment is a
+    JSX `{/* */}` comment, and the compile step strips those. What worked
+    was a probe on code: the index of `discardError &&` compared with the
+    trigger's copy key.
+
+  **Probe the served module for a line of code the change added, never a
+  comment. Restart `web` before a walk that is meant to verify frontend
+  edits made after the container started.**
 
 - **A secret leaked through an error nobody constructed: `http.NewRequestWithContext`
   returns a `*url.Error` that embeds the whole request URL, and Telegram's API
@@ -5566,6 +5596,111 @@ route with a missing guard has no second line of defence.
   the tools return *something*. **Read what the language server says about the
   workspace it built, not only whether the call succeeded** — the difference
   between a useful index and a useless one was two words in a log line.
+- **A whole-tree dead-code sweep (2026-09-13) found what no check in `make
+  lint` looks for.** `deadcode`, `staticcheck` and `knip` had never been run
+  against the tree. Between them: `react-hook-form` and `@hookform/resolvers`
+  in `package.json` with zero imports (and a Makefile comment warning about a
+  peer conflict in the package nothing used); about fifty frontend exports
+  nothing imported, twelve of them types nothing referenced at all; four unused
+  test-double methods; a `hearthctl` `String()` nothing called; and one comment
+  that lied — `NO_DECIMAL_CURRENCIES` said it was "exported because
+  AccountModal's toMinorUnits reads the same set" long after `toMinorUnits`
+  had moved into the same file (pattern 16). Three traps in reading the tool
+  output. *(a)* knip's "unused export" mostly meant "used, but only inside its
+  own file": the fix is dropping `export`, not deleting. Counting references
+  per symbol (`grep -rnw`) separated the two in one command — a count of one is
+  dead, more is over-exported. *(b)* `go run
+  golang.org/x/tools/cmd/deadcode@<version>` (and staticcheck the same way)
+  builds the tool with whatever `go` is on `PATH`, here 1.24.2, and every
+  package then fails with `package requires newer Go version go1.25`. Set
+  `GOTOOLCHAIN=go1.25.7` explicitly; `auto` does not help a tool run outside
+  the module. *(c)* `deadcode` without `-test` lists code reachable only from
+  tests, which is not the same as dead: `internal/testsupport` is test support
+  by design, and `AdminService.RecentAudit` is kept on purpose by the audit
+  screen's row in `docs/FEATURE_TRACKER.md`. Read each hit against the tracker
+  before deleting. Separately, staticcheck's SA4006 found a test that ignored
+  the error from its second run (`cmd_import_test.go`), so it could not fail on
+  that path (pattern 2); the new assertion goes red under a mutation that makes
+  a run with replayed rows exit 0. What would have caught all of it sooner:
+  those three tools in `make lint`.
+- **Fixing that review (2026-09-13) taught six more things.** *(a)* **The
+  fail-closed sibling hunt found one fail-open default the review had not.**
+  The review named one `switch` with no refusing `default`
+  (`usecase/transaction.go`). Scanning every production `switch` for the same
+  shape found `adapter/mail/smtp.go` mapping an unrecognised `SMTP_TLS_MODE` to
+  *no TLS*. `config.Load` refuses a bad mode first, so it was unreachable — but
+  a second line that fails open silently turns encryption off the day the first
+  line is loosened. It now maps to mandatory TLS, and the test goes red if the
+  old fallback returns. Fixing only the named instance would have left it
+  (pattern 1). *(b)* **Reading enum values back from the database now fails
+  closed as well.** Category kind, account type, transaction kind, role and
+  capabilities were cast straight from their columns; `adapter/postgres`
+  carried a comment choosing to trust the `CHECK` constraints for role and
+  capabilities. That choice was reversed, because role and capabilities decide
+  authorisation and a `CHECK` can be loosened by a migration without any Go
+  test noticing. A no-database unit test per type (`enum_read_unit_test.go`)
+  proves an unknown value is refused, mutation-checked. *(c)* **Deleting a read
+  method can delete the only proof that a write works.**
+  `TestAdminAuditRepoRecordsAndReadsBack` verified `Record` by calling
+  `Recent`, and the HTTP audit tests read rows the same way. Removing the dead
+  `Recent` would have left `Record` untested. Those tests now query
+  `admin_audit_log` directly. Before deleting a method, check what tests use
+  it to *observe*, not only what tests are *about* it. *(d)* **When several
+  sqlc queries select the same columns, `sqlc.embed(t)` removes the
+  field-by-field copies.** Each generated row then carries the model struct
+  nested inside it, so one converter serves all of them — this replaced three
+  hand-written copies each for accounts and transactions. *(e)* **Two
+  `SYSTEM_DESIGN.md` references to `usecase/transaction.go:232` pointed at the
+  wrong code before anyone touched the file today** — line 232 was a
+  description check, not the currency assignment both passages describe
+  (pattern 16). They now name `TransactionService.validate`: a function name
+  survives edits that a line number does not. *(f)* **A scripted regex rewrite
+  across 23 hook files produced syntax errors in three of them.** The worker
+  restored those three from `HEAD`, which also threw away earlier uncommitted
+  edits to the same files, and had to redo those by hand. When scripting over a
+  working tree with uncommitted changes, back the files up before the script
+  and restore from that copy, not from `HEAD`. *(g)* **An IP parser with no
+  trust list makes the API exactly as safe as its proxy's config, and no
+  safer.** chi's `RealIP` believed `True-Client-IP`, `X-Real-IP` and
+  `X-Forwarded-For` from anyone; production was safe only because nginx and
+  Caddy rewrote them, in two files outside the service. `trustedProxyRealIP`
+  moves the trust decision into the API as `TRUSTED_PROXY_CIDRS`, with unset
+  meaning trust nobody. The admin audit log's IP now comes from `clientIP`
+  too, so it matches the limiter's key and lost its `:port`. *(h)* **A
+  125-case `switch` turned into a table was proven equal by running both, not
+  by trusting the existing tests.** A temporary test kept the old `switch` as
+  a function and compared the two on 16,645 error shapes — every sentinel
+  bare, wrapped, and joined with every other — then was deleted so no second
+  copy of the table could drift. The ~105 response assertions alone never
+  exercise a wrapped or joined error. *(i)* **A default belongs to the
+  service even while only one channel uses it.** Marking a bill paid with no
+  amount made the HTTP handler read the whole bills page to find one number,
+  though `BillService.MarkPaid` already had the bill loaded. It moved, with a
+  test that goes red if the default is wrong. *(j)* **Extracting one shared
+  hook surfaced two old defects that six hand-written copies had hidden.**
+  Moving six ask/confirm/cancel flows onto `useConfirmAction` made their
+  behaviour comparable side by side, and two did not match the rest: a failed
+  retro discard drew its error *inside* the confirm pair, which the hook closes
+  on failure, so the message only appeared if the member clicked Discard again;
+  and both Holding panels left their confirm Remove button enabled while the
+  DELETE ran, so a double click sent two. Both fixed, each with a test that
+  goes red when the fix is removed. A shared primitive is also a way of finding
+  where the copies had already drifted. *(k)* **In the browser walk, the
+  browser extension's own tools lied twice, and the page's own evidence was
+  what settled it (pattern 16).** First, its typing and clicking never reached
+  the Hearth tab — the sign-in field stayed empty and no request left — which
+  looked exactly like a broken sign-in button until a page script set the
+  field the way React sees it and the same button sent `POST
+  /auth/magic-link` and got 202. Second, its network panel reported **503** for
+  every retro discard made through the UI, while a `fetch` wrapper installed in
+  the page recorded **204** for that same request, the retro was gone, and the
+  modal closed through its success path. Why the two disagreed was not
+  established. It was not hot reload: the dev server's file watcher had
+  already stopped picking up edits (the sixth stale-watcher instance, under
+  Tooling), and Vite passes `/api` through its proxy unchanged, so a stale
+  module could not change a response status either. Do not read this as the
+  extension being unreliable in general. Before chasing a server bug a tool
+  reports, check what the page's own code received.
 
 ### Provisioning the read-only role on the box (2026-09-05)
 

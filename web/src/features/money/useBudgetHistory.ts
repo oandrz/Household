@@ -13,7 +13,7 @@
 // what's in it, and reopening it within the query's staleness window reads
 // the cache instead of refetching.
 import { useQuery } from "@tanstack/react-query";
-import { apiFetch } from "../../api/client";
+import { fetchAndParse } from "../../api/client";
 import { budgetHistoryResponseSchema, type BudgetHistoryResponse } from "./budgetSchemas";
 
 // Matches api/internal/adapter/http/budget_handlers.go's own
@@ -24,13 +24,12 @@ import { budgetHistoryResponseSchema, type BudgetHistoryResponse } from "./budge
 // (`historyModalSubtitle`) reads it instead of a second hard-coded `6`.
 export const HISTORY_MONTHS = 6;
 
-export function budgetHistoryQueryKey(months: number) {
+function budgetHistoryQueryKey(months: number) {
   return ["budget-history", months] as const;
 }
 
 async function fetchBudgetHistory(months: number): Promise<BudgetHistoryResponse> {
-  const body = await apiFetch<unknown>(`/api/v1/budgets/history?months=${months}`);
-  return budgetHistoryResponseSchema.parse(body);
+  return fetchAndParse(budgetHistoryResponseSchema, `/api/v1/budgets/history?months=${months}`);
 }
 
 export function useBudgetHistory(enabled: boolean, months: number = HISTORY_MONTHS) {

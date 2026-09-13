@@ -3,7 +3,7 @@ SHELL := /bin/bash
 COMPOSE := docker compose
 
 .PHONY: help dev dev-local up down restart logs ps urls migrate migrate-down migrate-new \
-        test test-api test-web lint lint-arch lint-web typecheck fmt psql shell-api build sqlc \
+        test test-api test-web lint lint-arch lint-web lint-dead typecheck fmt psql shell-api build sqlc \
         seed reset-password unlock-household
 
 help: ## Show this help
@@ -75,12 +75,10 @@ test: test-api test-web ## Run every test suite
 test-api: ## Run the Go tests (needs Docker for testcontainers)
 	cd api && go test ./... -count=1 -timeout=20m
 
-# A bare `npm install` in web/ needs --legacy-peer-deps (an optional peer
-# conflict in @hookform/resolvers); `npm ci` does not need it and is clean.
 test-web: ## Run the frontend tests
 	cd web && npx vitest run
 
-lint: lint-arch typecheck lint-web ## Run every linter
+lint: lint-arch typecheck lint-web lint-dead ## Run every linter
 	cd api && go vet ./...
 
 lint-arch: ## Check the clean-architecture dependency rule
@@ -88,6 +86,25 @@ lint-arch: ## Check the clean-architecture dependency rule
 
 lint-web: ## Lint the frontend
 	cd web && npm run lint
+
+# Dead code and static analysis: Go functions nothing reaches (tests count as
+# callers, so test helpers are not reported), staticcheck's bug and unused-code
+# checks, and frontend files, exports and packages nothing imports. None of the
+# three ran before 2026-09-13 and the first run found ~60 dead symbols, two
+# unused packages and a test that could not fail (docs/LEARNING.md, Tooling).
+# Versions are pinned (LEARNING pattern 7). GOTOOLCHAIN is explicit because
+# `go run tool@version` builds with the go on PATH, which is older than go.mod
+# asks for and then fails on every package. sqlcgen is generated, so its
+# findings are the SQL file's problem, not this report's. deadcode exits 0
+# either way, hence the explicit check on each tool's filtered output.
+lint-dead: ## Report unreachable Go code, staticcheck findings, and unused frontend exports and packages
+	@cd api && out=$$(GOTOOLCHAIN=go1.25.7 go run golang.org/x/tools/cmd/deadcode@v0.36.0 -test ./... 2>&1 | grep -v '/sqlcgen/' || true); \
+	 if [ -n "$$out" ]; then echo "$$out"; echo "deadcode: unreachable code found"; exit 1; fi; \
+	 echo "deadcode passed"
+	@cd api && out=$$(GOTOOLCHAIN=go1.25.7 go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./... 2>&1 | grep -v '/sqlcgen/' || true); \
+	 if [ -n "$$out" ]; then echo "$$out"; echo "staticcheck: findings"; exit 1; fi; \
+	 echo "staticcheck passed"
+	cd web && npx --yes knip@5.88.1 --no-progress
 
 typecheck: ## Type-check the frontend, tests included
 	cd web && npx tsc --noEmit

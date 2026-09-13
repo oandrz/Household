@@ -3,7 +3,7 @@
 // near a month boundary, which is the mistake this project has now made three
 // times (see BudgetPage.tsx:52 and AccountModal.tsx's today()).
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { currentMonth } from "./month";
+import { currentMonth, monthLabel } from "./month";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -24,5 +24,15 @@ describe("currentMonth", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 2, 15));   // March, local
     expect(currentMonth()).toBe("2026-03");
+  });
+});
+
+describe("monthLabel", () => {
+  it("names the month and year a YYYY-MM string stands for", () => {
+    expect(monthLabel("2026-07")).toBe("July 2026");
+  });
+
+  it("does not slip into the previous month at the start of the year", () => {
+    expect(monthLabel("2026-01")).toBe("January 2026");
   });
 });

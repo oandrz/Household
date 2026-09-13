@@ -14,9 +14,13 @@
 // and its clearReceivedAmount flag), and that translation is the caller's
 // concern, not this form's.
 import { type FormEvent, useState } from "react";
+import { Field } from "../../components/Field";
+import { FIELD_CONTROL_CLASS } from "../../components/fieldClasses";
 import { FieldPair } from "../../components/FieldPair";
 import { Modal } from "../../components/Modal";
-import { apiErrorMessage } from "../auth/copy";
+import { ModalActions } from "../../components/ModalActions";
+import { useConfirmAction } from "../../components/useConfirmAction";
+import { apiErrorMessage } from "../../api/errorMessage";
 import { describeAmountError, minorUnitsToInputValue, toMinorUnits } from "./formatMoney";
 import { TRANSACTIONS_COPY } from "./transactionCopy";
 import { useCategories } from "./useTransactions";
@@ -136,8 +140,10 @@ export function TransactionModal({
   const [submitError, setSubmitError] = useState<unknown>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
+  // Delete's in-page confirmation. A failed delete is shown in this form's one
+  // error line, the same one Save uses, so handleDelete below catches the
+  // failure itself and never reads the hook's own per-item error.
+  const deletion = useConfirmAction();
 
   const fromAccount = accounts.find((a) => a.id === fromAccountId);
   const toAccount = accounts.find((a) => a.id === toAccountId);
@@ -332,17 +338,17 @@ export function TransactionModal({
       .finally(() => setIsSubmitting(false));
   }
 
+  // useConfirmAction collapses the confirm pair once the delete settles,
+  // whatever the outcome -- a failed delete must not leave Cancel/Confirm
+  // stuck open. The failure itself lands in submitError, below the fields.
   function handleDelete() {
     if (!onDelete) return;
     setSubmitError(null);
-    setIsDeleting(true);
-    onDelete()
-      .then(() => onClose())
-      .catch((err: unknown) => setSubmitError(err))
-      .finally(() => {
-        setIsDeleting(false);
-        setConfirmingDelete(false);
-      });
+    void deletion.confirm(() =>
+      onDelete()
+        .then(() => onClose())
+        .catch((err: unknown) => setSubmitError(err)),
+    );
   }
 
   return (
@@ -378,10 +384,7 @@ export function TransactionModal({
         </div>
 
         <FieldPair>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="transaction-amount" className="text-xs font-semibold text-label">
-              Amount
-            </label>
+          <Field label="Amount" htmlFor="transaction-amount">
             <input
               id="transaction-amount"
               type="text"
@@ -389,27 +392,20 @@ export function TransactionModal({
               required
               value={amountInput}
               onChange={(event) => setAmountInput(event.target.value)}
-              // min-h-11/sm:min-h-0 on this and every other field below in
-              // this modal: TransactionFilters.tsx's own SELECT_CLASS
-              // comment has the measured reason py-2/py-2.5 alone falls
-              // short of the 44px floor on a phone.
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              className={FIELD_CONTROL_CLASS}
             />
-          </div>
+          </Field>
 
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="transaction-date" className="text-xs font-semibold text-label">
-              Date
-            </label>
+          <Field label="Date" htmlFor="transaction-date">
             <input
               id="transaction-date"
               type="date"
               required
               value={date}
               onChange={(event) => setDate(event.target.value)}
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              className={FIELD_CONTROL_CLASS}
             />
-          </div>
+          </Field>
         </FieldPair>
 
         {amountError && (
@@ -424,37 +420,26 @@ export function TransactionModal({
           </p>
         )}
 
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="transaction-description" className="text-xs font-semibold text-label">
-            Description
-          </label>
+        <Field label="Description" htmlFor="transaction-description" error={descriptionError}>
           <input
             id="transaction-description"
             type="text"
             required
             value={description}
             onChange={(event) => setDescription(event.target.value)}
-            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+            className={FIELD_CONTROL_CLASS}
           />
-          {descriptionError && (
-            <p role="alert" className="text-xs leading-snug text-danger">
-              {descriptionError}
-            </p>
-          )}
-        </div>
+        </Field>
 
         {kind === "transfer" ? (
           <FieldPair>
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="transaction-from-account" className="text-xs font-semibold text-label">
-                From account
-              </label>
+            <Field label="From account" htmlFor="transaction-from-account">
               <select
                 id="transaction-from-account"
                 required
                 value={fromAccountId}
                 onChange={(event) => setFromAccountId(event.target.value)}
-                className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+                className={FIELD_CONTROL_CLASS}
               >
                 {accounts.map((a) => (
                   <option key={a.id} value={a.id}>
@@ -462,17 +447,14 @@ export function TransactionModal({
                   </option>
                 ))}
               </select>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="transaction-to-account" className="text-xs font-semibold text-label">
-                To account
-              </label>
+            </Field>
+            <Field label="To account" htmlFor="transaction-to-account">
               <select
                 id="transaction-to-account"
                 required
                 value={toAccountId}
                 onChange={(event) => setToAccountId(event.target.value)}
-                className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+                className={FIELD_CONTROL_CLASS}
               >
                 {accounts.map((a) => (
                   <option key={a.id} value={a.id}>
@@ -480,19 +462,16 @@ export function TransactionModal({
                   </option>
                 ))}
               </select>
-            </div>
+            </Field>
           </FieldPair>
         ) : (
           <FieldPair>
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="transaction-category" className="text-xs font-semibold text-label">
-                Category
-              </label>
+            <Field label="Category" htmlFor="transaction-category">
               <select
                 id="transaction-category"
                 value={categoryId}
                 onChange={(event) => setCategoryId(event.target.value)}
-                className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+                className={FIELD_CONTROL_CLASS}
               >
                 <option value="">{TRANSACTIONS_COPY.noCategory}</option>
                 {relevantCategories.map((c) => (
@@ -501,17 +480,14 @@ export function TransactionModal({
                   </option>
                 ))}
               </select>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="transaction-account" className="text-xs font-semibold text-label">
-                Account
-              </label>
+            </Field>
+            <Field label="Account" htmlFor="transaction-account">
               <select
                 id="transaction-account"
                 required
                 value={accountId}
                 onChange={(event) => setAccountId(event.target.value)}
-                className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+                className={FIELD_CONTROL_CLASS}
               >
                 {accounts.map((a) => (
                   <option key={a.id} value={a.id}>
@@ -519,7 +495,7 @@ export function TransactionModal({
                   </option>
                 ))}
               </select>
-            </div>
+            </Field>
           </FieldPair>
         )}
 
@@ -530,10 +506,11 @@ export function TransactionModal({
         )}
 
         {kind === "transfer" && (
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="transaction-received-amount" className="text-xs font-semibold text-label">
-              {TRANSACTIONS_COPY.amountReceived}
-            </label>
+          <Field
+            label={TRANSACTIONS_COPY.amountReceived}
+            htmlFor="transaction-received-amount"
+            error={receivedAmountError}
+          >
             <input
               id="transaction-received-amount"
               type="text"
@@ -544,29 +521,21 @@ export function TransactionModal({
                 setReceivedAmountTouched(true);
                 setReceivedAmountInput(event.target.value);
               }}
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              className={FIELD_CONTROL_CLASS}
             />
             <p className="text-[11.5px] text-muted">
               {TRANSACTIONS_COPY.amountReceivedHint(toCurrency ?? "")}
             </p>
-            {receivedAmountError && (
-              <p role="alert" className="text-xs leading-snug text-danger">
-                {receivedAmountError}
-              </p>
-            )}
-          </div>
+          </Field>
         )}
 
         {kind === "expense" && (
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="transaction-paid-by" className="text-xs font-semibold text-label">
-              Paid by
-            </label>
+          <Field label="Paid by" htmlFor="transaction-paid-by">
             <select
               id="transaction-paid-by"
               value={paidByMembershipId}
               onChange={(event) => setPaidByMembershipId(event.target.value)}
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              className={FIELD_CONTROL_CLASS}
             >
               <option value="">Unassigned</option>
               {members.map((m) => (
@@ -575,7 +544,7 @@ export function TransactionModal({
                 </option>
               ))}
             </select>
-          </div>
+          </Field>
         )}
 
         {submitError !== null && (
@@ -586,20 +555,20 @@ export function TransactionModal({
 
         {onDelete && (
           <div className="rounded-[10px] border border-hairline p-3">
-            {confirmingDelete ? (
+            {deletion.isConfirming() ? (
               <div className="flex flex-col gap-2.5">
                 <p className="text-[12.5px] text-ink">{TRANSACTIONS_COPY.deleteConfirmBody}</p>
                 <div className="flex gap-2.5">
                   <button
                     type="button"
-                    onClick={() => setConfirmingDelete(false)}
+                    onClick={deletion.cancel}
                     className="min-h-11 flex-1 rounded-lg border border-hairline py-2 text-center text-[13px] font-semibold text-label sm:min-h-0"
                   >
                     {TRANSACTIONS_COPY.deleteCancelAction}
                   </button>
                   <button
                     type="button"
-                    disabled={isDeleting}
+                    disabled={deletion.isPending()}
                     onClick={handleDelete}
                     className="min-h-11 flex-1 rounded-lg bg-danger py-2 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
                   >
@@ -610,7 +579,7 @@ export function TransactionModal({
             ) : (
               <button
                 type="button"
-                onClick={() => setConfirmingDelete(true)}
+                onClick={() => deletion.ask()}
                 className="min-h-11 text-[13px] font-semibold text-danger sm:min-h-0"
               >
                 {TRANSACTIONS_COPY.deleteTransaction}
@@ -619,22 +588,13 @@ export function TransactionModal({
           </div>
         )}
 
-        <div className="mt-1 flex gap-2.5">
-          <button
-            type="button"
-            onClick={onClose}
-            className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label sm:min-h-0"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="min-h-11 flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
-          >
-            {TRANSACTIONS_COPY.saveTransaction}
-          </button>
-        </div>
+        <ModalActions
+          secondaryLabel="Cancel"
+          onSecondary={onClose}
+          primaryLabel={TRANSACTIONS_COPY.saveTransaction}
+          primaryType="submit"
+          primaryDisabled={isSubmitting}
+        />
       </form>
     </Modal>
   );

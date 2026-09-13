@@ -151,12 +151,8 @@ type rolloverBudgetRequest struct {
 // is transaction_handlers.go's constant, reused rather than redeclared --
 // both routes take the same wire shape for a month.
 func parseBudgetMonth(w http.ResponseWriter, r *http.Request) (time.Time, bool) {
-	month, err := time.Parse(monthLayout, chi.URLParam(r, "month"))
-	if err != nil {
-		WriteError(w, http.StatusBadRequest, "INVALID_MONTH", "That month could not be read. Use YYYY-MM.", nil)
-		return time.Time{}, false
-	}
-	return month, true
+	return parseTimeOrRefuse(w, chi.URLParam(r, "month"), monthLayout,
+		http.StatusBadRequest, "INVALID_MONTH", "That month could not be read. Use YYYY-MM.")
 }
 
 // handleGetBudgetMonth serves the whole Budget screen for one month: the

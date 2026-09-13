@@ -130,10 +130,7 @@ RETURNING id, household_id, name, kind, sort_order, archived_at, created_at;
 -- strictly before it is already inside that figure and excluded.
 
 -- name: GetTransaction :one
-SELECT t.id, t.household_id, t.kind, t.occurred_on, t.description,
-       t.category_id, t.paid_by_membership_id, t.from_account_id, t.to_account_id,
-       t.amount_minor, t.amount_currency,
-       t.received_amount_minor, t.received_amount_currency, t.created_at,
+SELECT sqlc.embed(t),
        c.name AS category_name,
        u.display_name AS paid_by_name,
        fa.nickname AS from_account_name,
@@ -217,10 +214,7 @@ RETURNING id;
 -- LIMIT is $N + 1 in the caller, not here: the extra row is how the caller
 -- learns another page exists without counting the table.
 -- name: ListTransactions :many
-SELECT t.id, t.household_id, t.kind, t.occurred_on, t.description,
-       t.category_id, t.paid_by_membership_id, t.from_account_id, t.to_account_id,
-       t.amount_minor, t.amount_currency,
-       t.received_amount_minor, t.received_amount_currency, t.created_at,
+SELECT sqlc.embed(t),
        c.name AS category_name,
        u.display_name AS paid_by_name,
        fa.nickname AS from_account_name,
@@ -252,10 +246,7 @@ LIMIT sqlc.arg('row_limit');
 -- service converts each amount into the household's primary currency before
 -- summing, which SQL cannot do -- the FX provider lives in the usecase layer.
 -- name: MonthTotalsQuery :many
-SELECT t.id, t.household_id, t.kind, t.occurred_on, t.description,
-       t.category_id, t.paid_by_membership_id, t.from_account_id, t.to_account_id,
-       t.amount_minor, t.amount_currency,
-       t.received_amount_minor, t.received_amount_currency, t.created_at,
+SELECT sqlc.embed(t),
        c.name AS category_name,
        u.display_name AS paid_by_name,
        fa.nickname AS from_account_name,

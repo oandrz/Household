@@ -184,30 +184,6 @@ func (s *AdminService) RecordAudit(ctx context.Context, entry AdminAuditEntry) e
 	return s.d.Audit.Record(ctx, entry)
 }
 
-// recentAuditDefaultLimit and recentAuditMaxLimit bound RecentAudit's limit;
-// see its doc comment for why the clamp lives here.
-const (
-	recentAuditDefaultLimit = 50
-	recentAuditMaxLimit     = 500
-)
-
-// RecentAudit returns the most recent audit entries, most recent first.
-//
-// The limit is clamped here rather than in AdminAuditRepository.Recent,
-// whose own contract passes it straight through to SQL's LIMIT clause: a
-// caller-supplied limit reaching that unbounded is exactly how one request
-// ends up reading the whole table. A non-positive limit is treated as the
-// default page size; anything larger is capped.
-func (s *AdminService) RecentAudit(ctx context.Context, limit int) ([]AdminAuditEntry, error) {
-	switch {
-	case limit <= 0:
-		limit = recentAuditDefaultLimit
-	case limit > recentAuditMaxLimit:
-		limit = recentAuditMaxLimit
-	}
-	return s.d.Audit.Recent(ctx, limit)
-}
-
 // asFlagMap re-keys a repository's string map for the domain. The repositories
 // speak strings because a column can hold anything; the domain speaks Flag
 // because it validated.

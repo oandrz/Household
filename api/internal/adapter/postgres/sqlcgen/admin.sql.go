@@ -229,47 +229,6 @@ func (q *Queries) ListPlatformAdmins(ctx context.Context) ([]ListPlatformAdminsR
 	return items, nil
 }
 
-const recentAdminAudit = `-- name: RecentAdminAudit :many
-SELECT actor_user_id, action, target, detail, ip, created_at
-FROM admin_audit_log ORDER BY created_at DESC LIMIT $1
-`
-
-type RecentAdminAuditRow struct {
-	ActorUserID pgtype.UUID
-	Action      string
-	Target      string
-	Detail      []byte
-	Ip          string
-	CreatedAt   pgtype.Timestamptz
-}
-
-func (q *Queries) RecentAdminAudit(ctx context.Context, limit int32) ([]RecentAdminAuditRow, error) {
-	rows, err := q.db.Query(ctx, recentAdminAudit, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []RecentAdminAuditRow
-	for rows.Next() {
-		var i RecentAdminAuditRow
-		if err := rows.Scan(
-			&i.ActorUserID,
-			&i.Action,
-			&i.Target,
-			&i.Detail,
-			&i.Ip,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const recordAdminAudit = `-- name: RecordAdminAudit :exec
 INSERT INTO admin_audit_log (actor_user_id, action, target, detail, ip, created_at)
 VALUES ($1, $2, $3, $4, $5, $6)

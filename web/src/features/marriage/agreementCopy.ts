@@ -11,7 +11,7 @@ import type { AgreementProposal } from "./agreementSchemas";
 // sentence -- so three owners cannot read correctly on one screen and wrongly
 // on the next. "and", not the design's "&": one caller joins section NAMES,
 // and "Home & kids & Us" reads as three sections rather than two.
-export function joinNames(names: string[]): string {
+function joinNames(names: string[]): string {
   if (names.length === 0) return "";
   if (names.length === 1) return names[0];
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;

@@ -18,11 +18,11 @@ func TestTLSPolicyFromMode(t *testing.T) {
 		{"mandatory", gomail.TLSMandatory},
 		{"opportunistic", gomail.TLSOpportunistic},
 		{"none", gomail.NoTLS},
-		// Anything else falls back to NoTLS rather than panicking --
-		// config.Load already rejects any other value before it ever
-		// reaches here, so this is a defensive default, not a documented
-		// input.
-		{"unexpected", gomail.NoTLS},
+		// Anything else falls back to TLSMandatory, never NoTLS: config.Load
+		// already rejects any other value before it reaches here, so this is
+		// a defensive default, and a default that guesses must guess the side
+		// that refuses to send a sign-in link in plain text.
+		{"unexpected", gomail.TLSMandatory},
 	}
 	for _, tc := range cases {
 		if got := tlsPolicyFromMode(tc.mode); got != tc.want {

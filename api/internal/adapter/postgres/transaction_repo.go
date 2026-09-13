@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres/sqlcgen"
@@ -23,7 +24,8 @@ func (r *TransactionRepo) Get(ctx context.Context, householdID, transactionID st
 	if err != nil {
 		return usecase.TransactionView{}, translate(err, "get transaction")
 	}
-	return toTransactionViewFromGet(row), nil
+	return toTransactionView(row.Transaction, row.CategoryName, row.PaidByName,
+		row.FromAccountName, row.ToAccountName, row.BeforeFromOpening, row.BeforeToOpening)
 }
 
 func (r *TransactionRepo) Create(ctx context.Context, t domain.Transaction) (domain.Transaction, error) {
@@ -45,7 +47,7 @@ func (r *TransactionRepo) Create(ctx context.Context, t domain.Transaction) (dom
 	if err != nil {
 		return domain.Transaction{}, translate(err, "create transaction")
 	}
-	return toTransaction(row), nil
+	return toTransaction(row)
 }
 
 func (r *TransactionRepo) GetByIdempotencyKey(ctx context.Context, householdID, key string) (domain.Transaction, error) {
@@ -56,7 +58,7 @@ func (r *TransactionRepo) GetByIdempotencyKey(ctx context.Context, householdID, 
 	if err != nil {
 		return domain.Transaction{}, translate(err, "get transaction by idempotency key")
 	}
-	return toTransaction(row), nil
+	return toTransaction(row)
 }
 
 func (r *TransactionRepo) Update(ctx context.Context, t domain.Transaction) (domain.Transaction, error) {
@@ -78,7 +80,7 @@ func (r *TransactionRepo) Update(ctx context.Context, t domain.Transaction) (dom
 	if err != nil {
 		return domain.Transaction{}, translate(err, "update transaction")
 	}
-	return toTransaction(row), nil
+	return toTransaction(row)
 }
 
 func (r *TransactionRepo) Delete(ctx context.Context, householdID, transactionID string) error {
@@ -115,11 +117,21 @@ func receivedCurrency(m *domain.Money) *string {
 	return &currency
 }
 
-func toTransaction(t sqlcgen.Transaction) domain.Transaction {
+// toTransaction maps a transactions row into the domain type. Every
+// transaction query either returns sqlcgen.Transaction itself or carries one
+// through sqlc.embed(t), so this mapping exists once. kind goes through
+// domain.ParseTransactionKind for the reason toCategory gives:
+// TransactionService's account-shape switch must never see a kind no writer
+// here could have stored.
+func toTransaction(t sqlcgen.Transaction) (domain.Transaction, error) {
+	kind, err := domain.ParseTransactionKind(t.Kind)
+	if err != nil {
+		return domain.Transaction{}, fmt.Errorf("postgres: transaction: %w", err)
+	}
 	out := domain.Transaction{
 		ID:                 uuidToString(t.ID),
 		HouseholdID:        uuidToString(t.HouseholdID),
-		Kind:               domain.TransactionKind(t.Kind),
+		Kind:               kind,
 		OccurredOn:         dateToTime(t.OccurredOn),
 		Description:        t.Description,
 		CategoryID:         optionalIDToString(t.CategoryID),
@@ -137,7 +149,7 @@ func toTransaction(t sqlcgen.Transaction) domain.Transaction {
 			Currency: *t.ReceivedAmountCurrency,
 		}
 	}
-	return out
+	return out, nil
 }
 
 // buildTransactionView is the one place a row's joined names and its two
@@ -167,31 +179,29 @@ func buildTransactionView(
 	return view
 }
 
-func toTransactionViewFromGet(row sqlcgen.GetTransactionRow) usecase.TransactionView {
-	return buildTransactionView(
-		toTransaction(sqlcgen.Transaction{
-			ID: row.ID, HouseholdID: row.HouseholdID, Kind: row.Kind,
-			OccurredOn: row.OccurredOn, Description: row.Description,
-			CategoryID: row.CategoryID, PaidByMembershipID: row.PaidByMembershipID,
-			FromAccountID: row.FromAccountID, ToAccountID: row.ToAccountID,
-			AmountMinor: row.AmountMinor, AmountCurrency: row.AmountCurrency,
-			ReceivedAmountMinor:    row.ReceivedAmountMinor,
-			ReceivedAmountCurrency: row.ReceivedAmountCurrency,
-			CreatedAt:              row.CreatedAt,
-		}),
-		row.CategoryName, row.PaidByName, row.FromAccountName, row.ToAccountName,
-		// row.BeforeFromOpening and row.BeforeToOpening are already *bool, not
-		// because the LEFT JOIN makes them NULL when there is no account on
-		// that side -- "fa.id IS NOT NULL AND ..." evaluates to false, not
-		// NULL, in that case, so the raw SQL value is never actually NULL
-		// here. sqlc still types the column as nullable because it cannot
-		// prove a computed boolean expression is non-nullable, which is why
-		// the field is *bool at all. buildTransactionView's own nil-ing (see
-		// its comment) is what turns "false" into "no answer" for an absent
-		// side -- it is load-bearing, not a belt-and-braces double-check of
-		// something the query already guaranteed.
-		row.BeforeFromOpening, row.BeforeToOpening,
-	)
+// toTransactionView is the one converter for GetTransaction, ListTransactions
+// and MonthTotalsQuery. sqlc generates a distinct row type for each, but all
+// three select sqlc.embed(t) plus the same joined names and flags.
+//
+// beforeFrom and beforeTo are *bool, not because the LEFT JOIN makes them NULL
+// when there is no account on that side -- "fa.id IS NOT NULL AND ..."
+// evaluates to false, not NULL, in that case, so the raw SQL value is never
+// actually NULL here. sqlc still types the column as nullable because it
+// cannot prove a computed boolean expression is non-nullable, which is why the
+// field is *bool at all. buildTransactionView's own nil-ing (see its comment)
+// is what turns "false" into "no answer" for an absent side -- it is
+// load-bearing, not a belt-and-braces double-check of something the query
+// already guaranteed.
+func toTransactionView(
+	row sqlcgen.Transaction,
+	categoryName, paidByName, fromName, toName *string,
+	beforeFrom, beforeTo *bool,
+) (usecase.TransactionView, error) {
+	t, err := toTransaction(row)
+	if err != nil {
+		return usecase.TransactionView{}, err
+	}
+	return buildTransactionView(t, categoryName, paidByName, fromName, toName, beforeFrom, beforeTo), nil
 }
 
 // List asks for one row more than the caller wanted. That extra row is the
@@ -282,7 +292,12 @@ func (r *TransactionRepo) List(ctx context.Context, householdID string, f usecas
 	}
 	out := make([]usecase.TransactionView, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, toTransactionViewFromList(row))
+		view, err := toTransactionView(row.Transaction, row.CategoryName, row.PaidByName,
+			row.FromAccountName, row.ToAccountName, row.BeforeFromOpening, row.BeforeToOpening)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, view)
 	}
 	return out, nil
 }
@@ -300,7 +315,12 @@ func (r *TransactionRepo) MonthTotals(ctx context.Context, householdID string, m
 	}
 	out := make([]usecase.TransactionView, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, toTransactionViewFromMonthTotals(row))
+		view, err := toTransactionView(row.Transaction, row.CategoryName, row.PaidByName,
+			row.FromAccountName, row.ToAccountName, row.BeforeFromOpening, row.BeforeToOpening)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, view)
 	}
 	return out, nil
 }
@@ -319,38 +339,4 @@ const (
 // household, so a month is a calendar month and not a range of instants.
 func startOfMonth(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
-}
-
-func toTransactionViewFromList(row sqlcgen.ListTransactionsRow) usecase.TransactionView {
-	return buildTransactionView(
-		toTransaction(sqlcgen.Transaction{
-			ID: row.ID, HouseholdID: row.HouseholdID, Kind: row.Kind,
-			OccurredOn: row.OccurredOn, Description: row.Description,
-			CategoryID: row.CategoryID, PaidByMembershipID: row.PaidByMembershipID,
-			FromAccountID: row.FromAccountID, ToAccountID: row.ToAccountID,
-			AmountMinor: row.AmountMinor, AmountCurrency: row.AmountCurrency,
-			ReceivedAmountMinor:    row.ReceivedAmountMinor,
-			ReceivedAmountCurrency: row.ReceivedAmountCurrency,
-			CreatedAt:              row.CreatedAt,
-		}),
-		row.CategoryName, row.PaidByName, row.FromAccountName, row.ToAccountName,
-		row.BeforeFromOpening, row.BeforeToOpening,
-	)
-}
-
-func toTransactionViewFromMonthTotals(row sqlcgen.MonthTotalsQueryRow) usecase.TransactionView {
-	return buildTransactionView(
-		toTransaction(sqlcgen.Transaction{
-			ID: row.ID, HouseholdID: row.HouseholdID, Kind: row.Kind,
-			OccurredOn: row.OccurredOn, Description: row.Description,
-			CategoryID: row.CategoryID, PaidByMembershipID: row.PaidByMembershipID,
-			FromAccountID: row.FromAccountID, ToAccountID: row.ToAccountID,
-			AmountMinor: row.AmountMinor, AmountCurrency: row.AmountCurrency,
-			ReceivedAmountMinor:    row.ReceivedAmountMinor,
-			ReceivedAmountCurrency: row.ReceivedAmountCurrency,
-			CreatedAt:              row.CreatedAt,
-		}),
-		row.CategoryName, row.PaidByName, row.FromAccountName, row.ToAccountName,
-		row.BeforeFromOpening, row.BeforeToOpening,
-	)
 }

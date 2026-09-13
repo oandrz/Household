@@ -5,83 +5,16 @@
 // docs/adr/0010-binding-a-chat-needs-a-confirm.md before simplifying this
 // into a single click.
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, apiFetch } from "../../api/client";
-import { apiErrorMessage } from "../auth/copy";
-import { formatTelegramLinkedAt, telegramChatLabel, telegramPollInterval } from "./copy";
+import { ApiError } from "../../api/client";
+import { apiErrorMessage } from "../../api/errorMessage";
+import { formatTelegramLinkedAt, telegramChatLabel } from "./copy";
 import {
-  telegramBindingSchema,
-  telegramLinkStartSchema,
-  telegramLinkStatusSchema,
-  type TelegramBinding,
-  type TelegramLinkStart,
-  type TelegramLinkStatus,
-} from "./schemas";
-
-const telegramBindingQueryKey = ["telegram-binding"] as const;
-
-function telegramLinkStatusQueryKey(linkId: string) {
-  return ["telegram-link-status", linkId] as const;
-}
-
-async function fetchTelegramBinding(): Promise<TelegramBinding> {
-  const body = await apiFetch<unknown>("/api/v1/auth/telegram");
-  return telegramBindingSchema.parse(body);
-}
-
-function useTelegramBinding() {
-  return useQuery({ queryKey: telegramBindingQueryKey, queryFn: fetchTelegramBinding });
-}
-
-async function fetchTelegramLinkStatus(linkId: string): Promise<TelegramLinkStatus> {
-  const body = await apiFetch<unknown>(
-    `/api/v1/auth/telegram/link/${encodeURIComponent(linkId)}`,
-  );
-  return telegramLinkStatusSchema.parse(body);
-}
-
-function useTelegramLinkStatus(linkId: string | null) {
-  return useQuery({
-    queryKey: telegramLinkStatusQueryKey(linkId ?? "none"),
-    queryFn: () => fetchTelegramLinkStatus(linkId as string),
-    enabled: linkId !== null,
-    refetchInterval: (query) => telegramPollInterval(query.state.data?.status),
-  });
-}
-
-function useStartTelegramLink() {
-  return useMutation({
-    mutationFn: async (): Promise<TelegramLinkStart> => {
-      const body = await apiFetch<unknown>("/api/v1/auth/telegram/link", { method: "POST" });
-      return telegramLinkStartSchema.parse(body);
-    },
-  });
-}
-
-function useConfirmTelegramLink() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (linkId: string): Promise<TelegramBinding> => {
-      const body = await apiFetch<unknown>(
-        `/api/v1/auth/telegram/link/${encodeURIComponent(linkId)}/confirm`,
-        { method: "POST" },
-      );
-      return telegramBindingSchema.parse(body);
-    },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: telegramBindingQueryKey }),
-  });
-}
-
-function useDisconnectTelegram() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (): Promise<TelegramBinding> => {
-      const body = await apiFetch<unknown>("/api/v1/auth/telegram", { method: "DELETE" });
-      return telegramBindingSchema.parse(body);
-    },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: telegramBindingQueryKey }),
-  });
-}
+  useConfirmTelegramLink,
+  useDisconnectTelegram,
+  useStartTelegramLink,
+  useTelegramBinding,
+  useTelegramLinkStatus,
+} from "./useTelegram";
 
 export function TelegramPanel() {
   const binding = useTelegramBinding();

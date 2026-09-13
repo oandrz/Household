@@ -114,18 +114,17 @@ func auditAdmin(deps Deps) func(http.Handler) http.Handler {
 				Action:      r.Method + " " + r.URL.Path,
 				Target:      r.URL.Path,
 				Detail:      detail,
-				// r.RemoteAddr here is middleware.RealIP's rewrite of it, read
-				// from headers -- so this column is only ever as trustworthy as
-				// the proxy in front of the service. web/nginx.conf is what
-				// makes it trustworthy today, and says so at length: it blanks
-				// any client-supplied True-Client-IP and sets X-Real-IP from
-				// $remote_addr (chi takes the first non-empty of True-Client-IP,
-				// X-Real-IP, X-Forwarded-For, with no trusted-proxy list of its
-				// own), while nginx's real_ip module trusts X-Forwarded-For only
-				// from 172.28.0.0/16 with real_ip_recursive off. Run this
-				// service with anything else in front of it, or with nothing,
-				// and the attacker chooses what this column says.
-				IP: r.RemoteAddr,
+				// clientIP is the TCP peer, or nginx's X-Real-IP when that peer
+				// is inside TRUSTED_PROXY_CIDRS (trustedProxyRealIP) -- so this
+				// column is exactly as trustworthy as that list. In production
+				// the list is the hearth Docker network, and web/nginx.conf
+				// overwrites X-Real-IP with the client its real_ip module
+				// resolved (X-Forwarded-For trusted only from 172.28.0.0/16,
+				// real_ip_recursive off). A container on that network could
+				// still name any address, the boundary nginx.conf's own comment
+				// accepts. A request from outside the list is recorded as the
+				// address that actually connected, never as a header it sent.
+				IP: clientIP(r),
 				At: deps.Clock.Now(),
 			}); err != nil {
 				// An unwritable audit log closes the surface. The alternative

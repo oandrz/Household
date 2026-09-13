@@ -77,8 +77,8 @@ export const GOAL_COPY = {
   deleteContributionTrigger: "Delete",
   deleteContributionConfirmBody: "Delete this contribution? This can't be undone.",
   // Distinct from deleteContributionTrigger above on purpose -- the two are
-  // never on screen at once (TransactionModal.tsx's own confirmingDelete
-  // toggle: the trigger hides the moment this pair appears), but a distinct
+  // never on screen at once (TransactionModal.tsx's own delete
+  // confirmation: the trigger hides the moment this pair appears), but a distinct
   // word for the destructive confirm still reads more deliberately than
   // reusing "Delete" for both the opening click and the one that actually
   // commits it.

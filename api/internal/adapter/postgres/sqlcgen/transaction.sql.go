@@ -203,10 +203,7 @@ func (q *Queries) GetCategoryKind(ctx context.Context, arg GetCategoryKindParams
 
 const getTransaction = `-- name: GetTransaction :one
 
-SELECT t.id, t.household_id, t.kind, t.occurred_on, t.description,
-       t.category_id, t.paid_by_membership_id, t.from_account_id, t.to_account_id,
-       t.amount_minor, t.amount_currency,
-       t.received_amount_minor, t.received_amount_currency, t.created_at,
+SELECT t.id, t.household_id, t.kind, t.occurred_on, t.description, t.category_id, t.paid_by_membership_id, t.from_account_id, t.to_account_id, t.amount_minor, t.amount_currency, t.received_amount_minor, t.received_amount_currency, t.created_at, t.idempotency_key,
        c.name AS category_name,
        u.display_name AS paid_by_name,
        fa.nickname AS from_account_name,
@@ -228,26 +225,13 @@ type GetTransactionParams struct {
 }
 
 type GetTransactionRow struct {
-	ID                     pgtype.UUID
-	HouseholdID            pgtype.UUID
-	Kind                   string
-	OccurredOn             pgtype.Date
-	Description            string
-	CategoryID             pgtype.UUID
-	PaidByMembershipID     pgtype.UUID
-	FromAccountID          pgtype.UUID
-	ToAccountID            pgtype.UUID
-	AmountMinor            int64
-	AmountCurrency         string
-	ReceivedAmountMinor    *int64
-	ReceivedAmountCurrency *string
-	CreatedAt              pgtype.Timestamptz
-	CategoryName           *string
-	PaidByName             *string
-	FromAccountName        *string
-	ToAccountName          *string
-	BeforeFromOpening      *bool
-	BeforeToOpening        *bool
+	Transaction       Transaction
+	CategoryName      *string
+	PaidByName        *string
+	FromAccountName   *string
+	ToAccountName     *string
+	BeforeFromOpening *bool
+	BeforeToOpening   *bool
 }
 
 // transactionColumns is repeated in full in each query below rather than
@@ -268,20 +252,21 @@ func (q *Queries) GetTransaction(ctx context.Context, arg GetTransactionParams) 
 	row := q.db.QueryRow(ctx, getTransaction, arg.HouseholdID, arg.ID)
 	var i GetTransactionRow
 	err := row.Scan(
-		&i.ID,
-		&i.HouseholdID,
-		&i.Kind,
-		&i.OccurredOn,
-		&i.Description,
-		&i.CategoryID,
-		&i.PaidByMembershipID,
-		&i.FromAccountID,
-		&i.ToAccountID,
-		&i.AmountMinor,
-		&i.AmountCurrency,
-		&i.ReceivedAmountMinor,
-		&i.ReceivedAmountCurrency,
-		&i.CreatedAt,
+		&i.Transaction.ID,
+		&i.Transaction.HouseholdID,
+		&i.Transaction.Kind,
+		&i.Transaction.OccurredOn,
+		&i.Transaction.Description,
+		&i.Transaction.CategoryID,
+		&i.Transaction.PaidByMembershipID,
+		&i.Transaction.FromAccountID,
+		&i.Transaction.ToAccountID,
+		&i.Transaction.AmountMinor,
+		&i.Transaction.AmountCurrency,
+		&i.Transaction.ReceivedAmountMinor,
+		&i.Transaction.ReceivedAmountCurrency,
+		&i.Transaction.CreatedAt,
+		&i.Transaction.IdempotencyKey,
 		&i.CategoryName,
 		&i.PaidByName,
 		&i.FromAccountName,
@@ -408,10 +393,7 @@ func (q *Queries) ListCategoriesIncludingArchived(ctx context.Context, household
 }
 
 const listTransactions = `-- name: ListTransactions :many
-SELECT t.id, t.household_id, t.kind, t.occurred_on, t.description,
-       t.category_id, t.paid_by_membership_id, t.from_account_id, t.to_account_id,
-       t.amount_minor, t.amount_currency,
-       t.received_amount_minor, t.received_amount_currency, t.created_at,
+SELECT t.id, t.household_id, t.kind, t.occurred_on, t.description, t.category_id, t.paid_by_membership_id, t.from_account_id, t.to_account_id, t.amount_minor, t.amount_currency, t.received_amount_minor, t.received_amount_currency, t.created_at, t.idempotency_key,
        c.name AS category_name,
        u.display_name AS paid_by_name,
        fa.nickname AS from_account_name,
@@ -453,26 +435,13 @@ type ListTransactionsParams struct {
 }
 
 type ListTransactionsRow struct {
-	ID                     pgtype.UUID
-	HouseholdID            pgtype.UUID
-	Kind                   string
-	OccurredOn             pgtype.Date
-	Description            string
-	CategoryID             pgtype.UUID
-	PaidByMembershipID     pgtype.UUID
-	FromAccountID          pgtype.UUID
-	ToAccountID            pgtype.UUID
-	AmountMinor            int64
-	AmountCurrency         string
-	ReceivedAmountMinor    *int64
-	ReceivedAmountCurrency *string
-	CreatedAt              pgtype.Timestamptz
-	CategoryName           *string
-	PaidByName             *string
-	FromAccountName        *string
-	ToAccountName          *string
-	BeforeFromOpening      *bool
-	BeforeToOpening        *bool
+	Transaction       Transaction
+	CategoryName      *string
+	PaidByName        *string
+	FromAccountName   *string
+	ToAccountName     *string
+	BeforeFromOpening *bool
+	BeforeToOpening   *bool
 }
 
 // ListTransactions serves the ledger and all five of its filters.
@@ -512,20 +481,21 @@ func (q *Queries) ListTransactions(ctx context.Context, arg ListTransactionsPara
 	for rows.Next() {
 		var i ListTransactionsRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.HouseholdID,
-			&i.Kind,
-			&i.OccurredOn,
-			&i.Description,
-			&i.CategoryID,
-			&i.PaidByMembershipID,
-			&i.FromAccountID,
-			&i.ToAccountID,
-			&i.AmountMinor,
-			&i.AmountCurrency,
-			&i.ReceivedAmountMinor,
-			&i.ReceivedAmountCurrency,
-			&i.CreatedAt,
+			&i.Transaction.ID,
+			&i.Transaction.HouseholdID,
+			&i.Transaction.Kind,
+			&i.Transaction.OccurredOn,
+			&i.Transaction.Description,
+			&i.Transaction.CategoryID,
+			&i.Transaction.PaidByMembershipID,
+			&i.Transaction.FromAccountID,
+			&i.Transaction.ToAccountID,
+			&i.Transaction.AmountMinor,
+			&i.Transaction.AmountCurrency,
+			&i.Transaction.ReceivedAmountMinor,
+			&i.Transaction.ReceivedAmountCurrency,
+			&i.Transaction.CreatedAt,
+			&i.Transaction.IdempotencyKey,
 			&i.CategoryName,
 			&i.PaidByName,
 			&i.FromAccountName,
@@ -544,10 +514,7 @@ func (q *Queries) ListTransactions(ctx context.Context, arg ListTransactionsPara
 }
 
 const monthTotalsQuery = `-- name: MonthTotalsQuery :many
-SELECT t.id, t.household_id, t.kind, t.occurred_on, t.description,
-       t.category_id, t.paid_by_membership_id, t.from_account_id, t.to_account_id,
-       t.amount_minor, t.amount_currency,
-       t.received_amount_minor, t.received_amount_currency, t.created_at,
+SELECT t.id, t.household_id, t.kind, t.occurred_on, t.description, t.category_id, t.paid_by_membership_id, t.from_account_id, t.to_account_id, t.amount_minor, t.amount_currency, t.received_amount_minor, t.received_amount_currency, t.created_at, t.idempotency_key,
        c.name AS category_name,
        u.display_name AS paid_by_name,
        fa.nickname AS from_account_name,
@@ -572,26 +539,13 @@ type MonthTotalsQueryParams struct {
 }
 
 type MonthTotalsQueryRow struct {
-	ID                     pgtype.UUID
-	HouseholdID            pgtype.UUID
-	Kind                   string
-	OccurredOn             pgtype.Date
-	Description            string
-	CategoryID             pgtype.UUID
-	PaidByMembershipID     pgtype.UUID
-	FromAccountID          pgtype.UUID
-	ToAccountID            pgtype.UUID
-	AmountMinor            int64
-	AmountCurrency         string
-	ReceivedAmountMinor    *int64
-	ReceivedAmountCurrency *string
-	CreatedAt              pgtype.Timestamptz
-	CategoryName           *string
-	PaidByName             *string
-	FromAccountName        *string
-	ToAccountName          *string
-	BeforeFromOpening      *bool
-	BeforeToOpening        *bool
+	Transaction       Transaction
+	CategoryName      *string
+	PaidByName        *string
+	FromAccountName   *string
+	ToAccountName     *string
+	BeforeFromOpening *bool
+	BeforeToOpening   *bool
 }
 
 // MonthTotalsQuery returns every transaction in one calendar month. The
@@ -607,20 +561,21 @@ func (q *Queries) MonthTotalsQuery(ctx context.Context, arg MonthTotalsQueryPara
 	for rows.Next() {
 		var i MonthTotalsQueryRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.HouseholdID,
-			&i.Kind,
-			&i.OccurredOn,
-			&i.Description,
-			&i.CategoryID,
-			&i.PaidByMembershipID,
-			&i.FromAccountID,
-			&i.ToAccountID,
-			&i.AmountMinor,
-			&i.AmountCurrency,
-			&i.ReceivedAmountMinor,
-			&i.ReceivedAmountCurrency,
-			&i.CreatedAt,
+			&i.Transaction.ID,
+			&i.Transaction.HouseholdID,
+			&i.Transaction.Kind,
+			&i.Transaction.OccurredOn,
+			&i.Transaction.Description,
+			&i.Transaction.CategoryID,
+			&i.Transaction.PaidByMembershipID,
+			&i.Transaction.FromAccountID,
+			&i.Transaction.ToAccountID,
+			&i.Transaction.AmountMinor,
+			&i.Transaction.AmountCurrency,
+			&i.Transaction.ReceivedAmountMinor,
+			&i.Transaction.ReceivedAmountCurrency,
+			&i.Transaction.CreatedAt,
+			&i.Transaction.IdempotencyKey,
 			&i.CategoryName,
 			&i.PaidByName,
 			&i.FromAccountName,

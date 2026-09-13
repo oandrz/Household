@@ -108,10 +108,6 @@ func (failingAdminAudit) Record(context.Context, usecase.AdminAuditEntry) error 
 	return errAuditWriteFailed
 }
 
-func (failingAdminAudit) Recent(context.Context, int) ([]usecase.AdminAuditEntry, error) {
-	return nil, errAuditWriteFailed
-}
-
 // panickingFeatureFlags makes the flags handler panic rather than merely
 // fail. That is the difference that gives
 // TestTheAuditRowIsWrittenBeforeTheHandlerRuns its teeth: a handler that
@@ -421,12 +417,9 @@ func TestAdminAuditRowRecordsTheRealRequest(t *testing.T) {
 
 	env.authedGet(t, "/api/v1/admin/flags", session)
 
-	entries, err := env.adminAudit.Recent(context.Background(), 1)
-	if err != nil {
-		t.Fatalf("Recent: %v", err)
-	}
+	entries := env.auditEntries(t, 1)
 	if len(entries) != 1 {
-		t.Fatalf("Recent(1) returned %d entries, want 1", len(entries))
+		t.Fatalf("auditEntries(1) returned %d entries, want 1", len(entries))
 	}
 	if entries[0].Action != "GET /api/v1/admin/flags" {
 		t.Fatalf("Action = %q, want %q", entries[0].Action, "GET /api/v1/admin/flags")
@@ -448,19 +441,13 @@ func TestAdminAuditRowRecordsTheQueryString(t *testing.T) {
 		map[string]string{"password": env.ownerPassword}, session, csrf)
 
 	env.authedGet(t, "/api/v1/admin/flags?probe=1&limit=5", session)
-	entries, err := env.adminAudit.Recent(context.Background(), 1)
-	if err != nil {
-		t.Fatalf("Recent: %v", err)
-	}
+	entries := env.auditEntries(t, 1)
 	if got := entries[0].Detail["query"]; got != "probe=1&limit=5" {
 		t.Fatalf("Detail[query] = %v, want the raw query string", got)
 	}
 
 	env.authedGet(t, "/api/v1/admin/flags", session)
-	entries, err = env.adminAudit.Recent(context.Background(), 1)
-	if err != nil {
-		t.Fatalf("Recent: %v", err)
-	}
+	entries = env.auditEntries(t, 1)
 	if _, present := entries[0].Detail["query"]; present {
 		t.Fatalf("a request with no query string still wrote Detail[query] = %v", entries[0].Detail["query"])
 	}

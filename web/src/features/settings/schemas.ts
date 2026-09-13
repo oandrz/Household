@@ -31,7 +31,6 @@ export const updateMemberResponseSchema = z.object({
   capabilities: z.array(z.string()),
   warning: z.string().optional(),
 });
-export type UpdateMemberResponse = z.infer<typeof updateMemberResponseSchema>;
 
 export const notificationPreferencesSchema = z.object({
   billReminders: z.boolean(),

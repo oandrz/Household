@@ -56,11 +56,63 @@ const currencies = {
   currencies: [{ code: "SGD", name: "Singapore Dollar", symbol: "S$" }],
 };
 
+// stubFetchRoutes answers every request at once, so a test built on it never
+// sees a request still on its way. This keeps it for the GETs and holds every
+// DELETE open until the test calls `release`: that open window is where a
+// person's second click lands. Every DELETE URL is recorded, so the test can
+// count them.
+function holdDeletesOpen(routes: Parameters<typeof stubFetchRoutes>[0]) {
+  const answerFromRoutes = stubFetchRoutes(routes);
+  const deletes: string[] = [];
+  let release: () => void = () => {};
+  const heldResponse = new Promise<Response>((resolve) => {
+    release = () => resolve(new Response(null, { status: 204 }));
+  });
+  vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+    if ((init?.method ?? "GET").toUpperCase() === "DELETE") {
+      deletes.push(String(input));
+      return heldResponse;
+    }
+    return answerFromRoutes(input, init);
+  });
+  return { deletes, release: () => release() };
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 describe("HoldingIncomePanel", () => {
+  // A double click on "Really remove" used to send two DELETEs, because the
+  // button stayed clickable while the first was still on its way.
+  // TransactionModal, GoalContributionsPanel and BillRow already disable their
+  // confirm buttons for the same reason.
+  it("sends only one DELETE when the confirm button is clicked twice", async () => {
+    const network = holdDeletesOpen({
+      "GET /api/v1/currencies": { status: 200, body: currencies },
+      "GET /api/v1/holdings/h1/income": { status: 200, body: oneRow },
+    });
+    renderWithRouter(<HoldingIncomePanel holding={holding} onClose={() => {}} />);
+
+    await screen.findByText(/Q3 dividend/);
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    const confirmButton = screen.getByRole("button", { name: "Really remove" });
+    fireEvent.click(confirmButton);
+    fireEvent.click(confirmButton);
+
+    await waitFor(() => expect(network.deletes).toHaveLength(1));
+    // The count alone could pass too early: react-query sends the request a
+    // few microtasks after the click, so a second DELETE might not have landed
+    // yet. A disabled button is what actually stops the second click.
+    expect(confirmButton).toBeDisabled();
+
+    // Let the DELETE finish, and wait for the row to settle back to its plain
+    // Remove button, so that any second request has had every chance to go.
+    network.release();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument());
+    expect(network.deletes).toEqual(["/api/v1/holdings/h1/income/i1"]);
+  });
+
   it("says so when a delete fails, and keeps the row", async () => {
     stubFetchRoutes({
       "GET /api/v1/currencies": { status: 200, body: currencies },
