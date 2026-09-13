@@ -7,7 +7,7 @@
     "quality_profile": "showcase",
     "repository": {
       "url": "https://github.com/oandrz/Household",
-      "revision": "2a96f948e15d46cf3ef5431cc4d984d112190a41"
+      "revision": "d0e40cd5867f249b0ad7c30b1c95dcfcec407da7"
     },
     "views": [
       {
@@ -15,12 +15,13 @@
         "label": "The request path",
         "focus": [
           "browser",
+          "hearthctl",
           "caddy",
           "nginx",
           "api",
           "postgres"
         ],
-        "note": "One origin end to end: TLS at Caddy, the SPA and /api proxy at nginx, Go behind it, Postgres behind that."
+        "note": "Two clients, one origin: TLS at Caddy, the SPA and /api proxy at nginx, Go behind it, Postgres behind that."
       },
       {
         "id": "off-unless-configured",
@@ -29,9 +30,10 @@
           "api",
           "postgres",
           "mailpit",
-          "telegram"
+          "telegram",
+          "openrouter"
         ],
-        "note": "Two dashed edges are off here — the read-only pool and Telegram — and the /admin/mail read-back lands only on the next deploy."
+        "note": "Dashed edges switch on from .env pairs: the read-only pool, Telegram, OpenRouter free text. None needs a code change."
       },
       {
         "id": "operating-the-box",
@@ -47,6 +49,27 @@
     ]
   },
   "components": [
+    {
+      "id": "hearthctl",
+      "type": "external",
+      "label": "hearthctl",
+      "sublabel": "for scripts and agents",
+      "pos": [
+        24,
+        40
+      ],
+      "size": [
+        140,
+        64
+      ],
+      "sources": [
+        {
+          "path": "api/cmd/hearthctl/client.go",
+          "line": 101,
+          "label": "Bearer header"
+        }
+      ]
+    },
     {
       "id": "browser",
       "type": "external",
@@ -107,7 +130,7 @@
       "type": "backend",
       "label": "api — Go :8080",
       "sublabel": "distroless, no shell",
-      "tag": "clean architecture",
+      "tag": "poller + digest goroutines",
       "pos": [
         854,
         200
@@ -199,6 +222,27 @@
       ]
     },
     {
+      "id": "openrouter",
+      "type": "external",
+      "label": "openrouter.ai",
+      "sublabel": "open-weight models, outbound",
+      "pos": [
+        600,
+        40
+      ],
+      "size": [
+        185,
+        64
+      ],
+      "sources": [
+        {
+          "path": "api/internal/adapter/openrouter/intent_parser.go",
+          "line": 71,
+          "label": "IntentParser"
+        }
+      ]
+    },
+    {
       "id": "telegram",
       "type": "external",
       "label": "api.telegram.org",
@@ -254,7 +298,14 @@
       "from": "browser",
       "to": "caddy",
       "label": "HTTPS",
-      "variant": "emphasis"
+      "variant": "emphasis",
+      "labelDy": 16
+    },
+    {
+      "id": "hearthctl-https",
+      "from": "hearthctl",
+      "to": "caddy",
+      "label": "HTTPS, Bearer token"
     },
     {
       "id": "caddy-to-nginx",
@@ -268,7 +319,8 @@
       "from": "nginx",
       "to": "api",
       "label": "/api/v1, /healthz, /readyz",
-      "variant": "emphasis"
+      "variant": "emphasis",
+      "labelDy": 16
     },
     {
       "id": "app-pool",
@@ -314,7 +366,14 @@
       "id": "api-telegram",
       "from": "api",
       "to": "telegram",
-      "label": "getUpdates long-poll, sendMessage",
+      "label": "getUpdates long-poll; sendMessage, daily digest",
+      "variant": "dashed"
+    },
+    {
+      "id": "api-openrouter",
+      "from": "api",
+      "to": "openrouter",
+      "label": "POST /chat/completions, free text",
       "variant": "dashed"
     },
     {
@@ -347,7 +406,7 @@
       "title": "Edge",
       "items": [
         "Caddy exists to renew certificates; nginx already does the routing",
-        "One origin end to end, so there is no CORS configuration anywhere",
+        "One origin for browser and hearthctl, so no CORS anywhere; a token cannot reach /admin",
         "nginx sets X-Real-IP from Caddy, which stops a client spoofing the per-IP sign-up limiter"
       ]
     },
@@ -356,19 +415,19 @@
       "title": "Inside api — dependencies point inward",
       "items": [
         "internal/domain — money as int64 minor units, currency, roles; standard library only",
-        "internal/usecase — services plus ports.go; no service takes an actor parameter",
-        "internal/adapter — http, postgres, mail, telegram, crypto, clock and fx implement those ports",
-        "make lint-arch enforces the direction, test files included"
+        "internal/usecase — services plus ports.go; no actor parameter, guards sit at each channel's edge (ADR 8)",
+        "internal/adapter — http, postgres, mail, telegram, openrouter, intent, crypto, clock, fx",
+        "The digest ticks every 15 min beside the poller; a nudge_deliveries row makes it exactly-once (ADR 9)"
       ]
     },
     {
       "dot": "amber",
-      "title": "Dashed means off on this box",
+      "title": "Dashed means off unless configured",
       "items": [
-        "DATABASE_READONLY_URL unset — /admin/db/* answers 503, no fallback to DATABASE_URL",
-        "TELEGRAM_BOT_TOKEN empty — the route answers 404 and the poller never starts",
-        "Mail stops at Mailpit; that inbox is an auth bypass, so 8025 binds to 127.0.0.1 and is read over an SSH tunnel",
-        "Nightly plain-SQL dump encrypted to R2; the private key is not on the box"
+        "DATABASE_READONLY_URL unset on the box — /admin/db/* answers 503, no fallback",
+        "No TELEGRAM_* pair — the route answers 404; poller and digest never start",
+        "No OPENROUTER_* pair — the bot is commands-only; no NUDGES_* pair — no digest",
+        "Mail stops at Mailpit; that inbox is an auth bypass, so 8025 binds to 127.0.0.1"
       ]
     }
   ]
