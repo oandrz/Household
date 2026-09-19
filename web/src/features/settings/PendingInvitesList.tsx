@@ -28,8 +28,21 @@ function PendingInviteRow({
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[13.5px] font-semibold text-ink">{invite.name}</div>
-          <div className="truncate text-[11.5px] text-muted">
-            {memberBadgeLabel(invite.role)} · {invite.email} · {pendingInviteExpiryLine(invite.expiresAt)}
+          {/* Only the address truncates. At 360px this line is about 214px
+              wide, and when the whole line truncated, an ordinary address
+              pushed the expiry -- a field the owner needs -- off the end.
+              The role and the date keep their full width; the address
+              (min-w-0) gives way and ends in an ellipsis. */}
+          <div className="flex min-w-0 items-baseline gap-1 text-[11.5px] text-muted">
+            <span className="shrink-0">{memberBadgeLabel(invite.role)}</span>
+            <span aria-hidden="true" className="shrink-0">
+              ·
+            </span>
+            <span className="min-w-0 truncate">{invite.email}</span>
+            <span aria-hidden="true" className="shrink-0">
+              ·
+            </span>
+            <span className="shrink-0">{pendingInviteExpiryLine(invite.expiresAt)}</span>
           </div>
         </div>
         <button

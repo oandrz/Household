@@ -37,7 +37,24 @@ describe("PendingInvitesList", () => {
     renderList();
 
     expect(await screen.findByText("Jane")).toBeInTheDocument();
-    expect(screen.getByText(/^Owner · jane@example\.com · Expires /)).toBeInTheDocument();
+    expect(screen.getByText("Owner")).toBeInTheDocument();
+    expect(screen.getByText("jane@example.com")).toBeInTheDocument();
+    expect(screen.getByText(/^Expires /)).toBeInTheDocument();
+  });
+
+  // At 360px the detail line is about 214px wide, so even
+  // "Owner · jane@example.com · Expires Sep 26" does not fit. When the whole
+  // line truncated, the expiry was what got clipped (final review,
+  // 2026-09-19). Only the address may give way. jsdom has no layout, so this
+  // pins the structure; the browser walk measured the real row.
+  it("clips a long address rather than the role or the expiry", async () => {
+    stubFetchRoutes({ [`GET ${INVITES_URL}`]: { status: 200, body: [jane] } });
+    renderList();
+
+    const expiry = await screen.findByText(/^Expires /);
+    expect(expiry.closest(".truncate")).toBeNull();
+    expect(screen.getByText("Owner").closest(".truncate")).toBeNull();
+    expect(screen.getByText("jane@example.com")).toHaveClass("truncate");
   });
 
   it("renders nothing when no invite is pending", async () => {
