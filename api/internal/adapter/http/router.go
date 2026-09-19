@@ -250,6 +250,13 @@ func NewRouter(deps Deps) http.Handler {
 			g.Get("/spaces", handleListSpaces(deps))
 			g.Get("/notification-preferences", handleGetNotificationPreferences(deps))
 
+			// Owner-only: an invitee's address is personal data. Readable with
+			// an API token -- it shows no secret -- unlike withdrawing, below.
+			g.Group(func(o chi.Router) {
+				o.Use(requireOwner)
+				o.Get("/household/invites", handleListPendingInvites(deps))
+			})
+
 			// The Family calendar's API stub, dark behind its flag. It answers
 			// an empty list rather than 501: a flag-gated route must behave
 			// like a real route once its flag is on, or the flag proves
@@ -270,6 +277,16 @@ func NewRouter(deps Deps) http.Handler {
 					o.Patch("/household/members/{id}", handleUpdateMember(deps))
 					o.Delete("/household/members/{id}", handleRemoveMember(deps))
 					o.Post("/spaces", handleCreateSpace(deps))
+
+					// Withdrawing an invite changes who may join the
+					// household, so it needs a browser session as well as
+					// an owner: a leaked API token must not be able to
+					// manage who gets in (partner-invite spec decision 12,
+					// the reason behind ADR 7 rule 2).
+					o.Group(func(c chi.Router) {
+						c.Use(requireCookieSession)
+						c.Delete("/household/invites/{id}", handleWithdrawInvite(deps))
+					})
 				})
 			})
 
