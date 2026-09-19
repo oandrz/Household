@@ -550,11 +550,15 @@ checks ran, and it was walked 15 of 15 in a real browser
 (`docs/superpowers/plans/2026-09-19-hearth-partner-invite-lobby-m1-verification.md`).
 The whole-branch review's fix wave is in too. "Invite your partner" (Overview
 and Agreements) now opens the invite modal on Parent (`?invite=partner`),
-while "+ Invite" keeps Kid, and those flows were re-walked. It is not merged
-and no PR is open. Next, write milestone 2's plan (Telegram invites and the
-knock) from
-`docs/superpowers/specs/2026-09-19-hearth-partner-invite-lobby-design.md`.
-One thing for that plan to cover: its 3-second poll runs only for Telegram
+while "+ Invite" keeps Kid, and those flows were re-walked. The branch is
+rebased onto `main` (the code-quality pass landed there as PR #26) and open
+as **[PR #27](https://github.com/oandrz/Household/pull/27)**, not merged.
+**Next is milestone 2 — Telegram invites and the knock — and it has a PRD and
+a spec but no plan yet. Start from
+`docs/superpowers/plans/2026-09-20-hearth-partner-invite-lobby-m2-handover.md`**,
+which carries the code pointers, the decisions already made, what must be
+settled before the plan is written, and the traps milestone 1 hit. One thing
+for that plan to cover: the lobby's 3-second poll runs only for Telegram
 invites, so an emailed invite accepted in another browser still reaches an
 open Settings tab only on the next navigation.
 
