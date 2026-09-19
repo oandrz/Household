@@ -73,9 +73,11 @@ describe("AgreementsPage", () => {
     expect(await screen.findByTestId("agreements-locked-invite")).toHaveTextContent(
       "This household has one owner.",
     );
+    // ?invite=partner opens the invite modal on Parent: Agreements unlocks at
+    // two OWNERS, so a partner invited as a Kid would leave it locked.
     expect(screen.getByRole("link", { name: "Invite your partner" })).toHaveAttribute(
       "href",
-      "/settings?invite=true",
+      "/settings?invite=partner",
     );
     expect(screen.queryByTestId("agreements-frozen")).not.toBeInTheDocument();
     expect(screen.queryByTestId("agreements-propose")).not.toBeInTheDocument();

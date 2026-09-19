@@ -524,7 +524,7 @@ describe("MembersPanel", () => {
     expect(screen.getByRole("switch", { name: "Kayla's role" })).toHaveTextContent("Limited");
   });
 
-  it("openInvite seeds the modal open, and closing it survives a re-render", async () => {
+  it("openPartnerInvite seeds the modal open, and closing it survives a re-render", async () => {
     stubFetchRoutes({
       [`GET ${ME_URL}`]: { status: 200, body: meFixture() },
       [`GET ${MEMBERS_URL}`]: { status: 200, body: [andreas, kayla, ethan] },
@@ -535,7 +535,7 @@ describe("MembersPanel", () => {
     });
     const panel = (
       <QueryClientProvider client={queryClient}>
-        <MembersPanel openInvite />
+        <MembersPanel openPartnerInvite />
       </QueryClientProvider>
     );
 
@@ -544,11 +544,62 @@ describe("MembersPanel", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 
-    // The re-render is the whole test: a bound `open={openInvite}` would put
+    // The re-render is the whole test: a modal bound to the prop would put
     // the dialog straight back for as long as the URL still carries
-    // ?invite=true, so closing it would appear to do nothing the moment
+    // ?invite=partner, so closing it would appear to do nothing the moment
     // anything else on Settings re-rendered.
     rerender(panel);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  // The partner links (Overview's checklist, Agreements' locked state) exist
+  // to get a second OWNER into the household. A modal that opened on Kid let
+  // an owner who typed a name and an email invite their partner as a limited
+  // member, and the checklist step never moved (final review, 2026-09-19).
+  it("opens a partner invite on Parent, and + Invite after closing it opens on Kid", async () => {
+    stubFetchRoutes({
+      [`GET ${ME_URL}`]: { status: 200, body: meFixture() },
+      [`GET ${MEMBERS_URL}`]: { status: 200, body: [andreas, kayla, ethan] },
+      [`GET ${INVITES_URL}`]: { status: 200, body: [] },
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MembersPanel openPartnerInvite />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByLabelText("Role")).toHaveValue("owner");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    // "+ Invite" is Settings' own door, and it keeps the design's Kid default
+    // whatever door opened the modal last.
+    fireEvent.click(screen.getByRole("button", { name: "+ Invite" }));
+    expect(await screen.findByLabelText("Role")).toHaveValue("limited");
+  });
+
+  it("opens + Invite on Kid, and a reopen after choosing Parent starts on Kid again", async () => {
+    stubFetchRoutes({
+      [`GET ${ME_URL}`]: { status: 200, body: meFixture() },
+      [`GET ${MEMBERS_URL}`]: { status: 200, body: [andreas, kayla, ethan] },
+      [`GET ${INVITES_URL}`]: { status: 200, body: [] },
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "+ Invite" }));
+    const role = await screen.findByLabelText("Role");
+    expect(role).toHaveValue("limited");
+
+    fireEvent.change(role, { target: { value: "owner" } });
+    expect(screen.getByLabelText("Role")).toHaveValue("owner");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Invite" }));
+    expect(await screen.findByLabelText("Role")).toHaveValue("limited");
   });
 });

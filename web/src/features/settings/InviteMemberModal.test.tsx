@@ -51,6 +51,23 @@ describe("InviteMemberModal", () => {
     );
   });
 
+  it("starts on Parent, with every capability forced on, when its opener asks for an owner", () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <InviteMemberModal open defaultRole="owner" onClose={() => {}} />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByLabelText("Role")).toHaveValue("owner");
+    expect(screen.getByRole("switch", { name: "Marriage space access" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+  });
+
   it("shows the design's 'off for kids by default' helper text on the money row", () => {
     renderModal();
     expect(screen.getByText("Off for kids by default")).toBeInTheDocument();

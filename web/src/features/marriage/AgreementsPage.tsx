@@ -226,10 +226,11 @@ export function AgreementsPage() {
           <p className={MUTED}>{AGREEMENT_COPY.lockedBody}</p>
           <p className={MUTED}>{AGREEMENT_COPY.lockedOwnerCount}</p>
           {/* Into the existing Settings invite flow, not a second invite
-              implementation (decision 2). settingsRoute's validateSearch, added
-              in Step 7 below, is what makes this `search` prop typecheck at all
-              -- which is why the route and this page land in one commit. */}
-          <Link to="/settings" search={{ invite: true }} className={`mt-4 ${CTA}`}>
+              implementation (decision 2). "partner" opens the modal on
+              Parent: Agreements unlocks at two owners, so a partner invited
+              as a Kid would leave it locked. settingsRoute's validateSearch
+              is what makes this `search` prop typecheck at all. */}
+          <Link to="/settings" search={{ invite: "partner" }} className={`mt-4 ${CTA}`}>
             {AGREEMENT_COPY.invitePartner}
           </Link>
         </section>

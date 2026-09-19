@@ -218,8 +218,8 @@ export function AccountsPanel({
         </div>
       )}
 
-      {/* Mounted only while actually open, unlike InviteMemberModal/
-          NewSpaceModal's always-mounted shape: this modal's own queries
+      {/* Mounted only while actually open (as InviteMemberModal now is too),
+          unlike NewSpaceModal's always-mounted shape: this modal's own queries
           (useMe, the household members list) would otherwise fire on every
           Finances page load whether or not anyone opens it -- wastefully in
           production, and unstubbed in every existing test of this panel that

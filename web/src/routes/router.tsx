@@ -352,22 +352,26 @@ const marriageIndexRoute = createRoute({
 const settingsRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "settings",
-  // ?invite=true opens the Members panel's invite modal on arrival -- the
-  // Agreements page's locked state links here rather than growing a second
-  // invite implementation (spec decision 2). TanStack's default search parser
-  // JSON-parses each value, so a link built by <Link search={{ invite: true }}>
-  // arrives as the boolean; a hand-typed or copied URL may still deliver the
-  // string. Anything else -- ?invite=maybe, ?invite=1 -- makes this route
-  // contribute nothing (returns {} rather than echoing the bad value back).
-  // That does NOT scrub the raw value out of the URL or out of
-  // router.state.location.search -- TanStack's own parentSearch/strictSearch
-  // merge keeps whatever the URL carried, regardless of what a child route
-  // returns (router.test.tsx has the source citation). What this guards is
-  // the consumer: SettingsRouteComponent below only ever treats the search as
-  // "open" on strict `invite === true`, so a leaked "maybe" string still
-  // fails closed at the one place that acts on it.
-  validateSearch: (search: Record<string, unknown>): { invite?: true } =>
-    search.invite === true || search.invite === "true" ? { invite: true } : {},
+  // ?invite=partner opens the Members panel's invite modal on arrival, with
+  // Parent already chosen. Two links build it, and both exist to get a second
+  // OWNER into the household: Agreements' locked state (Agreements spec
+  // decision 2 -- it links here rather than growing a second invite
+  // implementation) and Overview's "Invite your partner" step. It used to be
+  // ?invite=true, which opened the modal on the design's Kid default, so an
+  // owner who only typed a name and an email invited their partner as a
+  // limited member and Agreements stayed locked (final review, 2026-09-19).
+  //
+  // Only "partner" is accepted. ?invite=true (an old bookmark), ?invite=maybe
+  // or anything else makes this route contribute nothing: it returns {}
+  // rather than echoing the bad value back. That does NOT scrub the raw value
+  // out of the URL or out of router.state.location.search -- TanStack's own
+  // parentSearch/strictSearch merge keeps whatever the URL carried,
+  // regardless of what a child route returns (router.test.tsx has the source
+  // citation). What this guards is the consumer: SettingsRouteComponent below
+  // opens the modal only on strict `invite === "partner"`, so a leaked value
+  // still fails closed at the one place that acts on it.
+  validateSearch: (search: Record<string, unknown>): { invite?: "partner" } =>
+    search.invite === "partner" ? { invite: "partner" } : {},
   // Named, not an inline arrow, for the rules-of-hooks reason
   // adminHouseholdsRoute's own component gives at :476 -- it calls useSearch
   // directly, and eslint-plugin-react-hooks only recognises a function as a
@@ -376,7 +380,7 @@ const settingsRoute = createRoute({
   // still join the chain that identifies this route.
   component: function SettingsRouteComponent() {
     const { invite } = useSearch({ from: "/authenticated/shell/settings" });
-    return <SettingsPage openInvite={invite === true} />;
+    return <SettingsPage openPartnerInvite={invite === "partner"} />;
   },
 });
 

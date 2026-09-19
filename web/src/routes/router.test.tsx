@@ -625,29 +625,42 @@ describe("the real route tree", () => {
     expect(router.state.location.pathname).toBe("/marriage/agreements");
   });
 
-  // The invite deep link is this feature's own new work (decision 2), so it is
-  // pinned in both directions: ?invite=true opens the modal, and anything else
-  // fails CLOSED to {} rather than being carried around as an unvalidated
-  // string. The three non-Members panels are stubbed as 500s deliberately --
-  // their shapes are not this test's subject, each renders its own error line
-  // rather than throwing (CurrencyPanel.tsx:124, NotificationsPanel.tsx:77,
-  // SpacesPanel.tsx:39), and leaving a route unregistered would instead throw
-  // inside stubFetchRoutes where TanStack Query swallows it into error state.
-  it("/settings?invite=true lands with the invite modal open, and ?invite=maybe does not", async () => {
+  // The partner deep link (Agreements decision 2, and Overview's "Invite your
+  // partner" step) is pinned in both directions: ?invite=partner opens the
+  // modal ON PARENT, and anything else fails CLOSED to {} rather than being
+  // carried around as an unvalidated string. ?invite=true is in the closed
+  // half on purpose: it was the old link, it opened the modal on Kid, and
+  // nothing in the app builds it any more. The three non-Members panels are
+  // stubbed as 500s deliberately -- their shapes are not this test's subject,
+  // each renders its own error line rather than throwing
+  // (CurrencyPanel.tsx:124, NotificationsPanel.tsx:77, SpacesPanel.tsx:39),
+  // and leaving a route unregistered would instead throw inside
+  // stubFetchRoutes where TanStack Query swallows it into error state.
+  it("/settings?invite=partner lands with the invite modal open on Parent, and ?invite=true or ?invite=maybe opens nothing", async () => {
     const broke = { status: 500, body: { error: { code: "INTERNAL", message: "Broke." } } };
     const settingsStubs = {
       "GET /api/v1/auth/me": { status: 200, body: meFixture() },
       "GET /api/v1/household/members": { status: 200, body: [] },
+      "GET /api/v1/household/invites": { status: 200, body: [] },
       "GET /api/v1/household": broke,
       "GET /api/v1/spaces": broke,
       "GET /api/v1/notification-preferences": broke,
     };
 
     stubFetchRoutes(settingsStubs);
-    const open = renderApp("/settings?invite=true");
+    const open = renderApp("/settings?invite=partner");
     expect(await screen.findByRole("dialog")).toHaveTextContent("Invite a family member");
-    expect(open.router.state.location.search).toEqual({ invite: true });
+    expect(screen.getByLabelText("Role")).toHaveValue("owner");
+    expect(open.router.state.location.search).toEqual({ invite: "partner" });
     open.unmount();
+
+    stubFetchRoutes(settingsStubs);
+    const oldLink = renderApp("/settings?invite=true");
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Settings" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    oldLink.unmount();
 
     stubFetchRoutes(settingsStubs);
     renderApp("/settings?invite=maybe");
@@ -663,10 +676,11 @@ describe("the real route tree", () => {
     // version this lockfile actually resolves (package-lock.json), not the
     // 1.170.18 of the sibling @tanstack/react-router package.json names). It
     // would keep reading `{ invite: "maybe" }` even with a correct validateSearch. The
-    // dialog's absence above (and the strict `invite === true` check in
-    // SettingsRouteComponent, mutation-tested below) is the actual fail-closed
-    // contract; the "open" half's `toEqual({ invite: true })` above only holds
-    // because JSON.parse("true") happens to already equal the validated shape.
+    // dialog's absence (and the strict `invite === "partner"` check in
+    // SettingsRouteComponent) is the actual fail-closed contract; the "open"
+    // half's `toEqual({ invite: "partner" })` above only holds because
+    // "partner" is not JSON, so the raw parse already equals the validated
+    // shape.
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 

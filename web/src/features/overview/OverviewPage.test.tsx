@@ -606,7 +606,9 @@ describe("OverviewPage", () => {
     const [accountStep, budgetStep, partnerStepLink] = screen.getAllByRole("link", { name: "Set up" });
     expect(accountStep).toHaveAttribute("href", "/money");
     expect(budgetStep).toHaveAttribute("href", "/money/budget");
-    expect(partnerStepLink).toHaveAttribute("href", "/settings?invite=true");
+    // ?invite=partner, not a bare ?invite: the modal must open on Parent, or an
+    // owner who just types a name and an email invites their partner as a Kid.
+    expect(partnerStepLink).toHaveAttribute("href", "/settings?invite=partner");
   });
 
   it("drops the checklist once the household has finished setting up", async () => {

@@ -23,6 +23,7 @@ import { PendingInvitesList } from "./PendingInvitesList";
 import { memberBadgeLabel, memberDescriptionLine } from "./copy";
 import { type MemberView } from "./schemas";
 import { useHouseholdMembers } from "./useHouseholdMembers";
+import { type RoleOption } from "./useInviteMember";
 import { useUpdateMember } from "./useUpdateMember";
 
 // Cycled by row index, not read from any field -- the API has no
@@ -164,17 +165,23 @@ function MemberRow({
   );
 }
 
-export function MembersPanel({ openInvite = false }: { openInvite?: boolean }) {
+export function MembersPanel({ openPartnerInvite = false }: { openPartnerInvite?: boolean }) {
   const me = useMe();
   const members = useHouseholdMembers();
   const updateMember = useUpdateMember();
-  // SEEDED, not bound. useState(openInvite) reads the prop once, on the first
-  // render, and this panel owns the modal from then on. Binding it --
-  // open={openInvite} on the modal at :335 -- would reopen it on every later
-  // render for as long as the URL still carries ?invite=true, so closing it
-  // would appear to do nothing the moment anything else on this page
-  // re-rendered.
-  const [inviteOpen, setInviteOpen] = useState(openInvite);
+  // The role the invite modal opened on, or null while it is closed. Each
+  // door sets its own: the partner links (?invite=partner) ask for Parent,
+  // because they exist to reach a second owner, and "+ Invite" asks for the
+  // design's Kid default.
+  //
+  // SEEDED, not bound. useState reads openPartnerInvite once, on the first
+  // render, and this panel owns the modal from then on. Binding it to the
+  // prop would reopen the modal on every later render for as long as the URL
+  // still carries ?invite=partner, so closing it would appear to do nothing
+  // the moment anything else on this page re-rendered.
+  const [inviteRole, setInviteRole] = useState<RoleOption | null>(
+    openPartnerInvite ? "owner" : null,
+  );
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [rowWarnings, setRowWarnings] = useState<Record<string, string>>({});
   // Which members currently have a mutation in flight -- a Set, not a
@@ -240,7 +247,7 @@ export function MembersPanel({ openInvite = false }: { openInvite?: boolean }) {
         {isOwner && (
           <button
             type="button"
-            onClick={() => setInviteOpen(true)}
+            onClick={() => setInviteRole("limited")}
             // min-h-11/sm:min-h-0: a button this size (no padding at all)
             // falls short of the 44px floor on a phone -- the same gap
             // TransactionFilters.tsx's own SELECT_CLASS comment measures
@@ -278,7 +285,14 @@ export function MembersPanel({ openInvite = false }: { openInvite?: boolean }) {
 
       {isOwner && <PendingInvitesList />}
 
-      <InviteMemberModal open={inviteOpen} onClose={() => setInviteOpen(false)} />
+      {/* Mounted only while open, like AccountsPanel's AccountModal, so every
+          open starts a fresh form on the role its door asked for. A modal
+          kept mounted between opens carried the last door's role into the
+          next one: open from a partner link on Parent, close, press
+          "+ Invite", and it was still on Parent. */}
+      {inviteRole && (
+        <InviteMemberModal open defaultRole={inviteRole} onClose={() => setInviteRole(null)} />
+      )}
     </section>
   );
 }

@@ -13,10 +13,10 @@ import { NotificationsPanel } from "./NotificationsPanel";
 import { SpacesPanel } from "./SpacesPanel";
 import { TelegramPanel } from "./TelegramPanel";
 
-// openInvite arrives from settingsRoute's validated ?invite=true and is passed
-// straight through to the panel that owns the modal. Defaulted, so every
-// existing `render(<SettingsPage />)` keeps compiling.
-export function SettingsPage({ openInvite = false }: { openInvite?: boolean }) {
+// openPartnerInvite arrives from settingsRoute's validated ?invite=partner and
+// is passed straight through to the panel that owns the modal. Defaulted, so
+// every existing `render(<SettingsPage />)` keeps compiling.
+export function SettingsPage({ openPartnerInvite = false }: { openPartnerInvite?: boolean }) {
   return (
     <PageContainer>
       <div>
@@ -35,7 +35,7 @@ export function SettingsPage({ openInvite = false }: { openInvite?: boolean }) {
       </div>
 
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
-        <MembersPanel openInvite={openInvite} />
+        <MembersPanel openPartnerInvite={openPartnerInvite} />
         <SpacesPanel />
         <CurrencyPanel />
       </div>

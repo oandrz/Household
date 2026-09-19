@@ -72,7 +72,9 @@ export function SetupChecklist({
             {OVERVIEW_COPY.setupPartnerSee}
           </Link>
         ) : (
-          <Link to="/settings" search={{ invite: true }} className={GO_LINK}>
+          // "partner", so the modal opens on Parent: this step ticks at two
+          // owners, and a Kid invite would never move it.
+          <Link to="/settings" search={{ invite: "partner" }} className={GO_LINK}>
             {OVERVIEW_COPY.setupGo}
           </Link>
         ),
