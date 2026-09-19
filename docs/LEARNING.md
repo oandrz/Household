@@ -1535,6 +1535,36 @@ person to ask whether the test could ever have gone red in the first place.
   "assert the identity of what happened" — and even then, ask whether the
   assertion proves the property or merely happens to catch this one
   mutation's particular shape.**
+- **A fixture no real household can be in, where the right rule and the
+  wrong rule give the same answer** (partner-invite lobby, milestone 1,
+  2026-09-19). `partnerStep.ts` marks "Invite your partner" done at `>= 2`
+  owners. Changing it to `>= 1` (count the signed-in owner as the partner)
+  failed `partnerStep.test.ts`, but left **every** `OverviewPage.test.tsx`
+  test green. The page tests' default roster was `[]`, and its comment
+  called that "a household still waiting for its partner". No household
+  has zero members, because the owner who created it is always one. With
+  zero owners, `0 >= 2` and `0 >= 1` are both false, so the page could not
+  tell the two rules apart. The Task 5 mutation (`>= 2` → `> 2`) went the
+  other way, which the explicit two-owner fixture did catch, so the gap
+  stayed hidden until the milestone's final mutation table tried the
+  opposite direction. Fixed in `7fe48bc`: the default roster is now one
+  owner, with a comment at the fixture saying why it must never be `[]`.
+  The same mutation now fails "shows a fresh household what is left to set
+  up" and "tells an owner whose partner is invited". **Before trusting a
+  default fixture, ask whether a real account could ever be in that state.
+  And mutate a boundary in both directions**: `> 2` and `>= 1` probe
+  different fixtures.
+- **Two of the same table's mutations could not be run as written, because
+  they never reached the test.** "Delete `household_id = $1 AND`" from
+  `ListPendingInvites` leaves `$2` with no `$1`, and `make sqlc` refuses the
+  file (`could not determine data type of parameter $1`). "Delete
+  ` AND household_id = $2`" from `DeleteUnacceptedInvite` leaves one
+  parameter, so sqlc generates a different function signature and the
+  repository stops compiling. A generator error or a build error is red
+  for the wrong reason. The mutation that proves a scoping clause keeps the
+  parameter and neutralises it — `(household_id = $1 OR TRUE)` — so the
+  generated code is unchanged and only the behaviour moves. Both then
+  failed on the cross-household assertion, as intended.
 
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
@@ -3716,6 +3746,16 @@ invalidates it, not only a write that changes what it would compute.** Both
 fixes are one line each (`ed93d26`, `dacc4c1`); the second was found by
 grepping for the shape of the first, which is step 3 of the checklist at the
 end of this file.
+
+**Held, 2026-09-19 (partner-invite lobby, milestone 1): nothing broke.**
+Sending an invite invalidates members, the new `["household", "invites"]` key
+and `me`, and withdrawing invalidates invites. The walk moved Overview's
+partner step from Set up → Invite sent → ✓ by clicking through the app's own
+links, not by reloading. The one staleness it found is outside this rule: an
+invite accepted in *another* browser does not reach an owner's Settings tab
+that is just sitting open (nothing refetches it) until they move to another
+page. That is a push/poll question, not a missing invalidation, and
+milestone 2's 3-second poll is where the spec answers it.
 
 ### 24. A delete scoped to the parent's parent, and a scope check thrown away
 
@@ -6032,6 +6072,34 @@ no test suite can hold.
   written down, as a test comment nobody outside that file would meet.
 
 ---
+
+### The partner-invite lobby's browser walk (2026-09-19)
+
+- **The `globalThis` trap recorded under the Agreements walk above was hit
+  again**, one call after it could have been avoided: a context created in one
+  `browser_run_code_unsafe` call was stored on `globalThis` and read back as
+  `undefined` in the next. Re-deriving it through
+  `page.context().browser().contexts()` worked, exactly as that entry says.
+  **Read this file's walk sections before a walk, not after.**
+- **The Playwright MCP server dropped mid-walk** ("Connection closed") after a
+  run-code call that drove a second browser context, and every Playwright tool
+  vanished for the rest of the session. The walk finished on Chrome DevTools
+  MCP. Its `new_page` takes an `isolatedContext` name, and **a named isolated
+  context is the cleanest "private window"**: one per person (the invitee, a
+  fresh sign-up, the accepting partner). Each is driven with the ordinary
+  click and type tools, not with scripts, and the owner's own session in the
+  default context is never touched.
+- **Both browser tools' default contexts arrived already signed in as the
+  seeded owner** (persistent profiles from earlier sessions). That saved
+  typing a password, which matters because five failures lock the whole
+  household. But check which account a page is on before you trust what it
+  shows: an invite link opened in the owner's own context rendered the
+  preview under a "Signed in as Andreas" banner.
+- **Build a fresh household by self-serve sign-up in its own isolated
+  context** when a criterion needs one owner. `make seed` reuses a household
+  where Christine has already accepted, so it has two owners. Signing up takes
+  about a minute through Mailpit, needs no volume drop, and leaves the seeded
+  household alone.
 
 ## Before you call something done
 

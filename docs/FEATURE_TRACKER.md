@@ -13,8 +13,23 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Out of scope — three different reasons, and **the row always says which**: marked "· not built" by the design itself; cut outright by the product owner (the audit screen, §9 — the code was deleted); or **deferred past the current release** by the product owner, meaning it is expected back later (the Family calendar, §7). A 🚫 is not a promise that something will never exist — it is a statement that it is not this release's work, and the row says what would bring it back |
 
-**Where things stand:** 125 of 146 features built or partly built — and **five of the 146 are 🚫**, so the honest denominator for this release is 141.
+**Where things stand:** 126 of 147 features built or partly built — and **five of the 147 are 🚫**, so the honest denominator for this release is 142.
 
+> **Recounted 2026-09-19**, when the partner-invite lobby's milestone 1 added
+> one ✅ row to section 3, "Pending invites in Settings: list and withdraw".
+> Overview's setup checklist gained its fourth step but stays one row, so
+> section 4 does not move. Counted with the 2026-09-12 method (State column,
+> split on unescaped pipes only), with one more rule that method needed: a
+> row separated from its table by a blank line (section 1's "Link an existing
+> account to a Telegram chat", section 5's "Period report") still uses its
+> table's State column. Read as a header instead, both vanished and the count
+> came out 99/19/16/5. With the rule, the script reproduced the old totals
+> (105/20/16/5 = 146) exactly before the new row was added. New totals:
+> 12/2/2/0, 7/1/1/0, **12/8/2/0**, 8/2/1/0, 36/4/7/0, 16/2/2/0, 0/0/0/3,
+> 0/0/0/1, 7/1/0/1, 8/0/1/0 — **106/20/16/5 = 147**, Built + Partial
+> **126**, denominator **142**. "Telegram invites" stays ⬜: that is
+> milestone 2.
+>
 > **Recounted 2026-09-12**, when milestone 2 of the portfolio added six rows
 > (the period report, dividends and fees, per-component blanking, the bar
 > chart, both-currency figures, and the primary-currency lock). ✅ 99 → 105,
@@ -1011,7 +1026,7 @@ above now states Built + Partial **113** of **134**, denominator **129**.
 |---|---|---|---|---|
 | Entry & authentication | 12 | 2 | 2 | 0 |
 | Navigation shell | 7 | 1 | 1 | 0 |
-| Household settings | 11 | 8 | 2 | 0 |
+| Household settings | 12 | 8 | 2 | 0 |
 | Overview (home) | 8 | 2 | 1 | 0 |
 | Money | 36 | 4 | 7 | 0 |
 | Marriage | 16 | 2 | 2 | 0 |
@@ -1019,7 +1034,7 @@ above now states Built + Partial **113** of **134**, denominator **129**.
 | Household extras | 0 | 0 | 0 | 1 |
 | Platform administration | 7 | 1 | 0 | 1 |
 | Automation | 8 | 0 | 1 | 0 |
-| **Total** | **105** | **20** | **16** | **5** |
+| **Total** | **106** | **20** | **16** | **5** |
 
 ---
 
@@ -1124,6 +1139,7 @@ The full checklist is at the end of `docs/LEARNING.md`.
 | Email addresses hidden from non-owners | ✅ | Owners see them; a limited member sees the list without addresses |
 | Last-owner protection | ✅ | Removing or demoting the last owner is refused inline |
 | Invite a family member (modal) | ✅ | Name, role, optional email, access switches |
+| Pending invites in Settings: list and withdraw (no mockup) | ✅ | Partner-invite lobby, milestone 1 (`docs/superpowers/plans/2026-09-19-hearth-partner-invite-lobby-m1.md`), walked 15 of 15 in a real browser on 2026-09-19 (`docs/superpowers/plans/2026-09-19-hearth-partner-invite-lobby-m1-verification.md`). Owners see a **Pending invites** list under Members: each invite nobody has accepted and that has not expired, as `Owner · email · Expires <date>`, with Withdraw. `GET /api/v1/household/invites` is owner-only, and a personal API token may read it. **Withdraw is `DELETE /api/v1/household/invites/{id}`: it needs a browser session (a token gets `403 SESSION_REQUIRED`) and it deletes the row**, so the emailed link then shows the invite-not-found screen. An accepted invite cannot be withdrawn (`409`). A limited member sees no list and sends no request. Built on branch `partner-invite-lobby`; not merged or deployed yet |
 | Remove a member | ⬜ | No control in the design either; the backend supports it |
 | Spaces list with audiences | ✅ | |
 | New space (modal) | 🟡 | Everyone and Parents only work. **Custom is shown disabled** — per-space membership is not built, and the design marks custom space pages "not built" too |
@@ -1166,7 +1182,7 @@ the designed Overview rather than being replaced.
 | Vision check-in strip | ✅ *(inside `NextRetroCard.tsx`, Vision spec's task 13 — "Vision check-in: 2026 theme — "…"", gated on the theme being non-empty, which a version-0 year always sends as `""`, so the strip and the card agree about when there is nothing to show without a second, separate check)* |
 | "This week" agenda | ⬜ | **Stays ⬜, deliberately, though the thing it reads is now 🚫.** It is the seventh and last of the design's Overview cards, and it reads Family's calendar — deferred out of this release on 2026-09-07 (§7). The owner deferred the calendar, not this card, so moving this row by inference would be the map making a scope decision nobody made. Practically: **Overview closes this release at six of seven cards**, and this row is unstartable until §7 reopens |
 | "+ Add" quick-create menu | 🟡 — four of six entries now live: Transaction, Account, Savings goal and Bill. Transaction and Bill are both disabled with their reason until an account exists — a bill needs a pay-from account the same way an expense needs a from-account; Savings goal has no such precondition (Goals decision 6 — there is no funding-source account to require). Calendar event and Marriage retro still join it in the change that builds each |
-| Setup checklist (no mockup — see below) | ✅ |
+| Setup checklist (no mockup — see below) | ✅ — four steps since 2026-09-19, when "Invite your partner" joined (partner-invite lobby milestone 1, walked in its verification file) |
 | Limited-member "amounts are hidden" panel (no mockup — see below) | ✅ |
 
 The "+ Add" menu offers Transaction, Account, Bill, Savings goal, Calendar
@@ -1177,15 +1193,19 @@ own menu entry was wired in, so a Marriage retro entry is buildable today
 without waiting on anything else. Calendar event is the one still waiting —
 on Family.
 
-Two rows above have no mockup of their own. The **setup checklist** is three
-steps derived from data the page already fetched (create your household, add an
-account, set a budget for the current month); it disappears at three of three,
-so an established household is not shown a permanent chore list, and it never
-renders for a limited member, who can do none of it. It has three steps rather
-than the four an onboarding flow would suggest: an emailed invite writes only
-to the `invites` table while `GET /household/members` reads memberships, so an
-"invite your partner" step could only tick once the partner *accepted* — the
-step joins the list in the change that exposes pending invites. The
+Two rows above have no mockup of their own. The **setup checklist** has four
+steps: create your household, add an account, set a budget for the current
+month, and invite your partner. It is built from data the page already
+fetches. It disappears at four of four, so an established household is not
+shown a permanent chore list, and it never renders for a limited member, who
+can do none of it. The partner step arrived with the partner-invite lobby's
+milestone 1 (2026-09-19). Before that, an emailed invite wrote only to the
+`invites` table, which nothing read back, so the step could only have ticked
+after the partner accepted. `GET /household/invites` is what lets it say "sent":
+with an owner-role invite pending the step reads "Invite sent — waiting for your
+partner" with a **See invite** link to Settings. Without one it shows **Set
+up**, which opens Settings with the invite modal. It ticks at two owners.
+Limited members and limited invites never count toward it. The
 **limited-member panel** exists because Overview is the only page every member
 reaches: a limited member holding `money` gets no summary, no budget card and
 no checklist, and without it saw a page with nothing on it at all (found in the
