@@ -988,7 +988,9 @@ revoke tokens, the Telegram connection group, and withdrawing an invite
 (`DELETE /household/invites/{id}`), because withdrawing changes who may join
 the household (partner-invite spec decision 12). Listing pending invites is
 deliberately *not* behind it: a list shows no secret, so an owner's token may
-read it.
+read it. The diagram above draws this step on the mutation path only. The
+Telegram group applies it to its reads as well, and runs its own
+`requireFeature` first; the route table has that group's exact order.
 
 **`requireSession` also resolves this household's feature flags on every
 authenticated request, uncached**, in the same breath as the membership
@@ -3023,8 +3025,10 @@ request whose `403` would then need hiding. Sending an invite
 (`useInviteMember`) invalidates members, invites and `me`; withdrawing one
 (`useWithdrawInvite`) invalidates invites. An invite accepted in *another*
 browser reaches an owner's open tab only when something refetches — moving to
-another page does it, sitting on Settings does not. Milestone 2's
-3-second poll is the planned answer. `Budget`
+another page does it, sitting on Settings does not. Milestone 2's planned
+3-second poll runs only while a *Telegram* invite is waiting for a knock, so
+an emailed invite accepted elsewhere will still wait for the next navigation.
+Nothing in the spec addresses that case yet. `Budget`
 and Overview likewise share `currentMonth()` (`features/money/month.ts`),
 which reads the *local* calendar — the two screens must agree on which month
 "this month" is, and the API container's own clock is UTC.

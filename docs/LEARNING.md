@@ -1563,7 +1563,8 @@ person to ask whether the test could ever have gone red in the first place.
   repository stops compiling. A generator error or a build error is red
   for the wrong reason. The mutation that proves a scoping clause keeps the
   parameter and neutralises it — `(household_id = $1 OR TRUE)` — so the
-  generated code is unchanged and only the behaviour moves. Both then
+  generated function and its params struct keep their signature (only the
+  embedded SQL string changes) and only the behaviour moves. Both then
   failed on the cross-household assertion, as intended.
 
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
@@ -3754,8 +3755,9 @@ partner step from Set up → Invite sent → ✓ by clicking through the app's o
 links, not by reloading. The one staleness it found is outside this rule: an
 invite accepted in *another* browser does not reach an owner's Settings tab
 that is just sitting open (nothing refetches it) until they move to another
-page. That is a push/poll question, not a missing invalidation, and
-milestone 2's 3-second poll is where the spec answers it.
+page. That is a push/poll question, not a missing invalidation. Milestone 2's
+planned 3-second poll covers only Telegram invites waiting for a knock, so an
+emailed invite accepted elsewhere is still unaddressed.
 
 ### 24. A delete scoped to the parent's parent, and a scope check thrown away
 

@@ -308,8 +308,10 @@ always has.
 4. **An open Settings tab does not learn about an acceptance in another
    browser.** Sam's Settings tab kept showing Alex as pending, and Sam as
    the only member, until Sam moved to another page. That is expected in
-   milestone 1, which has no polling. The spec's milestone 2 adds a
-   3-second poll.
+   milestone 1, which has no polling. Milestone 2's planned 3-second poll
+   runs only while a Telegram invite is waiting for a knock, so this case,
+   an emailed invite accepted in another browser, is not addressed by the
+   spec yet.
 
 Also seen, older than this milestone and outside it: after Escape closes a
 modal that `?invite=true` opened, the URL keeps `?invite=true` (so a reload

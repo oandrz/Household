@@ -22,8 +22,9 @@ needed them to exist (see "Where things stand" below).
 > split on unescaped pipes only), with one more rule that method needed: a
 > row separated from its table by a blank line (section 1's "Link an existing
 > account to a Telegram chat", section 5's "Period report") still uses its
-> table's State column. Read as a header instead, both vanished and the count
-> came out 99/19/16/5. With the rule, the script reproduced the old totals
+> table's State column. Read as a header instead, each detached row was lost
+> along with every row after it in its block — seven rows in all — and the
+> count came out 99/19/16/5. With the rule, the script reproduced the old totals
 > (105/20/16/5 = 146) exactly before the new row was added. New totals:
 > 12/2/2/0, 7/1/1/0, **12/8/2/0**, 8/2/1/0, 36/4/7/0, 16/2/2/0, 0/0/0/3,
 > 0/0/0/1, 7/1/0/1, 8/0/1/0 — **106/20/16/5 = 147**, Built + Partial
