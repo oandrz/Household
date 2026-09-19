@@ -64,7 +64,9 @@ export function OverviewPage() {
   const goals = useGoals({ enabled: isOwner });
 
   // The checklist's partner step reads the roster and the pending invites.
-  // GET /household/invites is owner-only, so a limited member never asks.
+  // Only the invites request is gated: GET /household/invites is owner-only,
+  // so a limited member never asks. GET /household/members is open to every
+  // member, so useHouseholdMembers runs for everyone.
   const members = useHouseholdMembers();
   const invites = usePendingInvites({ enabled: isOwner });
 

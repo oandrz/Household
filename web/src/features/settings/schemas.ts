@@ -21,7 +21,9 @@ export type MemberView = z.infer<typeof memberSchema>;
 export const membersListSchema = z.array(memberSchema);
 
 // GET /household/invites' one row (pending_invite_handlers.go's
-// pendingInviteDTO). Owner-only, so `email` is always the real address.
+// inviteSummaryDTO -- not admin_directory_handlers.go's pendingInviteDTO,
+// which is the operator's differently-shaped view). Owner-only, so `email`
+// is always the real address.
 // Milestone 2 of the partner-invite spec adds `channel` and `knock`; until
 // then every row is an email invite.
 export const pendingInviteSchema = z.object({

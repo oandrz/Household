@@ -121,4 +121,25 @@ describe("PendingInvitesList", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("This invite has already been accepted.");
   });
+
+  // A failed withdraw is news too: a 404 means another owner already
+  // withdrew it. Refreshing only on success left the dead row on screen
+  // beside its error (final review, 2026-09-19).
+  it("refreshes the list after a failed withdraw, so an invite already gone leaves the screen", async () => {
+    stubFetchRoutes({
+      [`GET ${INVITES_URL}`]: [
+        { status: 200, body: [jane] },
+        { status: 200, body: [] },
+      ],
+      [`DELETE ${INVITES_URL}/inv-jane`]: {
+        status: 404,
+        body: { error: { code: "NOT_FOUND", message: "That could not be found." } },
+      },
+    });
+    renderList();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Withdraw the invite to Jane" }));
+
+    await waitFor(() => expect(screen.queryByText("Jane")).not.toBeInTheDocument());
+  });
 });

@@ -70,8 +70,10 @@ export function PendingInvitesList() {
   const invites = usePendingInvites({ enabled: true });
   const withdraw = useWithdrawInvite();
   // A Set, not one flag, for the reason MembersPanel's pendingIds gives: one
-  // shared mutation's isPending only reflects the latest call. It is also
-  // what stops a double click sending two DELETEs.
+  // shared mutation's isPending only reflects the latest call. It drives each
+  // row's `disabled` Withdraw, and that is what stops a double click sending
+  // two DELETEs: React re-renders after a click before the next click event
+  // runs, so the second click lands on a disabled button and never fires.
   const [withdrawingIds, setWithdrawingIds] = useState<Set<string>>(new Set());
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
 
@@ -87,10 +89,6 @@ export function PendingInvitesList() {
   if (!invites.isSuccess || invites.data.length === 0) return null;
 
   function handleWithdraw(id: string) {
-    // Checked directly, not through the disabled attribute: a second,
-    // synchronous click lands before React has re-rendered the button as
-    // disabled.
-    if (withdrawingIds.has(id)) return;
     setRowErrors((prev) => ({ ...prev, [id]: "" }));
     setWithdrawingIds((prev) => new Set(prev).add(id));
     withdraw.mutate(id, {

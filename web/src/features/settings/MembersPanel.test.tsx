@@ -293,6 +293,51 @@ describe("MembersPanel", () => {
     expect(screen.queryByRole("switch", { name: "Kayla Money access" })).not.toBeInTheDocument();
   });
 
+  // A 409 on withdraw means the invitee accepted in the meantime: they are a
+  // member now. The members list has to refetch to show that, not only the
+  // invites list (final review, 2026-09-19).
+  it("shows an invitee who accepted meanwhile under Members when their withdraw answers 409", async () => {
+    const janeInvite = {
+      id: "inv-jane",
+      name: "Jane",
+      email: "jane@example.com",
+      role: "owner",
+      capabilities: ["calendar", "chores", "money", "marriage"],
+      expiresAt: "2026-09-26T09:00:00Z",
+    };
+    const janeMember = member({
+      id: "mem-jane",
+      user: { id: "u-jane", email: "jane@example.com", displayName: "Jane", avatarInitial: "J" },
+      role: "owner",
+      capabilities: ["calendar", "chores", "money", "marriage"],
+    });
+    stubFetchRoutes({
+      [`GET ${ME_URL}`]: { status: 200, body: meFixture() },
+      [`GET ${MEMBERS_URL}`]: [
+        { status: 200, body: [andreas] },
+        { status: 200, body: [andreas, janeMember] },
+      ],
+      [`GET ${INVITES_URL}`]: [
+        { status: 200, body: [janeInvite] },
+        { status: 200, body: [] },
+      ],
+      [`DELETE ${INVITES_URL}/inv-jane`]: {
+        status: 409,
+        body: {
+          error: { code: "INVITE_ALREADY_ACCEPTED", message: "This invite has already been accepted." },
+        },
+      },
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Withdraw the invite to Jane" }));
+
+    expect(await screen.findByRole("switch", { name: "Jane's role" })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Withdraw the invite to Jane" })).not.toBeInTheDocument(),
+    );
+  });
+
   it("never asks a limited member's browser for pending invites", async () => {
     const fetchMock = stubFetchRoutes({
       [`GET ${ME_URL}`]: { status: 200, body: meFixture("limited") },
