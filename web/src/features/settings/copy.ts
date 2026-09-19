@@ -92,3 +92,10 @@ export function formatTelegramLinkedAt(iso: string): string {
 export function telegramChatLabel(chatUsername: string | undefined): string {
   return chatUsername ? `@${chatUsername}` : "a Telegram chat with no username";
 }
+
+// "Expires 26 Sep" -- the day only: an invite lives seven days and nobody
+// needs the minute. Formatted in the viewer's locale and zone.
+export function pendingInviteExpiryLine(expiresAt: string): string {
+  const day = new Date(expiresAt).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return `Expires ${day}`;
+}

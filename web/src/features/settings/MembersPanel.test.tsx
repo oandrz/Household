@@ -27,6 +27,7 @@ import type { MemberView } from "./schemas";
 
 const ME_URL = "/api/v1/auth/me";
 const MEMBERS_URL = "/api/v1/household/members";
+const INVITES_URL = "/api/v1/household/invites";
 
 function meFixture(role: "owner" | "limited" = "owner"): Me {
   return {
@@ -108,6 +109,7 @@ describe("MembersPanel", () => {
     stubFetchRoutes({
       [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
       [`GET ${MEMBERS_URL}`]: { status: 200, body: [andreas, kayla, ethan] },
+      [`GET ${INVITES_URL}`]: { status: 200, body: [] },
     });
     renderPanel();
 
@@ -130,6 +132,7 @@ describe("MembersPanel", () => {
     const fetchMock = stubFetchRoutes({
       [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
       [`GET ${MEMBERS_URL}`]: { status: 200, body: [andreas, kayla, ethan] },
+      [`GET ${INVITES_URL}`]: { status: 200, body: [] },
       "PATCH /api/v1/household/members/mem-kayla": {
         status: 200,
         body: { id: "mem-kayla", role: "limited", capabilities: ["calendar", "chores", "money"] },
@@ -157,6 +160,7 @@ describe("MembersPanel", () => {
     stubFetchRoutes({
       [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
       [`GET ${MEMBERS_URL}`]: { status: 200, body: [andreas, kayla, ethan] },
+      [`GET ${INVITES_URL}`]: { status: 200, body: [] },
       "PATCH /api/v1/household/members/mem-andreas": {
         status: 409,
         body: { error: { code: "LAST_OWNER", message: "A household must keep at least one owner." } },
@@ -181,6 +185,7 @@ describe("MembersPanel", () => {
     stubFetchRoutes({
       [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
       [`GET ${MEMBERS_URL}`]: { status: 200, body: [andreas, kayla, ethan] },
+      [`GET ${INVITES_URL}`]: { status: 200, body: [] },
     });
     renderPanel();
 
@@ -192,6 +197,7 @@ describe("MembersPanel", () => {
     const fetchMock = stubFetchRoutes({
       [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
       [`GET ${MEMBERS_URL}`]: { status: 200, body: [andreas, kayla, ethan] },
+      [`GET ${INVITES_URL}`]: { status: 200, body: [] },
       "PATCH /api/v1/household/members/mem-kayla": {
         status: 200,
         body: { id: "mem-kayla", role: "owner", capabilities: ["calendar", "chores", "money", "marriage"] },
@@ -220,6 +226,7 @@ describe("MembersPanel", () => {
     const fetchMock = stubFetchRoutes({
       [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
       [`GET ${MEMBERS_URL}`]: { status: 200, body: [andreas, kayla, ethan] },
+      [`GET ${INVITES_URL}`]: { status: 200, body: [] },
       "PATCH /api/v1/household/members/mem-andreas": {
         status: 200,
         body: { id: "mem-andreas", role: "limited", capabilities: ["calendar", "chores", "money"] },
@@ -248,6 +255,7 @@ describe("MembersPanel", () => {
     stubFetchRoutes({
       [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
       [`GET ${MEMBERS_URL}`]: { status: 200, body: [andreas, kayla, ethan] },
+      [`GET ${INVITES_URL}`]: { status: 200, body: [] },
       "PATCH /api/v1/household/members/mem-kayla": {
         status: 200,
         body: {
@@ -285,6 +293,18 @@ describe("MembersPanel", () => {
     expect(screen.queryByRole("switch", { name: "Kayla Money access" })).not.toBeInTheDocument();
   });
 
+  it("never asks a limited member's browser for pending invites", async () => {
+    const fetchMock = stubFetchRoutes({
+      [`GET ${ME_URL}`]: { status: 200, body: meFixture("limited") },
+      [`GET ${MEMBERS_URL}`]: { status: 200, body: [andreas, kayla, ethan] },
+    });
+    renderPanel();
+
+    await screen.findByText("Parent · full access");
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === INVITES_URL)).toBe(false);
+    expect(screen.queryByText("Pending invites")).toBeNull();
+  });
+
   // Fix round 2 (spec review), Finding 1. toggleCapability computes its
   // next array from `member.capabilities`, which is only as fresh as the
   // last completed fetch. Clicking Money, then clicking Chores before the
@@ -304,6 +324,7 @@ describe("MembersPanel", () => {
         // invalidates the query) sees -- money now granted.
         { status: 200, body: [andreas, kaylaAfterMoney, ethan] },
       ],
+      [`GET ${INVITES_URL}`]: { status: 200, body: [] },
       "PATCH /api/v1/household/members/mem-kayla": {
         status: 200,
         body: { id: "mem-kayla", role: "limited", capabilities: ["calendar", "chores", "money"] },
@@ -396,6 +417,7 @@ describe("MembersPanel", () => {
         const key = `${method} ${url}`;
 
         if (key === `GET ${ME_URL}`) return jsonResponse(meFixture("owner"));
+        if (key === `GET ${INVITES_URL}`) return jsonResponse([]);
         if (key === `GET ${MEMBERS_URL}`) {
           membersGetCount += 1;
           if (membersGetCount === 1) {
@@ -480,6 +502,7 @@ describe("MembersPanel", () => {
     stubFetchRoutes({
       [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
       [`GET ${MEMBERS_URL}`]: { status: 200, body: [andreas, kayla, ethan] },
+      [`GET ${INVITES_URL}`]: { status: 200, body: [] },
       "PATCH /api/v1/household/members/mem-kayla": {
         status: 422,
         body: {
@@ -505,6 +528,7 @@ describe("MembersPanel", () => {
     stubFetchRoutes({
       [`GET ${ME_URL}`]: { status: 200, body: meFixture() },
       [`GET ${MEMBERS_URL}`]: { status: 200, body: [andreas, kayla, ethan] },
+      [`GET ${INVITES_URL}`]: { status: 200, body: [] },
     });
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },

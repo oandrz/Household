@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../../api/client";
 import { meQueryKey } from "../auth/useAuth";
 import { householdMembersQueryKey } from "./useHouseholdMembers";
+import { pendingInvitesQueryKey } from "./usePendingInvites";
 
 export type RoleOption = "owner" | "limited";
 
@@ -26,6 +27,7 @@ export function useInviteMember() {
     mutationFn: inviteMember,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: householdMembersQueryKey });
+      queryClient.invalidateQueries({ queryKey: pendingInvitesQueryKey });
       queryClient.invalidateQueries({ queryKey: meQueryKey });
     },
   });

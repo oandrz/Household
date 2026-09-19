@@ -19,6 +19,7 @@ import { useMe } from "../auth/useAuth";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { ALL_CAPABILITIES } from "./capabilities";
 import { InviteMemberModal } from "./InviteMemberModal";
+import { PendingInvitesList } from "./PendingInvitesList";
 import { memberBadgeLabel, memberDescriptionLine } from "./copy";
 import { type MemberView } from "./schemas";
 import { useHouseholdMembers } from "./useHouseholdMembers";
@@ -274,6 +275,8 @@ export function MembersPanel({ openInvite = false }: { openInvite?: boolean }) {
           ))}
         </div>
       )}
+
+      {isOwner && <PendingInvitesList />}
 
       <InviteMemberModal open={inviteOpen} onClose={() => setInviteOpen(false)} />
     </section>
