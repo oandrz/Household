@@ -91,6 +91,11 @@ export const OVERVIEW_COPY = {
   // literal "July" is wrong for eleven months of the year.
   setupBudget: (monthName: string) => `Set a budget for ${monthName}`,
   setupGo: "Set up",
+  // "Partner", not "member": the step exists to reach the two owners
+  // Agreements needs, so a kid's invite does not tick it (partnerStep.ts).
+  setupPartner: "Invite your partner",
+  setupPartnerInvited: "Invite sent — waiting for your partner",
+  setupPartnerSee: "See invite",
 
   quickAdd: "+ Add",
   quickAddTransaction: "Transaction",

@@ -7,19 +7,15 @@
 // requests on the most-visited page and let this list disagree with the cards
 // beside it about the same numbers.
 //
-// There is deliberately no "invite your partner" step, though the design's
-// own onboarding implies one. An emailed invite writes only to the `invites`
-// table -- InviteService.Create -- while GET /household/members reads
-// memberships joined to users, so a pending invite is not a row there and no
-// endpoint exposes one. The step could therefore only tick when the partner
+// "Invite your partner" reads the roster and the pending invites
+// (partnerStep.ts). It could not exist until GET /household/invites did: an
+// invite was never read back, so the step could only tick when the partner
 // *accepted*, leaving an owner who had just invited someone looking at an
-// unticked "Invite your partner" whose link leads to a Settings page showing
-// no trace of the invite they sent. That is the same failure Budget's spec
-// refused when it cut the dormant "Roll unspent into savings" toggle, and
-// the rule Sidebar.tsx states. The step joins this list in the change that
-// exposes pending invites.
+// unticked step whose link showed no trace of the invite they sent.
 import { Link } from "@tanstack/react-router";
+import type { ReactNode } from "react";
 import { OVERVIEW_COPY } from "./copy";
+import type { PartnerStep } from "./partnerStep";
 
 // Read at render time -- a household that opens the app in August must not be
 // told to budget for July.
@@ -27,20 +23,60 @@ function monthName(): string {
   return new Date().toLocaleString(undefined, { month: "long" });
 }
 
+// inline-flex items-center min-h-11 sm:min-h-0: BudgetCard.tsx's own comment
+// on this identical pattern has the reason.
+const GO_LINK = "inline-flex min-h-11 items-center text-[12.5px] font-semibold text-accent sm:min-h-0";
+
 export function SetupChecklist({
   hasAccount,
   hasBudget,
+  partner,
 }: {
   hasAccount: boolean;
   hasBudget: boolean;
+  partner: PartnerStep;
 }) {
-  const steps = [
+  const steps: { label: string; done: boolean; link: ReactNode }[] = [
     // Always done: reaching this page at all required creating one. It is
     // listed anyway so the first thing a new household sees is something
-    // already achieved rather than three things outstanding.
-    { label: OVERVIEW_COPY.setupHousehold, done: true, to: null },
-    { label: OVERVIEW_COPY.setupAccount, done: hasAccount, to: "/money" as const },
-    { label: OVERVIEW_COPY.setupBudget(monthName()), done: hasBudget, to: "/money/budget" as const },
+    // already achieved rather than everything outstanding.
+    { label: OVERVIEW_COPY.setupHousehold, done: true, link: null },
+    {
+      label: OVERVIEW_COPY.setupAccount,
+      done: hasAccount,
+      link: (
+        <Link to="/money" className={GO_LINK}>
+          {OVERVIEW_COPY.setupGo}
+        </Link>
+      ),
+    },
+    {
+      label: OVERVIEW_COPY.setupBudget(monthName()),
+      done: hasBudget,
+      link: (
+        <Link to="/money/budget" className={GO_LINK}>
+          {OVERVIEW_COPY.setupGo}
+        </Link>
+      ),
+    },
+    {
+      label: partner === "invited" ? OVERVIEW_COPY.setupPartnerInvited : OVERVIEW_COPY.setupPartner,
+      // "Invited" is not done: the step finishes when the partner is in, not
+      // when the invite leaves.
+      done: partner === "joined",
+      // Once an invite is out, the link shows it rather than opening a second
+      // invite modal over it.
+      link:
+        partner === "invited" ? (
+          <Link to="/settings" className={GO_LINK}>
+            {OVERVIEW_COPY.setupPartnerSee}
+          </Link>
+        ) : (
+          <Link to="/settings" search={{ invite: true }} className={GO_LINK}>
+            {OVERVIEW_COPY.setupGo}
+          </Link>
+        ),
+    },
   ];
 
   const done = steps.filter((s) => s.done).length;
@@ -67,17 +103,7 @@ export function SetupChecklist({
               {step.done ? "✓ " : ""}
               {step.label}
             </span>
-            {/* inline-flex items-center min-h-11 sm:min-h-0:
-                BudgetCard.tsx's own comment on this identical pattern has
-                the reason. */}
-            {!step.done && step.to && (
-              <Link
-                to={step.to}
-                className="inline-flex min-h-11 items-center text-[12.5px] font-semibold text-accent sm:min-h-0"
-              >
-                {OVERVIEW_COPY.setupGo}
-              </Link>
-            )}
+            {!step.done && step.link}
           </li>
         ))}
       </ul>
