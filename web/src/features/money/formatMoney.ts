@@ -11,10 +11,10 @@
 // backend's allowlist treats them as two-minor-unit currencies. IDR is here
 // because the design draws Rp 85,400,000 and nobody quotes rupiah cents. This
 // affects display only -- the stored value keeps every minor unit.
-// Exported because AccountModal's toMinorUnits reads the same set: a currency
-// this file renders whole must be parsed whole too, or "85400000" typed into
-// the form and "Rp 85,400,000" shown back would disagree by two decimal places.
-export const NO_DECIMAL_CURRENCIES = new Set(["IDR", "VND"]);
+// toMinorUnits below reads the same set: a currency this file renders whole
+// must be parsed whole too, or "85400000" typed into a form and
+// "Rp 85,400,000" shown back would disagree by two decimal places.
+const NO_DECIMAL_CURRENCIES = new Set(["IDR", "VND"]);
 
 // U+2212 MINUS SIGN, not a hyphen: it aligns with digits at the same width,
 // which a hyphen does not, and every negative figure in this app is in a

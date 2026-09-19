@@ -74,11 +74,12 @@ func (l *ipRateLimiter) allow(ip string) bool {
 // all the same, since it is reachable without a session.
 const telegramStartsPerIPPerHour = 20
 
-// clientIP prefers the address chi's middleware.RealIP has already resolved
-// (it rewrites r.RemoteAddr from X-Forwarded-For, and the router installs it),
-// falling back to the raw RemoteAddr. The port is stripped so repeat requests
-// from one client, which arrive on different ephemeral ports, count together --
-// forgetting that makes the limiter count nothing at all.
+// clientIP is the address the per-IP limiters and the admin audit log use:
+// r.RemoteAddr, which trustedProxyRealIP has already replaced with nginx's
+// X-Real-IP when, and only when, the request came from a trusted proxy. The
+// port is stripped so repeat requests from one client, which arrive on
+// different ephemeral ports, count together -- forgetting that makes the
+// limiter count nothing at all.
 func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

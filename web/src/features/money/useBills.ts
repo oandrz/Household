@@ -26,7 +26,7 @@
 // see useBills's own comment below for why GET /bills needs it and GET
 // /accounts doesn't.
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { apiFetch } from "../../api/client";
+import { apiFetch, fetchAndParse } from "../../api/client";
 import { accountsQueryKey } from "./useAccounts";
 import {
   billPaymentResponseSchema,
@@ -96,14 +96,13 @@ export type PayBillBody = {
   paidOn: string;
 };
 
-export function billsQueryKey(includeArchived: boolean) {
+function billsQueryKey(includeArchived: boolean) {
   return ["bills", { includeArchived }] as const;
 }
 
 async function fetchBills(includeArchived: boolean): Promise<BillsResponse> {
   const suffix = includeArchived ? "?include_archived=true" : "";
-  const body = await apiFetch<unknown>(`/api/v1/bills${suffix}`);
-  return billsResponseSchema.parse(body);
+  return fetchAndParse(billsResponseSchema, `/api/v1/bills${suffix}`);
 }
 
 // `enabled` exists for Overview (Task 16), which renders for every member
@@ -169,11 +168,10 @@ export function useCreateBill() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (body: CreateBillBody): Promise<Bill> => {
-      const raw = await apiFetch<unknown>("/api/v1/bills", {
+      return (await fetchAndParse(billResponseSchema, "/api/v1/bills", {
         method: "POST",
         body: JSON.stringify(body),
-      });
-      return billResponseSchema.parse(raw).bill;
+      })).bill;
     },
     onSuccess: () => invalidateBills(queryClient),
   });
@@ -183,11 +181,10 @@ export function useUpdateBill() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (vars: { id: string; body: UpdateBillBody }): Promise<Bill> => {
-      const raw = await apiFetch<unknown>(`/api/v1/bills/${encodeURIComponent(vars.id)}`, {
+      return (await fetchAndParse(billResponseSchema, `/api/v1/bills/${encodeURIComponent(vars.id)}`, {
         method: "PATCH",
         body: JSON.stringify(vars.body),
-      });
-      return billResponseSchema.parse(raw).bill;
+      })).bill;
     },
     onSuccess: () => invalidateBills(queryClient),
   });
@@ -197,10 +194,9 @@ export function useArchiveBill() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string): Promise<Bill> => {
-      const raw = await apiFetch<unknown>(`/api/v1/bills/${encodeURIComponent(id)}/archive`, {
+      return (await fetchAndParse(billResponseSchema, `/api/v1/bills/${encodeURIComponent(id)}/archive`, {
         method: "POST",
-      });
-      return billResponseSchema.parse(raw).bill;
+      })).bill;
     },
     onSuccess: () => invalidateBills(queryClient),
   });
@@ -210,10 +206,9 @@ export function useRestoreBill() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string): Promise<Bill> => {
-      const raw = await apiFetch<unknown>(`/api/v1/bills/${encodeURIComponent(id)}/restore`, {
+      return (await fetchAndParse(billResponseSchema, `/api/v1/bills/${encodeURIComponent(id)}/restore`, {
         method: "POST",
-      });
-      return billResponseSchema.parse(raw).bill;
+      })).bill;
     },
     onSuccess: () => invalidateBills(queryClient),
   });
@@ -227,11 +222,10 @@ export function useMarkPaid() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (vars: { id: string; body: PayBillBody }): Promise<{ payment: BillPayment; bill: Bill }> => {
-      const raw = await apiFetch<unknown>(`/api/v1/bills/${encodeURIComponent(vars.id)}/pay`, {
+      return fetchAndParse(billPaymentResponseSchema, `/api/v1/bills/${encodeURIComponent(vars.id)}/pay`, {
         method: "POST",
         body: JSON.stringify(vars.body),
       });
-      return billPaymentResponseSchema.parse(raw);
     },
     onSuccess: () => invalidateBillsAndLedger(queryClient),
   });

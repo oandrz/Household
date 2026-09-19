@@ -43,7 +43,7 @@
 // if a future TanStack Query upgrade changes it. The actual defence against
 // reintroducing the anti-pattern is the real-browser walkthrough, not this
 // file.
-import { MutationObserver, QueryClient } from "@tanstack/query-core";
+import { MutationObserver, QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 
 describe("MutationObserver per-call callback reliability", () => {

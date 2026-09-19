@@ -7,18 +7,17 @@
 // was actually chosen against. `count` is passed only when a caller genuinely
 // wants something other than the server's answer.
 import { useQuery } from "@tanstack/react-query";
-import { apiFetch } from "../../api/client";
+import { fetchAndParse } from "../../api/client";
 import { portfolioReportSchema, type PeriodKind, type PortfolioReport } from "./holdingSchemas";
 
-export function portfolioReportQueryKey(kind: PeriodKind, count?: number) {
+function portfolioReportQueryKey(kind: PeriodKind, count?: number) {
   return ["portfolio-report", { kind, count: count ?? null }] as const;
 }
 
 async function fetchReport(kind: PeriodKind, count?: number): Promise<PortfolioReport> {
   const query = new URLSearchParams({ kind });
   if (count !== undefined) query.set("count", String(count));
-  const body = await apiFetch<unknown>(`/api/v1/holdings/report?${query.toString()}`);
-  return portfolioReportSchema.parse(body);
+  return fetchAndParse(portfolioReportSchema, `/api/v1/holdings/report?${query.toString()}`);
 }
 
 export function usePortfolioReport(options: { kind: PeriodKind; count?: number; enabled?: boolean }) {

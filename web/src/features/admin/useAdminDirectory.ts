@@ -5,7 +5,7 @@
 // routed to the one AdminGate AdminShell owns (useCloseSurfaceOnReauth).
 import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, apiFetch } from "../../api/client";
+import { ApiError, fetchAndParse } from "../../api/client";
 import { adminFlagsKey } from "./useAdmin";
 import {
   adminHouseholdPageSchema,
@@ -16,12 +16,9 @@ import {
 
 // Re-exported, not declared here: directoryLimits.ts is the leaf router.tsx
 // imports directly so it never has to reach this file (see that file's
-// comment). Kept here too so every existing import of these two names from
-// useAdminDirectory.ts keeps working unchanged.
-export {
-  DIRECTORY_DEFAULT_LIMIT,
-  DIRECTORY_MAX_LIMIT,
-} from "./directoryLimits";
+// comment). Kept here too because AdminHouseholdsPage imports it from this
+// file.
+export { DIRECTORY_MAX_LIMIT } from "./directoryLimits";
 
 // adminHouseholdsPath builds the exact URL the page requests, exported so a
 // test's fetch stub and the hook agree byte for byte. q is omitted when
@@ -34,11 +31,11 @@ export function adminHouseholdsPath(q: string, limit: number): string {
   return `/api/v1/admin/households?${params.toString()}`;
 }
 
-export function adminHouseholdsKey(q: string, limit: number) {
+function adminHouseholdsKey(q: string, limit: number) {
   return ["admin", "households", { q, limit }] as const;
 }
 
-export function adminHouseholdKey(householdId: string) {
+function adminHouseholdKey(householdId: string) {
   return ["admin", "household", householdId] as const;
 }
 
@@ -46,17 +43,16 @@ async function fetchAdminHouseholds(
   q: string,
   limit: number,
 ): Promise<AdminHouseholdsResponse> {
-  const body = await apiFetch<unknown>(adminHouseholdsPath(q, limit));
-  return adminHouseholdsResponseSchema.parse(body);
+  return fetchAndParse(adminHouseholdsResponseSchema, adminHouseholdsPath(q, limit));
 }
 
 async function fetchAdminHousehold(
   householdId: string,
 ): Promise<AdminHouseholdPage> {
-  const body = await apiFetch<unknown>(
+  return fetchAndParse(
+    adminHouseholdPageSchema,
     `/api/v1/admin/households/${encodeURIComponent(householdId)}`,
   );
-  return adminHouseholdPageSchema.parse(body);
 }
 
 export function useAdminHouseholds(q: string, limit: number) {

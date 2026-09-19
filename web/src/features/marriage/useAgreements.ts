@@ -15,7 +15,7 @@
 // mutations sit beside the query here and one naming family across all seven
 // flags is easier to read than two.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, apiFetch } from "../../api/client";
+import { ApiError, apiFetch, fetchAndParse } from "../../api/client";
 import { AGREEMENT_COPY } from "./agreementCopy";
 import { agreementsQueryKey } from "./agreementQueryKeys";
 import {
@@ -33,7 +33,7 @@ const BASE = "/api/v1/marriage/agreements";
 // always sent, empty where the kind does not use it: the handler blanks
 // sectionId itself for an edit or a remove, and an OMITTED previousBody would
 // always read as stale, since an agreement body is never empty.
-export type ProposeBody = {
+type ProposeBody = {
   kind: AgreementKind;
   sectionId: string;
   targetAgreementId: string;
@@ -43,8 +43,7 @@ export type ProposeBody = {
 };
 
 async function fetchAgreements(): Promise<AgreementsDocument> {
-  const raw = await apiFetch<unknown>(BASE);
-  return agreementsResponseSchema.parse(raw).agreements;
+  return (await fetchAndParse(agreementsResponseSchema, BASE)).agreements;
 }
 
 // The four proposal routes share one envelope and each answers the whole
@@ -54,11 +53,10 @@ async function fetchAgreements(): Promise<AgreementsDocument> {
 // loudly here rather than three screens later) and then dropped: no component
 // in this feature renders it.
 async function postProposalAction(path: string, body?: unknown): Promise<AgreementsDocument> {
-  const raw = await apiFetch<unknown>(path, {
+  return (await fetchAndParse(agreementProposalWriteResponseSchema, path, {
     method: "POST",
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
-  return agreementProposalWriteResponseSchema.parse(raw).agreements;
+  })).agreements;
 }
 
 // One failed write -> the sentence to show, plus a refetch wherever the answer
@@ -131,8 +129,7 @@ export function useAgreements() {
       // No body, and 200 rather than 201: the starter set is idempotent and a
       // second click may create nothing, so it answers the plain document
       // envelope rather than a write envelope with no row to name.
-      const raw = await apiFetch<unknown>(`${BASE}/starter-set`, { method: "POST" });
-      return agreementsResponseSchema.parse(raw).agreements;
+      return (await fetchAndParse(agreementsResponseSchema, `${BASE}/starter-set`, { method: "POST" })).agreements;
     },
     onSuccess: afterWrite,
   });

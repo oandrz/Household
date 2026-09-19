@@ -45,7 +45,7 @@ func newFakeAPI(t *testing.T) (*fakeAPI, *httptest.Server) {
 func signInResponder(session, csrf string) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/auth/sign-in" {
-			http.Error(w, `{"error":{"code":"UNAUTHENTICATED"}}`, 401)
+			http.Error(w, `{"error":{"code":"UNAUTHENTICATED"}}`, http.StatusUnauthorized)
 			return
 		}
 		exp := time.Now().Add(30 * 24 * time.Hour)
@@ -158,7 +158,7 @@ func TestA401MeansSignInAgainAndNeverRetries(t *testing.T) {
 	st, _ := newStore(srv.URL)
 	st.save(&credentials{BaseURL: srv.URL, Session: "stale", CSRF: "x"})
 	f.respond = func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, `{"error":{"code":"UNAUTHENTICATED"}}`, 401)
+		http.Error(w, `{"error":{"code":"UNAUTHENTICATED"}}`, http.StatusUnauthorized)
 	}
 
 	_, _, err := run_(t, srv.URL, "", "whoami")
@@ -178,7 +178,7 @@ func TestAWrongPasswordShowsAttemptsRemainingAndNeverSaysRetry(t *testing.T) {
 	t.Setenv("HEARTH_PASSWORD", "wrong")
 	f, srv := newFakeAPI(t)
 	f.respond = func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, `{"error":{"code":"INVALID_CREDENTIALS","details":{"attemptsRemaining":2}}}`, 401)
+		http.Error(w, `{"error":{"code":"INVALID_CREDENTIALS","details":{"attemptsRemaining":2}}}`, http.StatusUnauthorized)
 	}
 
 	out, _, err := run_(t, srv.URL, "", "login", "--email=a@example.com")
@@ -206,7 +206,7 @@ func TestOtherErrorsPrintTheBodyAndExit3(t *testing.T) {
 	st, _ := newStore(srv.URL)
 	st.save(&credentials{BaseURL: srv.URL, Session: "s", CSRF: "c"})
 	f.respond = func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, `{"error":{"code":"VALIDATION","message":"nope"}}`, 422)
+		http.Error(w, `{"error":{"code":"VALIDATION","message":"nope"}}`, http.StatusUnprocessableEntity)
 	}
 
 	out, _, err := run_(t, srv.URL, "", "category", "add", "--name=Food")
@@ -260,7 +260,7 @@ func TestLogoutForgetsTheFileEvenIfTheServerRefuses(t *testing.T) {
 	st, _ := newStore(srv.URL)
 	st.save(&credentials{BaseURL: srv.URL, Session: "s", CSRF: "c"})
 	f.respond = func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, `{"error":{"code":"UNAUTHENTICATED"}}`, 401)
+		http.Error(w, `{"error":{"code":"UNAUTHENTICATED"}}`, http.StatusUnauthorized)
 	}
 	_, _, err := run_(t, srv.URL, "", "logout")
 	if exitCode(t, err) != exitSignInAgain {

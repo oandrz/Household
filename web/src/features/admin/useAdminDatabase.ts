@@ -8,7 +8,7 @@
 // Retries are off globally (main.tsx sets retry: false) and neither hook sets
 // its own. A retried 503 would be four audit rows per failed page load.
 import { useQuery } from "@tanstack/react-query";
-import { apiFetch } from "../../api/client";
+import { fetchAndParse } from "../../api/client";
 import {
   adminDatabaseRowsSchema,
   adminDatabaseTablesSchema,
@@ -16,13 +16,13 @@ import {
   type AdminDatabaseTables,
 } from "./adminDatabaseSchemas";
 
-// Re-exported so a reader looking for the limits finds them beside the hooks
-// that use them. They are declared in browseLimits.ts because router.tsx
-// needs them for validateSearch and may never statically import a hook file
-// -- adminBundleSplit.test.ts walks main.tsx's import graph and fails if any
+// Re-exported so the page finds the default limit beside the hooks that use
+// it. The limits are declared in browseLimits.ts because router.tsx needs
+// them for validateSearch and may never statically import a hook file --
+// adminBundleSplit.test.ts walks main.tsx's import graph and fails if any
 // admin hook becomes reachable from it. directoryLimits.ts exists for exactly
 // this reason.
-export { BROWSE_DEFAULT_LIMIT, BROWSE_MAX_LIMIT } from "./browseLimits";
+export { BROWSE_DEFAULT_LIMIT } from "./browseLimits";
 
 export function adminDatabaseTablesPath(): string {
   return "/api/v1/admin/db/tables";
@@ -36,11 +36,11 @@ export function adminDatabaseRowsPath(
   return `/api/v1/admin/db/tables/${encodeURIComponent(table)}?limit=${String(limit)}&offset=${String(offset)}`;
 }
 
-export function adminDatabaseTablesKey() {
+function adminDatabaseTablesKey() {
   return ["admin", "database", "tables"] as const;
 }
 
-export function adminDatabaseRowsKey(
+function adminDatabaseRowsKey(
   table: string,
   limit: number,
   offset: number,
@@ -49,8 +49,7 @@ export function adminDatabaseRowsKey(
 }
 
 async function fetchTables(): Promise<AdminDatabaseTables> {
-  const body = await apiFetch<unknown>(adminDatabaseTablesPath());
-  return adminDatabaseTablesSchema.parse(body);
+  return fetchAndParse(adminDatabaseTablesSchema, adminDatabaseTablesPath());
 }
 
 async function fetchRows(
@@ -58,10 +57,10 @@ async function fetchRows(
   limit: number,
   offset: number,
 ): Promise<AdminDatabaseRows> {
-  const body = await apiFetch<unknown>(
+  return fetchAndParse(
+    adminDatabaseRowsSchema,
     adminDatabaseRowsPath(table, limit, offset),
   );
-  return adminDatabaseRowsSchema.parse(body);
 }
 
 export function useAdminDatabaseTables() {

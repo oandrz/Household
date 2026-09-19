@@ -30,7 +30,6 @@ type readLog struct{ calls []string }
 
 func (l *readLog) record(name string) { l.calls = append(l.calls, name) }
 func (l *readLog) seq() []string      { return l.calls }
-func (l *readLog) reset()             { l.calls = nil }
 
 // --- Clock, hasher, token generator -----------------------------------
 
@@ -1395,29 +1394,6 @@ func (d *mailerDouble) failEverySend(err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.sendErr = err
-}
-
-// signupLinksSentCount is a mutex-guarded read of len(signupLinks).
-func (d *mailerDouble) signupLinksSentCount() int {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return len(d.signupLinks)
-}
-
-// lastSignupLinkURL is a mutex-guarded read of the most recently sent
-// sign-up link email's URL.
-func (d *mailerDouble) lastSignupLinkURL() string {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.signupLinks[len(d.signupLinks)-1].URL
-}
-
-// existingAccountNoticesSentCount is a mutex-guarded read of
-// len(existingAccountNotices).
-func (d *mailerDouble) existingAccountNoticesSentCount() int {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return len(d.existingAccountNotices)
 }
 
 // signalSent must be called with mu held. The channel is large enough that
@@ -3081,12 +3057,9 @@ func newRetroRepoDouble() *retroRepoDouble {
 	return &retroRepoDouble{rows: map[string]*retroRow{}}
 }
 
-// setActions completes the mutual reference List needs to compute
-// ActionCount, and Add (on the other double) needs to resolve which month
-// an action's retro belongs to -- see retroActionRepoDouble.setRetros for
-// the reverse direction. Call both setters when a test needs the two
-// doubles to agree with each other; neither is required when a test only
-// exercises one repository's own port in isolation.
+// setActions wires the actions double List reads ActionCount from. It is not
+// required when a test only exercises this repository's own port in
+// isolation.
 func (d *retroRepoDouble) setActions(a *retroActionRepoDouble) { d.actions = a }
 
 // seed inserts a retro directly, bypassing Create, for a test that wants one
@@ -3268,25 +3241,11 @@ type retroActionRow struct {
 type retroActionRepoDouble struct {
 	rows map[string]*retroActionRow
 	n    int
-
-	// retros, when wired via setRetros, is the RetroRepository double Add
-	// reads a retro's own month from, so an action created through Add (as
-	// opposed to seedOpen, which is told the month directly) can still
-	// surface through OpenInMonth. See retroRepoDouble.setActions for the
-	// reverse direction and why this is the same mutual-reference pattern
-	// goalDouble/fakeBudgetRepo already use. nil is fine for a test that
-	// never calls setRetros; Add then leaves Month at its zero value, and
-	// such an action is findable only through ForRetro, never OpenInMonth.
-	retros *retroRepoDouble
 }
 
 func newRetroActionRepoDouble() *retroActionRepoDouble {
 	return &retroActionRepoDouble{rows: map[string]*retroActionRow{}}
 }
-
-// setRetros completes the mutual reference Add needs -- see this struct's
-// own retros field comment.
-func (d *retroActionRepoDouble) setRetros(r *retroRepoDouble) { d.retros = r }
 
 // seedOpen inserts an open (unticked) action for retroID, against month,
 // for the "Still open from July" fixture OpenInMonth answers -- and for
@@ -3310,11 +3269,11 @@ func (d *retroActionRepoDouble) seedOpen(retroID string, month time.Time, body s
 }
 
 // Add writes one action. RetroActionInput carries a RetroID but no month
-// (an action has no month column of its own -- only its retro does), so
-// Month is resolved through the wired retros double when one is set (see
-// setRetros); without one, Month stays the zero value and the action is
-// findable only through ForRetro, never OpenInMonth -- the same documented
-// limitation this double's retros field comment states.
+// (an action has no month column of its own -- only its retro does), and
+// this double does not join back to a retro, so Month stays the zero value:
+// an action created through Add is findable through ForRetro, never
+// OpenInMonth. A test that needs an open action in a month seeds it with
+// seedOpen, which is told the month directly.
 func (d *retroActionRepoDouble) Add(_ context.Context, in usecase.RetroActionInput) (usecase.RetroActionRecord, error) {
 	d.n++
 	row := &retroActionRow{
@@ -3326,11 +3285,6 @@ func (d *retroActionRepoDouble) Add(_ context.Context, in usecase.RetroActionInp
 			AssigneeMembershipIDs: in.AssigneeMembershipIDs,
 		},
 		HouseholdID: in.HouseholdID,
-	}
-	if d.retros != nil {
-		if retro, ok := d.retros.rows[in.RetroID]; ok {
-			row.Month = retro.Month
-		}
 	}
 	d.rows[row.ID] = row
 	return row.RetroActionRecord, nil
@@ -4067,19 +4021,10 @@ func (d *fakeFlagRepo) ClearHousehold(_ context.Context, householdID, key string
 
 var _ usecase.FeatureFlagRepository = (*fakeFlagRepo)(nil)
 
-// fakeAuditRepo is AdminAuditRepository. Recent sorts most-recent-first, the
-// same order the real query's ORDER BY at DESC produces, and applies limit
-// exactly as given -- it deliberately does not clamp (see
-// AdminService.RecentAudit's doc comment for why that check lives one layer
-// up).
+// fakeAuditRepo is AdminAuditRepository: it keeps every recorded entry, in
+// order, so a test can read back what was written.
 type fakeAuditRepo struct {
 	entries []usecase.AdminAuditEntry
-
-	// lastLimit records the exact limit this double was called with, so a
-	// test can confirm AdminService.RecentAudit clamped *before* calling
-	// Recent, not just that the returned slice happened to be short because
-	// there were few entries to return.
-	lastLimit int
 }
 
 func newFakeAuditRepo() *fakeAuditRepo { return &fakeAuditRepo{} }
@@ -4087,20 +4032,6 @@ func newFakeAuditRepo() *fakeAuditRepo { return &fakeAuditRepo{} }
 func (d *fakeAuditRepo) Record(_ context.Context, entry usecase.AdminAuditEntry) error {
 	d.entries = append(d.entries, entry)
 	return nil
-}
-
-func (d *fakeAuditRepo) Recent(_ context.Context, limit int) ([]usecase.AdminAuditEntry, error) {
-	d.lastLimit = limit
-	out := make([]usecase.AdminAuditEntry, len(d.entries))
-	copy(out, d.entries)
-	sort.Slice(out, func(i, j int) bool { return out[i].At.After(out[j].At) })
-	if limit <= 0 {
-		return nil, nil
-	}
-	if limit < len(out) {
-		out = out[:limit]
-	}
-	return out, nil
 }
 
 var _ usecase.AdminAuditRepository = (*fakeAuditRepo)(nil)

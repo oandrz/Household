@@ -41,7 +41,7 @@ interface ClearableQueryClient {
 // every route whose own component calls useMe() (directly or, for the invite
 // screen, indirectly through InviteScreen) while genuinely reachable with no
 // session at all.
-export function isOnPublicRoute(pathname: string): boolean {
+function isOnPublicRoute(pathname: string): boolean {
   return PUBLIC_ROUTE_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 

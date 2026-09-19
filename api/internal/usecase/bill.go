@@ -126,15 +126,19 @@ type BillPatch struct {
 	IsSubscription     *bool
 }
 
-// MarkPayment is MarkPaid's input. AmountMinor is the caller's, not the
-// bill's own stored figure: the modal that produces this prefills the bill's
-// amount but leaves it editable, because a utility bill varies month to
-// month, and marking one payment does not change the bill's own standing
-// amount.
+// MarkPayment is MarkPaid's input. AmountMinor is optional: nil pays the
+// bill's own stored amount, and a value is the caller's figure for this one
+// payment. The modal prefills the bill's amount but leaves it editable,
+// because a utility bill varies month to month, and marking one payment does
+// not change the bill's own standing amount.
+//
+// The default is decided by MarkPaid, not by each caller. The HTTP handler
+// used to work it out itself by reading the whole bills page, which left the
+// rule where the CLI and the Telegram bot could not reuse it.
 type MarkPayment struct {
 	HouseholdID string
 	BillID      string
-	AmountMinor int64
+	AmountMinor *int64
 	PaidOn      time.Time
 }
 
@@ -222,7 +226,7 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 	if err != nil {
 		return BillsView{}, err
 	}
-	dueTotal, paidSoFarTotal, subscriptionsAnnual := zero, zero, zero
+	subscriptionsAnnual := zero
 	excludedNoRate := 0
 	// excludedBillIDs is what stops the per-bill pass below and the
 	// per-payment pass after it from counting the same bill twice: a bill
@@ -234,13 +238,8 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 	// with no bills must still serialise Bills as JSON [], not null (the
 	// GoalService.List precedent for the same reason).
 	views := make([]BillView, 0, len(records))
-	var (
-		autopayCount, billCount        int
-		nextDueBillID, nextDueBillName string
-		nextDueOn                      *time.Time
-		nextDueAmount                  domain.Money
-		nextDueOverdue, nextDueAutopay bool
-	)
+	var next nextDueBill
+	var autopayCount, billCount int
 
 	for _, rec := range records {
 		view := s.toView(rec, today)
@@ -256,25 +255,7 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 		if b.Autopay {
 			autopayCount++
 		}
-		dueThisMonth := false
-		if b.NextDue != nil {
-			candidate := *b.NextDue
-			if nextDueOn == nil || candidate.Before(*nextDueOn) ||
-				(candidate.Equal(*nextDueOn) && b.Name < nextDueBillName) {
-				nextDueBillID, nextDueBillName = b.ID, b.Name
-				nextDueOn = &candidate
-				nextDueAmount = b.Amount
-				nextDueOverdue = view.Overdue
-				nextDueAutopay = b.Autopay
-			}
-			// Both sides through billStartOfDay: Year/Month read a time's
-			// own Location, so an unconverted `today` would answer this in
-			// the caller's zone while Bills.MonthTotals -- the figure this
-			// probe recovers per-bill identity for -- scoped its month in
-			// UTC. See billStartOfDay's own comment.
-			c, t := billStartOfDay(candidate), billStartOfDay(today)
-			dueThisMonth = c.Year() == t.Year() && c.Month() == t.Month()
-		}
+		next.consider(b, view.Overdue)
 
 		// excludedThisBill is one flag for the whole bill, covering both
 		// totals it might touch below, per this method's own comment on
@@ -285,26 +266,21 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 		// already omits this bill's contribution when its currency has no
 		// rate.
 		excludedThisBill := false
-		if dueThisMonth {
+		if b.NextDue != nil && dueInMonthOf(*b.NextDue, today) {
 			if _, convErr := s.convert(ctx, b.Amount, primary); convErr != nil {
 				excludedThisBill = true
 			}
 		}
 
 		if b.IsSubscription {
-			if annual, ok := domain.AnnualEquivalentMinor(b.Cadence, b.Amount.Amount); ok {
-				converted, convErr := s.convert(ctx, domain.Money{Amount: annual, Currency: b.Amount.Currency}, primary)
-				if convErr != nil {
-					excludedThisBill = true
-				} else {
-					subscriptionsAnnual, err = subscriptionsAnnual.Add(converted)
-					if err != nil {
-						return BillsView{}, err
-					}
-				}
+			var noRate bool
+			subscriptionsAnnual, noRate, err = s.addSubscriptionAnnual(ctx, subscriptionsAnnual, b, primary)
+			if err != nil {
+				return BillsView{}, err
 			}
-			// ok == false is a one-off: not a recurring cost, ticked or not,
-			// and never a reason to exclude anything.
+			if noRate {
+				excludedThisBill = true
+			}
 		}
 
 		if excludedThisBill {
@@ -313,52 +289,155 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 		}
 	}
 
-	// Payments due this month also feed DueThisMonth (the union rule
-	// Bills.MonthTotals' own header comment states), but a payment is a
-	// distinct entity from the bill that generated it, so its own
-	// no-rate exclusion is counted here -- unless that bill was already
-	// counted above, per this method's own comment.
+	excludedNoRate += s.countExcludedPayments(ctx, paymentRecords, excludedBillIDs, primary)
+
+	dueTotal, err := s.sumConvertible(ctx, dueMinor, zero)
+	if err != nil {
+		return BillsView{}, err
+	}
+	paidSoFarTotal, err := s.sumConvertible(ctx, paidMinor, zero)
+	if err != nil {
+		return BillsView{}, err
+	}
+
+	sortBillViews(views)
+
+	paidViews := make([]BillPaymentView, 0, len(paymentRecords))
 	for _, p := range paymentRecords {
+		paidViews = append(paidViews, BillPaymentView(p))
+	}
+
+	// Integer-first, one division: subscriptionsAnnual is already the sum of
+	// every bill's own annual equivalent, converted then added -- the only
+	// division in the whole rollup happens here, exactly once.
+	subscriptionsMonthly := domain.Money{Amount: subscriptionsAnnual.Amount / 12, Currency: primary}
+
+	return BillsView{
+		Bills:         views,
+		PaidThisMonth: paidViews,
+		Summary: BillsSummary{
+			Currency:             primary,
+			DueThisMonth:         dueTotal,
+			PaidSoFar:            paidSoFarTotal,
+			NextDueBillID:        next.id,
+			NextDueBillName:      next.name,
+			NextDueOn:            next.on,
+			NextDueAmount:        next.amount,
+			NextDueOverdue:       next.overdue,
+			NextDueAutopay:       next.autopay,
+			AutopayCount:         autopayCount,
+			BillCount:            billCount,
+			SubscriptionsMonthly: subscriptionsMonthly,
+			SubscriptionsAnnual:  subscriptionsAnnual,
+			ExcludedNoRate:       excludedNoRate,
+		},
+	}, nil
+}
+
+// nextDueBill is the summary's "next due" bill as List walks the live bills:
+// the earliest NextDue wins, and a tie goes to the name that sorts first. A
+// bill with no NextDue is never a candidate.
+type nextDueBill struct {
+	id, name         string
+	on               *time.Time
+	amount           domain.Money
+	overdue, autopay bool
+}
+
+func (n *nextDueBill) consider(b domain.Bill, overdue bool) {
+	if b.NextDue == nil {
+		return
+	}
+	candidate := *b.NextDue
+	if n.on == nil || candidate.Before(*n.on) ||
+		(candidate.Equal(*n.on) && b.Name < n.name) {
+		n.id, n.name = b.ID, b.Name
+		n.on = &candidate
+		n.amount = b.Amount
+		n.overdue = overdue
+		n.autopay = b.Autopay
+	}
+}
+
+// dueInMonthOf reports whether due falls in today's calendar month. Both sides
+// go through billStartOfDay: Year/Month read a time's own Location, so an
+// unconverted today would answer this in the caller's zone while
+// Bills.MonthTotals -- the figure this probe recovers per-bill identity for --
+// scoped its month in UTC. See billStartOfDay's own comment.
+func dueInMonthOf(due, today time.Time) bool {
+	c, t := billStartOfDay(due), billStartOfDay(today)
+	return c.Year() == t.Year() && c.Month() == t.Month()
+}
+
+// addSubscriptionAnnual adds one subscription's annual equivalent, converted
+// into primary, to total. noRate reports a bill whose currency has no rate: it
+// adds nothing, and List counts it in ExcludedNoRate. A one-off answers total
+// unchanged and noRate false -- not a recurring cost, ticked or not, and never
+// a reason to exclude anything.
+func (s *BillService) addSubscriptionAnnual(ctx context.Context, total domain.Money, b domain.Bill, primary string) (sum domain.Money, noRate bool, err error) {
+	annual, ok := domain.AnnualEquivalentMinor(b.Cadence, b.Amount.Amount)
+	if !ok {
+		return total, false, nil
+	}
+	converted, convErr := s.convert(ctx, domain.Money{Amount: annual, Currency: b.Amount.Currency}, primary)
+	if convErr != nil {
+		return total, true, nil
+	}
+	sum, err = total.Add(converted)
+	if err != nil {
+		return domain.Money{}, false, err
+	}
+	return sum, false, nil
+}
+
+// countExcludedPayments counts this month's payments whose currency has no
+// rate. Payments due this month also feed DueThisMonth (the union rule
+// Bills.MonthTotals' own header comment states), but a payment is a distinct
+// entity from the bill that generated it, so its own no-rate exclusion is
+// counted here -- unless that bill was already counted by List's per-bill
+// pass, per List's own comment. excludedBillIDs is updated as it goes.
+func (s *BillService) countExcludedPayments(ctx context.Context, payments []BillPaymentRecord, excludedBillIDs map[string]bool, primary string) int {
+	count := 0
+	for _, p := range payments {
 		if excludedBillIDs[p.Payment.BillID] {
 			continue
 		}
 		if _, convErr := s.convert(ctx, p.Payment.Amount, primary); convErr != nil {
-			excludedNoRate++
+			count++
 			excludedBillIDs[p.Payment.BillID] = true
 		}
 	}
+	return count
+}
 
-	// The actual sums: Bills.MonthTotals' own currency-aggregated maps,
-	// converted per currency then added. A currency with no rate is simply
-	// skipped here -- its exclusion was already counted, precisely, by the
-	// two per-entity passes above; counting it again here (once per
-	// currency) is exactly the bug this method's own comment describes
-	// fixing.
-	for currency, amount := range dueMinor {
-		converted, convErr := s.convert(ctx, domain.Money{Amount: amount, Currency: currency}, primary)
+// sumConvertible is the actual sum behind DueThisMonth and PaidSoFar:
+// Bills.MonthTotals' own currency-aggregated map, each currency converted into
+// zero's currency, then added. A currency with no rate is simply skipped here
+// -- its exclusion was already counted, precisely, by List's two per-entity
+// passes; counting it again here (once per currency) is exactly the bug List's
+// own comment describes fixing.
+func (s *BillService) sumConvertible(ctx context.Context, byCurrency map[string]int64, zero domain.Money) (domain.Money, error) {
+	total := zero
+	for currency, amount := range byCurrency {
+		converted, convErr := s.convert(ctx, domain.Money{Amount: amount, Currency: currency}, zero.Currency)
 		if convErr != nil {
 			continue
 		}
-		dueTotal, err = dueTotal.Add(converted)
+		var err error
+		total, err = total.Add(converted)
 		if err != nil {
-			return BillsView{}, err
+			return domain.Money{}, err
 		}
 	}
-	for currency, amount := range paidMinor {
-		converted, convErr := s.convert(ctx, domain.Money{Amount: amount, Currency: currency}, primary)
-		if convErr != nil {
-			continue
-		}
-		paidSoFarTotal, err = paidSoFarTotal.Add(converted)
-		if err != nil {
-			return BillsView{}, err
-		}
-	}
+	return total, nil
+}
 
-	// Ascending by due date, nil last, ties by name -- one order across the
-	// whole list rather than two separately-sorted Due-soon/Later slices: the
-	// frontend splits on each row's own DueSoon flag (Task 9's own comment),
-	// so the order they arrive in is the order both halves render in.
+// sortBillViews orders the Bills list ascending by due date, nil last, ties by
+// name -- one order across the whole list rather than two separately-sorted
+// Due-soon/Later slices: the frontend splits on each row's own DueSoon flag
+// (Task 9's own comment), so the order they arrive in is the order both halves
+// render in.
+func sortBillViews(views []BillView) {
 	sort.SliceStable(views, func(i, j int) bool {
 		a, b := views[i].Bill.NextDue, views[j].Bill.NextDue
 		switch {
@@ -374,37 +453,6 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 			return views[i].Bill.Name < views[j].Bill.Name
 		}
 	})
-
-	paidViews := make([]BillPaymentView, 0, len(paymentRecords))
-	for _, p := range paymentRecords {
-		paidViews = append(paidViews, BillPaymentView{Payment: p.Payment, BillName: p.BillName, Autopay: p.Autopay})
-	}
-
-	// Integer-first, one division: subscriptionsAnnual is already the sum of
-	// every bill's own annual equivalent, converted then added -- the only
-	// division in the whole rollup happens here, exactly once.
-	subscriptionsMonthly := domain.Money{Amount: subscriptionsAnnual.Amount / 12, Currency: primary}
-
-	return BillsView{
-		Bills:         views,
-		PaidThisMonth: paidViews,
-		Summary: BillsSummary{
-			Currency:             primary,
-			DueThisMonth:         dueTotal,
-			PaidSoFar:            paidSoFarTotal,
-			NextDueBillID:        nextDueBillID,
-			NextDueBillName:      nextDueBillName,
-			NextDueOn:            nextDueOn,
-			NextDueAmount:        nextDueAmount,
-			NextDueOverdue:       nextDueOverdue,
-			NextDueAutopay:       nextDueAutopay,
-			AutopayCount:         autopayCount,
-			BillCount:            billCount,
-			SubscriptionsMonthly: subscriptionsMonthly,
-			SubscriptionsAnnual:  subscriptionsAnnual,
-			ExcludedNoRate:       excludedNoRate,
-		},
-	}, nil
 }
 
 // Create validates and writes a new bill. DueAnchorDay is derived from
@@ -658,18 +706,19 @@ func (s *BillService) SetArchived(ctx context.Context, householdID, billID strin
 // so getting the currency or the date wrong here is wrong money on three
 // other screens.
 //
-// The amount is the caller's, not the bill's own stored figure -- see
-// MarkPayment's own comment. The bill's own amount_minor is left untouched by
-// paying.
+// The amount is the caller's when MarkPayment carries one, and the bill's own
+// stored figure when it does not -- see MarkPayment's own comment. Either way
+// the bill's own amount_minor is left untouched by paying.
 //
-// AmountMinor must be positive, the same domain.ErrBillAmountNotPositive
+// A caller's amount must be positive, the same domain.ErrBillAmountNotPositive
 // refusal Create (bill.go's own check) and Update give -- checked here, in
 // the service, not by the HTTP layer: bill_payments' own CHECK
 // (amount_minor > 0) would otherwise be the first thing to catch a
 // non-positive amount, and a raw constraint violation surfacing as a 500 is
 // not an acceptable answer to a bad request body. Checked before the Get
 // below, the same "validate the caller's own input before spending a query
-// on it" order Create uses.
+// on it" order Create uses. The bill's own amount needs no second check:
+// Create and Update already refuse a non-positive one.
 //
 // Three separate conditions refuse with *domain.BillNotPayableError, not a
 // bare domain.ErrForbidden: an archived bill, a settled one-off with no
@@ -680,7 +729,7 @@ func (s *BillService) SetArchived(ctx context.Context, householdID, billID strin
 // own doc comment for why this does not disturb errors.Is(err,
 // domain.ErrForbidden) callers.
 func (s *BillService) MarkPaid(ctx context.Context, in MarkPayment) (BillPaymentView, error) {
-	if in.AmountMinor <= 0 {
+	if in.AmountMinor != nil && *in.AmountMinor <= 0 {
 		return BillPaymentView{}, domain.ErrBillAmountNotPositive
 	}
 	rec, err := s.deps.Bills.Get(ctx, in.HouseholdID, in.BillID)
@@ -695,6 +744,10 @@ func (s *BillService) MarkPaid(ctx context.Context, in MarkPayment) (BillPayment
 		// exactly that (Bill.NextDue's own comment), not "not yet loaded".
 		return BillPaymentView{}, &domain.BillNotPayableError{Reason: domain.BillSettled}
 	}
+	amount := rec.Bill.Amount.Amount
+	if in.AmountMinor != nil {
+		amount = *in.AmountMinor
+	}
 
 	acct, err := s.deps.Accounts.Get(ctx, in.HouseholdID, rec.Bill.PayFromAccountID)
 	if err != nil {
@@ -704,8 +757,8 @@ func (s *BillService) MarkPaid(ctx context.Context, in MarkPayment) (BillPayment
 		return BillPaymentView{}, &domain.BillNotPayableError{Reason: domain.PayFromAccountArchived}
 	}
 	// The expense's currency is the pay-from ACCOUNT's, never the bill's own
-	// stored figure reinterpreted -- transaction.go:232 is the identical rule
-	// TransactionService.Create applies, and a test asserts the two agree.
+	// stored figure reinterpreted -- TransactionService.validate applies the
+	// identical rule to every transaction, and a test asserts the two agree.
 	currency := acct.Balance.Currency
 
 	// dueOn is the occurrence being settled: the bill's CURRENT next_due, not
@@ -730,7 +783,7 @@ func (s *BillService) MarkPaid(ctx context.Context, in MarkPayment) (BillPayment
 		BillID:             in.BillID,
 		DueOn:              dueOn,
 		PaidOn:             in.PaidOn,
-		AmountMinor:        in.AmountMinor,
+		AmountMinor:        amount,
 		Currency:           currency,
 		Description:        rec.Bill.Name,
 		CategoryID:         rec.Bill.CategoryID,
@@ -757,11 +810,25 @@ func (s *BillService) UndoPayment(ctx context.Context, householdID, billID, paym
 	return s.deps.Bills.UndoPayment(ctx, householdID, billID, paymentID)
 }
 
+// View is one bill exactly as List renders its row, archived bills included,
+// for a caller that needs a single bill: a write handler answering with the
+// row it just changed, or a check that reads the bill's currency. It is one
+// repository read, where going through List would cost four plus the whole
+// page summary. A bill that does not exist in this household is
+// domain.ErrNotFound, BillRepository.Get's own answer.
+func (s *BillService) View(ctx context.Context, householdID, billID string, today time.Time) (BillView, error) {
+	rec, err := s.deps.Bills.Get(ctx, householdID, billID)
+	if err != nil {
+		return BillView{}, err
+	}
+	return s.toView(rec, today), nil
+}
+
 // toView composes one BillView from a repository record, computing Overdue
 // and DueSoon against today -- the one calculation every method that returns
-// a BillView shares, so List, Create, Update and SetArchived cannot drift on
-// what "overdue" means the way transaction.go's validate exists to stop
-// Create and Update drifting on transaction rules.
+// a BillView shares, so List, View, Create, Update and SetArchived cannot
+// drift on what "overdue" means the way transaction.go's validate exists to
+// stop Create and Update drifting on transaction rules.
 func (s *BillService) toView(rec BillRecord, today time.Time) BillView {
 	b := rec.Bill
 	overdue := b.NextDue != nil && domain.IsOverdue(*b.NextDue, today)

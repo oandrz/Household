@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -223,7 +224,10 @@ func TestTouchWritesOnlyLastSeenAt(t *testing.T) {
 	}
 }
 
-func TestAdminAuditRepoRecordsAndReadsBack(t *testing.T) {
+// TestAdminAuditRepoRecordsTheRow reads admin_audit_log directly: the port is
+// write-only (usecase.AdminAuditRepository's doc comment), so the table is the
+// only place to check what Record wrote.
+func TestAdminAuditRepoRecordsTheRow(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
 	users := postgres.NewUserRepo(db)
@@ -245,15 +249,20 @@ func TestAdminAuditRepoRecordsAndReadsBack(t *testing.T) {
 		t.Fatalf("Record: %v", err)
 	}
 
-	entries, err := audit.Recent(ctx, 10)
+	var target, ip string
+	var detail []byte
+	err = db.Pool().QueryRow(ctx,
+		`SELECT target, detail, ip::text FROM admin_audit_log WHERE actor_user_id::text = $1`, user.ID).
+		Scan(&target, &detail, &ip)
 	if err != nil {
-		t.Fatalf("Recent: %v", err)
+		t.Fatalf("read the audit row back: %v", err)
 	}
-	if len(entries) != 1 {
-		t.Fatalf("Recent returned %d entries, want 1", len(entries))
+	var decoded map[string]any
+	if err := json.Unmarshal(detail, &decoded); err != nil {
+		t.Fatalf("decode detail %q: %v", detail, err)
 	}
-	if entries[0].Target != "family_calendar" || entries[0].Detail["enabled"] != true {
-		t.Fatalf("entry = %+v, want the target and detail written", entries[0])
+	if target != "family_calendar" || decoded["enabled"] != true || ip != "203.0.113.5" {
+		t.Fatalf("row = target %q, detail %v, ip %q; want the target, detail and ip written", target, decoded, ip)
 	}
 }
 

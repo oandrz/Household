@@ -397,9 +397,13 @@ type AdminAuditEntry struct {
 	At          time.Time
 }
 
+// AdminAuditRepository is write-only on purpose. The log is append-only by
+// convention and nothing in the product reads it back: the audit screen was
+// descoped on 2026-09-02, and the read path it left behind was deleted on
+// 2026-09-13 rather than kept alive only for its own tests. An operator reads
+// admin_audit_log through psql; tests read the table directly.
 type AdminAuditRepository interface {
 	Record(ctx context.Context, entry AdminAuditEntry) error
-	Recent(ctx context.Context, limit int) ([]AdminAuditEntry, error)
 }
 
 type AdminReauthAttemptRepository interface {
@@ -1047,6 +1051,19 @@ type GoalRecord struct {
 type GoalMonthTotal struct {
 	GoalID      string
 	AmountMinor int64
+}
+
+// GoalLookup is what a service OUTSIDE the goals feature needs to know about a
+// goal, and nothing more: fetch one by id. BudgetService.RollOver is the
+// caller -- it reads the target goal before rolling a month's unspent money
+// into it. A narrow port rather than the whole GoalRepository, for the same
+// interface-segregation reason HoldingCounter exists: the budget service must
+// not be able to grow a dependency on goal writes it was never meant to make.
+// Every GoalRepository satisfies it, so wiring passes the same repository.
+type GoalLookup interface {
+	// Get has GoalRepository.Get's contract exactly: domain.ErrNotFound for
+	// an unknown id and for another household's goal alike.
+	Get(ctx context.Context, householdID, goalID string) (GoalRecord, error)
 }
 
 // GoalRepository's implementation must not trust a contribution's household

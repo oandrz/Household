@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { apiFetch } from "../../api/client";
+import { apiFetch, fetchAndParse } from "../../api/client";
 import { accountsQueryKey } from "./useAccounts";
 import {
   categoriesResponseSchema,
@@ -19,7 +19,7 @@ export type TransactionFilters = {
   cursor?: string;
 };
 
-export function transactionsQueryKey(filters: TransactionFilters) {
+function transactionsQueryKey(filters: TransactionFilters) {
   return ["transactions", filters] as const;
 }
 
@@ -59,8 +59,7 @@ export function useTransactions(filters: TransactionFilters) {
   return useQuery({
     queryKey: transactionsQueryKey(filters),
     queryFn: async (): Promise<TransactionsResponse> => {
-      const body = await apiFetch<unknown>(`/api/v1/transactions${toQueryString(filters)}`);
-      return transactionsResponseSchema.parse(body);
+      return fetchAndParse(transactionsResponseSchema, `/api/v1/transactions${toQueryString(filters)}`);
     },
   });
 }
@@ -69,8 +68,7 @@ export function useCategories() {
   return useQuery({
     queryKey: categoriesQueryKey(),
     queryFn: async (): Promise<Category[]> => {
-      const body = await apiFetch<unknown>("/api/v1/categories");
-      return categoriesResponseSchema.parse(body).categories;
+      return (await fetchAndParse(categoriesResponseSchema, "/api/v1/categories")).categories;
     },
   });
 }
@@ -97,11 +95,10 @@ export function useCreateTransaction() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (body: unknown): Promise<Transaction> => {
-      const raw = await apiFetch<unknown>("/api/v1/transactions", {
+      return fetchAndParse(transactionSchema, "/api/v1/transactions", {
         method: "POST",
         body: JSON.stringify(body),
       });
-      return transactionSchema.parse(raw);
     },
     onSuccess: () => invalidateLedger(queryClient),
   });
@@ -111,11 +108,10 @@ export function useUpdateTransaction() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, body }: { id: string; body: unknown }): Promise<Transaction> => {
-      const raw = await apiFetch<unknown>(`/api/v1/transactions/${encodeURIComponent(id)}`, {
+      return fetchAndParse(transactionSchema, `/api/v1/transactions/${encodeURIComponent(id)}`, {
         method: "PATCH",
         body: JSON.stringify(body),
       });
-      return transactionSchema.parse(raw);
     },
     onSuccess: () => invalidateLedger(queryClient),
   });

@@ -62,7 +62,9 @@ commands:
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New(usage)
+		// usage is a raw string ending in a newline, and main prints the
+		// error with Fprintln, which adds its own.
+		return errors.New(strings.TrimSuffix(usage, "\n"))
 	}
 
 	cfg, err := config.Load()

@@ -19,14 +19,13 @@ export const adminDatabaseColumnSchema = z
   .strict();
 export type AdminDatabaseColumn = z.infer<typeof adminDatabaseColumnSchema>;
 
-export const adminDatabaseTableSchema = z
+const adminDatabaseTableSchema = z
   .object({
     name: z.string(),
     rowCount: z.number().int(),
     columns: z.array(adminDatabaseColumnSchema),
   })
   .strict();
-export type AdminDatabaseTable = z.infer<typeof adminDatabaseTableSchema>;
 
 export const adminDatabaseTablesSchema = z
   .object({ tables: z.array(adminDatabaseTableSchema) })

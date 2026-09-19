@@ -6,7 +6,10 @@
 // ordinary proposal, which is why this hands the page a seed rather than
 // writing one itself.
 import { useId, useState } from "react";
+import { Field } from "../../components/Field";
+import { FIELD_CONTROL_CLASS } from "../../components/fieldClasses";
 import { Modal } from "../../components/Modal";
+import { ModalActions } from "../../components/ModalActions";
 import { ApiError } from "../../api/client";
 import { AGREEMENT_COPY } from "./agreementCopy";
 import { handleWriteError, useAgreements } from "./useAgreements";
@@ -59,10 +62,15 @@ export function NewSectionModal({
           event.preventDefault();
         }}
       >
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor={nameFieldId} className="text-xs font-semibold text-label">
-            {AGREEMENT_COPY.sectionNameLabel}
-          </label>
+        {/* The error line sits directly under the input, never in a footer
+            banner: the refusal is about this field, and criterion 13 is that
+            the person can see which one. */}
+        <Field
+          label={AGREEMENT_COPY.sectionNameLabel}
+          htmlFor={nameFieldId}
+          error={error}
+          errorTestId="agreement-section-name-error"
+        >
           <input
             id={nameFieldId}
             type="text"
@@ -71,21 +79,9 @@ export function NewSectionModal({
             placeholder={AGREEMENT_COPY.sectionNamePlaceholder}
             // MaxAgreementSectionNameLen, as a courtesy; the server counts runes.
             maxLength={60}
-            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+            className={FIELD_CONTROL_CLASS}
           />
-          {/* Directly under the input, never a footer banner: the refusal is
-              about this field, and criterion 13 is that the person can see
-              which one. */}
-          {error !== null && (
-            <p
-              data-testid="agreement-section-name-error"
-              role="alert"
-              className="text-xs leading-snug text-danger"
-            >
-              {error}
-            </p>
-          )}
-        </div>
+        </Field>
 
         <div className="flex flex-col gap-2">
           <span className="text-xs font-semibold text-label">
@@ -109,23 +105,14 @@ export function NewSectionModal({
           </div>
         </div>
 
-        <div className="mt-1 flex gap-2.5">
-          <button
-            type="button"
-            onClick={onClose}
-            className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label sm:min-h-0"
-          >
-            {AGREEMENT_COPY.cancel}
-          </button>
-          <button
-            type="button"
-            disabled={isCreatingSection || name.trim() === ""}
-            onClick={() => void handleCreate()}
-            className="min-h-11 flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
-          >
-            {AGREEMENT_COPY.newSectionCreate}
-          </button>
-        </div>
+        <ModalActions
+          secondaryLabel={AGREEMENT_COPY.cancel}
+          onSecondary={onClose}
+          primaryLabel={AGREEMENT_COPY.newSectionCreate}
+          primaryType="button"
+          onPrimary={() => void handleCreate()}
+          primaryDisabled={isCreatingSection || name.trim() === ""}
+        />
       </form>
     </Modal>
   );

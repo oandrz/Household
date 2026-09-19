@@ -192,6 +192,12 @@ free ones cost nothing). A third pair, `NUDGES_AT` + `NUDGES_TIMEZONE`
 needs the Telegram pair. Each pair is both-or-neither; `config.Load` refuses
 one alone.
 
+`TRUSTED_PROXY_CIDRS` needs nothing from you: `docker-compose.prod.yml` sets
+it on `api` to the `hearth` network's subnet, the only place nginx reaches the
+API from. It is what lets the API believe nginx's `X-Real-IP` and nobody
+else's. Change the network's subnet and this value, and `web/nginx.conf`'s
+`set_real_ip_from`, change with it.
+
 ## 9 · First bring-up
 
 ```bash

@@ -240,15 +240,11 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 		// never gated by this lock (see domain.LockoutPolicy's doc comment),
 		// so a real member always has a way back into their own household
 		// even while the password lock is being held open this way.
-		if err := s.d.Attempts.Record(ctx, &householdID, &user.ID, email, false, now); err != nil {
-			return SignInResult{}, err
-		}
-		updated, err := s.d.Attempts.FailuresSince(ctx, householdID, now.Add(-s.d.Policy.Window))
+		updated, err := s.recordHouseholdFailure(ctx, householdID, user.ID, email, now)
 		if err != nil {
 			return SignInResult{}, err
 		}
-		state = s.d.Policy.Evaluate(updated, now)
-		return SignInResult{}, &SignInFailedError{Locked: true, LockedUntil: state.Until}
+		return SignInResult{}, &SignInFailedError{Locked: true, LockedUntil: updated.Until}
 	}
 
 	passwordFailed := true
@@ -265,14 +261,10 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 	}
 
 	if passwordFailed {
-		if err := s.d.Attempts.Record(ctx, &householdID, &user.ID, email, false, now); err != nil {
-			return SignInResult{}, err
-		}
-		failures, err := s.d.Attempts.FailuresSince(ctx, householdID, now.Add(-s.d.Policy.Window))
+		state, err := s.recordHouseholdFailure(ctx, householdID, user.ID, email, now)
 		if err != nil {
 			return SignInResult{}, err
 		}
-		state := s.d.Policy.Evaluate(failures, now)
 		return SignInResult{}, &SignInFailedError{
 			AttemptsRemaining: state.AttemptsRemaining,
 			Locked:            state.Locked,
@@ -287,6 +279,24 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 		return SignInResult{}, err
 	}
 	return s.issueSession(ctx, user.ID, householdID, now)
+}
+
+// recordHouseholdFailure records one failed attempt against a member's
+// household and evaluates the lock over the failure set that now includes it.
+// SignIn's two household-scoped failures -- an already-locked household and a
+// wrong password -- both end this way. It deliberately does not run the
+// password or decoy check: where that call sits relative to each branch is
+// what keeps the branches timing-indistinguishable, so it stays at each call
+// site, before this.
+func (s *AuthService) recordHouseholdFailure(ctx context.Context, householdID, userID, email string, now time.Time) (domain.LockState, error) {
+	if err := s.d.Attempts.Record(ctx, &householdID, &userID, email, false, now); err != nil {
+		return domain.LockState{}, err
+	}
+	failures, err := s.d.Attempts.FailuresSince(ctx, householdID, now.Add(-s.d.Policy.Window))
+	if err != nil {
+		return domain.LockState{}, err
+	}
+	return s.d.Policy.Evaluate(failures, now), nil
 }
 
 func (s *AuthService) issueSession(ctx context.Context, userID, householdID string, now time.Time) (SignInResult, error) {

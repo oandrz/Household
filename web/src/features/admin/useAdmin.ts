@@ -8,7 +8,7 @@
 // each write mutation's onError for how a lapsed grant discovered mid-edit
 // still reaches that same gate.
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { ApiError, apiFetch } from "../../api/client";
+import { ApiError, apiFetch, fetchAndParse } from "../../api/client";
 import { adminFlagsResponseSchema, type AdminFlag, type AdminFlagsResponse } from "./adminSchemas";
 
 export const adminFlagsKey = ["admin", "flags"] as const;
@@ -31,8 +31,7 @@ export function toAdminGateError(error: unknown): ApiError | null {
 }
 
 async function fetchAdminFlags(): Promise<AdminFlagsResponse> {
-  const body = await apiFetch<unknown>("/api/v1/admin/flags");
-  return adminFlagsResponseSchema.parse(body);
+  return fetchAndParse(adminFlagsResponseSchema, "/api/v1/admin/flags");
 }
 
 // refetchOnWindowFocus is off. Every request under /admin writes an
@@ -110,11 +109,10 @@ function closeSurfaceOnAdminLayerFailure(queryClient: QueryClient) {
 }
 
 async function putFlag(path: string, enabled: boolean): Promise<AdminFlagsResponse> {
-  const body = await apiFetch<unknown>(path, {
+  return fetchAndParse(adminFlagsResponseSchema, path, {
     method: "PUT",
     body: JSON.stringify({ enabled }),
   });
-  return adminFlagsResponseSchema.parse(body);
 }
 
 export function useSetGlobalFlag() {
@@ -148,11 +146,11 @@ export function useClearHouseholdFlag() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (vars: { key: string; householdId: string }) => {
-      const body = await apiFetch<unknown>(
+      return fetchAndParse(
+        adminFlagsResponseSchema,
         `/api/v1/admin/flags/${encodeURIComponent(vars.key)}/households/${encodeURIComponent(vars.householdId)}`,
         { method: "DELETE" },
       );
-      return adminFlagsResponseSchema.parse(body);
     },
     onSuccess: cacheRefreshedFlags(queryClient),
     onError: closeSurfaceOnAdminLayerFailure(queryClient),

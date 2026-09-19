@@ -6,7 +6,7 @@
 // toggled by a query parameter) rather than useBudget.ts's month-keying, so
 // `goalsQueryKey` is modelled on `accountsQueryKey`, not `budgetQueryKey`.
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { apiFetch } from "../../api/client";
+import { apiFetch, fetchAndParse } from "../../api/client";
 import {
   goalContributionsResponseSchema,
   goalResponseSchema,
@@ -49,7 +49,7 @@ export type UpdateGoalBody = {
 // for the reason its Go field is a pointer at all -- addContributionRequest's
 // own comment: it exists only to be checked against the goal's stored
 // currency, never carried into the write itself.
-export type AddContributionBody = {
+type AddContributionBody = {
   amountMinor: number;
   occurredOn: string;
   note: string;
@@ -60,19 +60,17 @@ export function goalsQueryKey(includeArchived: boolean) {
   return ["goals", { includeArchived }] as const;
 }
 
-export function goalContributionsQueryKey(goalId: string) {
+function goalContributionsQueryKey(goalId: string) {
   return ["goal-contributions", goalId] as const;
 }
 
 async function fetchGoals(includeArchived: boolean): Promise<GoalsResponse> {
   const suffix = includeArchived ? "?include_archived=true" : "";
-  const body = await apiFetch<unknown>(`/api/v1/goals${suffix}`);
-  return goalsResponseSchema.parse(body);
+  return fetchAndParse(goalsResponseSchema, `/api/v1/goals${suffix}`);
 }
 
 async function fetchGoalContributions(goalId: string): Promise<GoalContributionsResponse> {
-  const body = await apiFetch<unknown>(`/api/v1/goals/${encodeURIComponent(goalId)}/contributions`);
-  return goalContributionsResponseSchema.parse(body);
+  return fetchAndParse(goalContributionsResponseSchema, `/api/v1/goals/${encodeURIComponent(goalId)}/contributions`);
 }
 
 // Both goalsQueryKey variants, the same useAccounts.ts invalidateAccounts
@@ -127,11 +125,10 @@ export function useGoals(options: { includeArchived?: boolean; enabled?: boolean
     // flow chained onto it), the same reason useBudget.ts's createCategory
     // returns rather than discards.
     mutationFn: async (body: CreateGoalBody): Promise<Goal> => {
-      const raw = await apiFetch<unknown>("/api/v1/goals", {
+      return (await fetchAndParse(goalResponseSchema, "/api/v1/goals", {
         method: "POST",
         body: JSON.stringify(body),
-      });
-      return goalResponseSchema.parse(raw).goal;
+      })).goal;
     },
     onSuccess: () => invalidateGoals(queryClient),
   });

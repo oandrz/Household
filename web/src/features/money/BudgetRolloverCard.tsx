@@ -30,7 +30,7 @@
 // goal" instead of naming it -- cheaper, and just as honest, as fetching
 // the archived-inclusive list only to resolve one name.
 import { useState } from "react";
-import { apiErrorMessage } from "../auth/copy";
+import { apiErrorMessage } from "../../api/errorMessage";
 import { BUDGET_COPY } from "./budgetCopy";
 import { formatMoney } from "./formatMoney";
 import { useBudget } from "./useBudget";

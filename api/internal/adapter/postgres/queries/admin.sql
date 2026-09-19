@@ -43,10 +43,6 @@ DELETE FROM household_feature_flags WHERE household_id = $1 AND key = $2;
 INSERT INTO admin_audit_log (actor_user_id, action, target, detail, ip, created_at)
 VALUES ($1, $2, $3, $4, $5, $6);
 
--- name: RecentAdminAudit :many
-SELECT actor_user_id, action, target, detail, ip, created_at
-FROM admin_audit_log ORDER BY created_at DESC LIMIT $1;
-
 -- name: RecordAdminReauthAttempt :exec
 INSERT INTO admin_reauth_attempts (user_id, succeeded, at) VALUES ($1, $2, $3);
 

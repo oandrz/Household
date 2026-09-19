@@ -88,6 +88,7 @@ import {
   DIRECTORY_DEFAULT_LIMIT,
   DIRECTORY_MAX_LIMIT,
 } from "../features/admin/directoryLimits";
+import { LoadingScreen } from "../components/LoadingScreen";
 import { InviteScreen } from "../features/auth/InviteScreen";
 import { MagicLinkConsumeScreen } from "../features/auth/MagicLinkConsumeScreen";
 import { SignInScreen } from "../features/auth/SignInScreen";
@@ -426,26 +427,22 @@ const LazyAdminDatabaseTablePage = lazy(() =>
   })),
 );
 
-// The Suspense fallback below is inlined at both call sites rather than
-// factored into its own top-level component, matching signInMagicRoute's
-// own comment on why: a named module-scope component here would trip
-// eslint-plugin-react-refresh's only-export-components rule against this
-// file's other exports (routeTree, router), even unexported. It matches
-// AdminShell's own AdminLoadingScreen -- this one covers the network
-// round-trip for the chunk itself, before AdminShell's module (and the
-// query it starts) has even arrived, so a household member watching the
-// network tab sees the identical "a page is loading" moment either place a
-// route suspends.
+// Every lazy admin route suspends on LoadingScreen, the same placeholder
+// AdminShell shows while its own query is in flight -- this one covers the
+// network round-trip for the chunk itself, before AdminShell's module has
+// even arrived, so a household member watching the network tab sees the
+// identical "a page is loading" moment either place a route suspends. It is
+// imported from components/, not defined here (a module-scope component would
+// trip eslint-plugin-react-refresh's only-export-components rule against this
+// file's routeTree and router exports) and not imported from AdminShell.tsx
+// (that would pull the admin query layer into main.tsx's static graph, which
+// adminBundleSplit.test.ts exists to prevent).
 const adminRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
   path: "admin",
   component: () => (
     <Suspense
-      fallback={
-        <main className="grid min-h-dvh place-items-center">
-          <p className="text-sm text-muted">Loading…</p>
-        </main>
-      }
+      fallback={<LoadingScreen />}
     >
       <LazyAdminShell />
     </Suspense>
@@ -469,11 +466,7 @@ const adminFlagsRoute = createRoute({
   path: "flags",
   component: () => (
     <Suspense
-      fallback={
-        <main className="grid min-h-dvh place-items-center">
-          <p className="text-sm text-muted">Loading…</p>
-        </main>
-      }
+      fallback={<LoadingScreen />}
     >
       <LazyAdminFlagsPage />
     </Suspense>
@@ -489,11 +482,7 @@ const adminMailRoute = createRoute({
   path: "mail",
   component: () => (
     <Suspense
-      fallback={
-        <main className="grid min-h-dvh place-items-center">
-          <p className="text-sm text-muted">Loading…</p>
-        </main>
-      }
+      fallback={<LoadingScreen />}
     >
       <LazyAdminMailPage />
     </Suspense>
@@ -511,11 +500,7 @@ const adminMailMessageRoute = createRoute({
     });
     return (
       <Suspense
-        fallback={
-          <main className="grid min-h-dvh place-items-center">
-            <p className="text-sm text-muted">Loading…</p>
-          </main>
-        }
+        fallback={<LoadingScreen />}
       >
         <LazyAdminMailMessagePage messageId={messageId} />
       </Suspense>
@@ -556,11 +541,7 @@ const adminHouseholdsRoute = createRoute({
     const navigate = useNavigate();
     return (
       <Suspense
-        fallback={
-          <main className="grid min-h-dvh place-items-center">
-            <p className="text-sm text-muted">Loading…</p>
-          </main>
-        }
+        fallback={<LoadingScreen />}
       >
         <LazyAdminHouseholdsPage
           q={q}
@@ -599,11 +580,7 @@ const adminHouseholdRoute = createRoute({
     });
     return (
       <Suspense
-        fallback={
-          <main className="grid min-h-dvh place-items-center">
-            <p className="text-sm text-muted">Loading…</p>
-          </main>
-        }
+        fallback={<LoadingScreen />}
       >
         <LazyAdminHouseholdPage householdId={householdId} />
       </Suspense>
@@ -619,11 +596,7 @@ const adminDatabaseRoute = createRoute({
   path: "database",
   component: () => (
     <Suspense
-      fallback={
-        <main className="grid min-h-dvh place-items-center">
-          <p className="text-sm text-muted">Loading…</p>
-        </main>
-      }
+      fallback={<LoadingScreen />}
     >
       <LazyAdminDatabasePage />
     </Suspense>
@@ -674,11 +647,7 @@ const adminDatabaseTableRoute = createRoute({
     const navigate = useNavigate();
     return (
       <Suspense
-        fallback={
-          <main className="grid min-h-dvh place-items-center">
-            <p className="text-sm text-muted">Loading…</p>
-          </main>
-        }
+        fallback={<LoadingScreen />}
       >
         <LazyAdminDatabaseTablePage
           table={table}

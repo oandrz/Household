@@ -23,7 +23,7 @@ export const ME_URL = "/api/v1/auth/me";
 
 // m-1 is also meFixture's membership id below, so the viewer of every page
 // test is Andreas -- the first owner and, in proposalFixture, the proposer.
-export const OWNERS: AgreementOwner[] = [
+const OWNERS: AgreementOwner[] = [
   { membershipId: "m-1", name: "Andreas" },
   { membershipId: "m-2", name: "Christine" },
 ];
@@ -31,7 +31,7 @@ export const ONE_OWNER: AgreementOwner[] = [{ membershipId: "m-1", name: "Andrea
 
 // domain.StarterSectionNames(), mirrored: "Use starter set" seeds these four
 // labels and no agreements (decision 17).
-export const STARTER_SECTION_NAMES = ["Money", "Conflict", "Home & kids", "Us"];
+const STARTER_SECTION_NAMES = ["Money", "Conflict", "Home & kids", "Us"];
 
 export function meFixture(overrides: Partial<Me> = {}): Me {
   return {

@@ -148,6 +148,13 @@ lines in `nginx.conf` — `set_real_ip_from <Caddy's address>` and
 > caller's list only for callers in `trusted_proxies`, of which none are
 > configured. The mitigation still holds — `off` takes the last entry either
 > way — but the reason differs from the one written above.
+>
+> **Updated 2026-09-13.** The API no longer uses `middleware.RealIP`.
+> `trustedProxyRealIP` reads `X-Real-IP` only when the connecting peer is
+> inside `TRUSTED_PROXY_CIDRS` (production: the same `172.28.0.0/16`), and
+> never reads `True-Client-IP` or `X-Forwarded-For`. The two-proxy reasoning
+> above still holds; what changed is that the API now keeps its own trust
+> list instead of relying only on nginx's rewriting.
 
 **One box is a single point of failure, accepted.** Recovery is: new box, clone
 the repo, restore the dump, `docker compose up`, repoint DNS. This should be

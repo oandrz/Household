@@ -13,6 +13,9 @@
 // second call to the same `["budget", month]` queryKey reads the warm cache
 // instead of firing a second request.
 //
+// The rows and the add-a-category control live in useBudgetRows.ts, and one
+// row's markup is BudgetCategoryRow.tsx; this file loads, renders and saves.
+//
 // `initial` is always a `TemplatePrefill` shape, never `null` and never a
 // bare `{expectedIncomeMinor, lines}` -- BudgetPage.tsx normalises "Create
 // your first budget" to `{expectedIncomeMinor: null, lines: [], missing:
@@ -21,32 +24,22 @@
 // []`, since nothing is missing from a template when there was no template).
 // One shape in, rather than a union this component would have to re-branch
 // on internally, for no behavioural difference either way.
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 import { apiFetch, ApiError } from "../../api/client";
+import { apiErrorMessage } from "../../api/errorMessage";
+import { Field } from "../../components/Field";
+import { FIELD_CONTROL_CLASS } from "../../components/fieldClasses";
 import { Modal } from "../../components/Modal";
-import { CloseIcon } from "../../components/icons";
-import { apiErrorMessage } from "../auth/copy";
+import { ModalActions } from "../../components/ModalActions";
+import { BudgetCategoryRow } from "./BudgetCategoryRow";
 import { BUDGET_COPY } from "./budgetCopy";
 import { categorySchema as fullCategorySchema } from "./budgetSchemas";
-import { fiftyThirtyTwentyTemplate, type TemplatePrefill } from "./budgetTemplates";
+import type { TemplatePrefill } from "./budgetTemplates";
 import { formatMoney, minorUnitsToInputValue, toMinorUnits } from "./formatMoney";
 import { useBudget, type SaveBudgetBody } from "./useBudget";
-
-// The household's plain category list (BudgetPage.tsx's `useCategories()`
-// data) -- active only, by construction of that endpoint's default
-// `includeArchived=false`. `archived` is typed optional here rather than
-// omitted: `kind` is required by both `Category` shapes this component is
-// ever handed (transactionSchemas.ts's and budgetSchemas.ts's), but a
-// defensive `!c.archived` check on the add-category dropdown costs nothing
-// and guards the shape this prop is documented, not enforced, to hold.
-type CategoryOption = {
-  id: string;
-  name: string;
-  kind: "expense" | "income";
-  archived?: boolean;
-};
+import { useBudgetRows, type BudgetRow, type CategoryOption } from "./useBudgetRows";
 
 // GET /api/v1/categories?includeArchived=true's shape -- distinct from
 // transactionSchemas.ts's `categoriesResponseSchema`, whose own
@@ -57,72 +50,16 @@ const categoriesWithArchivedResponseSchema = z.object({
   categories: z.array(fullCategorySchema),
 });
 
-type RowAction = "create" | "restore" | null;
-
-// One row per capped category in the modal. `key` is stable across
-// re-renders regardless of `action`: a real category's own id for an
-// existing/restored/dropdown-picked row, or a locally-generated temp id for
-// a row still waiting on its create call.
-type Row = {
-  key: string;
-  categoryId: string | null;
-  name: string;
-  // "" for a row with nothing to compare a rename against (a brand-new
-  // create, or a restore whose name at match time IS what will be sent --
-  // see buildRows and addCategoryByName). A real row's original name, once
-  // known, never becomes "" again, so `name.trim() !== originalName` stays
-  // a safe rename test for the lifetime of the row.
-  originalName: string;
-  capInput: string;
-  archived: boolean;
-  queuedArchive: boolean;
-  action: RowAction;
-};
-
-function buildRows(
-  lines: TemplatePrefill["lines"],
-  categories: CategoryOption[],
-  currency: string,
-): Row[] {
-  return lines.map((line) => {
-    const found = categories.find((c) => c.id === line.categoryId);
-    // A line whose category this modal cannot name at all: there is no hard
-    // delete, so this is only reachable if `categories` (whatever list the
-    // caller handed in) somehow still doesn't carry the id -- e.g. a
-    // household deleted between the archived-inclusive fetch resolving and
-    // this render, or a genuinely stale id from "Import last month"'s
-    // straight-through handoff of `prevMonthBudget.lines`.
-    // `name` and `originalName` MUST be the same fallback string, not two
-    // different ones ("Unknown category" vs "") -- Save's rename check is
-    // `row.name.trim() !== row.originalName`, and two different fallbacks
-    // would make that true unconditionally, firing a PATCH that silently
-    // renames a real (possibly archived) category to "Unknown category" on
-    // every save. Falling back to the same string on both sides is what
-    // keeps that comparison honest: still renders, still submits its real
-    // id and cap unchanged, but queues no rename nobody asked for.
-    const name = found?.name ?? "Unknown category";
-    return {
-      key: line.categoryId,
-      categoryId: line.categoryId,
-      name,
-      originalName: name,
-      capInput: minorUnitsToInputValue(line.capMinor, currency),
-      archived: Boolean(found?.archived),
-      queuedArchive: false,
-      action: null,
-    };
-  });
-}
-
 export function BudgetModal({
   month,
   initial,
   categories,
-  // Not in the brief's literal 5-prop list, but load-bearing: BudgetPage.tsx's
-  // own `ModalState` comment is explicit that the 50/30/20 waiting-for-income
-  // state cannot be told apart from "this household has zero matching
-  // categories" by `initial.lines.length === 0` alone. Both are real, both
-  // start this modal with zero rows, and only this flag says which one it is.
+  // Not in the brief's literal 5-prop list, but load-bearing:
+  // budgetModalPrefill.ts's own `BudgetModalState` comment is explicit that
+  // the 50/30/20 waiting-for-income state cannot be told apart from "this
+  // household has zero matching categories" by `initial.lines.length === 0`
+  // alone. Both are real, both start this modal with zero rows, and only this
+  // flag says which one it is.
   awaitingIncome,
   onClose,
   onSaved,
@@ -138,13 +75,18 @@ export function BudgetModal({
   // The household's real, include-archived category roster -- fetched here,
   // one level up from BudgetModalForm, so it is ready (not still in flight)
   // the moment that component's rows first build. Two callers need it once
-  // it lands: buildRows below (Defect A, Task 17's browser walk -- an
-  // archived category's line was rendering "Unknown category" because name
-  // resolution ran off the active-only `categories` prop) and the
+  // it lands: buildRows in useBudgetRows.ts (Defect A, Task 17's browser walk
+  // -- an archived category's line was rendering "Unknown category" because
+  // name resolution ran off the active-only `categories` prop) and the
   // archived-name gotcha check in addCategoryByName (ledgered from Task 13's
   // review). `categories` (the prop) stays active-only throughout and is
   // still what the add-dropdown filters against -- that list must never
   // offer an archived category to pick again.
+  //
+  // The key is not categoriesQueryKey() but still starts with ["categories"],
+  // so useBudget.ts's invalidateQueries({ queryKey: categoriesQueryKey() })
+  // refreshes it through TanStack Query's prefix match. An `exact: true`
+  // invalidation of that key would leave this one stale.
   const archivedAwareCategories = useQuery({
     queryKey: ["categories", { includeArchived: true }] as const,
     queryFn: async () => {
@@ -189,12 +131,13 @@ export function BudgetModal({
 }
 
 // Split from `BudgetModal` so every field's `useState(() => ...)` initialiser
-// -- which reads `initial`/`currency` -- runs exactly once, the moment
-// `budget.data` first exists. `BudgetModal` re-rendering later (a background
-// refetch after `budget.save`'s own invalidation, before `onClose` unmounts
-// everything) does not remount this component -- same type, same position in
-// the tree -- so a household's in-progress edits are never silently reseeded
-// from a fresher server response mid-session.
+// -- which reads `initial`/`currency`, including useBudgetRows' own rows --
+// runs exactly once, the moment `budget.data` first exists. `BudgetModal`
+// re-rendering later (a background refetch after `budget.save`'s own
+// invalidation, before `onClose` unmounts everything) does not remount this
+// component -- same type, same position in the tree -- so a household's
+// in-progress edits are never silently reseeded from a fresher server
+// response mid-session.
 function BudgetModalForm({
   initial,
   categories,
@@ -222,173 +165,34 @@ function BudgetModalForm({
   archiveCategory: ReturnType<typeof useBudget>["archiveCategory"];
   restoreCategory: ReturnType<typeof useBudget>["restoreCategory"];
 }) {
-  const [rows, setRows] = useState<Row[]>(() => buildRows(initial.lines, allCategories, currency));
-  const [missing, setMissing] = useState<string[]>(initial.missing);
+  const {
+    rows,
+    missingToShow,
+    availableToAdd,
+    addSelectValue,
+    newCategoryName,
+    setNewCategoryName,
+    addCategoryError,
+    addCategoryByName,
+    prefillFromIncome,
+    removeRow,
+    toggleArchiveRow,
+    renameRow,
+    capRow,
+    handleAddSelectChange,
+    handleAddNewCategory,
+  } = useBudgetRows({ initial, categories, allCategories, awaitingIncome, currency });
   const [incomeInput, setIncomeInput] = useState(() =>
     initial.expectedIncomeMinor != null ? minorUnitsToInputValue(initial.expectedIncomeMinor, currency) : "",
   );
-  const [addSelectValue, setAddSelectValue] = useState("");
-  const [newCategoryName, setNewCategoryName] = useState("");
-  // Task 17 browser walk, Defect B: typing an already-used name into "New
-  // category…" and clicking Add was a silent no-op -- the duplicate guard
-  // below returned with no row added and no feedback at all. This surfaces
-  // that guard as a visible inline error next to the add control, reusing
-  // the 409 CATEGORY_NAME_TAKEN copy shape (categoryNameTaken below) since
-  // it is naming the same fact: this household already has a category by
-  // this name.
-  const [addCategoryError, setAddCategoryError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const tempKeyRef = useRef(0);
-
-  // Returns whether a row was actually added -- callers that reset the
-  // "New category…" input on success (handleAddNewCategory below) need to
-  // know the difference between "added" and "refused," since the taken-name
-  // refusal below must leave the typed value in place for the household to
-  // see what they typed and correct it.
-  function addCategoryByName(rawName: string): boolean {
-    const name = rawName.trim();
-    if (!name) return false;
-    if (rows.some((row) => row.name === name)) {
-      setAddCategoryError(BUDGET_COPY.categoryNameTaken(name));
-      return false;
-    }
-    setAddCategoryError(null);
-
-    // The archived-name gotcha (ledgered from Task 13's review): a
-    // template's `missing` name, or a name typed into "New category…",
-    // might belong to a category this household already has -- just
-    // archived. Creating it again 409s on
-    // categories_household_id_name_key. `allCategories` is the household's
-    // real, include-archived roster this checks against before deciding
-    // whether "Add" means create or restore; `categories` (the prop) is
-    // active-only by construction and cannot answer that question on its
-    // own.
-    const archivedMatch = allCategories.find((c) => c.name === name && c.archived);
-    if (archivedMatch) {
-      setRows((prev) => [
-        ...prev,
-        {
-          key: archivedMatch.id,
-          categoryId: archivedMatch.id,
-          name: archivedMatch.name,
-          originalName: archivedMatch.name,
-          capInput: "",
-          archived: true,
-          queuedArchive: false,
-          action: "restore",
-        },
-      ]);
-      return true;
-    }
-
-    const activeMatch = categories.find((c) => c.name === name && !c.archived);
-    if (activeMatch) {
-      setRows((prev) => [
-        ...prev,
-        {
-          key: activeMatch.id,
-          categoryId: activeMatch.id,
-          name: activeMatch.name,
-          originalName: activeMatch.name,
-          capInput: "",
-          archived: false,
-          queuedArchive: false,
-          action: null,
-        },
-      ]);
-      return true;
-    }
-
-    tempKeyRef.current += 1;
-    setRows((prev) => [
-      ...prev,
-      {
-        key: `new-${tempKeyRef.current}`,
-        categoryId: null,
-        name,
-        originalName: "",
-        capInput: "",
-        archived: false,
-        queuedArchive: false,
-        action: "create",
-      },
-    ]);
-    return true;
-  }
 
   function handleIncomeChange(value: string) {
     setIncomeInput(value);
-    // Only the 50/30/20 template's waiting-for-income state drives caps off
-    // income -- every other opening (blank, family-of-four, an existing
-    // budget) treats income as a plain editable field with no effect on the
-    // rows below it. Recomputes on every keystroke, replacing whatever the
-    // template last computed: a household that hand-tweaks a row and then
-    // keeps typing into income loses that tweak, an accepted simplification
-    // for a template's one-shot prefill role (this is never reachable for
-    // the general edit flow, which never sets `awaitingIncome`).
-    if (!awaitingIncome) return;
-    const minor = value.trim() === "" ? null : toMinorUnits(value, currency);
-    if (minor !== null && minor > 0) {
-      const prefill = fiftyThirtyTwentyTemplate(categories, minor);
-      setRows(buildRows(prefill.lines, categories, currency));
-      setMissing(prefill.missing);
-    } else {
-      setRows([]);
-      setMissing([]);
-    }
-  }
-
-  function removeRow(key: string) {
-    setRows((prev) => prev.filter((row) => row.key !== key));
-  }
-
-  function toggleArchiveRow(key: string) {
-    setRows((prev) => prev.map((row) => (row.key === key ? { ...row, queuedArchive: !row.queuedArchive } : row)));
-  }
-
-  function renameRow(key: string, name: string) {
-    setRows((prev) => prev.map((row) => (row.key === key ? { ...row, name } : row)));
-  }
-
-  function capRow(key: string, capInput: string) {
-    setRows((prev) => prev.map((row) => (row.key === key ? { ...row, capInput } : row)));
-  }
-
-  function handleAddSelectChange(value: string) {
-    setAddSelectValue(value);
-    // Leaving "New category…" for something else hides the form the error
-    // is attached to (gated on addSelectValue === "__new__" below) -- clear
-    // it here too so a stale refusal from a previous attempt can't flash
-    // back in if the household reopens "New category…" later.
-    setAddCategoryError(null);
-    if (value === "" || value === "__new__") return;
-    const picked = categories.find((c) => c.id === value);
-    if (!picked) return;
-    setRows((prev) => [
-      ...prev,
-      {
-        key: picked.id,
-        categoryId: picked.id,
-        name: picked.name,
-        originalName: picked.name,
-        capInput: "",
-        archived: false,
-        queuedArchive: false,
-        action: null,
-      },
-    ]);
-    setAddSelectValue("");
-  }
-
-  function handleAddNewCategory() {
-    // Only clears the input and closes "New category…" on an actual add --
-    // a taken-name refusal (addCategoryByName returning false, and setting
-    // addCategoryError itself) must leave the typed value and the form
-    // exactly as the household left them, per Defect B's fix.
-    if (!addCategoryByName(newCategoryName)) return;
-    setNewCategoryName("");
-    setAddSelectValue("");
+    // A no-op unless the 50/30/20 template is waiting on income -- see
+    // prefillFromIncome's own comment.
+    prefillFromIncome(value);
   }
 
   // Live figures, tolerant of an unparsable or blank cap (treated as 0 for
@@ -401,11 +205,6 @@ function BudgetModalForm({
   const incomeBlank = incomeInput.trim() === "";
   const incomeForDisplay = incomeBlank ? null : (toMinorUnits(incomeInput, currency) ?? 0);
   const leftToAllocateMinor = incomeForDisplay === null ? null : incomeForDisplay - allocatedMinor;
-
-  const missingToShow = missing.filter((name) => !rows.some((row) => row.name === name));
-  const availableToAdd = categories.filter(
-    (c) => c.kind === "expense" && !c.archived && !rows.some((row) => row.categoryId === c.id),
-  );
 
   async function handleSave() {
     setSaveError(null);
@@ -420,7 +219,10 @@ function BudgetModalForm({
       incomeMinor = parsed;
     }
 
-    const capsByKey = new Map<string, number>();
+    // Every row is checked before anything is sent, and each row is paired
+    // here with the cap it will save -- so the write loop below reads the cap
+    // straight off the pair instead of looking it up again by key.
+    const rowsWithCaps: { row: BudgetRow; capMinor: number }[] = [];
     for (const row of rows) {
       if (!row.name.trim()) {
         setSaveError("Every category needs a name.");
@@ -431,7 +233,7 @@ function BudgetModalForm({
         setSaveError(`Enter a cap for "${row.name}" as a number, or leave it blank for 0.`);
         return;
       }
-      capsByKey.set(row.key, parsedCap);
+      rowsWithCaps.push({ row, capMinor: parsedCap });
     }
 
     setIsSaving(true);
@@ -441,43 +243,39 @@ function BudgetModalForm({
     // budgetCopy.ts's categoryNameTaken comment).
     let attemptedName = "";
     try {
-      const resolvedIds = new Map<string, string>();
+      const lines: SaveBudgetBody["lines"] = [];
       // Sequential, not Promise.all: the spec requires every queued create,
       // rename and archive to run to completion, in order, before the PUT --
       // and to stop at the first failure without firing the rest. A
       // concurrent Promise.all would race an unrelated later row's write
       // ahead of an earlier one that was about to fail, and would still fire
       // every row's call even when an early one 409s.
-      for (const row of rows) {
-        let categoryId = row.categoryId;
+      for (const { row, capMinor } of rowsWithCaps) {
+        let categoryId: string;
         if (row.action === "create") {
           attemptedName = row.name.trim();
           const created = await createCategory(attemptedName);
           categoryId = created.id;
         } else {
+          // Any row not waiting on a create already carries its real id --
+          // BudgetRow's own type guarantees it, so there is nothing to assert.
+          categoryId = row.categoryId;
           if (row.action === "restore") {
             attemptedName = row.name.trim();
-            await restoreCategory(row.categoryId!);
+            await restoreCategory(categoryId);
           }
-          if (categoryId && row.name.trim() !== row.originalName) {
+          if (row.name.trim() !== row.originalName) {
             attemptedName = row.name.trim();
             await renameCategory(categoryId, attemptedName);
           }
         }
-        if (row.queuedArchive && categoryId) {
+        if (row.queuedArchive) {
           await archiveCategory(categoryId);
         }
-        resolvedIds.set(row.key, categoryId!);
+        lines.push({ categoryId, capMinor });
       }
 
-      const body: SaveBudgetBody = {
-        expectedIncomeMinor: incomeMinor,
-        lines: rows.map((row) => ({
-          categoryId: resolvedIds.get(row.key)!,
-          capMinor: capsByKey.get(row.key)!,
-        })),
-      };
-      await save(body);
+      await save({ expectedIncomeMinor: incomeMinor, lines });
       onSaved();
       onClose();
     } catch (err) {
@@ -494,10 +292,7 @@ function BudgetModalForm({
   return (
     <Modal open onClose={onClose} title={BUDGET_COPY.editBudget}>
       <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="budget-modal-income" className="text-xs font-semibold text-label">
-            {BUDGET_COPY.expectedIncome}
-          </label>
+        <Field label={BUDGET_COPY.expectedIncome} htmlFor="budget-modal-income">
           <input
             id="budget-modal-income"
             type="text"
@@ -505,13 +300,9 @@ function BudgetModalForm({
             autoFocus={awaitingIncome}
             value={incomeInput}
             onChange={(event) => handleIncomeChange(event.target.value)}
-            // min-h-11/sm:min-h-0 on every field in this modal:
-            // TransactionFilters.tsx's own SELECT_CLASS comment has the
-            // measured reason py-2.5 alone falls short of the 44px floor on
-            // a phone.
-            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+            className={FIELD_CONTROL_CLASS}
           />
-        </div>
+        </Field>
 
         {awaitingIncome && incomeBlank && (
           <p className="text-xs text-muted" data-testid="budget-modal-fifty-thirty-twenty-prompt">
@@ -550,90 +341,28 @@ function BudgetModalForm({
 
         <div className="flex flex-col gap-3">
           {rows.map((row) => (
-            <div
+            <BudgetCategoryRow
               key={row.key}
-              data-testid={`budget-modal-row-${row.categoryId ?? row.key}`}
-              className="flex items-center gap-2"
-            >
-              <div className="flex min-w-0 flex-1 flex-col gap-1">
-                <label htmlFor={`budget-modal-row-name-${row.key}`} className="sr-only">
-                  {BUDGET_COPY.categoryName}
-                </label>
-                <input
-                  id={`budget-modal-row-name-${row.key}`}
-                  type="text"
-                  value={row.name}
-                  onChange={(event) => renameRow(row.key, event.target.value)}
-                  // min-h-11/sm:min-h-0: the row's own ✕ button (below) is
-                  // already h-11 on a phone, so this doesn't change the
-                  // row's height -- it aligns the name and cap fields with a
-                  // target that was already 44px instead of floating short
-                  // inside it.
-                  //
-                  // The wrapper's own min-w-0: a flex item's default
-                  // min-width is `auto`, which resolves to its content's
-                  // min-content width in a row flex container -- for a
-                  // column wrapping a text input, that is the input's own
-                  // unshrinkable intrinsic width (TransactionFilters.tsx's
-                  // FIELD_CLASS documents the identical trap). Without it,
-                  // this row's four cells (name, the w-28 cap field, Archive
-                  // and the w-11 ✕ button) never lose enough combined width
-                  // to fit 375px, and the row scrolled inside the dialog's
-                  // own box -- invisible to a check of
-                  // `document.documentElement`, since a native <dialog>
-                  // paints in the top layer, outside normal document flow.
-                  className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] sm:min-h-0"
-                />
-                {(row.archived || row.queuedArchive) && (
-                  <span className="text-[11px] text-muted">
-                    {row.action === "restore" ? BUDGET_COPY.willRestore : BUDGET_COPY.archivedMarker}
-                  </span>
-                )}
-              </div>
-              <div className="flex w-28 flex-col gap-1">
-                <label htmlFor={`budget-modal-row-cap-${row.key}`} className="sr-only">
-                  {BUDGET_COPY.cap}
-                </label>
-                <input
-                  id={`budget-modal-row-cap-${row.key}`}
-                  type="text"
-                  inputMode="decimal"
-                  value={row.capInput}
-                  onChange={(event) => capRow(row.key, event.target.value)}
-                  className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] sm:min-h-0"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => toggleArchiveRow(row.key)}
-                className="min-h-11 text-[11.5px] font-semibold text-label sm:min-h-0"
-              >
-                {row.queuedArchive ? "Unarchive" : BUDGET_COPY.archiveRow}
-              </button>
-              <button
-                type="button"
-                aria-label={BUDGET_COPY.removeRow}
-                onClick={() => removeRow(row.key)}
-                // 44px floor on phones, restoring at `sm`: same reasoning as
-                // Modal.tsx's close button -- this modal isn't tied to the
-                // shell's `lg` nav switch.
-                className="grid h-11 w-11 flex-none place-items-center rounded-lg bg-canvas text-[12px] text-label sm:h-7 sm:w-7"
-              >
-                <CloseIcon />
-              </button>
-            </div>
+              row={row}
+              onRename={(name) => renameRow(row.key, name)}
+              onCapChange={(capInput) => capRow(row.key, capInput)}
+              onToggleArchive={() => toggleArchiveRow(row.key)}
+              onRemove={() => removeRow(row.key)}
+            />
           ))}
         </div>
 
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="budget-modal-add-select" className="text-xs font-semibold text-label">
-            {BUDGET_COPY.addACategory}
-          </label>
+        <Field
+          label={BUDGET_COPY.addACategory}
+          htmlFor="budget-modal-add-select"
+          error={addCategoryError}
+          errorTestId="budget-modal-add-category-error"
+        >
           <select
             id="budget-modal-add-select"
             value={addSelectValue}
             onChange={(event) => handleAddSelectChange(event.target.value)}
-            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+            className={FIELD_CONTROL_CLASS}
           >
             <option value="">{BUDGET_COPY.chooseACategory}</option>
             {availableToAdd.map((c) => (
@@ -653,7 +382,7 @@ function BudgetModalForm({
                 type="text"
                 value={newCategoryName}
                 onChange={(event) => setNewCategoryName(event.target.value)}
-                className="min-h-11 flex-1 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+                className={`${FIELD_CONTROL_CLASS} flex-1`}
               />
               <button
                 type="button"
@@ -664,12 +393,7 @@ function BudgetModalForm({
               </button>
             </div>
           )}
-          {addCategoryError !== null && (
-            <p role="alert" className="text-xs leading-snug text-danger" data-testid="budget-modal-add-category-error">
-              {addCategoryError}
-            </p>
-          )}
-        </div>
+        </Field>
 
         {saveError !== null && (
           <p role="alert" className="text-xs leading-snug text-danger">
@@ -677,23 +401,16 @@ function BudgetModalForm({
           </p>
         )}
 
-        <div className="mt-1 flex gap-2.5">
-          <button
-            type="button"
-            onClick={onClose}
-            className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label sm:min-h-0"
-          >
-            {BUDGET_COPY.cancel}
-          </button>
-          <button
-            type="button"
-            disabled={isSaving}
-            onClick={handleSave}
-            className="min-h-11 flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
-          >
-            {BUDGET_COPY.saveBudget}
-          </button>
-        </div>
+        {/* primaryType="button": there is no <form> here at all -- Save runs
+            only from its own click. */}
+        <ModalActions
+          secondaryLabel={BUDGET_COPY.cancel}
+          onSecondary={onClose}
+          primaryLabel={BUDGET_COPY.saveBudget}
+          primaryType="button"
+          onPrimary={() => void handleSave()}
+          primaryDisabled={isSaving}
+        />
       </div>
     </Modal>
   );

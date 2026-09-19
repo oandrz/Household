@@ -5,7 +5,7 @@ import { useState } from "react";
 import { AGREEMENT_COPY, agreementDateLabel, proposalSummary } from "./agreementCopy";
 import type { AgreementProposal } from "./agreementSchemas";
 
-export type ProposalCardProps = {
+type ProposalCardProps = {
   proposal: AgreementProposal;
   // The target's display number as the document numbers it right now, and null
   // when no live agreement carries that id -- the targetChanged case. The wire
@@ -25,7 +25,7 @@ type Action = "agree" | "park" | "withdraw";
 // a COMPLETE string on purpose: two Tailwind utilities for the same property
 // on one element resolve by stylesheet order rather than by the order they are
 // written, so `${primary} bg-danger` is a coin toss between accent and danger.
-// RetroModal.tsx:640-648 spells its own danger button out for the same reason.
+// DiscardDraftControl.tsx spells its own danger button out for the same reason.
 const primary =
   "min-h-11 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0";
 const secondary =
@@ -204,7 +204,7 @@ export function ProposalCard({ proposal, targetNumber, onAgree, onPark, onWithdr
           )}
         </div>
       )}
-      {/* The same two-button confirm RetroModal.tsx:633-671 uses, never
+      {/* The same two-button confirm DiscardDraftControl.tsx uses, never
           window.confirm: a browser dialog cannot be styled, cannot be tested
           without stubbing a global, and blocks the tab it opens on. */}
       {confirming && (

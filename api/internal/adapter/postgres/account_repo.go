@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -30,7 +31,11 @@ func (r *AccountRepo) List(ctx context.Context, householdID string, includeArchi
 		}
 		out := make([]usecase.AccountView, 0, len(rows))
 		for _, row := range rows {
-			out = append(out, toAccountViewIncludingArchived(row))
+			view, err := toAccountView(row.Account, row.OwnerName, row.BalanceMinor)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, view)
 		}
 		return out, nil
 	}
@@ -41,7 +46,11 @@ func (r *AccountRepo) List(ctx context.Context, householdID string, includeArchi
 	}
 	out := make([]usecase.AccountView, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, toAccountView(row))
+		view, err := toAccountView(row.Account, row.OwnerName, row.BalanceMinor)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, view)
 	}
 	return out, nil
 }
@@ -73,7 +82,7 @@ func (r *AccountRepo) Get(ctx context.Context, householdID, accountID string) (u
 	if err != nil {
 		return usecase.AccountView{}, translate(err, "get account")
 	}
-	return toAccountViewFromGet(row), nil
+	return toAccountView(row.Account, row.OwnerName, row.BalanceMinor)
 }
 
 func (r *AccountRepo) Create(ctx context.Context, a domain.Account) (domain.Account, error) {
@@ -91,7 +100,7 @@ func (r *AccountRepo) Create(ctx context.Context, a domain.Account) (domain.Acco
 	if err != nil {
 		return domain.Account{}, translate(err, "create account")
 	}
-	return toAccount(row), nil
+	return toAccount(row)
 }
 
 func (r *AccountRepo) Update(ctx context.Context, a domain.Account) (domain.Account, error) {
@@ -110,7 +119,7 @@ func (r *AccountRepo) Update(ctx context.Context, a domain.Account) (domain.Acco
 	if err != nil {
 		return domain.Account{}, translate(err, "update account")
 	}
-	return toAccount(row), nil
+	return toAccount(row)
 }
 
 func (r *AccountRepo) SetArchived(ctx context.Context, householdID, accountID string, archived bool, at time.Time) (domain.Account, error) {
@@ -126,7 +135,7 @@ func (r *AccountRepo) SetArchived(ctx context.Context, householdID, accountID st
 	if err != nil {
 		return domain.Account{}, translate(err, "set account archived")
 	}
-	return toAccount(row), nil
+	return toAccount(row)
 }
 
 func (r *AccountRepo) MembershipBelongsToHousehold(ctx context.Context, householdID, membershipID string) (bool, error) {
@@ -150,26 +159,31 @@ func optionalID(id string) *string {
 	return &id
 }
 
-// toAccount maps the columns every account query returns into the domain
-// type. sqlc generates a distinct row struct per query (ListAccountsRow,
-// ListAccountsIncludingArchivedRow, GetAccountRow, and the plain Account for
-// the RETURNING queries) and flattens each one's `a.*` columns directly onto
-// the row rather than embedding sqlcgen.Account, so the three view converters
-// below rebuild an Account from their row's fields before calling this --
-// the mapping from Account to domain.Account itself exists once, here.
-func toAccount(a sqlcgen.Account) domain.Account {
+// toAccount maps an accounts row into the domain type. Every account query
+// either returns sqlcgen.Account itself (the RETURNING queries) or carries one
+// through sqlc.embed(a) (the view queries), so this mapping exists once.
+//
+// type goes through domain.ParseAccountType. accounts.type has a CHECK, but a
+// value this code did not construct is refused here rather than carried up --
+// the rule toCategory and toBill follow -- because AccountService's type
+// rules (which types may hold holdings, count toward net worth) branch on it.
+func toAccount(a sqlcgen.Account) (domain.Account, error) {
+	accountType, err := domain.ParseAccountType(a.Type)
+	if err != nil {
+		return domain.Account{}, fmt.Errorf("postgres: account: %w", err)
+	}
 	return domain.Account{
 		ID:                      uuidToString(a.ID),
 		HouseholdID:             uuidToString(a.HouseholdID),
 		Nickname:                a.Nickname,
-		Type:                    domain.AccountType(a.Type),
+		Type:                    accountType,
 		OwnerMembershipID:       optionalIDToString(a.OwnerMembershipID),
 		OpeningBalance:          domain.Money{Amount: a.OpeningBalanceMinor, Currency: a.OpeningBalanceCurrency},
 		OpeningBalanceAsOf:      dateToTime(a.OpeningBalanceAsOf),
 		CountTowardNetWorth:     a.CountTowardNetWorth,
 		VisibleToLimitedMembers: a.VisibleToLimitedMembers,
 		ArchivedAt:              timePtrOf(a.ArchivedAt),
-	}
+	}, nil
 }
 
 // optionalIDToString is optionalID's inverse: a NULL owner_membership_id
@@ -200,53 +214,15 @@ func buildView(a domain.Account, ownerName *string, balanceMinor int64) usecase.
 	}
 }
 
-func toAccountView(row sqlcgen.ListAccountsRow) usecase.AccountView {
-	return buildView(toAccount(sqlcgen.Account{
-		ID:                      row.ID,
-		HouseholdID:             row.HouseholdID,
-		Nickname:                row.Nickname,
-		Type:                    row.Type,
-		OwnerMembershipID:       row.OwnerMembershipID,
-		OpeningBalanceMinor:     row.OpeningBalanceMinor,
-		OpeningBalanceCurrency:  row.OpeningBalanceCurrency,
-		OpeningBalanceAsOf:      row.OpeningBalanceAsOf,
-		CountTowardNetWorth:     row.CountTowardNetWorth,
-		VisibleToLimitedMembers: row.VisibleToLimitedMembers,
-		ArchivedAt:              row.ArchivedAt,
-		CreatedAt:               row.CreatedAt,
-	}), row.OwnerName, row.BalanceMinor)
-}
-
-func toAccountViewIncludingArchived(row sqlcgen.ListAccountsIncludingArchivedRow) usecase.AccountView {
-	return buildView(toAccount(sqlcgen.Account{
-		ID:                      row.ID,
-		HouseholdID:             row.HouseholdID,
-		Nickname:                row.Nickname,
-		Type:                    row.Type,
-		OwnerMembershipID:       row.OwnerMembershipID,
-		OpeningBalanceMinor:     row.OpeningBalanceMinor,
-		OpeningBalanceCurrency:  row.OpeningBalanceCurrency,
-		OpeningBalanceAsOf:      row.OpeningBalanceAsOf,
-		CountTowardNetWorth:     row.CountTowardNetWorth,
-		VisibleToLimitedMembers: row.VisibleToLimitedMembers,
-		ArchivedAt:              row.ArchivedAt,
-		CreatedAt:               row.CreatedAt,
-	}), row.OwnerName, row.BalanceMinor)
-}
-
-func toAccountViewFromGet(row sqlcgen.GetAccountRow) usecase.AccountView {
-	return buildView(toAccount(sqlcgen.Account{
-		ID:                      row.ID,
-		HouseholdID:             row.HouseholdID,
-		Nickname:                row.Nickname,
-		Type:                    row.Type,
-		OwnerMembershipID:       row.OwnerMembershipID,
-		OpeningBalanceMinor:     row.OpeningBalanceMinor,
-		OpeningBalanceCurrency:  row.OpeningBalanceCurrency,
-		OpeningBalanceAsOf:      row.OpeningBalanceAsOf,
-		CountTowardNetWorth:     row.CountTowardNetWorth,
-		VisibleToLimitedMembers: row.VisibleToLimitedMembers,
-		ArchivedAt:              row.ArchivedAt,
-		CreatedAt:               row.CreatedAt,
-	}), row.OwnerName, row.BalanceMinor)
+// toAccountView is the one converter for ListAccounts,
+// ListAccountsIncludingArchived and GetAccount. sqlc generates a distinct row
+// type for each, but all three select sqlc.embed(a) plus the same owner name
+// and balance, so each call site passes those three fields and nothing is
+// copied column by column.
+func toAccountView(a sqlcgen.Account, ownerName *string, balanceMinor int64) (usecase.AccountView, error) {
+	account, err := toAccount(a)
+	if err != nil {
+		return usecase.AccountView{}, err
+	}
+	return buildView(account, ownerName, balanceMinor), nil
 }

@@ -142,6 +142,8 @@ func (r *FeatureFlagRepo) ClearHousehold(ctx context.Context, householdID, key s
 	}), "clear household flag")
 }
 
+// AdminAuditRepo writes the admin audit log and never reads it back -- see
+// usecase.AdminAuditRepository's doc comment for why.
 type AdminAuditRepo struct{ q *sqlcgen.Queries }
 
 func NewAdminAuditRepo(db *DB) *AdminAuditRepo { return &AdminAuditRepo{q: sqlcgen.New(db.Pool())} }
@@ -163,30 +165,6 @@ func (r *AdminAuditRepo) Record(ctx context.Context, entry usecase.AdminAuditEnt
 		Ip:          entry.IP,
 		CreatedAt:   timestamptz(entry.At),
 	}), "record admin audit")
-}
-
-func (r *AdminAuditRepo) Recent(ctx context.Context, limit int) ([]usecase.AdminAuditEntry, error) {
-	rows, err := r.q.RecentAdminAudit(ctx, int32(limit))
-	if err != nil {
-		return nil, translate(err, "recent admin audit")
-	}
-	out := make([]usecase.AdminAuditEntry, 0, len(rows))
-	for _, row := range rows {
-		detail := map[string]any{}
-		// A detail column this code cannot decode must not fail the whole
-		// read: the log is for looking at after something went wrong, and
-		// that is exactly when a malformed row is most likely.
-		_ = json.Unmarshal(row.Detail, &detail)
-		out = append(out, usecase.AdminAuditEntry{
-			ActorUserID: uuidToString(row.ActorUserID),
-			Action:      row.Action,
-			Target:      row.Target,
-			Detail:      detail,
-			IP:          row.Ip,
-			At:          timeOf(row.CreatedAt),
-		})
-	}
-	return out, nil
 }
 
 type AdminReauthAttemptRepo struct{ q *sqlcgen.Queries }

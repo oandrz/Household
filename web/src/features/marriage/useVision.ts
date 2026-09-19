@@ -39,7 +39,7 @@
 //      (1) alone would leave `conflict` stuck true.
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, apiFetch } from "../../api/client";
+import { ApiError, fetchAndParse } from "../../api/client";
 import { visionQueryKey } from "./visionQueryKeys";
 import { visionResponseSchema, type Vision } from "./visionSchemas";
 
@@ -71,8 +71,7 @@ export type SaveVisionBody = {
 };
 
 async function fetchVision(year: number): Promise<Vision> {
-  const body = await apiFetch<unknown>(`/api/v1/marriage/vision?year=${year}`);
-  return visionResponseSchema.parse(body).vision;
+  return (await fetchAndParse(visionResponseSchema, `/api/v1/marriage/vision?year=${year}`)).vision;
 }
 
 export function useVision(year: number) {
@@ -108,11 +107,10 @@ export function useVision(year: number) {
         // genuinely meaning it.
         throw new Error("saveVision called before the vision finished loading");
       }
-      const raw = await apiFetch<unknown>(`/api/v1/marriage/vision/${year}`, {
+      return (await fetchAndParse(visionResponseSchema, `/api/v1/marriage/vision/${year}`, {
         method: "PUT",
         body: JSON.stringify({ ...body, version: current.version }),
-      });
-      return visionResponseSchema.parse(raw).vision;
+      })).vision;
     },
     onSuccess: () => {
       setConflictAt(null);

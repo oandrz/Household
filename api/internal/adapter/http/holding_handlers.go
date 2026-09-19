@@ -521,12 +521,8 @@ func handleCreateHoldingValuation(deps Deps) http.HandlerFunc {
 }
 
 func parseHoldingDate(w http.ResponseWriter, r *http.Request, text string) (time.Time, bool) {
-	d, err := time.Parse(holdingDateLayout, strings.TrimSpace(text))
-	if err != nil {
-		WriteError(w, http.StatusUnprocessableEntity, "INVALID_DATE", "Enter a date as YYYY-MM-DD.", nil)
-		return time.Time{}, false
-	}
-	return d, true
+	return parseTimeOrRefuse(w, strings.TrimSpace(text), holdingDateLayout,
+		http.StatusUnprocessableEntity, "INVALID_DATE", "Enter a date as YYYY-MM-DD.")
 }
 
 // --- income and the period report -------------------------------------------

@@ -14,7 +14,6 @@ export const userSchema = z.object({
   displayName: z.string(),
   avatarInitial: z.string(),
 });
-export type User = z.infer<typeof userSchema>;
 
 export const householdSchema = z.object({
   id: z.string(),
@@ -27,14 +26,13 @@ export const householdSchema = z.object({
 });
 export type Household = z.infer<typeof householdSchema>;
 
-export const membershipSchema = z.object({
+const membershipSchema = z.object({
   id: z.string(),
   householdId: z.string(),
   userId: z.string(),
   role: z.string(),
   capabilities: z.array(z.string()),
 });
-export type Membership = z.infer<typeof membershipSchema>;
 
 export const spaceSchema = z.object({
   id: z.string(),

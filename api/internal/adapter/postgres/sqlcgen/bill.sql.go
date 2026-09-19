@@ -225,8 +225,8 @@ type CreateBillPaymentParams struct {
 // transaction. UNIQUE (bill_id, due_on) is the backstop that refuses a
 // double-clicked Mark paid; it has no name of its own
 // (00008_bills.sql), so translate's generic 23505 branch is what turns it
-// into domain.ErrAlreadyExists, not a named-constraint case like
-// billNameUniqueConstraint.
+// into domain.ErrAlreadyExists, not a named entry in translate.go's
+// uniqueConstraintErrors like bills' own name key.
 func (q *Queries) CreateBillPayment(ctx context.Context, arg CreateBillPaymentParams) (BillPayment, error) {
 	row := q.db.QueryRow(ctx, createBillPayment,
 		arg.BillID,

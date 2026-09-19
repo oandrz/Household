@@ -204,3 +204,20 @@ export async function apiFetch<T>(
 
   return parsed as T;
 }
+
+// Anything with a parse method: every zod schema, without tying this file to
+// zod's generic types.
+type Parser<T> = { parse(data: unknown): T };
+
+// fetchAndParse is apiFetch plus the step nearly every hook takes next: the
+// JSON body goes through the schema, so a response of the wrong shape throws
+// here instead of reaching a screen typed as something it is not. The schema
+// comes first so a call reads "fetch this shape from here", and the path and
+// init are exactly apiFetch's.
+export async function fetchAndParse<T>(
+  schema: Parser<T>,
+  path: string,
+  init: RequestInit = {},
+): Promise<T> {
+  return schema.parse(await apiFetch<unknown>(path, init));
+}

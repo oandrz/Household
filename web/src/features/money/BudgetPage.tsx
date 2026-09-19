@@ -34,25 +34,13 @@ import { BudgetCategoryGrid } from "./BudgetCategoryGrid";
 import { BudgetRolloverCard } from "./BudgetRolloverCard";
 import { BudgetStatCards } from "./BudgetStatCards";
 import { formatPercentUsed } from "./percentUsedCopy";
-import { familyOfFourTemplate, fiftyThirtyTwentyTemplate, type TemplatePrefill } from "./budgetTemplates";
+import { resolveTemplatePrefill, type BudgetModalEntry, type BudgetModalState } from "./budgetModalPrefill";
 import { formatMoney } from "./formatMoney";
-import { currentMonth } from "./month";
+import { currentMonth, monthLabel } from "./month";
 import { useBudget } from "./useBudget";
 import { useBudgetHistory } from "./useBudgetHistory";
 import { useCategories } from "./useTransactions";
 import type { BudgetMonthResponse } from "./budgetSchemas";
-
-// The modal handoff Task 14 consumes: `prefill: null` is a blank budget
-// ("Create your first budget"), a `TemplatePrefill` is a template's
-// computed starting point. `awaitingIncome` is set only by the 50/30/20
-// card -- its prefill has zero lines until an income figure exists, and
-// the modal (Task 14) uses this flag, not "lines.length === 0" alone, to
-// decide whether to show the income prompt (a household with genuinely no
-// matching categories would also have zero lines, for an unrelated reason).
-type ModalState = {
-  prefill: TemplatePrefill | null;
-  awaitingIncome: boolean;
-};
 
 // Shifts a "YYYY-MM" string by whole months, for the ‹ › picker below. Built
 // through Date's own (year, monthIndex, 1) constructor -- the day is fixed
@@ -62,17 +50,6 @@ function shiftMonth(month: string, delta: number): string {
   const [year, monthNum] = month.split("-").map(Number);
   const shifted = new Date(year, monthNum - 1 + delta, 1);
   return `${shifted.getFullYear()}-${String(shifted.getMonth() + 1).padStart(2, "0")}`;
-}
-
-// "2026-07" -> "July 2026". Parsed onto day 2, matching TransactionsPage's
-// own monthLabel comment on why day 1 is the wrong anchor at a negative UTC
-// offset.
-function monthLabel(month: string): string {
-  const [year, monthNum] = month.split("-").map(Number);
-  return new Date(year, monthNum - 1, 2).toLocaleDateString("en-US", {
-    month: "long",
-    year: "numeric",
-  });
 }
 
 // "2026-06" -> "June". The design's own wording (Household Dashboard.dc.html
@@ -125,7 +102,7 @@ export function BudgetPage() {
   const categories = useCategories();
   // Task 14 owns the real modal; this page only decides what it should
   // open pre-filled with. `null` means no modal is open.
-  const [modal, setModal] = useState<ModalState | null>(null);
+  const [modal, setModal] = useState<BudgetModalState | null>(null);
   // The History modal (Task 15). `useBudgetHistory`'s own `enabled` gate is
   // this flag directly -- opening History is the only reason this page ever
   // needs the /budgets/history request, so closing it stops the query
@@ -193,47 +170,13 @@ export function BudgetPage() {
   // happens to agree with it.
   const rolloverMayShow = monthClosed && (data.remainingMinor > 0 || data.rolloverAmountMinor !== null);
 
-  function openBlank() {
-    setModal({ prefill: null, awaitingIncome: false });
-  }
-  function openFamilyOfFour() {
-    setModal({ prefill: familyOfFourTemplate(categoryList), awaitingIncome: false });
-  }
-  function openFiftyThirtyTwenty() {
-    // Called with 0, not the previous month's or any guessed income --
-    // fiftyThirtyTwentyTemplate treats that as "blank" and returns zero
-    // lines (budgetTemplates.ts's own comment), which is exactly the
-    // waiting-for-income state the modal (Task 14) opens into.
-    setModal({ prefill: fiftyThirtyTwentyTemplate(categoryList, 0), awaitingIncome: true });
-  }
-  // The Edit-budget entry point for a month that already has a budget --
-  // BudgetModal.tsx's own header comment anticipated this exact function
-  // ("a future 'Edit budget' entry point (Task 15) for an *existing* budget
-  // would normalise the same way"). `data.budget` is never null on this
-  // path (the header button that calls this only renders once the screen
-  // has already branched into the populated state below), but the guard
-  // stays rather than a non-null assertion -- the same "fail closed on a
-  // value you did not just construct" instinct as everywhere else here.
-  function openEditBudget() {
-    if (!data.budget) return;
-    setModal({
-      prefill: { expectedIncomeMinor: data.budget.expectedIncomeMinor, lines: data.budget.lines, missing: [] },
-      awaitingIncome: false,
+  function openModal(entry: BudgetModalEntry) {
+    const next = resolveTemplatePrefill(entry, {
+      categories: categoryList,
+      budget: data.budget,
+      prevMonthBudget: budget.prevMonthBudget,
     });
-  }
-  function openImportLastMonth() {
-    if (!budget.prevMonthBudget) return;
-    // The previous month's lines already reference real categoryIds --
-    // no name-mapping needed the way the two templates above need it, so
-    // `missing` is trivially empty here.
-    setModal({
-      prefill: {
-        expectedIncomeMinor: budget.prevMonthBudget.expectedIncomeMinor,
-        lines: budget.prevMonthBudget.lines,
-        missing: [],
-      },
-      awaitingIncome: false,
-    });
+    if (next) setModal(next);
   }
 
   return (
@@ -331,7 +274,7 @@ export function BudgetPage() {
               <button
                 type="button"
                 data-testid="budget-edit-button"
-                onClick={openEditBudget}
+                onClick={() => openModal("editBudget")}
                 className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0"
               >
                 {BUDGET_COPY.editBudget}
@@ -356,7 +299,7 @@ export function BudgetPage() {
             <button
               type="button"
               data-testid="budget-create-blank"
-              onClick={openBlank}
+              onClick={() => openModal("blank")}
               className="min-h-11 rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white sm:min-h-0"
             >
               {BUDGET_COPY.createFirstBudget}
@@ -369,7 +312,7 @@ export function BudgetPage() {
             <button
               type="button"
               data-testid="budget-start-from-template"
-              onClick={openBlank}
+              onClick={() => openModal("blank")}
               className="min-h-11 rounded-lg border border-callout-border bg-callout px-5 py-2.5 text-[13px] font-semibold text-accent sm:min-h-0"
             >
               {BUDGET_COPY.startFromTemplate}
@@ -380,7 +323,7 @@ export function BudgetPage() {
             <button
               type="button"
               data-testid="budget-template-family-of-four"
-              onClick={openFamilyOfFour}
+              onClick={() => openModal("familyOfFour")}
               className="rounded-[10px] border border-hairline p-3.5 text-left hover:border-accent hover:bg-callout"
             >
               <div className="text-[13px] font-semibold text-ink">{BUDGET_COPY.templateFamilyOfFour}</div>
@@ -391,7 +334,7 @@ export function BudgetPage() {
             <button
               type="button"
               data-testid="budget-template-fifty-thirty-twenty"
-              onClick={openFiftyThirtyTwenty}
+              onClick={() => openModal("fiftyThirtyTwenty")}
               className="rounded-[10px] border border-hairline p-3.5 text-left hover:border-accent hover:bg-callout"
             >
               <div className="text-[13px] font-semibold text-ink">{BUDGET_COPY.templateFiftyThirtyTwenty}</div>
@@ -409,7 +352,7 @@ export function BudgetPage() {
               <button
                 type="button"
                 data-testid="budget-template-import-last-month"
-                onClick={openImportLastMonth}
+                onClick={() => openModal("importLastMonth")}
                 className="rounded-[10px] border border-hairline p-3.5 text-left hover:border-accent hover:bg-callout"
               >
                 <div className="text-[13px] font-semibold text-ink">{BUDGET_COPY.templateImportLastMonth}</div>
@@ -515,7 +458,7 @@ export function BudgetPage() {
           twice (one copy per branch would drift). BudgetModal.tsx's own
           header comment explains why `initial` is always a
           `TemplatePrefill`, never `null`: "Create your first budget" and
-          Edit-budget's own `openEditBudget` above both normalise into the
+          Edit budget (budgetModalPrefill.ts's editBudget case) both normalise into the
           same shape rather than the modal branching on a union internally --
           there is no behavioural difference between "no prefill" and "a
           prefill with zero lines and nothing missing." */}

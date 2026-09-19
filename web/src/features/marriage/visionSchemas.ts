@@ -13,7 +13,7 @@ import { z } from "zod";
 // "0 of 0" -- untrue about the household. Anything this schema doesn't
 // recognise (a genuine wire drift, or a fourth kind added server-side and
 // forgotten here) must fail the parse, not silently become "typed".
-export const measureKindSchema = z.enum(["typed", "linked", "broken"]);
+const measureKindSchema = z.enum(["typed", "linked", "broken"]);
 
 // visionMeasureSchema mirrors measureDTO. hasFigure is the field the screen
 // actually branches on (measureDTO's own comment): when it is false,
@@ -76,4 +76,3 @@ export type Vision = z.infer<typeof visionSchema>;
 // GET /marriage/vision and PUT /marriage/vision/{year}: the vision alone,
 // wrapped.
 export const visionResponseSchema = z.object({ vision: visionSchema });
-export type VisionResponse = z.infer<typeof visionResponseSchema>;

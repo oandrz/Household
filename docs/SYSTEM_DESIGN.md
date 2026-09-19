@@ -352,11 +352,15 @@ so the panel is off there; see the production topology below and
 **Production differs in three ways that matter:** the `web` container is nginx
 serving static files; TLS termination in front is mandatory — cookies are
 `Secure` outside development, so without TLS the browser never returns the
-session cookie; and only nginx's config sets `X-Real-IP` to `$remote_addr` and
-suppresses `True-Client-IP`, which is what stops a client from spoofing the
-sign-up per-IP rate limiter's key (§4). Development has no nginx service at
-all — Vite proxies `/api` straight to `api:8080` with no header rewriting — so
-the per-IP limiter is fully spoofable there; see `docs/HANDOVER.md`.
+session cookie; and the API believes a client address only from a proxy it
+was told to trust. `trustedProxyRealIP` reads `X-Real-IP`, and only when the
+connecting peer is inside `TRUSTED_PROXY_CIDRS` — production sets the compose
+subnet, and unset trusts nobody — while nginx is what sets `X-Real-IP` from
+`$remote_addr`, which is what stops a client from spoofing the sign-up
+per-IP rate limiter's key (§4). Development has no nginx service and sets no
+trusted range, so a client-sent `X-Real-IP` is ignored there and every
+browser request shares the Vite proxy container's address: one rate-limit
+bucket for the whole dev stack, not a spoofable one; see `docs/HANDOVER.md`.
 
 ### The production topology — running since 2026-08-15
 
@@ -458,7 +462,7 @@ works for six years and then quietly stops.
 **That second proxy would break the per-IP rate limiter, and nginx is now told
 about it.** With Caddy in front, the `$remote_addr` nginx sees is *Caddy's*
 address on every request, so the `X-Real-IP` it sets would be the same value for
-every caller and `middleware.RealIP` would key the whole world to one bucket
+every caller and `trustedProxyRealIP` would key the whole world to one bucket
 (§4). `web/nginx.conf` therefore carries `set_real_ip_from 172.28.0.0/16`,
 `real_ip_header X-Forwarded-For` and an explicit `real_ip_recursive off`, which
 resolve `$remote_addr` back to the real client. Invisible when wrong — the
@@ -471,9 +475,12 @@ alone**, because Docker assigns Caddy's address from that subnet and a `/32`
 would need pinning. It is the same string as the `hearth` network's `subnet:` in
 `deploy/docker-compose.prod.yml`, and the two must move together. That means any
 container on the network can present an `X-Forwarded-For` nginx will believe —
-accepted, because such a container can also reach `api:8080` directly, where
-`middleware.RealIP` has no trusted-proxy list at all, so narrowing the CIDR
-would close one of two equivalent routes. What the boundary actually rests on is
+accepted, because such a container can also reach `api:8080` directly, and
+the API trusts the same `172.28.0.0/16` for `X-Real-IP` (`TRUSTED_PROXY_CIDRS`
+in `deploy/docker-compose.prod.yml`, which must move together with the
+subnet and nginx's `set_real_ip_from`), so narrowing only nginx's CIDR would
+close one of two equivalent routes. Until 2026-09-13 the API used chi's
+`middleware.RealIP`, which believed those headers from any caller at all. What the boundary actually rests on is
 that internet traffic reaches nginx only through Caddy, which replaces
 `X-Forwarded-For` rather than forwarding a caller's. Putting anything in front
 of *Caddy* is a `trusted_proxies` change in `deploy/Caddyfile`, not a CIDR
@@ -635,8 +642,8 @@ graph TD
         Category["CategoryService — seeds the starter<br/>set on first read; create, rename, archive"]
         Transaction["TransactionService — MonthSummary<br/>converts then adds, like Account"]
         Budget["BudgetService — Month, Save, History,<br/>RollOver; RollOver moves a closed<br/>month's Remaining into a goal, once"]
-        Goal["GoalService — composes the whole<br/>Goals screen in one List call;<br/>a contribution moves no real money"]
-        Bill["BillService — MarkPaid/UndoPayment write<br/>into TransactionRepository through<br/>BillRepository, not TransactionService"]
+        Goal["GoalService — composes the whole<br/>Goals screen in one List call, one<br/>card in View; a contribution moves<br/>no real money"]
+        Bill["BillService — MarkPaid/UndoPayment write<br/>into TransactionRepository through<br/>BillRepository, not TransactionService;<br/>View builds one bill the way List does"]
         Retro["RetroService — Save is the shared-draft<br/>version guard; SetActionDone never<br/>touches it, a second repository entirely"]
         Vision["VisionService — Get resolves linked<br/>measures through GoalProgressReader;<br/>Save replaces the whole document,<br/>version 0 meaning create"]
         AdminSvc["AdminService — IsPlatformAdmin, flags<br/>read/write, RecordAudit; takes no actor<br/>parameter for any permission decision"]
@@ -804,6 +811,7 @@ refuses (spec decision 7).
 | `RetroActionRepository` | `adapter/postgres` | Eighteenth. `Add` writes the action and its assignees in one transaction, so a bad assignee id leaves no orphan action; `carriedFrom` is validated through a join back to `retros` requiring the same household before it is trusted, and a malformed id is refused rather than silently read as SQL NULL (`docs/LEARNING.md`) — "fail closed on values you did not construct" applied to a field the client supplies directly. `OpenInMonth` backs both the modal's "Still open from July" offer and Overview's `openActionCount` |
 | `VisionRepository` | `adapter/postgres` | Nineteenth. `Get` returns `domain.ErrNotFound` for a year never set, which `VisionService` turns into the empty vision the screen renders (decision 9) — the repository never invents a row. `Save` replaces the whole document — parent upserted, every child deleted and reinserted — in one transaction, under the same two-shape version guard `RetroRepository.Update` established: `version == 0` is a create, refused with `domain.ErrVisionChanged` if a row has appeared since the caller read the empty vision; `version > 0` is an update, `WHERE version = $n`, with a zero-row result re-read to tell "the vision is gone" apart from "someone saved first." The existence check runs on the transaction's own connection, never the pool-backed `Get` — calling `Get` from inside `Save`'s own `pgx.BeginFunc` would hold one pool connection while asking the pool for a second, which starves it under concurrent saves (`docs/LEARNING.md`). A measure naming a goal outside this household is refused inside the same transaction with `domain.ErrVisionGoalUnknown` — the `vision_measures` foreign key alone only proves the goal exists *somewhere* |
 | `GoalProgressReader` | `adapter/postgres` (`*GoalRepo` already satisfies it) | Unnumbered, like `AccountLookup`/`CategoryLookup` above — a narrow port, not a repository. One method wide on purpose, the same interface-segregation reasoning as those two, for a caller in the opposite direction: `VisionService` needs one thing from Goals, the progress of a handful of goal ids, not the forty-line `GoalRepository` contract. `ProgressByIDs` returns an entry only for an id that exists in the caller's own household; a missing id is a miss, not an error — a measure whose goal was deleted renders as a label with no figure (spec decision 8), not a failed page. Counts an *archived* goal as found, deliberately: archiving is not deletion anywhere else in this product, so a measure linked to an archived goal keeps its figure |
+| `GoalLookup` | `adapter/postgres` (`*GoalRepo` already satisfies it) | Unnumbered, the same narrow-port shape as `GoalProgressReader` directly above. One method, `Get`, and `BudgetDeps.Goals` is typed as this rather than the whole `GoalRepository` (2026-09-13): `BudgetService.RollOver` reads the target goal before `BudgetRepository.RollOverToGoal` writes, and that is the only thing Budget ever asks Goals. Held as the full nine-method repository, the budget service could create goals or delete contributions with nothing in the type system saying it should not |
 | `TelegramLinkRepository` | `adapter/postgres` | Twentieth. Stores the pending deep-link nonces, hashed, that carry either a browser's sign-in request or a signed-in member's link request across to Telegram — the same table, told apart by `user_id` (§6). `Create(ctx, userID, nonceHash, expiresAt) (id, error)` **now returns the new row's id** — a port signature change, landed with the linking feature — because `TelegramLinkService.Start` hands that id straight back to the browser to poll `Status` with; the plain sign-in nonce (`TelegramAuthService.StartLink`) still calls `Create` with `userID ""` and simply discards the id, since a sign-in nonce is never polled by row id at all. `Consume` stamps `consumed_at` **and** records the redeeming `chat_id` **and now `chat_username`** in one statement, because the chat is unknown when the nonce is minted — the browser has not met Telegram yet — so redemption is the only moment they can be joined, and a redemption that failed to record its chat would be a rate limit that silently never fires; it returns a `TelegramLinkRedemption{ID, UserID}`, not the row itself, because `HandleStart`'s branch (link vs sign-in/sign-up) is exactly that pair. Absent, expired or already consumed all return `domain.ErrNotFound` from one guarded `UPDATE`, the same shape `MagicLinkRepository.Consume` uses. `ByID` reads one row back for the browser that minted it — deliberately with no ownership check of its own, so a caller that skipped the `row.UserID == session user` comparison is a bug in the caller, not a silently-safe repository (ADR 8: authorisation is not this layer's job). `CountLinksSince` (per chat, unchanged) still lives here rather than on `TelegramAccountRepository`, because the per-chat limit has to bind chats that have no account yet — a stranger repeating `/start` has no user row to count against. `CountMintsSince` is new and per **user**: it bounds how many link nonces one signed-in member can mint in an hour (decision 12, three), a table-growth control rather than a security one, since the session minting is already authenticated |
 | `TelegramAccountRepository` | `adapter/postgres` | Twenty-first. `ByChatID` resolves a chat to the user it is bound to, or `domain.ErrNotFound` — which is the entire branch key of the Telegram sign-in flow: found means "send a sign-in link", not found means "send a sign-up link" (§5). The binding is now written from **two** call sites, and this repository's own doc comment was rewritten to say so rather than to explain why `Create` did not exist: inside `SignupRepository.Provision`'s existing transaction, when a stranger creates a household from a chat, and by `Create(ctx, TelegramBinding) error`, called by `TelegramLinkService.Confirm` when a member who already has an account connects their chat from Settings. `Create` answers `domain.ErrAlreadyExists` for either `UNIQUE` — one chat per user, one user per chat — without distinguishing which: the caller already knows which side it was asking about (a fresh sign-up binds a chat that must be free; `Confirm` binds a user who must have no chat yet) and picks the sentence, rather than the repository guessing at intent. `ByUserID` reads a user's own binding back, `TelegramBinding{UserID, ChatID, ChatUsername, LinkedAt}`, and `Delete` removes it, idempotently — removing a binding that is not there is not an error, because the caller's goal ("this user has no chat") is already true. Both directions of the binding stay `UNIQUE` in the database, and that constraint, not any check in Go, is what makes a sign-in — and now a confirm — unambiguous |
 | `PlatformAdminRepository` | `adapter/postgres` | Twenty-second. `Get`/`Grant`/`Revoke`/`List` over `platform_admins`. `Grant` has exactly one call site in the whole repository outside test code — `adminctl`'s `runGrantPlatformAdmin` — which is the property [ADR 5](adr/0005-platform-admin-authorization.md) exists to keep true; there is no `AdminService` method that calls it, on purpose, since granting is not a decision the running service ever makes |
@@ -811,12 +819,12 @@ refuses (spec decision 7).
 | `APITokenRepository` | `adapter/postgres` | Personal API tokens ([ADR 7](adr/0007-personal-api-tokens.md)): `Create` stores only the SHA-256 and an 8-character prefix; `ByTokenHash` is the live lookup (revoked or expired is `ErrNotFound`, like `GetLiveSession`); `Revoke` is user-scoped so a guessed id from another member is a miss; `RevokeAllForUser` sits beside `SessionRepository.RevokeAllForUser` in `MemberService.revokeCredentials`; `Touch` is throttled by the caller to one write an hour |
 | `IntentParser` | `adapter/openrouter` | The Telegram bot's free-text reader (stage 5b of the chat-commands spec): an open-weight model through OpenRouter's OpenAI-dialect API over plain `net/http`, up to three model ids tried in order. One implementation and one caller, which is normally the wrong shape for a port — it is one anyway because the implementation is a third-party API behind a key, and the product must behave identically without it: `nil` means "commands only". (A Claude adapter was its second implementation for one day, 2026-09-08, and was removed when the owner chose free models; git has it.) The prompt, the `log_transaction` schema, and the reader that turns the model's arguments into an `Intent` and fails closed on any kind it did not name live in `adapter/intent`, apart from the HTTP, because the reader is the last line between a model's output and the ledger and earns its own tests. The port returns text fields, never ids, so what the person confirms is what they can read. The Commander caps every call at 30 s, because the poller handles one update at a time and a stalled provider would hold every chat |
 | `FeatureFlagRepository` | `adapter/postgres` | Twenty-third. `OverridesFor` is the one query `requireSession` runs on every authenticated request — both the global and the household layer in a single `UNION ALL` statement, never two round trips. `key` carries no foreign key to a registry table, because the registry (`domain.AllFlags`) is compile-time; a row can outlive the `const` that named it, and `SetHousehold`/`ClearHousehold` are two different operations on purpose — setting a household's override to `false` and removing the override row entirely are different states downstream, not the same write with a different value |
-| `AdminAuditRepository` | `adapter/postgres` | Twenty-fourth, and append-only by convention rather than by any database privilege: `Record` and `Recent` are its only two methods, there is no `Delete`, and `adminctl prune` does not touch `admin_audit_log`. `Recent`'s own limit is unclamped at the repository — the clamp (max 500, default 50) lives one layer up, in `AdminService.RecentAudit`, the same division of labour `TransactionRepository`'s keyset paging draws between "the query can do this" and "the service decides how much of it a caller gets" |
+| `AdminAuditRepository` | `adapter/postgres` | Twenty-fourth, append-only by convention rather than by any database privilege, and **write-only**: `Record` is its one method, there is no `Delete`, and `adminctl prune` does not touch `admin_audit_log`. It had a `Recent` read and `AdminService.RecentAudit` over it for the audit screen; when that screen was descoped (2026-09-02, `docs/FEATURE_TRACKER.md`) the read stayed behind with no production caller, and it was deleted on 2026-09-13. The log is read through `psql`, or through the read-only database browse (§4), which audits its own reads. Tests that need to see what `Record` wrote query the table directly |
 | `AdminReauthAttemptRepository` | `adapter/postgres` | Twenty-fifth, and the reason a fifth login-adjacent table exists at all rather than reusing `LoginAttemptRepository`: `FailuresSince`, `Record` and `ClearFailures` run against `admin_reauth_attempts`, keyed on `user_id`, never `household_id` — see §6 and [ADR 5](adr/0005-platform-admin-authorization.md) for the blast-radius reasoning `login_attempts`' own household scoping would have carried over silently if this port had wrapped that table instead of adding its own |
 | `AdminDirectoryRepository` | `adapter/postgres` | Twenty-sixth. `Metrics`/`SearchHouseholds`/`Household`, read-only, and the one port that reads across household boundaries *in the product's own vocabulary* — every other repository in this table answers for a single household, which is why composing this screen out of them would have meant new methods on four ports and an N+1 call per counter. (`DatabaseBrowser` below crosses them too, but it reads whatever table it is asked for and has no concept of a household at all, so it is a different kind of read rather than a second directory.) Its SQL file is the only place `COALESCE(last_seen_at, created_at)` appears, so "when was this session last used" has exactly one definition (§6); `SearchHouseholds` reaches its matching member through a `LEFT JOIN` onto `users` itself rather than onto the lateral subquery, because sqlc types a column selected through a derived table as non-nullable and the scan then fails at runtime on the first household with no member match (`docs/LEARNING.md`) |
 | `TelegramSender` | `adapter/telegram` | The Telegram twin of `Mailer`, and justified the same way: the usecase layer must not hold an HTTP client, and `TelegramAuthService` must be testable against a double. One method, `SendMessage(ctx, chatID, text)` — plain text, no template system, exactly as the mailer has none |
 | `PasswordHasher`, `TokenGenerator` | `adapter/crypto` | argon2id with cost from config; tokens are random, stored hashed |
-| `Mailer` | `adapter/mail` | SMTP; TLS policy and credentials from config |
+| `Mailer` | `adapter/mail` | SMTP; TLS policy and credentials from config. An unrecognised `SMTP_TLS_MODE` maps to mandatory TLS, never to plaintext: `config.Load` refuses a bad value first, so this is the second line, and a second line that fails open would silently turn encryption off the day the first one is loosened (2026-09-13) |
 | `MailOutbox` | `adapter/mail` (`MailpitOutbox`, its only implementation) | Reads what `Mailer` sent, rather than what it is about to — the operator's outbound message inspector, added 2026-09-04. `Recent(ctx, limit) (OutboxPage, error)` and `Message(ctx, id) (OutboxMessage, error)` hand back the body exactly as Mailpit holds it, unprocessed: extraction is `AdminOutboxService`'s job (§2), not the adapter's, so "which strings are links" stays testable without an HTTP server. Two Mailpit endpoints only, `GET /api/v1/messages` and `GET /api/v1/message/{id}` — a test asserts no third path is ever requested, because `GET /api/v1/message/{id}/link-check` looks like the obvious third and is not: it issues a real HTTP request to every URL it finds, and every URL in a Hearth email is a live single-use token. `Message` reports `domain.ErrNotFound` for an id Mailpit's own store no longer holds (it keeps no volume, so a restart empties it) and both methods report `usecase.ErrOutboxUnavailable` — a distinct error, because an operator needs different advice for "no such message" than for "Mailpit is down" — when the upstream cannot be reached, times out, or answers a body the adapter cannot map (a message with no recipient, since every Hearth template addresses exactly one). A 5-second timeout and no retries, the same reasoning `TokenGenerator`'s neighbours use for a same-host dependency: a slow answer means something is wrong, not far away |
 | `DatabaseBrowser` | `adapter/postgres` — **two** implementations: `BrowseRepo` (live) and `UnavailableBrowse` (a stand-in) | The operator's read-only database browse, added 2026-09-04. `Tables(ctx)` and `Rows(ctx, table, limit, offset)`. Every **cell** comes back already rendered as text — no driver type, no `any`, nothing a caller could write through; the counts beside them (`TableInfo.RowCount`, `RowPage.Total`/`Limit`/`Offset`) are plain `int64`/`int`, because a number the screen formats is not data read out of a household's row. That is not only the clean-architecture rule: it is what lets the implementation render a redacted column as a literal *inside its own `SELECT` list*, so the secret bytes never leave Postgres (spec decision 7). The contract is three clauses and all three are load-bearing: `domain.ErrNotFound` for a table this role cannot see — whether it does not exist or the role has no privilege on it, which is one answer on purpose, since the role's privileges are the guard and probing them would be the leak; `usecase.ErrBrowseUnavailable` for a failure of the *connection* rather than of the request; and never write, never be reachable through a connection that could. `BrowseRepo` is the one hand-written pgx repository in a package otherwise generated by sqlc, because sqlc turns *fixed* SQL into typed Go and this repository's whole job is a `SELECT` list and a `FROM` clause chosen at call time from `information_schema`. Its constructor takes a `*ReadOnlyDB` and nothing else, so it cannot be built over the application pool; every table name is matched against the catalogue first and quoted with `pgx.Identifier` second, never concatenated from a request, and **schema-qualified** as `public.<table>` — the lookup pins `table_schema = 'public'`, so a read that resolved through `search_path` instead could name a different relation from the one just validated, and the symptom would be an `ORDER BY` on a column that relation does not have; `ColumnInfo.DataType` is a name for a human to read rather than a catalogue value to branch on (`citext`, `text[]`, not `USER-DEFINED` and `ARRAY` — see `displayType`), while redaction is decided separately on the raw `data_type` **and** `udt_name`; and paging is `ORDER BY` the primary key, falling back to `ctid` — `OFFSET` without `ORDER BY` silently repeats and skips rows the moment anything writes between two pages (spec decision 10). **`UnavailableBrowse` is the second implementation and exists so that two different failures stay two different answers**: `DATABASE_READONLY_URL` unset leaves `Deps.AdminBrowse` nil and answers `DB_BROWSE_NOT_CONFIGURED`, while a variable that *is* set over a pool that could not be opened is wired with this stand-in and answers `DB_BROWSE_UNAVAILABLE`, carrying the boot failure so the log can say why. Without it an operator restoring onto a fresh box would be told to set a variable already in their `.env` (§4, and `cmd/api/main.go`'s `openBrowse`). It is Liskov-honest rather than a stub: `ErrBrowseUnavailable` is the port's own contract for "the store is there, I could not reach it", so no caller special-cases it |
 | `AgreementRepository` | `adapter/postgres` — one implementation across **two files**, `agreement_repo.go` (the pool-backed reads and the section writes) and `agreement_write_repo.go` (the two transactional writes) | **Twenty-seventh.** `Document` composes the whole screen in four list queries — sections, live agreements, open proposals, accepted proposals — and never a per-proposal round trip; the version, the `01..N` numbering and the awaiting lists are all derived above it, in `AgreementService`, from those four slices. Two methods run transactions and both do so because they write more than one row: `CreateProposal` writes the proposal **and** the proposer's own implicit signature (decision 5) — a proposal without it is one nobody has agreed to, including its author — and `Sign` reads the proposal's status, locks the *target agreement* row (decision 12, not the proposal: locking the proposal serialises two signatures on that proposal and nothing else, so an edit and a remove aimed at the same agreement would both pass their checks and both land), upserts the signature, applies the change when the signature completes the live owner set, and stamps the status, all on the transaction's own connection. Reaching back to the pool from inside either would ask for a second connection while holding the first — the defect `VisionRepository.Save` already carries a note about. A target that has moved since the proposal was written answers `domain.ErrAgreementChanged` and writes nothing; the section unique key is mapped by constraint name to `domain.ErrAgreementSectionNameTaken`, because a generic `ErrAlreadyExists` leaves the screen unable to say which collision happened |
@@ -894,7 +902,7 @@ model.
 
 ```mermaid
 graph TD
-    Req["Request"] --> RID["RequestID · RealIP · Recoverer<br/>(recoverer writes the standard error envelope)"]
+    Req["Request"] --> RID["RequestID · trustedProxyRealIP · Recoverer<br/>(recoverer writes the standard error envelope)"]
     RID --> Public{"Public route?"}
 
     Public -->|"sign-in, magic-link,<br/>magic-link/consume,<br/>invites/{token},<br/>currencies"| Handler
@@ -2377,14 +2385,17 @@ and sees none of those move would rightly distrust the feature. What keeps it
 honest is the same rule Transactions enforces on itself: the expense's
 currency is the pay-from **account's** currency, resolved through
 `AccountLookup` — the identical assignment `TransactionService.Create` makes
-at `usecase/transaction.go:232`, `t.Amount.Currency = fromCurrency` — never
+in `TransactionService.validate` (`usecase/transaction.go`), `t.Amount.Currency = fromCurrency` — never
 a value Bills stores or infers on its own. `TestMarkPaidWritesTheExpenseInTheAccountsCurrency`
 asserts the two agree, so a bill on an IDR account writes an IDR expense even
 if the bill's own display figure is read in a stale currency somewhere else.
 The amount and date are `MarkPayment`'s own caller-supplied fields, not the
 bill's stored `amount_minor` re-read — a utility bill varies month to month,
 and paying it once must not silently rewrite what the household expects to
-owe next time.
+owe next time. The amount is optional: when a caller sends none,
+`BillService.MarkPaid` pays the bill's own stored amount. That default lived
+in the HTTP handler until 2026-09-13, where it read the whole bills page to
+find one number and any other channel would have had to repeat it.
 
 **Marking paid is three rows in one database transaction, and undo reverses
 all three.** `RecordPayment` writes the expense, the payment row and the
@@ -2448,7 +2459,7 @@ own comment on `next_due`).
 **A bill with no payer is why Spending by person gained an Unattributed
 row.** `paid_by_membership_id` is optional on a bill the same way it is on a
 transaction, but before Bills existed, a payer-less transaction was rare
-enough that `BudgetService`'s by-person grouping (`usecase/budget.go:252`)
+enough that `BudgetService`'s by-person grouping (`tallySpend` and `buildPersonViews` in `usecase/budget.go`)
 simply dropped it — every real transaction until now had a human behind it. A
 bill autopaying with no named person makes that the common case, not the
 exception, so the grouping now emits an explicit `Unattributed` row rather
@@ -3581,16 +3592,19 @@ Notes that are not obvious from the shapes:
   There is no account-deletion feature yet to force the question; when one
   arrives, it has to decide what happens to that user's audit rows rather than
   having Postgres decide it by default.
-- **`admin_audit_log.ip` is only as trustworthy as whatever sits in front of
-  this service, and in development nothing does.** `auditAdmin`'s own comment
-  names what makes the column trustworthy in production: `web/nginx.conf`
-  blanks any client-supplied `True-Client-IP` and sets `X-Real-IP` from
-  `$remote_addr`, which is the value chi's `RealIP` middleware actually reads.
-  The browser walk ran with no such proxy in front of the dev stack, so every
-  row it wrote carries the Docker Compose network's own container address
-  (`172.22.0.5:…`) rather than a client address — expected, not a defect, but
-  worth stating so a reader of the dev database's own audit log does not read
-  that column as identifying anything.
+- **`admin_audit_log.ip` is only as trustworthy as the proxy the API is told
+  to trust, and in development it trusts none.** In production
+  `web/nginx.conf` sets `X-Real-IP` from `$remote_addr`, and
+  `trustedProxyRealIP` believes that header only because the peer sending it
+  is inside `TRUSTED_PROXY_CIDRS` (`deploy/docker-compose.prod.yml`); nginx
+  also still blanks `True-Client-IP`, which the API no longer reads at all.
+  The column holds `clientIP(r)`, the same address the rate limiter keys on,
+  with no port — before 2026-09-13 it held the raw `RemoteAddr`, port
+  included. In development no range is trusted, so every row carries the
+  Docker Compose network's own container address (`172.22.0.5`) rather than
+  a client address — expected, not a defect, but worth stating so a reader
+  of the dev database's own audit log does not read that column as
+  identifying anything.
 - **`admin_reauth_attempts` exists so `login_attempts` never has to know about
   the admin surface.** Both tables record a failed password attempt and both
   are evaluated by the same `domain.LockoutPolicy`, but `login_attempts` locks
@@ -3778,7 +3792,7 @@ Notes that are not obvious from the shapes:
 - **`bills` carries no `currency` column, unlike `goals`.** It is
   denominated in whatever the pay-from account's currency is, because
   `TransactionService.Create` already forces an expense's currency to its
-  from-account's (`usecase/transaction.go:232`) — a currency stored on
+  from-account's (`TransactionService.validate`, `usecase/transaction.go`) — a currency stored on
   `bills` itself would be overwritten the moment a payment wrote its
   transaction, and the two would disagree in the meantime. Do not add one;
   the migration's own comment says so.
@@ -3919,12 +3933,29 @@ web/src/
                        rather than triggering the global sign-out-and-redirect
                        every other 401 does. A dead session's own 401
                        (UNAUTHENTICATED) is deliberately not on that list and
-                       still signs the operator out like anywhere else
+                       still signs the operator out like anywhere else.
+                       fetchAndParse(schema, path, init?) is apiFetch plus a
+                       zod parse of the body; every hook that reads a
+                       response goes through it, so a body the screen cannot
+                       trust throws rather than rendering
+  api/errorMessage.ts  apiErrorMessage -- any thrown error to the sentence a
+                       screen shows. Beside ApiError, not in features/auth,
+                       because every feature uses it
   components/          generic primitives only: Modal (native <dialog>),
                        PageContainer, FieldPair, ToggleSwitch, and icons.tsx --
                        every icon is an inline SVG, never a Unicode character,
                        because a character only renders where a font on the
-                       device covers its codepoint (docs/LEARNING.md)
+                       device covers its codepoint (docs/LEARNING.md).
+                       Field (label, control and alert line), ModalActions
+                       (the Cancel/Submit footer every modal shares),
+                       fieldClasses.ts (the one input class string, with its
+                       44px tap-target reason written once), useConfirmAction
+                       (ask, confirm or cancel an action that cannot be taken
+                       back -- never window.confirm) and LoadingScreen (the
+                       router Suspense fallback; it imports nothing, so it
+                       pulls no admin code into the main bundle)
+  lib/parseEnum.ts     a <select> value checked against the allowed set,
+                       falling back rather than casting (fail closed)
   features/
     auth/              sign-in, invite, magic-link, sign-up screens and hooks.
                        SignInScreen also carries the "Continue with Telegram"
@@ -3967,7 +3998,12 @@ web/src/
                        mints, opens the deep link with a plain-link
                        fallback for a blocked popup, polls status every 3s,
                        confirms; renders nothing on a 404, this install's
-                       "no bot configured" answer)
+                       "no bot configured" answer). As in money/, marriage/
+                       and admin/, every request lives in a use*.ts hook file
+                       (useHousehold, useSpaces, useInviteMember,
+                       useUpdateMember, useNotificationPreferences,
+                       useTelegram, useHouseholdMembers); no settings
+                       component calls apiFetch itself
     money/             Finances page — net worth (now with its twelve-month
                        trend, NetWorthChart.tsx, inline SVG the same way
                        marriage/MoodChart.tsx draws its own line — no

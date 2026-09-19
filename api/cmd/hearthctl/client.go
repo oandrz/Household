@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -214,5 +213,3 @@ func (c *client) requireCreds() error {
 	}
 	return nil
 }
-
-func (c *client) String() string { return fmt.Sprintf("hearth@%s", c.baseURL) }

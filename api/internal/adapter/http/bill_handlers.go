@@ -1,7 +1,6 @@
 package httpadapter
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -183,12 +182,8 @@ type billPaymentResponse struct {
 // own date -- a bill's next_due is a calendar date, not an instant, the same
 // reasoning openingBalanceLayout documents for accounts.
 func parseBillDueDate(w http.ResponseWriter, raw string) (time.Time, bool) {
-	t, err := time.Parse(occurredOnLayout, raw)
-	if err != nil {
-		WriteError(w, http.StatusUnprocessableEntity, "INVALID_DATE", "That date could not be read. Use YYYY-MM-DD.", nil)
-		return time.Time{}, false
-	}
-	return t, true
+	return parseTimeOrRefuse(w, raw, occurredOnLayout,
+		http.StatusUnprocessableEntity, "INVALID_DATE", "That date could not be read. Use YYYY-MM-DD.")
 }
 
 // handleListBills serves the whole Bills screen: every row (live only by
@@ -338,12 +333,10 @@ func setBillArchived(deps Deps, archived bool) http.HandlerFunc {
 	}
 }
 
-// handleMarkBillPaid is POST /bills/{id}/pay. It resolves AmountMinor's
-// default itself (the bill's own stored amount) before calling
-// BillService.MarkPaid, since MarkPayment carries no "use the bill's own"
-// convention of its own -- the caller always supplies a concrete figure
-// (MarkPayment's own comment on why the amount is the caller's, not the
-// bill's).
+// handleMarkBillPaid is POST /bills/{id}/pay. An absent amountMinor reaches
+// BillService.MarkPaid as nil, and the service pays the bill's own stored
+// amount (MarkPayment's own comment): what "no amount" means is a rule about
+// bills, so it lives in the service every channel shares, not in this handler.
 //
 // Most of what MarkPaid can return already has a home in the shared
 // MapDomainError switch: domain.ErrBillAmountNotPositive -> 422, domain.
@@ -369,31 +362,10 @@ func handleMarkBillPaid(deps Deps) http.HandlerFunc {
 			return
 		}
 
-		amount := req.AmountMinor
-		if amount == nil {
-			views, err := listBillViews(r.Context(), deps, scope.HouseholdID, today)
-			if err != nil {
-				MapDomainError(w, r, err)
-				return
-			}
-			view, found := findBillViewByID(views, id)
-			if !found {
-				// Not found here means exactly what BillRepository.Get's own
-				// contract says an unknown or another-household id means:
-				// domain.ErrNotFound -> 404, indistinguishable from a real
-				// miss (the identical reasoning MapDomainError already gives
-				// that sentinel elsewhere).
-				MapDomainError(w, r, domain.ErrNotFound)
-				return
-			}
-			a := view.Bill.Amount.Amount
-			amount = &a
-		}
-
 		payment, err := deps.Bills.MarkPaid(r.Context(), usecase.MarkPayment{
 			HouseholdID: scope.HouseholdID,
 			BillID:      id,
-			AmountMinor: *amount,
+			AmountMinor: req.AmountMinor,
 			PaidOn:      paidOn,
 		})
 		if err != nil {
@@ -403,22 +375,20 @@ func handleMarkBillPaid(deps Deps) http.HandlerFunc {
 
 		// The response's "bill" half needs the full joined view (category and
 		// account names, the freshly recomputed Overdue/DueSoon/Settled) that
-		// BillPaymentView does not carry -- the same re-read
-		// writeBillCurrencyMismatch already performs, for the same reason: no
-		// BillService method returns both a payment and its bill's own view
-		// in one call.
-		views, err := listBillViews(r.Context(), deps, scope.HouseholdID, today)
-		if err != nil {
-			MapDomainError(w, r, err)
-			return
-		}
-		updated, found := findBillViewByID(views, id)
-		if !found {
+		// BillPaymentView does not carry, so the one bill is read back through
+		// BillService.View: no BillService method returns both a payment and
+		// its bill's own view in one call.
+		updated, err := deps.Bills.View(r.Context(), scope.HouseholdID, id, today)
+		if errors.Is(err, domain.ErrNotFound) {
 			// MarkPaid just succeeded against this exact household/bill pair
 			// above -- a miss on this immediate re-read is this handler's own
 			// invariant broken, not a client mistake (writeBillCurrencyMismatch's
 			// own comment on the identical situation).
 			logAndWriteInternal(w, r, fmt.Errorf("bill %s not found on the re-read after MarkPaid succeeded", id))
+			return
+		}
+		if err != nil {
+			MapDomainError(w, r, err)
 			return
 		}
 
@@ -579,8 +549,10 @@ func writeBillWriteError(w http.ResponseWriter, r *http.Request, deps Deps, hous
 		MapDomainError(w, r, err)
 		return
 	}
-	if views, listErr := listBillViews(r.Context(), deps, householdID, today); listErr == nil {
-		if archived, ok := findArchivedBillByName(views, attemptedName); ok {
+	// A name search is genuinely about every bill, archived ones included, so
+	// this is the one lookup in the file that still reads the whole list.
+	if page, listErr := deps.Bills.List(r.Context(), householdID, true, today); listErr == nil {
+		if archived, ok := findArchivedBillByName(page.Bills, attemptedName); ok {
 			WriteError(w, http.StatusConflict, "BILL_NAME_TAKEN",
 				fmt.Sprintf("%q is the name of an archived bill. Restore it, or choose a different name.",
 					strings.TrimSpace(attemptedName)),
@@ -592,23 +564,20 @@ func writeBillWriteError(w http.ResponseWriter, r *http.Request, deps Deps, hous
 }
 
 // writeBillCurrencyMismatch answers Update's ErrBillCurrencyImmutable with a
-// message naming both currencies -- the bill's own stored one (read back via
-// listBillViews, since BillService exposes no bare Get -- List's own
-// live-and-archived union is every lookup this file needs, the same reason
-// goal_handlers.go has none either) and the target account's (via
-// deps.Accounts.Get, the AccountService already wired into Deps).
+// message naming both currencies -- the bill's own stored one (read back
+// through BillService.View) and the target account's (via deps.Accounts.Get,
+// the AccountService already wired into Deps).
 func writeBillCurrencyMismatch(w http.ResponseWriter, r *http.Request, deps Deps, householdID, billID, targetAccountID string, today time.Time) {
-	views, err := listBillViews(r.Context(), deps, householdID, today)
-	if err != nil {
-		MapDomainError(w, r, err)
-		return
-	}
-	current, found := findBillViewByID(views, billID)
-	if !found {
+	current, err := deps.Bills.View(r.Context(), householdID, billID, today)
+	if errors.Is(err, domain.ErrNotFound) {
 		// Update already succeeded in finding this bill (it read it before
 		// failing on the currency check) -- a miss on this immediate re-read
 		// is this handler's own invariant broken, not a client mistake.
 		logAndWriteInternal(w, r, fmt.Errorf("bill %s not found on the re-read after a currency-mismatch refusal", billID))
+		return
+	}
+	if err != nil {
+		MapDomainError(w, r, err)
 		return
 	}
 	acct, err := deps.Accounts.Get(r.Context(), householdID, targetAccountID)
@@ -620,28 +589,6 @@ func writeBillCurrencyMismatch(w http.ResponseWriter, r *http.Request, deps Deps
 		fmt.Sprintf("This bill is in %s; that account is in %s. A bill's currency cannot be changed after it is created.",
 			current.Bill.Amount.Currency, acct.Balance.Currency),
 		map[string]any{"billCurrency": current.Bill.Amount.Currency, "accountCurrency": acct.Balance.Currency})
-}
-
-// listBillViews is BillService.List's live-and-archived union, stripped
-// down to the slice callers in this file want -- the identical shape
-// listGoalViews already uses for goals, and for the same reason: no service
-// here exposes a single-bill getter, so this is the one lookup every helper
-// that needs to inspect a specific existing bill shares.
-func listBillViews(ctx context.Context, deps Deps, householdID string, today time.Time) ([]usecase.BillView, error) {
-	view, err := deps.Bills.List(ctx, householdID, true, today)
-	if err != nil {
-		return nil, err
-	}
-	return view.Bills, nil
-}
-
-func findBillViewByID(views []usecase.BillView, id string) (usecase.BillView, bool) {
-	for _, v := range views {
-		if v.Bill.ID == id {
-			return v, true
-		}
-	}
-	return usecase.BillView{}, false
 }
 
 // findArchivedBillByName is writeBillWriteError's lookup: among every bill

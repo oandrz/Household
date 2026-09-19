@@ -4,13 +4,12 @@
 // (see SpacesPanel.tsx), and POST /spaces sits behind requireOwner
 // regardless.
 import { type FormEvent, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Field } from "../../components/Field";
+import { FIELD_CONTROL_CLASS } from "../../components/fieldClasses";
 import { Modal } from "../../components/Modal";
-import { apiFetch } from "../../api/client";
-import { apiErrorMessage } from "../auth/copy";
-import { spaceSchema } from "../auth/schemas";
-
-type VisibilityOption = "everyone" | "parents_only";
+import { ModalActions } from "../../components/ModalActions";
+import { apiErrorMessage } from "../../api/errorMessage";
+import { useCreateSpace, type VisibilityOption } from "./useSpaces";
 
 // The design's four template tiles. Selecting one prefills the Name field
 // (the design shows "Kids" selected with Name already reading "Kids") --
@@ -24,29 +23,6 @@ const TEMPLATES: { key: string; name: string; blurb: string }[] = [
   { key: "travel", name: "Travel", blurb: "Trips, packing, itineraries" },
   { key: "blank", name: "", blurb: "Start empty, add your own pages" },
 ];
-
-async function createSpace(vars: {
-  name: string;
-  visibility: VisibilityOption;
-  template: string;
-}) {
-  const body = await apiFetch<unknown>("/api/v1/spaces", {
-    method: "POST",
-    body: JSON.stringify(vars),
-  });
-  return spaceSchema.parse(body);
-}
-
-function useCreateSpace() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: createSpace,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["spaces"] });
-      queryClient.invalidateQueries({ queryKey: ["me"] });
-    },
-  });
-}
 
 export function NewSpaceModal({
   open,
@@ -115,22 +91,16 @@ export function NewSpaceModal({
           </div>
         </div>
 
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="new-space-name" className="text-xs font-semibold text-label">
-            Name
-          </label>
+        <Field label="Name" htmlFor="new-space-name">
           <input
             id="new-space-name"
             type="text"
             required
             value={name}
             onChange={(event) => setName(event.target.value)}
-            // min-h-11/sm:min-h-0: TransactionFilters.tsx's own
-            // SELECT_CLASS comment has the measured reason py-2.5 alone
-            // falls short of the 44px floor on a phone.
-            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+            className={FIELD_CONTROL_CLASS}
           />
-        </div>
+        </Field>
 
         <div className="flex flex-col gap-2">
           <span className="text-xs font-semibold text-label">Who can see it</span>
@@ -181,22 +151,13 @@ export function NewSpaceModal({
           </p>
         )}
 
-        <div className="mt-1 flex gap-2.5">
-          <button
-            type="button"
-            onClick={handleClose}
-            className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label sm:min-h-0"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={createSpaceMutation.isPending}
-            className="min-h-11 flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
-          >
-            Create space
-          </button>
-        </div>
+        <ModalActions
+          secondaryLabel="Cancel"
+          onSecondary={handleClose}
+          primaryLabel="Create space"
+          primaryType="submit"
+          primaryDisabled={createSpaceMutation.isPending}
+        />
       </form>
     </Modal>
   );

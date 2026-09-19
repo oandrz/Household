@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { apiFetch } from "../../api/client";
+import { fetchAndParse } from "../../api/client";
 import { accountSchema, accountsResponseSchema, type Account, type AccountsResponse } from "./schemas";
 import type { AccountEditValues, AccountFormValues } from "./AccountModal";
 
@@ -9,8 +9,7 @@ export function accountsQueryKey(includeArchived: boolean) {
 
 async function fetchAccounts(includeArchived: boolean): Promise<AccountsResponse> {
   const suffix = includeArchived ? "?include_archived=true" : "";
-  const body = await apiFetch<unknown>(`/api/v1/accounts${suffix}`);
-  return accountsResponseSchema.parse(body);
+  return fetchAndParse(accountsResponseSchema, `/api/v1/accounts${suffix}`);
 }
 
 export function useAccounts(includeArchived: boolean) {
@@ -39,11 +38,10 @@ export function useCreateAccount() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (body: AccountFormValues): Promise<Account> => {
-      const raw = await apiFetch<unknown>("/api/v1/accounts", {
+      return fetchAndParse(accountSchema, "/api/v1/accounts", {
         method: "POST",
         body: JSON.stringify(body),
       });
-      return accountSchema.parse(raw);
     },
     onSuccess: () => invalidateAccounts(queryClient),
   });
@@ -76,11 +74,10 @@ export function useUpdateAccount() {
         // an edit would silently leave the previous owner in place.
         ownerMembershipId: body.ownerMembershipId ?? "",
       };
-      const raw = await apiFetch<unknown>(`/api/v1/accounts/${encodeURIComponent(id)}`, {
+      return fetchAndParse(accountSchema, `/api/v1/accounts/${encodeURIComponent(id)}`, {
         method: "PATCH",
         body: JSON.stringify(payload),
       });
-      return accountSchema.parse(raw);
     },
     onSuccess: () => invalidateAccounts(queryClient),
   });
@@ -91,11 +88,11 @@ export function useSetAccountArchived() {
   return useMutation({
     mutationFn: async (vars: { id: string; archived: boolean }): Promise<Account> => {
       const suffix = vars.archived ? "archive" : "restore";
-      const raw = await apiFetch<unknown>(
+      return fetchAndParse(
+        accountSchema,
         `/api/v1/accounts/${encodeURIComponent(vars.id)}/${suffix}`,
         { method: "POST" },
       );
-      return accountSchema.parse(raw);
     },
     onSuccess: () => invalidateAccounts(queryClient),
   });

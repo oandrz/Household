@@ -4,38 +4,16 @@
 // POST /household/members/invite sits behind requireOwner on the server
 // regardless -- this is presentation, not the enforcement.
 import { type FormEvent, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Field } from "../../components/Field";
+import { FIELD_CONTROL_CLASS } from "../../components/fieldClasses";
 import { FieldPair } from "../../components/FieldPair";
 import { Modal } from "../../components/Modal";
+import { ModalActions } from "../../components/ModalActions";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
-import { apiFetch } from "../../api/client";
-import { apiErrorMessage } from "../auth/copy";
+import { apiErrorMessage } from "../../api/errorMessage";
 import { ALL_CAPABILITIES } from "./capabilities";
-
-type RoleOption = "owner" | "limited";
-
-async function inviteMember(vars: {
-  name: string;
-  email: string;
-  role: RoleOption;
-  capabilities: string[];
-}): Promise<{ status: string }> {
-  return apiFetch<{ status: string }>("/api/v1/household/members/invite", {
-    method: "POST",
-    body: JSON.stringify(vars),
-  });
-}
-
-function useInviteMember() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: inviteMember,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["household", "members"] });
-      queryClient.invalidateQueries({ queryKey: ["me"] });
-    },
-  });
-}
+import { parseEnum } from "../../lib/parseEnum";
+import { ROLE_OPTIONS, type RoleOption, useInviteMember } from "./useInviteMember";
 
 export function InviteMemberModal({
   open,
@@ -90,10 +68,7 @@ export function InviteMemberModal({
     <Modal open={open} onClose={handleClose} title="Invite a family member">
       <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
         <FieldPair>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="invite-member-name" className="text-xs font-semibold text-label">
-              Name
-            </label>
+          <Field label="Name" htmlFor="invite-member-name">
             <input
               id="invite-member-name"
               type="text"
@@ -101,39 +76,29 @@ export function InviteMemberModal({
               placeholder="First name"
               value={name}
               onChange={(event) => setName(event.target.value)}
-              // min-h-11/sm:min-h-0 on every field in this modal:
-              // TransactionFilters.tsx's own SELECT_CLASS comment has the
-              // measured reason py-2.5 alone falls short of the 44px floor
-              // on a phone.
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              className={FIELD_CONTROL_CLASS}
             />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="invite-member-role" className="text-xs font-semibold text-label">
-              Role
-            </label>
+          </Field>
+          <Field label="Role" htmlFor="invite-member-role">
             <select
               id="invite-member-role"
               value={role}
-              onChange={(event) => setRole(event.target.value as RoleOption)}
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              onChange={(event) => setRole(parseEnum(event.target.value, ROLE_OPTIONS, role))}
+              className={FIELD_CONTROL_CLASS}
             >
               <option value="limited">Kid</option>
               <option value="owner">Parent</option>
             </select>
-          </div>
+          </Field>
         </FieldPair>
 
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="invite-member-email" className="text-xs font-semibold text-label">
-            {/* The design's own label names a phone option this API has no
-                field for -- there is only an email address to send an
-                invite to. Kept the literal design copy since the "optional
-                for kids" half is accurate (domain.ErrInviteRequiresEmail
-                only fires for an owner invite); "or phone" is a known gap,
-                not something silently dropped. */}
-            Email or phone (optional for kids)
-          </label>
+        {/* The design's own label names a phone option this API has no
+            field for -- there is only an email address to send an
+            invite to. Kept the literal design copy since the "optional
+            for kids" half is accurate (domain.ErrInviteRequiresEmail
+            only fires for an owner invite); "or phone" is a known gap,
+            not something silently dropped. */}
+        <Field label="Email or phone (optional for kids)" htmlFor="invite-member-email">
           <input
             id="invite-member-email"
             type="email"
@@ -141,9 +106,9 @@ export function InviteMemberModal({
             placeholder="Send an invite link"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+            className={FIELD_CONTROL_CLASS}
           />
-        </div>
+        </Field>
 
         <div className="flex flex-col gap-2">
           <span className="text-xs font-semibold text-label">Can access</span>
@@ -203,22 +168,13 @@ export function InviteMemberModal({
           </p>
         )}
 
-        <div className="mt-1 flex gap-2.5">
-          <button
-            type="button"
-            onClick={handleClose}
-            className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label sm:min-h-0"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={invite.isPending}
-            className="min-h-11 flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
-          >
-            Send invite
-          </button>
-        </div>
+        <ModalActions
+          secondaryLabel="Cancel"
+          onSecondary={handleClose}
+          primaryLabel="Send invite"
+          primaryType="submit"
+          primaryDisabled={invite.isPending}
+        />
       </form>
     </Modal>
   );

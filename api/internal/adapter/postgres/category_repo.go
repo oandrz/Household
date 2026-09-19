@@ -36,7 +36,11 @@ func (r *CategoryRepo) List(ctx context.Context, householdID string, includeArch
 		}
 		out := make([]domain.Category, 0, len(rows))
 		for _, row := range rows {
-			out = append(out, toCategory(row))
+			c, err := toCategory(row)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, c)
 		}
 		return out, nil
 	}
@@ -47,7 +51,11 @@ func (r *CategoryRepo) List(ctx context.Context, householdID string, includeArch
 	}
 	out := make([]domain.Category, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, toCategory(row))
+		c, err := toCategory(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
 	}
 	return out, nil
 }
@@ -129,7 +137,11 @@ func (r *CategoryRepo) Kind(ctx context.Context, householdID, categoryID string)
 	if err != nil {
 		return "", translate(err, "get category kind")
 	}
-	return domain.CategoryKind(kind), nil
+	parsed, err := domain.ParseCategoryKind(kind)
+	if err != nil {
+		return "", fmt.Errorf("postgres: category kind: %w", err)
+	}
+	return parsed, nil
 }
 
 // Create adds one category at the end of the household's sort order.
@@ -152,7 +164,7 @@ func (r *CategoryRepo) Create(ctx context.Context, c domain.Category) (domain.Ca
 	if err != nil {
 		return domain.Category{}, translate(err, "create category")
 	}
-	return toCategory(row), nil
+	return toCategory(row)
 }
 
 // Rename changes the name only; RenameCategory's WHERE clause scopes the
@@ -168,7 +180,7 @@ func (r *CategoryRepo) Rename(ctx context.Context, householdID, categoryID, name
 	if err != nil {
 		return domain.Category{}, translate(err, "rename category")
 	}
-	return toCategory(row), nil
+	return toCategory(row)
 }
 
 // SetArchived stamps or clears archived_at. SetCategoryArchived's own
@@ -185,16 +197,26 @@ func (r *CategoryRepo) SetArchived(ctx context.Context, householdID, categoryID 
 	if err != nil {
 		return domain.Category{}, translate(err, "set category archived")
 	}
-	return toCategory(row), nil
+	return toCategory(row)
 }
 
-func toCategory(c sqlcgen.Category) domain.Category {
+// toCategory refuses a kind this code did not write. categories.kind carries
+// a CHECK, but a CHECK is the schema's promise, not this adapter's: a value
+// read from a column goes through domain.ParseCategoryKind, so an impossible
+// row fails here instead of reaching TransactionService's kind check as
+// something that is neither expense nor income. Same rule as toBill's cadence
+// and toGoalContribution's source.
+func toCategory(c sqlcgen.Category) (domain.Category, error) {
+	kind, err := domain.ParseCategoryKind(c.Kind)
+	if err != nil {
+		return domain.Category{}, fmt.Errorf("postgres: category: %w", err)
+	}
 	return domain.Category{
 		ID:          uuidToString(c.ID),
 		HouseholdID: uuidToString(c.HouseholdID),
 		Name:        c.Name,
-		Kind:        domain.CategoryKind(c.Kind),
+		Kind:        kind,
 		SortOrder:   int(c.SortOrder),
 		ArchivedAt:  timePtrOf(c.ArchivedAt),
-	}
+	}, nil
 }

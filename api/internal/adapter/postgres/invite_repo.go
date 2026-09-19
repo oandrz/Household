@@ -50,13 +50,21 @@ func (r *InviteRepo) ByTokenHash(ctx context.Context, tokenHash []byte) (usecase
 	if err != nil {
 		return usecase.InviteDetails{}, translate(err, "get invite by token hash")
 	}
+	role, err := toRole(row.Role)
+	if err != nil {
+		return usecase.InviteDetails{}, err
+	}
+	caps, err := toCapabilities(row.Capabilities)
+	if err != nil {
+		return usecase.InviteDetails{}, err
+	}
 	return usecase.InviteDetails{
 		ID:           uuidToString(row.ID),
 		HouseholdID:  uuidToString(row.HouseholdID),
 		Email:        row.Email,
 		Name:         row.Name,
-		Role:         toRole(row.Role),
-		Capabilities: toCapabilities(row.Capabilities),
+		Role:         role,
+		Capabilities: caps,
 		FamilyName:   row.FamilyName,
 		InviterName:  row.InviterName,
 		ExpiresAt:    timeOf(row.ExpiresAt),
@@ -72,13 +80,21 @@ func (r *InviteRepo) LiveInviteForEmail(ctx context.Context, householdID, email 
 	if err != nil {
 		return usecase.InviteDetails{}, translate(err, "get live invite for email")
 	}
+	role, err := toRole(row.Role)
+	if err != nil {
+		return usecase.InviteDetails{}, err
+	}
+	caps, err := toCapabilities(row.Capabilities)
+	if err != nil {
+		return usecase.InviteDetails{}, err
+	}
 	return usecase.InviteDetails{
 		ID:           uuidToString(row.ID),
 		HouseholdID:  uuidToString(row.HouseholdID),
 		Email:        row.Email,
 		Name:         row.Name,
-		Role:         toRole(row.Role),
-		Capabilities: toCapabilities(row.Capabilities),
+		Role:         role,
+		Capabilities: caps,
 		FamilyName:   row.FamilyName,
 		InviterName:  row.InviterName,
 		ExpiresAt:    timeOf(row.ExpiresAt),

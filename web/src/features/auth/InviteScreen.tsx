@@ -16,8 +16,9 @@ import { type FormEvent, type ReactNode, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { apiFetch, ApiError } from "../../api/client";
+import { apiErrorMessage } from "../../api/errorMessage";
+import { Field } from "../../components/Field";
 import {
-  apiErrorMessage,
   formatList,
   limitedAccessClause,
   roleLabel,
@@ -171,10 +172,7 @@ function AcceptInviteForm({
       </div>
 
       <form className="flex flex-col gap-3.5" onSubmit={handleSubmit}>
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="invite-name" className="text-xs font-semibold text-label">
-            Name
-          </label>
+        <Field label="Name" htmlFor="invite-name">
           <input
             id="invite-name"
             type="text"
@@ -184,12 +182,9 @@ function AcceptInviteForm({
             onChange={(event) => setDisplayName(event.target.value)}
             className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
           />
-        </div>
+        </Field>
 
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="invite-password" className="text-xs font-semibold text-label">
-            Password
-          </label>
+        <Field label="Password" htmlFor="invite-password">
           <input
             id="invite-password"
             type="password"
@@ -216,7 +211,7 @@ function AcceptInviteForm({
               </span>
             </div>
           )}
-        </div>
+        </Field>
 
         <button
           type="submit"

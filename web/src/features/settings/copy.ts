@@ -10,7 +10,7 @@ import type { TelegramLinkStatus } from "./schemas";
 // limited member -- the design's own words (Settings screen, Members
 // panel), distinct from copy.ts's roleLabel ("co-owner"/"Kid"), which is
 // this same design's wording for the *invite-acceptance* screen instead.
-export function memberRoleDescriptor(role: string): string {
+function memberRoleDescriptor(role: string): string {
   if (role === "owner") return "Parent";
   if (role === "limited") return "Kid";
   return role;

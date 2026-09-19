@@ -312,7 +312,7 @@ export function monthYearLabel(month: string): string {
 // short + year rather than monthNameOnly's long + no-year (the design's two
 // month strings on this one screen are genuinely different shapes, not a
 // single helper reused two ways).
-export function sinceLabel(since: string): string {
+function sinceLabel(since: string): string {
   const [year, monthNum] = since.split("-").map(Number);
   return new Date(year, monthNum - 1, 2).toLocaleDateString("en-US", { month: "short", year: "numeric" });
 }

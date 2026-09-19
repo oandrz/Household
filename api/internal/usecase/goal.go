@@ -169,32 +169,13 @@ func (s *GoalService) List(ctx context.Context, householdID string, includeArchi
 	}
 	actualTotal := plannedTotal
 
-	var (
-		onTrackCount, datedCount, noDateCount, excludedNoRate int
-		nextGoalID, nextGoalName                              string
-		nextGoalMonth                                         *time.Time
-	)
+	var counts goalCounts
+	excludedNoRate := 0
 
 	views := make([]GoalView, 0, len(records))
 	for _, rec := range records {
 		g := rec.Goal
-		status := domain.GoalStatusFor(g, rec.ContributedMinor, today)
-		percent := domain.GoalProgressPercent(rec.ContributedMinor, g.Target.Amount)
-
-		view := GoalView{
-			Goal:        g,
-			Contributed: domain.Money{Amount: rec.ContributedMinor, Currency: g.Target.Currency},
-			Percent:     percent,
-			Status:      status,
-		}
-		if !g.IsArchived() && g.TargetMonth != nil && status != domain.GoalAchieved {
-			monthsLeft := domain.MonthsLeftInclusive(*g.TargetMonth, today)
-			remaining := domain.GoalRemainingMinor(rec.ContributedMinor, g.Target.Amount)
-			if required, ok := domain.RequiredMonthlyMinor(remaining, monthsLeft); ok {
-				view.RequiredMonthly = domain.Money{Amount: required, Currency: g.Target.Currency}
-				view.RequiredMonthlyOK = true
-			}
-		}
+		view := goalCardView(rec, today)
 		views = append(views, view)
 
 		if g.IsArchived() {
@@ -202,43 +183,9 @@ func (s *GoalService) List(ctx context.Context, householdID string, includeArchi
 			// archived goal, in either count or either total.
 			continue
 		}
+		counts.add(g, view.Status)
 
-		switch {
-		case status == domain.GoalAchieved:
-			// In neither count -- it is not a goal to be on track for.
-		case g.TargetMonth == nil:
-			noDateCount++
-		default:
-			datedCount++
-			if status == domain.GoalOnTrack {
-				onTrackCount++
-			}
-			if nextGoalID == "" || g.TargetMonth.Before(*nextGoalMonth) ||
-				(g.TargetMonth.Equal(*nextGoalMonth) && g.Name < nextGoalName) {
-				nextGoalID, nextGoalName, nextGoalMonth = g.ID, g.Name, g.TargetMonth
-			}
-		}
-
-		// Convert-then-add, per goal: plannedInPrimary and (if this goal
-		// received anything this month) actualInPrimary share the goal's one
-		// currency, so either both convert or neither does. Splitting these
-		// into two independently-guarded conversions would let the two
-		// totals disagree about which goals had a rate, which the "excluded
-		// from BOTH totals" rule above forbids.
-		plannedInPrimary, convErr := s.convert(ctx, g.PlannedMonthly, primary)
-		excluded := convErr != nil
-
-		var actualInPrimary domain.Money
-		hasActual := false
-		if amt, ok := actualByGoal[g.ID]; ok && !excluded {
-			actualInPrimary, convErr = s.convert(ctx, domain.Money{Amount: amt, Currency: g.Target.Currency}, primary)
-			if convErr != nil {
-				excluded = true
-			} else {
-				hasActual = true
-			}
-		}
-
+		plannedInPrimary, actualInPrimary, hasActual, excluded := s.monthlyInPrimary(ctx, g, actualByGoal, primary)
 		if excluded {
 			excludedNoRate++
 			continue
@@ -262,15 +209,103 @@ func (s *GoalService) List(ctx context.Context, householdID string, includeArchi
 			Currency:            primary,
 			PlannedMonthlyTotal: plannedTotal,
 			ActualThisMonth:     actualTotal,
-			OnTrackCount:        onTrackCount,
-			DatedCount:          datedCount,
-			NoDateCount:         noDateCount,
+			OnTrackCount:        counts.onTrack,
+			DatedCount:          counts.dated,
+			NoDateCount:         counts.noDate,
 			ExcludedNoRate:      excludedNoRate,
-			NextGoalID:          nextGoalID,
-			NextGoalName:        nextGoalName,
-			NextGoalMonth:       nextGoalMonth,
+			NextGoalID:          counts.nextID,
+			NextGoalName:        counts.nextName,
+			NextGoalMonth:       counts.nextMonth,
 		},
 	}, nil
+}
+
+// goalCardView is one goal's card: contributed, percent, status and, for a
+// live dated goal not yet achieved, the monthly amount still required.
+func goalCardView(rec GoalRecord, today time.Time) GoalView {
+	g := rec.Goal
+	status := domain.GoalStatusFor(g, rec.ContributedMinor, today)
+	view := GoalView{
+		Goal:        g,
+		Contributed: domain.Money{Amount: rec.ContributedMinor, Currency: g.Target.Currency},
+		Percent:     domain.GoalProgressPercent(rec.ContributedMinor, g.Target.Amount),
+		Status:      status,
+	}
+	if !g.IsArchived() && g.TargetMonth != nil && status != domain.GoalAchieved {
+		monthsLeft := domain.MonthsLeftInclusive(*g.TargetMonth, today)
+		remaining := domain.GoalRemainingMinor(rec.ContributedMinor, g.Target.Amount)
+		if required, ok := domain.RequiredMonthlyMinor(remaining, monthsLeft); ok {
+			view.RequiredMonthly = domain.Money{Amount: required, Currency: g.Target.Currency}
+			view.RequiredMonthlyOK = true
+		}
+	}
+	return view
+}
+
+// View is one goal exactly as List renders its card, archived goals included,
+// for a caller that needs a single goal: a write handler answering with the
+// card it just changed, or a check that reads the goal's currency. It is one
+// repository read, where going through List would cost three and a summary
+// nobody asked for. A goal that does not exist in this household is
+// domain.ErrNotFound, GoalRepository.Get's own answer.
+func (s *GoalService) View(ctx context.Context, householdID, goalID string, today time.Time) (GoalView, error) {
+	rec, err := s.d.Goals.Get(ctx, householdID, goalID)
+	if err != nil {
+		return GoalView{}, err
+	}
+	return goalCardView(rec, today), nil
+}
+
+// goalCounts is the currency-independent half of the Goals summary: the
+// dated, no-date and on-track counts and the next goal to land. List feeds it
+// live goals only.
+type goalCounts struct {
+	onTrack, dated, noDate int
+	nextID, nextName       string
+	nextMonth              *time.Time
+}
+
+func (c *goalCounts) add(g domain.Goal, status domain.GoalStatus) {
+	switch {
+	case status == domain.GoalAchieved:
+		// In neither count -- it is not a goal to be on track for.
+	case g.TargetMonth == nil:
+		c.noDate++
+	default:
+		c.dated++
+		if status == domain.GoalOnTrack {
+			c.onTrack++
+		}
+		if c.nextID == "" || g.TargetMonth.Before(*c.nextMonth) ||
+			(g.TargetMonth.Equal(*c.nextMonth) && g.Name < c.nextName) {
+			c.nextID, c.nextName, c.nextMonth = g.ID, g.Name, g.TargetMonth
+		}
+	}
+}
+
+// monthlyInPrimary converts one goal's planned monthly figure and, if the goal
+// received anything this month, its actual figure into primary. excluded means
+// neither may be added to a total.
+//
+// Convert-then-add, per goal: the planned and actual figures share the goal's
+// one currency, so either both convert or neither does. Splitting these into
+// two independently-guarded conversions would let the two totals disagree
+// about which goals had a rate, which List's "excluded from BOTH totals" rule
+// forbids.
+func (s *GoalService) monthlyInPrimary(ctx context.Context, g domain.Goal, actualByGoal map[string]int64, primary string) (planned, actual domain.Money, hasActual, excluded bool) {
+	planned, err := s.convert(ctx, g.PlannedMonthly, primary)
+	if err != nil {
+		return domain.Money{}, domain.Money{}, false, true
+	}
+	amount, ok := actualByGoal[g.ID]
+	if !ok {
+		return planned, domain.Money{}, false, false
+	}
+	actual, err = s.convert(ctx, domain.Money{Amount: amount, Currency: g.Target.Currency}, primary)
+	if err != nil {
+		return domain.Money{}, domain.Money{}, false, true
+	}
+	return planned, actual, true, false
 }
 
 // Create validates and writes a new goal. Every check runs before the

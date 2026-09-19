@@ -19,14 +19,12 @@ func (r *MembershipRepo) List(ctx context.Context, householdID string) ([]usecas
 	}
 	views := make([]usecase.MemberView, len(rows))
 	for i, row := range rows {
+		membership, err := toMembership(row.ID, row.HouseholdID, row.UserID, row.Role, row.Capabilities)
+		if err != nil {
+			return nil, err
+		}
 		views[i] = usecase.MemberView{
-			Membership: domain.Membership{
-				ID:           uuidToString(row.ID),
-				HouseholdID:  uuidToString(row.HouseholdID),
-				UserID:       uuidToString(row.UserID),
-				Role:         toRole(row.Role),
-				Capabilities: toCapabilities(row.Capabilities),
-			},
+			Membership: membership,
 			User: domain.User{
 				ID:            uuidToString(row.UserID),
 				Email:         stringOrEmpty(row.Email),
@@ -43,13 +41,7 @@ func (r *MembershipRepo) ByUser(ctx context.Context, userID string) (domain.Memb
 	if err != nil {
 		return domain.Membership{}, translate(err, "get membership by user")
 	}
-	return domain.Membership{
-		ID:           uuidToString(row.ID),
-		HouseholdID:  uuidToString(row.HouseholdID),
-		UserID:       uuidToString(row.UserID),
-		Role:         toRole(row.Role),
-		Capabilities: toCapabilities(row.Capabilities),
-	}, nil
+	return toMembership(row.ID, row.HouseholdID, row.UserID, row.Role, row.Capabilities)
 }
 
 // Create passes m straight through to Postgres without re-checking the
@@ -70,13 +62,7 @@ func (r *MembershipRepo) Create(ctx context.Context, m domain.Membership) (domai
 	if err != nil {
 		return domain.Membership{}, translate(err, "create membership")
 	}
-	return domain.Membership{
-		ID:           uuidToString(row.ID),
-		HouseholdID:  uuidToString(row.HouseholdID),
-		UserID:       uuidToString(row.UserID),
-		Role:         toRole(row.Role),
-		Capabilities: toCapabilities(row.Capabilities),
-	}, nil
+	return toMembership(row.ID, row.HouseholdID, row.UserID, row.Role, row.Capabilities)
 }
 
 func (r *MembershipRepo) Update(ctx context.Context, householdID, membershipID string, role domain.Role, caps domain.Capabilities) error {

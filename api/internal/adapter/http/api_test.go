@@ -156,6 +156,11 @@ type testEnv struct {
 	featureFlags   usecase.FeatureFlagRepository
 	adminAudit     usecase.AdminAuditRepository
 
+	// db is the database behind every repository above. The audit port is
+	// write-only, so auditEntries and auditRowCount read admin_audit_log
+	// through it directly.
+	db *postgres.DB
+
 	// deps is the exact Deps every route in env.router was built from, kept
 	// so a test can build a second router sharing everything except one
 	// swapped-out dependency. Two callers need it: routerWithMemberships
@@ -423,6 +428,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		platformAdmins: platformAdminRepo,
 		featureFlags:   featureFlagRepo,
 		adminAudit:     adminAuditRepo,
+		db:             db,
 	}
 
 	ctx := context.Background()
@@ -590,16 +596,46 @@ func (env *testEnv) makePlatformAdmin(t *testing.T, email string) {
 	}
 }
 
-// auditRowCount reads the audit log's length through the repository. The
-// admin API's own /admin/audit route is not used here: a test that asserts on
-// auditing must not depend on a route that is itself audited.
+// auditRowCount and auditEntries read admin_audit_log straight from the
+// database. The admin API has no audit route and the audit port is
+// write-only; a test that asserts on auditing must not depend on a route that
+// is itself audited anyway.
 func (env *testEnv) auditRowCount(t *testing.T) int {
 	t.Helper()
-	entries, err := env.adminAudit.Recent(context.Background(), 1000)
-	if err != nil {
-		t.Fatalf("recent audit: %v", err)
+	var n int
+	if err := env.db.Pool().QueryRow(context.Background(), `SELECT count(*) FROM admin_audit_log`).Scan(&n); err != nil {
+		t.Fatalf("count audit rows: %v", err)
 	}
-	return len(entries)
+	return n
+}
+
+// auditEntries returns up to limit audit rows, newest first -- the order the
+// deleted AdminAuditRepository.Recent used, so a caller's "the latest row"
+// still means the request it just made.
+func (env *testEnv) auditEntries(t *testing.T, limit int) []usecase.AdminAuditEntry {
+	t.Helper()
+	rows, err := env.db.Pool().Query(context.Background(),
+		`SELECT action, target, detail FROM admin_audit_log ORDER BY created_at DESC LIMIT $1`, limit)
+	if err != nil {
+		t.Fatalf("read audit rows: %v", err)
+	}
+	defer rows.Close()
+	var out []usecase.AdminAuditEntry
+	for rows.Next() {
+		var entry usecase.AdminAuditEntry
+		var detail []byte
+		if err := rows.Scan(&entry.Action, &entry.Target, &detail); err != nil {
+			t.Fatalf("scan audit row: %v", err)
+		}
+		if err := json.Unmarshal(detail, &entry.Detail); err != nil {
+			t.Fatalf("decode audit detail %q: %v", detail, err)
+		}
+		out = append(out, entry)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read audit rows: %v", err)
+	}
+	return out
 }
 
 // signIn signs in through the public API, exactly as a browser would, and

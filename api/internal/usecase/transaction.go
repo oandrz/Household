@@ -253,6 +253,11 @@ func (s *TransactionService) validate(ctx context.Context, t *domain.Transaction
 		if t.FromAccountID == "" || t.ToAccountID == "" || t.FromAccountID == t.ToAccountID {
 			return domain.ErrTransactionAccountsInvalid
 		}
+	default:
+		// Unreachable while ParseTransactionKind above admits only these three.
+		// A fourth kind added there without a rule here must refuse rather
+		// than skip the account check it has no case for.
+		return fmt.Errorf("transaction: no account rule for kind %q: %w", t.Kind, domain.ErrUnknownTransactionKind)
 	}
 
 	// The currencies come from the accounts, never from the request.

@@ -122,7 +122,7 @@ func importServer(t *testing.T) (*fakeAPI, string, map[string]int) {
 			var body map[string]any
 			json.Unmarshal(f.bodies[len(f.bodies)-1], &body)
 			if body["description"] == "Refused" {
-				http.Error(w, `{"error":{"code":"CATEGORY_KIND_MISMATCH"}}`, 422)
+				http.Error(w, `{"error":{"code":"CATEGORY_KIND_MISMATCH"}}`, http.StatusUnprocessableEntity)
 				return
 			}
 			keys[key]++
@@ -172,8 +172,17 @@ func TestImportRunTwiceCreatesThenReplaysAndReportsRefusedRows(t *testing.T) {
 		t.Fatalf("two identical coffees must be two keys, got %v", keys)
 	}
 
+	// The refused row is still refused on the second run, so the exit code must
+	// stay 3. Unchecked, a second run that crashed before printing would leave
+	// s holding the first run's summary and fail for the wrong reason.
 	out, _, err = run_(t, url, "", "transaction", "import", file)
-	json.Unmarshal([]byte(out), &s)
+	if exitCode(t, err) != exitAPIRefused {
+		t.Fatalf("second run still has one refused row and must exit 3, got %v", err)
+	}
+	s = importSummary{}
+	if err := json.Unmarshal([]byte(out), &s); err != nil {
+		t.Fatalf("second run summary not JSON: %q", out)
+	}
 	if s.Created != 0 || s.Replayed != 2 {
 		t.Fatalf("second run must replay both good rows and create nothing: %+v", s)
 	}
@@ -226,7 +235,7 @@ func TestImportOnALapsedSessionExits2AndPostsNothing(t *testing.T) {
 	t.Setenv("HEARTH_CONFIG_DIR", t.TempDir())
 	f, srv := newFakeAPI(t)
 	f.respond = func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, `{"error":{"code":"UNAUTHENTICATED"}}`, 401)
+		http.Error(w, `{"error":{"code":"UNAUTHENTICATED"}}`, http.StatusUnauthorized)
 	}
 	st, _ := newStore(srv.URL)
 	st.save(&credentials{BaseURL: srv.URL, Session: "stale", CSRF: "c"})

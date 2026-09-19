@@ -3,58 +3,10 @@
 // owner-only to change (PATCH /notification-preferences sits behind
 // requireOwner -- these are not a per-member preference, see
 // household_handlers.go's doc comment on handleUpdateNotificationPreferences).
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiFetch } from "../../api/client";
 import { useMe } from "../auth/useAuth";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
-import {
-  notificationPreferencesSchema,
-  type NotificationPreferences,
-} from "./schemas";
-
-const preferencesQueryKey = ["notification-preferences"] as const;
-
-async function fetchPreferences(): Promise<NotificationPreferences> {
-  const body = await apiFetch<unknown>("/api/v1/notification-preferences");
-  return notificationPreferencesSchema.parse(body);
-}
-
-function usePreferences() {
-  return useQuery({ queryKey: preferencesQueryKey, queryFn: fetchPreferences });
-}
-
-// One field per call, a genuine partial PATCH -- the server applies only
-// the keys present in the body and leaves every omitted toggle untouched
-// (see notificationPreferencesRequest's pointer fields in
-// household_handlers.go), so a single toggle click never risks touching
-// the other three.
-function useUpdatePreferences() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (
-      vars: Partial<NotificationPreferences>,
-    ): Promise<NotificationPreferences> => {
-      const body = await apiFetch<unknown>("/api/v1/notification-preferences", {
-        method: "PATCH",
-        body: JSON.stringify(vars),
-      });
-      return notificationPreferencesSchema.parse(body);
-    },
-    // Returns (rather than fires-and-forgets) the invalidation promises --
-    // see CurrencyPanel.tsx's useUpdateHousehold for the identical fix and
-    // the full reasoning. Here it matters even though every toggle patches
-    // a different field: two rapid clicks on the *same* toggle (on, then
-    // off again) would otherwise both compute from the identical stale
-    // cached value once `isPending` cleared early, sending the same
-    // request twice instead of the second, intended reversal.
-    onSuccess: () => {
-      return Promise.all([
-        queryClient.invalidateQueries({ queryKey: preferencesQueryKey }),
-        queryClient.invalidateQueries({ queryKey: ["me"] }),
-      ]);
-    },
-  });
-}
+import { type NotificationPreferences } from "./schemas";
+import { usePreferences, useUpdatePreferences } from "./useNotificationPreferences";
 
 const TOGGLES: { key: keyof NotificationPreferences; label: string }[] = [
   { key: "billReminders", label: "Bill due reminders (3 days before)" },

@@ -59,9 +59,9 @@ export function VersionHistoryModal({
           {isLoading ? AGREEMENT_COPY.loading : AGREEMENT_COPY.historyEmpty}
         </p>
       ) : (
-        // The content block scrolls, not the panel -- VisionModal.tsx:665's
-        // exact shape. Do NOT reach for the design's `hb-scroll` class; it does
-        // not exist in web/src.
+        // The content block scrolls, not the panel -- the exact shape of
+        // VisionModal.tsx's own max-h-[65vh] content block. Do NOT reach for
+        // the design's `hb-scroll` class; it does not exist in web/src.
         <div className="flex max-h-[65vh] flex-col gap-1 overflow-y-auto pr-1">
           {history.length === 0 ? (
             <p className="text-xs text-muted">{AGREEMENT_COPY.historyEmpty}</p>

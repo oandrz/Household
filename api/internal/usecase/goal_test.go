@@ -759,3 +759,50 @@ func TestGoalAddContributionRefusesCrossHouseholdGoal(t *testing.T) {
 		t.Fatalf("Contributed = %d, want 50000 (unchanged) -- the attacker's contribution must not have been written at all", view.Contributed.Amount)
 	}
 }
+
+// --- View ------------------------------------------------------------------
+
+func TestGoalViewIsTheSameCardListRenders(t *testing.T) {
+	f := newGoalFixture(t)
+	today := time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC)
+	targetMonth := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
+	g := f.seedGoal(domain.Goal{
+		Name:           "Emergency fund",
+		Target:         domain.Money{Amount: 1_000_000, Currency: "SGD"},
+		TargetMonth:    &targetMonth,
+		PlannedMonthly: domain.Money{Amount: 50_000, Currency: "SGD"},
+	})
+
+	page, err := f.svc.List(context.Background(), "house-1", true, today)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	row := findGoalView(t, page.Goals, g.ID)
+	one, err := f.svc.View(context.Background(), "house-1", g.ID, today)
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	if one.Goal.ID != row.Goal.ID || one.Contributed != row.Contributed || one.Percent != row.Percent ||
+		one.Status != row.Status || one.RequiredMonthly != row.RequiredMonthly || one.RequiredMonthlyOK != row.RequiredMonthlyOK {
+		t.Fatalf("View = %+v, want List's own card %+v", one, row)
+	}
+	if !one.RequiredMonthlyOK {
+		t.Fatal("a dated goal not yet reached must carry its required monthly -- View computed nothing")
+	}
+}
+
+func TestGoalViewOfAGoalThatIsNotHereIsNotFound(t *testing.T) {
+	f := newGoalFixture(t)
+	theirs := f.seedGoal(domain.Goal{
+		HouseholdID: "house-2",
+		Name:        "Theirs",
+		Target:      domain.Money{Amount: 1000, Currency: "SGD"},
+	})
+	today := time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC)
+
+	for _, id := range []string{"no-such-goal", theirs.ID} {
+		if _, err := f.svc.View(context.Background(), "house-1", id, today); !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("View(house-1, %s) = %v, want domain.ErrNotFound", id, err)
+		}
+	}
+}

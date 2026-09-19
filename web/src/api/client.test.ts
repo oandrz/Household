@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { apiFetch, ApiError, setUnauthorizedHandler } from "./client";
+import { z } from "zod";
+import { apiFetch, ApiError, fetchAndParse, setUnauthorizedHandler } from "./client";
 
 function clearCookies() {
   document.cookie.split("; ").forEach((cookie) => {
@@ -329,5 +330,21 @@ describe("apiFetch unauthorized handling", () => {
     await apiFetch("/api/v1/admin/flags").catch(() => {});
 
     expect(handler).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("fetchAndParse", () => {
+  const categorySchema = z.object({ name: z.string() });
+
+  it("returns the body as the schema parsed it", async () => {
+    stubFetch(200, { name: "Groceries", unexpected: true });
+    await expect(fetchAndParse(categorySchema, "/api/v1/categories/1")).resolves.toEqual({
+      name: "Groceries",
+    });
+  });
+
+  it("throws when a 2xx body does not match the schema, instead of returning it mistyped", async () => {
+    stubFetch(200, { name: 42 });
+    await expect(fetchAndParse(categorySchema, "/api/v1/categories/1")).rejects.toThrow();
   });
 });

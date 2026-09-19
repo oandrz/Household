@@ -20,7 +20,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
-import { BillModal } from "./BillModal";
+import { BillModal, type BillModalMode } from "./BillModal";
 import { BillsPage } from "./BillsPage";
 import type { Bill, BillsResponse } from "./billSchemas";
 
@@ -125,14 +125,14 @@ function billFixture(overrides: Partial<Bill> = {}): Bill {
 }
 
 function renderModal(
-  props: Partial<Parameters<typeof BillModal>[0]> = {},
+  props: BillModalMode = { mode: "create" },
   extraRoutes: Record<string, RouteResponse | RouteResponse[]> = {},
 ) {
   const onClose = vi.fn();
   const onSaved = vi.fn();
   const fetchMock = stubFetchRoutes({ ...BASE_ROUTES, ...extraRoutes });
 
-  renderWithRouter(<BillModal mode="create" onClose={onClose} onSaved={onSaved} {...props} />);
+  renderWithRouter(<BillModal {...props} onClose={onClose} onSaved={onSaved} />);
 
   return { fetchMock, onClose, onSaved };
 }

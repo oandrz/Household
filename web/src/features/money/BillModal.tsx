@@ -1,7 +1,8 @@
 // The Add/Edit bill modal (design/Household Dashboard.dc.html's "ADD BILL"
 // panel) -- one modal for both, the TransactionModal.tsx pattern the task
-// brief names directly: an `isEditing` branch off a single optional `bill`
-// prop, not two components.
+// brief names directly: an `isEditing` branch, not two components. Which one
+// it is comes from the `mode` union below, which carries the bill itself in
+// edit mode.
 //
 // Owns its own useAccounts/useCategories/useHouseholdMembers calls, mounted
 // only while the modal is open (BillsPage.tsx's own conditional render), so
@@ -28,11 +29,14 @@
 // TransactionModal.tsx's own `(categories.data ?? []).filter(...)` already
 // tolerates the identical gap for the identical hook.
 import { type FormEvent, useState } from "react";
+import { Field } from "../../components/Field";
+import { FIELD_CONTROL_CLASS } from "../../components/fieldClasses";
 import { FieldPair } from "../../components/FieldPair";
 import { Modal } from "../../components/Modal";
+import { ModalActions } from "../../components/ModalActions";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { ApiError } from "../../api/client";
-import { apiErrorMessage } from "../auth/copy";
+import { apiErrorMessage } from "../../api/errorMessage";
 import type { MemberView } from "../settings/schemas";
 import { useHouseholdMembers } from "../settings/useHouseholdMembers";
 import { BILL_COPY, CADENCE_OPTIONS } from "./billCopy";
@@ -42,7 +46,8 @@ import type { Category } from "./transactionSchemas";
 import { useCategories } from "./useTransactions";
 import { useAccounts } from "./useAccounts";
 import { useCreateBill, useRestoreBill, useUpdateBill, type CreateBillBody, type UpdateBillBody } from "./useBills";
-import type { Bill } from "./billSchemas";
+import { parseEnum } from "../../lib/parseEnum";
+import { BILL_CADENCES, type Bill } from "./billSchemas";
 
 // today() reads the *local* calendar date via getFullYear/getMonth/getDate,
 // never toISOString() (which converts to UTC first) -- the same function and
@@ -59,26 +64,25 @@ function today(): string {
   return `${year}-${month}-${day}`;
 }
 
-export function BillModal({
-  mode,
-  bill,
-  onClose,
-  onSaved,
-}: {
-  mode: "create" | "edit";
-  // Present only when mode === "edit" -- BillsPage.tsx's own modalBill state
-  // is "new" | Bill | null, never "edit" paired with no bill, the identical
-  // contract GoalModal.tsx's own `goal` prop documents.
-  bill?: Bill;
+// Create mode has no bill yet; edit mode always has the one being edited. A
+// union rather than a `mode` flag beside an optional `bill` prop, so "edit
+// with no bill" cannot be written at a call site at all (BillsPage.tsx's own
+// modalBill state is "new" | Bill | null) and nothing in this file needs a
+// `bill!` to read it. GoalModal.tsx's `GoalModalMode` is the same shape.
+export type BillModalMode = { mode: "create" } | { mode: "edit"; bill: Bill };
+
+type BillModalProps = BillModalMode & {
   onClose: () => void;
   onSaved: () => void;
-}) {
-  const isEditing = mode === "edit";
+};
+
+export function BillModal(props: BillModalProps) {
+  const { onClose } = props;
   const accounts = useAccounts(false);
   const categories = useCategories();
   const members = useHouseholdMembers();
 
-  const title = isEditing ? BILL_COPY.editBillModalTitle : BILL_COPY.addBillModalTitle;
+  const title = props.mode === "edit" ? BILL_COPY.editBillModalTitle : BILL_COPY.addBillModalTitle;
 
   // Loading and failed are two states, not one. `!accounts.data` alone meant
   // a failed GET /accounts rendered "Loading…" for as long as the modal
@@ -109,13 +113,10 @@ export function BillModal({
 
   return (
     <BillModalForm
-      mode={mode}
-      bill={bill}
+      {...props}
       accounts={accounts.data.accounts}
       categories={categories.data ?? []}
       members={members.data ?? []}
-      onClose={onClose}
-      onSaved={onSaved}
     />
   );
 }
@@ -123,24 +124,18 @@ export function BillModal({
 // Split from BillModal so every field's `useState(() => ...)` initialiser --
 // which reads `accounts`/`bill` -- runs exactly once, the moment
 // `accounts.data` first exists. See this file's own header comment for why.
-function BillModalForm({
-  mode,
-  bill,
-  accounts,
-  categories,
-  members,
-  onClose,
-  onSaved,
-}: {
-  mode: "create" | "edit";
-  bill?: Bill;
-  accounts: Account[];
-  categories: Category[];
-  members: MemberView[];
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const isEditing = mode === "edit";
+function BillModalForm(
+  props: BillModalProps & {
+    accounts: Account[];
+    categories: Category[];
+    members: MemberView[];
+  },
+) {
+  const { accounts, categories, members, onClose, onSaved } = props;
+  // The bill being edited, or null while creating -- read once from the
+  // `mode` union, so every use of it below is checked by the compiler.
+  const bill = props.mode === "edit" ? props.bill : null;
+  const isEditing = bill !== null;
   const createBill = useCreateBill();
   const updateBill = useUpdateBill();
   const restoreBill = useRestoreBill();
@@ -156,7 +151,7 @@ function BillModalForm({
   // touched the date into a save that un-settles the bill with a due date
   // the household never chose. Editing must start from what the bill
   // actually has (blank, for a settled one), not from a fabricated default;
-  // only a brand-new bill (bill === undefined) gets today() as a sensible
+  // only a brand-new bill (bill === null) gets today() as a sensible
   // starting point.
   const [nextDueInput, setNextDueInput] = useState(bill ? (bill.nextDue ?? "") : today());
   const [categoryId, setCategoryId] = useState(bill?.categoryId ?? "");
@@ -186,7 +181,7 @@ function BillModalForm({
   // own choice of a different-currency account silently reinterpret an
   // already-typed amount under a currency the household never saw.
   const currentAccount = accounts.find((a) => a.id === payFromAccountId);
-  const currency = isEditing ? bill!.currency : (currentAccount?.balance?.currency ?? "");
+  const currency = bill ? bill.currency : (currentAccount?.balance?.currency ?? "");
 
   // Required unless editing a bill that is already settled (a paid one-off
   // with no next occurrence -- nextDue === null). createBillRequest has no
@@ -195,7 +190,7 @@ function BillModalForm({
   // patch that never touches a settled bill's date must stay free to leave it
   // settled -- forcing a date here would mean the only way to rename a
   // settled bill is to also give it a new due date.
-  const nextDueRequired = !isEditing || bill!.nextDue !== null;
+  const nextDueRequired = bill === null || bill.nextDue !== null;
 
   // Bills only ever produce expense transactions (decision 1: "a bill is an
   // actual payment to an actual company"), so this filters the same way
@@ -227,7 +222,7 @@ function BillModalForm({
     const trimmedName = name.trim();
     setIsSaving(true);
     try {
-      if (isEditing) {
+      if (bill) {
         // Every field but category/payer/date/pay-from is safe to resend
         // unconditionally: none of name/amountMinor/cadence/autopay/
         // isSubscription is a derived figure this form could restate wrongly
@@ -254,7 +249,7 @@ function BillModalForm({
         // bill" -- including an edit that only changed the name. The currency
         // check runs first, so a household whose archived account was its only
         // one in that currency could never edit that bill again.
-        if (payFromAccountId !== bill!.payFromAccountId) {
+        if (payFromAccountId !== bill.payFromAccountId) {
           body.payFromAccountId = payFromAccountId;
         }
         if (nextDueInput.trim() !== "") {
@@ -274,9 +269,7 @@ function BillModalForm({
         } else {
           body.paidByMembershipId = paidByMembershipId;
         }
-        // mode === "edit" guarantees the caller passed `bill` (this
-        // component's own contract, documented on the prop above).
-        await updateBill.mutateAsync({ id: bill!.id, body });
+        await updateBill.mutateAsync({ id: bill.id, body });
       } else {
         const body: CreateBillBody = {
           name: trimmedName,
@@ -340,10 +333,7 @@ function BillModalForm({
     <Modal open onClose={onClose} title={isEditing ? BILL_COPY.editBillModalTitle : BILL_COPY.addBillModalTitle}>
       <form className="flex flex-col gap-4" onSubmit={handleSave}>
         <FieldPair>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="bill-modal-name" className="text-xs font-semibold text-label">
-              {BILL_COPY.billNameLabel}
-            </label>
+          <Field label={BILL_COPY.billNameLabel} htmlFor="bill-modal-name">
             <input
               id="bill-modal-name"
               type="text"
@@ -351,18 +341,11 @@ function BillModalForm({
               value={name}
               onChange={(event) => setName(event.target.value)}
               placeholder={BILL_COPY.billNamePlaceholder}
-              // min-h-11/sm:min-h-0 on every field in this modal:
-              // TransactionFilters.tsx's own SELECT_CLASS comment has the
-              // measured reason py-2.5 alone falls short of the 44px floor
-              // on a phone.
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              className={FIELD_CONTROL_CLASS}
             />
-          </div>
+          </Field>
 
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="bill-modal-amount" className="text-xs font-semibold text-label">
-              {BILL_COPY.amountLabel}
-            </label>
+          <Field label={BILL_COPY.amountLabel} htmlFor="bill-modal-amount">
             <input
               id="bill-modal-amount"
               type="text"
@@ -370,9 +353,9 @@ function BillModalForm({
               required
               value={amountInput}
               onChange={(event) => setAmountInput(event.target.value)}
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              className={FIELD_CONTROL_CLASS}
             />
-          </div>
+          </Field>
         </FieldPair>
 
         {amountError && (
@@ -382,15 +365,12 @@ function BillModalForm({
         )}
 
         <FieldPair>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="bill-modal-cadence" className="text-xs font-semibold text-label">
-              {BILL_COPY.repeatsLabel}
-            </label>
+          <Field label={BILL_COPY.repeatsLabel} htmlFor="bill-modal-cadence">
             <select
               id="bill-modal-cadence"
               value={cadence}
-              onChange={(event) => setCadence(event.target.value as CreateBillBody["cadence"])}
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              onChange={(event) => setCadence(parseEnum(event.target.value, BILL_CADENCES, cadence))}
+              className={FIELD_CONTROL_CLASS}
             >
               {CADENCE_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -398,38 +378,27 @@ function BillModalForm({
                 </option>
               ))}
             </select>
-          </div>
+          </Field>
 
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="bill-modal-next-due" className="text-xs font-semibold text-label">
-              {BILL_COPY.nextDueLabel}
-            </label>
+          <Field label={BILL_COPY.nextDueLabel} htmlFor="bill-modal-next-due" error={nextDueError}>
             <input
               id="bill-modal-next-due"
               type="date"
               required={nextDueRequired}
               value={nextDueInput}
               onChange={(event) => setNextDueInput(event.target.value)}
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              className={FIELD_CONTROL_CLASS}
             />
-            {nextDueError && (
-              <p role="alert" className="text-xs leading-snug text-danger">
-                {nextDueError}
-              </p>
-            )}
-          </div>
+          </Field>
         </FieldPair>
 
         <FieldPair>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="bill-modal-category" className="text-xs font-semibold text-label">
-              {BILL_COPY.categoryLabel}
-            </label>
+          <Field label={BILL_COPY.categoryLabel} htmlFor="bill-modal-category">
             <select
               id="bill-modal-category"
               value={categoryId}
               onChange={(event) => setCategoryId(event.target.value)}
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              className={FIELD_CONTROL_CLASS}
             >
               <option value="">{BILL_COPY.noCategoryOption}</option>
               {/* Only reachable if the bill's own category has since been
@@ -448,18 +417,15 @@ function BillModalForm({
                 </option>
               ))}
             </select>
-          </div>
+          </Field>
 
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="bill-modal-pay-from" className="text-xs font-semibold text-label">
-              {BILL_COPY.payFromLabel}
-            </label>
+          <Field label={BILL_COPY.payFromLabel} htmlFor="bill-modal-pay-from">
             <select
               id="bill-modal-pay-from"
               required
               value={payFromAccountId}
               onChange={(event) => setPayFromAccountId(event.target.value)}
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              className={FIELD_CONTROL_CLASS}
             >
               {/* Same reasoning as Category above, for the identical case:
                   the bill's own pay-from account has since been archived.
@@ -475,18 +441,15 @@ function BillModalForm({
                 </option>
               ))}
             </select>
-          </div>
+          </Field>
         </FieldPair>
 
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="bill-modal-paid-by" className="text-xs font-semibold text-label">
-            {BILL_COPY.paidByLabel}
-          </label>
+        <Field label={BILL_COPY.paidByLabel} htmlFor="bill-modal-paid-by">
           <select
             id="bill-modal-paid-by"
             value={paidByMembershipId}
             onChange={(event) => setPaidByMembershipId(event.target.value)}
-            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+            className={FIELD_CONTROL_CLASS}
           >
             <option value="">{BILL_COPY.unassignedPayer}</option>
             {members.map((m) => (
@@ -495,7 +458,7 @@ function BillModalForm({
               </option>
             ))}
           </select>
-        </div>
+        </Field>
 
         <div className="flex items-center justify-between rounded-[10px] border border-hairline px-3.5 py-2.5">
           <div>
@@ -538,22 +501,13 @@ function BillModalForm({
           </div>
         )}
 
-        <div className="mt-1 flex gap-2.5">
-          <button
-            type="button"
-            onClick={onClose}
-            className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label sm:min-h-0"
-          >
-            {BILL_COPY.cancelAction}
-          </button>
-          <button
-            type="submit"
-            disabled={isSaving}
-            className="min-h-11 flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
-          >
-            {isEditing ? BILL_COPY.saveBillSubmit : BILL_COPY.addBillSubmit}
-          </button>
-        </div>
+        <ModalActions
+          secondaryLabel={BILL_COPY.cancelAction}
+          onSecondary={onClose}
+          primaryLabel={isEditing ? BILL_COPY.saveBillSubmit : BILL_COPY.addBillSubmit}
+          primaryType="submit"
+          primaryDisabled={isSaving}
+        />
       </form>
     </Modal>
   );

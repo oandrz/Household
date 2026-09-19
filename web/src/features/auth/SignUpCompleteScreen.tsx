@@ -12,7 +12,8 @@
 import { type FormEvent, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { ApiError } from "../../api/client";
-import { apiErrorMessage } from "./copy";
+import { apiErrorMessage } from "../../api/errorMessage";
+import { Field } from "../../components/Field";
 import { type Currency, type SignUpPreview } from "./schemas";
 import { useCompleteSignUp, useCurrencies, useSignUpPreview } from "./useAuth";
 
@@ -186,10 +187,7 @@ function CompleteSignUpForm({
       </p>
 
       <form className="flex flex-col gap-3.5" onSubmit={handleSubmit}>
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="sign-up-household-name" className="text-xs font-semibold text-label">
-            Household name
-          </label>
+        <Field label="Household name" htmlFor="sign-up-household-name">
           <input
             id="sign-up-household-name"
             type="text"
@@ -201,12 +199,9 @@ function CompleteSignUpForm({
           <p className="text-[11px] text-muted">
             Shown at the bottom of the sidebar, beside your name. Change it any time.
           </p>
-        </div>
+        </Field>
 
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="sign-up-currency" className="text-xs font-semibold text-label">
-            Primary currency
-          </label>
+        <Field label="Primary currency" htmlFor="sign-up-currency">
           <select
             id="sign-up-currency"
             required
@@ -237,12 +232,9 @@ function CompleteSignUpForm({
               </optgroup>
             )}
           </select>
-        </div>
+        </Field>
 
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="sign-up-name" className="text-xs font-semibold text-label">
-            Your name
-          </label>
+        <Field label="Your name" htmlFor="sign-up-name">
           <input
             id="sign-up-name"
             type="text"
@@ -252,7 +244,7 @@ function CompleteSignUpForm({
             onChange={(event) => setDisplayName(event.target.value)}
             className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
           />
-        </div>
+        </Field>
 
         <div className="flex flex-col gap-1.5">
           {channel === "email" ? (

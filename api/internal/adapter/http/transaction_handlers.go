@@ -2,6 +2,7 @@ package httpadapter
 
 import (
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"time"
@@ -54,6 +55,22 @@ var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]
 
 func isValidUUID(s string) bool {
 	return uuidPattern.MatchString(s)
+}
+
+// parseOptionalUUIDFilter reads one optional id filter from the query string.
+// Absent is fine and answers ""; present but malformed is refused with 422
+// and the caller's own code and message, because each filter names a
+// different thing the screen has to point at.
+func parseOptionalUUIDFilter(w http.ResponseWriter, q url.Values, param, code, message string) (string, bool) {
+	raw := q.Get(param)
+	if raw == "" {
+		return "", true
+	}
+	if !isValidUUID(raw) {
+		WriteError(w, http.StatusUnprocessableEntity, code, message, nil)
+		return "", false
+	}
+	return raw, true
 }
 
 type transactionDTO struct {
@@ -208,29 +225,18 @@ func parseTransactionFilter(w http.ResponseWriter, r *http.Request) (usecase.Tra
 	// TransactionRepository.List fail closed on a bad id for exactly this
 	// filter set; this is the second line of defence in front of it, and the
 	// one that can actually tell the caller what was wrong.
-	if raw := q.Get("account_id"); raw != "" {
-		if !isValidUUID(raw) {
-			WriteError(w, http.StatusUnprocessableEntity, "INVALID_ACCOUNT_FILTER",
-				"That account id could not be read.", nil)
-			return usecase.TransactionFilter{}, time.Time{}, false
-		}
-		filter.AccountID = raw
+	var ok bool
+	if filter.AccountID, ok = parseOptionalUUIDFilter(w, q, "account_id",
+		"INVALID_ACCOUNT_FILTER", "That account id could not be read."); !ok {
+		return usecase.TransactionFilter{}, time.Time{}, false
 	}
-	if raw := q.Get("category_id"); raw != "" {
-		if !isValidUUID(raw) {
-			WriteError(w, http.StatusUnprocessableEntity, "INVALID_CATEGORY_FILTER",
-				"That category id could not be read.", nil)
-			return usecase.TransactionFilter{}, time.Time{}, false
-		}
-		filter.CategoryID = raw
+	if filter.CategoryID, ok = parseOptionalUUIDFilter(w, q, "category_id",
+		"INVALID_CATEGORY_FILTER", "That category id could not be read."); !ok {
+		return usecase.TransactionFilter{}, time.Time{}, false
 	}
-	if raw := q.Get("paid_by"); raw != "" {
-		if !isValidUUID(raw) {
-			WriteError(w, http.StatusUnprocessableEntity, "INVALID_PAID_BY_FILTER",
-				"That member id could not be read.", nil)
-			return usecase.TransactionFilter{}, time.Time{}, false
-		}
-		filter.PaidByMembershipID = raw
+	if filter.PaidByMembershipID, ok = parseOptionalUUIDFilter(w, q, "paid_by",
+		"INVALID_PAID_BY_FILTER", "That member id could not be read."); !ok {
+		return usecase.TransactionFilter{}, time.Time{}, false
 	}
 
 	// The default month applies to BOTH halves of this response. Setting only

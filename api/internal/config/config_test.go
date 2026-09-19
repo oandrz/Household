@@ -1,6 +1,8 @@
 package config_test
 
 import (
+	"net/netip"
+	"slices"
 	"testing"
 
 	"github.com/andreasoentoro/hearth/api/internal/config"
@@ -14,6 +16,47 @@ func setRequiredEnv(t *testing.T) {
 	t.Setenv("SMTP_ADDR", "localhost:1025")
 	t.Setenv("SMTP_FROM", "Hearth <noreply@hearth.localhost>")
 	t.Setenv("APP_BASE_URL", "http://localhost:5173")
+}
+
+func TestLoadTrustsNoProxyWhenTrustedProxyCIDRsIsUnset(t *testing.T) {
+	setRequiredEnv(t)
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.TrustedProxies) != 0 {
+		t.Fatalf("TrustedProxies = %v, want none", cfg.TrustedProxies)
+	}
+}
+
+func TestLoadReadsTrustedProxyCIDRs(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("TRUSTED_PROXY_CIDRS", "172.28.0.0/16, 10.0.0.5/32")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := []netip.Prefix{netip.MustParsePrefix("172.28.0.0/16"), netip.MustParsePrefix("10.0.0.5/32")}
+	if !slices.Equal(cfg.TrustedProxies, want) {
+		t.Fatalf("TrustedProxies = %v, want %v", cfg.TrustedProxies, want)
+	}
+}
+
+// A value that cannot be read refuses the boot rather than being skipped: a
+// skipped entry would leave nginx keyed as one client, one rate-limit bucket
+// for everyone, with nothing pointing back at the .env line.
+func TestLoadRefusesAnUnusableTrustedProxyCIDR(t *testing.T) {
+	for _, raw := range []string{"172.28.0.0", "not-a-cidr", "172.28.0.0/16,", "172.28.0.0/33"} {
+		t.Run(raw, func(t *testing.T) {
+			setRequiredEnv(t)
+			t.Setenv("TRUSTED_PROXY_CIDRS", raw)
+			if _, err := config.Load(); err == nil {
+				t.Fatalf("Load accepted TRUSTED_PROXY_CIDRS=%q", raw)
+			}
+		})
+	}
 }
 
 func TestLoadReadsEnvironment(t *testing.T) {

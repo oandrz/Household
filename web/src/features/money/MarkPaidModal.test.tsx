@@ -311,7 +311,7 @@ describe("MarkPaidModal", () => {
     // synchronously, before mutateAsync's promise (and the onSuccess ->
     // invalidateBillsAndLedger -> refetch chain it awaits) has settled.
     // Waiting for the row to show its plain trigger again instead proves the
-    // FULL chain landed: `finally` only resets confirmingPaymentId once
+    // FULL chain landed: useConfirmAction's `finally` only closes the confirm pair once
     // mutateAsync itself resolves, which is after that refetch -- and it is
     // handleConfirmUndo's own explicit clearUndoErrors() call that clears the
     // stale refusal, not a derived effect (BillsPage.tsx's own comment

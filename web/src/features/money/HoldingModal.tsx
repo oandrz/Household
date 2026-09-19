@@ -9,10 +9,12 @@
 // same reason a database CHECK and a Go parser both exist.
 import { useState, type FormEvent } from "react";
 import { ApiError } from "../../api/client";
+import { FIELD_CONTROL_CLASS } from "../../components/fieldClasses";
 import { Modal } from "../../components/Modal";
 import { useAccounts } from "./useAccounts";
 import type { CreateHoldingBody, UpdateHoldingBody } from "./useHoldings";
-import type { Holding, InstrumentKind } from "./holdingSchemas";
+import { parseEnum } from "../../lib/parseEnum";
+import { instrumentKindSchema, type Holding, type InstrumentKind } from "./holdingSchemas";
 
 type Mutation<TBody> = {
   mutateAsync: (input: TBody) => Promise<unknown>;
@@ -84,7 +86,7 @@ export function HoldingModal({
           <label className="flex flex-1 min-w-[9rem] flex-col gap-1.5">
             <span className="text-xs font-semibold text-label">Account</span>
             <select
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              className={FIELD_CONTROL_CLASS}
               value={accountId}
               onChange={(e) => setAccountId(e.target.value)}
               required
@@ -108,7 +110,7 @@ export function HoldingModal({
         <label className="flex flex-1 min-w-[9rem] flex-col gap-1.5">
           <span className="text-xs font-semibold text-label">Name</span>
           <input
-            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+            className={FIELD_CONTROL_CLASS}
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="D05, Gold bar, …"
@@ -119,9 +121,9 @@ export function HoldingModal({
         <label className="flex flex-1 min-w-[9rem] flex-col gap-1.5">
           <span className="text-xs font-semibold text-label">Kind</span>
           <select
-            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+            className={FIELD_CONTROL_CLASS}
             value={instrument}
-            onChange={(e) => onInstrumentChange(e.target.value as InstrumentKind)}
+            onChange={(e) => onInstrumentChange(parseEnum(e.target.value, instrumentKindSchema.options, instrument))}
           >
             {INSTRUMENTS.map((i) => (
               <option key={i.value} value={i.value}>
@@ -134,7 +136,7 @@ export function HoldingModal({
         <label className="flex flex-1 min-w-[9rem] flex-col gap-1.5">
           <span className="text-xs font-semibold text-label">Counted in</span>
           <input
-            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+            className={FIELD_CONTROL_CLASS}
             value={unit}
             onChange={(e) => setUnit(e.target.value)}
             placeholder="share, gram, unit"

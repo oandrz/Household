@@ -9,7 +9,7 @@
 // retried 503 would be four audit rows per failed page load and several
 // seconds of spinner before the unavailability copy ever appeared.
 import { useQuery } from "@tanstack/react-query";
-import { apiFetch } from "../../api/client";
+import { fetchAndParse } from "../../api/client";
 import {
   adminMailListSchema,
   adminMailMessageSchema,
@@ -17,35 +17,33 @@ import {
   type AdminMailMessage,
 } from "./adminOutboxSchemas";
 
-// The service's own clamps, mirrored so the page can say "showing the newest
-// 50" without a round trip. They must match usecase/admin_outbox.go.
+// The service's own default page size, mirrored so the page can say "showing
+// the newest 50" without a round trip. It must match usecase/admin_outbox.go.
 export const OUTBOX_DEFAULT_LIMIT = 50;
-export const OUTBOX_MAX_LIMIT = 200;
 
 export function adminMailPath(limit: number): string {
   return `/api/v1/admin/mail?limit=${String(limit)}`;
 }
 
-export function adminMailKey(limit: number) {
+function adminMailKey(limit: number) {
   return ["admin", "mail", { limit }] as const;
 }
 
-export function adminMailMessageKey(messageId: string) {
+function adminMailMessageKey(messageId: string) {
   return ["admin", "mail", "message", messageId] as const;
 }
 
 async function fetchAdminMail(limit: number): Promise<AdminMailList> {
-  const body = await apiFetch<unknown>(adminMailPath(limit));
-  return adminMailListSchema.parse(body);
+  return fetchAndParse(adminMailListSchema, adminMailPath(limit));
 }
 
 async function fetchAdminMailMessage(
   messageId: string,
 ): Promise<AdminMailMessage> {
-  const body = await apiFetch<unknown>(
+  return fetchAndParse(
+    adminMailMessageSchema,
     `/api/v1/admin/mail/${encodeURIComponent(messageId)}`,
   );
-  return adminMailMessageSchema.parse(body);
 }
 
 export function useAdminMail(limit: number) {

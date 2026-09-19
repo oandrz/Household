@@ -9,7 +9,7 @@ import { useState } from "react";
 import { RETRO_COPY, monthYearLabel } from "./retroCopy";
 import type { RetroSummary } from "./retroSchemas";
 
-export type RetroHistoryListProps = {
+type RetroHistoryListProps = {
   summaries: RetroSummary[];
   onSelect: (month: string) => void;
   selectedMonth: string | null;

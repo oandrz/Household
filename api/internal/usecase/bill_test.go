@@ -994,7 +994,7 @@ func TestMarkPaidWritesTheExpenseInTheAccountsCurrency(t *testing.T) {
 	repo.add(billOn("Arisan", "IDR", "2026-08-15", 50_000_000))
 
 	if _, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
-		HouseholdID: "h1", BillID: "bill-1", AmountMinor: 50_000_000, PaidOn: day("2026-08-15"),
+		HouseholdID: "h1", BillID: "bill-1", AmountMinor: int64Ptr(50_000_000), PaidOn: day("2026-08-15"),
 	}); err != nil {
 		t.Fatalf("MarkPaid: %v", err)
 	}
@@ -1015,7 +1015,7 @@ func TestMarkPaidAdvancesNextDueByTheCadenceFromTheDueDate(t *testing.T) {
 
 	// Paid three days late.
 	if _, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
-		HouseholdID: "h1", BillID: "bill-1", AmountMinor: 14230, PaidOn: day("2026-08-11"),
+		HouseholdID: "h1", BillID: "bill-1", AmountMinor: int64Ptr(14230), PaidOn: day("2026-08-11"),
 	}); err != nil {
 		t.Fatalf("MarkPaid: %v", err)
 	}
@@ -1046,7 +1046,7 @@ func TestMarkPaidAdvancesNextDueFromTheDueDateAcrossAMonthBoundary(t *testing.T)
 	repo.add(bill("Rent", "2026-08-28", 250000)) // monthly, anchor 28
 
 	if _, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
-		HouseholdID: "h1", BillID: "bill-1", AmountMinor: 250000, PaidOn: day("2026-09-02"),
+		HouseholdID: "h1", BillID: "bill-1", AmountMinor: int64Ptr(250000), PaidOn: day("2026-09-02"),
 	}); err != nil {
 		t.Fatalf("MarkPaid: %v", err)
 	}
@@ -1061,7 +1061,7 @@ func TestMarkPaidSettlesAOneOffWithNoNextDate(t *testing.T) {
 	repo.add(oneOff("Renew passport", "2026-08-20", 7000))
 
 	if _, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
-		HouseholdID: "h1", BillID: "bill-1", AmountMinor: 7000, PaidOn: day("2026-08-20"),
+		HouseholdID: "h1", BillID: "bill-1", AmountMinor: int64Ptr(7000), PaidOn: day("2026-08-20"),
 	}); err != nil {
 		t.Fatalf("MarkPaid: %v", err)
 	}
@@ -1085,7 +1085,7 @@ func TestMarkPaidSettlesAOneOffAsNeitherDueSoonNorLater(t *testing.T) {
 	repo.add(oneOff("Renew passport", "2026-08-20", 7000))
 
 	if _, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
-		HouseholdID: "h1", BillID: "bill-1", AmountMinor: 7000, PaidOn: day("2026-08-20"),
+		HouseholdID: "h1", BillID: "bill-1", AmountMinor: int64Ptr(7000), PaidOn: day("2026-08-20"),
 	}); err != nil {
 		t.Fatalf("MarkPaid: %v", err)
 	}
@@ -1135,7 +1135,7 @@ func TestMarkPaidRefusesAnArchivedBill(t *testing.T) {
 	repo.add(archivedBill(bill("Old gym", "2026-08-02", 8000)))
 
 	_, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
-		HouseholdID: "h1", BillID: "bill-1", AmountMinor: 8000, PaidOn: day("2026-08-09"),
+		HouseholdID: "h1", BillID: "bill-1", AmountMinor: int64Ptr(8000), PaidOn: day("2026-08-09"),
 	})
 	markPaidReason(t, err, domain.BillArchived)
 }
@@ -1146,7 +1146,7 @@ func TestMarkPaidRefusesAnArchivedPayFromAccount(t *testing.T) {
 	repo.add(bill("SP utilities", "2026-08-08", 14230))
 
 	_, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
-		HouseholdID: "h1", BillID: "bill-1", AmountMinor: 14230, PaidOn: day("2026-08-09"),
+		HouseholdID: "h1", BillID: "bill-1", AmountMinor: int64Ptr(14230), PaidOn: day("2026-08-09"),
 	})
 	markPaidReason(t, err, domain.PayFromAccountArchived)
 }
@@ -1159,7 +1159,7 @@ func TestMarkPaidRefusesASettledOneOff(t *testing.T) {
 	repo.add(settled)
 
 	_, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
-		HouseholdID: "h1", BillID: "bill-1", AmountMinor: 7000, PaidOn: day("2026-08-25"),
+		HouseholdID: "h1", BillID: "bill-1", AmountMinor: int64Ptr(7000), PaidOn: day("2026-08-25"),
 	})
 	markPaidReason(t, err, domain.BillSettled)
 }
@@ -1176,10 +1176,90 @@ func TestMarkPaidRefusesANonPositiveAmount(t *testing.T) {
 
 	for _, amount := range []int64{0, -100} {
 		_, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
-			HouseholdID: "h1", BillID: "bill-1", AmountMinor: amount, PaidOn: day("2026-08-08"),
+			HouseholdID: "h1", BillID: "bill-1", AmountMinor: int64Ptr(amount), PaidOn: day("2026-08-08"),
 		})
 		if !errors.Is(err, domain.ErrBillAmountNotPositive) {
 			t.Fatalf("MarkPaid(amount=%d) = %v, want domain.ErrBillAmountNotPositive", amount, err)
+		}
+	}
+}
+
+func int64Ptr(v int64) *int64 { return &v }
+
+// TestMarkPaidWithNoAmountPaysTheBillsOwnAmount pins where the default lives:
+// a caller that sends no amount pays the figure stored on the bill, decided
+// once in the service so the web modal, the CLI and the chat bot cannot each
+// work it out differently.
+func TestMarkPaidWithNoAmountPaysTheBillsOwnAmount(t *testing.T) {
+	repo := &fakeBillRepo{}
+	svc := newBillService(t, repo)
+	repo.add(bill("SP utilities", "2026-08-08", 14230))
+
+	if _, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
+		HouseholdID: "h1", BillID: "bill-1", PaidOn: day("2026-08-08"),
+	}); err != nil {
+		t.Fatalf("MarkPaid: %v", err)
+	}
+	if got := repo.lastWrite.AmountMinor; got != 14230 {
+		t.Fatalf("paid %d, want the bill's own 14230", got)
+	}
+}
+
+// The other half: a caller's amount wins over the bill's, because this
+// month's utility bill is rarely last month's figure.
+func TestMarkPaidWithAnAmountPaysThatAmount(t *testing.T) {
+	repo := &fakeBillRepo{}
+	svc := newBillService(t, repo)
+	repo.add(bill("SP utilities", "2026-08-08", 14230))
+
+	if _, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
+		HouseholdID: "h1", BillID: "bill-1", AmountMinor: int64Ptr(15990), PaidOn: day("2026-08-08"),
+	}); err != nil {
+		t.Fatalf("MarkPaid: %v", err)
+	}
+	if got := repo.lastWrite.AmountMinor; got != 15990 {
+		t.Fatalf("paid %d, want the caller's 15990", got)
+	}
+}
+
+// --- View ------------------------------------------------------------------
+
+func TestBillViewIsTheSameRowListRenders(t *testing.T) {
+	repo := &fakeBillRepo{}
+	svc := newBillService(t, repo)
+	repo.add(bill("SP utilities", "2026-08-08", 14230))
+	today := day("2026-08-06")
+
+	page, err := svc.List(context.Background(), "h1", true, today)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	one, err := svc.View(context.Background(), "h1", "bill-1", today)
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	row := page.Bills[0]
+	if one.Bill.ID != row.Bill.ID || one.Bill.Amount != row.Bill.Amount ||
+		one.CategoryName != row.CategoryName || one.AccountName != row.AccountName ||
+		one.Overdue != row.Overdue || one.DueSoon != row.DueSoon || one.Settled != row.Settled {
+		t.Fatalf("View = %+v, want List's own row %+v", one, row)
+	}
+	if !one.DueSoon {
+		t.Fatal("a bill due in two days must be DueSoon -- View computed nothing")
+	}
+}
+
+func TestBillViewOfABillThatIsNotHereIsNotFound(t *testing.T) {
+	repo := &fakeBillRepo{}
+	svc := newBillService(t, repo)
+	repo.add(bill("SP utilities", "2026-08-08", 14230))
+
+	for _, tc := range []struct{ household, billID string }{
+		{"h1", "no-such-bill"},
+		{"another-household", "bill-1"},
+	} {
+		if _, err := svc.View(context.Background(), tc.household, tc.billID, day("2026-08-06")); !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("View(%s, %s) = %v, want domain.ErrNotFound", tc.household, tc.billID, err)
 		}
 	}
 }

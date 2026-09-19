@@ -9,7 +9,10 @@
 // renders it only while it is open rather than keeping it mounted behind
 // `open={false}`: unmounting is the only way back to a writable send button.
 import { useId, useState } from "react";
+import { Field } from "../../components/Field";
+import { FIELD_CONTROL_CLASS } from "../../components/fieldClasses";
 import { Modal } from "../../components/Modal";
+import { ModalActions } from "../../components/ModalActions";
 import { ApiError } from "../../api/client";
 import { AGREEMENT_COPY } from "./agreementCopy";
 import { handleWriteError, useAgreements } from "./useAgreements";
@@ -41,8 +44,7 @@ const TEXTAREA_CLASS =
 // 500 characters). SignInScreen.tsx:231 records the same defect measured in a
 // real browser -- one long currency option held the sign-up card at 428px on a
 // 375px phone and the page scrolled sideways.
-const SELECT_CLASS =
-  "min-h-11 w-full min-w-0 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0";
+const SELECT_CLASS = `${FIELD_CONTROL_CLASS} w-full min-w-0`;
 
 export function ProposeAgreementModal({
   seed,
@@ -123,8 +125,8 @@ export function ProposeAgreementModal({
   const [error, setError] = useState<string | null>(null);
   // One-way, component-local, set from err.code -- never useAgreements' own
   // state, which clears on the next background refetch and would re-enable
-  // Send over wording that has since moved. RetroModal.tsx:101 and
-  // VisionModal.tsx:470 are the same latch for the same defect: once true it
+  // Send over wording that has since moved. useRetroDraft.ts and
+  // useVisionDraft.ts hold the same `hadConflict` latch for the same defect: once true it
   // never goes false again for this mount's life, and the way back is closing
   // the modal, which unmounts this component and its draft together.
   const [hadConflict, setHadConflict] = useState(false);
@@ -204,7 +206,7 @@ export function ProposeAgreementModal({
       <form
         className="flex flex-col gap-4"
         onSubmit={(event) => {
-          // The form submits nothing. RetroModal.tsx:355-365 is the same guard
+          // The form submits nothing. RetroModal.tsx's own form onSubmit is the same guard
           // for the same reason: a `type="submit"` once let Enter anywhere in
           // a form finish a retro. Enter here would send a proposal both
           // owners then have to live with.
@@ -221,7 +223,7 @@ export function ProposeAgreementModal({
               a styled stand-in, which is the shape that shipped
               keyboard-invisible focus in TransactionsPage's Kind filter
               (docs/LEARNING.md pattern 3) with every unit test green, because
-              fireEvent.click never presses a key. RetroModal.tsx:400-413 is
+              fireEvent.click never presses a key. RetroModal.tsx's mood picker is
               the corrected shape this copies. */}
           <div role="radiogroup" aria-labelledby={modeLegendId} className="flex gap-1">
             {MODES.map((option) => (
@@ -245,15 +247,14 @@ export function ProposeAgreementModal({
         </div>
 
         {mode === "add" && (
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-center justify-between gap-3">
-              <label htmlFor={sectionSelectId} className={LABEL_CLASS}>
-                {AGREEMENT_COPY.addSectionLabel}
-              </label>
-              {/* Opens New section from inside this one. The page closes this
-                  modal before opening that one -- nothing here stacks
-                  <dialog>s -- and hands the new section straight back as a
-                  fresh seed. */}
+          <Field
+            label={AGREEMENT_COPY.addSectionLabel}
+            htmlFor={sectionSelectId}
+            labelAside={
+              // Opens New section from inside this one. The page closes this
+              // modal before opening that one -- nothing here stacks
+              // <dialog>s -- and hands the new section straight back as a
+              // fresh seed.
               <button
                 type="button"
                 onClick={onOpenNewSection}
@@ -261,7 +262,8 @@ export function ProposeAgreementModal({
               >
                 {AGREEMENT_COPY.newSectionLink}
               </button>
-            </div>
+            }
+          >
             <select
               id={sectionSelectId}
               value={sectionId}
@@ -274,16 +276,14 @@ export function ProposeAgreementModal({
                 </option>
               ))}
             </select>
-          </div>
+          </Field>
         )}
 
         {mode !== "add" && (
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor={targetSelectId} className={LABEL_CLASS}>
-              {mode === "edit"
-                ? AGREEMENT_COPY.editTargetLabel
-                : AGREEMENT_COPY.removeTargetLabel}
-            </label>
+          <Field
+            label={mode === "edit" ? AGREEMENT_COPY.editTargetLabel : AGREEMENT_COPY.removeTargetLabel}
+            htmlFor={targetSelectId}
+          >
             <select
               id={targetSelectId}
               value={targetId}
@@ -296,14 +296,14 @@ export function ProposeAgreementModal({
                 </option>
               ))}
             </select>
-          </div>
+          </Field>
         )}
 
         {mode !== "remove" && (
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor={bodyFieldId} className={LABEL_CLASS}>
-              {mode === "add" ? AGREEMENT_COPY.addBodyLabel : AGREEMENT_COPY.editBodyLabel}
-            </label>
+          <Field
+            label={mode === "add" ? AGREEMENT_COPY.addBodyLabel : AGREEMENT_COPY.editBodyLabel}
+            htmlFor={bodyFieldId}
+          >
             <textarea
               id={bodyFieldId}
               value={body}
@@ -319,7 +319,7 @@ export function ProposeAgreementModal({
               maxLength={500}
               className={TEXTAREA_CLASS}
             />
-          </div>
+          </Field>
         )}
 
         {mode === "remove" && (
@@ -333,10 +333,7 @@ export function ProposeAgreementModal({
           </p>
         )}
 
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor={noteFieldId} className={LABEL_CLASS}>
-            {AGREEMENT_COPY.proposeNoteLabel}
-          </label>
+        <Field label={AGREEMENT_COPY.proposeNoteLabel} htmlFor={noteFieldId}>
           <textarea
             id={noteFieldId}
             value={note}
@@ -346,7 +343,7 @@ export function ProposeAgreementModal({
             maxLength={500}
             className={TEXTAREA_CLASS}
           />
-        </div>
+        </Field>
 
         {/* Only Restore seeds an add with a body already in it (decision 18),
             so this sentence appears exactly where restoring is what is
@@ -372,24 +369,15 @@ export function ProposeAgreementModal({
           </p>
         )}
 
-        <div className="mt-1 flex gap-2.5">
-          <button
-            type="button"
-            onClick={onClose}
-            className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label sm:min-h-0"
-          >
-            {AGREEMENT_COPY.cancel}
-          </button>
-          {/* type="button", never "submit": see the form's onSubmit above. */}
-          <button
-            type="button"
-            disabled={hadConflict || isProposing || !canSend}
-            onClick={() => void handleSend()}
-            className="min-h-11 flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
-          >
-            {AGREEMENT_COPY.proposeSend}
-          </button>
-        </div>
+        {/* primaryType="button", never "submit": see the form's onSubmit above. */}
+        <ModalActions
+          secondaryLabel={AGREEMENT_COPY.cancel}
+          onSecondary={onClose}
+          primaryLabel={AGREEMENT_COPY.proposeSend}
+          primaryType="button"
+          onPrimary={() => void handleSend()}
+          primaryDisabled={hadConflict || isProposing || !canSend}
+        />
       </form>
     </Modal>
   );

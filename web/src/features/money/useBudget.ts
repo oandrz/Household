@@ -16,7 +16,7 @@
 // category dropdown stale the way `CurrencyPanel.tsx:49`'s defect class
 // warns about.
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { apiFetch } from "../../api/client";
+import { apiFetch, fetchAndParse } from "../../api/client";
 import { categoriesQueryKey } from "./useTransactions";
 import { goalsQueryKey } from "./useGoals";
 import {
@@ -32,13 +32,12 @@ export type SaveBudgetBody = {
   lines: { categoryId: string; capMinor: number }[];
 };
 
-export function budgetQueryKey(month: string) {
+function budgetQueryKey(month: string) {
   return ["budget", month] as const;
 }
 
 async function fetchBudgetMonth(month: string): Promise<BudgetMonthResponse> {
-  const body = await apiFetch<unknown>(`/api/v1/budgets/${encodeURIComponent(month)}`);
-  return budgetMonthResponseSchema.parse(body);
+  return fetchAndParse(budgetMonthResponseSchema, `/api/v1/budgets/${encodeURIComponent(month)}`);
 }
 
 // Shifts a "YYYY-MM" string back one whole month, built the same way
@@ -137,11 +136,10 @@ export function useBudget(month: string, options: { enabled?: boolean } = {}) {
     // queued create and the final PUT, which is exactly the call sequence
     // the save-order test pins.
     mutationFn: async (name: string): Promise<Category> => {
-      const raw = await apiFetch<unknown>("/api/v1/categories", {
+      return (await fetchAndParse(categoryResponseSchema, "/api/v1/categories", {
         method: "POST",
         body: JSON.stringify({ name }),
-      });
-      return categoryResponseSchema.parse(raw).category;
+      })).category;
     },
     onSuccess: () => invalidateAfterCategoryWrite(queryClient, month),
   });

@@ -14,8 +14,11 @@ func TestIPRateLimiterCountsPerIPAndResets(t *testing.T) {
 	clock := func() time.Time { return now }
 	l := newIPRateLimiter(2, time.Minute, clock)
 
-	if !l.allow("1.2.3.4") || !l.allow("1.2.3.4") {
-		t.Fatal("the first two requests must be allowed")
+	if !l.allow("1.2.3.4") {
+		t.Fatal("the first request must be allowed")
+	}
+	if !l.allow("1.2.3.4") {
+		t.Fatal("the second request must be allowed")
 	}
 	if l.allow("1.2.3.4") {
 		t.Fatal("the third request must be refused")

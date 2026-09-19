@@ -11,10 +11,13 @@
 // explicitly, and a native select is what lets a test (and a keyboard user)
 // change either field with one event instead of simulating a row of buttons.
 import { type FormEvent, useState } from "react";
+import { Field } from "../../components/Field";
+import { FIELD_CONTROL_CLASS } from "../../components/fieldClasses";
 import { FieldPair } from "../../components/FieldPair";
 import { Modal } from "../../components/Modal";
+import { ModalActions } from "../../components/ModalActions";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
-import { apiErrorMessage } from "../auth/copy";
+import { apiErrorMessage } from "../../api/errorMessage";
 import { useCurrencies, useMe } from "../auth/useAuth";
 import type { MemberView } from "../settings/schemas";
 import { useHouseholdMembers } from "../settings/useHouseholdMembers";
@@ -26,7 +29,8 @@ import {
   toMinorUnits,
 } from "./formatMoney";
 import { useCreateAccount, useUpdateAccount } from "./useAccounts";
-import type { Account, AccountType } from "./schemas";
+import { parseEnum } from "../../lib/parseEnum";
+import { accountTypeSchema, type Account, type AccountType } from "./schemas";
 
 // AccountFormValues is exactly the POST body the create route accepts, so the
 // modal and useCreateAccount cannot disagree about field names.
@@ -244,36 +248,26 @@ export function AccountModal({
   return (
     <Modal open={open} onClose={onClose} title="Account details">
       <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="account-nickname" className="text-xs font-semibold text-label">
-            Nickname
-          </label>
+        <Field label="Nickname" htmlFor="account-nickname">
           <input
             id="account-nickname"
             type="text"
             required
             value={nickname}
             onChange={(event) => setNickname(event.target.value)}
-            // min-h-11/sm:min-h-0 on every field in this modal:
-            // TransactionFilters.tsx's own SELECT_CLASS comment has the
-            // measured reason py-2.5 alone falls short of the 44px floor
-            // on a phone.
-            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+            className={FIELD_CONTROL_CLASS}
           />
-        </div>
+        </Field>
 
         <FieldPair>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="account-owner" className="text-xs font-semibold text-label">
-              Owner
-            </label>
+          <Field label="Owner" htmlFor="account-owner">
             <select
               id="account-owner"
               value={ownerMembershipId ?? ""}
               onChange={(event) =>
                 setOwnerMembershipId(event.target.value === "" ? null : event.target.value)
               }
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              className={FIELD_CONTROL_CLASS}
             >
               <option value="">Shared</option>
               {members.data?.map((member) => (
@@ -282,17 +276,14 @@ export function AccountModal({
                 </option>
               ))}
             </select>
-          </div>
+          </Field>
 
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="account-type" className="text-xs font-semibold text-label">
-              Type
-            </label>
+          <Field label="Type" htmlFor="account-type">
             <select
               id="account-type"
               value={type}
-              onChange={(event) => setType(event.target.value as AccountType)}
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              onChange={(event) => setType(parseEnum(event.target.value, accountTypeSchema.options, type))}
+              className={FIELD_CONTROL_CLASS}
             >
               {ACCOUNT_TYPES.map((t) => (
                 <option key={t} value={t}>
@@ -300,24 +291,21 @@ export function AccountModal({
                 </option>
               ))}
             </select>
-          </div>
+          </Field>
         </FieldPair>
 
         <FieldPair>
-          <div className="flex flex-col gap-1.5">
-            {/* "Starting balance" rather than "Balance": this input writes
-                opening_balance_minor, and once an account has transactions on
-                it that is a different number from the one the Finances list
-                shows against the same account. A bare "Balance" next to a row
-                reading S$1,300 invites someone to "correct" this field to
-                1300, which is precisely the edit that rewrites history. The
-                wording is the design's own -- "Starting balance" is the only
-                label it gives a balance input anywhere (the bank-connect
-                panel this modal is drawn from has no balance field at all,
-                because a synced account would not need one). */}
-            <label htmlFor="account-balance" className="text-xs font-semibold text-label">
-              Starting balance
-            </label>
+          {/* "Starting balance" rather than "Balance": this input writes
+              opening_balance_minor, and once an account has transactions on
+              it that is a different number from the one the Finances list
+              shows against the same account. A bare "Balance" next to a row
+              reading S$1,300 invites someone to "correct" this field to
+              1300, which is precisely the edit that rewrites history. The
+              wording is the design's own -- "Starting balance" is the only
+              label it gives a balance input anywhere (the bank-connect
+              panel this modal is drawn from has no balance field at all,
+              because a synced account would not need one). */}
+          <Field label="Starting balance" htmlFor="account-balance">
             <input
               id="account-balance"
               type="text"
@@ -328,14 +316,11 @@ export function AccountModal({
                 setBalanceTouched(true);
                 setBalanceInput(event.target.value);
               }}
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              className={FIELD_CONTROL_CLASS}
             />
-          </div>
+          </Field>
 
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="account-currency" className="text-xs font-semibold text-label">
-              Currency
-            </label>
+          <Field label="Currency" htmlFor="account-currency">
             <select
               id="account-currency"
               value={currency}
@@ -343,7 +328,7 @@ export function AccountModal({
                 setCurrencyTouched(true);
                 setCurrency(event.target.value);
               }}
-              className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+              className={FIELD_CONTROL_CLASS}
             >
               {currency === "" && <option value="">--</option>}
               {currencies.data?.currencies.map((c) => (
@@ -352,7 +337,7 @@ export function AccountModal({
                 </option>
               ))}
             </select>
-          </div>
+          </Field>
         </FieldPair>
 
         {balanceError && (
@@ -378,23 +363,20 @@ export function AccountModal({
           </p>
         )}
 
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="account-as-of" className="text-xs font-semibold text-label">
-            Starting balance as of
-          </label>
+        <Field label="Starting balance as of" htmlFor="account-as-of">
           <input
             id="account-as-of"
             type="date"
             required
             value={asOf}
             onChange={(event) => setAsOf(event.target.value)}
-            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0"
+            className={FIELD_CONTROL_CLASS}
           />
           <p className="text-[11.5px] leading-snug text-muted">
             The balance at the start of that day — transactions dated that day
             count.
           </p>
-        </div>
+        </Field>
 
         <div className="flex items-center justify-between rounded-[10px] border border-hairline px-3.5 py-2.5">
           <div>
@@ -430,22 +412,13 @@ export function AccountModal({
           </p>
         )}
 
-        <div className="mt-1 flex gap-2.5">
-          <button
-            type="button"
-            onClick={onClose}
-            className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label sm:min-h-0"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={mutation.isPending}
-            className="min-h-11 flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
-          >
-            {isEditing ? "Save" : "Add account"}
-          </button>
-        </div>
+        <ModalActions
+          secondaryLabel="Cancel"
+          onSecondary={onClose}
+          primaryLabel={isEditing ? "Save" : "Add account"}
+          primaryType="submit"
+          primaryDisabled={mutation.isPending}
+        />
       </form>
     </Modal>
   );
