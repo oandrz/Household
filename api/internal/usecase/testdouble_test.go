@@ -688,6 +688,11 @@ type inviteRow struct {
 	InvitedBy    string
 	ExpiresAt    time.Time
 	AcceptedAt   *time.Time
+	CreatedAt    time.Time
+	// Seq is insertion order, standing in for ListPendingInvites' ORDER BY
+	// created_at, id -- a fixed test clock gives every row the same
+	// CreatedAt, so the timestamp alone cannot order them.
+	Seq int
 }
 
 // inviteDouble plays the same role invite_repo.go's InviteRepo plays over
@@ -763,6 +768,7 @@ func (d *inviteDouble) Create(_ context.Context, householdID, email, name string
 	d.rows[string(tokenHash)] = &inviteRow{
 		ID: id, HouseholdID: householdID, Email: email, Name: name, Role: role,
 		Capabilities: caps, InvitedBy: invitedBy, ExpiresAt: expiresAt,
+		CreatedAt: d.clock.Now(), Seq: d.n,
 	}
 
 	if d.raceNextCreate {
@@ -855,6 +861,43 @@ func (d *inviteDouble) Accept(ctx context.Context, inviteID, email, passwordHash
 		return usecase.AcceptedInvite{}, err
 	}
 	return usecase.AcceptedInvite{UserID: user.ID, MembershipID: created.ID, HouseholdID: created.HouseholdID}, nil
+}
+
+// ListPending mirrors ListPendingInvites: this household's rows that are
+// neither accepted nor expired as of now, oldest first, never nil.
+func (d *inviteDouble) ListPending(_ context.Context, householdID string, now time.Time) ([]usecase.InviteSummary, error) {
+	rows := make([]*inviteRow, 0)
+	for _, row := range d.rows {
+		if row.HouseholdID == householdID && row.AcceptedAt == nil && row.ExpiresAt.After(now) {
+			rows = append(rows, row)
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Seq < rows[j].Seq })
+	out := make([]usecase.InviteSummary, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, usecase.InviteSummary{
+			ID: row.ID, Name: row.Name, Email: row.Email, Role: row.Role,
+			Capabilities: row.Capabilities, ExpiresAt: row.ExpiresAt, CreatedAt: row.CreatedAt,
+		})
+	}
+	return out, nil
+}
+
+// Delete mirrors DeleteUnacceptedInvite plus InviteAcceptedInHousehold: a
+// row in another household is not found, an accepted row is refused and
+// kept, anything else is removed.
+func (d *inviteDouble) Delete(_ context.Context, householdID, inviteID string) error {
+	for hash, row := range d.rows {
+		if row.ID != inviteID || row.HouseholdID != householdID {
+			continue
+		}
+		if row.AcceptedAt != nil {
+			return domain.ErrInviteAlreadyAccepted
+		}
+		delete(d.rows, hash)
+		return nil
+	}
+	return domain.ErrNotFound
 }
 
 // --- SignupRepository -------------------------------------------------

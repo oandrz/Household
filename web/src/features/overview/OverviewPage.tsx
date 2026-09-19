@@ -17,11 +17,14 @@ import { currentMonth } from "../money/month";
 import { useAccounts } from "../money/useAccounts";
 import { useBudget } from "../money/useBudget";
 import { useGoals } from "../money/useGoals";
+import { useHouseholdMembers } from "../settings/useHouseholdMembers";
+import { usePendingInvites } from "../settings/usePendingInvites";
 import { BudgetCard } from "./BudgetCard";
 import { OVERVIEW_COPY } from "./copy";
 import { GoalsCard } from "./GoalsCard";
 import { NextBillCard } from "./NextBillCard";
 import { NextRetroCard } from "./NextRetroCard";
+import { partnerStep } from "./partnerStep";
 import { QuickAddMenu } from "./QuickAddMenu";
 import { SetupChecklist } from "./SetupChecklist";
 import { VisionCard } from "./VisionCard";
@@ -59,6 +62,13 @@ export function OverviewPage() {
   // (requireCapability(money) AND requireOwner), so this is gated the same
   // way and for the same reason.
   const goals = useGoals({ enabled: isOwner });
+
+  // The checklist's partner step reads the roster and the pending invites.
+  // Only the invites request is gated: GET /household/invites is owner-only,
+  // so a limited member never asks. GET /household/members is open to every
+  // member, so useHouseholdMembers runs for everyone.
+  const members = useHouseholdMembers();
+  const invites = usePendingInvites({ enabled: isOwner });
 
   return (
     <PageContainer>
@@ -127,18 +137,21 @@ export function OverviewPage() {
               grid: the cards are the figures someone opens this page to
               glance at, and a chore list sitting beside them at the same
               size competes with that. */}
-          {/* Both queries must have *answered* before this renders, not just
+          {/* Every query must have *answered* before this renders, not just
               the member be an owner. `hasAccount` and `hasBudget` are false
               while their requests are in flight, which is indistinguishable
-              from "this household has neither" -- so without these two gates
+              from "this household has neither" -- so without these gates
               an established household is told to go and create the account
               and budget it already has, on every cold load, until the figures
               land. Same root cause as the limited-member panel above:
-              a claim derived from data that has not arrived. */}
-          {isOwner && accounts.isSuccess && budget.data && (
+              a claim derived from data that has not arrived. The roster and
+              the pending invites carry the identical risk for the partner
+              step. */}
+          {isOwner && accounts.isSuccess && budget.data && members.isSuccess && invites.isSuccess && (
             <SetupChecklist
               hasAccount={accounts.data.accounts.length > 0}
               hasBudget={budget.data.budget != null}
+              partner={partnerStep(members.data, invites.data)}
             />
           )}
         </>

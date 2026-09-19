@@ -15,17 +15,24 @@ import { ALL_CAPABILITIES } from "./capabilities";
 import { parseEnum } from "../../lib/parseEnum";
 import { ROLE_OPTIONS, type RoleOption, useInviteMember } from "./useInviteMember";
 
+// MembersPanel mounts this only while it is open, so every open is a fresh
+// form: there is no reset() to call on close, because the next open starts
+// from useState again. `defaultRole` is the role that fresh form starts on.
+// It is "limited" (Kid, the design's own default for this field) unless the
+// door that opened the modal asks otherwise -- the "Invite your partner"
+// links ask for "owner".
 export function InviteMemberModal({
   open,
   onClose,
+  defaultRole = "limited",
 }: {
   open: boolean;
   onClose: () => void;
+  defaultRole?: RoleOption;
 }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  // "Kid" is the design's own default selection for this field.
-  const [role, setRole] = useState<RoleOption>("limited");
+  const [role, setRole] = useState<RoleOption>(defaultRole);
   // Calendar and chores default on, money default off -- the design's own
   // toggle states ("Off for kids by default" is literal design copy on the
   // money row) and, not coincidentally, exactly what the seed gives Kayla.
@@ -43,29 +50,16 @@ export function InviteMemberModal({
     );
   }
 
-  function reset() {
-    setName("");
-    setEmail("");
-    setRole("limited");
-    setLimitedCapabilities(["calendar", "chores"]);
-    invite.reset();
-  }
-
-  function handleClose() {
-    reset();
-    onClose();
-  }
-
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     invite.mutate(
       { name, email, role, capabilities },
-      { onSuccess: handleClose },
+      { onSuccess: onClose },
     );
   }
 
   return (
-    <Modal open={open} onClose={handleClose} title="Invite a family member">
+    <Modal open={open} onClose={onClose} title="Invite a family member">
       <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
         <FieldPair>
           <Field label="Name" htmlFor="invite-member-name">
@@ -170,7 +164,7 @@ export function InviteMemberModal({
 
         <ModalActions
           secondaryLabel="Cancel"
-          onSecondary={handleClose}
+          onSecondary={onClose}
           primaryLabel="Send invite"
           primaryType="submit"
           primaryDisabled={invite.isPending}

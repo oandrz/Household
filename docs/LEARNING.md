@@ -1535,6 +1535,37 @@ person to ask whether the test could ever have gone red in the first place.
   "assert the identity of what happened" — and even then, ask whether the
   assertion proves the property or merely happens to catch this one
   mutation's particular shape.**
+- **A fixture no real household can be in, where the right rule and the
+  wrong rule give the same answer** (partner-invite lobby, milestone 1,
+  2026-09-19). `partnerStep.ts` marks "Invite your partner" done at `>= 2`
+  owners. Changing it to `>= 1` (count the signed-in owner as the partner)
+  failed `partnerStep.test.ts`, but left **every** `OverviewPage.test.tsx`
+  test green. The page tests' default roster was `[]`, and its comment
+  called that "a household still waiting for its partner". No household
+  has zero members, because the owner who created it is always one. With
+  zero owners, `0 >= 2` and `0 >= 1` are both false, so the page could not
+  tell the two rules apart. The Task 5 mutation (`>= 2` → `> 2`) went the
+  other way, which the explicit two-owner fixture did catch, so the gap
+  stayed hidden until the milestone's final mutation table tried the
+  opposite direction. Fixed in `7fe48bc`: the default roster is now one
+  owner, with a comment at the fixture saying why it must never be `[]`.
+  The same mutation now fails "shows a fresh household what is left to set
+  up" and "tells an owner whose partner is invited". **Before trusting a
+  default fixture, ask whether a real account could ever be in that state.
+  And mutate a boundary in both directions**: `> 2` and `>= 1` probe
+  different fixtures.
+- **Two of the same table's mutations could not be run as written, because
+  they never reached the test.** "Delete `household_id = $1 AND`" from
+  `ListPendingInvites` leaves `$2` with no `$1`, and `make sqlc` refuses the
+  file (`could not determine data type of parameter $1`). "Delete
+  ` AND household_id = $2`" from `DeleteUnacceptedInvite` leaves one
+  parameter, so sqlc generates a different function signature and the
+  repository stops compiling. A generator error or a build error is red
+  for the wrong reason. The mutation that proves a scoping clause keeps the
+  parameter and neutralises it — `(household_id = $1 OR TRUE)` — so the
+  generated function and its params struct keep their signature (only the
+  embedded SQL string changes) and only the behaviour moves. Both then
+  failed on the cross-household assertion, as intended.
 
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
@@ -2493,6 +2524,26 @@ product. When writing a walk script, dry-run its arithmetic against the state
 the walk itself will have created by that step — a criterion that asserts a
 counter must say what the counter has already counted.
 
+**The partner-invite lobby's walk (2026-09-19) passed 15 of 15 because the
+walker already knew the answer.** Criteria 11 and 12 needed an owner-role
+invite, so the walker, knowing that, changed the modal's Role from Kid to
+Parent every time. Criteria 9, 10 and 13 only checked that the modal
+*opened*. No criterion asked what a first-time owner gets if they type a
+name and an address and press Send. The answer was a **Kid** invite: the
+modal opened on the design's Kid default even from "Invite your partner".
+The partner would have joined as a limited member, the checklist step would
+never have ticked, and Agreements would have stayed locked. The walk did
+notice the default, but filed it as an "observation" to settle later, not a
+defect. The whole-branch review is what called it Important. Fixed in
+`b8aa854` (the partner links now open the modal on Parent), and re-walked the
+naive way: type a name, type an address, press Enter, and the pending row
+reads "Owner". **When a criterion needs a particular choice, ask whether a
+first-time user would make that choice without being told. If the walker has
+to know it, the product has to say it — or make it the default.** And a
+walker's observation that would stop a first-time user from finishing the
+flow is a defect, not a note for later. This is the same shape as the
+"15 of 15 still missed day-one UX" record at the top of this pattern.
+
 ### 14. Literal example data belongs to the seed, not the product
 
 The design mockup was built around one imagined household — Andreas &
@@ -3315,6 +3366,24 @@ the identical defect the whole pattern is about, one level up. State the
 invariant, not the enumeration — the same rule the admin surface's handover
 distilled from nine of its own comments.
 
+**Two claims checked in the partner-invite lobby's final review
+(2026-09-19), and both were false.**
+- The review said that moving `DELETE /household/invites/{id}` out of the
+  `requireOwner` group "would leave every test green". Run, the mutation
+  turned the existing `TestOwnerOnlyRoutesRejectALimitedMember` walk red
+  (`status = 404, want 403` for a made-up id) as well as the new test. The
+  new test was still worth adding, because only a real invite shows the row
+  being deleted (`204`), but the gap was smaller than claimed.
+- A comment in `PendingInvitesList.tsx` said an early
+  `if (withdrawingIds.has(id)) return` stopped a double click "before React
+  has re-rendered the button as disabled". It never could: it read the
+  render's own Set, which the first click had not changed yet. The
+  `disabled` attribute was the real guard (removing it turned the
+  double-click test red). The check and the comment are gone (`eeede79`).
+
+A reviewer's claim and a code comment get the same treatment: run the
+mutation, read the failure.
+
 ---
 
 ### 17. A requirement the plan drops is invisible to every review that reads the plan
@@ -3716,6 +3785,23 @@ invalidates it, not only a write that changes what it would compute.** Both
 fixes are one line each (`ed93d26`, `dacc4c1`); the second was found by
 grepping for the shape of the first, which is step 3 of the checklist at the
 end of this file.
+
+**Held, 2026-09-19 (partner-invite lobby, milestone 1): nothing broke.**
+Sending an invite invalidates members, the new `["household", "invites"]` key
+and `me`, and withdrawing invalidates invites. The final review then found the
+error path of this very rule: withdraw invalidated only **on success**, so a
+`404` (another owner already withdrew) or a `409` (accepted meanwhile) left a
+dead row on screen beside its error. It now invalidates in `onSettled`, and a
+`409` also invalidates members, because the invitee is one now (`eeede79`).
+**A failed write can still be news about the data: list the keys its failure
+makes stale too.** The walk moved Overview's
+partner step from Set up → Invite sent → ✓ by clicking through the app's own
+links, not by reloading. The one staleness it found is outside this rule: an
+invite accepted in *another* browser does not reach an owner's Settings tab
+that is just sitting open (nothing refetches it) until they move to another
+page. That is a push/poll question, not a missing invalidation. Milestone 2's
+planned 3-second poll covers only Telegram invites waiting for a knock, so an
+emailed invite accepted elsewhere is still unaddressed.
 
 ### 24. A delete scoped to the parent's parent, and a scope check thrown away
 
@@ -6032,6 +6118,34 @@ no test suite can hold.
   written down, as a test comment nobody outside that file would meet.
 
 ---
+
+### The partner-invite lobby's browser walk (2026-09-19)
+
+- **The `globalThis` trap recorded under the Agreements walk above was hit
+  again**, one call after it could have been avoided: a context created in one
+  `browser_run_code_unsafe` call was stored on `globalThis` and read back as
+  `undefined` in the next. Re-deriving it through
+  `page.context().browser().contexts()` worked, exactly as that entry says.
+  **Read this file's walk sections before a walk, not after.**
+- **The Playwright MCP server dropped mid-walk** ("Connection closed") after a
+  run-code call that drove a second browser context, and every Playwright tool
+  vanished for the rest of the session. The walk finished on Chrome DevTools
+  MCP. Its `new_page` takes an `isolatedContext` name, and **a named isolated
+  context is the cleanest "private window"**: one per person (the invitee, a
+  fresh sign-up, the accepting partner). Each is driven with the ordinary
+  click and type tools, not with scripts, and the owner's own session in the
+  default context is never touched.
+- **Both browser tools' default contexts arrived already signed in as the
+  seeded owner** (persistent profiles from earlier sessions). That saved
+  typing a password, which matters because five failures lock the whole
+  household. But check which account a page is on before you trust what it
+  shows: an invite link opened in the owner's own context rendered the
+  preview under a "Signed in as Andreas" banner.
+- **Build a fresh household by self-serve sign-up in its own isolated
+  context** when a criterion needs one owner. `make seed` reuses a household
+  where Christine has already accepted, so it has two owners. Signing up takes
+  about a minute through Mailpit, needs no volume drop, and leaves the seeded
+  household alone.
 
 ## Before you call something done
 

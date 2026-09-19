@@ -43,6 +43,8 @@ var routeTable = []route{
 	{"POST", "/household/members/invite", "owner+csrf", `{"name","email","role","capabilities":[...]}`},
 	{"PATCH", "/household/members/{id}", "owner+csrf", `{"role"?,"capabilities"?}`},
 	{"DELETE", "/household/members/{id}", "owner+csrf", "-"},
+	{"GET", "/household/invites", "owner", "-"},
+	{"DELETE", "/household/invites/{id}", "owner+browser session+csrf", "-"},
 	{"GET", "/spaces", "session", "-"},
 	{"POST", "/spaces", "owner+csrf", `{"name","visibility","template"?}`},
 	{"GET", "/notification-preferences", "session", "-"},

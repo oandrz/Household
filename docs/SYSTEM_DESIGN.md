@@ -176,6 +176,17 @@ in production, so the deployed panel says it is not configured until an
 operator runs `deploy/PROVISION.md` §10. Design:
 `docs/superpowers/specs/2026-09-04-hearth-database-browse-design.md`.
 
+**The partner-invite lobby's milestone 1 is built and walked on branch
+`partner-invite-lobby` (2026-09-19). It is not merged to `main` and not
+deployed.** It makes a sent invite visible: two routes, `GET` and
+`DELETE /household/invites` (§4); two new `InviteRepository` methods (§3); the
+one definition of *pending* (§6); a Pending invites list in Settings; and a
+fourth Overview checklist step, "Invite your partner" (§7). It adds no table
+and no migration. Milestone 2 (invites delivered over Telegram, and letting a
+partner in by a knock) is **not built**. Evidence:
+`docs/superpowers/plans/2026-09-19-hearth-partner-invite-lobby-m1-verification.md`.
+Design: `docs/superpowers/specs/2026-09-19-hearth-partner-invite-lobby-design.md`.
+
 **This is deployed.** Hearth has run at <https://oink.mywire.org> since
 2026-08-15, on one Hetzner CX23 in Falkenstein, serving a real household. §1
 carries the production topology; it is a drawing of something running, not a
@@ -796,7 +807,8 @@ refuses (spec decision 7).
 | Port | Implemented by | Notes |
 |---|---|---|
 | `UserRepository` | `adapter/postgres` | Includes the transactional `CreateWithMembership` |
-| `HouseholdRepository`, `MembershipRepository`, `SessionRepository`, `MagicLinkRepository`, `LoginAttemptRepository`, `InviteRepository`, `SignupRepository`, `SpaceRepository`, `NotificationRepository` | `adapter/postgres` | Ten narrow repositories rather than one wide one |
+| `HouseholdRepository`, `MembershipRepository`, `SessionRepository`, `MagicLinkRepository`, `LoginAttemptRepository`, `SignupRepository`, `SpaceRepository`, `NotificationRepository` | `adapter/postgres` | Ten narrow repositories rather than one wide one (with `UserRepository` above and `InviteRepository` below) |
+| `InviteRepository` | `adapter/postgres` | `Create`, `ByTokenHash`, `LiveInviteForEmail`, `MarkAccepted`, the one-transaction `Accept` (§5) — and, since the partner-invite lobby's milestone 1, **`ListPending`** and **`Delete`**. `ListPending` holds the one definition of a *pending* invite (§6) and returns `[]InviteSummary`, never nil. The type is `InviteSummary`, not `PendingInvite`, because `PendingInvite` was already the admin directory's differently-shaped view of an invite (no id, no capabilities). `Delete` is scoped by `household_id` inside the SQL (`DeleteUnacceptedInvite`), so another household's id answers `domain.ErrNotFound` exactly like an id that never existed. An accepted invite is history: it answers `domain.ErrInviteAlreadyAccepted` and nothing is deleted. Telling those two apart takes a second read (`InviteAcceptedInHousehold`), made only after the delete matched nothing |
 | `AccountRepository` | `adapter/postgres` | Eleventh. Accounts joined to the owner's display name (`AccountView`); its `MembershipBelongsToHousehold` is what stops an account being assigned to a member of a different household. `AccountView.Balance` is now a real sum — see §5. `MonthlyMovements` is its newest method: one row per account per calendar month with any transaction, summed in that account's own currency (no FX conversion in SQL, the same division of labour `MonthTotals` already draws for `TransactionRepository`) — the twelve-month trend's only new read, and its filter is deliberately `ListAccounts`'s own balance expression split by month, kept identical on purpose (§5) |
 | `CategoryRepository` | `adapter/postgres` | Twelfth. `List` respects `sort_order`, the order the design draws rather than alphabetical; `EnsureSeeded` is idempotent under two concurrent first requests through one `INSERT ... ON CONFLICT DO NOTHING` against `UNIQUE(household_id, name)`, never a read-then-write. Budget grows it with `Create`, `Rename` and `SetArchived` — a category is referenced by transactions and budget lines, so it archives rather than deletes, the same reasoning `accounts.archived_at` already uses for a different table; `sort_order`'s own concurrent-create window is a known, accepted, cosmetic tie (see `docs/LEARNING.md`) |
 | `TransactionRepository` | `adapter/postgres` | Thirteenth. Keyset-paged `List` (a cursor is the last row's date and id, not an offset); `Update` never merges a patch — `TransactionService` turns a partial `PATCH` into a complete `domain.Transaction` first; `MonthTotals` returns rows rather than a SQL `SUM`, because a sum is only correct within one currency and the FX conversion lives in the service, not the repository |
@@ -922,17 +934,22 @@ graph TD
     Cap -->|"accounts: money"| RequireCap["requireCapability(money)<br/>403 unless the caller's membership has it"]
     Cap -->|"transactions, categories,<br/>budgets, goals, bills, holdings: money AND owner —<br/>reads included"| RequireCapTxn["requireCapability(money)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
     Cap -->|"retros, marriage/vision,<br/>marriage/agreements:<br/>marriage AND owner — reads included"| RequireCapRetro["requireCapability(marriage)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
+    Cap -->|"GET household/invites:<br/>owner, no capability"| RequireOwnerRead["requireOwner<br/>ahead of the GET/HEAD split"]
     Cap -->|"no — most routes"| Safe{"GET or HEAD?"}
     RequireCap --> Safe
     RequireCapTxn --> Safe
     RequireCapRetro --> Safe
+    RequireOwnerRead --> Safe
     Safe -->|yes| Handler
     Safe -->|no| CSRF["requireCSRF<br/>double-submit, constant-time compare"]
 
     CSRF --> Owner{"Household-wide<br/>mutation?"}
     Owner -->|yes| RequireOwner["requireOwner"]
-    Owner -->|no| Handler
-    RequireOwner --> Handler
+    Owner -->|no| CookieOnly
+    RequireOwner --> CookieOnly{"Must a browser session<br/>make this change?"}
+    CookieOnly -->|"token mint and revoke,<br/>invite withdraw"| RequireCookie["requireCookieSession<br/>403 SESSION_REQUIRED to a token"]
+    CookieOnly -->|no| Handler
+    RequireCookie --> Handler
 
     Handler["Handler — decode within a size limit,<br/>call the service"] --> Service["Service"]
     Service --> Domain["Domain rules"]
@@ -965,8 +982,15 @@ branch.** `requireSession` hands it to `requireToken`, which resolves
 flags lookups, and builds a Scope with `AuthVia = token`; a bad token beside
 a good cookie is still a 401, because a caller who sent a token meant to use
 it ([ADR 7](adr/0007-personal-api-tokens.md)). `requireCSRF` then skips only
-for that Scope, and `requireCookieSession` refuses it on the two routes that
-mint and revoke tokens.
+for that Scope, and `requireCookieSession` refuses it (`403 SESSION_REQUIRED`)
+wherever a leaked token must not be enough: the two routes that mint and
+revoke tokens, the Telegram connection group, and withdrawing an invite
+(`DELETE /household/invites/{id}`), because withdrawing changes who may join
+the household (partner-invite spec decision 12). Listing pending invites is
+deliberately *not* behind it: a list shows no secret, so an owner's token may
+read it. The diagram above draws this step on the mutation path only. The
+Telegram group applies it to its reads as well, and runs its own
+`requireFeature` first; the route table has that group's exact order.
 
 **`requireSession` also resolves this household's feature flags on every
 authenticated request, uncached**, in the same breath as the membership
@@ -1222,6 +1246,8 @@ rows, and a link redemption writes neither.
 | PATCH | `/household`, `/notification-preferences` | session · CSRF · owner |
 | POST | `/household/members/invite`, `/spaces` | session · CSRF · owner |
 | PATCH · DELETE | `/household/members/{id}` | session · CSRF · owner |
+| GET | `/household/invites` | session (cookie **or token**) · owner — this household's *pending* invites (§6), oldest first, each with `id`, `name`, `email`, `role`, `capabilities`, `expiresAt`; always a JSON array, `[]` when none. Owner-only because an invitee's address is personal data, the same rule that shows only an owner the members' addresses. A token may read it: a list shows no secret |
+| DELETE | `/household/invites/{id}` | session · CSRF · owner · **cookie** session (`requireCookieSession`) — withdraws the invite by **deleting its row**, so its emailed link stops resolving (`GET /invites/{token}` answers `404`). `204` with no body. An id from another household, or one that never existed, is `404`; an accepted invite is `409 INVITE_ALREADY_ACCEPTED` and survives; an expired, unaccepted invite is deletable. A token gets `403 SESSION_REQUIRED` (spec decision 12) |
 | GET | `/family/calendar` | session · `requireFeature(family_calendar)` — no capability at all, the same as `/household`; an unbuilt page's API stub, dark by default, answering `{"events":[]}` once its flag is on rather than a stub-specific status, so the flag proves something real about the route it guards |
 | POST | `/admin/session` | session · CSRF — the one admin route reachable with no grant; how a grant is obtained |
 | GET | `/admin/flags` | session · admin (`requirePlatformAdmin`) · grant |
@@ -2987,7 +3013,25 @@ only in the sense that it stopped being three: `useHouseholdMembers` was
 declared privately and identically in `AccountModal`, `TransactionsPage` and
 `MembersPanel`, all against `["household", "members"]`, sharing one cache
 entry by coincidence rather than by construction; Overview would have been
-the fourth copy, so it is now one module in `features/settings/`. `Budget`
+the fourth copy, so it is now one module in `features/settings/`. Its
+sibling is `usePendingInvites` (same folder), keyed by the exported
+`pendingInvitesQueryKey = ["household", "invites"]` — a builder, never a
+literal, and starting with `"household"` so `PATCH /household`'s prefix
+invalidation reaches it too. It has two readers: `PendingInvitesList` in
+Settings' Members panel, and Overview's "Invite your partner" step. Both are
+owner-only: `MembersPanel` mounts the list only for an owner, and
+`OverviewPage` passes `enabled: isOwner`, so a limited member never sends a
+request whose `403` would then need hiding. Sending an invite
+(`useInviteMember`) invalidates members, invites and `me`. Withdrawing one
+(`useWithdrawInvite`) invalidates invites in `onSettled`, so a failed withdraw
+refreshes the list too: a `404` means another owner already withdrew it, and a
+`409` means it was accepted meanwhile, which also invalidates members because
+the invitee is one now. An invite accepted in *another*
+browser reaches an owner's open tab only when something refetches — moving to
+another page does it, sitting on Settings does not. Milestone 2's planned
+3-second poll runs only while a *Telegram* invite is waiting for a knock, so
+an emailed invite accepted elsewhere will still wait for the next navigation.
+Nothing in the spec addresses that case yet. `Budget`
 and Overview likewise share `currentMonth()` (`features/money/month.ts`),
 which reads the *local* calendar — the two screens must agree on which month
 "this month" is, and the API container's own clock is UTC.
@@ -3622,6 +3666,19 @@ Notes that are not obvious from the shapes:
   below say why).
 - **`login_attempts` allows both foreign keys to be null**, so an attempt against
   an unknown address is recorded without revealing whether it exists.
+- **An invite is *pending* when `accepted_at IS NULL AND expires_at > now`, and
+  that is the only definition.** It lives in one query, `ListPendingInvites`,
+  which Settings' Pending invites list and Overview's "Invite your partner"
+  step both read through `GET /household/invites`. `now` is a parameter the
+  caller passes, not the database's `now()`, so a test can move the clock (the
+  same shape `ListPendingInvitesForAdmin` uses). **Withdrawing an invite deletes
+  its row** (`DeleteUnacceptedInvite`) rather than marking it: there is no
+  `withdrawn_at`, and milestone 1 needed no migration. The delete names
+  `household_id` in its own `WHERE`, so an id from another household matches
+  nothing. It also requires `accepted_at IS NULL`, because an accepted invite is
+  the record of how a member joined and is never deleted. An expired,
+  unaccepted row is not pending, so it is never listed, but it can still be
+  deleted.
 - **`signups` has no `user_id`**, unlike `magic_links`. There is no user yet —
   only a verified address — which is also why the row carries no household
   name or display name: those are collected on the screen the mailed token
@@ -3994,7 +4051,13 @@ web/src/
                        restores the desktop grid unchanged), RequireAuth,
                        RequireCapability
     settings/          members, spaces, currency, notifications,
-                       TelegramPanel.tsx (connect/disconnect a chat --
+                       PendingInvitesList.tsx (inside MembersPanel, owners
+                       only: each pending invite's name, role, email and
+                       expiry, with Withdraw -- a Set of in-flight ids, not
+                       one flag, drives each row's disabled Withdraw, which
+                       is what stops a double click sending two DELETEs;
+                       only the address truncates, so a phone still shows
+                       the expiry), TelegramPanel.tsx (connect/disconnect a chat --
                        mints, opens the deep link with a plain-link
                        fallback for a blocked popup, polls status every 3s,
                        confirms; renders nothing on a 404, this install's
@@ -4002,7 +4065,8 @@ web/src/
                        and admin/, every request lives in a use*.ts hook file
                        (useHousehold, useSpaces, useInviteMember,
                        useUpdateMember, useNotificationPreferences,
-                       useTelegram, useHouseholdMembers); no settings
+                       useTelegram, useHouseholdMembers,
+                       usePendingInvites); no settings
                        component calls apiFetch itself
     money/             Finances page — net worth (now with its twelve-month
                        trend, NetWorthChart.tsx, inline SVG the same way
@@ -4049,7 +4113,9 @@ web/src/
                        never records how to store -- reading the same
                        useVision hook /marriage/vision itself uses, omitted
                        entirely (not an empty quotation) for a year with no
-                       vision yet), a setup checklist, and the "+ Add"
+                       vision yet), a four-step setup checklist
+                       (SetupChecklist.tsx; the partner step's state comes
+                       from partnerStep.ts), and the "+ Add"
                        quick-create menu
     marriage/          RetrosPage -- header (title, subtitle, done-count
                        clause, privacy badge, start-retro button), the
@@ -4168,7 +4234,8 @@ web/src/
                        a two-owner household on every load): locked, nothing
                        written yet (decision 2, never had two owners) ->
                        the explanation and an "Invite your partner" deep
-                       link into Settings' own invite modal; locked, with
+                       link into Settings' own invite modal, opened on
+                       Parent (?invite=partner); locked, with
                        content (decision 3, dropped from two owners to one)
                        -> the whole document, read-only, every write control
                        gone rather than disabled, proposals still listed and
@@ -4494,13 +4561,28 @@ shipped broken — it rendered nothing at all until a browser walk found it, and
 every unit test passed both before and after, because each asserted only that
 something was *absent* (see `docs/LEARNING.md` pattern 2).
 
-The checklist is derived entirely from data the page already holds — no
-endpoint of its own — and disappears once its three steps are done, so an
-established household is not shown a permanent chore list. It has three steps,
-not the four an onboarding flow suggests: an emailed invite writes only to the
-`invites` table (§6) while `GET /household/members` reads memberships joined to
-users, so a pending invite is not a row there and an "invite your partner" step
-could only tick once the partner accepted.
+The checklist has no endpoint of its own. It is built from reads the page
+makes anyway, and it disappears once all four steps are done, so an
+established household is not shown a permanent chore list. The fourth step,
+"Invite your partner", arrived with the partner-invite lobby's milestone 1.
+Until then it could not exist: an emailed invite writes only to `invites`
+(§6), while `GET /household/members` reads memberships joined to users, so a
+sent invite was invisible and the step could only have ticked after the
+partner accepted. `GET /household/invites` is what made "sent" readable.
+`partnerStep.ts` turns the two lists into one of three states. **Done** means
+at least two owners (`>= 2` — the signed-in owner is always one of them, so
+`>= 1` would tick the step for every household). **Invited** means an
+owner-role invite is pending, and the step shows "Invite sent — waiting for
+your partner" with a *See invite* link. **None** shows *Set up*, which opens
+Settings with the invite modal on **Parent** (`/settings?invite=partner`, the
+same link Agreements' locked state builds). `settingsRoute.validateSearch`
+accepts only `invite=partner`; anything else, including the old
+`invite=true`, opens nothing. "+ Invite" keeps the design's Kid default.
+`MembersPanel` mounts `InviteMemberModal` only while it is open, so each open
+starts a fresh form on the role its door asked for — kept mounted, the modal
+carried a partner link's Parent into the next "+ Invite". Limited members and limited invites never
+count: the step exists to reach the two owners Agreements needs, not to count
+kids.
 
 **`/marriage`, `/marriage/$` and `/family/calendar` were deleted together**
 in `110ab0a`, with the placeholders they rendered, because a navigation row

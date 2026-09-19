@@ -20,6 +20,24 @@ export type MemberView = z.infer<typeof memberSchema>;
 
 export const membersListSchema = z.array(memberSchema);
 
+// GET /household/invites' one row (pending_invite_handlers.go's
+// inviteSummaryDTO -- not admin_directory_handlers.go's pendingInviteDTO,
+// which is the operator's differently-shaped view). Owner-only, so `email`
+// is always the real address.
+// Milestone 2 of the partner-invite spec adds `channel` and `knock`; until
+// then every row is an email invite.
+export const pendingInviteSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  email: z.string(),
+  role: z.string(),
+  capabilities: z.array(z.string()),
+  expiresAt: z.string(),
+});
+export type PendingInvite = z.infer<typeof pendingInviteSchema>;
+
+export const pendingInvitesSchema = z.array(pendingInviteSchema);
+
 // PATCH /household/members/:id's success body. `warning` is present only
 // when usecase.ErrSessionRevocationFailed fired -- the mutation still
 // committed (the response is still 200 with the normal fields), but the

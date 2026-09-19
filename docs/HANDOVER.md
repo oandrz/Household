@@ -542,6 +542,22 @@ a repository; it carries doc comments that are load-bearing, not decorative
 
 ## 4. What to do next
 
+**Partner-invite lobby: milestone 1 is built and walked, and milestone 2's
+plan is next.** Branch `partner-invite-lobby` (2026-09-19) lets owners see and
+withdraw pending invites in Settings, and gives Overview's checklist a fourth
+step, "Invite your partner". `make lint && make test` are green, four mutation
+checks ran, and it was walked 15 of 15 in a real browser
+(`docs/superpowers/plans/2026-09-19-hearth-partner-invite-lobby-m1-verification.md`).
+The whole-branch review's fix wave is in too. "Invite your partner" (Overview
+and Agreements) now opens the invite modal on Parent (`?invite=partner`),
+while "+ Invite" keeps Kid, and those flows were re-walked. It is not merged
+and no PR is open. Next, write milestone 2's plan (Telegram invites and the
+knock) from
+`docs/superpowers/specs/2026-09-19-hearth-partner-invite-lobby-design.md`.
+One thing for that plan to cover: its 3-second poll runs only for Telegram
+invites, so an emailed invite accepted in another browser still reaches an
+open Settings tab only on the next navigation.
+
 **Unmerged: `hearth-portfolio-holdings` carries milestones 1 and 2 of the
 Portfolio** (`.claude/prds/investment-portfolio-tracking.prd.md`). Holdings with
 fractional quantities and average-cost basis, dated valuations, dividends and

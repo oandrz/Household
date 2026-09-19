@@ -76,6 +76,31 @@ function trendBody(changeBasisPoints: number) {
   };
 }
 
+// Two owners: the state in which "Invite your partner" is done. Tests about a
+// finished household register this.
+const TWO_OWNERS = [
+  {
+    id: "m1",
+    user: { id: "u1", email: "sam@newhouse.test", displayName: "Sam", avatarInitial: "S" },
+    role: "owner",
+    capabilities: ["calendar", "chores", "money", "marriage"],
+  },
+  {
+    id: "m2",
+    user: { id: "u2", email: "alex@newhouse.test", displayName: "Alex", avatarInitial: "A" },
+    role: "owner",
+    capabilities: ["calendar", "chores", "money", "marriage"],
+  },
+];
+
+// One owner -- Sam, who is signed in -- is the default roster: a household
+// still waiting for its partner. Never [] here. A household always holds the
+// owner who created it, and with zero owners "at least two owners" and "at
+// least one owner" are both false, so the checklist could not tell a correct
+// partnerStep from one that counts the signed-in owner as the partner. That
+// off-by-one passed this file until 2026-09-19.
+const ONE_OWNER = TWO_OWNERS.slice(0, 1);
+
 // Spelled out here rather than imported from TransactionsPage.test.tsx -- a
 // test file that reaches into another feature's fixtures breaks when that
 // feature's own tests change for reasons of their own.
@@ -287,7 +312,8 @@ function renderOverview(routes: Record<string, RouteResponse | RouteResponse[]>)
       status: 200,
       body: { currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }] },
     },
-    "GET /api/v1/household/members": { status: 200, body: [] },
+    "GET /api/v1/household/members": { status: 200, body: ONE_OWNER },
+    "GET /api/v1/household/invites": { status: 200, body: [] },
     ...routes,
   });
   return { fetchMock, ...renderWithRouter(<OverviewPage />) };
@@ -571,20 +597,24 @@ describe("OverviewPage", () => {
     });
 
     expect(await screen.findByText("Finish setting up")).toBeInTheDocument();
-    expect(screen.getByText("1 of 3 done")).toBeInTheDocument();
+    expect(screen.getByText("1 of 4 done")).toBeInTheDocument();
 
     // Each unfinished step's own link, not just the count: a checklist that
     // shows the right number of steps and sends you to the wrong screen is
     // worse than no checklist. The account step is the one the walk reached
     // through "+ Add" instead, so nothing else covers it.
-    const [accountStep, budgetStep] = screen.getAllByRole("link", { name: "Set up" });
+    const [accountStep, budgetStep, partnerStepLink] = screen.getAllByRole("link", { name: "Set up" });
     expect(accountStep).toHaveAttribute("href", "/money");
     expect(budgetStep).toHaveAttribute("href", "/money/budget");
+    // ?invite=partner, not a bare ?invite: the modal must open on Parent, or an
+    // owner who just types a name and an email invites their partner as a Kid.
+    expect(partnerStepLink).toHaveAttribute("href", "/settings?invite=partner");
   });
 
   it("drops the checklist once the household has finished setting up", async () => {
     renderOverview({
       "GET /api/v1/auth/me": { status: 200, body: meBody() },
+      "GET /api/v1/household/members": { status: 200, body: TWO_OWNERS },
       "GET /api/v1/accounts": {
         status: 200,
         body: {
@@ -605,6 +635,36 @@ describe("OverviewPage", () => {
     // loading yet.
     await screen.findByText("62% used");
     expect(screen.queryByText("Finish setting up")).toBeNull();
+  });
+
+  it("tells an owner whose partner is invited that the invite is on its way", async () => {
+    renderOverview({
+      "GET /api/v1/auth/me": { status: 200, body: meBody() },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [ACCOUNT], summary: summaryBody(500000) } },
+      [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
+      "GET /api/v1/goals": { status: 200, body: goalsBody() },
+      "GET /api/v1/bills": { status: 200, body: billsBody() },
+      "GET /api/v1/retros": { status: 200, body: retrosBody() },
+      [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionBody() } },
+      "GET /api/v1/household/invites": {
+        status: 200,
+        body: [
+          {
+            id: "inv-1",
+            name: "Alex",
+            email: "alex@newhouse.test",
+            role: "owner",
+            capabilities: [],
+            expiresAt: "2026-09-26T09:00:00Z",
+          },
+        ],
+      },
+    });
+
+    expect(await screen.findByText(OVERVIEW_COPY.setupPartnerInvited)).toBeInTheDocument();
+    expect(screen.getByText("3 of 4 done")).toBeInTheDocument();
+    // Sent already, so the link shows the invite rather than opening a second one.
+    expect(screen.getByRole("link", { name: OVERVIEW_COPY.setupPartnerSee })).toHaveAttribute("href", "/settings");
   });
 
   // The sibling of the blank-page defect above, and the same root cause:
@@ -628,7 +688,8 @@ describe("OverviewPage", () => {
         status: 200,
         body: { currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }] },
       },
-      "GET /api/v1/household/members": { status: 200, body: [] },
+      "GET /api/v1/household/members": { status: 200, body: TWO_OWNERS },
+      "GET /api/v1/household/invites": { status: 200, body: [] },
       "GET /api/v1/auth/me": { status: 200, body: meBody() },
       "GET /api/v1/accounts": { status: 200, body: { accounts: [ACCOUNT], summary: summaryBody(500000) } },
       [`GET /api/v1/budgets/${MONTH}`]: { status: 200, body: budgetBody() },
@@ -660,7 +721,7 @@ describe("OverviewPage", () => {
   it("keeps the checklist away from a limited member, who cannot do any of it", async () => {
     // Writing a budget is requireOwner, and so is adding an account.
     // Offering the steps would be offering work they cannot do.
-    renderOverview({
+    const { fetchMock } = renderOverview({
       "GET /api/v1/auth/me": {
         status: 200,
         body: meBody({ role: "limited", capabilities: ["calendar", "chores", "money"] }),
@@ -670,6 +731,7 @@ describe("OverviewPage", () => {
 
     await screen.findByText("Overview");
     expect(screen.queryByText("Finish setting up")).toBeNull();
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/v1/household/invites")).toBe(false);
   });
 
   it("offers only the things it can actually create", async () => {

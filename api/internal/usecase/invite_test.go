@@ -455,3 +455,120 @@ func TestAcceptInviteAcceptsAPasswordAtTheLengthCeiling(t *testing.T) {
 		t.Fatal("expected a live session token")
 	}
 }
+
+// TestListPendingShowsOnlyThisHouseholdsLiveInvites pins "pending" -- not
+// accepted, not expired, this household only -- at the service boundary,
+// measured by the Clock the service reads rather than by wall time.
+func TestListPendingShowsOnlyThisHouseholdsLiveInvites(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	ownerCaps := domain.AllCapabilities()
+
+	if err := f.invites.Create(ctx, f.householdID, f.andreasID, "Old", "old@example.com",
+		domain.RoleOwner, ownerCaps); err != nil {
+		t.Fatalf("Create (old): %v", err)
+	}
+	f.clock.Advance(8 * 24 * time.Hour) // past the seven-day invite TTL
+
+	if err := f.invites.Create(ctx, f.householdID, f.andreasID, "Jane", "jane@example.com",
+		domain.RoleOwner, ownerCaps); err != nil {
+		t.Fatalf("Create (jane): %v", err)
+	}
+	if err := f.invites.Create(ctx, f.householdID, f.andreasID, "Accepted", "accepted@example.com",
+		domain.RoleLimited, domain.Capabilities{domain.CapCalendar}); err != nil {
+		t.Fatalf("Create (accepted): %v", err)
+	}
+	if _, err := f.invites.Accept(ctx, lastInviteToken(t, f), "a long enough password", "Accepted"); err != nil {
+		t.Fatalf("Accept: %v", err)
+	}
+	if _, err := f.inviteRepo.Create(ctx, "household-2", "stranger@example.com", "Stranger",
+		domain.RoleOwner, ownerCaps, []byte("another-household-token-hash"), f.andreasID,
+		f.clock.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("Create (other household): %v", err)
+	}
+
+	got, err := f.invites.ListPending(ctx, f.householdID)
+	if err != nil {
+		t.Fatalf("ListPending: %v", err)
+	}
+	if len(got) != 1 || got[0].Email != "jane@example.com" || got[0].Role != domain.RoleOwner {
+		t.Fatalf("pending = %+v, want only Jane's invite", got)
+	}
+}
+
+func TestListPendingIsEmptyNotNilForAHouseholdWithNoInvites(t *testing.T) {
+	f := newFixture(t)
+
+	got, err := f.invites.ListPending(context.Background(), f.householdID)
+	if err != nil {
+		t.Fatalf("ListPending: %v", err)
+	}
+	if got == nil || len(got) != 0 {
+		t.Fatalf("got %#v, want an empty, non-nil slice", got)
+	}
+}
+
+// TestWithdrawKillsTheInviteLink is the point of withdrawing: the link the
+// invitee already holds must stop working, not merely vanish from a list.
+func TestWithdrawKillsTheInviteLink(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	if err := f.invites.Create(ctx, f.householdID, f.andreasID, "Jane", "jane@example.com",
+		domain.RoleOwner, domain.AllCapabilities()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	token := lastInviteToken(t, f)
+	pending, err := f.invites.ListPending(ctx, f.householdID)
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("ListPending: %v %+v", err, pending)
+	}
+
+	if err := f.invites.Withdraw(ctx, f.householdID, pending[0].ID); err != nil {
+		t.Fatalf("Withdraw: %v", err)
+	}
+
+	if _, err := f.invites.Preview(ctx, token); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Preview after withdraw: got %v, want domain.ErrNotFound", err)
+	}
+	if left, _ := f.invites.ListPending(ctx, f.householdID); len(left) != 0 {
+		t.Fatalf("still pending after withdraw: %+v", left)
+	}
+}
+
+func TestWithdrawRefusesAnAcceptedInvite(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	if err := f.invites.Create(ctx, f.householdID, f.andreasID, "Jane", "jane@example.com",
+		domain.RoleOwner, domain.AllCapabilities()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	pending, _ := f.invites.ListPending(ctx, f.householdID)
+	if _, err := f.invites.Accept(ctx, lastInviteToken(t, f), "a long enough password", "Jane"); err != nil {
+		t.Fatalf("Accept: %v", err)
+	}
+
+	if err := f.invites.Withdraw(ctx, f.householdID, pending[0].ID); !errors.Is(err, domain.ErrInviteAlreadyAccepted) {
+		t.Fatalf("Withdraw after accept: got %v, want domain.ErrInviteAlreadyAccepted", err)
+	}
+}
+
+func TestWithdrawCannotReachAnotherHouseholdsInvite(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	otherID, err := f.inviteRepo.Create(ctx, "household-2", "stranger@example.com", "Stranger",
+		domain.RoleOwner, domain.AllCapabilities(), []byte("another-household-token-hash"), f.andreasID,
+		f.clock.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("Create (other household): %v", err)
+	}
+
+	if err := f.invites.Withdraw(ctx, f.householdID, otherID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Withdraw across households: got %v, want domain.ErrNotFound", err)
+	}
+	if left, _ := f.inviteRepo.ListPending(ctx, "household-2", f.clock.Now()); len(left) != 1 {
+		t.Fatalf("the other household's invite must survive: %+v", left)
+	}
+}
