@@ -77,8 +77,7 @@ function trendBody(changeBasisPoints: number) {
 }
 
 // Two owners: the state in which "Invite your partner" is done. Tests about a
-// finished household register this; the default roster ([]) is a household
-// still waiting for its partner.
+// finished household register this.
 const TWO_OWNERS = [
   {
     id: "m1",
@@ -93,6 +92,14 @@ const TWO_OWNERS = [
     capabilities: ["calendar", "chores", "money", "marriage"],
   },
 ];
+
+// One owner -- Sam, who is signed in -- is the default roster: a household
+// still waiting for its partner. Never [] here. A household always holds the
+// owner who created it, and with zero owners "at least two owners" and "at
+// least one owner" are both false, so the checklist could not tell a correct
+// partnerStep from one that counts the signed-in owner as the partner. That
+// off-by-one passed this file until 2026-09-19.
+const ONE_OWNER = TWO_OWNERS.slice(0, 1);
 
 // Spelled out here rather than imported from TransactionsPage.test.tsx -- a
 // test file that reaches into another feature's fixtures breaks when that
@@ -305,7 +312,7 @@ function renderOverview(routes: Record<string, RouteResponse | RouteResponse[]>)
       status: 200,
       body: { currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }] },
     },
-    "GET /api/v1/household/members": { status: 200, body: [] },
+    "GET /api/v1/household/members": { status: 200, body: ONE_OWNER },
     "GET /api/v1/household/invites": { status: 200, body: [] },
     ...routes,
   });
