@@ -252,3 +252,20 @@ func (s *InviteService) Accept(ctx context.Context, token, password, displayName
 
 	return issueSession(ctx, s.d.Sessions, s.d.Tokens, s.d.SessionTTL, accepted.UserID, accepted.HouseholdID, now)
 }
+
+// ListPending is what an owner sees in Settings: every invite the household
+// has sent that nobody has accepted and that has not expired, measured
+// against Clock so tests can move it. See InviteRepository.ListPending for
+// the one definition of "pending".
+func (s *InviteService) ListPending(ctx context.Context, householdID string) ([]InviteSummary, error) {
+	return s.d.Invites.ListPending(ctx, householdID, s.d.Clock.Now())
+}
+
+// Withdraw deletes an invite nobody has accepted, so the link its invitee
+// already holds stops working. It deletes rather than stamps
+// (partner-invite spec decision 13): a "withdrawn" stamp would need every
+// invite query to remember one more condition, and a deleted row cannot be
+// accepted by any of them, current or future.
+func (s *InviteService) Withdraw(ctx context.Context, householdID, inviteID string) error {
+	return s.d.Invites.Delete(ctx, householdID, inviteID)
+}
