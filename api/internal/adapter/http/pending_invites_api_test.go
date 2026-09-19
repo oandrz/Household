@@ -95,6 +95,28 @@ func TestThePendingInviteListIsOwnerOnly(t *testing.T) {
 	}
 }
 
+// Withdrawing changes who may join the household, so it is an owner's call.
+// The limited member here has everything else a withdraw needs -- a real
+// cookie session, a valid CSRF token, the id of a real invite in their own
+// household -- so requireOwner is the only thing left to refuse it.
+func TestALimitedMemberCannotWithdrawAnInvite(t *testing.T) {
+	env := newTestEnv(t)
+	ownerSession, ownerCSRF := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	env.mustInviteOwner(t, ownerSession, ownerCSRF, "Jane", "jane@example.com")
+	invite, ok := findPendingInvite(env.pendingInvites(t, ownerSession), "jane@example.com")
+	if !ok {
+		t.Fatal("setup: the invite is not pending")
+	}
+
+	limitedSession, limitedCSRF := env.signIn(t, env.limitedEmail, env.limitedPassword)
+	rec := env.authed(t, http.MethodDelete, "/api/v1/household/invites/"+invite.ID, nil, limitedSession, limitedCSRF)
+	assertErrorResponse(t, rec, http.StatusForbidden, "FORBIDDEN")
+
+	if _, ok := findPendingInvite(env.pendingInvites(t, ownerSession), "jane@example.com"); !ok {
+		t.Fatal("a refused withdraw still deleted the invite")
+	}
+}
+
 // Reading shows no secret, so a token may list. Withdrawing changes who may
 // join, so a token may not (spec decision 12, the reason behind ADR 7 rule 2).
 func TestATokenCanListPendingInvitesButNotWithdrawThem(t *testing.T) {

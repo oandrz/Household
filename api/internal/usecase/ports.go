@@ -587,8 +587,8 @@ type AcceptedInvite struct {
 // that name is already taken above by the operator admin directory's own,
 // differently-shaped view of an invite (no ID, no Capabilities -- it is
 // read-only and never withdrawn from that screen). The two are genuinely
-// different data for different audiences; renaming the admin one would touch
-// files outside this task's scope for no benefit.
+// different data for different audiences, so each keeps a name of its own
+// rather than one being renamed to make room for the other.
 type InviteSummary struct {
 	ID           string
 	Name         string

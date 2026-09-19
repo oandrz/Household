@@ -17,8 +17,8 @@ import (
 // usecase.InviteSummary. Named for that type rather than "pendingInviteDTO"
 // because admin_directory_handlers.go already declares a pendingInviteDTO
 // for the operator directory's own, differently-shaped view of an invite
-// (no ID, no Capabilities) -- the same collision Task 2 hit and named at the
-// usecase layer (InviteSummary vs PendingInvite; see ports.go). Email is
+// (no ID, no Capabilities) -- the same collision the usecase layer resolves
+// the same way (InviteSummary vs PendingInvite; see ports.go). Email is
 // always the real address: the route is owner-only, the same rule that lets
 // only an owner see members' addresses (handleListMembers).
 type inviteSummaryDTO struct {
