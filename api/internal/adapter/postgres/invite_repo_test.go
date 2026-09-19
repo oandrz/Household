@@ -314,3 +314,154 @@ func countUsersByEmail(t *testing.T, db *postgres.DB, email string) int {
 	}
 	return count
 }
+
+// createHouseholdForInviteTest keeps the two tests below about invites rather
+// than about household setup.
+func createHouseholdForInviteTest(t *testing.T, households *postgres.HouseholdRepo, familyName string) domain.Household {
+	t.Helper()
+	h, err := households.Create(context.Background(), domain.Household{
+		Name: familyName + " household", FamilyName: familyName,
+		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
+	})
+	if err != nil {
+		t.Fatalf("create household %s: %v", familyName, err)
+	}
+	return h
+}
+
+// TestListPendingInvites pins the one definition of "pending" -- not
+// accepted, not expired -- and that the list never crosses households
+// (docs/LEARNING.md pattern 24). An empty result is an empty slice, not nil,
+// so the HTTP layer encodes it as [].
+func TestListPendingInvites(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	households := postgres.NewHouseholdRepo(db)
+	users := postgres.NewUserRepo(db)
+	invites := postgres.NewInviteRepo(db)
+
+	h := createHouseholdForInviteTest(t, households, "Oentoro")
+	other := createHouseholdForInviteTest(t, households, "Someone Else")
+	empty := createHouseholdForInviteTest(t, households, "Nobody Invited")
+	inviter, err := users.Create(ctx, "andreas@hearth.family", "hash", "Andreas")
+	if err != nil {
+		t.Fatalf("create inviter: %v", err)
+	}
+	now := time.Now()
+
+	liveID, err := invites.Create(ctx, h.ID, "christine@hearth.family", "Christine", domain.RoleOwner,
+		domain.AllCapabilities(), []byte("pending-live-hash-pending-live-01"), inviter.ID, now.Add(72*time.Hour))
+	if err != nil {
+		t.Fatalf("Create (live): %v", err)
+	}
+	acceptedID, err := invites.Create(ctx, h.ID, "accepted@example.com", "Accepted", domain.RoleLimited,
+		domain.Capabilities{domain.CapCalendar}, []byte("pending-accepted-hash-accepted-01"), inviter.ID, now.Add(72*time.Hour))
+	if err != nil {
+		t.Fatalf("Create (accepted): %v", err)
+	}
+	if err := invites.MarkAccepted(ctx, acceptedID); err != nil {
+		t.Fatalf("MarkAccepted: %v", err)
+	}
+	if _, err := invites.Create(ctx, h.ID, "expired@example.com", "Expired", domain.RoleLimited,
+		domain.Capabilities{domain.CapCalendar}, []byte("pending-expired-hash-expired-001"), inviter.ID, now.Add(-time.Hour)); err != nil {
+		t.Fatalf("Create (expired): %v", err)
+	}
+	if _, err := invites.Create(ctx, other.ID, "stranger@example.com", "Stranger", domain.RoleOwner,
+		domain.AllCapabilities(), []byte("pending-other-hash-other-house-01"), inviter.ID, now.Add(72*time.Hour)); err != nil {
+		t.Fatalf("Create (other household): %v", err)
+	}
+
+	got, err := invites.ListPending(ctx, h.ID, now)
+	if err != nil {
+		t.Fatalf("ListPending: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("pending = %+v, want exactly Christine's invite", got)
+	}
+	if got[0].ID != liveID || got[0].Email != "christine@hearth.family" || got[0].Name != "Christine" ||
+		got[0].Role != domain.RoleOwner || !got[0].ExpiresAt.After(now) || got[0].CreatedAt.IsZero() {
+		t.Fatalf("pending[0] = %+v", got[0])
+	}
+
+	none, err := invites.ListPending(ctx, empty.ID, now)
+	if err != nil {
+		t.Fatalf("ListPending (empty household): %v", err)
+	}
+	if none == nil || len(none) != 0 {
+		t.Fatalf("empty household: got %#v, want an empty, non-nil slice", none)
+	}
+}
+
+// TestDeleteInvite pins withdraw's contract: it removes an unaccepted invite
+// so its token stops resolving, refuses an accepted one, and cannot reach
+// another household's invite -- the id alone is never enough.
+func TestDeleteInvite(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	households := postgres.NewHouseholdRepo(db)
+	users := postgres.NewUserRepo(db)
+	invites := postgres.NewInviteRepo(db)
+
+	h := createHouseholdForInviteTest(t, households, "Oentoro")
+	other := createHouseholdForInviteTest(t, households, "Someone Else")
+	inviter, err := users.Create(ctx, "andreas@hearth.family", "hash", "Andreas")
+	if err != nil {
+		t.Fatalf("create inviter: %v", err)
+	}
+	later := time.Now().Add(72 * time.Hour)
+
+	liveHash := []byte("delete-live-hash-delete-live-0001")
+	liveID, err := invites.Create(ctx, h.ID, "christine@hearth.family", "Christine", domain.RoleOwner,
+		domain.AllCapabilities(), liveHash, inviter.ID, later)
+	if err != nil {
+		t.Fatalf("Create (live): %v", err)
+	}
+
+	// Another household's id is not found, and its row survives.
+	if err := invites.Delete(ctx, other.ID, liveID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("delete through another household: got %v, want domain.ErrNotFound", err)
+	}
+	if _, err := invites.ByTokenHash(ctx, liveHash); err != nil {
+		t.Fatalf("the invite must survive a delete scoped to another household: %v", err)
+	}
+
+	if err := invites.Delete(ctx, h.ID, liveID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := invites.ByTokenHash(ctx, liveHash); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("after Delete the token must not resolve: got %v", err)
+	}
+	if err := invites.Delete(ctx, h.ID, liveID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("deleting twice: got %v, want domain.ErrNotFound", err)
+	}
+
+	acceptedHash := []byte("delete-accepted-hash-accepted-001")
+	acceptedID, err := invites.Create(ctx, h.ID, "accepted@example.com", "Accepted", domain.RoleLimited,
+		domain.Capabilities{domain.CapCalendar}, acceptedHash, inviter.ID, later)
+	if err != nil {
+		t.Fatalf("Create (accepted): %v", err)
+	}
+	if err := invites.MarkAccepted(ctx, acceptedID); err != nil {
+		t.Fatalf("MarkAccepted: %v", err)
+	}
+	if err := invites.Delete(ctx, h.ID, acceptedID); !errors.Is(err, domain.ErrInviteAlreadyAccepted) {
+		t.Fatalf("deleting an accepted invite: got %v, want domain.ErrInviteAlreadyAccepted", err)
+	}
+	if _, err := invites.ByTokenHash(ctx, acceptedHash); err != nil {
+		t.Fatalf("an accepted invite is history and must survive: %v", err)
+	}
+
+	// Withdrawing an expired, unaccepted invite is tidying up, not an error.
+	expiredID, err := invites.Create(ctx, h.ID, "expired@example.com", "Expired", domain.RoleLimited,
+		domain.Capabilities{domain.CapCalendar}, []byte("delete-expired-hash-expired-00001"), inviter.ID, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("Create (expired): %v", err)
+	}
+	if err := invites.Delete(ctx, h.ID, expiredID); err != nil {
+		t.Fatalf("deleting an expired invite: %v", err)
+	}
+
+	if err := invites.Delete(ctx, h.ID, "not-a-uuid"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("a malformed id: got %v, want domain.ErrNotFound", err)
+	}
+}

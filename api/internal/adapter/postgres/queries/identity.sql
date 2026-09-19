@@ -160,6 +160,33 @@ UPDATE invites SET accepted_at = now()
 WHERE id = $1 AND accepted_at IS NULL AND expires_at > now()
 RETURNING id;
 
+-- name: ListPendingInvites :many
+-- "Pending" is the partner-invite spec's one definition: not accepted and not
+-- expired. $2 is the caller's clock rather than now(), so a test can move it,
+-- the same shape ListPendingInvitesForAdmin uses.
+SELECT id, email, name, role, capabilities, expires_at, created_at
+FROM invites
+WHERE household_id = $1 AND accepted_at IS NULL AND expires_at > $2
+ORDER BY created_at, id;
+
+-- name: DeleteUnacceptedInvite :one
+-- Scoped by household in the SQL itself, so an id from another household
+-- deletes nothing (docs/LEARNING.md pattern 24). An accepted invite is
+-- history and is never deleted here.
+DELETE FROM invites
+WHERE id = $1 AND household_id = $2 AND accepted_at IS NULL
+RETURNING id;
+
+-- name: InviteAcceptedInHousehold :one
+-- Read only after DeleteUnacceptedInvite matched nothing, to tell "already
+-- accepted" apart from "no such invite in this household". The ::boolean
+-- cast is the same trick holding.sql's account_archived and
+-- admin_directory.sql's has_telegram use, so sqlc infers a real bool rather
+-- than the untyped interface{} it falls back to for a bare IS NOT NULL.
+SELECT (accepted_at IS NOT NULL)::boolean AS accepted
+FROM invites
+WHERE id = $1 AND household_id = $2;
+
 -- name: ListSpaces :many
 -- ORDER BY position, key: position alone has no tiebreaker, so two spaces
 -- sharing a position (nothing stops that -- positions are assigned by

@@ -578,6 +578,27 @@ type AcceptedInvite struct {
 	HouseholdID  string
 }
 
+// InviteSummary is one invite a household has sent that nobody has accepted
+// and that has not expired: what Settings lists so an owner can see, and
+// withdraw, what they sent. It carries no token -- the raw token is never
+// stored, and the hash is nobody's business above the adapter.
+//
+// Named InviteSummary rather than the design doc's "PendingInvite" because
+// that name is already taken above by the operator admin directory's own,
+// differently-shaped view of an invite (no ID, no Capabilities -- it is
+// read-only and never withdrawn from that screen). The two are genuinely
+// different data for different audiences; renaming the admin one would touch
+// files outside this task's scope for no benefit.
+type InviteSummary struct {
+	ID           string
+	Name         string
+	Email        string
+	Role         domain.Role
+	Capabilities domain.Capabilities
+	ExpiresAt    time.Time
+	CreatedAt    time.Time
+}
+
 type InviteRepository interface {
 	Create(ctx context.Context, householdID, email, name string, role domain.Role,
 		caps domain.Capabilities, tokenHash []byte, invitedBy string, expiresAt time.Time) (string, error)
@@ -603,6 +624,19 @@ type InviteRepository interface {
 	// expired.
 	Accept(ctx context.Context, inviteID, email, passwordHash, displayName string,
 		householdID string, role domain.Role, caps domain.Capabilities) (AcceptedInvite, error)
+	// ListPending returns householdID's invites that are neither accepted
+	// nor expired as of now, oldest first. "Pending" has this one definition
+	// everywhere (the partner-invite spec's Data section). An empty result
+	// is an empty slice, never nil, so the HTTP layer encodes it as [].
+	ListPending(ctx context.Context, householdID string, now time.Time) ([]InviteSummary, error)
+	// Delete removes an invite nobody has accepted, scoped to householdID in
+	// the SQL itself: an id belonging to another household deletes nothing
+	// and reports domain.ErrNotFound, exactly as an id that never existed
+	// does, so the answer never confirms another household's invite exists.
+	// An accepted invite is history rather than something to withdraw: it
+	// reports domain.ErrInviteAlreadyAccepted with nothing deleted. An
+	// expired, unaccepted invite is deletable.
+	Delete(ctx context.Context, householdID, inviteID string) error
 }
 
 // SignupDetails is a pending sign-up, read back by token. Exactly one of

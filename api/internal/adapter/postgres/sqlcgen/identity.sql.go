@@ -302,6 +302,27 @@ func (q *Queries) DeleteMembership(ctx context.Context, arg DeleteMembershipPara
 	return err
 }
 
+const deleteUnacceptedInvite = `-- name: DeleteUnacceptedInvite :one
+DELETE FROM invites
+WHERE id = $1 AND household_id = $2 AND accepted_at IS NULL
+RETURNING id
+`
+
+type DeleteUnacceptedInviteParams struct {
+	ID          pgtype.UUID
+	HouseholdID pgtype.UUID
+}
+
+// Scoped by household in the SQL itself, so an id from another household
+// deletes nothing (docs/LEARNING.md pattern 24). An accepted invite is
+// history and is never deleted here.
+func (q *Queries) DeleteUnacceptedInvite(ctx context.Context, arg DeleteUnacceptedInviteParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, deleteUnacceptedInvite, arg.ID, arg.HouseholdID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const extendSession = `-- name: ExtendSession :exec
 UPDATE sessions SET expires_at = $2 WHERE token_hash = $1
 `
@@ -614,6 +635,29 @@ func (q *Queries) GrantAdminSession(ctx context.Context, arg GrantAdminSessionPa
 	return err
 }
 
+const inviteAcceptedInHousehold = `-- name: InviteAcceptedInHousehold :one
+SELECT (accepted_at IS NOT NULL)::boolean AS accepted
+FROM invites
+WHERE id = $1 AND household_id = $2
+`
+
+type InviteAcceptedInHouseholdParams struct {
+	ID          pgtype.UUID
+	HouseholdID pgtype.UUID
+}
+
+// Read only after DeleteUnacceptedInvite matched nothing, to tell "already
+// accepted" apart from "no such invite in this household". The ::boolean
+// cast is the same trick holding.sql's account_archived and
+// admin_directory.sql's has_telegram use, so sqlc infers a real bool rather
+// than the untyped interface{} it falls back to for a bare IS NOT NULL.
+func (q *Queries) InviteAcceptedInHousehold(ctx context.Context, arg InviteAcceptedInHouseholdParams) (bool, error) {
+	row := q.db.QueryRow(ctx, inviteAcceptedInHousehold, arg.ID, arg.HouseholdID)
+	var accepted bool
+	err := row.Scan(&accepted)
+	return accepted, err
+}
+
 const listMemberships = `-- name: ListMemberships :many
 SELECT m.id, m.household_id, m.user_id, m.role, m.capabilities,
        u.email, u.display_name, u.avatar_initial
@@ -651,6 +695,59 @@ func (q *Queries) ListMemberships(ctx context.Context, householdID pgtype.UUID) 
 			&i.Email,
 			&i.DisplayName,
 			&i.AvatarInitial,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingInvites = `-- name: ListPendingInvites :many
+SELECT id, email, name, role, capabilities, expires_at, created_at
+FROM invites
+WHERE household_id = $1 AND accepted_at IS NULL AND expires_at > $2
+ORDER BY created_at, id
+`
+
+type ListPendingInvitesParams struct {
+	HouseholdID pgtype.UUID
+	ExpiresAt   pgtype.Timestamptz
+}
+
+type ListPendingInvitesRow struct {
+	ID           pgtype.UUID
+	Email        string
+	Name         string
+	Role         string
+	Capabilities []string
+	ExpiresAt    pgtype.Timestamptz
+	CreatedAt    pgtype.Timestamptz
+}
+
+// "Pending" is the partner-invite spec's one definition: not accepted and not
+// expired. $2 is the caller's clock rather than now(), so a test can move it,
+// the same shape ListPendingInvitesForAdmin uses.
+func (q *Queries) ListPendingInvites(ctx context.Context, arg ListPendingInvitesParams) ([]ListPendingInvitesRow, error) {
+	rows, err := q.db.Query(ctx, listPendingInvites, arg.HouseholdID, arg.ExpiresAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingInvitesRow
+	for rows.Next() {
+		var i ListPendingInvitesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.Name,
+			&i.Role,
+			&i.Capabilities,
+			&i.ExpiresAt,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

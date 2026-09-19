@@ -180,3 +180,67 @@ func (r *InviteRepo) Accept(ctx context.Context, inviteID, email, passwordHash, 
 		HouseholdID:  uuidToString(membershipRow.HouseholdID),
 	}, nil
 }
+
+// ListPending reads role and capabilities through toRole and toCapabilities
+// like every other enum read here, so a value this build does not know fails
+// the read instead of reaching the wire (CLAUDE.md: fail closed).
+func (r *InviteRepo) ListPending(ctx context.Context, householdID string, now time.Time) ([]usecase.InviteSummary, error) {
+	rows, err := r.q.ListPendingInvites(ctx, sqlcgen.ListPendingInvitesParams{
+		HouseholdID: uuid(householdID),
+		ExpiresAt:   timestamptz(now),
+	})
+	if err != nil {
+		return nil, translate(err, "list pending invites")
+	}
+	out := make([]usecase.InviteSummary, 0, len(rows))
+	for _, row := range rows {
+		role, err := toRole(row.Role)
+		if err != nil {
+			return nil, err
+		}
+		caps, err := toCapabilities(row.Capabilities)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, usecase.InviteSummary{
+			ID:           uuidToString(row.ID),
+			Name:         row.Name,
+			Email:        row.Email,
+			Role:         role,
+			Capabilities: caps,
+			ExpiresAt:    timeOf(row.ExpiresAt),
+			CreatedAt:    timeOf(row.CreatedAt),
+		})
+	}
+	return out, nil
+}
+
+// Delete is one guarded statement on the common path. Only when it removed
+// nothing does a second, equally household-scoped read decide which of
+// InviteRepository.Delete's two refusals applies -- so neither statement can
+// confirm that another household's invite id exists.
+func (r *InviteRepo) Delete(ctx context.Context, householdID, inviteID string) error {
+	_, err := r.q.DeleteUnacceptedInvite(ctx, sqlcgen.DeleteUnacceptedInviteParams{
+		ID:          uuid(inviteID),
+		HouseholdID: uuid(householdID),
+	})
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("delete invite: %w", err)
+	}
+	accepted, err := r.q.InviteAcceptedInHousehold(ctx, sqlcgen.InviteAcceptedInHouseholdParams{
+		ID:          uuid(inviteID),
+		HouseholdID: uuid(householdID),
+	})
+	if err != nil {
+		return translate(err, "read invite acceptance")
+	}
+	if accepted {
+		return domain.ErrInviteAlreadyAccepted
+	}
+	// An unaccepted row here means it changed between the two statements.
+	// Answer as the DELETE did: nothing was removed.
+	return domain.ErrNotFound
+}
