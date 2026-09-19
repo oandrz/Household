@@ -2524,6 +2524,26 @@ product. When writing a walk script, dry-run its arithmetic against the state
 the walk itself will have created by that step — a criterion that asserts a
 counter must say what the counter has already counted.
 
+**The partner-invite lobby's walk (2026-09-19) passed 15 of 15 because the
+walker already knew the answer.** Criteria 11 and 12 needed an owner-role
+invite, so the walker, knowing that, changed the modal's Role from Kid to
+Parent every time. Criteria 9, 10 and 13 only checked that the modal
+*opened*. No criterion asked what a first-time owner gets if they type a
+name and an address and press Send. The answer was a **Kid** invite: the
+modal opened on the design's Kid default even from "Invite your partner".
+The partner would have joined as a limited member, the checklist step would
+never have ticked, and Agreements would have stayed locked. The walk did
+notice the default, but filed it as an "observation" to settle later, not a
+defect. The whole-branch review is what called it Important. Fixed in
+`b8aa854` (the partner links now open the modal on Parent), and re-walked the
+naive way: type a name, type an address, press Enter, and the pending row
+reads "Owner". **When a criterion needs a particular choice, ask whether a
+first-time user would make that choice without being told. If the walker has
+to know it, the product has to say it — or make it the default.** And a
+walker's observation that would stop a first-time user from finishing the
+flow is a defect, not a note for later. This is the same shape as the
+"15 of 15 still missed day-one UX" record at the top of this pattern.
+
 ### 14. Literal example data belongs to the seed, not the product
 
 The design mockup was built around one imagined household — Andreas &
@@ -3346,6 +3366,24 @@ the identical defect the whole pattern is about, one level up. State the
 invariant, not the enumeration — the same rule the admin surface's handover
 distilled from nine of its own comments.
 
+**Two claims checked in the partner-invite lobby's final review
+(2026-09-19), and both were false.**
+- The review said that moving `DELETE /household/invites/{id}` out of the
+  `requireOwner` group "would leave every test green". Run, the mutation
+  turned the existing `TestOwnerOnlyRoutesRejectALimitedMember` walk red
+  (`status = 404, want 403` for a made-up id) as well as the new test. The
+  new test was still worth adding, because only a real invite shows the row
+  being deleted (`204`), but the gap was smaller than claimed.
+- A comment in `PendingInvitesList.tsx` said an early
+  `if (withdrawingIds.has(id)) return` stopped a double click "before React
+  has re-rendered the button as disabled". It never could: it read the
+  render's own Set, which the first click had not changed yet. The
+  `disabled` attribute was the real guard (removing it turned the
+  double-click test red). The check and the comment are gone (`eeede79`).
+
+A reviewer's claim and a code comment get the same treatment: run the
+mutation, read the failure.
+
 ---
 
 ### 17. A requirement the plan drops is invisible to every review that reads the plan
@@ -3750,7 +3788,13 @@ end of this file.
 
 **Held, 2026-09-19 (partner-invite lobby, milestone 1): nothing broke.**
 Sending an invite invalidates members, the new `["household", "invites"]` key
-and `me`, and withdrawing invalidates invites. The walk moved Overview's
+and `me`, and withdrawing invalidates invites. The final review then found the
+error path of this very rule: withdraw invalidated only **on success**, so a
+`404` (another owner already withdrew) or a `409` (accepted meanwhile) left a
+dead row on screen beside its error. It now invalidates in `onSettled`, and a
+`409` also invalidates members, because the invitee is one now (`eeede79`).
+**A failed write can still be news about the data: list the keys its failure
+makes stale too.** The walk moved Overview's
 partner step from Set up → Invite sent → ✓ by clicking through the app's own
 links, not by reloading. The one staleness it found is outside this rule: an
 invite accepted in *another* browser does not reach an owner's Settings tab

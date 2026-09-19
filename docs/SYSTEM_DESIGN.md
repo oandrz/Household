@@ -3022,8 +3022,11 @@ Settings' Members panel, and Overview's "Invite your partner" step. Both are
 owner-only: `MembersPanel` mounts the list only for an owner, and
 `OverviewPage` passes `enabled: isOwner`, so a limited member never sends a
 request whose `403` would then need hiding. Sending an invite
-(`useInviteMember`) invalidates members, invites and `me`; withdrawing one
-(`useWithdrawInvite`) invalidates invites. An invite accepted in *another*
+(`useInviteMember`) invalidates members, invites and `me`. Withdrawing one
+(`useWithdrawInvite`) invalidates invites in `onSettled`, so a failed withdraw
+refreshes the list too: a `404` means another owner already withdrew it, and a
+`409` means it was accepted meanwhile, which also invalidates members because
+the invitee is one now. An invite accepted in *another*
 browser reaches an owner's open tab only when something refetches — moving to
 another page does it, sitting on Settings does not. Milestone 2's planned
 3-second poll runs only while a *Telegram* invite is waiting for a knock, so
@@ -4051,8 +4054,10 @@ web/src/
                        PendingInvitesList.tsx (inside MembersPanel, owners
                        only: each pending invite's name, role, email and
                        expiry, with Withdraw -- a Set of in-flight ids, not
-                       one flag, is what stops a double click sending two
-                       DELETEs), TelegramPanel.tsx (connect/disconnect a chat --
+                       one flag, drives each row's disabled Withdraw, which
+                       is what stops a double click sending two DELETEs;
+                       only the address truncates, so a phone still shows
+                       the expiry), TelegramPanel.tsx (connect/disconnect a chat --
                        mints, opens the deep link with a plain-link
                        fallback for a blocked popup, polls status every 3s,
                        confirms; renders nothing on a 404, this install's
@@ -4229,7 +4234,8 @@ web/src/
                        a two-owner household on every load): locked, nothing
                        written yet (decision 2, never had two owners) ->
                        the explanation and an "Invite your partner" deep
-                       link into Settings' own invite modal; locked, with
+                       link into Settings' own invite modal, opened on
+                       Parent (?invite=partner); locked, with
                        content (decision 3, dropped from two owners to one)
                        -> the whole document, read-only, every write control
                        gone rather than disabled, proposals still listed and
@@ -4568,7 +4574,13 @@ at least two owners (`>= 2` — the signed-in owner is always one of them, so
 `>= 1` would tick the step for every household). **Invited** means an
 owner-role invite is pending, and the step shows "Invite sent — waiting for
 your partner" with a *See invite* link. **None** shows *Set up*, which opens
-Settings with the invite modal. Limited members and limited invites never
+Settings with the invite modal on **Parent** (`/settings?invite=partner`, the
+same link Agreements' locked state builds). `settingsRoute.validateSearch`
+accepts only `invite=partner`; anything else, including the old
+`invite=true`, opens nothing. "+ Invite" keeps the design's Kid default.
+`MembersPanel` mounts `InviteMemberModal` only while it is open, so each open
+starts a fresh form on the role its door asked for — kept mounted, the modal
+carried a partner link's Parent into the next "+ Invite". Limited members and limited invites never
 count: the step exists to reach the two owners Agreements needs, not to count
 kids.
 

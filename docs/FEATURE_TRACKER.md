@@ -1140,7 +1140,7 @@ The full checklist is at the end of `docs/LEARNING.md`.
 | Email addresses hidden from non-owners | ✅ | Owners see them; a limited member sees the list without addresses |
 | Last-owner protection | ✅ | Removing or demoting the last owner is refused inline |
 | Invite a family member (modal) | ✅ | Name, role, optional email, access switches |
-| Pending invites in Settings: list and withdraw (no mockup) | ✅ | Partner-invite lobby, milestone 1 (`docs/superpowers/plans/2026-09-19-hearth-partner-invite-lobby-m1.md`), walked 15 of 15 in a real browser on 2026-09-19 (`docs/superpowers/plans/2026-09-19-hearth-partner-invite-lobby-m1-verification.md`). Owners see a **Pending invites** list under Members: each invite nobody has accepted and that has not expired, as `Owner · email · Expires <date>`, with Withdraw. `GET /api/v1/household/invites` is owner-only, and a personal API token may read it. **Withdraw is `DELETE /api/v1/household/invites/{id}`: it needs a browser session (a token gets `403 SESSION_REQUIRED`) and it deletes the row**, so the emailed link then shows the invite-not-found screen. An accepted invite cannot be withdrawn (`409`). A limited member sees no list and sends no request. Built on branch `partner-invite-lobby`; not merged or deployed yet |
+| Pending invites in Settings: list and withdraw (no mockup) | ✅ | Partner-invite lobby, milestone 1 (`docs/superpowers/plans/2026-09-19-hearth-partner-invite-lobby-m1.md`), walked 15 of 15 in a real browser on 2026-09-19 (`docs/superpowers/plans/2026-09-19-hearth-partner-invite-lobby-m1-verification.md`). Owners see a **Pending invites** list under Members: each invite nobody has accepted and that has not expired, as `Owner · email · Expires <date>`, with Withdraw. `GET /api/v1/household/invites` is owner-only, and a personal API token may read it. **Withdraw is `DELETE /api/v1/household/invites/{id}`: it needs a browser session (a token gets `403 SESSION_REQUIRED`) and it deletes the row**, so the emailed link then shows the invite-not-found screen. An accepted invite cannot be withdrawn (`409`). A failed withdraw (`404` or `409`) still refreshes the list, and a `409` also refreshes Members. A limited member sees no list and sends no request. At phone width only the address truncates, so the role and the expiry stay visible. **"+ Invite" opens the invite modal on Kid (the design's default); the two "Invite your partner" links (`/settings?invite=partner`, from Overview and Agreements) open it on Parent** — the final-review fix wave, re-walked 2026-09-19. Built on branch `partner-invite-lobby`; not merged or deployed yet |
 | Remove a member | ⬜ | No control in the design either; the backend supports it |
 | Spaces list with audiences | ✅ | |
 | New space (modal) | 🟡 | Everyone and Parents only work. **Custom is shown disabled** — per-space membership is not built, and the design marks custom space pages "not built" too |
@@ -1205,7 +1205,9 @@ milestone 1 (2026-09-19). Before that, an emailed invite wrote only to the
 after the partner accepted. `GET /household/invites` is what lets it say "sent":
 with an owner-role invite pending the step reads "Invite sent — waiting for your
 partner" with a **See invite** link to Settings. Without one it shows **Set
-up**, which opens Settings with the invite modal. It ticks at two owners.
+up**, which opens Settings with the invite modal already on **Parent**
+(`?invite=partner`), so an owner who only types a name and an address invites
+a co-owner, not a Kid. It ticks at two owners.
 Limited members and limited invites never count toward it. The
 **limited-member panel** exists because Overview is the only page every member
 reaches: a limited member holding `money` gets no summary, no budget card and

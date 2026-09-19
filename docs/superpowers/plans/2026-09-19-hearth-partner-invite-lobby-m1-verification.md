@@ -9,6 +9,12 @@
 > building equivalent, recorded below. `make lint && make test` green on
 > `7fe48bc`. No product defect was found. Four observations are recorded at
 > the end, none of them a milestone-1 regression.
+>
+> **Correction, same day: that "no product defect" was wrong.** The
+> whole-branch review rated observations 1 and 2 as Important defects, and it
+> was right: the walk passed criteria 9, 10 and 13 only because the walker
+> knew to switch the modal to Parent. Both are fixed, and the affected
+> criteria were re-walked. See section 4, "Final-review fix wave".
 
 This file is the evidence for Task 6 of
 `docs/superpowers/plans/2026-09-19-hearth-partner-invite-lobby-m1.md`. The
@@ -285,6 +291,10 @@ always has.
 
 ### Observations (none is a milestone-1 regression)
 
+*Observations 1 and 2 were later judged Important defects and are fixed; see
+section 4. Observation 2 also understated itself: an ordinary address, not
+only a long one, clipped the date.*
+
 1. **"Invite your partner" opens the modal on Kid.** Both doors to
    `/settings?invite=true` (Agreements since 2026-09-07, Overview's checklist
    since this milestone) open the invite modal with **Role: Kid** selected. A
@@ -317,3 +327,111 @@ Also seen, older than this milestone and outside it: after Escape closes a
 modal that `?invite=true` opened, the URL keeps `?invite=true` (so a reload
 reopens the modal) and focus falls to `<body>`. `MembersPanel.tsx:171`
 documents the seeding as deliberate.
+
+---
+
+## 4. Final-review fix wave (2026-09-19)
+
+The whole-branch review of `bdd3765..3a9f2b7` answered "Ready to merge: With
+fixes", with no Critical findings, three Important and six Minor. The
+controller ruled that all nine are fixed in one wave. Commits, in order:
+
+- `b8aa854` fix(invites): "Invite your partner" opens the invite modal on Parent
+- `be31fb9` fix(settings): a pending invite's expiry stays visible on a phone
+- `545d1e2` test(invites): a limited member cannot withdraw an invite
+- `eeede79` fix(invites): a failed withdraw refreshes the list, and four comments tell the truth
+
+### What changed, per finding
+
+| Finding | Change |
+|---|---|
+| **Important 1** — partner links opened the modal on Kid | Both links now build `?invite=partner`, the only value `settingsRoute.validateSearch` accepts. The modal opens on Parent; "+ Invite" keeps Kid. `MembersPanel` now mounts `InviteMemberModal` only while it is open (the `AccountsPanel` shape) and passes `defaultRole`. The review's suggested shape (keep the modal mounted, use `defaultRole` in `reset()`) fails one sequence: open from a partner link on Parent, close, press "+ Invite", and `reset()` has already put the form back on Parent. `?invite=true` now opens nothing, because nothing in the app builds it any more. An old bookmark lands on plain Settings |
+| **Important 2** — expiry hidden at phone width | The detail line is a flex row. Only the address has `min-w-0 truncate`; the role, the date and the dots are `shrink-0` |
+| **Important 3** — owner guard on DELETE untested | New `TestALimitedMemberCannotWithdrawAnInvite`: a limited member with a real session and CSRF token DELETEs an owner's invite → `403 FORBIDDEN`, and the invite is still listed |
+| Minor 4 — dead double-click guard | The `withdrawingIds.has(id)` early return and its comment are gone. The comment on the Set now says `disabled` is the guard |
+| Minor 5 — wrong DTO name | `schemas.ts` names `inviteSummaryDTO` |
+| Minor 6 — task references in comments | `pending_invite_handlers.go` and `ports.go` reworded (also the Agreements link comment's "Step 7") |
+| Minor 7 — stale row after a failed withdraw | `useWithdrawInvite` invalidates invites in `onSettled`; on a `409` it also invalidates members |
+| Minor 8 — `enabled` comment | `usePendingInvites.ts` says Overview passes `isOwner` and PendingInvitesList passes `true` |
+| Minor 9 — Overview comment | Only the invites request is owner-gated; the members request runs for everyone |
+
+### Tests written first, and what they said before the fix
+
+- Important 1: six tests red on the old code, for example
+  `router.test.tsx` "/settings?invite=partner lands with the invite modal
+  open on Parent…" → `Unable to find role="dialog"`, and the two href
+  assertions → `expected … href "/settings?invite=partner"`. The
+  "+ Invite reopen after Parent starts on Kid" test was already green: it
+  guards the old behaviour that must not regress.
+- Important 2: the two list tests → `Unable to find an element with the
+  text: Owner` / `/^Expires /` (they were one truncating node).
+- Minor 7: `Unable to find role="switch" and name "Jane's role"` (409) and
+  the 404 row never leaving the screen.
+
+### Mutation checks
+
+1. **Important 1.** Put `InviteMemberModal` back to always-mounted
+   (`open={inviteRole !== null} defaultRole={inviteRole ?? "limited"}`).
+   Two tests red: "opens a partner invite on Parent, and + Invite after
+   closing it opens on Kid" and "opens + Invite on Kid, and a reopen after
+   choosing Parent starts on Kid again", both
+   `expect(element).toHaveValue(limited)` with the form still on `owner`.
+   Restored; 15/15 green.
+2. **Important 3.** Moved the `requireCookieSession` group out of the
+   `requireOwner` group into the CSRF-only group. Red:
+   `pending_invites_api_test.go:113: status = 204, want 403` — and **also**
+   the existing walk, `household_api_test.go:183: DELETE
+   /api/v1/household/invites/{id}: status = 404, want 403`. So the review's
+   premise ("every test stays green") was wrong; the walk already guarded
+   this route with a made-up id. The new test adds that a real invite would
+   be deleted. Restored; both green.
+3. **Minor 4 (extra).** With the early return deleted, set
+   `disabled={false}` on Withdraw: "disables Withdraw while its request
+   runs, so a double click sends one DELETE" red with
+   `expect(element).toBeDisabled()` / `Received element is not disabled`.
+   Restored. So `disabled` is the real guard, and it is tested.
+
+### Commands and output
+
+- `cd web && npx vitest run` → `Test Files 103 passed (103)`,
+  `Tests 913 passed (913)`.
+- `npx tsc --noEmit -p .` → no output, exit 0. eslint on the touched
+  folders → clean.
+- `cd api && go test ./internal/adapter/http -run
+  'PendingInvite|WithdrawingAn|TestALimitedMemberCannotWithdrawAnInvite|TestOwnerOnlyRoutesRejectALimitedMember'`
+  → seven `--- PASS`, `ok … 7.803s`. (The coordinator's pattern alone does
+  not match the new test's name, so it was added.)
+- `go build ./... && go vet ./...` → ok.
+- `make lint` on `eeede79` → `architecture lint passed`, `deadcode passed`,
+  `staticcheck passed`, knip, `go vet`, `=== MAKE LINT EXIT 0 ===`.
+- The full `make test` was not re-run after the fix wave. The whole web suite
+  and the touched Go tests were.
+
+### Re-walk (Chrome DevTools MCP)
+
+`hearth-web-1` restarted after the last frontend commit. Port 5173 was still
+`ssh` PID 49674 (colima), and the served `/src/routes/router.tsx` contained
+`invite: "partner"`. The existing test households have two owners, so a
+fresh one was made by self-serve sign-up: **"Fix Wave Household"**, owner
+Taylor (`taylor.walk@example.com`), in isolated context `taylor`.
+
+| # | Result | Evidence |
+|---|---|---|
+| 9 | **Pass** | "1 of 4 done"; "Invite your partner" **Set up** → `http://localhost:5173/settings?invite=partner` |
+| 10 | **Pass** | Clicked it: `/settings?invite=partner`, dialog open and `:modal`, **Role = owner ("Parent")**, Marriage row shown, focus inside. **First-use path:** typed only "Christine" and `christine@hearthhome.co`, pressed Enter, changed nothing else → the pending row reads **"Christine · Owner · christine@hearthhome.co · Expires Sep 26"** |
+| 13 | **Pass** | Agreements (locked, one owner): "Invite your partner" → `/settings?invite=partner`, dialog open and `:modal`, **Role = owner ("Parent")**, focus inside |
+| 14 | **Pass** | 360×740: page `scrollWidth` 360. Detail line 214 px wide; the address (23 characters, the length of `christine@hearth.family`) is clipped (`scrollWidth` 137 > `clientWidth` 76) and the screenshot shows "Owner · christine@h… · Expires Sep 26". The expiry's right edge is 253, the line's own right edge. Withdraw at 265–321 |
+| "+ Invite" | **Pass** | In the same tab, right after cancelling the partner modal, "+ Invite" opened on **Role = limited ("Kid")**, no Marriage row |
+
+Console for the whole session: no errors, no warnings.
+
+**Seen during the re-walk, older than this wave:** Chrome's mobile emulation
+reloads the page, and because the URL keeps `?invite=partner` after the
+modal closes, the reload opens the modal again (this is the existing
+"URL keeps the hint" behaviour noted in section 3). It is harmless, but it
+does make a reload of Settings reopen the partner modal.
+
+**Rows the re-walk created:** Christine's invite was withdrawn with a real
+click (`DELETE …/ac4a7d28-…` → `204`; `0` rows remain). **Still present:**
+"Fix Wave Household" with its owner Taylor and sign-up row, and two Mailpit
+messages (Taylor's set-up link, Christine's invite).
