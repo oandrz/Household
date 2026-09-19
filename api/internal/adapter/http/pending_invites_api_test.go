@@ -1,6 +1,7 @@
 package httpadapter_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -116,6 +117,49 @@ func TestATokenCanListPendingInvitesButNotWithdrawThem(t *testing.T) {
 	}
 	if _, ok := findPendingInvite(env.pendingInvites(t, session), "jane@example.com"); !ok {
 		t.Fatal("a refused withdraw still deleted the invite")
+	}
+}
+
+// An accepted invite is history, not a mistake: withdrawing it must refuse
+// with 409, and the row must survive so nothing else has to notice it was
+// asked to disappear.
+func TestWithdrawingAnAcceptedInviteIs409(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	env.mustInviteOwner(t, session, csrf, "Jane", "jane@example.com")
+	invite, ok := findPendingInvite(env.pendingInvites(t, session), "jane@example.com")
+	if !ok {
+		t.Fatal("setup: the invite is not pending")
+	}
+
+	// The test mailer drops the invite mail rather than delivering it, so
+	// there is no token here to accept the invite through the public API --
+	// accepting it can only be simulated by writing the row directly.
+	tag, err := env.db.Pool().Exec(context.Background(),
+		`UPDATE invites SET accepted_at = now() WHERE id = $1`, invite.ID)
+	if err != nil {
+		t.Fatalf("mark invite accepted: %v", err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("mark invite accepted touched %d rows, want 1", tag.RowsAffected())
+	}
+
+	rec := env.authed(t, http.MethodDelete, "/api/v1/household/invites/"+invite.ID, nil, session, csrf)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("withdraw an accepted invite: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := decodeError(t, rec).Error.Code; got != "INVITE_ALREADY_ACCEPTED" {
+		t.Fatalf("withdraw an accepted invite: error code = %q, want INVITE_ALREADY_ACCEPTED", got)
+	}
+
+	var count int
+	if err := env.db.Pool().QueryRow(context.Background(),
+		`SELECT count(*) FROM invites WHERE id = $1`, invite.ID).Scan(&count); err != nil {
+		t.Fatalf("count invite rows: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("a refused withdraw left %d rows for the accepted invite, want 1", count)
 	}
 }
 
