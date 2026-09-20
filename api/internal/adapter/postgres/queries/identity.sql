@@ -210,6 +210,23 @@ WHERE token_hash = $1
   AND knocked_at IS NULL
 RETURNING id;
 
+-- name: ClaimKnockedInvite :one
+-- The guard and the read in one statement: it stamps the invite accepted
+-- only if it is a telegram invite, unaccepted, unexpired, and somebody has
+-- knocked -- and returns everything the rest of InviteRepo.Admit's
+-- transaction needs, so no separate read can see a different row than the
+-- one this statement just claimed. Zero rows means one of those five
+-- conditions failed; the caller (InviteRepo.Admit) tells them apart with
+-- one more read, as Delete already does with InviteAcceptedInHousehold.
+UPDATE invites
+SET accepted_at = $3
+WHERE id = $1 AND household_id = $2
+  AND channel = 'telegram'
+  AND accepted_at IS NULL
+  AND expires_at > $3
+  AND knocked_at IS NOT NULL
+RETURNING name, role, capabilities, knock_chat_id, knock_chat_username;
+
 -- name: ReplaceInviteToken :one
 -- One statement replaces the token and clears the knock together, so there
 -- is never an instant where a fresh link carries a stale knock. It returns

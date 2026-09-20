@@ -3,11 +3,13 @@ package postgres_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres"
 	"github.com/andreasoentoro/hearth/api/internal/domain"
+	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
 func TestInviteLifecycle(t *testing.T) {
@@ -726,4 +728,195 @@ func TestReplaceTokenRefusesEverythingButALiveTelegramInviteInThisHousehold(t *t
 	if _, err := invites.ReplaceToken(ctx, h.ID, "not-a-uuid", []byte("newhash5-000000000000000000001"), later); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("a malformed id: got %v, want domain.ErrNotFound", err)
 	}
+}
+
+// --- Task 9: Admit -- Let in, the transaction the whole milestone exists
+// for. One repository call creates the user, the membership and the
+// telegram_accounts row and stamps the invite accepted; either all four
+// happen or none do.
+
+// TestAdmitCreatesUserMembershipAndTelegramAccountAtomically is the happy
+// path against real Postgres, proving all four writes land together: a
+// user with no credentials, a membership carrying the invite's own role
+// and capabilities, a telegram_accounts row binding the knocked chat to
+// that new user, and the invite stamped accepted.
+func TestAdmitCreatesUserMembershipAndTelegramAccountAtomically(t *testing.T) {
+	ctx := context.Background()
+	db, h := newInviteTestHousehold(t)
+	invites := postgres.NewInviteRepo(db)
+	accounts := postgres.NewTelegramAccountRepo(db)
+
+	tokenHash := []byte("admit-happy-path-token-hash-3201")
+	inviteID, err := invites.CreateTelegram(ctx, h.ID, "Christine", domain.RoleOwner,
+		domain.AllCapabilities(), tokenHash, h.OwnerUserID, time.Now().Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	if err := invites.RecordKnock(ctx, tokenHash, 4242, "christine_t", "4812", time.Now()); err != nil {
+		t.Fatalf("RecordKnock: %v", err)
+	}
+
+	admitted, err := invites.Admit(ctx, h.ID, inviteID, time.Now())
+	if err != nil {
+		t.Fatalf("Admit: %v", err)
+	}
+	if admitted.UserID == "" || admitted.MembershipID == "" {
+		t.Fatalf("admitted = %+v, want a real user and membership id", admitted)
+	}
+	if admitted.Name != "Christine" || admitted.Role != domain.RoleOwner || admitted.ChatID != 4242 {
+		t.Fatalf("admitted = %+v", admitted)
+	}
+	if len(admitted.Capabilities) != len(domain.AllCapabilities()) || !admitted.Capabilities.Has(domain.CapMoney) {
+		t.Fatalf("capabilities = %v, want everything the invite granted", admitted.Capabilities)
+	}
+
+	// The user has no email and no password: this member was let in from a
+	// Telegram knock, never typed a password.
+	stored, err := postgres.NewUserRepo(db).ByID(ctx, admitted.UserID)
+	if err != nil {
+		t.Fatalf("read back the new user: %v", err)
+	}
+	if stored.Email != "" || stored.PasswordHash != "" {
+		t.Fatalf("user = %+v, want no email and no password", stored)
+	}
+
+	binding, err := accounts.ByUserID(ctx, admitted.UserID)
+	if err != nil {
+		t.Fatalf("read back the telegram account: %v", err)
+	}
+	if binding.ChatID != 4242 || binding.ChatUsername != "christine_t" {
+		t.Fatalf("binding = %+v, want chat 4242 (christine_t)", binding)
+	}
+
+	details, err := invites.ByTokenHash(ctx, tokenHash)
+	if err != nil {
+		t.Fatalf("ByTokenHash: %v", err)
+	}
+	if details.AcceptedAt == nil {
+		t.Fatal("the invite was not stamped accepted")
+	}
+}
+
+// TestAdmitRefusesAnInviteNobodyHasKnockedOn proves the fallback read
+// invite_repo.go's Admit runs after ClaimKnockedInvite's guarded UPDATE
+// matches nothing: a live Telegram invite that nobody has tapped answers
+// domain.ErrInviteNotKnocked, and nothing is written.
+func TestAdmitRefusesAnInviteNobodyHasKnockedOn(t *testing.T) {
+	ctx := context.Background()
+	db, h := newInviteTestHousehold(t)
+	invites := postgres.NewInviteRepo(db)
+
+	tokenHash := []byte("admit-not-knocked-token-hash-320")
+	inviteID, err := invites.CreateTelegram(ctx, h.ID, "Christine", domain.RoleOwner,
+		domain.AllCapabilities(), tokenHash, h.OwnerUserID, time.Now().Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+
+	usersBefore := countRows(t, db, "users")
+	if _, err := invites.Admit(ctx, h.ID, inviteID, time.Now()); !errors.Is(err, domain.ErrInviteNotKnocked) {
+		t.Fatalf("Admit: got %v, want domain.ErrInviteNotKnocked", err)
+	}
+	if got := countRows(t, db, "users"); got != usersBefore {
+		t.Errorf("users: %d rows after a refused Admit, want %d", got, usersBefore)
+	}
+}
+
+// TestAdmitIsSingleUse proves the guarded stamp itself: a second Admit call
+// on an already-admitted invite answers domain.ErrInviteAlreadyAccepted and
+// writes no second user or membership -- the same guard-runs-first property
+// TestInviteAcceptIsSingleUse proves for Accept.
+func TestAdmitIsSingleUse(t *testing.T) {
+	ctx := context.Background()
+	db, h := newInviteTestHousehold(t)
+	invites := postgres.NewInviteRepo(db)
+
+	tokenHash := []byte("admit-single-use-token-hash-3201")
+	inviteID, err := invites.CreateTelegram(ctx, h.ID, "Christine", domain.RoleOwner,
+		domain.AllCapabilities(), tokenHash, h.OwnerUserID, time.Now().Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	if err := invites.RecordKnock(ctx, tokenHash, 4242, "christine_t", "4812", time.Now()); err != nil {
+		t.Fatalf("RecordKnock: %v", err)
+	}
+	if _, err := invites.Admit(ctx, h.ID, inviteID, time.Now()); err != nil {
+		t.Fatalf("first Admit: %v", err)
+	}
+
+	usersAfterFirst := countRows(t, db, "users")
+	membershipsAfterFirst := countRows(t, db, "memberships")
+
+	if _, err := invites.Admit(ctx, h.ID, inviteID, time.Now()); !errors.Is(err, domain.ErrInviteAlreadyAccepted) {
+		t.Fatalf("second Admit: got %v, want domain.ErrInviteAlreadyAccepted", err)
+	}
+	if got := countRows(t, db, "users"); got != usersAfterFirst {
+		t.Errorf("users: %d rows after a refused second Admit, want %d", got, usersAfterFirst)
+	}
+	if got := countRows(t, db, "memberships"); got != membershipsAfterFirst {
+		t.Errorf("memberships: %d rows after a refused second Admit, want %d", got, membershipsAfterFirst)
+	}
+}
+
+// Admit is all or nothing. Forcing the last insert to fail -- by binding
+// the chat to somebody else first -- must leave no user and no membership
+// behind, because a half-admitted member is a row nobody can clean up from
+// the product.
+func TestAdmitLeavesNothingBehindWhenTheChatIsAlreadyBound(t *testing.T) {
+	ctx := context.Background()
+	db, h := newInviteTestHousehold(t)
+	invites := postgres.NewInviteRepo(db)
+	accounts := postgres.NewTelegramAccountRepo(db)
+
+	tokenHash := []byte("another-token-hash-32-bytes-----")
+	inviteID, err := invites.CreateTelegram(ctx, h.ID, "Christine", domain.RoleOwner,
+		domain.AllCapabilities(), tokenHash, h.OwnerUserID, time.Now().Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	if err := invites.RecordKnock(ctx, tokenHash, 4242, "christine_t", "4812", time.Now()); err != nil {
+		t.Fatalf("RecordKnock: %v", err)
+	}
+	// The chat signs up somewhere else between the knock and the click --
+	// spec decision 15's race, forced rather than waited for.
+	if err := accounts.Create(ctx, usecase.TelegramBinding{
+		UserID: h.OwnerUserID, ChatID: 4242, ChatUsername: "christine_t",
+	}); err != nil {
+		t.Fatalf("bind the chat elsewhere: %v", err)
+	}
+
+	usersBefore := countRows(t, db, "users")
+	membershipsBefore := countRows(t, db, "memberships")
+
+	if _, err := invites.Admit(ctx, h.ID, inviteID, time.Now()); !errors.Is(err, domain.ErrChatAlreadyBound) {
+		t.Fatalf("Admit: got %v, want domain.ErrChatAlreadyBound", err)
+	}
+	if got := countRows(t, db, "users"); got != usersBefore {
+		t.Errorf("users: %d rows after a refused Admit, want %d -- the transaction leaked a user", got, usersBefore)
+	}
+	if got := countRows(t, db, "memberships"); got != membershipsBefore {
+		t.Errorf("memberships: %d rows after a refused Admit, want %d", got, membershipsBefore)
+	}
+	var acceptedAt *time.Time
+	if err := db.Pool().QueryRow(ctx, `SELECT accepted_at FROM invites WHERE id = $1`, inviteID).
+		Scan(&acceptedAt); err != nil {
+		t.Fatalf("read the invite back: %v", err)
+	}
+	if acceptedAt != nil {
+		t.Error("the invite was stamped accepted although nothing else was written")
+	}
+}
+
+// countRows is a whole-table count, used only to prove a failed
+// transaction left nothing behind. Whole-table rather than scoped because
+// the claim being tested is "nothing was written anywhere".
+func countRows(t *testing.T, db *postgres.DB, table string) int {
+	t.Helper()
+	var n int
+	// table is a literal from this test file, never caller input.
+	if err := db.Pool().QueryRow(context.Background(),
+		fmt.Sprintf(`SELECT count(*) FROM %s`, table)).Scan(&n); err != nil {
+		t.Fatalf("count %s: %v", table, err)
+	}
+	return n
 }

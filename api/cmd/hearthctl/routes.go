@@ -46,6 +46,7 @@ var routeTable = []route{
 	{"GET", "/household/invites", "owner", "-"},
 	{"DELETE", "/household/invites/{id}", "owner+browser session+csrf", "-"},
 	{"POST", "/household/invites/{id}/link", "owner+browser session+csrf", "-> {link,expiresAt}; telegram invites only"},
+	{"POST", "/household/invites/{id}/admit", "owner+browser session+csrf", "-> {member,signInSent}; no request body"},
 	{"GET", "/spaces", "session", "-"},
 	{"POST", "/spaces", "owner+csrf", `{"name","visibility","template"?}`},
 	{"GET", "/notification-preferences", "session", "-"},

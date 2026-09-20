@@ -862,3 +862,149 @@ func TestANewLinkStillArrivesWhenTellingTheKnockedChatFails(t *testing.T) {
 		t.Fatalf("the send was still attempted for chat %d, want 4242", got)
 	}
 }
+
+// --- Task 9: Admit -- Let in, the whole point of the milestone ----------
+
+// Let in, the whole point of the milestone: one click turns a knock into a
+// member, and the bot sends them a sign-in link in their own chat.
+func TestAdmitCreatesTheMemberAndSendsTheirSignInLink(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	invite, err := f.invites.CreateTelegram(ctx, f.householdID, f.andreasID, "Christine", domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	rawToken := telegramRawToken(t, invite.URL)
+	if _, err := f.invites.Knock(ctx, rawToken, 4242, "christine_t"); err != nil {
+		t.Fatalf("Knock: %v", err)
+	}
+
+	member, err := f.invites.Admit(ctx, f.householdID, invite.ID)
+	if err != nil {
+		t.Fatalf("Admit: %v", err)
+	}
+	if !member.SignInSent {
+		t.Fatal("signInSent is false although the send succeeded")
+	}
+	if member.Role != domain.RoleOwner {
+		t.Fatalf("role is %q; Let in grants exactly what the invite said (spec decision 14)", member.Role)
+	}
+	if got := f.chats.lastSignInChat(); got != 4242 {
+		t.Fatalf("the sign-in link went to chat %d, want the chat that knocked (4242)", got)
+	}
+	if bound := f.inviteAccounts.userForChat(4242); bound != member.UserID {
+		t.Fatalf("chat 4242 is bound to %q, want the new member %q", bound, member.UserID)
+	}
+	// The invite is spent: a second Let in, and a second knock, both refuse.
+	if _, err := f.invites.Admit(ctx, f.householdID, invite.ID); !errors.Is(err, domain.ErrInviteAlreadyAccepted) {
+		t.Fatalf("second Admit: got %v, want domain.ErrInviteAlreadyAccepted", err)
+	}
+	if _, err := f.invites.Knock(ctx, rawToken, 5555, "someone"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("second Knock on an admitted invite: got %v, want domain.ErrNotFound", err)
+	}
+}
+
+// Nobody has knocked yet, or a new link was issued since. Either way there
+// is no one to let in, and nothing is written.
+func TestAdmitRefusesWhenNobodyIsWaiting(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	invite, err := f.invites.CreateTelegram(ctx, f.householdID, f.andreasID, "Christine", domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+
+	usersBefore := f.users.count()
+	if _, err := f.invites.Admit(ctx, f.householdID, invite.ID); !errors.Is(err, domain.ErrInviteNotKnocked) {
+		t.Fatalf("got %v, want domain.ErrInviteNotKnocked", err)
+	}
+	if got := f.users.count(); got != usersBefore {
+		t.Fatal("a user was created for an invite nobody knocked on")
+	}
+}
+
+// An id from another household is a 404, never a 409 or anything else that
+// would confirm the invite exists (docs/LEARNING.md pattern 24).
+func TestAdmitForAnotherHouseholdsInviteIsNotFound(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	invite, err := f.invites.CreateTelegram(ctx, f.householdID, f.andreasID, "Christine", domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	rawToken := telegramRawToken(t, invite.URL)
+	if _, err := f.invites.Knock(ctx, rawToken, 4242, "christine_t"); err != nil {
+		t.Fatalf("Knock: %v", err)
+	}
+
+	if _, err := f.invites.Admit(ctx, "some-other-household", invite.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("got %v, want domain.ErrNotFound", err)
+	}
+}
+
+// The member exists; only the message failed. Saying so is the whole of the
+// recovery path -- the chat is bound now, so any /start already sends them
+// a fresh sign-in link (spec decision 6).
+func TestAdmitReportsAFailedSendWithoutLosingTheMember(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	invite, err := f.invites.CreateTelegram(ctx, f.householdID, f.andreasID, "Christine", domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	rawToken := telegramRawToken(t, invite.URL)
+	if _, err := f.invites.Knock(ctx, rawToken, 4242, "christine_t"); err != nil {
+		t.Fatalf("Knock: %v", err)
+	}
+	f.chats.failNextSignIn()
+
+	member, err := f.invites.Admit(ctx, f.householdID, invite.ID)
+	if err != nil {
+		t.Fatalf("Admit must succeed when only the send failed: %v", err)
+	}
+	if member.SignInSent {
+		t.Fatal("signInSent is true although the send failed")
+	}
+	if member.MembershipID == "" {
+		t.Fatal("the member was lost because a message could not be sent")
+	}
+	if bound := f.inviteAccounts.userForChat(4242); bound != member.UserID {
+		t.Fatalf("chat 4242 is bound to %q, want the new member %q -- a failed send must not undo the binding", bound, member.UserID)
+	}
+}
+
+// The chat may have bound itself to a different account between the knock
+// and the click (spec decision 15) -- the same race
+// TestAdmitLeavesNothingBehindWhenTheChatIsAlreadyBound proves against real
+// Postgres. Here it is forced through the double to prove
+// InviteService.Admit itself passes the sentinel through untranslated.
+func TestAdmitRefusesWhenTheChatIsAlreadyBound(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	invite, err := f.invites.CreateTelegram(ctx, f.householdID, f.andreasID, "Christine", domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	rawToken := telegramRawToken(t, invite.URL)
+	if _, err := f.invites.Knock(ctx, rawToken, 4242, "christine_t"); err != nil {
+		t.Fatalf("Knock: %v", err)
+	}
+	f.inviteAccounts.bind(4242, "someone-else-entirely")
+
+	usersBefore := f.users.count()
+	membersBefore := f.members.count()
+	if _, err := f.invites.Admit(ctx, f.householdID, invite.ID); !errors.Is(err, domain.ErrChatAlreadyBound) {
+		t.Fatalf("got %v, want domain.ErrChatAlreadyBound", err)
+	}
+	if got := f.users.count(); got != usersBefore {
+		t.Errorf("users = %d, want %d -- a refused Admit must leave no user behind", got, usersBefore)
+	}
+	if got := f.members.count(); got != membersBefore {
+		t.Errorf("memberships = %d, want %d -- a refused Admit must leave no membership behind", got, membersBefore)
+	}
+}

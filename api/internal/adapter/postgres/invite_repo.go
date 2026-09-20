@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres/sqlcgen"
@@ -382,4 +383,152 @@ func (r *InviteRepo) ReplaceToken(ctx context.Context, householdID, inviteID str
 	// report success for a write that never happened (CLAUDE.md: fail
 	// closed on values you did not construct).
 	return 0, domain.ErrNotFound
+}
+
+// Admit is Let in (spec decision 5): the user, the membership, the
+// telegram_accounts row and the acceptance stamp, in one transaction.
+// Either all four happen or none do.
+//
+// Do not compose this from separate calls. A failure between them would
+// leave a user with no membership and no email -- no unique constraint to
+// make a retry fail loudly, so each retry would silently orphan another
+// one. This is the same rule Accept's own doc comment gives.
+//
+// ClaimKnockedInvite runs first, for the reason Accept's guard does: it is
+// what makes a second, concurrent Let in fail cheaply, before any row is
+// written, rather than failing on the telegram_accounts unique index with
+// an error nobody can map.
+func (r *InviteRepo) Admit(ctx context.Context, householdID, inviteID string, now time.Time) (usecase.AdmittedInvite, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return usecase.AdmittedInvite{}, fmt.Errorf("begin admit invite transaction: %w", err)
+	}
+	// A no-op once Commit has succeeded; the error from a post-commit
+	// Rollback call is deliberately discarded, matching Accept's own
+	// defer-rollback pattern.
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	q := r.q.WithTx(tx)
+
+	claimed, err := q.ClaimKnockedInvite(ctx, sqlcgen.ClaimKnockedInviteParams{
+		ID:          uuid(inviteID),
+		HouseholdID: uuid(householdID),
+		AcceptedAt:  timestamptz(now),
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return usecase.AdmittedInvite{}, fmt.Errorf("claim knocked invite: %w", err)
+		}
+		return usecase.AdmittedInvite{}, r.admitFailureReason(ctx, q, householdID, inviteID)
+	}
+
+	role, err := toRole(claimed.Role)
+	if err != nil {
+		return usecase.AdmittedInvite{}, err
+	}
+	caps, err := toCapabilities(claimed.Capabilities)
+	if err != nil {
+		return usecase.AdmittedInvite{}, err
+	}
+
+	// email and passwordHash are both nil, not "": this member was let in
+	// from a Telegram knock, never typed a password, and Accept's own "" <->
+	// SQL NULL convention (StoredUser's doc comment) applies the same way
+	// here as it does to every other credential-less member.
+	userRow, err := q.CreateUser(ctx, sqlcgen.CreateUserParams{
+		Email:         nil,
+		PasswordHash:  nil,
+		DisplayName:   claimed.Name,
+		AvatarInitial: initialOf(claimed.Name),
+	})
+	if err != nil {
+		return usecase.AdmittedInvite{}, translate(err, "create user for invite admission")
+	}
+
+	membershipRow, err := q.CreateMembership(ctx, sqlcgen.CreateMembershipParams{
+		HouseholdID:  uuid(householdID),
+		UserID:       userRow.ID,
+		Role:         string(role),
+		Capabilities: caps.Strings(),
+	})
+	if err != nil {
+		return usecase.AdmittedInvite{}, translate(err, "create membership for invite admission")
+	}
+
+	// knock_chat_id is nullable at the schema level, but invites_knock_is_whole
+	// (migration 00021) ties it to knocked_at: ClaimKnockedInvite's own guard
+	// requires knocked_at IS NOT NULL, so it is never nil here in practice.
+	// int64Or is used anyway rather than a bare dereference, because a
+	// pointer this code did not itself just check must never be trusted
+	// blindly (CLAUDE.md: fail closed on values you did not construct).
+	chatID := int64Or(claimed.KnockChatID)
+	if err := q.CreateTelegramAccount(ctx, sqlcgen.CreateTelegramAccountParams{
+		UserID:       userRow.ID,
+		ChatID:       chatID,
+		ChatUsername: claimed.KnockChatUsername,
+	}); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
+			// The chat bound itself to a different account somewhere else
+			// between the knock and this click -- the re-check spec
+			// decision 15 asks for, closed by the same UNIQUE the knock-time
+			// check cannot see across. translate would flatten this to the
+			// generic domain.ErrAlreadyExists, because neither of
+			// telegram_accounts' two UNIQUEs is a named entry in its
+			// uniqueConstraintErrors map (that map exists for exactly this
+			// case: an unlisted name falls through to the generic sentinel).
+			// The specific domain.ErrChatAlreadyBound the caller needs is
+			// mapped explicitly here instead of adding a table entry,
+			// because TelegramAccountRepository.Create's own contract
+			// (ports.go) deliberately keeps the generic sentinel for its
+			// two UNIQUEs -- "the caller knows which side it was asking
+			// about... and chooses the sentence, rather than a repository
+			// guessing at intent" -- and this is that caller choosing.
+			return usecase.AdmittedInvite{}, domain.ErrChatAlreadyBound
+		}
+		return usecase.AdmittedInvite{}, fmt.Errorf("create telegram account for invite admission: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return usecase.AdmittedInvite{}, fmt.Errorf("commit admit invite transaction: %w", err)
+	}
+
+	return usecase.AdmittedInvite{
+		UserID:       uuidToString(userRow.ID),
+		MembershipID: uuidToString(membershipRow.ID),
+		Name:         claimed.Name,
+		Role:         role,
+		Capabilities: caps,
+		ChatID:       chatID,
+	}, nil
+}
+
+// admitFailureReason runs only after ClaimKnockedInvite's guarded UPDATE
+// matched nothing, to tell its five collapsed conditions apart -- the same
+// fallback-read shape Delete already uses via InviteAcceptedInHousehold.
+// Household-scoped, so an id from another household reports
+// domain.ErrNotFound rather than confirming it exists elsewhere. It reads
+// through q, the same transaction-scoped queries ClaimKnockedInvite just
+// ran through, so it sees the identical snapshot rather than opening a
+// second connection mid-transaction.
+func (r *InviteRepo) admitFailureReason(ctx context.Context, q *sqlcgen.Queries, householdID, inviteID string) error {
+	accepted, err := q.InviteAcceptedInHousehold(ctx, sqlcgen.InviteAcceptedInHouseholdParams{
+		ID:          uuid(inviteID),
+		HouseholdID: uuid(householdID),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ErrNotFound
+		}
+		return translate(err, "read invite admit state")
+	}
+	if accepted {
+		return domain.ErrInviteAlreadyAccepted
+	}
+	// Not accepted, yet ClaimKnockedInvite still matched nothing: either
+	// nobody has knocked, the knock was cleared by a fresh link, or the
+	// invite has expired. Admit has nothing more specific to say for any of
+	// those than "nobody is waiting" -- the same one-answer-for-several-
+	// causes shape RecordKnock's own doc comment explains.
+	return domain.ErrInviteNotKnocked
 }

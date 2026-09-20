@@ -289,6 +289,7 @@ func NewRouter(deps Deps) http.Handler {
 						c.Delete("/household/members/{id}", handleRemoveMember(deps))
 						c.Delete("/household/invites/{id}", handleWithdrawInvite(deps))
 						c.Post("/household/invites/{id}/link", handleNewInviteLink(deps))
+						c.Post("/household/invites/{id}/admit", handleAdmitInvite(deps))
 					})
 				})
 			})

@@ -619,6 +619,35 @@ type AcceptedInvite struct {
 	HouseholdID  string
 }
 
+// AdmittedMember is what Let in produced: the household's newest member,
+// and whether the bot managed to hand them a sign-in link in their own
+// chat. SignInSent is false when the member exists but the message could
+// not be sent -- named rather than hidden (spec decision 6), because the
+// owner is the only person who can tell the new member to send /start
+// themselves.
+type AdmittedMember struct {
+	MembershipID string
+	UserID       string
+	Name         string
+	Role         domain.Role
+	Capabilities domain.Capabilities
+	SignInSent   bool
+}
+
+// AdmittedInvite is what InviteRepository.Admit produced inside its
+// transaction: the user and membership it just created, and the chat to
+// send their sign-in link to. ChatID travels back out this way rather than
+// the caller re-reading the invite, because by the time Admit returns, the
+// invite that carried it has already been stamped accepted.
+type AdmittedInvite struct {
+	UserID       string
+	MembershipID string
+	Name         string
+	Role         domain.Role
+	Capabilities domain.Capabilities
+	ChatID       int64
+}
+
 // InviteKnock is one tap on a Telegram invite link: who tapped, and the
 // four digits their chat was shown. The owner compares those digits with
 // the ones on the phone in front of them and then admits (ADR 11).
@@ -731,6 +760,27 @@ type InviteRepository interface {
 	// see the postgres implementation's own doc comment for how it tells
 	// the two apart.
 	ReplaceToken(ctx context.Context, householdID, inviteID string, tokenHash []byte, expiresAt time.Time) (knockedChatID int64, err error)
+	// Admit is Let in (spec decision 5): the user, the membership, the
+	// telegram_accounts binding and the acceptance stamp, in one
+	// transaction. Either all four happen or none do -- a failure between
+	// them would leave a user with no membership and no email, and because
+	// nothing constrains that user's identity to be unique, a retry would
+	// silently orphan another one each time rather than failing loudly.
+	//
+	// The stamp runs first, for the reason Accept's own guard does: it is
+	// what makes a second, concurrent Let in fail cheaply, as
+	// domain.ErrInviteAlreadyAccepted, before any row is written -- rather
+	// than failing later on the telegram_accounts unique index with an
+	// error nobody can map.
+	//
+	// Reports domain.ErrInviteNotKnocked when nobody has knocked (or a new
+	// link cleared the knock since), domain.ErrInviteAlreadyAccepted when
+	// this invite was already admitted, domain.ErrNotFound when there is no
+	// such invite in this household, and domain.ErrChatAlreadyBound when
+	// the knocked chat bound itself to a different account between the
+	// knock and this call -- the re-check spec decision 15 asks for,
+	// closed by the same UNIQUE the knock-time check cannot see across.
+	Admit(ctx context.Context, householdID, inviteID string, now time.Time) (AdmittedInvite, error)
 }
 
 // SignupDetails is a pending sign-up, read back by token. Exactly one of

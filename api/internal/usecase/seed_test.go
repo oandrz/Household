@@ -33,7 +33,10 @@ func newSeedFixture() *seedFixture {
 	households := newHouseholdDouble()
 	spaces := newSpaceDouble()
 	notifications := newNotificationDouble()
-	inviteRepo := newInviteDouble(clock, users, members)
+	// Seed never calls Admit, but newInviteDouble now always takes the
+	// telegram_accounts double it would write into, the same as every
+	// other fixture's invite double.
+	inviteRepo := newInviteDouble(clock, users, members, newTelegramAccountRepoDouble())
 	mailer := newMailerDouble()
 	hasher := &fakeHasher{}
 	tokens := &seqTokens{}

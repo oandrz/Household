@@ -11,6 +11,51 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimKnockedInvite = `-- name: ClaimKnockedInvite :one
+UPDATE invites
+SET accepted_at = $3
+WHERE id = $1 AND household_id = $2
+  AND channel = 'telegram'
+  AND accepted_at IS NULL
+  AND expires_at > $3
+  AND knocked_at IS NOT NULL
+RETURNING name, role, capabilities, knock_chat_id, knock_chat_username
+`
+
+type ClaimKnockedInviteParams struct {
+	ID          pgtype.UUID
+	HouseholdID pgtype.UUID
+	AcceptedAt  pgtype.Timestamptz
+}
+
+type ClaimKnockedInviteRow struct {
+	Name              string
+	Role              string
+	Capabilities      []string
+	KnockChatID       *int64
+	KnockChatUsername *string
+}
+
+// The guard and the read in one statement: it stamps the invite accepted
+// only if it is a telegram invite, unaccepted, unexpired, and somebody has
+// knocked -- and returns everything the rest of InviteRepo.Admit's
+// transaction needs, so no separate read can see a different row than the
+// one this statement just claimed. Zero rows means one of those five
+// conditions failed; the caller (InviteRepo.Admit) tells them apart with
+// one more read, as Delete already does with InviteAcceptedInHousehold.
+func (q *Queries) ClaimKnockedInvite(ctx context.Context, arg ClaimKnockedInviteParams) (ClaimKnockedInviteRow, error) {
+	row := q.db.QueryRow(ctx, claimKnockedInvite, arg.ID, arg.HouseholdID, arg.AcceptedAt)
+	var i ClaimKnockedInviteRow
+	err := row.Scan(
+		&i.Name,
+		&i.Role,
+		&i.Capabilities,
+		&i.KnockChatID,
+		&i.KnockChatUsername,
+	)
+	return i, err
+}
+
 const clearFailures = `-- name: ClearFailures :exec
 DELETE FROM login_attempts WHERE household_id = $1 AND succeeded = false
 `

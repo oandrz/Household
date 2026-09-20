@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"sort"
@@ -717,6 +718,7 @@ type inviteDouble struct {
 	clock      *fixedClock
 	users      *userDouble
 	members    *membershipDouble
+	accounts   *telegramAccountRepoDouble
 	familyName map[string]string // householdID -> family name, mirrors the households join
 	rows       map[string]*inviteRow
 	n          int
@@ -741,9 +743,14 @@ type inviteDouble struct {
 	raceNextCreate bool
 }
 
-func newInviteDouble(clock *fixedClock, users *userDouble, members *membershipDouble) *inviteDouble {
+// accounts is the same telegram_accounts double InviteDeps.Accounts is
+// wired to at every call site: Admit below writes the binding into it, the
+// same table Knock reads from before it ever touches an invite, so a test
+// sees the two calls agree exactly as they must against real Postgres.
+func newInviteDouble(clock *fixedClock, users *userDouble, members *membershipDouble,
+	accounts *telegramAccountRepoDouble) *inviteDouble {
 	return &inviteDouble{
-		clock: clock, users: users, members: members,
+		clock: clock, users: users, members: members, accounts: accounts,
 		familyName: map[string]string{}, rows: map[string]*inviteRow{},
 	}
 }
@@ -904,6 +911,65 @@ func (d *inviteDouble) Accept(ctx context.Context, inviteID, email, passwordHash
 		return usecase.AcceptedInvite{}, err
 	}
 	return usecase.AcceptedInvite{UserID: user.ID, MembershipID: created.ID, HouseholdID: created.HouseholdID}, nil
+}
+
+// Admit mirrors invite_repo.go's own Admit: the guard is checked, and the
+// chat's availability re-checked, before anything is written -- the same
+// "all four or nothing" property the real transaction gives, proved here by
+// never writing until every check has already passed rather than by
+// unwinding partial writes. There is no concurrent writer in a test to race
+// the way a real transaction can, so checking first is observably identical
+// to a rollback: nothing is written when a check fails.
+func (d *inviteDouble) Admit(ctx context.Context, householdID, inviteID string, now time.Time) (usecase.AdmittedInvite, error) {
+	row := d.byID(inviteID)
+	if row == nil || row.HouseholdID != householdID {
+		return usecase.AdmittedInvite{}, domain.ErrNotFound
+	}
+	if row.AcceptedAt != nil {
+		return usecase.AdmittedInvite{}, domain.ErrInviteAlreadyAccepted
+	}
+	// Channel, expiry and "somebody knocked" all collapse into the one
+	// answer ClaimKnockedInvite's real guarded UPDATE gives for any of
+	// them: there is nobody here to let in.
+	if row.Channel != domain.ChannelTelegram || !row.ExpiresAt.After(now) || row.KnockedAt == nil {
+		return usecase.AdmittedInvite{}, domain.ErrInviteNotKnocked
+	}
+
+	// The re-check spec decision 15 asks for: the chat may have bound
+	// itself to a different account between the knock and this call.
+	if _, err := d.accounts.ByChatID(ctx, row.KnockChatID); err == nil {
+		return usecase.AdmittedInvite{}, domain.ErrChatAlreadyBound
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return usecase.AdmittedInvite{}, err
+	}
+
+	stamped := now
+	row.AcceptedAt = &stamped
+
+	user, err := d.users.Create(ctx, "", "", row.Name)
+	if err != nil {
+		return usecase.AdmittedInvite{}, err
+	}
+	membership, err := domain.NewMembership("", householdID, user.ID, row.Role, row.Capabilities)
+	if err != nil {
+		return usecase.AdmittedInvite{}, err
+	}
+	created, err := d.members.Create(ctx, membership)
+	if err != nil {
+		return usecase.AdmittedInvite{}, err
+	}
+	if err := d.accounts.Create(ctx, usecase.TelegramBinding{
+		UserID: user.ID, ChatID: row.KnockChatID, ChatUsername: row.KnockUsername,
+	}); err != nil {
+		// Already ruled out by the ByChatID check above; reachable only if
+		// this double's own bookkeeping ever drifts from it.
+		return usecase.AdmittedInvite{}, domain.ErrChatAlreadyBound
+	}
+
+	return usecase.AdmittedInvite{
+		UserID: user.ID, MembershipID: created.ID, Name: row.Name,
+		Role: row.Role, Capabilities: row.Capabilities, ChatID: row.KnockChatID,
+	}, nil
 }
 
 // ListPending mirrors ListPendingInvites: this household's rows that are
@@ -1840,27 +1906,28 @@ func (d *notificationDouble) Upsert(_ context.Context, householdID string, p use
 // password at all, both members of one household, and a fixedClock
 // starting at 2026-07-18T09:41:00Z.
 type fixture struct {
-	auth          *usecase.AuthService
-	invites       *usecase.InviteService
-	memberSvc     *usecase.MemberService
-	householdSvc  *usecase.HouseholdService
-	clock         *fixedClock
-	sessions      *sessionDouble
-	apiTokens     *apiTokenDouble
-	mailer        *mailerDouble
-	hasher        *fakeHasher
-	users         *userDouble
-	members       *membershipDouble
-	magicLinks    *magicLinkDouble
-	inviteRepo    *inviteDouble
-	chats         *inviteChatsDouble
-	households    *householdDouble
-	spaces        *spaceDouble
-	notifications *notificationDouble
-	holdings      *holdingCounterDouble
-	householdID   string
-	andreasID     string
-	ethanID       string
+	auth           *usecase.AuthService
+	invites        *usecase.InviteService
+	memberSvc      *usecase.MemberService
+	householdSvc   *usecase.HouseholdService
+	clock          *fixedClock
+	sessions       *sessionDouble
+	apiTokens      *apiTokenDouble
+	mailer         *mailerDouble
+	hasher         *fakeHasher
+	users          *userDouble
+	members        *membershipDouble
+	magicLinks     *magicLinkDouble
+	inviteRepo     *inviteDouble
+	chats          *inviteChatsDouble
+	inviteAccounts *telegramAccountRepoDouble
+	households     *householdDouble
+	spaces         *spaceDouble
+	notifications  *notificationDouble
+	holdings       *holdingCounterDouble
+	householdID    string
+	andreasID      string
+	ethanID        string
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -1915,15 +1982,17 @@ func newFixture(t *testing.T) *fixture {
 		BaseURL:    "http://localhost:5173",
 	})
 
-	inviteRepo := newInviteDouble(clock, users, members)
+	// Read by Knock, before it ever touches the invite (see InviteDeps'
+	// own doc comment on Accounts) -- empty of bindings, so every chat here
+	// starts unbound. Built before inviteRepo so Admit can write into the
+	// same double Knock reads from, exactly as production wires one real
+	// telegram_accounts table behind both.
+	inviteAccounts := newTelegramAccountRepoDouble()
+	inviteRepo := newInviteDouble(clock, users, members, inviteAccounts)
 	// Matches the design's household throughout: households.Create("Andreas
 	// & Christine", "Oentoro") in invite_repo_test.go, and Andreas as the
 	// inviter whose display name every invite-preview test expects.
 	inviteRepo.setFamilyName(householdID, "Oentoro")
-	// Read by Knock, before it ever touches the invite (see InviteDeps'
-	// own doc comment on Accounts) -- empty of bindings, so every chat here
-	// starts unbound.
-	inviteAccounts := newTelegramAccountRepoDouble()
 	chats := newInviteChatsDouble()
 
 	invites := usecase.NewInviteService(usecase.InviteDeps{
@@ -1977,8 +2046,9 @@ func newFixture(t *testing.T) *fixture {
 		auth: auth, invites: invites, memberSvc: memberSvc, householdSvc: householdSvc,
 		clock: clock, sessions: sessions, apiTokens: apiTokens, mailer: mailer, hasher: hasher,
 		users: users, members: members, magicLinks: magicLinks, inviteRepo: inviteRepo,
-		chats:      chats,
-		households: households, spaces: spaces, notifications: notifications,
+		chats:          chats,
+		inviteAccounts: inviteAccounts,
+		households:     households, spaces: spaces, notifications: notifications,
 		holdings:    holdings,
 		householdID: householdID, andreasID: andreas.ID, ethanID: ethan.ID,
 	}
@@ -3965,6 +4035,13 @@ func (d *telegramAccountRepoDouble) bind(chatID int64, userID string) {
 	d.byUserID[userID] = usecase.TelegramBinding{UserID: userID, ChatID: chatID, LinkedAt: time.Now()}
 }
 
+// userForChat is test-only introspection standing in for reading
+// telegram_accounts back after Admit's transaction commits: "" means no
+// user is bound to this chat.
+func (d *telegramAccountRepoDouble) userForChat(chatID int64) string {
+	return d.byChatID[chatID]
+}
+
 var _ usecase.TelegramAccountRepository = (*telegramAccountRepoDouble)(nil)
 
 // --- TelegramSender ------------------------------------------------------
@@ -4026,14 +4103,40 @@ type inviteChatsDouble struct {
 	signInUsers       []string
 	cancelledChats    []int64
 	failNextCancelled error
+	failNextSignInErr error
 }
 
 func newInviteChatsDouble() *inviteChatsDouble { return &inviteChatsDouble{} }
 
+// failNextSignIn arms a one-shot failure for Admit's post-commit send: the
+// next SendSignIn call still records the chat and user it was asked to tell
+// (the real send genuinely reached the network and failed after the fact,
+// not before) but returns an error instead of nil, the same one-shot shape
+// failNextSendLinkCancelled below gives the other message this service
+// sends.
+func (d *inviteChatsDouble) failNextSignIn() {
+	d.failNextSignInErr = errors.New("telegram is down")
+}
+
 func (d *inviteChatsDouble) SendSignIn(_ context.Context, chatID int64, userID string) error {
 	d.signInChats = append(d.signInChats, chatID)
 	d.signInUsers = append(d.signInUsers, userID)
+	if d.failNextSignInErr != nil {
+		err := d.failNextSignInErr
+		d.failNextSignInErr = nil
+		return err
+	}
 	return nil
+}
+
+// lastSignInChat is 0 if SendSignIn was never called -- 0 is not a real
+// chat id, the same sentinel lastCancelledChat below uses for its own
+// message.
+func (d *inviteChatsDouble) lastSignInChat() int64 {
+	if len(d.signInChats) == 0 {
+		return 0
+	}
+	return d.signInChats[len(d.signInChats)-1]
 }
 
 // failNextSendLinkCancelled arms a one-shot failure: the next
@@ -4122,7 +4225,7 @@ func newTelegramAuthService(t *testing.T) (*usecase.TelegramAuthService, *telegr
 	// (see ports.go's doc comment), so the double is built one layer down,
 	// at InviteRepository, and handed to a real InviteService -- exactly
 	// the shape main.go wires accounts and codes into.
-	invites := newInviteDouble(clock, users, members)
+	invites := newInviteDouble(clock, users, members, accounts)
 	invites.tokens = tokens
 	invites.setFamilyName(defaultTestHouseholdID, "Oentoro")
 	codes := newPairingCodesDouble()

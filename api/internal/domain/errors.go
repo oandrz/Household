@@ -33,8 +33,14 @@ var (
 	// Telegram invite's t.me link, and an email invite's channel is fixed
 	// at creation (spec decision 9), so there is nothing here to replace.
 	ErrInviteNotTelegram = errors.New("only telegram invites have a link")
-	ErrTokenExpired      = errors.New("token has expired or been used")
-	ErrRateLimited       = errors.New("too many requests")
+
+	// ErrInviteNotKnocked is Admit's ("Let in") refusal when nobody has
+	// knocked on this Telegram invite -- nobody has tapped the link yet, or
+	// NewLink cleared a previous knock when a fresh link replaced it. There
+	// is no one waiting for the owner to let in.
+	ErrInviteNotKnocked = errors.New("no one is waiting on this invite")
+	ErrTokenExpired     = errors.New("token has expired or been used")
+	ErrRateLimited      = errors.New("too many requests")
 
 	// Added in the Task 6 fix round (see task-6-report.md, "Fix round 1").
 	ErrAmountOverflow               = errors.New("amount overflows a signed 64-bit integer")

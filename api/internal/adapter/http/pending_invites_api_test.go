@@ -1,14 +1,18 @@
 package httpadapter_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres"
 	"github.com/andreasoentoro/hearth/api/internal/domain"
+	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
 // Pending invites: docs/superpowers/specs/2026-09-19-hearth-partner-invite-lobby-design.md,
@@ -237,6 +241,10 @@ func TestATokenCannotChangeWhoIsInTheHousehold(t *testing.T) {
 		// ever looks at the id, so a token is refused before it could learn
 		// whether that invite exists at all.
 		{"new link", http.MethodPost, "/api/v1/household/invites/00000000-0000-0000-0000-000000000000/link", nil},
+		// Admit -- Let in -- is the same rule for the same reason: a leaked
+		// API token must not be able to seat a new member either (spec
+		// decision 12).
+		{"admit", http.MethodPost, "/api/v1/household/invites/00000000-0000-0000-0000-000000000000/admit", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -519,5 +527,171 @@ func TestPublicInviteRoutesTreatATelegramTokenAsUnknown(t *testing.T) {
 	})
 	if accept.Code != http.StatusNotFound {
 		t.Fatalf("accept: got %d, want 404: %s", accept.Code, accept.Body.String())
+	}
+}
+
+// --- Task 9: Admit -- Let in --------------------------------------------
+
+// admitBody decodes POST .../admit's response.
+type admitBody struct {
+	Member struct {
+		ID           string   `json:"id"`
+		Name         string   `json:"name"`
+		Role         string   `json:"role"`
+		Capabilities []string `json:"capabilities"`
+	} `json:"member"`
+	SignInSent bool `json:"signInSent"`
+}
+
+// mustCreateAndKnockTelegramInvite creates a Telegram invite through the
+// public route (exactly as an owner would) and records a knock on it
+// through the usecase layer directly -- the bot side of a knock has no
+// HTTP route of its own; env.deps.Invites is the same *usecase.InviteService
+// the router itself was built from.
+func (env *testEnv) mustCreateAndKnockTelegramInvite(t *testing.T, session, csrf *http.Cookie, chatID int64, username string) inviteCreatedBody {
+	t.Helper()
+	rec := env.authed(t, http.MethodPost, "/api/v1/household/members/invite", map[string]any{
+		"name": "Christine", "role": "owner", "channel": "telegram",
+		"capabilities": []string{"money", "calendar", "chores", "marriage"},
+	}, session, csrf)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create telegram invite: got %d, want 201: %s", rec.Code, rec.Body.String())
+	}
+	var created inviteCreatedBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode invite response: %v %s", err, rec.Body.String())
+	}
+	if !strings.Contains(created.Link, "start=inv_") {
+		t.Fatalf("link %q carries no inv_ payload", created.Link)
+	}
+	rawToken := created.Link[strings.Index(created.Link, "start=inv_")+len("start=inv_"):]
+	if _, err := env.deps.Invites.Knock(context.Background(), rawToken, chatID, username); err != nil {
+		t.Fatalf("Knock: %v", err)
+	}
+	return created
+}
+
+// The whole point of the milestone: the owner clicks Let in on a knocked
+// invite and a real member appears in the roster, with the sign-in link
+// reported sent (noopInviteChats never fails).
+func TestOwnerAdmitsAKnockedTelegramInvite(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	created := env.mustCreateAndKnockTelegramInvite(t, session, csrf, 4242, "christine_t")
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/household/invites/"+created.ID+"/admit", nil, session, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("admit: got %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var body admitBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode admit response: %v %s", err, rec.Body.String())
+	}
+	if body.Member.Name != "Christine" || body.Member.Role != "owner" {
+		t.Fatalf("member = %+v", body.Member)
+	}
+	if !body.SignInSent {
+		t.Fatal("signInSent is false; the test env's chats double never fails a send")
+	}
+
+	found := false
+	for _, m := range env.getMembers(t, session) {
+		if m.ID == body.Member.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("admit answered 200 but the new member is not in the household")
+	}
+
+	// The invite is spent: a second Let in refuses.
+	again := env.authed(t, http.MethodPost, "/api/v1/household/invites/"+created.ID+"/admit", nil, session, csrf)
+	assertErrorResponse(t, again, http.StatusConflict, "INVITE_ALREADY_ACCEPTED")
+}
+
+// Nobody has tapped the link yet: there is no one to let in.
+func TestAdmitRefusesAnUnknockedTelegramInvite(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/household/members/invite", map[string]any{
+		"name": "Christine", "role": "owner", "channel": "telegram",
+		"capabilities": []string{"money", "calendar", "chores", "marriage"},
+	}, session, csrf)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create telegram invite: got %d, want 201: %s", rec.Code, rec.Body.String())
+	}
+	var created inviteCreatedBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode invite response: %v %s", err, rec.Body.String())
+	}
+
+	admit := env.authed(t, http.MethodPost, "/api/v1/household/invites/"+created.ID+"/admit", nil, session, csrf)
+	assertErrorResponse(t, admit, http.StatusConflict, "INVITE_NOT_KNOCKED")
+}
+
+// The chat may have joined a different household between the knock and the
+// click (spec decision 15) -- the re-check InviteRepo.Admit's own
+// transaction performs, proved here through the real route rather than
+// only against the repository directly.
+func TestAdmitRefusesAChatAlreadyBoundToAnotherAccount(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	created := env.mustCreateAndKnockTelegramInvite(t, session, csrf, 4242, "christine_t")
+
+	owner, ok := env.findMemberByRole(t, session, "owner")
+	if !ok {
+		t.Fatal("setup: no owner in the seeded household")
+	}
+	if err := postgres.NewTelegramAccountRepo(env.db).Create(context.Background(), usecase.TelegramBinding{
+		UserID: owner.User.ID, ChatID: 4242, ChatUsername: "christine_t",
+	}); err != nil {
+		t.Fatalf("bind the chat elsewhere: %v", err)
+	}
+
+	admit := env.authed(t, http.MethodPost, "/api/v1/household/invites/"+created.ID+"/admit", nil, session, csrf)
+	assertErrorResponse(t, admit, http.StatusConflict, "CHAT_ALREADY_BOUND")
+}
+
+// findMemberByRole is admit-test setup: it reads the household's own roster
+// back through the ordinary list route rather than a direct database read,
+// so the owner id it hands back is exactly what a real caller would see.
+func (env *testEnv) findMemberByRole(t *testing.T, session *http.Cookie, role string) (memberListEntry, bool) {
+	t.Helper()
+	for _, m := range env.getMembers(t, session) {
+		if m.Role == role {
+			return m, true
+		}
+	}
+	return memberListEntry{}, false
+}
+
+// A limited member is not an owner -- Admit sits behind requireOwner the
+// same as every other route in this group.
+func TestALimitedMemberCannotAdmit(t *testing.T) {
+	env := newTestEnv(t)
+	ownerSession, ownerCSRF := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	created := env.mustCreateAndKnockTelegramInvite(t, ownerSession, ownerCSRF, 4242, "christine_t")
+
+	limitedSession, limitedCSRF := env.signIn(t, env.limitedEmail, env.limitedPassword)
+	rec := env.authed(t, http.MethodPost, "/api/v1/household/invites/"+created.ID+"/admit", nil, limitedSession, limitedCSRF)
+	assertErrorResponse(t, rec, http.StatusForbidden, "FORBIDDEN")
+}
+
+// The matching code is compared by eye and accepted by nothing. If this
+// ever fails, someone has turned a display into a credential, and ADR 4's
+// rejection of guessable one-time codes applies (spec decision 3). There is
+// no existing convention in this package for pinning an absent request
+// field, so this reads the handler's own source -- the crude fallback the
+// task brief itself names, not the preferred tool.
+func TestTheAdmitRequestHasNoCodeField(t *testing.T) {
+	body, err := os.ReadFile("invite_lobby_handlers.go")
+	if err != nil {
+		t.Fatalf("read handler source: %v", err)
+	}
+	for _, forbidden := range []string{"Code string", `json:"code"`} {
+		if bytes.Contains(body, []byte(forbidden)) {
+			t.Fatalf("the admit handler declares %q; the matching code must never be accepted by an endpoint", forbidden)
+		}
 	}
 }

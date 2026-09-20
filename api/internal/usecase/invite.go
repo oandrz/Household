@@ -317,6 +317,41 @@ func (s *InviteService) Knock(ctx context.Context, rawToken string, chatID int64
 	return code, nil
 }
 
+// Admit is Let in, the whole point of the milestone: the owner has compared
+// the four digits by eye and clicked to turn the waiting knock into a real
+// member. The write -- user, membership, telegram_accounts binding and
+// acceptance stamp together -- is entirely InviteRepository.Admit's
+// transaction (see its own doc comment). This method's own job is the
+// order of the two things that cannot both be in that transaction: the
+// write, then the message.
+//
+// The sign-in link is sent after the commit, never inside it (spec
+// decision 6): sending from inside the transaction would let a message
+// promise an account that a later rollback could still take away. A
+// failure to send is reported as SignInSent: false rather than swallowed
+// (docs/LEARNING.md pattern 5) -- no new recovery path is needed, because
+// the chat is bound by then, so any /start it sends already gets a fresh
+// sign-in link.
+func (s *InviteService) Admit(ctx context.Context, householdID, inviteID string) (AdmittedMember, error) {
+	admitted, err := s.d.Invites.Admit(ctx, householdID, inviteID, s.d.Clock.Now())
+	if err != nil {
+		return AdmittedMember{}, err
+	}
+	member := AdmittedMember{
+		MembershipID: admitted.MembershipID,
+		UserID:       admitted.UserID,
+		Name:         admitted.Name,
+		Role:         admitted.Role,
+		Capabilities: admitted.Capabilities,
+		SignInSent:   true,
+	}
+	if err := s.d.Chats.SendSignIn(ctx, admitted.ChatID, admitted.UserID); err != nil {
+		slog.Error("admitted a member but could not send their sign-in link", "error", err)
+		member.SignInSent = false
+	}
+	return member, nil
+}
+
 // Preview lets a caller see what an invite offers before they sign in or
 // create credentials. It shares its expiry/acceptance checks with Accept
 // through checkInviteLive.
