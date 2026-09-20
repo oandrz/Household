@@ -3,6 +3,11 @@
 // owner-only, and a limited member must never fire a request whose 403 would
 // then need hiding. Overview passes `enabled: isOwner`. PendingInvitesList
 // passes `true`, because MembersPanel mounts it only for an owner.
+// InviteMemberModal (Task 12) is the third caller -- also owner-only, since
+// this modal never opens for anyone else -- and passes `created !== null`:
+// it has no use for the list until a Telegram invite gives it a card to
+// feed, and shares this same query's cache with PendingInvitesList rather
+// than issuing a second request for data already on screen behind it.
 //
 // The key starts with "household" for the reason householdMembersQueryKey's
 // does (useHouseholdMembers.ts): PATCH /household invalidates by that prefix.

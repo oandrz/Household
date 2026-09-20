@@ -169,14 +169,23 @@ export function PendingInviteCard({
   // list has no further use for a new one beyond the refetch already
   // clearing the stale state.
   onNewLink?: (link: string) => void;
-  // Called the moment Admit succeeds -- before this card's own `admit.data`
-  // even lands, since useMutation runs a call-level onSuccess ahead of the
-  // hook's own onSettled. PendingInvitesList.tsx uses this to hold the
-  // result itself, because *this card* can be unmounted (its row removed by
-  // the very refetch Admit triggers) well before an owner has had a chance
-  // to read a signInSent: false warning off it. The modal (Task 12) does
-  // not pass this: it controls its own lifetime and keeps showing this same
-  // card's own state-0 render instead.
+  // Called the moment Admit succeeds -- in the same tick `admit.data` lands,
+  // not before it: query-core's Mutation#execute awaits the hook's own
+  // onSettled (usePendingInvites.ts's three invalidations) *before*
+  // dispatching success, and only that dispatch's onMutationUpdate both
+  // sets `.data` on the observer and calls this per-call onSuccess (in that
+  // order, via #notify). What actually matters is a different ordering:
+  // #notify skips a per-call callback once the observer has no listeners,
+  // i.e. once this card has unmounted -- which is exactly why
+  // useAdmitInvite's onSettled fires its invalidations without awaiting
+  // them (see that hook's own comment). A blocking onSettled would hold
+  // the whole dispatch behind the very refetch that removes this card's
+  // row, and onAdmitted would never fire at all. PendingInvitesList.tsx
+  // uses this prop to hold the result itself, because *this card* can be
+  // unmounted (its row removed by that same refetch) well before an owner
+  // has had a chance to read a signInSent: false warning off it. The modal
+  // (Task 12) does not pass this: it controls its own lifetime and keeps
+  // showing this same card's own state-0 render instead.
   onAdmitted?: (result: AdmitResult) => void;
 }) {
   const withdraw = useWithdrawInvite();

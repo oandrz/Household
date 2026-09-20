@@ -62,6 +62,22 @@ export const inviteLinkSchema = z.object({
 });
 export type InviteLink = z.infer<typeof inviteLinkSchema>;
 
+// POST /household/members/invite's body (Task 12) -- member_handlers.go's
+// inviteCreatedDTO. That struct's own comment explains why every field is
+// optional: an email invite has no id to report (Create predates this
+// response shape), and a zero timestamp would print as a real-looking date
+// that is actually a lie, so the profile and email paths answer `{}`.
+// Only a Telegram invite carries all three. Reuses inviteLinkSchema's own
+// `link`/`expiresAt` shapes rather than inventing a parallel pair --
+// inviteLinkSchema itself stays required, since POST .../link always
+// returns a real link.
+export const inviteCreatedSchema = z.object({
+  id: z.string().optional(),
+  link: inviteLinkSchema.shape.link.optional(),
+  expiresAt: inviteLinkSchema.shape.expiresAt.optional(),
+});
+export type InviteCreated = z.infer<typeof inviteCreatedSchema>;
+
 // POST /household/invites/:id/admit's body (Task 9) -- the request carries
 // no fields at all, since the four digits are compared by eye, not sent
 // back. `signInSent` tells the owner whether the new member's sign-in link
