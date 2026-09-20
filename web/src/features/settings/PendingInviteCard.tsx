@@ -3,32 +3,53 @@
 // link. Mounted once per Telegram invite in PendingInvitesList.tsx, and
 // again (Task 12) inside InviteMemberModal's success state -- which is why
 // this component owns every mutation it needs (Withdraw, a new link, Admit)
-// rather than taking them as callback props: `link` and `onNewLink` are its
-// only optional inputs, because the modal is the only caller that still
-// holds a link fresh from a 201 and the only one that needs to hear about a
-// replacement.
+// rather than taking them as callback props: `link`, `onNewLink` and
+// `onAdmitted` are its only optional inputs, because the modal is the only
+// caller that still holds a link fresh from a 201 and needs to hear about a
+// replacement, and PendingInvitesList is the only caller whose observed
+// query can remove this card's own row out from under it (see `onAdmitted`
+// below).
 //
-// Four states, decided in this order. The first three are read off `invite`
-// itself, never off a flag this component invents, so two tabs looking at
-// the same invite render the same thing:
+// Four states, decided in this order:
+//   0. useAdmitInvite().data truthy -> admitted (see below for why this one
+//      is not read off `invite`)
 //   1. invite.knock present            -> knocked
-//   2. no knock, `link` prop present   -> waiting, link in hand
-//   3. no knock, no link               -> waiting, link not in hand
-// The fourth -- admitted -- is the deliberate exception, and it is read from
-// useAdmitInvite().data instead. It has to be: Admit stamps the invite
-// accepted, and pendingInvitesQueryKey (one of the three keys
+//   2. no knock, this session holds a link -> waiting, link in hand
+//   3. no knock, no link held               -> waiting, link not in hand
+// State 1 (knocked) is read off `invite` itself, never off a flag this
+// component invents, so two tabs looking at the same invite agree on it.
+// States 2 and 3 are NOT read off `invite` -- there is nothing on the wire
+// to read; a link exists only in the hand of whichever session minted it.
+// They split on `effectiveLink`, which is session-local *by design*: either
+// the `link` prop (a fresh 201 the modal just received) or `heldLink` (a
+// link this same card minted itself via "Not them"/"Get a new link", set
+// below). Two tabs are expected to differ here -- one may hold a link the
+// other never asked for -- while still agreeing on state 1. Do not read
+// this as contradicting "read off `invite`": it says which *tab-local*
+// state states 2/3 read, not that they secretly read the row.
+//
+// State 0 (admitted) is the deliberate exception to state 1's rule, and for
+// a different reason than 2/3: it is read from useAdmitInvite().data
+// because there is no invite left at all to read it from. Admit stamps the
+// invite accepted, and pendingInvitesQueryKey (one of the three keys
 // usePendingInvites.ts's useAdmitInvite invalidates) means the row this
-// invite prop describes leaves the pending list on the very next refetch.
-// By the time that render happens there is no accepted invite left to read
+// `invite` prop describes leaves the pending list on the very next refetch.
+// By the time that refetch lands there is no accepted invite left to read
 // "admitted" from -- the mutation's own result is the only place it still
-// lives. Do not "fix" the asymmetry by moving the other three states onto a
-// local flag too; they stay read off `invite` on purpose.
+// lives. Do not "fix" the asymmetry by moving state 1 onto a local flag
+// too; it stays read off `invite` on purpose.
+//
+// Because state 0 lives only as long as this card does, and this card can
+// be unmounted the moment the refetch above removes its row,
+// PendingInvitesList cannot rely on this card to show the admitted notice
+// for long -- see `onAdmitted` below and PendingInvitesList.tsx's own
+// admittedResults state for how it survives that.
 import { useState } from "react";
 import { apiErrorMessage } from "../../api/errorMessage";
 import { useConfirmAction } from "../../components/useConfirmAction";
 import { admittedLine, knockLine, pendingInviteExpiryLine } from "./copy";
 import { InviteLinkShare } from "./InviteLinkShare";
-import type { PendingInvite } from "./schemas";
+import type { AdmitResult, PendingInvite } from "./schemas";
 import { useAdmitInvite, useNewInviteLink, useWithdrawInvite } from "./usePendingInvites";
 
 const CARD_CLASS = "flex flex-col gap-3 rounded-xl border border-hairline bg-card p-4";
@@ -134,6 +155,7 @@ export function PendingInviteCard({
   invite,
   link,
   onNewLink,
+  onAdmitted,
 }: {
   invite: PendingInvite;
   // The raw link, only while this session still holds it -- a link exists
@@ -147,6 +169,15 @@ export function PendingInviteCard({
   // list has no further use for a new one beyond the refetch already
   // clearing the stale state.
   onNewLink?: (link: string) => void;
+  // Called the moment Admit succeeds -- before this card's own `admit.data`
+  // even lands, since useMutation runs a call-level onSuccess ahead of the
+  // hook's own onSettled. PendingInvitesList.tsx uses this to hold the
+  // result itself, because *this card* can be unmounted (its row removed by
+  // the very refetch Admit triggers) well before an owner has had a chance
+  // to read a signInSent: false warning off it. The modal (Task 12) does
+  // not pass this: it controls its own lifetime and keeps showing this same
+  // card's own state-0 render instead.
+  onAdmitted?: (result: AdmitResult) => void;
 }) {
   const withdraw = useWithdrawInvite();
   const admit = useAdmitInvite();
@@ -226,7 +257,10 @@ export function PendingInviteCard({
           <button
             type="button"
             disabled={admit.isPending}
-            onClick={() => admit.mutate(invite.id)}
+            // The per-call onSuccess (not this hook's own onSettled) is
+            // what reaches onAdmitted -- see that prop's own comment for
+            // why the ordering matters.
+            onClick={() => admit.mutate(invite.id, { onSuccess: (result) => onAdmitted?.(result) })}
             className={PRIMARY_BUTTON_CLASS}
           >
             Let in
@@ -250,7 +284,11 @@ export function PendingInviteCard({
   if (effectiveLink) {
     return (
       <li className={CARD_CLASS}>
-        <InviteLinkShare link={effectiveLink} />
+        {/* Keyed on the link itself: InviteLinkShare's own "Copied" state
+            must not survive a link swap -- without this, minting a new link
+            after copying the old one would still read "Copied" for a link
+            nobody has actually copied yet. */}
+        <InviteLinkShare key={effectiveLink} link={effectiveLink} />
         <p className="text-[11.5px] text-muted">Shown once. You can get a new link any time.</p>
         <div className="flex flex-wrap items-center gap-2.5">
           <NewLinkControl

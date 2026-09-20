@@ -121,11 +121,26 @@ export function useAdmitInvite() {
     // when someone else joins. Kept for consistency with useInviteMember's
     // existing three-key invalidation on this same screen -- cheap
     // insurance, not a proven dependency.
-    onSettled: () =>
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: pendingInvitesQueryKey }),
-        queryClient.invalidateQueries({ queryKey: householdMembersQueryKey }),
-        queryClient.invalidateQueries({ queryKey: meQueryKey }),
-      ]),
+    //
+    // Fired, not returned -- unlike useWithdrawInvite's onSettled just
+    // above, which returns its Promise.all on purpose so Withdraw stays
+    // disabled until the refetch lands. Admit must not do the same: TanStack
+    // Query does not set a mutation's own `.data` until after onSettled's
+    // *returned* promise resolves (mutation-core's dispatch order is
+    // `await onSettled(); dispatch({type: "success", data})`). Returning
+    // this Promise.all would therefore delay `useAdmitInvite().data` until
+    // the pending-invites refetch it kicks off has already landed -- and for
+    // a card mounted per-row in a live list (PendingInvitesList), that
+    // refetch is exactly what removes this invite's row. Blocking here would
+    // mean `.data` lands only after the card reading it has already
+    // unmounted, which is precisely the bug a review caught: the
+    // signInSent: false line ("ask them to send /start to the bot") could
+    // never actually be seen. The invalidations below still run; this only
+    // stops them from gating the mutation's own success state.
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: pendingInvitesQueryKey });
+      void queryClient.invalidateQueries({ queryKey: householdMembersQueryKey });
+      void queryClient.invalidateQueries({ queryKey: meQueryKey });
+    },
   });
 }
