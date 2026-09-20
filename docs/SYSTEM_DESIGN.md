@@ -182,10 +182,23 @@ deployed.** It makes a sent invite visible: two routes, `GET` and
 `DELETE /household/invites` (§4); two new `InviteRepository` methods (§3); the
 one definition of *pending* (§6); a Pending invites list in Settings; and a
 fourth Overview checklist step, "Invite your partner" (§7). It adds no table
-and no migration. Milestone 2 (invites delivered over Telegram, and letting a
-partner in by a knock) is **not built**. Evidence:
+and no migration. Evidence:
 `docs/superpowers/plans/2026-09-19-hearth-partner-invite-lobby-m1-verification.md`.
 Design: `docs/superpowers/specs/2026-09-19-hearth-partner-invite-lobby-design.md`.
+
+**Milestone 2 — a partner joins over Telegram, by a knock — is also built, on
+branch `worktree-partner-invite-lobby-m2` (2026-09-20). It is not merged to
+`main`, not deployed, and its own browser walk has not run yet.** An owner
+gets a one-time Telegram link for an invite (§4, §5); the partner's tap
+records a **knock** and nothing else; the owner compares a four-digit code
+and clicks **Let in** or **Not them**. One migration
+(`00021_invite_channels.sql`, §6) adds a `channel` to `invites` and the four
+knock columns; three new ports (§3); email invites move behind a new,
+off-by-default flag; and the bot now answers only private chats, closing a
+security-review finding this milestone depended on (§5). Recorded as
+[ADR 11](adr/0011-joining-a-household-by-knock.md). Design:
+`docs/superpowers/specs/2026-09-19-hearth-partner-invite-lobby-design.md`
+(the same spec covers both milestones).
 
 **This is deployed.** Hearth has run at <https://oink.mywire.org> since
 2026-08-15, on one Hetzner CX23 in Falkenstein, serving a real household. §1
@@ -808,7 +821,10 @@ refuses (spec decision 7).
 |---|---|---|
 | `UserRepository` | `adapter/postgres` | Includes the transactional `CreateWithMembership` |
 | `HouseholdRepository`, `MembershipRepository`, `SessionRepository`, `MagicLinkRepository`, `LoginAttemptRepository`, `SignupRepository`, `SpaceRepository`, `NotificationRepository` | `adapter/postgres` | Ten narrow repositories rather than one wide one (with `UserRepository` above and `InviteRepository` below) |
-| `InviteRepository` | `adapter/postgres` | `Create`, `ByTokenHash`, `LiveInviteForEmail`, `MarkAccepted`, the one-transaction `Accept` (§5) — and, since the partner-invite lobby's milestone 1, **`ListPending`** and **`Delete`**. `ListPending` holds the one definition of a *pending* invite (§6) and returns `[]InviteSummary`, never nil. The type is `InviteSummary`, not `PendingInvite`, because `PendingInvite` was already the admin directory's differently-shaped view of an invite (no id, no capabilities). `Delete` is scoped by `household_id` inside the SQL (`DeleteUnacceptedInvite`), so another household's id answers `domain.ErrNotFound` exactly like an id that never existed. An accepted invite is history: it answers `domain.ErrInviteAlreadyAccepted` and nothing is deleted. Telling those two apart takes a second read (`InviteAcceptedInHousehold`), made only after the delete matched nothing |
+| `InviteRepository` | `adapter/postgres` | `Create`, `ByTokenHash`, `LiveInviteForEmail`, `MarkAccepted`, the one-transaction `Accept` (§5) — and, since the partner-invite lobby's milestone 1, **`ListPending`** and **`Delete`**. `ListPending` holds the one definition of a *pending* invite (§6) and returns `[]InviteSummary`, never nil. The type is `InviteSummary`, not `PendingInvite`, because `PendingInvite` was already the admin directory's differently-shaped view of an invite (no id, no capabilities). `Delete` is scoped by `household_id` inside the SQL (`DeleteUnacceptedInvite`), so another household's id answers `domain.ErrNotFound` exactly like an id that never existed. An accepted invite is history: it answers `domain.ErrInviteAlreadyAccepted` and nothing is deleted. Telling those two apart takes a second read (`InviteAcceptedInHousehold`), made only after the delete matched nothing. **Milestone 2 adds four more methods** (§5, §6): `CreateTelegram` (a channel-`telegram` row with no email); `RecordKnock`, one guarded `UPDATE` that is the whole of "one knock per link", reporting `domain.ErrNotFound` for every case it does not match so the bot's one bland reply covers all of them; `ReplaceToken`, the single write behind "get a new link" and "Not them" together, which reads the chat that had knocked back through a `RETURNING (SELECT …)` subselect (a narrow, accepted race — `docs/LEARNING.md`); and `Admit`, Let in's own transaction — user, membership, `telegram_accounts` row and acceptance stamp, the stamp written first for the same cheap-fail reason `Accept`'s own guard is |
+| `InviteKnocker` | `usecase.InviteService` | One method, `Knock(ctx, rawToken, chatID, username) (code, err)` — declared for `TelegramAuthService`, which calls it from inside `HandleStart` when a `/start` payload begins `inv_`. Every refusal about the *link* is `domain.ErrNotFound`, with one exception: `domain.ErrChatAlreadyBound` is named plainly, because it says something about the tapper's own chat rather than the link |
+| `InviteChats` | `usecase.TelegramAuthService` | Two methods, declared for `InviteService`: `SendSignIn` (the ordinary magic link, sent after Admit's commit, never inside it) and `SendLinkCancelled` (told to a chat whose knock a new link just cleared). `InviteKnocker` and `InviteChats` point at each other across the two services — `TelegramAuthService` needs `InviteService` and `InviteService` needs `TelegramAuthService` back — and `cmd/api/main.go` closes the resulting cycle with `InviteService.SetChats`, called once both services exist, rather than either package importing the other |
+| `PairingCodes` | `adapter/crypto` | One method, `NewCode() (string, error)`, four decimal digits from `crypto/rand`. A port so a test can pin an exact code rather than asserting only "four digits" |
 | `AccountRepository` | `adapter/postgres` | Eleventh. Accounts joined to the owner's display name (`AccountView`); its `MembershipBelongsToHousehold` is what stops an account being assigned to a member of a different household. `AccountView.Balance` is now a real sum — see §5. `MonthlyMovements` is its newest method: one row per account per calendar month with any transaction, summed in that account's own currency (no FX conversion in SQL, the same division of labour `MonthTotals` already draws for `TransactionRepository`) — the twelve-month trend's only new read, and its filter is deliberately `ListAccounts`'s own balance expression split by month, kept identical on purpose (§5) |
 | `CategoryRepository` | `adapter/postgres` | Twelfth. `List` respects `sort_order`, the order the design draws rather than alphabetical; `EnsureSeeded` is idempotent under two concurrent first requests through one `INSERT ... ON CONFLICT DO NOTHING` against `UNIQUE(household_id, name)`, never a read-then-write. Budget grows it with `Create`, `Rename` and `SetArchived` — a category is referenced by transactions and budget lines, so it archives rather than deletes, the same reasoning `accounts.archived_at` already uses for a different table; `sort_order`'s own concurrent-create window is a known, accepted, cosmetic tie (see `docs/LEARNING.md`) |
 | `TransactionRepository` | `adapter/postgres` | Thirteenth. Keyset-paged `List` (a cursor is the last row's date and id, not an offset); `Update` never merges a patch — `TransactionService` turns a partial `PATCH` into a complete `domain.Transaction` first; `MonthTotals` returns rows rather than a SQL `SUM`, because a sum is only correct within one currency and the FX conversion lives in the service, not the repository |
@@ -947,7 +963,7 @@ graph TD
     Owner -->|yes| RequireOwner["requireOwner"]
     Owner -->|no| CookieOnly
     RequireOwner --> CookieOnly{"Must a browser session<br/>make this change?"}
-    CookieOnly -->|"token mint and revoke,<br/>invite withdraw"| RequireCookie["requireCookieSession<br/>403 SESSION_REQUIRED to a token"]
+    CookieOnly -->|"token mint and revoke;<br/>invite create, withdraw,<br/>new link and admit;<br/>member update and remove"| RequireCookie["requireCookieSession<br/>403 SESSION_REQUIRED to a token"]
     CookieOnly -->|no| Handler
     RequireCookie --> Handler
 
@@ -984,13 +1000,16 @@ a good cookie is still a 401, because a caller who sent a token meant to use
 it ([ADR 7](adr/0007-personal-api-tokens.md)). `requireCSRF` then skips only
 for that Scope, and `requireCookieSession` refuses it (`403 SESSION_REQUIRED`)
 wherever a leaked token must not be enough: the two routes that mint and
-revoke tokens, the Telegram connection group, and withdrawing an invite
-(`DELETE /household/invites/{id}`), because withdrawing changes who may join
-the household (partner-invite spec decision 12). Listing pending invites is
-deliberately *not* behind it: a list shows no secret, so an owner's token may
-read it. The diagram above draws this step on the mutation path only. The
-Telegram group applies it to its reads as well, and runs its own
-`requireFeature` first; the route table has that group's exact order.
+revoke tokens, the Telegram connection group, and — since the partner-invite
+lobby — every way into or out of the household: creating an invite,
+withdrawing one, getting a fresh link, Let in, changing a member's role and
+removing a member (spec decision 12, [ADR 11](adr/0011-joining-a-household-by-knock.md)).
+A leaked token must not be able to mint a permanent co-owner any more than it
+can mint a permanent API token. Listing pending invites is deliberately *not*
+behind it: a list shows no secret, so an owner's token may read it. The
+diagram above draws this step on the mutation path only. The Telegram group
+applies it to its reads as well, and runs its own `requireFeature` first; the
+route table has that group's exact order.
 
 **`requireSession` also resolves this household's feature flags on every
 authenticated request, uncached**, in the same breath as the membership
@@ -1244,10 +1263,13 @@ rows, and a link redemption writes neither.
 | GET | `/currencies` | none — read before a session exists (sign-up's currency select) and after one (Settings) |
 | GET | `/household`, `/household/members`, `/spaces`, `/notification-preferences` | session |
 | PATCH | `/household`, `/notification-preferences` | session · CSRF · owner |
-| POST | `/household/members/invite`, `/spaces` | session · CSRF · owner |
-| PATCH · DELETE | `/household/members/{id}` | session · CSRF · owner |
-| GET | `/household/invites` | session (cookie **or token**) · owner — this household's *pending* invites (§6), oldest first, each with `id`, `name`, `email`, `role`, `capabilities`, `expiresAt`; always a JSON array, `[]` when none. Owner-only because an invitee's address is personal data, the same rule that shows only an owner the members' addresses. A token may read it: a list shows no secret |
+| POST | `/spaces` | session · CSRF · owner |
+| POST | `/household/members/invite` | session · CSRF · owner · **cookie** session (`requireCookieSession`) — required since milestone 2: a leaked API token must not be able to mint a permanent co-owner (spec decision 12, the reason behind [ADR 7](adr/0007-personal-api-tokens.md) rule 2). Body now carries a required `channel` (`"email"` \| `"telegram"`), parsed with a `default` that refuses. `201 {id, expiresAt, link?}` — `link` only for `channel: "telegram"`, shown once and never recoverable a second time. `409 EMAIL_INVITES_DISABLED` while `email_invites` is off; `409 TELEGRAM_INVITES_UNAVAILABLE` while Telegram is off or unconfigured; `422 INVITE_REQUIRES_EMAIL` for an email-channel body with no address. The kid-profile path (limited, no sign-in) is unchanged and needs no channel |
+| PATCH · DELETE | `/household/members/{id}` | session · CSRF · owner · **cookie** session (`requireCookieSession`) — same requirement as the row above, since changing a role or removing a member is also a way into or out of the household (spec decision 12) |
+| GET | `/household/invites` | session (cookie **or token**) · owner — this household's *pending* invites (§6), oldest first, each with `id`, `name`, `email`, `role`, `capabilities`, `channel`, `knock`, `expiresAt`; always a JSON array, `[]` when none. `channel` is `"email"` or `"telegram"`; `knock` is `null` until a Telegram invite's link has been tapped, then `{username, code, knockedAt}` — `username` is `null` when Telegram sent none. Owner-only because an invitee's address is personal data, the same rule that shows only an owner the members' addresses. A token may read it: a list shows no secret |
 | DELETE | `/household/invites/{id}` | session · CSRF · owner · **cookie** session (`requireCookieSession`) — withdraws the invite by **deleting its row**, so its emailed link stops resolving (`GET /invites/{token}` answers `404`). `204` with no body. An id from another household, or one that never existed, is `404`; an accepted invite is `409 INVITE_ALREADY_ACCEPTED` and survives; an expired, unaccepted invite is deletable. A token gets `403 SESSION_REQUIRED` (spec decision 12) |
+| POST | `/household/invites/{id}/link` | session · CSRF · owner · **cookie** session (`requireCookieSession`) — milestone 2. Telegram invites only (`409 INVITE_NOT_TELEGRAM` for an email invite); issues a fresh one-time link and clears any knock in the same statement, and serves both "Get a new link" and **"Not them"** — the two have identical effects, so there is one route rather than two. `200 {link, expiresAt}` |
+| POST | `/household/invites/{id}/admit` | session · CSRF · owner · **cookie** session (`requireCookieSession`) — milestone 2, **Let in**. Reads no body — the four-digit code is compared by eye and accepted by no endpoint (`TestTheAdmitRequestHasNoCodeField`). `200 {member, signInSent}`; `signInSent: false` when the member was created but the bot could not reach their chat. `409 INVITE_NOT_KNOCKED` when nobody has knocked (or a new link cleared the knock since); `409 CHAT_ALREADY_BOUND` when the knocked chat joined another household meanwhile, the re-check spec decision 15 asks for, run inside `Admit`'s own transaction; `409 INVITE_ALREADY_ACCEPTED` for a second Let in |
 | GET | `/family/calendar` | session · `requireFeature(family_calendar)` — no capability at all, the same as `/household`; an unbuilt page's API stub, dark by default, answering `{"events":[]}` once its flag is on rather than a stub-specific status, so the flag proves something real about the route it guards |
 | POST | `/admin/session` | session · CSRF — the one admin route reachable with no grant; how a grant is obtained |
 | GET | `/admin/flags` | session · admin (`requirePlatformAdmin`) · grant |
@@ -1470,7 +1492,7 @@ the rate limit is exhausted or the send fails. **The frontend is therefore the
 only place a send failure can surface**, which is why the sent panel carries
 retry copy.
 
-### Invite acceptance — one transaction
+### Invite acceptance — one transaction, and the email path only
 
 ```mermaid
 sequenceDiagram
@@ -1480,6 +1502,8 @@ sequenceDiagram
     participant DB as Postgres
 
     B->>I: POST /invites/{token}/accept
+    I->>R: ByTokenHash
+    I->>I: channel == email? else domain.ErrNotFound
     I->>R: preview — expired? already accepted?
     I->>I: build membership via domain rules
     I->>I: hash password
@@ -1496,6 +1520,22 @@ All three writes are one transaction. Split apart, a failure in the middle leave
 an orphaned user holding the unique email index and the invite becomes
 permanently unacceptable. The invite is claimed *first*, so two concurrent
 accepts serialise on that row and the loser gets a clean conflict.
+
+**This public, pre-sign-in route serves the email channel only.** Since the
+partner-invite lobby's milestone 2, an invite also carries a `channel`
+(`email` or `telegram`, §6), and a Telegram invite is never accepted here at
+all — it is admitted by a signed-in owner, in their own browser, from the
+knock flow below. `Preview` and `Accept` both check `details.Channel !=
+domain.ChannelEmail` **immediately after `ByTokenHash`, before the
+expired/already-accepted switch above**, and answer the identical
+`domain.ErrNotFound` an unknown token gets. The ordering is load-bearing, not
+cosmetic: checking the channel after the liveness switch would let an
+**expired** Telegram token answer `ErrInviteExpired` instead, telling a
+caller holding that link "this token was real, it's just too late" — the
+exact leak this ordering closes. A public form must not serve a channel it
+does not own; without this guard, whoever holds a Telegram invite link could
+skip the owner's own **Let in** decision entirely by posting straight to this
+route. `TestTheWebFormCannotAcceptATelegramInvite` pins both call sites.
 
 ### Self-serve sign-up — provisioning is one transaction
 
@@ -1635,6 +1675,19 @@ membership it never questions. The update id is the idempotency key, so
 the poller's known redelivery-after-restart becomes a replay rather than a
 second row. Walked live on 2026-09-08 against a development bot, after the
 first attempt with the production token went to the production poller.
+
+**Since the partner-invite lobby's milestone 2 (2026-09-20), `ParseCommand`
+answers only a private chat, the same gate `ParseStart` uses below.** Before
+this, a bound **group** chat made every member of the room the account
+holder: any member's `/spend` or `/yes` acted as the owner, and a Telegram
+sign-in request posted a working magic link into the room (security review
+2026-09-19, finding 2 — `docs/reviews/2026-09-19-security-review.md`). The
+diagram's `P->>C: HandleCommand(...)` step is now reached only when
+`Message.Chat.Type == "private"` **and** `From.ID == Chat.ID`; everything
+else — a group, a supergroup, a channel post — is dropped before the
+Commander is called at all, the same fail-closed `switch` shape
+`domain`-arriving values already follow elsewhere in this codebase
+([ADR 11](adr/0011-joining-a-household-by-knock.md)).
 
 ### Telegram — the bot speaks first: the daily digest
 
@@ -1817,14 +1870,29 @@ address and needs `AuthService.decoy()` plus timing equalisation to stay quiet.
   again. `cmd/api/main.go` carries the trade-off at the line, including what
   would have to change (a `WaitGroup`, and a supervisor timeout longer than the
   send) if this loop ever writes more than one row.
+- **A `/start` from a group, supergroup or channel is dropped before
+  `HandleStart` is called at all.** `P->>T: HandleStart(chatID, payload,
+  username)` in the diagram above is reached only for a private chat —
+  `isPrivateChatWithItsOwner` (`adapter/telegram/update.go`), the same gate
+  `ParseCommand` uses for chat commands above, and the one this milestone's
+  own knock flow below depends on (security review 2026-09-19, finding 2;
+  [ADR 11](adr/0011-joining-a-household-by-knock.md)). Every payload this
+  section describes — a link nonce, a sign-in nonce, and (below)
+  `inv_<token>` — is unreachable from a room with more than one person in
+  it.
 - **Telegram being down degrades partially.** Telegram sign-in stops; the email
   path is unaffected; sessions already issued are unaffected.
 
-**What Telegram is *not* used for: invites.** An invite still goes to an email
-address and is still relayed from Mailpit by hand on the live install. A
-shareable `t.me/…?start=inv_<token>` link is the natural follow-up and is
-deliberately not in this slice; `docs/FEATURE_TRACKER.md` carries it as a ⬜ row
-so it is a gap on the map rather than an assumption.
+**`HandleStart` now routes on the payload before any of the branches
+above.** Since the partner-invite lobby's milestone 2, a payload beginning
+`inv_` is stripped and handed to `InviteKnocker.Knock` **before**
+`Links.Consume` is ever called — invite tokens and link/sign-in nonces are
+different token spaces entirely, so this is a prefix check, not a database
+round trip that could collide. Every other payload behaves exactly as the
+two diagrams above already show, unmodified. See "Telegram invites — a
+knock, then Let in" below for that branch's own flow; it is documented apart
+from the diagram above because it shares only the payload dispatch and the
+poller, never `TelegramLinkRepo` or a magic-link/sign-up token.
 
 ### Telegram — connecting an existing account, and why the binding waits for a confirm
 
@@ -1952,6 +2020,109 @@ it, so an owner who had said `/nudges off` and later relinks the same chat
 is unmuted. Accepted, not a defect: reconnecting is a deliberate act, and
 carrying the flag across a deleted row would mean keeping a tombstone whose
 only job is remembering one boolean.
+
+### Telegram invites — a knock, then Let in
+
+Partner-invite lobby milestone 2 ([ADR 11](adr/0011-joining-a-household-by-knock.md)),
+following the shape of [ADR 10](adr/0010-binding-a-chat-needs-a-confirm.md)
+directly above: a tap on a Telegram link records and nothing else; a
+signed-in owner decides. It depends on the private-chats-only fix two
+sections up — a knock recorded from a group chat would carry the same
+ambiguity ADR 10 already refuses for a binding.
+
+```mermaid
+sequenceDiagram
+    participant B as Owner (Browser)
+    participant H as Handler
+    participant I as InviteService
+    participant R as InviteRepo
+    participant P as Poller
+    participant T as TelegramAuthService
+    participant TG as Telegram
+    participant C as Partner (Chat)
+
+    B->>H: POST /household/members/invite<br/>{channel: telegram} (owner · CSRF · cookie session)
+    H->>I: CreateTelegram(...)
+    I->>R: CreateTelegram(...) -> id, tokenHash
+    I-->>H: {id, expiresAt, link}
+    H-->>B: 201 — link shown once
+    B->>C: owner hands the link over: copy / QR / share
+    C->>TG: /start inv_TOKEN
+    P->>TG: getUpdates (long poll)
+    TG-->>P: Update
+    P->>T: HandleStart(chatID, "inv_TOKEN", username)
+    T->>I: Knock(rawToken, chatID, username) — InviteKnocker
+    I->>R: RecordKnock(hash, chatID, username, code, now)<br/>— one guarded UPDATE, knocked_at IS NULL
+    I-->>T: code "4812"
+    T->>TG: "Your code: 4812"
+    TG->>C: reply
+    loop every 3s while some invite has no knock yet
+        B->>H: GET /household/invites
+        H->>I: ListPending
+        I-->>H: [...{channel: telegram, knock: {username, code, knockedAt}}]
+        H-->>B: 200
+    end
+    Note over B: owner compares the two codes by eye
+    B->>H: POST /household/invites/{id}/admit (owner · CSRF · cookie session)
+    H->>I: Admit(householdID, id)
+    I->>R: Admit(...) — one tx: stamp accepted,<br/>create user, membership, telegram_accounts
+    R-->>I: AdmittedInvite{..., chatID}
+    I->>T: SendSignIn(chatID, userID) — InviteChats, AFTER commit
+    T->>TG: sign-in link
+    TG->>C: reply
+    I-->>H: AdmittedMember{..., signInSent}
+    H-->>B: 200 {member, signInSent}
+```
+
+**`RecordKnock` is one guarded `UPDATE`, and that single statement is the
+whole of "one knock per link" (spec decision 2).** Its `WHERE` clause
+requires `channel = 'telegram' AND accepted_at IS NULL AND expires_at >
+now AND knocked_at IS NULL`, all five conditions in the SQL itself rather
+than a service-level `if` — a caller cannot forget one, and two taps at the
+same instant leave exactly one winner. Every case the `UPDATE` does not
+match — unknown token, wrong channel, expired, accepted, already knocked —
+answers the same `domain.ErrNotFound`, which the bot turns into one bland
+dead-link reply. A chat cannot tell "your link already got a knock" from
+"this link never existed" by probing.
+
+**The code is display-only, and no endpoint anywhere accepts it.** It is
+drawn from `crypto/rand` (`PairingCodes`, `adapter/crypto`) at knock time,
+shown in the partner's chat and — via `GET /household/invites`'s `knock`
+field — on the owner's own screen, and compared by eye. `POST
+/household/invites/{id}/admit` reads no body at all;
+`TestTheAdmitRequestHasNoCodeField` pins that. [ADR 4](adr/0004-telegram-as-a-second-delivery-channel.md)
+rejected a numeric one-time code as a sign-in mechanism because a guessable
+code needs its own attempt limiting, lockout and timing analysis; this one
+grants nothing on its own, so none of that applies — but the instant it is
+ever typed into a form and compared server-side, ADR 4's rejection applies
+again in full ([ADR 11](adr/0011-joining-a-household-by-knock.md)).
+
+**`Admit` (Let in) stamps the invite accepted *first*, the same reason
+`InviteRepository.Accept`'s own guard does above**: a concurrent second Let
+in fails cheaply as `domain.ErrInviteAlreadyAccepted` before any row is
+written, rather than failing later on `telegram_accounts`' own unique index
+with an error nobody can map. `SendSignIn` runs **after the commit, never
+inside it** (spec decision 6) — a message send is not something a database
+transaction can roll back, so the member and the message are deliberately
+not one atomic unit. When the send fails, `signInSent: false` is the
+answer, named rather than hidden: it is the owner's only signal that the
+new member has to send `/start` to the bot themselves.
+
+**"Get a new link" and "Not them" are the same route,
+`POST /household/invites/{id}/link`,** because their effects are identical:
+clear any knock, issue a fresh token, and tell a chat that had knocked that
+its link no longer works. `ReplaceInviteToken`'s single `UPDATE` does both
+in one statement, reading the chat that had knocked back through a
+`RETURNING (SELECT …)` subselect. That subselect's snapshot is taken before
+the statement's own row lock, which leaves one narrow, accepted race — a
+knock landing in the gap between the two can be silently missed rather than
+reported to the chat that made it — recorded as a defect in
+`docs/LEARNING.md` rather than fixed here; there is no security consequence.
+
+**`usePendingInvites` polls `GET /household/invites` every 3 seconds only
+while at least one Telegram invite in the current list has no knock yet**,
+not on every render of the pending-invite list — an emailed invite, or a
+knocked-but-not-yet-decided one, is not what this loop exists to catch.
 
 ### Accounts — net worth is composed on read, not stored
 
@@ -3028,10 +3199,11 @@ refreshes the list too: a `404` means another owner already withdrew it, and a
 `409` means it was accepted meanwhile, which also invalidates members because
 the invitee is one now. An invite accepted in *another*
 browser reaches an owner's open tab only when something refetches — moving to
-another page does it, sitting on Settings does not. Milestone 2's planned
-3-second poll runs only while a *Telegram* invite is waiting for a knock, so
-an emailed invite accepted elsewhere will still wait for the next navigation.
-Nothing in the spec addresses that case yet. `Budget`
+another page does it, sitting on Settings does not. Milestone 2's own
+3-second poll (`invitePollInterval`, `usePendingInvites.ts`) runs only while a
+*Telegram* invite in the current list is waiting for a knock, so an emailed
+invite accepted elsewhere still waits for the next navigation — the spec does
+not address that case, and this milestone did not close it either. `Budget`
 and Overview likewise share `currentMonth()` (`features/money/month.ts`),
 which reads the *local* calendar — the two screens must agree on which month
 "this month" is, and the API container's own clock is UTC.
@@ -3158,12 +3330,17 @@ erDiagram
     invites {
         uuid id PK
         uuid household_id FK
-        citext email
+        citext email "nullable since 00021 — a telegram-channel invite has none"
+        text channel "email | telegram, default email (00021)"
         text role
         bytea token_hash
         uuid invited_by FK
         timestamptz expires_at
         timestamptz accepted_at
+        bigint knock_chat_id "nullable; whole-or-absent with the three below; CHECK > 0 (a group id is negative)"
+        text knock_chat_username "nullable — display only, Telegram sends none for some accounts"
+        text knock_code "nullable — the four digits, display only, no endpoint reads it back"
+        timestamptz knocked_at "nullable — set once; RecordKnock's guarded UPDATE is what keeps it to one knock"
     }
     sessions {
         uuid id PK
@@ -3679,6 +3856,30 @@ Notes that are not obvious from the shapes:
   the record of how a member joined and is never deleted. An expired,
   unaccepted row is not pending, so it is never listed, but it can still be
   deleted.
+- **`invites.email` became nullable in migration `00021_invite_channels.sql`,
+  and four CHECK constraints say what that nullability is allowed to mean.**
+  `invites_channel_matches_email` (`(channel = 'email') = (email IS NOT
+  NULL)`) is an equality between two booleans so neither direction can
+  drift: an email invite with a NULL address and a Telegram invite carrying
+  one are both refused by the same clause. `invites_knock_is_whole`
+  requires `knock_chat_id`, `knock_code` and `knocked_at` to be NULL
+  together or set together — `knock_chat_username` stays out of that
+  equality on purpose, because Telegram legitimately sends no username, and
+  NULL there is data, not a half-written row.
+  `invites_knock_needs_telegram` refuses a knock on an email invite.
+  `invites_knock_chat_is_a_person` (`knock_chat_id IS NULL OR knock_chat_id
+  > 0`) is the second gate against a group chat knocking, behind the
+  application-layer check in `adapter/telegram/update.go`
+  ([ADR 11](adr/0011-joining-a-household-by-knock.md)) — free to add because
+  no row in `invites` has ever held this column, unlike `telegram_accounts`
+  and `telegram_link_requests`, which hold real production rows and do not
+  get the equivalent CHECK this milestone. Every existing row is an email
+  invite with an address, so `DEFAULT 'email'` on the new `channel` column
+  satisfies all four constraints the moment they are added, with no
+  backfill, the same migration-time validation `signups_have_exactly_one_channel`
+  already relies on below. `RecordKnock` is the only writer of the four
+  knock columns, as one guarded `UPDATE` (§5); `ReplaceInviteToken` is the
+  only writer that clears them.
 - **`signups` has no `user_id`**, unlike `magic_links`. There is no user yet —
   only a verified address — which is also why the row carries no household
   name or display name: those are collected on the screen the mailed token
@@ -4052,12 +4253,33 @@ web/src/
                        RequireCapability
     settings/          members, spaces, currency, notifications,
                        PendingInvitesList.tsx (inside MembersPanel, owners
-                       only: each pending invite's name, role, email and
-                       expiry, with Withdraw -- a Set of in-flight ids, not
+                       only: each pending invite's name, role and expiry,
+                       fed by PendingInviteCard.tsx -- one card per row,
+                       which renders the state the invite's own `channel`
+                       and `knock` fields carry: an email invite (name,
+                       role, email, Withdraw -- a Set of in-flight ids, not
                        one flag, drives each row's disabled Withdraw, which
-                       is what stops a double click sending two DELETEs;
-                       only the address truncates, so a phone still shows
-                       the expiry), TelegramPanel.tsx (connect/disconnect a chat --
+                       is what stops a double click sending two DELETEs),
+                       or a Telegram invite waiting on a link
+                       (InviteLinkShare.tsx -- Copy / QR / Share, keyed on
+                       the link itself so a stale "Copied" label cannot
+                       survive a link swap), knocked (the code shown beside
+                       Let in and Not them), or admitted -- a notice held
+                       in PendingInvitesList's own state, keyed by invite
+                       id, because Admit's own refetch removes the row
+                       before the mutation's `.data` would otherwise land
+                       (docs/LEARNING.md). Polls GET /household/invites
+                       every 3s, but only while some Telegram invite in the
+                       list has no knock yet (invitePollInterval,
+                       usePendingInvites.ts) -- not on every render, and not
+                       once every invite has either knocked or has none to
+                       knock. InviteMemberModal.tsx picks a channel
+                       (availableChannelsFor, gated on the household's own
+                       email_invites/telegram_sign_in flags) instead of a
+                       bare optional email field, and a Telegram pick hands
+                       off into the same PendingInviteCard waiting-link
+                       state once the 201 lands. TelegramPanel.tsx
+                       (connect/disconnect a chat --
                        mints, opens the deep link with a plain-link
                        fallback for a blocked popup, polls status every 3s,
                        confirms; renders nothing on a 404, this install's
@@ -4066,7 +4288,8 @@ web/src/
                        (useHousehold, useSpaces, useInviteMember,
                        useUpdateMember, useNotificationPreferences,
                        useTelegram, useHouseholdMembers,
-                       usePendingInvites); no settings
+                       usePendingInvites -- now also exporting
+                       useNewInviteLink and useAdmitInvite); no settings
                        component calls apiFetch itself
     money/             Finances page — net worth (now with its twelve-month
                        trend, NetWorthChart.tsx, inline SVG the same way

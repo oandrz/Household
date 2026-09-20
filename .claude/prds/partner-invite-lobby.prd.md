@@ -157,8 +157,8 @@ Email invites are hidden while email cannot leave the box.
 
 | # | Milestone | Outcome | Status | Plan |
 |---|---|---|---|---|
-| 1 | Owners can see pending invites | Settings lists pending invites with role and expiry, and any owner can withdraw one. The Overview checklist gains "Invite your partner". No change to how an invite is delivered or accepted | pending | — |
-| 2 | Partner joins over Telegram | The owner gets a one-time link (copy, QR, share). The partner taps it, the knock appears, the owner lets them in, and the partner gets a sign-in link. The email invite option is hidden while email cannot leave. **Hypothesis tested here** | pending | — |
+| 1 | Owners can see pending invites | Settings lists pending invites with role and expiry, and any owner can withdraw one. The Overview checklist gains "Invite your partner". No change to how an invite is delivered or accepted | **built, walked 2026-09-19** | [plan](../../docs/superpowers/plans/2026-09-19-hearth-partner-invite-lobby-m1.md) |
+| 2 | Partner joins over Telegram | The owner gets a one-time link (copy, QR, share). The partner taps it, the knock appears, the owner lets them in, and the partner gets a sign-in link. The email invite option is hidden while email cannot leave. **Hypothesis tested here** | **built 2026-09-20; not yet merged, deployed, or walked in a browser** | [plan](../../docs/superpowers/plans/2026-09-20-hearth-partner-invite-lobby-m2.md) |
 | 3 | Household access list | One place listing pending invites, API tokens and linked chats. Owners see all and revoke their own. Closes the tracker's "Manage API tokens in Settings" row | pending | — |
 
 Each milestone ends with the project's usual definition of done: `make lint &&
@@ -168,24 +168,50 @@ updated.
 
 ## Open Questions
 
-- [ ] **ADR 4 amendment, or a new ADR 11?** Invites over Telegram are ADR 4's
+- [x] **ADR 4 amendment, or a new ADR 11?** Invites over Telegram are ADR 4's
       deferred follow-up. The decision to hide email invites also changes ADR
       3's consequences. Settle before milestone 2's spec.
-- [ ] **How long does a link stay valid?** Email invites last seven days today.
+      **Decided: a new ADR, [0011-joining-a-household-by-knock.md](../../docs/adr/0011-joining-a-household-by-knock.md),
+      2026-09-20 — it extends ADR 10's reasoning to a second flow, which an
+      amendment to ADR 4 could not carry on its own. ADR 4 and ADR 3 each
+      gained a short amendment pointing at it instead.**
+- [x] **How long does a link stay valid?** Email invites last seven days today.
       TBD: seven days to match, or shorter because the partner is usually in the
       same room. Validate in the milestone 2 spec.
-- [ ] **What does the knock show the owner when the partner has no Telegram
+      **Decided in the milestone 2 spec, decision 8: Telegram invite links
+      live 24 hours; email invites keep their existing seven days.**
+- [x] **What does the knock show the owner when the partner has no Telegram
       @username?** Telegram usernames are optional. TBD: the first name alone
       may not be enough to tell "Not them" apart. Validate by looking at what
       Telegram actually sends for an account without a username.
-- [ ] **Several knocks on one link** (it was forwarded, or someone was fast):
+      **Decided: never the first name (it is attacker-chosen and not
+      unique, `adapter/telegram/update.go`'s `senderName`) — the knock line
+      reads "Someone with no Telegram username tapped the link" instead
+      (`copy.ts`, `knockLine`), and the same rule applies to ADR 10's own
+      confirm screen.**
+- [x] **Several knocks on one link** (it was forwarded, or someone was fast):
       show every knock and let the owner pick one? TBD in the milestone 2 spec.
       Letting one in must consume the link either way.
-- [ ] **Can the owner change the role at Let in**, or only the role chosen when
+      **Decided in the milestone 2 spec, decision 2: one knock per link.**
+      The first `/start` with a link records it; every later tap gets the
+      standard dead-link reply. There is no `invite_knocks` table because
+      there is never more than one knock to hold. A leaked link costs one new
+      link ("Not them" / "Get a new link"), never a takeover — see
+      [ADR 11](../../docs/adr/0011-joining-a-household-by-knock.md).
+- [x] **Can the owner change the role at Let in**, or only the role chosen when
       the invite was created? The MVP assumes it is fixed at creation.
-- [ ] **Existing pending email invites when the email option is hidden.** Do
+      **Decided in the milestone 2 spec, decision 14: fixed at creation.**
+      Let in grants exactly what the invite says; changing a role afterwards
+      is an ordinary member edit, not part of this flow.
+- [x] **Existing pending email invites when the email option is hidden.** Do
       they stay listed and withdrawable (assumed yes), or are they withdrawn
       automatically?
+      **Decided: they stay listed and withdrawable.** `email_invites` gates
+      only the *creation* of a new email invite, at the HTTP edge and in the
+      invite modal; `ListPending`/`GET /household/invites` reads every
+      pending invite regardless of channel or flag state, so a household with
+      an email invite already in flight when the flag turns off keeps seeing
+      and can still withdraw it.
 
 ## Risks
 
@@ -199,5 +225,8 @@ updated.
 | **The knock leaks household details to a stranger's chat** | Low | High: a privacy breach | Requirement 3: the reply carries no household or member information |
 
 ---
-*Status: DRAFT, requirements only. Decisions 1-4 made by the product owner on
-2026-09-19. Implementation planning pending via `/plan`.*
+*Status: Decisions 1-4 made by the product owner on 2026-09-19. Milestones 1
+and 2 are planned and built (see Delivery Milestones above and
+[ADR 11](../../docs/adr/0011-joining-a-household-by-knock.md)); all six open
+questions above are settled. Milestone 3, the household access list, is not
+yet planned.*

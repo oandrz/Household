@@ -186,7 +186,8 @@ not" shape this product has refused twice before.
   natural follow-up — the delivery channel now exists, so it is a payload change
   to the same `/start` parsing rather than new infrastructure. Deliberately not
   in this slice; `docs/FEATURE_TRACKER.md` carries it as ⬜ so it is a gap on the
-  map rather than an assumption.
+  map rather than an assumption. **Done: [ADR 11](0011-joining-a-household-by-knock.md),
+  2026-09-20.**
 - **Cross-device sign-in.** Needs a typed confirmation code binding both ends;
   see "Why the link comes back to the tapper".
 - **A `Notifier` port.** Extract it when a third channel arrives, or when one
