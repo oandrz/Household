@@ -13,6 +13,7 @@ const jane: PendingInvite = {
   email: "jane@example.com",
   role: "owner",
   capabilities: ["calendar", "chores", "money", "marriage"],
+  channel: "email",
   expiresAt: "2026-09-26T09:00:00Z",
 };
 
