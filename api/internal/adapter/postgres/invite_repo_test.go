@@ -382,6 +382,12 @@ func TestListPendingInvites(t *testing.T) {
 		got[0].Role != domain.RoleOwner || !got[0].ExpiresAt.After(now) || got[0].CreatedAt.IsZero() {
 		t.Fatalf("pending[0] = %+v", got[0])
 	}
+	// Every row this test creates predates Telegram invites, so migration
+	// 00021's DEFAULT 'email' is what this invite's channel column actually
+	// holds -- and nobody has knocked on it.
+	if got[0].Channel != domain.ChannelEmail || got[0].Knock != nil {
+		t.Fatalf("pending[0] channel/knock = %q/%+v, want email/nil", got[0].Channel, got[0].Knock)
+	}
 
 	none, err := invites.ListPending(ctx, empty.ID, now)
 	if err != nil {

@@ -578,17 +578,6 @@ type AcceptedInvite struct {
 	HouseholdID  string
 }
 
-// InviteSummary is one invite a household has sent that nobody has accepted
-// and that has not expired: what Settings lists so an owner can see, and
-// withdraw, what they sent. It carries no token -- the raw token is never
-// stored, and the hash is nobody's business above the adapter.
-//
-// Named InviteSummary rather than the design doc's "PendingInvite" because
-// that name is already taken above by the operator admin directory's own,
-// differently-shaped view of an invite (no ID, no Capabilities -- it is
-// read-only and never withdrawn from that screen). The two are genuinely
-// different data for different audiences, so each keeps a name of its own
-// rather than one being renamed to make room for the other.
 // InviteKnock is one tap on a Telegram invite link: who tapped, and the
 // four digits their chat was shown. The owner compares those digits with
 // the ones on the phone in front of them and then admits (ADR 11).
@@ -604,6 +593,17 @@ type InviteKnock struct {
 	KnockedAt time.Time
 }
 
+// InviteSummary is one invite a household has sent that nobody has accepted
+// and that has not expired: what Settings lists so an owner can see, and
+// withdraw, what they sent. It carries no token -- the raw token is never
+// stored, and the hash is nobody's business above the adapter.
+//
+// Named InviteSummary rather than the design doc's "PendingInvite" because
+// that name is already taken above by the operator admin directory's own,
+// differently-shaped view of an invite (no ID, no Capabilities -- it is
+// read-only and never withdrawn from that screen). The two are genuinely
+// different data for different audiences, so each keeps a name of its own
+// rather than one being renamed to make room for the other.
 type InviteSummary struct {
 	ID           string
 	Name         string
