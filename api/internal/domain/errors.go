@@ -410,4 +410,12 @@ var (
 	// ErrTelegramMintsRateLimited bounds how many link attempts one member
 	// can start in an hour. Table growth, not a security control.
 	ErrTelegramMintsRateLimited = errors.New("too many telegram link attempts")
+
+	// ErrChatAlreadyBound is InviteService.Knock's refusal for a chat that
+	// already belongs to a Hearth account. It is the one invite-knock
+	// refusal that is NOT the bland dead-link answer every other case
+	// gets: it says nothing about the *link*, only about the tapper's own
+	// chat, which they could already learn by sending /start with no
+	// payload at all (spec decision 15).
+	ErrChatAlreadyBound = errors.New("this telegram chat already belongs to an account")
 )

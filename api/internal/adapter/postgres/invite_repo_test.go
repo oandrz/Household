@@ -537,3 +537,45 @@ func TestInviteChannelConstraintsRefuseHalfWrittenRows(t *testing.T) {
 		})
 	}
 }
+
+// Two chats tap the same link at the same instant. Exactly one knock is
+// recorded, and the other gets the same ErrNotFound a dead link gets. The
+// overlap is forced with a barrier rather than hoped for: two goroutines
+// started back to back usually do not overlap, so a test without one would
+// pass while the guard was missing.
+func TestTwoSimultaneousKnocksProduceExactlyOneWinner(t *testing.T) {
+	ctx := context.Background()
+	db, h := newInviteTestHousehold(t)
+	invites := postgres.NewInviteRepo(db)
+
+	tokenHash := []byte("a-token-hash-32-bytes-long-------")
+	if _, err := invites.CreateTelegram(ctx, h.ID, "Christine", domain.RoleOwner,
+		domain.AllCapabilities(), tokenHash, h.OwnerUserID, time.Now().Add(24*time.Hour)); err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for _, chatID := range []int64{4242, 9999} {
+		go func(chatID int64) {
+			<-start // the barrier: both goroutines are parked here
+			results <- invites.RecordKnock(ctx, tokenHash, chatID, "someone", "4812", time.Now())
+		}(chatID)
+	}
+	close(start)
+
+	var wins, refusals int
+	for i := 0; i < 2; i++ {
+		switch err := <-results; {
+		case err == nil:
+			wins++
+		case errors.Is(err, domain.ErrNotFound):
+			refusals++
+		default:
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	if wins != 1 || refusals != 1 {
+		t.Fatalf("got %d wins and %d refusals, want exactly 1 and 1", wins, refusals)
+	}
+}

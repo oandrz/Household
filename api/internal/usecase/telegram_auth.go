@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/andreasoentoro/hearth/api/internal/domain"
@@ -46,6 +47,10 @@ type TelegramAuthDeps struct {
 	Clock       Clock
 	BaseURL     string
 	BotUsername string
+	// Invites answers an inv_ payload: everything about the household
+	// invite it names lives behind this one method, so this service holds
+	// no invite rule of its own.
+	Invites InviteKnocker
 }
 
 // TelegramAuthService delivers Hearth's existing sign-in and sign-up tokens
@@ -96,6 +101,15 @@ func (s *TelegramAuthService) StartLink(ctx context.Context) (TelegramStartLink,
 // told anything -- an ordinary refusal MUST be answered here, in the chat, or
 // it is answered nowhere.
 func (s *TelegramAuthService) HandleStart(ctx context.Context, chatID int64, payload, username string) error {
+	// An invite payload is routed here before the nonce table is touched at
+	// all: migration 00018's comment reserved the inv_ prefix so an invite
+	// never has to occupy a telegram_link_requests row, which lives ten
+	// minutes while an invite lives a day. Consuming first would spend a
+	// nonce that was never minted and answer a real invite as a dead link.
+	if rawToken, ok := strings.CutPrefix(payload, telegramInvitePayloadPrefix); ok {
+		return s.handleInviteStart(ctx, chatID, rawToken, username)
+	}
+
 	now := s.d.Clock.Now()
 
 	// Consume first, then check the limit. A refused attempt still spends its
@@ -180,6 +194,32 @@ func (s *TelegramAuthService) handleLinkStartForUnboundChat(ctx context.Context,
 		return s.say(ctx, chatID, "Go back to Hearth and confirm this chat to finish connecting it.")
 	default:
 		return fmt.Errorf("look up telegram binding by user: %w", err)
+	}
+}
+
+// handleInviteStart answers a tap on a household invite link. It writes no
+// membership: the owner's signed-in browser admits, and that is the whole
+// of the protection against a leaked link (ADR 11, following ADR 10).
+//
+// Every refusal is telegramDeadLinkMessage, the same sentence an unknown
+// sign-in nonce gets, for the reason that constant's own comment gives.
+// A chat that already belongs to a Hearth account is refused with a
+// different, self-describing line: it tells the tapper only about their own
+// chat, which they already know, and saves them tapping a dead link
+// forever (spec decision 15).
+func (s *TelegramAuthService) handleInviteStart(ctx context.Context, chatID int64, rawToken, username string) error {
+	code, err := s.d.Invites.Knock(ctx, rawToken, chatID, username)
+	switch {
+	case err == nil:
+		return s.say(ctx, chatID, fmt.Sprintf(
+			"Your code is %s.\n\nShow it to whoever invited you. They'll let you in, and then I'll send you a sign-in link.",
+			code))
+	case errors.Is(err, domain.ErrChatAlreadyBound):
+		return s.say(ctx, chatID, "This Telegram account already belongs to a Hearth household.")
+	case errors.Is(err, domain.ErrNotFound):
+		return s.say(ctx, chatID, telegramDeadLinkMessage)
+	default:
+		return fmt.Errorf("record invite knock: %w", err)
 	}
 }
 

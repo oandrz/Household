@@ -196,6 +196,20 @@ SELECT (accepted_at IS NOT NULL)::boolean AS accepted
 FROM invites
 WHERE id = $1 AND household_id = $2;
 
+-- name: RecordInviteKnock :one
+-- One guarded UPDATE is the whole of "one knock per link" (spec decision
+-- 2): knocked_at IS NULL is what makes the second tap -- and two taps at
+-- the same instant -- lose. Every other condition is here for the same
+-- reason it is in the SQL and not in Go: a caller cannot forget it.
+UPDATE invites
+SET knock_chat_id = $2, knock_chat_username = $3, knock_code = $4, knocked_at = $5
+WHERE token_hash = $1
+  AND channel = 'telegram'
+  AND accepted_at IS NULL
+  AND expires_at > $5
+  AND knocked_at IS NULL
+RETURNING id;
+
 -- name: ListSpaces :many
 -- ORDER BY position, key: position alone has no tiebreaker, so two spaces
 -- sharing a position (nothing stops that -- positions are assigned by

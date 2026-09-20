@@ -72,6 +72,12 @@ type InviteDeps struct {
 	// a short life costs almost nothing, and a link forgotten in a chat
 	// history dies the next day.
 	TelegramInviteTTL time.Duration
+	// Codes draws the four digits Knock shows the tapper.
+	Codes PairingCodes
+	// Accounts is read by Knock, before it ever touches the invite: a chat
+	// that already belongs to a Hearth account is refused before it can
+	// spend somebody else's link (spec decision 15).
+	Accounts TelegramAccountRepository
 }
 
 type InviteService struct {
@@ -220,6 +226,44 @@ func (s *InviteService) CreateTelegram(ctx context.Context, householdID, invited
 // rest to the knocker.
 func (s *InviteService) telegramInviteURL(rawToken string) string {
 	return fmt.Sprintf("https://t.me/%s?start=%s%s", s.d.BotUsername, telegramInvitePayloadPrefix, rawToken)
+}
+
+// Knock records the first tap on a Telegram invite link and returns the
+// four digits to show the tapper. It implements InviteKnocker, so
+// TelegramAuthService can route an inv_ payload here without knowing any
+// invite rule.
+//
+// Every refusal about the *link* is domain.ErrNotFound, with no exception:
+// unknown, expired, accepted, already knocked and email-channel all collapse
+// into one answer, because a caller that could tell them apart would hand a
+// chat holding a stolen link a way to probe for somebody else's invite.
+//
+// The one exception is domain.ErrChatAlreadyBound, and it is safe precisely
+// because it is not about the link: it tells the tapper only that their own
+// chat already belongs to an account, which they can discover by sending
+// /start with no payload at all. Answering it plainly saves them tapping a
+// link that will never work (spec decision 15).
+//
+// That check is first, before the guarded UPDATE, so a chat that already
+// belongs to an account cannot consume somebody else's invite link on its
+// way to being refused. It runs again inside Admit's transaction, because
+// the chat may sign up somewhere else between the knock and the click.
+func (s *InviteService) Knock(ctx context.Context, rawToken string, chatID int64, username string) (string, error) {
+	if _, err := s.d.Accounts.ByChatID(ctx, chatID); err == nil {
+		return "", domain.ErrChatAlreadyBound
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return "", err
+	}
+
+	code, err := s.d.Codes.NewCode()
+	if err != nil {
+		return "", err
+	}
+	if err := s.d.Invites.RecordKnock(ctx, s.d.Tokens.HashToken(rawToken), chatID, username, code,
+		s.d.Clock.Now()); err != nil {
+		return "", err
+	}
+	return code, nil
 }
 
 // Preview lets a caller see what an invite offers before they sign in or

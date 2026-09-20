@@ -233,6 +233,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 	spaces := postgres.NewSpaceRepo(db)
 	notifications := postgres.NewNotificationRepo(db)
 	signups := postgres.NewSignupRepo(db)
+	telegramAccounts := postgres.NewTelegramAccountRepo(db)
 
 	// Cheap argon2 cost parameters: these tests perform many real sign-ins
 	// under -race, and production cost parameters (65536 KiB, 3 passes)
@@ -268,6 +269,8 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		BaseURL:           "http://localhost:5173",
 		BotUsername:       "HearthBot",
 		TelegramInviteTTL: usecase.TelegramInviteTTL,
+		Codes:             crypto.PairCodes{},
+		Accounts:          telegramAccounts,
 	})
 	apiTokens := postgres.NewAPITokenRepo(db)
 	memberSvc := usecase.NewMemberService(usecase.MemberDeps{Members: memberships, Sessions: sessions, APITokens: apiTokens})

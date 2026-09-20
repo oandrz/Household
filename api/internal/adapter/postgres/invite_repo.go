@@ -298,3 +298,26 @@ func (r *InviteRepo) Delete(ctx context.Context, householdID, inviteID string) e
 	// Answer as the DELETE did: nothing was removed.
 	return domain.ErrNotFound
 }
+
+// RecordKnock reports domain.ErrNotFound for every case its guarded UPDATE
+// does not match -- unknown token, email channel, accepted, expired, or
+// already knocked. That is deliberately one answer: the caller turns it
+// into the bot's one bland reply, and any difference between these cases
+// would be something a chat could probe for.
+func (r *InviteRepo) RecordKnock(ctx context.Context, tokenHash []byte, chatID int64,
+	username, code string, now time.Time) error {
+	_, err := r.q.RecordInviteKnock(ctx, sqlcgen.RecordInviteKnockParams{
+		TokenHash:         tokenHash,
+		KnockChatID:       nullableInt8(chatID),
+		KnockChatUsername: nullableText(username),
+		KnockCode:         nullableText(code),
+		KnockedAt:         timestamptz(now),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ErrNotFound
+		}
+		return fmt.Errorf("record invite knock: %w", err)
+	}
+	return nil
+}

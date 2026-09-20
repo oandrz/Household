@@ -953,6 +953,42 @@ func (q *Queries) PruneLoginAttempts(ctx context.Context, at pgtype.Timestamptz)
 	return result.RowsAffected(), nil
 }
 
+const recordInviteKnock = `-- name: RecordInviteKnock :one
+UPDATE invites
+SET knock_chat_id = $2, knock_chat_username = $3, knock_code = $4, knocked_at = $5
+WHERE token_hash = $1
+  AND channel = 'telegram'
+  AND accepted_at IS NULL
+  AND expires_at > $5
+  AND knocked_at IS NULL
+RETURNING id
+`
+
+type RecordInviteKnockParams struct {
+	TokenHash         []byte
+	KnockChatID       *int64
+	KnockChatUsername *string
+	KnockCode         *string
+	KnockedAt         pgtype.Timestamptz
+}
+
+// One guarded UPDATE is the whole of "one knock per link" (spec decision
+// 2): knocked_at IS NULL is what makes the second tap -- and two taps at
+// the same instant -- lose. Every other condition is here for the same
+// reason it is in the SQL and not in Go: a caller cannot forget it.
+func (q *Queries) RecordInviteKnock(ctx context.Context, arg RecordInviteKnockParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, recordInviteKnock,
+		arg.TokenHash,
+		arg.KnockChatID,
+		arg.KnockChatUsername,
+		arg.KnockCode,
+		arg.KnockedAt,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const recordLoginAttempt = `-- name: RecordLoginAttempt :exec
 INSERT INTO login_attempts (household_id, user_id, email, succeeded, at)
 VALUES ($1, $2, $3, $4, $5)

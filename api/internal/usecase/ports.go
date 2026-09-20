@@ -271,6 +271,25 @@ type TelegramAccountRepository interface {
 	Delete(ctx context.Context, userID string) error
 }
 
+// InviteKnocker is the one thing TelegramAuthService needs from the
+// invite side: turn a raw invite token and a chat into a code to show,
+// or refuse. InviteService implements it. The split keeps every word
+// the bot says inside TelegramAuthService and every invite rule inside
+// InviteService.
+type InviteKnocker interface {
+	// Knock records the first tap on a Telegram invite link and returns
+	// the four digits to show the tapper. Every refusal about the *link*
+	// -- unknown, expired, accepted, already knocked, email-channel --
+	// is domain.ErrNotFound, with no exception, because the chat gets one
+	// bland reply for all of them and must not be able to tell them apart
+	// by probing. The one refusal that is NOT domain.ErrNotFound is
+	// domain.ErrChatAlreadyBound: a chat that already belongs to a Hearth
+	// account, which is safe to name plainly because it says nothing
+	// about the link -- only about the tapper's own chat, which they
+	// could learn by sending /start with no payload at all.
+	Knock(ctx context.Context, rawToken string, chatID int64, username string) (code string, err error)
+}
+
 // NudgeRecipient is one chat that may receive one household's daily digest:
 // an owner with the money capability whose chat has not opted out. The
 // repository's query is the authorisation for this outbound direction (ADR 8):
@@ -624,6 +643,14 @@ type InviteSummary struct {
 	CreatedAt time.Time
 }
 
+// PairingCodes draws the four digits an owner compares by eye. A port
+// so tests are deterministic; crypto.PairCodes is the implementation.
+type PairingCodes interface {
+	// NewCode returns exactly four decimal digits, "0000" through
+	// "9999", leading zeros kept.
+	NewCode() (string, error)
+}
+
 type InviteRepository interface {
 	Create(ctx context.Context, householdID, email, name string, role domain.Role,
 		caps domain.Capabilities, tokenHash []byte, invitedBy string, expiresAt time.Time) (string, error)
@@ -668,6 +695,12 @@ type InviteRepository interface {
 	// reports domain.ErrInviteAlreadyAccepted with nothing deleted. An
 	// expired, unaccepted invite is deletable.
 	Delete(ctx context.Context, householdID, inviteID string) error
+	// RecordKnock reports domain.ErrNotFound for every case its guarded
+	// UPDATE does not match -- unknown token, email channel, accepted,
+	// expired, or already knocked. That is deliberately one answer: the
+	// caller turns it into the bot's one bland reply, and any difference
+	// between these cases would be something a chat could probe for.
+	RecordKnock(ctx context.Context, tokenHash []byte, chatID int64, username, code string, now time.Time) error
 }
 
 // SignupDetails is a pending sign-up, read back by token. Exactly one of

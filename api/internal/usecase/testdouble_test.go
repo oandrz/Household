@@ -691,6 +691,7 @@ type inviteRow struct {
 	// knock_chat_username, knock_code and knocked_at. KnockedAt nil means
 	// no knock, the same "one column decides" rule invite_repo.go's
 	// ListPending applies when reading the real table.
+	KnockChatID   int64
 	KnockUsername string
 	KnockCode     string
 	KnockedAt     *time.Time
@@ -719,6 +720,14 @@ type inviteDouble struct {
 	familyName map[string]string // householdID -> family name, mirrors the households join
 	rows       map[string]*inviteRow
 	n          int
+
+	// tokens hashes a raw token the same way the service that seeded this
+	// double did, so knockCode and knockChatID -- test-only introspection,
+	// standing in for reading the row back after a knock -- can find the
+	// row a raw token belongs to. Only newTelegramAuthService's fixture
+	// sets it; every other fixture leaves it nil because nothing else
+	// needs to look a row up by raw token.
+	tokens usecase.TokenGenerator
 
 	// raceNextCreate arms a one-shot simulated race: the next Create call
 	// writes its row (mirroring a concurrent writer's insert landing first)
@@ -939,6 +948,49 @@ func (d *inviteDouble) Delete(_ context.Context, householdID, inviteID string) e
 		return nil
 	}
 	return domain.ErrNotFound
+}
+
+// RecordKnock mirrors RecordInviteKnock's guarded UPDATE: every condition
+// the real WHERE clause carries -- known token, telegram channel, not yet
+// accepted, not expired, not already knocked -- is checked here too, so a
+// test against this double proves the same thing a test against Postgres
+// proves. Any mismatch reports domain.ErrNotFound, one answer for every
+// case, exactly as the real guard's zero-rows result does.
+func (d *inviteDouble) RecordKnock(_ context.Context, tokenHash []byte, chatID int64,
+	username, code string, now time.Time) error {
+	row, ok := d.rows[string(tokenHash)]
+	if !ok || row.Channel != domain.ChannelTelegram || row.AcceptedAt != nil ||
+		!row.ExpiresAt.After(now) || row.KnockedAt != nil {
+		return domain.ErrNotFound
+	}
+	row.KnockChatID = chatID
+	row.KnockUsername = username
+	row.KnockCode = code
+	knockedAt := now
+	row.KnockedAt = &knockedAt
+	return nil
+}
+
+// knockCode and knockChatID read back what RecordKnock stored for rawToken,
+// hashing it the same way InviteService.Knock did -- test-only
+// introspection standing in for a row read after a real knock. "" and 0
+// mean either the token is unknown or nothing has knocked yet; every test
+// that calls these has already asserted the knock it is reading back
+// succeeded, so the two cases are not distinguished here.
+func (d *inviteDouble) knockCode(rawToken string) string {
+	row, ok := d.rows[string(d.tokens.HashToken(rawToken))]
+	if !ok {
+		return ""
+	}
+	return row.KnockCode
+}
+
+func (d *inviteDouble) knockChatID(rawToken string) int64 {
+	row, ok := d.rows[string(d.tokens.HashToken(rawToken))]
+	if !ok {
+		return 0
+	}
+	return row.KnockChatID
 }
 
 // --- SignupRepository -------------------------------------------------
@@ -3894,6 +3946,27 @@ func (d *telegramSenderDouble) lastTo(chatID int64) string {
 
 var _ usecase.TelegramSender = (*telegramSenderDouble)(nil)
 
+// defaultTestHouseholdID is the household every seedTelegramInvite variant
+// in this fixture writes its invite against. The tests that use it never
+// assert on the household itself, only on what HandleStart says back to
+// the chat that tapped, so one shared id is enough.
+const defaultTestHouseholdID = "household-1"
+
+// --- PairingCodes ---------------------------------------------------------
+
+// pairingCodesDouble draws a fixed four-digit code rather than a live
+// random one, so a test can assert on it without an RNG in the way.
+// crypto.PairCodes is the real implementation and carries its own test
+// (paircode_test.go); this double only needs to hand Knock something to
+// pass through.
+type pairingCodesDouble struct{ code string }
+
+func newPairingCodesDouble() *pairingCodesDouble { return &pairingCodesDouble{code: "4812"} }
+
+func (d *pairingCodesDouble) NewCode() (string, error) { return d.code, nil }
+
+var _ usecase.PairingCodes = (*pairingCodesDouble)(nil)
+
 // --- TelegramAuthService fixture ----------------------------------------
 
 // telegramDoubles holds every double newTelegramAuthService wires together,
@@ -3904,8 +3977,13 @@ type telegramDoubles struct {
 	magicLinks *magicLinkDouble
 	signups    *signupDouble
 	sender     *telegramSenderDouble
-	tokens     *seqTokens
-	clock      *fixedClock
+	// invites is the invite repository double behind TelegramAuthDeps'
+	// InviteKnocker -- see newTelegramAuthService's own comment for why the
+	// knocker itself is a real *usecase.InviteService built over this same
+	// double, rather than a double of InviteKnocker directly.
+	invites *inviteDouble
+	tokens  *seqTokens
+	clock   *fixedClock
 }
 
 // newTelegramAuthService builds a TelegramAuthService over its own set of
@@ -3940,6 +4018,22 @@ func newTelegramAuthService(t *testing.T) (*usecase.TelegramAuthService, *telegr
 	signups := newSignupDouble(clock, households, users, members, spaces, notifications)
 	sender := newTelegramSenderDouble()
 
+	// InviteKnocker's only real implementation is *usecase.InviteService
+	// (see ports.go's doc comment), so the double is built one layer down,
+	// at InviteRepository, and handed to a real InviteService -- exactly
+	// the shape main.go wires accounts and codes into.
+	invites := newInviteDouble(clock, users, members)
+	invites.tokens = tokens
+	invites.setFamilyName(defaultTestHouseholdID, "Oentoro")
+	codes := newPairingCodesDouble()
+	inviteSvc := usecase.NewInviteService(usecase.InviteDeps{
+		Invites:  invites,
+		Codes:    codes,
+		Accounts: accounts,
+		Tokens:   tokens,
+		Clock:    clock,
+	})
+
 	svc := usecase.NewTelegramAuthService(usecase.TelegramAuthDeps{
 		Links:       links,
 		Accounts:    accounts,
@@ -3950,12 +4044,99 @@ func newTelegramAuthService(t *testing.T) (*usecase.TelegramAuthService, *telegr
 		Clock:       clock,
 		BaseURL:     "http://localhost:5173",
 		BotUsername: "HearthBot",
+		Invites:     inviteSvc,
 	})
 
 	return svc, &telegramDoubles{
 		links: links, accounts: accounts, magicLinks: magicLinks,
-		signups: signups, sender: sender, tokens: tokens, clock: clock,
+		signups: signups, sender: sender, invites: invites, tokens: tokens, clock: clock,
 	}
+}
+
+// seedTelegramInvite writes a live Telegram invite directly through the
+// invite repository double -- bypassing InviteService.CreateTelegram, which
+// invite_test.go already exercises -- and returns the raw token HandleStart
+// is tapped with. household and name are recorded but never asserted on by
+// these tests, which only check what the chat that knocked was told.
+func (d *telegramDoubles) seedTelegramInvite(t *testing.T, householdID, name string) string {
+	t.Helper()
+	raw, hash, err := d.tokens.NewToken()
+	if err != nil {
+		t.Fatalf("NewToken: %v", err)
+	}
+	if _, err := d.invites.CreateTelegram(context.Background(), householdID, name, domain.RoleOwner,
+		domain.AllCapabilities(), hash, "inviter-1", d.clock.Now().Add(24*time.Hour)); err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	return raw
+}
+
+// seedExpiredTelegramInvite is seedTelegramInvite with an expiry already in
+// the past, for the "expired" case in the one-bland-reply matrix.
+func (d *telegramDoubles) seedExpiredTelegramInvite(t *testing.T) string {
+	t.Helper()
+	raw, hash, err := d.tokens.NewToken()
+	if err != nil {
+		t.Fatalf("NewToken: %v", err)
+	}
+	if _, err := d.invites.CreateTelegram(context.Background(), defaultTestHouseholdID, "Christine", domain.RoleOwner,
+		domain.AllCapabilities(), hash, "inviter-1", d.clock.Now().Add(-time.Hour)); err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	return raw
+}
+
+// seedEmailInvite writes an ordinary email-channel invite, for the
+// "wrong channel" case in the one-bland-reply matrix: RecordKnock's own
+// guard requires channel = 'telegram', so tapping an email invite's token
+// must refuse exactly like an unknown one.
+func (d *telegramDoubles) seedEmailInvite(t *testing.T) string {
+	t.Helper()
+	raw, hash, err := d.tokens.NewToken()
+	if err != nil {
+		t.Fatalf("NewToken: %v", err)
+	}
+	if _, err := d.invites.Create(context.Background(), defaultTestHouseholdID, "christine@example.com", "Christine",
+		domain.RoleOwner, domain.AllCapabilities(), hash, "inviter-1", d.clock.Now().Add(7*24*time.Hour)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	return raw
+}
+
+// seedAcceptedTelegramInvite is seedTelegramInvite plus stamping the row
+// accepted, for the "already accepted" case in the one-bland-reply matrix.
+// It reaches into the row directly rather than going through Accept, which
+// refuses a Telegram-channel invite outright (see InviteService.Accept) --
+// this double's own accepted_at is what RecordKnock's guard actually reads.
+func (d *telegramDoubles) seedAcceptedTelegramInvite(t *testing.T) string {
+	t.Helper()
+	raw := d.seedTelegramInvite(t, defaultTestHouseholdID, "Christine")
+	row, ok := d.invites.rows[string(d.tokens.HashToken(raw))]
+	if !ok {
+		t.Fatal("seeded invite vanished")
+	}
+	now := d.clock.Now()
+	row.AcceptedAt = &now
+	return raw
+}
+
+// seedBoundChat binds a fresh chat id to some Hearth user, standing in for
+// an account this chat already belongs to (a prior sign-up or link), and
+// returns the chat id -- the one case an invite knock answers with
+// something other than the bland dead-link reply (spec decision 15).
+func (d *telegramDoubles) seedBoundChat(t *testing.T) int64 {
+	t.Helper()
+	const boundChatID = int64(600001)
+	d.accounts.bind(boundChatID, "user-already-bound")
+	return boundChatID
+}
+
+// seedSignInNonce mints an ordinary sign-in nonce -- the payload
+// HandleStart's non-inv_ branch has always handled -- so a test can prove
+// that branch is unchanged.
+func (d *telegramDoubles) seedSignInNonce(t *testing.T) string {
+	t.Helper()
+	return d.links.mintLive(t, time.Now().Add(10*time.Minute))
 }
 
 // --- TelegramLinkService fixture -----------------------------------------

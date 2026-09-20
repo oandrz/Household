@@ -160,6 +160,8 @@ func run() error {
 		BaseURL:           cfg.AppBaseURL,
 		BotUsername:       cfg.TelegramBotUsername,
 		TelegramInviteTTL: usecase.TelegramInviteTTL,
+		Codes:             crypto.PairCodes{},
+		Accounts:          telegramAccounts,
 	})
 	apiTokens := postgres.NewAPITokenRepo(db)
 	memberSvc := usecase.NewMemberService(usecase.MemberDeps{
@@ -211,6 +213,7 @@ func run() error {
 			Clock:       sysClock,
 			BaseURL:     cfg.AppBaseURL,
 			BotUsername: cfg.TelegramBotUsername,
+			Invites:     inviteSvc,
 		})
 		telegramPoller = telegram.NewPoller(client, telegramSvc)
 		// Built from the same configuration as telegramSvc above: no bot

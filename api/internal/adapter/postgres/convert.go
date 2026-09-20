@@ -42,6 +42,17 @@ func stringOrEmpty(p *string) string {
 	return *p
 }
 
+// nullableInt8 is nullableText's counterpart for invites.knock_chat_id. A
+// chat id is never 0 -- migration 00021's invites_knock_chat_is_a_person
+// requires it positive -- so 0 stands for "no chat" the same way ""
+// stands for "no string" above.
+func nullableInt8(n int64) *int64 {
+	if n == 0 {
+		return nil
+	}
+	return &n
+}
+
 // uuid parses a domain id into the wire type. Domain ids only ever
 // originate from a row this package itself produced, so a parse failure
 // here can only mean a caller passed a malformed id — the resulting query
