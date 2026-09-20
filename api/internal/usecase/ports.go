@@ -243,12 +243,15 @@ type TelegramBinding struct {
 }
 
 // TelegramAccountRepository is the binding between a Telegram chat and the
-// Hearth user it belongs to. Bindings are written in two places and nowhere
-// else: inside SignupRepository.Provision's transaction, when a stranger
-// creates a household from a chat, and by TelegramLinkService.Confirm, when
-// a member who already has an account connects their chat from Settings.
-// Both directions are UNIQUE in the database -- one chat per user, one user
-// per chat -- and that constraint, not any check in Go, is what makes a
+// Hearth user it belongs to. Bindings are written in three places and
+// nowhere else: inside SignupRepository.Provision's transaction, when a
+// stranger creates a household from a chat; inside InviteRepo.Admit's own
+// transaction, when an owner lets a knocked Telegram invite in -- the same
+// reason as Provision, the write has to be inside a transaction this port
+// cannot join; and by TelegramLinkService.Confirm, when a member who
+// already has an account connects their chat from Settings. Both
+// directions are UNIQUE in the database -- one chat per user, one user per
+// chat -- and that constraint, not any check in Go, is what makes a
 // sign-in unambiguous.
 type TelegramAccountRepository interface {
 	// ByChatID returns domain.ErrNotFound when the chat is bound to no user,
