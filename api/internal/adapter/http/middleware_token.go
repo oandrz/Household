@@ -64,10 +64,10 @@ func requireToken(deps Deps, next http.Handler) http.Handler {
 }
 
 // requireCookieSession refuses a request that authenticated with a token.
-// It guards the two routes that mint and revoke tokens: a leaked token must
-// not be able to make itself permanent, and revocation is a decision for
-// the person, from a browser they signed in to. The refusing default is the
-// point -- an unset AuthVia is not a session.
+// It protects two things a leaked token must never be able to do: make
+// itself permanent, and change who can get into the household (partner-
+// invite spec decision 12, the reason behind ADR 7 rule 2). The refusing
+// default is the point -- an unset AuthVia is not a session.
 func requireCookieSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		scope, ok := RequestScope(r)
