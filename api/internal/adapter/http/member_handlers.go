@@ -113,10 +113,11 @@ func parseInviteChannelChoice(s string) (inviteChannelChoice, error) {
 }
 
 // handleInviteMember sits behind requireOwner: only an owner may add a
-// member. It parses role and capabilities itself (rather than handing raw
-// strings to the service) so a malformed value is reported through the same
-// MapDomainError table (INVALID_ROLE / INVALID_CAPABILITIES) that a value
-// domain.NewMembership itself rejects would be.
+// member. It parses role, capabilities and channel itself (rather than
+// handing raw strings to the service) so a malformed value is reported
+// through the same MapDomainError table (INVALID_ROLE / INVALID_CAPABILITIES
+// / INVALID_INVITE_CHANNEL) that a value domain.NewMembership itself rejects
+// would be.
 func handleInviteMember(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, ok := RequestScope(r)
