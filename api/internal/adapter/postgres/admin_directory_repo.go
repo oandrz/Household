@@ -172,11 +172,11 @@ func (r *AdminDirectoryRepo) Household(ctx context.Context, householdID string, 
 	for _, row := range inviteRows {
 		role, err := domain.ParseRole(row.Role)
 		if err != nil {
-			return usecase.HouseholdDetail{}, fmt.Errorf("invite for %s: %w", row.Email, err)
+			return usecase.HouseholdDetail{}, fmt.Errorf("invite for %s: %w", stringOrEmpty(row.Email), err)
 		}
 		detail.PendingInvites = append(detail.PendingInvites, usecase.PendingInvite{
 			Name:          row.Name,
-			Email:         row.Email,
+			Email:         stringOrEmpty(row.Email),
 			Role:          role,
 			InvitedByName: row.InvitedByName,
 			ExpiresAt:     timeOf(row.ExpiresAt),

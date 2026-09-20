@@ -686,9 +686,17 @@ type inviteRow struct {
 	Role         domain.Role
 	Capabilities domain.Capabilities
 	InvitedBy    string
-	ExpiresAt    time.Time
-	AcceptedAt   *time.Time
-	CreatedAt    time.Time
+	Channel      domain.InviteChannel
+	// The four knock columns, mirroring invites.knock_chat_id,
+	// knock_chat_username, knock_code and knocked_at. KnockedAt nil means
+	// no knock, the same "one column decides" rule invite_repo.go's
+	// ListPending applies when reading the real table.
+	KnockUsername string
+	KnockCode     string
+	KnockedAt     *time.Time
+	ExpiresAt     time.Time
+	AcceptedAt    *time.Time
+	CreatedAt     time.Time
 	// Seq is insertion order, standing in for ListPendingInvites' ORDER BY
 	// created_at, id -- a fixed test clock gives every row the same
 	// CreatedAt, so the timestamp alone cannot order them.
@@ -768,6 +776,10 @@ func (d *inviteDouble) Create(_ context.Context, householdID, email, name string
 	d.rows[string(tokenHash)] = &inviteRow{
 		ID: id, HouseholdID: householdID, Email: email, Name: name, Role: role,
 		Capabilities: caps, InvitedBy: invitedBy, ExpiresAt: expiresAt,
+		// Every invite this double's callers create today is an email
+		// invite, the same default migration 00021 gives every existing
+		// row. Nothing writes ChannelTelegram here yet -- that is Task 7.
+		Channel:   domain.ChannelEmail,
 		CreatedAt: d.clock.Now(), Seq: d.n,
 	}
 
@@ -875,10 +887,17 @@ func (d *inviteDouble) ListPending(_ context.Context, householdID string, now ti
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Seq < rows[j].Seq })
 	out := make([]usecase.InviteSummary, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, usecase.InviteSummary{
+		summary := usecase.InviteSummary{
 			ID: row.ID, Name: row.Name, Email: row.Email, Role: row.Role,
-			Capabilities: row.Capabilities, ExpiresAt: row.ExpiresAt, CreatedAt: row.CreatedAt,
-		})
+			Capabilities: row.Capabilities, Channel: row.Channel,
+			ExpiresAt: row.ExpiresAt, CreatedAt: row.CreatedAt,
+		}
+		if row.KnockedAt != nil {
+			summary.Knock = &usecase.InviteKnock{
+				Username: row.KnockUsername, Code: row.KnockCode, KnockedAt: *row.KnockedAt,
+			}
+		}
+		out = append(out, summary)
 	}
 	return out, nil
 }

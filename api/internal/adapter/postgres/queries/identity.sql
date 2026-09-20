@@ -164,7 +164,9 @@ RETURNING id;
 -- "Pending" is the partner-invite spec's one definition: not accepted and not
 -- expired. $2 is the caller's clock rather than now(), so a test can move it,
 -- the same shape ListPendingInvitesForAdmin uses.
-SELECT id, email, name, role, capabilities, expires_at, created_at
+SELECT id, email, name, role, capabilities, channel,
+       knock_chat_username, knock_code, knocked_at,
+       expires_at, created_at
 FROM invites
 WHERE household_id = $1 AND accepted_at IS NULL AND expires_at > $2
 ORDER BY created_at, id;

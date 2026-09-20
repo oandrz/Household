@@ -30,8 +30,13 @@ func NewInviteRepo(db *DB) *InviteRepo {
 func (r *InviteRepo) Create(ctx context.Context, householdID, email, name string, role domain.Role,
 	caps domain.Capabilities, tokenHash []byte, invitedBy string, expiresAt time.Time) (string, error) {
 	id, err := r.q.CreateInvite(ctx, sqlcgen.CreateInviteParams{
-		HouseholdID:  uuid(householdID),
-		Email:        email,
+		HouseholdID: uuid(householdID),
+		// text(), not nullableText(): Create's caller always has a real
+		// address today (Task 7 is what gives this repository a Telegram
+		// invite with none), and nullableText would turn "" into NULL,
+		// which invites_channel_matches_email then refuses against the
+		// default channel of 'email'.
+		Email:        text(email),
 		Name:         name,
 		Role:         string(role),
 		Capabilities: caps.Strings(),
@@ -61,7 +66,7 @@ func (r *InviteRepo) ByTokenHash(ctx context.Context, tokenHash []byte) (usecase
 	return usecase.InviteDetails{
 		ID:           uuidToString(row.ID),
 		HouseholdID:  uuidToString(row.HouseholdID),
-		Email:        row.Email,
+		Email:        stringOrEmpty(row.Email),
 		Name:         row.Name,
 		Role:         role,
 		Capabilities: caps,
@@ -75,7 +80,10 @@ func (r *InviteRepo) ByTokenHash(ctx context.Context, tokenHash []byte) (usecase
 func (r *InviteRepo) LiveInviteForEmail(ctx context.Context, householdID, email string) (usecase.InviteDetails, error) {
 	row, err := r.q.GetLiveInviteForEmail(ctx, sqlcgen.GetLiveInviteForEmailParams{
 		HouseholdID: uuid(householdID),
-		Email:       email,
+		// text(), not nullableText(): a Telegram invite has no address, so
+		// this lookup is never searching for one -- the same "always a
+		// real value" case text() documents for ByEmail and CountSince.
+		Email: text(email),
 	})
 	if err != nil {
 		return usecase.InviteDetails{}, translate(err, "get live invite for email")
@@ -91,7 +99,7 @@ func (r *InviteRepo) LiveInviteForEmail(ctx context.Context, householdID, email 
 	return usecase.InviteDetails{
 		ID:           uuidToString(row.ID),
 		HouseholdID:  uuidToString(row.HouseholdID),
-		Email:        row.Email,
+		Email:        stringOrEmpty(row.Email),
 		Name:         row.Name,
 		Role:         role,
 		Capabilities: caps,
@@ -202,15 +210,30 @@ func (r *InviteRepo) ListPending(ctx context.Context, householdID string, now ti
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, usecase.InviteSummary{
+		channel, err := domain.ParseInviteChannel(row.Channel)
+		if err != nil {
+			return nil, err
+		}
+		summary := usecase.InviteSummary{
 			ID:           uuidToString(row.ID),
 			Name:         row.Name,
-			Email:        row.Email,
+			Email:        stringOrEmpty(row.Email), // "" for NULL -- see nullableText's inverse
 			Role:         role,
 			Capabilities: caps,
+			Channel:      channel,
 			ExpiresAt:    timeOf(row.ExpiresAt),
 			CreatedAt:    timeOf(row.CreatedAt),
-		})
+		}
+		// knocked_at is the column invites_knock_is_whole ties the other two
+		// to, so it alone decides whether there is a knock to report.
+		if row.KnockedAt.Valid {
+			summary.Knock = &usecase.InviteKnock{
+				Username:  stringOrEmpty(row.KnockChatUsername),
+				Code:      stringOrEmpty(row.KnockCode),
+				KnockedAt: timeOf(row.KnockedAt),
+			}
+		}
+		out = append(out, summary)
 	}
 	return out, nil
 }

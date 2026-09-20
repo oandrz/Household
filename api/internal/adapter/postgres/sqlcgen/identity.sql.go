@@ -105,7 +105,7 @@ RETURNING id
 
 type CreateInviteParams struct {
 	HouseholdID  pgtype.UUID
-	Email        string
+	Email        *string
 	Name         string
 	Role         string
 	Capabilities []string
@@ -380,7 +380,7 @@ WHERE i.token_hash = $1
 type GetInviteByTokenHashRow struct {
 	ID           pgtype.UUID
 	HouseholdID  pgtype.UUID
-	Email        string
+	Email        *string
 	Name         string
 	Role         string
 	Capabilities []string
@@ -422,13 +422,13 @@ LIMIT 1
 
 type GetLiveInviteForEmailParams struct {
 	HouseholdID pgtype.UUID
-	Email       string
+	Email       *string
 }
 
 type GetLiveInviteForEmailRow struct {
 	ID           pgtype.UUID
 	HouseholdID  pgtype.UUID
-	Email        string
+	Email        *string
 	Name         string
 	Role         string
 	Capabilities []string
@@ -707,7 +707,9 @@ func (q *Queries) ListMemberships(ctx context.Context, householdID pgtype.UUID) 
 }
 
 const listPendingInvites = `-- name: ListPendingInvites :many
-SELECT id, email, name, role, capabilities, expires_at, created_at
+SELECT id, email, name, role, capabilities, channel,
+       knock_chat_username, knock_code, knocked_at,
+       expires_at, created_at
 FROM invites
 WHERE household_id = $1 AND accepted_at IS NULL AND expires_at > $2
 ORDER BY created_at, id
@@ -719,13 +721,17 @@ type ListPendingInvitesParams struct {
 }
 
 type ListPendingInvitesRow struct {
-	ID           pgtype.UUID
-	Email        string
-	Name         string
-	Role         string
-	Capabilities []string
-	ExpiresAt    pgtype.Timestamptz
-	CreatedAt    pgtype.Timestamptz
+	ID                pgtype.UUID
+	Email             *string
+	Name              string
+	Role              string
+	Capabilities      []string
+	Channel           string
+	KnockChatUsername *string
+	KnockCode         *string
+	KnockedAt         pgtype.Timestamptz
+	ExpiresAt         pgtype.Timestamptz
+	CreatedAt         pgtype.Timestamptz
 }
 
 // "Pending" is the partner-invite spec's one definition: not accepted and not
@@ -746,6 +752,10 @@ func (q *Queries) ListPendingInvites(ctx context.Context, arg ListPendingInvites
 			&i.Name,
 			&i.Role,
 			&i.Capabilities,
+			&i.Channel,
+			&i.KnockChatUsername,
+			&i.KnockCode,
+			&i.KnockedAt,
 			&i.ExpiresAt,
 			&i.CreatedAt,
 		); err != nil {

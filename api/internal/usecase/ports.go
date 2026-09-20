@@ -589,14 +589,34 @@ type AcceptedInvite struct {
 // read-only and never withdrawn from that screen). The two are genuinely
 // different data for different audiences, so each keeps a name of its own
 // rather than one being renamed to make room for the other.
+// InviteKnock is one tap on a Telegram invite link: who tapped, and the
+// four digits their chat was shown. The owner compares those digits with
+// the ones on the phone in front of them and then admits (ADR 11).
+//
+// Code is display-only. No endpoint accepts it, so there is nothing to
+// guess and nothing to rate-limit; a test pins that the admit request has
+// no code field. Username is "" when Telegram sent none, which is ordinary
+// -- a @username is optional -- and the screen says so in words rather than
+// rendering an empty "@".
+type InviteKnock struct {
+	Username  string
+	Code      string
+	KnockedAt time.Time
+}
+
 type InviteSummary struct {
 	ID           string
 	Name         string
-	Email        string
+	Email        string // "" for a Telegram invite, which has no address
 	Role         domain.Role
 	Capabilities domain.Capabilities
-	ExpiresAt    time.Time
-	CreatedAt    time.Time
+	Channel      domain.InviteChannel
+	// Knock is nil until someone taps the link, and always nil for an email
+	// invite. A pointer rather than a zero-valued struct because "nobody has
+	// knocked" and "somebody knocked at the zero time" must not look alike.
+	Knock     *InviteKnock
+	ExpiresAt time.Time
+	CreatedAt time.Time
 }
 
 type InviteRepository interface {

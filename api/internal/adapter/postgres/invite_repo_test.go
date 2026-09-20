@@ -465,3 +465,69 @@ func TestDeleteInvite(t *testing.T) {
 		t.Fatalf("a malformed id: got %v, want domain.ErrNotFound", err)
 	}
 }
+
+// inviteTestHousehold is a household and its owner, built once so the
+// tests that only need somewhere to point household_id and invited_by at
+// do not each repeat households.Create/users.Create inline. Tasks 7 and 9
+// reuse this helper rather than inventing their own.
+type inviteTestHousehold struct{ ID, OwnerUserID string }
+
+func newInviteTestHousehold(t *testing.T) (*postgres.DB, inviteTestHousehold) {
+	t.Helper()
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	h, err := postgres.NewHouseholdRepo(db).Create(ctx, domain.Household{
+		Name: "Andreas & Christine", FamilyName: "Oentoro",
+		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
+	})
+	if err != nil {
+		t.Fatalf("create household: %v", err)
+	}
+	owner, err := postgres.NewUserRepo(db).Create(ctx, "andreas@hearth.family", "hash", "Andreas")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	return db, inviteTestHousehold{ID: h.ID, OwnerUserID: owner.ID}
+}
+
+// The two CHECK constraints are the schema's own fail-closed rule: a row
+// that says one thing in its channel and another in its columns never
+// exists, whatever a future caller writes. Asserted against real Postgres
+// because a constraint is not a Go rule -- it holds for psql, adminctl and
+// anything else that ever writes this table.
+func TestInviteChannelConstraintsRefuseHalfWrittenRows(t *testing.T) {
+	ctx := context.Background()
+	db, h := newInviteTestHousehold(t) // the file's existing helper
+
+	cases := []struct {
+		name string
+		sql  string
+	}{
+		{"an email invite with no address",
+			`INSERT INTO invites (household_id, email, name, role, capabilities, token_hash, invited_by, expires_at, channel)
+			 VALUES ($1, NULL, 'Nobody', 'owner', '{money}', '\x01', $2, now() + interval '1 day', 'email')`},
+		{"a telegram invite carrying an address",
+			`INSERT INTO invites (household_id, email, name, role, capabilities, token_hash, invited_by, expires_at, channel)
+			 VALUES ($1, 'jane@example.com', 'Jane', 'owner', '{money}', '\x02', $2, now() + interval '1 day', 'telegram')`},
+		{"a knock with no code",
+			`INSERT INTO invites (household_id, email, name, role, capabilities, token_hash, invited_by, expires_at, channel, knock_chat_id, knocked_at)
+			 VALUES ($1, NULL, 'Jane', 'owner', '{money}', '\x03', $2, now() + interval '1 day', 'telegram', 4242, now())`},
+		{"a knock on an email invite",
+			`INSERT INTO invites (household_id, email, name, role, capabilities, token_hash, invited_by, expires_at, channel, knock_chat_id, knock_code, knocked_at)
+			 VALUES ($1, 'jane@example.com', 'Jane', 'owner', '{money}', '\x04', $2, now() + interval '1 day', 'email', 4242, '4812', now())`},
+		{"a knock from a group chat",
+			`INSERT INTO invites (household_id, email, name, role, capabilities, token_hash, invited_by, expires_at, channel, knock_chat_id, knock_code, knocked_at)
+			 VALUES ($1, NULL, 'Jane', 'owner', '{money}', '\x05', $2, now() + interval '1 day', 'telegram', -100500, '4812', now())`},
+		{"a channel this build does not define",
+			`INSERT INTO invites (household_id, email, name, role, capabilities, token_hash, invited_by, expires_at, channel)
+			 VALUES ($1, NULL, 'Jane', 'owner', '{money}', '\x06', $2, now() + interval '1 day', 'carrier_pigeon')`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := db.Pool().Exec(ctx, tc.sql, h.ID, h.OwnerUserID); err == nil {
+				t.Fatal("the row was accepted; a CHECK constraint should have refused it")
+			}
+		})
+	}
+}

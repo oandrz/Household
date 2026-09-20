@@ -179,7 +179,7 @@ type ListPendingInvitesForAdminParams struct {
 
 type ListPendingInvitesForAdminRow struct {
 	Name          string
-	Email         string
+	Email         *string
 	Role          string
 	ExpiresAt     pgtype.Timestamptz
 	InvitedByName string

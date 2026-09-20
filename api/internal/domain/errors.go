@@ -17,6 +17,7 @@ var (
 	ErrInviteExpired             = errors.New("invite has expired")
 	ErrInviteAlreadyAccepted     = errors.New("invite has already been accepted")
 	ErrInviteRequiresEmail       = errors.New("an invite requires an email address")
+	ErrUnknownInviteChannel      = errors.New("unknown invite channel")
 	ErrTokenExpired              = errors.New("token has expired or been used")
 	ErrRateLimited               = errors.New("too many requests")
 
