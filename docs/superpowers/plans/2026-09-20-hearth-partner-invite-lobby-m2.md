@@ -589,7 +589,9 @@ func TestInviteChannelConstraintsRefuseHalfWrittenRows(t *testing.T) {
 
 Adapt `newInviteTestHousehold` and the household/owner field names to whatever the file already uses — **read the top of `invite_repo_test.go` first** and reuse its fixture rather than inventing a second one.
 
-- [ ] **Step 3: Run it and watch it fail**
+- [ ] **Step 3: Prove the test can fail, then watch it pass**
+
+Unlike every other task here, the test cannot be written before its subject: a constraint test needs the column to exist to say anything at all. So prove it the other way round — **comment out the four `ADD CONSTRAINT` lines** in the migration, run the test, and watch all six rows be accepted:
 
 ```bash
 export PATH=/Volumes/Oink_Machine/.local/opt/go-v1.24.2/bin:$PATH
@@ -598,7 +600,7 @@ export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
 cd api && go test ./internal/adapter/postgres/ -run TestInviteChannelConstraintsRefuseHalfWrittenRows -v
 ```
 
-Expected: FAIL with `column "channel" of relation "invites" does not exist` until the migration is applied by the test container's own migrate step. Once it is, the rows are accepted (no constraints yet) — both are the right failure.
+Expected: FAIL, six times, each saying "the row was accepted". Restore the constraints and run it again: PASS. A constraint test that was never seen failing proves only that the insert syntax is wrong (`proving-tests-can-fail` skill).
 
 - [ ] **Step 4: Add the domain type**
 
@@ -924,9 +926,12 @@ func TestAProfileOnlyMemberIsStillCreatedDirectly(t *testing.T) {
 	if strings.Contains(list.Body.String(), "Kayla") {
 		t.Fatal("a kid profile wrote an invite row")
 	}
+	// Counted, not merely found: the profile arm has to answer and return,
+	// and an arm that fell through to the create call below the switch
+	// would produce two Kaylas that a "contains" assertion would pass.
 	members := env.do(t, owner, http.MethodGet, "/api/v1/household/members", "")
-	if !strings.Contains(members.Body.String(), "Kayla") {
-		t.Fatal("the kid profile was not created")
+	if got := strings.Count(members.Body.String(), `"Kayla"`); got != 1 {
+		t.Fatalf("the members list names Kayla %d times, want exactly 1", got)
 	}
 }
 
@@ -1031,11 +1036,18 @@ In `api/internal/adapter/http/member_handlers.go`, add the field to `inviteMembe
 			// creates the member directly and writes no invite row. It
 			// refuses any role but limited, which is the check this arm
 			// deliberately does not repeat -- one rule, one place.
+			//
+			// It answers and RETURNS. Falling through would reach the
+			// Create call below the switch and create the member a second
+			// time, with the same empty email -- a defect no "the member
+			// exists" assertion would catch, which is why the test counts.
 			if err := deps.Invites.Create(r.Context(), scope.HouseholdID, scope.UserID,
 				req.Name, "", role, caps); err != nil {
 				MapDomainError(w, r, err)
 				return
 			}
+			WriteJSON(w, http.StatusCreated, map[string]string{"status": "invited"})
+			return
 		case channelChoiceEmail:
 			if !scope.Flags.Enabled(domain.FlagEmailInvites) {
 				MapDomainError(w, r, domain.ErrEmailInvitesDisabled)
@@ -1417,6 +1429,8 @@ Spec decision 11: a Telegram invite needs **both** `telegram_sign_in` on and a b
 - [ ] **Step 7: Wire the two new deps in both places**
 
 `docs/LEARNING.md` pattern 23: a port added to a service must be wired in `cmd/api/main.go` **and** in `api_test.go`'s own `Deps` literal, or the route panics on a nil interface in tests while production works.
+
+**There is a third `InviteDeps` literal: `api/cmd/adminctl/main.go:137`.** It deliberately fills only the email path's fields, and leaves `BotUsername`, `TelegramInviteTTL` (and later `Chats`, `Codes`, `Accounts`) zero. That is correct — `adminctl create-invite` only ever creates an email invite, and `CreateTelegram`'s empty-`BotUsername` guard refuses before touching any of them. Leave it alone, and **do not add constructor validation that rejects a partially filled `InviteDeps`**: it would panic `adminctl` at startup for a path it never takes.
 
 `api/cmd/api/main.go`, in the `usecase.InviteDeps{…}` literal (line ~151):
 
@@ -1812,7 +1826,6 @@ func TestEveryRefusedInviteStartGetsTheSameReply(t *testing.T) {
 		"expired invite":    func(t *testing.T, d *telegramDoubles) (string, int64) { return "inv_" + d.seedExpiredTelegramInvite(t), 4242 },
 		"email invite":      func(t *testing.T, d *telegramDoubles) (string, int64) { return "inv_" + d.seedEmailInvite(t), 4242 },
 		"already accepted":  func(t *testing.T, d *telegramDoubles) (string, int64) { return "inv_" + d.seedAcceptedTelegramInvite(t), 4242 },
-		"chat already ours": func(t *testing.T, d *telegramDoubles) (string, int64) { return "inv_" + d.seedTelegramInvite(t, householdID, "Christine"), d.seedBoundChat(t) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			svc, doubles := newTelegramAuthService(t)
@@ -1824,6 +1837,29 @@ func TestEveryRefusedInviteStartGetsTheSameReply(t *testing.T) {
 				t.Fatalf("got %q, want the one bland reply %q", got, dead)
 			}
 		})
+	}
+}
+
+// A chat that already belongs to a Hearth account is the one refusal that
+// is NOT bland, and that is safe because it is not about the link: it tells
+// the tapper only about their own chat, which they could learn by sending
+// /start with no payload at all. Saying it plainly saves them tapping a
+// link that will never work for them (spec decision 15).
+func TestAChatThatAlreadyBelongsToAnAccountIsToldSo(t *testing.T) {
+	svc, doubles := newTelegramAuthService(t)
+	boundChat := doubles.seedBoundChat(t)
+	rawToken := doubles.seedTelegramInvite(t, householdID, "Christine")
+
+	if err := svc.HandleStart(context.Background(), boundChat, "inv_"+rawToken, "jane_t"); err != nil {
+		t.Fatalf("HandleStart: %v", err)
+	}
+	if got := doubles.sender.lastTo(boundChat); got != "This Telegram account already belongs to a Hearth household." {
+		t.Fatalf("got %q, want decision 15's own sentence", got)
+	}
+	// And it did not spend the link on its way to being refused: the check
+	// runs before the guarded UPDATE, so somebody else can still knock.
+	if doubles.invites.knockChatID(rawToken) != 0 {
+		t.Fatal("a refused chat consumed the invite link")
 	}
 }
 
@@ -2168,7 +2204,9 @@ func TestANewLinkKillsTheOldOneAndClearsTheKnock(t *testing.T) {
 func TestANewLinkIsRefusedForAnEmailInvite(t *testing.T) {
 	svc, doubles := newInviteService(t)
 	ctx := context.Background()
-	doubles.flags.set(domain.FlagEmailInvites, true)
+	// No flag setup here: the email_invites flag is enforced at the HTTP
+	// edge (Task 4), and InviteService.Create never reads a flag. Setting
+	// one here would imply a coupling that does not exist.
 	if err := svc.Create(ctx, householdID, ownerID, "Jane", "jane@example.com",
 		domain.RoleOwner, domain.AllCapabilities()); err != nil {
 		t.Fatalf("Create: %v", err)
@@ -2727,7 +2765,9 @@ func TestAdmitLeavesNothingBehindWhenTheChatIsAlreadyBound(t *testing.T) {
 	}
 	// The chat signs up somewhere else between the knock and the click --
 	// spec decision 15's race, forced rather than waited for.
-	if err := accounts.Link(ctx, h.OwnerUserID, 4242, "christine_t"); err != nil {
+	if err := accounts.Create(ctx, usecase.TelegramBinding{
+		UserID: h.OwnerUserID, ChatID: 4242, ChatUsername: "christine_t",
+	}); err != nil {
 		t.Fatalf("bind the chat elsewhere: %v", err)
 	}
 
@@ -2754,7 +2794,23 @@ func TestAdmitLeavesNothingBehindWhenTheChatIsAlreadyBound(t *testing.T) {
 }
 ```
 
-`accounts.Link` and `countRows` are placeholders for whatever the package already calls them — read `telegram_account_repo.go` for the binding method's real name, and reuse the file's existing row-counting helper rather than adding a second one.
+`postgres.NewTelegramAccountRepo(db).Create(ctx, usecase.TelegramBinding{…})` is the real binding call (`telegram_account_repo.go:42`; `LinkedAt` is ignored — the column's `DEFAULT now()` fills it). The package has **no** row-counting helper, so add `countRows` beside this test:
+
+```go
+// countRows is a whole-table count, used only to prove a failed
+// transaction left nothing behind. Whole-table rather than scoped because
+// the claim being tested is "nothing was written anywhere".
+func countRows(t *testing.T, db *postgres.DB, table string) int {
+	t.Helper()
+	var n int
+	// table is a literal from this test file, never caller input.
+	if err := db.Pool().QueryRow(context.Background(),
+		fmt.Sprintf(`SELECT count(*) FROM %s`, table)).Scan(&n); err != nil {
+		t.Fatalf("count %s: %v", table, err)
+	}
+	return n
+}
+```
 
 - [ ] **Step 8: Mutation check 3 — the browser-session guard on admit**
 
@@ -3014,6 +3070,22 @@ One component, three states: waiting for a tap, somebody has tapped, and (briefl
   }): JSX.Element
   ```
 
+**How the modal gets a `PendingInvite` (Task 12 depends on this).** After a 201 the modal holds `{id, expiresAt, link}` — not a row, and with no knock field at all. The card must not grow a second, narrower prop shape for that case. Instead the modal reads the row out of the list it already invalidated (`useInviteMember` invalidates `pendingInvitesQueryKey` on success) and falls back to a row synthesized from the 201 until the refetch lands:
+
+```tsx
+// The list is the one source of a knock -- it is what the poll updates --
+// so the modal reads its row from there rather than holding invite state of
+// its own. Between the 201 and the first refetch there is no row yet, and
+// this stands in: the same invite, known not to have been knocked on,
+// because it was created a moment ago.
+const row =
+  usePendingInvites({ enabled: true }).data?.find((i) => i.id === created.id) ??
+  { id: created.id, name, role, capabilities, email: "", channel: "telegram",
+    knock: null, expiresAt: created.expiresAt };
+```
+
+**The one state that is not read off the data.** Task 11's rule is "read the state off the invite, never off a local flag" — and **admitted is the exception**, necessarily: Admit deletes nothing but stamps the invite accepted, so the row leaves the pending list on the very next refetch. There is no row left to read "admitted" from. That state therefore comes from `useAdmitInvite().data` (which carries `signInSent`), and it is the only one that does. Say so in a comment where the state is chosen, or the next person will "fix" the inconsistency by moving the other two states onto local flags as well.
+
 - [ ] **Step 1: Add the QR dependency, pinned exact**
 
 ```bash
@@ -3116,7 +3188,10 @@ Share to Telegram is `https://t.me/share/url?url=<encodeURIComponent(link)>`, op
 
 - [ ] **Step 5: Write `PendingInviteCard`**
 
-Three states, decided in this order — **read them off the data, never off a local flag**, so two tabs looking at the same invite agree:
+Four states, decided in this order. The first three are **read off the invite itself, never off a local flag**, so two tabs looking at the same invite agree; the fourth is the documented exception above:
+
+0. `useAdmitInvite().data` is present → **admitted**: "Let in." plus, when `signInSent` is false, decision 6's line: "If no message arrived, ask them to send /start to the bot." This one is held locally because the row it describes has just left the pending list.
+
 
 1. `invite.knock` is present → **knocked**: "@name tapped the link" or "Someone with no Telegram username tapped the link", then "Does their phone show **4812**?", with [Let in], [Not them], [Withdraw].
 2. no knock, `link` prop present → **waiting, link in hand**: `InviteLinkShare`, "Shown once. You can get a new link any time.", [Get a new link], [Withdraw].
@@ -3332,6 +3407,7 @@ Not a tidy-up afterwards — part of the work, per CLAUDE.md. A defect nobody wr
 - Modify: `docs/adr/0004-telegram-as-a-second-delivery-channel.md:185-189` (the out-of-scope item)
 - Modify: `docs/adr/0003-mail-stays-on-the-box.md` (consequences)
 - Modify: `docs/SYSTEM_DESIGN.md`, `docs/FEATURE_TRACKER.md`, `docs/LEARNING.md`
+- Modify: `.claude/prds/partner-invite-lobby.prd.md` — it still lists "several knocks on one link" as an open question. Spec decision 2 closed it: **one**. Say so where the open question is, rather than deleting the line, so the next reader sees it was decided and not forgotten.
 
 - [ ] **Step 1: Write ADR 11**
 
@@ -3373,7 +3449,7 @@ One entry per defect worth remembering. At minimum:
 - [ ] **Step 6: Commit (explicit paths only)**
 
 ```bash
-git add docs/adr/0011-joining-a-household-by-knock.md docs/adr/0004-telegram-as-a-second-delivery-channel.md docs/adr/0003-mail-stays-on-the-box.md docs/SYSTEM_DESIGN.md docs/FEATURE_TRACKER.md docs/LEARNING.md
+git add docs/adr/0011-joining-a-household-by-knock.md docs/adr/0004-telegram-as-a-second-delivery-channel.md docs/adr/0003-mail-stays-on-the-box.md docs/SYSTEM_DESIGN.md docs/FEATURE_TRACKER.md docs/LEARNING.md .claude/prds/partner-invite-lobby.prd.md
 git commit -m "docs: ADR 11, joining a household by knock"
 ```
 
