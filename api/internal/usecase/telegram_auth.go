@@ -298,6 +298,21 @@ func (s *TelegramAuthService) sendSignUp(ctx context.Context, chatID int64, now 
 		s.d.BaseURL, raw))
 }
 
+// SendSignIn and SendLinkCancelled implement InviteChats. They live here
+// rather than in InviteService because TelegramAuthService owns every word
+// the bot says and owns the one path that mints a magic link -- a second
+// one would mean two expiry rules and two rate limits drifting apart, which
+// is the same reasoning this type's own doc comment gives.
+func (s *TelegramAuthService) SendSignIn(ctx context.Context, chatID int64, userID string) error {
+	return s.sendSignIn(ctx, chatID, userID)
+}
+
+func (s *TelegramAuthService) SendLinkCancelled(ctx context.Context, chatID int64) error {
+	return s.say(ctx, chatID, "That link is no longer valid. Ask whoever invited you for a new one.")
+}
+
+var _ InviteChats = (*TelegramAuthService)(nil)
+
 // say sends text to chatID and wraps any failure with the calling method's
 // context, never with text itself: text carries a live magic-link or sign-up
 // URL on the sign-in and sign-up paths, and this error can reach

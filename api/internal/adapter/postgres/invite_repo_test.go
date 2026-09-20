@@ -579,3 +579,151 @@ func TestTwoSimultaneousKnocksProduceExactlyOneWinner(t *testing.T) {
 		t.Fatalf("got %d wins and %d refusals, want exactly 1 and 1", wins, refusals)
 	}
 }
+
+// --- Task 8: ReplaceToken -------------------------------------------------
+
+// TestReplaceInviteTokenReturnsThePreviousKnockChatID is the empirical
+// proof task-8-brief.md asked for before anything is built on top of it:
+// ReplaceInviteToken's RETURNING clause is
+// "COALESCE((SELECT prior.knock_chat_id FROM invites prior WHERE prior.id
+// = $1), 0)" -- a subquery against the very table the UPDATE is writing to,
+// in the same statement. The claim is that under READ COMMITTED this
+// subquery sees the row as it stood when the statement began, so it
+// returns the chat that had knocked (4242) rather than the NULL the
+// UPDATE's own SET clause just wrote. If that claim were wrong, this test
+// would observe 0 here, and nothing else in the suite would catch it -- the
+// knocked chat would simply never be told its link died, silently.
+func TestReplaceInviteTokenReturnsThePreviousKnockChatID(t *testing.T) {
+	ctx := context.Background()
+	db, h := newInviteTestHousehold(t)
+	invites := postgres.NewInviteRepo(db)
+
+	oldHash := []byte("replace-old-hash-replace-old-0001")
+	inviteID, err := invites.CreateTelegram(ctx, h.ID, "Christine", domain.RoleOwner,
+		domain.AllCapabilities(), oldHash, h.OwnerUserID, time.Now().Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	if err := invites.RecordKnock(ctx, oldHash, 4242, "jane_t", "4812", time.Now()); err != nil {
+		t.Fatalf("RecordKnock: %v", err)
+	}
+
+	newHash := []byte("replace-new-hash-replace-new-0001")
+	got, err := invites.ReplaceToken(ctx, h.ID, inviteID, newHash, time.Now().Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("ReplaceToken: %v", err)
+	}
+	if got != 4242 {
+		t.Fatalf("ReplaceToken returned %d, want 4242 (the chat that had knocked) -- "+
+			"a 0 here means the RETURNING subselect saw the post-update NULL, not the pre-update row", got)
+	}
+
+	// The old token is dead...
+	if _, err := invites.ByTokenHash(ctx, oldHash); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("the old token still resolves: got %v, want domain.ErrNotFound", err)
+	}
+	// ...the new one resolves to the same invite...
+	details, err := invites.ByTokenHash(ctx, newHash)
+	if err != nil {
+		t.Fatalf("the new token does not resolve: %v", err)
+	}
+	if details.ID != inviteID {
+		t.Fatalf("the new token resolves to invite %q, want %q", details.ID, inviteID)
+	}
+	// ...and the knock is cleared, not merely orphaned under the old hash.
+	pending, err := invites.ListPending(ctx, h.ID, time.Now())
+	if err != nil {
+		t.Fatalf("ListPending: %v", err)
+	}
+	found := false
+	for _, s := range pending {
+		if s.ID != inviteID {
+			continue
+		}
+		found = true
+		if s.Knock != nil {
+			t.Fatalf("the knock was not cleared: %+v", s.Knock)
+		}
+	}
+	if !found {
+		t.Fatal("the invite is missing from the pending list")
+	}
+
+	// A second replace, with nobody having knocked the new link, returns 0
+	// -- the plain no-knock case, alongside the 4242 case above.
+	thirdHash := []byte("replace-third-hash-replace-3-0001")
+	got, err = invites.ReplaceToken(ctx, h.ID, inviteID, thirdHash, time.Now().Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("second ReplaceToken: %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("ReplaceToken with nobody knocked = %d, want 0", got)
+	}
+}
+
+// TestReplaceTokenRefusesEverythingButALiveTelegramInviteInThisHousehold
+// covers ReplaceToken's whole error surface in one database: another
+// household's invite (whatever its channel) is domain.ErrNotFound -- the
+// household check must win over the channel check, not merely happen to
+// agree with it -- this household's own email invite is
+// domain.ErrInviteNotTelegram, and an already-accepted Telegram invite in
+// this household is domain.ErrNotFound too: "get a new link" is not
+// something an accepted invite offers, the same two-way split
+// DeleteUnacceptedInvite's own fallback read makes for Withdraw.
+func TestReplaceTokenRefusesEverythingButALiveTelegramInviteInThisHousehold(t *testing.T) {
+	ctx := context.Background()
+	db, h := newInviteTestHousehold(t)
+	invites := postgres.NewInviteRepo(db)
+	other := createHouseholdForInviteTest(t, postgres.NewHouseholdRepo(db), "Someone Else")
+	later := time.Now().Add(24 * time.Hour)
+
+	otherTelegramHash := []byte("scope-other-telegram-hash-00001")
+	otherTelegramID, err := invites.CreateTelegram(ctx, other.ID, "Someone", domain.RoleOwner,
+		domain.AllCapabilities(), otherTelegramHash, h.OwnerUserID, later)
+	if err != nil {
+		t.Fatalf("CreateTelegram (other household): %v", err)
+	}
+	if _, err := invites.ReplaceToken(ctx, h.ID, otherTelegramID, []byte("newhash1-000000000000000000001"), later); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("another household's telegram invite: got %v, want domain.ErrNotFound", err)
+	}
+
+	// Another household's email invite is still domain.ErrNotFound -- proof
+	// the household check runs regardless of channel, not only when the
+	// channel happens to match.
+	otherEmailHash := []byte("scope-other-email-hash-000000001")
+	otherEmailID, err := invites.Create(ctx, other.ID, "jane@example.com", "Jane", domain.RoleLimited,
+		domain.Capabilities{domain.CapCalendar}, otherEmailHash, h.OwnerUserID, later)
+	if err != nil {
+		t.Fatalf("Create (other household, email): %v", err)
+	}
+	if _, err := invites.ReplaceToken(ctx, h.ID, otherEmailID, []byte("newhash2-000000000000000000001"), later); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("another household's email invite: got %v, want domain.ErrNotFound", err)
+	}
+
+	mineEmailHash := []byte("scope-mine-email-hash-0000000001")
+	mineEmailID, err := invites.Create(ctx, h.ID, "kid@example.com", "Kid", domain.RoleLimited,
+		domain.Capabilities{domain.CapCalendar}, mineEmailHash, h.OwnerUserID, later)
+	if err != nil {
+		t.Fatalf("Create (this household, email): %v", err)
+	}
+	if _, err := invites.ReplaceToken(ctx, h.ID, mineEmailID, []byte("newhash3-000000000000000000001"), later); !errors.Is(err, domain.ErrInviteNotTelegram) {
+		t.Fatalf("this household's email invite: got %v, want domain.ErrInviteNotTelegram", err)
+	}
+
+	mineAcceptedHash := []byte("scope-mine-accepted-hash-000001")
+	mineAcceptedID, err := invites.CreateTelegram(ctx, h.ID, "Accepted", domain.RoleOwner,
+		domain.AllCapabilities(), mineAcceptedHash, h.OwnerUserID, later)
+	if err != nil {
+		t.Fatalf("CreateTelegram (accepted): %v", err)
+	}
+	if err := invites.MarkAccepted(ctx, mineAcceptedID); err != nil {
+		t.Fatalf("MarkAccepted: %v", err)
+	}
+	if _, err := invites.ReplaceToken(ctx, h.ID, mineAcceptedID, []byte("newhash4-000000000000000000001"), later); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("an already-accepted telegram invite: got %v, want domain.ErrNotFound", err)
+	}
+
+	if _, err := invites.ReplaceToken(ctx, h.ID, "not-a-uuid", []byte("newhash5-000000000000000000001"), later); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("a malformed id: got %v, want domain.ErrNotFound", err)
+	}
+}

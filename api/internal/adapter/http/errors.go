@@ -301,6 +301,12 @@ var domainErrorResponses = []domainErrorResponse{
 		message:   "Inviting by Telegram is unavailable on this install.",
 	},
 	{
+		sentinels: []error{domain.ErrInviteNotTelegram},
+		status:    http.StatusConflict,
+		code:      "INVITE_NOT_TELEGRAM",
+		message:   "Only Telegram invites have a link.",
+	},
+	{
 		sentinels: []error{domain.ErrUnknownInviteChannel},
 		status:    http.StatusUnprocessableEntity,
 		code:      "INVALID_INVITE_CHANNEL",

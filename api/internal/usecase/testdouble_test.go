@@ -993,6 +993,43 @@ func (d *inviteDouble) knockChatID(rawToken string) int64 {
 	return row.KnockChatID
 }
 
+// ReplaceToken mirrors invite_repo.go's own ReplaceToken: the guarded
+// match -- this household, telegram channel, not yet accepted -- decides
+// success the same way the real UPDATE's WHERE does, and a miss is
+// resolved the same two-branch way the real fallback read is: an
+// unaccepted row in this household with some other channel is
+// domain.ErrInviteNotTelegram, anything else (wrong household, unknown id,
+// or already accepted) is domain.ErrNotFound. The row is re-keyed by its
+// new token hash, exactly as a real UPDATE of token_hash would move which
+// hash finds it.
+func (d *inviteDouble) ReplaceToken(_ context.Context, householdID, inviteID string,
+	tokenHash []byte, expiresAt time.Time) (int64, error) {
+	var oldHash string
+	var row *inviteRow
+	for hash, r := range d.rows {
+		if r.ID == inviteID {
+			oldHash, row = hash, r
+			break
+		}
+	}
+	if row == nil || row.HouseholdID != householdID || row.AcceptedAt != nil {
+		return 0, domain.ErrNotFound
+	}
+	if row.Channel != domain.ChannelTelegram {
+		return 0, domain.ErrInviteNotTelegram
+	}
+
+	previous := row.KnockChatID
+	delete(d.rows, oldHash)
+	row.ExpiresAt = expiresAt
+	row.KnockChatID = 0
+	row.KnockUsername = ""
+	row.KnockCode = ""
+	row.KnockedAt = nil
+	d.rows[string(tokenHash)] = row
+	return previous, nil
+}
+
 // --- SignupRepository -------------------------------------------------
 
 type signupRow struct {
@@ -1816,6 +1853,7 @@ type fixture struct {
 	members       *membershipDouble
 	magicLinks    *magicLinkDouble
 	inviteRepo    *inviteDouble
+	chats         *inviteChatsDouble
 	households    *householdDouble
 	spaces        *spaceDouble
 	notifications *notificationDouble
@@ -1882,6 +1920,11 @@ func newFixture(t *testing.T) *fixture {
 	// & Christine", "Oentoro") in invite_repo_test.go, and Andreas as the
 	// inviter whose display name every invite-preview test expects.
 	inviteRepo.setFamilyName(householdID, "Oentoro")
+	// Read by Knock, before it ever touches the invite (see InviteDeps'
+	// own doc comment on Accounts) -- empty of bindings, so every chat here
+	// starts unbound.
+	inviteAccounts := newTelegramAccountRepoDouble()
+	chats := newInviteChatsDouble()
 
 	invites := usecase.NewInviteService(usecase.InviteDeps{
 		Invites:           inviteRepo,
@@ -1895,6 +1938,9 @@ func newFixture(t *testing.T) *fixture {
 		BaseURL:           "http://localhost:5173",
 		BotUsername:       "HearthBot",
 		TelegramInviteTTL: usecase.TelegramInviteTTL,
+		Codes:             newPairingCodesDouble(),
+		Accounts:          inviteAccounts,
+		Chats:             chats,
 	})
 
 	apiTokens := newAPITokenDouble()
@@ -1931,6 +1977,7 @@ func newFixture(t *testing.T) *fixture {
 		auth: auth, invites: invites, memberSvc: memberSvc, householdSvc: householdSvc,
 		clock: clock, sessions: sessions, apiTokens: apiTokens, mailer: mailer, hasher: hasher,
 		users: users, members: members, magicLinks: magicLinks, inviteRepo: inviteRepo,
+		chats:      chats,
 		households: households, spaces: spaces, notifications: notifications,
 		holdings:    holdings,
 		householdID: householdID, andreasID: andreas.ID, ethanID: ethan.ID,
@@ -3966,6 +4013,59 @@ func newPairingCodesDouble() *pairingCodesDouble { return &pairingCodesDouble{co
 func (d *pairingCodesDouble) NewCode() (string, error) { return d.code, nil }
 
 var _ usecase.PairingCodes = (*pairingCodesDouble)(nil)
+
+// --- InviteChats ------------------------------------------------------
+
+// inviteChatsDouble stands in for TelegramAuthService on the two messages
+// InviteService.NewLink causes, recording each call so a test can assert
+// which chat was told what -- the same "record, don't behave" shape this
+// file's other -Double types use for a port with side effects rather than
+// a return value worth asserting on.
+type inviteChatsDouble struct {
+	signInChats       []int64
+	signInUsers       []string
+	cancelledChats    []int64
+	failNextCancelled error
+}
+
+func newInviteChatsDouble() *inviteChatsDouble { return &inviteChatsDouble{} }
+
+func (d *inviteChatsDouble) SendSignIn(_ context.Context, chatID int64, userID string) error {
+	d.signInChats = append(d.signInChats, chatID)
+	d.signInUsers = append(d.signInUsers, userID)
+	return nil
+}
+
+// failNextSendLinkCancelled arms a one-shot failure: the next
+// SendLinkCancelled call still records the chat it was asked to tell (the
+// real send genuinely reached the network and failed after the fact, not
+// before) but returns err instead of nil.
+func (d *inviteChatsDouble) failNextSendLinkCancelled(err error) {
+	d.failNextCancelled = err
+}
+
+func (d *inviteChatsDouble) SendLinkCancelled(_ context.Context, chatID int64) error {
+	d.cancelledChats = append(d.cancelledChats, chatID)
+	if d.failNextCancelled != nil {
+		err := d.failNextCancelled
+		d.failNextCancelled = nil
+		return err
+	}
+	return nil
+}
+
+// lastCancelledChat is 0 if SendLinkCancelled was never called -- 0 is not
+// a real chat id (migration 00021's invites_knock_chat_is_a_person requires
+// one positive), the same sentinel InviteRepository.ReplaceToken itself
+// uses for "nobody had knocked".
+func (d *inviteChatsDouble) lastCancelledChat() int64 {
+	if len(d.cancelledChats) == 0 {
+		return 0
+	}
+	return d.cancelledChats[len(d.cancelledChats)-1]
+}
+
+var _ usecase.InviteChats = (*inviteChatsDouble)(nil)
 
 // --- TelegramAuthService fixture ----------------------------------------
 

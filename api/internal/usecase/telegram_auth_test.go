@@ -522,3 +522,37 @@ func TestStartWithoutTheInvitePrefixIsUnchanged(t *testing.T) {
 		t.Fatalf("an ordinary nonce no longer produces a link: %q", doubles.sender.lastTo(4242))
 	}
 }
+
+// --- Task 8: TelegramAuthService as InviteService's InviteChats ----------
+
+// SendSignIn is InviteChats' half of admitting a knocked chat. It must mint
+// through the same sendSignIn HandleStart itself uses -- a second magic-link
+// path would mean two expiry rules and two rate limits drifting apart (the
+// type's own doc comment).
+func TestSendSignInReusesTheOrdinaryMagicLinkPath(t *testing.T) {
+	svc, doubles := newTelegramAuthService(t)
+
+	if err := svc.SendSignIn(context.Background(), 4242, "user-1"); err != nil {
+		t.Fatalf("SendSignIn: %v", err)
+	}
+	sent := doubles.sender.lastTo(4242)
+	if !strings.Contains(sent, "/sign-in/magic?token=") {
+		t.Fatalf("message = %q, want it to carry a magic-link URL", sent)
+	}
+	if doubles.magicLinks.countFor("user-1") != 1 {
+		t.Fatalf("magic links minted = %d, want 1", doubles.magicLinks.countFor("user-1"))
+	}
+}
+
+// SendLinkCancelled is InviteChats' other half: the courtesy told to a
+// knocked chat when the owner replaces the link.
+func TestSendLinkCancelledTellsTheChatItsLinkIsDead(t *testing.T) {
+	svc, doubles := newTelegramAuthService(t)
+
+	if err := svc.SendLinkCancelled(context.Background(), 4242); err != nil {
+		t.Fatalf("SendLinkCancelled: %v", err)
+	}
+	if got := doubles.sender.lastTo(4242); got != "That link is no longer valid. Ask whoever invited you for a new one." {
+		t.Fatalf("got %q", got)
+	}
+}

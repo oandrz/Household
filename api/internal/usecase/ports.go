@@ -290,6 +290,23 @@ type InviteKnocker interface {
 	Knock(ctx context.Context, rawToken string, chatID int64, username string) (code string, err error)
 }
 
+// InviteChats is what InviteService needs from the Telegram side: the two
+// messages an invite causes. TelegramAuthService implements it, reusing its
+// own sendSignIn, so no second magic-link path exists. The split mirrors
+// InviteKnocker just above, in the opposite direction -- that interface is
+// what TelegramAuthService needs from InviteService; this one is what
+// InviteService needs back from TelegramAuthService, and main.go closes
+// the resulting cycle with InviteService.SetChats.
+type InviteChats interface {
+	// SendSignIn delivers an ordinary magic link to a chat that has just
+	// been admitted. It is called after the commit, never inside it (spec
+	// decision 6).
+	SendSignIn(ctx context.Context, chatID int64, userID string) error
+	// SendLinkCancelled tells a chat that knocked that its link is no
+	// longer valid, because the owner asked for a new one.
+	SendLinkCancelled(ctx context.Context, chatID int64) error
+}
+
 // NudgeRecipient is one chat that may receive one household's daily digest:
 // an owner with the money capability whose chat has not opted out. The
 // repository's query is the authorisation for this outbound direction (ADR 8):
@@ -701,6 +718,19 @@ type InviteRepository interface {
 	// caller turns it into the bot's one bland reply, and any difference
 	// between these cases would be something a chat could probe for.
 	RecordKnock(ctx context.Context, tokenHash []byte, chatID int64, username, code string, now time.Time) error
+	// ReplaceToken is the single write behind "get a new link", which is
+	// also "Not them" (see InviteService.NewLink's own doc comment for why
+	// one write serves both). It clears the knock in the same statement
+	// that replaces the token, so there is never an instant where a fresh
+	// link carries a stale knock, and returns the chat that had knocked --
+	// 0 when nobody had -- so the caller can tell them. Household-scoped
+	// and channel-scoped in the SQL itself, so an id from another
+	// household matches nothing and reports domain.ErrNotFound, the same
+	// answer an id that never existed gets. An email invite matches
+	// nothing either, answered as domain.ErrInviteNotTelegram instead --
+	// see the postgres implementation's own doc comment for how it tells
+	// the two apart.
+	ReplaceToken(ctx context.Context, householdID, inviteID string, tokenHash []byte, expiresAt time.Time) (knockedChatID int64, err error)
 }
 
 // SignupDetails is a pending sign-up, read back by token. Exactly one of

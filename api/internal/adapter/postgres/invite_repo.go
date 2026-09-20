@@ -321,3 +321,65 @@ func (r *InviteRepo) RecordKnock(ctx context.Context, tokenHash []byte, chatID i
 	}
 	return nil
 }
+
+// ReplaceToken is the single write behind "get a new link", which is also
+// "Not them": one statement replaces the token and clears the knock
+// together, so there is never an instant where a fresh link carries a
+// stale knock. It returns the chat that had knocked (0 when nobody had),
+// read back inside the same UPDATE -- see ReplaceInviteToken's own SQL
+// comment for why that is safe to trust, and
+// TestReplaceInviteTokenReturnsThePreviousKnockChatID for the proof against
+// a real database.
+//
+// Household-scoped and channel-scoped in the guarded UPDATE itself, so an
+// id from another household matches nothing there and reports
+// domain.ErrNotFound, the same answer an id that never existed gets -- the
+// fallback read below never runs for that case, so it never has the chance
+// to confirm the id exists elsewhere.
+//
+// An email invite also matches nothing in the guarded UPDATE, and the
+// caller cannot tell that apart from "no such invite" without reading
+// further -- so on a miss this reads the row back, scoped by household and
+// accepted_at IS NULL exactly as the guarded UPDATE was, to report
+// domain.ErrInviteNotTelegram for the case an owner can actually act on.
+// That same accepted_at IS NULL scoping is what keeps an already-accepted
+// Telegram invite from reaching that channel check at all: it reads as
+// domain.ErrNotFound too, because "get a new link" is not something an
+// accepted invite offers, the same way Withdraw's own fallback read
+// distinguishes its two failure modes.
+func (r *InviteRepo) ReplaceToken(ctx context.Context, householdID, inviteID string,
+	tokenHash []byte, expiresAt time.Time) (int64, error) {
+	previous, err := r.q.ReplaceInviteToken(ctx, sqlcgen.ReplaceInviteTokenParams{
+		ID:          uuid(inviteID),
+		HouseholdID: uuid(householdID),
+		TokenHash:   tokenHash,
+		ExpiresAt:   timestamptz(expiresAt),
+	})
+	if err == nil {
+		return previous, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return 0, fmt.Errorf("replace invite token: %w", err)
+	}
+
+	channel, err := r.q.InviteChannelForReplace(ctx, sqlcgen.InviteChannelForReplaceParams{
+		ID:          uuid(inviteID),
+		HouseholdID: uuid(householdID),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, domain.ErrNotFound
+		}
+		return 0, translate(err, "read invite channel for replace")
+	}
+	if channel != string(domain.ChannelTelegram) {
+		return 0, domain.ErrInviteNotTelegram
+	}
+	// The fallback read found a live (accepted_at IS NULL) Telegram invite
+	// with this id in this household, yet the guarded UPDATE above still
+	// matched nothing -- a state that should be unreachable given the two
+	// queries share the same WHERE conditions. Fail closed rather than
+	// report success for a write that never happened (CLAUDE.md: fail
+	// closed on values you did not construct).
+	return 0, domain.ErrNotFound
+}

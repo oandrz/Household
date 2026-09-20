@@ -28,8 +28,13 @@ var (
 	// a later task teaches it to actually create an invite -- the honest
 	// refusal for a channel this build cannot yet deliver.
 	ErrTelegramInvitesUnavailable = errors.New("telegram invites are unavailable on this install")
-	ErrTokenExpired               = errors.New("token has expired or been used")
-	ErrRateLimited                = errors.New("too many requests")
+	// ErrInviteNotTelegram is InviteService.NewLink's refusal for an email
+	// invite: "get a new link" and "Not them" only make sense for a
+	// Telegram invite's t.me link, and an email invite's channel is fixed
+	// at creation (spec decision 9), so there is nothing here to replace.
+	ErrInviteNotTelegram = errors.New("only telegram invites have a link")
+	ErrTokenExpired      = errors.New("token has expired or been used")
+	ErrRateLimited       = errors.New("too many requests")
 
 	// Added in the Task 6 fix round (see task-6-report.md, "Fix round 1").
 	ErrAmountOverflow               = errors.New("amount overflows a signed 64-bit integer")

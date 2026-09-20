@@ -695,6 +695,33 @@ func (q *Queries) InviteAcceptedInHousehold(ctx context.Context, arg InviteAccep
 	return accepted, err
 }
 
+const inviteChannelForReplace = `-- name: InviteChannelForReplace :one
+SELECT channel
+FROM invites
+WHERE id = $1 AND household_id = $2 AND accepted_at IS NULL
+`
+
+type InviteChannelForReplaceParams struct {
+	ID          pgtype.UUID
+	HouseholdID pgtype.UUID
+}
+
+// Read only after ReplaceInviteToken's guarded UPDATE matched nothing, to
+// tell "this invite has no email channel" apart from "no such invite in
+// this household" -- the same fallback-read shape
+// InviteAcceptedInHousehold gives DeleteUnacceptedInvite. accepted_at IS
+// NULL is part of the WHERE, not read back as its own column: a row that
+// fails to match here is either in another household, unknown, or already
+// accepted, and InviteRepo.ReplaceToken answers domain.ErrNotFound for all
+// three -- an accepted invite is not something "get a new link" acts on,
+// the same way it is not something Delete acts on.
+func (q *Queries) InviteChannelForReplace(ctx context.Context, arg InviteChannelForReplaceParams) (string, error) {
+	row := q.db.QueryRow(ctx, inviteChannelForReplace, arg.ID, arg.HouseholdID)
+	var channel string
+	err := row.Scan(&channel)
+	return channel, err
+}
+
 const listMemberships = `-- name: ListMemberships :many
 SELECT m.id, m.household_id, m.user_id, m.role, m.capabilities,
        u.email, u.display_name, u.avatar_initial
@@ -1011,6 +1038,55 @@ func (q *Queries) RecordLoginAttempt(ctx context.Context, arg RecordLoginAttempt
 		arg.At,
 	)
 	return err
+}
+
+const replaceInviteToken = `-- name: ReplaceInviteToken :one
+UPDATE invites AS target
+SET token_hash = $3, expires_at = $4,
+    knock_chat_id = NULL, knock_chat_username = NULL, knock_code = NULL, knocked_at = NULL
+WHERE target.id = $1 AND target.household_id = $2
+  AND target.channel = 'telegram'
+  AND target.accepted_at IS NULL
+RETURNING COALESCE((SELECT prior.knock_chat_id FROM invites prior WHERE prior.id = $1), 0)::bigint AS previous_knock_chat_id
+`
+
+type ReplaceInviteTokenParams struct {
+	ID          pgtype.UUID
+	HouseholdID pgtype.UUID
+	TokenHash   []byte
+	ExpiresAt   pgtype.Timestamptz
+}
+
+// One statement replaces the token and clears the knock together, so there
+// is never an instant where a fresh link carries a stale knock. It returns
+// the chat that had knocked, if any, so the caller can tell them their link
+// is dead -- from their side it simply stopped working. The subselect reads
+// the row as it stood when this statement began (READ COMMITTED's own
+// snapshot rule), before the UPDATE's own SET clears it, which
+// TestReplaceInviteTokenReturnsThePreviousKnockChatID proves against a real
+// database rather than trusting as documentation. No expires_at condition,
+// deliberately: an expired link is the main reason an owner asks for a new
+// one, so ReplaceToken must still work on it.
+//
+// The UPDATE names its own target "target" and the subselect its own copy
+// "prior": without both aliases sqlc's analyzer (not real Postgres -- the
+// unaliased form runs fine by hand in psql) reports the outer WHERE's `id`
+// as ambiguous. COALESCE(..., 0) turns "nobody had knocked" into 0 inside
+// the query itself, matching InviteRepository.ReplaceToken's contract
+// exactly -- without it sqlc infers this column as a plain, non-nullable
+// int64, and scanning a genuine SQL NULL into that type fails at runtime
+// the first time an owner asks for a new link on an invite nobody has
+// tapped yet.
+func (q *Queries) ReplaceInviteToken(ctx context.Context, arg ReplaceInviteTokenParams) (int64, error) {
+	row := q.db.QueryRow(ctx, replaceInviteToken,
+		arg.ID,
+		arg.HouseholdID,
+		arg.TokenHash,
+		arg.ExpiresAt,
+	)
+	var previous_knock_chat_id int64
+	err := row.Scan(&previous_knock_chat_id)
+	return previous_knock_chat_id, err
 }
 
 const revokeSessionByToken = `-- name: RevokeSessionByToken :exec

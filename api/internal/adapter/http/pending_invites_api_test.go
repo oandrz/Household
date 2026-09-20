@@ -233,6 +233,10 @@ func TestATokenCannotChangeWhoIsInTheHousehold(t *testing.T) {
 		{"update member", http.MethodPatch, "/api/v1/household/members/" + env.limitedMembership,
 			map[string]any{"role": "owner", "capabilities": []string{"calendar", "chores", "money", "marriage"}}},
 		{"remove member", http.MethodDelete, "/api/v1/household/members/" + env.limitedMembership, nil},
+		// A fake id is enough: requireCookieSession sits before the handler
+		// ever looks at the id, so a token is refused before it could learn
+		// whether that invite exists at all.
+		{"new link", http.MethodPost, "/api/v1/household/invites/00000000-0000-0000-0000-000000000000/link", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

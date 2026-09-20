@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/andreasoentoro/hearth/api/internal/domain"
@@ -78,6 +79,10 @@ type InviteDeps struct {
 	// that already belongs to a Hearth account is refused before it can
 	// spend somebody else's link (spec decision 15).
 	Accounts TelegramAccountRepository
+	// Chats sends the two messages a Telegram invite causes. It cannot be
+	// set here at construction time -- see SetChats' own doc comment for
+	// the constructor cycle that forces it to arrive later.
+	Chats InviteChats
 }
 
 type InviteService struct {
@@ -92,6 +97,18 @@ type InviteService struct {
 func NewInviteService(d InviteDeps) *InviteService {
 	return &InviteService{d: d}
 }
+
+// SetChats completes the two-way wiring between this service and
+// TelegramAuthService: the invite side needs to send two messages, and the
+// Telegram side needs to record a knock (InviteKnocker). Neither can be
+// constructed with the other already built -- a cycle in the wiring, not in
+// the types -- so main.go builds both, handing this service to
+// TelegramAuthDeps.Invites directly, and closes the remaining half of the
+// loop here. Called exactly once, at startup, before any request is
+// served: NewLink dereferences d.Chats with no nil check, deliberately (see
+// its own doc comment), so a caller that forgets this panics loudly instead
+// of silently never telling a knocked chat its link died.
+func (s *InviteService) SetChats(chats InviteChats) { s.d.Chats = chats }
 
 // InvitePreview is what a caller sees before signing in: enough to render
 // "Andreas invited you to join the Oentoro household as Kid, with calendar
@@ -226,6 +243,40 @@ func (s *InviteService) CreateTelegram(ctx context.Context, householdID, invited
 // rest to the knocker.
 func (s *InviteService) telegramInviteURL(rawToken string) string {
 	return fmt.Sprintf("https://t.me/%s?start=%s%s", s.d.BotUsername, telegramInvitePayloadPrefix, rawToken)
+}
+
+// NewLink replaces a Telegram invite's link, which is also what "Not them"
+// does: the knock is cleared, the old token stops working, and whoever
+// knocked is told. One method for both because the owner's two intentions
+// -- "that wasn't them" and "I lost the link" -- need exactly the same four
+// effects, and a second route would give the waiting card a third state
+// for no benefit.
+//
+// An owner who suspects a leak and wants no new link withdraws the invite
+// instead (Withdraw, which deletes the row).
+func (s *InviteService) NewLink(ctx context.Context, householdID, inviteID string) (TelegramInviteLink, error) {
+	if s.d.BotUsername == "" {
+		return TelegramInviteLink{}, domain.ErrTelegramInvitesUnavailable
+	}
+	raw, hash, err := s.d.Tokens.NewToken()
+	if err != nil {
+		return TelegramInviteLink{}, fmt.Errorf("generate telegram invite token: %w", err)
+	}
+	expiresAt := s.d.Clock.Now().Add(s.d.TelegramInviteTTL)
+	knockedChatID, err := s.d.Invites.ReplaceToken(ctx, householdID, inviteID, hash, expiresAt)
+	if err != nil {
+		return TelegramInviteLink{}, err
+	}
+	// After the write, never before: a failure here must not leave the
+	// owner without the new link they asked for. The chat is told as a
+	// courtesy -- their link already stopped working the moment the row
+	// changed -- so the error is logged, not returned.
+	if knockedChatID != 0 {
+		if err := s.d.Chats.SendLinkCancelled(ctx, knockedChatID); err != nil {
+			slog.Error("could not tell a knocked chat its invite link was replaced", "error", err)
+		}
+	}
+	return TelegramInviteLink{ID: inviteID, URL: s.telegramInviteURL(raw), ExpiresAt: expiresAt}, nil
 }
 
 // Knock records the first tap on a Telegram invite link and returns the

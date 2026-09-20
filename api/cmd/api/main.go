@@ -215,6 +215,12 @@ func run() error {
 			BotUsername: cfg.TelegramBotUsername,
 			Invites:     inviteSvc,
 		})
+		// Closes the two-way wiring InviteService.SetChats' own doc comment
+		// describes: inviteSvc above was built with no Chats, because
+		// telegramSvc could not exist yet -- it needs inviteSvc itself, as
+		// TelegramAuthDeps.Invites just above. Must run before the poller
+		// or the HTTP server starts serving requests.
+		inviteSvc.SetChats(telegramSvc)
 		telegramPoller = telegram.NewPoller(client, telegramSvc)
 		// Built from the same configuration as telegramSvc above: no bot
 		// token means neither service exists, and every route either one

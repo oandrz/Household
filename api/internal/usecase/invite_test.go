@@ -734,3 +734,131 @@ func TestTheWebFormCannotAcceptATelegramInvite(t *testing.T) {
 		t.Fatalf("Accept of an expired Telegram invite: got %v, want domain.ErrNotFound", err)
 	}
 }
+
+// --- Task 8: NewLink -- a new link, which is also "Not them" -------------
+
+// telegramRawToken recovers the raw token from a TelegramInviteLink's URL by
+// stripping the inv_ payload prefix -- exactly how a real owner's browser
+// would read it off the link, and the same approach every other Telegram
+// invite test in this file uses.
+func telegramRawToken(t *testing.T, url string) string {
+	t.Helper()
+	raw := strings.TrimPrefix(url, "https://t.me/HearthBot?start=inv_")
+	if raw == "" || raw == url {
+		t.Fatalf("could not extract a token from telegram link %q", url)
+	}
+	return raw
+}
+
+// One route does "get a new link" and "Not them". The old link stops
+// working the moment the new one exists -- that is what makes a leaked link
+// cost one new link rather than a takeover (spec decision 2).
+func TestANewLinkKillsTheOldOneAndClearsTheKnock(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	first, err := f.invites.CreateTelegram(ctx, f.householdID, f.andreasID, "Christine", domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	firstToken := telegramRawToken(t, first.URL)
+	if _, err := f.invites.Knock(ctx, firstToken, 4242, "jane_t"); err != nil {
+		t.Fatalf("Knock: %v", err)
+	}
+
+	second, err := f.invites.NewLink(ctx, f.householdID, first.ID)
+	if err != nil {
+		t.Fatalf("NewLink: %v", err)
+	}
+	if second.URL == first.URL {
+		t.Fatal("the new link is the old link")
+	}
+	// The knocked chat is told, because from their side the link simply
+	// stopped working and nobody would otherwise say why.
+	if got := f.chats.lastCancelledChat(); got != 4242 {
+		t.Fatalf("cancelled chat %d, want 4242", got)
+	}
+	// The old token knocks no more, and the row is back to waiting.
+	if _, err := f.invites.Knock(ctx, firstToken, 5555, "someone"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("the old token still knocks: %v", err)
+	}
+	if row := f.inviteRepo.byID(first.ID); row.KnockedAt != nil {
+		t.Fatal("the knock was not cleared")
+	}
+	// And the fresh token does.
+	secondToken := telegramRawToken(t, second.URL)
+	if _, err := f.invites.Knock(ctx, secondToken, 5555, "someone"); err != nil {
+		t.Fatalf("the new token does not knock: %v", err)
+	}
+}
+
+// An email invite has no link to replace. Refused with its own message
+// rather than silently converted: the channel is fixed when the invite is
+// created (spec decision 9).
+func TestANewLinkIsRefusedForAnEmailInvite(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	// No flag setup here: the email_invites flag is enforced at the HTTP
+	// edge, and InviteService.Create never reads a flag. Setting one here
+	// would imply a coupling that does not exist.
+	if err := f.invites.Create(ctx, f.householdID, f.andreasID, "Jane", "jane@example.com",
+		domain.RoleOwner, domain.AllCapabilities()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	pending, err := f.invites.ListPending(ctx, f.householdID)
+	if err != nil {
+		t.Fatalf("ListPending: %v", err)
+	}
+
+	if _, err := f.invites.NewLink(ctx, f.householdID, pending[0].ID); !errors.Is(err, domain.ErrInviteNotTelegram) {
+		t.Fatalf("got %v, want domain.ErrInviteNotTelegram", err)
+	}
+}
+
+// An id from another household is a 404, never a 403: the answer must not
+// confirm that another household's invite exists (docs/LEARNING.md pattern
+// 24).
+func TestANewLinkForAnotherHouseholdsInviteIsNotFound(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	mine, err := f.invites.CreateTelegram(ctx, f.householdID, f.andreasID, "Christine", domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	if _, err := f.invites.NewLink(ctx, "some-other-household", mine.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("got %v, want domain.ErrNotFound", err)
+	}
+}
+
+// The courtesy message to the knocked chat is best-effort: NewLink's own
+// doc comment says the send happens after the write and its failure is
+// logged, never returned, because the owner must still get the new link
+// they asked for. Mutation check: inline the return of that error and this
+// test turns red.
+func TestANewLinkStillArrivesWhenTellingTheKnockedChatFails(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	first, err := f.invites.CreateTelegram(ctx, f.householdID, f.andreasID, "Christine", domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	firstToken := telegramRawToken(t, first.URL)
+	if _, err := f.invites.Knock(ctx, firstToken, 4242, "jane_t"); err != nil {
+		t.Fatalf("Knock: %v", err)
+	}
+	f.chats.failNextSendLinkCancelled(errors.New("telegram is down"))
+
+	second, err := f.invites.NewLink(ctx, f.householdID, first.ID)
+	if err != nil {
+		t.Fatalf("NewLink: %v, want nil -- a courtesy-message failure must not cost the owner their new link", err)
+	}
+	if second.URL == "" {
+		t.Fatal("no link was returned")
+	}
+	// The send was still attempted, and its failure is what this test
+	// arms -- only the return value to the caller is unaffected.
+	if got := f.chats.lastCancelledChat(); got != 4242 {
+		t.Fatalf("the send was still attempted for chat %d, want 4242", got)
+	}
+}
