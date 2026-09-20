@@ -3,9 +3,11 @@ package domain
 import "fmt"
 
 // An InviteChannel is how an invite reaches the person it is for. It is
-// stored in invites.channel and arrives from a request body, so it is
+// stored in invites.channel and read back from a database column, so it is
 // parsed rather than cast: a value this build does not define must refuse,
-// not fall through to a default that sends something nowhere.
+// not fall through to a default that sends something nowhere. See
+// ParseInviteChannel's own doc comment for why a request body never reaches
+// this type directly.
 type InviteChannel string
 
 const (

@@ -84,7 +84,7 @@ func TestParseStartRefusesAFirstNameAsTheSenderName(t *testing.T) {
 // Telegram omits `from` on a channel post. A nil there must not panic the
 // poller, but also: a nil From means the message is not from the chat itself,
 // so the chat is not a private chat with its owner, so ParseStart must refuse.
-func TestParseStartToleratesAMissingSender(t *testing.T) {
+func TestParseStartRefusesAMissingSender(t *testing.T) {
 	u := Update{UpdateID: 8, Message: &Message{Text: "/start abc"}}
 	u.Message.Chat.ID = 502
 	u.Message.Chat.Type = "private"

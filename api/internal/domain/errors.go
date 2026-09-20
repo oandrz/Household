@@ -24,9 +24,14 @@ var (
 	// leave hearthctl and any crafted request still able to create one
 	// (spec decision 10).
 	ErrEmailInvitesDisabled = errors.New("email invites are disabled on this install")
-	// ErrTelegramInvitesUnavailable is the Telegram channel's answer until
-	// a later task teaches it to actually create an invite -- the honest
-	// refusal for a channel this build cannot yet deliver.
+	// ErrTelegramInvitesUnavailable is the Telegram channel's refusal, and
+	// now covers two distinct causes: no bot is configured on this install
+	// at all (invite.go's CreateTelegram and NewLink, checking
+	// BotUsername), or a bot is configured but the household has the
+	// telegram_sign_in flag off (member_handlers.go, checking
+	// scope.Flags). Both answer the same sentinel because a caller cannot
+	// act differently on the two -- either way there is no Telegram invite
+	// to offer.
 	ErrTelegramInvitesUnavailable = errors.New("telegram invites are unavailable on this install")
 	// ErrInviteNotTelegram is InviteService.NewLink's refusal for an email
 	// invite: "get a new link" and "Not them" only make sense for a

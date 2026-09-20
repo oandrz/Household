@@ -40,7 +40,7 @@ var routeTable = []route{
 	{"GET", "/household", "session", "-"},
 	{"PATCH", "/household", "owner+csrf", `{"name"?,"familyName"?,"primaryCurrency"?,"showSecondaryCurrency"?,"secondaryCurrency"?,"fxRateMode"?}`},
 	{"GET", "/household/members", "session", "-"},
-	{"POST", "/household/members/invite", "owner+browser session+csrf", `{"name","role","capabilities":[...],"channel":"profile"|"email"|"telegram","email"?}` + " -> {id,expiresAt,link?}"},
+	{"POST", "/household/members/invite", "owner+browser session+csrf", `{"name","role","capabilities":[...],"channel":"profile"|"email"|"telegram","email"?}` + " -> {id?,expiresAt?,link?}"},
 	{"PATCH", "/household/members/{id}", "owner+browser session+csrf", `{"role"?,"capabilities"?}`},
 	{"DELETE", "/household/members/{id}", "owner+browser session+csrf", "-"},
 	{"GET", "/household/invites", "owner", "-"},

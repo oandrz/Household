@@ -770,7 +770,13 @@ type InviteRepository interface {
 	// answer an id that never existed gets. An email invite matches
 	// nothing either, answered as domain.ErrInviteNotTelegram instead --
 	// see the postgres implementation's own doc comment for how it tells
-	// the two apart.
+	// the two apart. An already-accepted invite also reports
+	// domain.ErrNotFound: "get a new link" is not something an accepted
+	// invite offers, the same way Withdraw's own fallback read treats it.
+	// An expired invite, in contrast, is replaceable -- a deliberate
+	// omission of any expires_at condition from the SQL, because an
+	// expired link is the route's primary use case: it is the main reason
+	// an owner asks for a new one.
 	ReplaceToken(ctx context.Context, householdID, inviteID string, tokenHash []byte, expiresAt time.Time) (knockedChatID int64, err error)
 	// Admit is Let in (spec decision 5): the user, the membership, the
 	// telegram_accounts binding and the acceptance stamp, in one

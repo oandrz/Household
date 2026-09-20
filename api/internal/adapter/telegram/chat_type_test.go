@@ -27,10 +27,10 @@ func TestParseStartAcceptsOnlyAPrivateChat(t *testing.T) {
 		t.Fatal("a private /start must parse")
 	}
 	for name, u := range map[string]Update{
-		"group":       groupUpdate("/start inv_abc"),
-		"supergroup":  withChatType(groupUpdate("/start inv_abc"), "supergroup"),
-		"channel":     withChatType(groupUpdate("/start inv_abc"), "channel"),
-		"empty type":  withChatType(privateUpdate("/start inv_abc"), ""),
+		"group":        groupUpdate("/start inv_abc"),
+		"supergroup":   withChatType(groupUpdate("/start inv_abc"), "supergroup"),
+		"channel":      withChatType(groupUpdate("/start inv_abc"), "channel"),
+		"empty type":   withChatType(privateUpdate("/start inv_abc"), ""),
 		"unknown type": withChatType(privateUpdate("/start inv_abc"), "secret_new_kind"),
 	} {
 		if _, ok := ParseStart(u); ok {

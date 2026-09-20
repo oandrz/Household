@@ -27,9 +27,12 @@ type Message struct {
 		Type string `json:"type"`
 	} `json:"chat"`
 	// From is absent on a channel post, so this is a pointer and every
-	// reader must handle nil. Read for display only -- the confirm screen
-	// names the chat that redeemed a link -- never to decide anything:
-	// a username is chosen by its owner and Telegram lets it change.
+	// reader must handle nil. isPrivateChatWithItsOwner reads From.ID, the
+	// security gate behind every command this bot accepts. From.Username is
+	// the one field on this type that stays display-only -- the confirm
+	// screen names the chat that redeemed a link -- never used to decide
+	// anything, because a username is chosen by its owner and Telegram lets
+	// it change.
 	From *User `json:"from"`
 }
 
@@ -86,9 +89,12 @@ type StartCommand struct {
 }
 
 // ParseStart returns false for everything that is not a /start, including
-// updates with no message at all. The switch has a default that ignores rather
-// than one that guesses: this value arrives from a third party, so the rule is
-// the same as for a database column -- refuse what you did not construct.
+// updates with no message at all, and for a /start that is not a private
+// chat with its own sender (isPrivateChatWithItsOwner) -- a group message or
+// one forwarded on someone else's behalf never reaches the poller's dispatch.
+// The switch has a default that ignores rather than one that guesses: this
+// value arrives from a third party, so the rule is the same as for a
+// database column -- refuse what you did not construct.
 func ParseStart(u Update) (StartCommand, bool) {
 	if u.Message == nil {
 		return StartCommand{}, false
