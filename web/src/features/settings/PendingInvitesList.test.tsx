@@ -17,6 +17,19 @@ const jane: PendingInvite = {
   expiresAt: "2026-09-26T09:00:00Z",
 };
 
+// A Telegram row, waiting on a tap with nothing minted this session --
+// PendingInviteCard's state 3, the one every fixture above never reaches.
+const christine: PendingInvite = {
+  id: "inv-christine",
+  name: "Christine",
+  email: "",
+  role: "owner",
+  capabilities: ["money"],
+  channel: "telegram",
+  knock: null,
+  expiresAt: "2026-09-27T00:00:00Z",
+};
+
 function renderList() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -41,6 +54,22 @@ describe("PendingInvitesList", () => {
     expect(screen.getByText("Owner")).toBeInTheDocument();
     expect(screen.getByText("jane@example.com")).toBeInTheDocument();
     expect(screen.getByText(/^Expires /)).toBeInTheDocument();
+  });
+
+  // Pins the ternary this list adds in Task 11: a Telegram row must reach
+  // PendingInviteCard, not the milestone-1 PendingInviteRow beside it --
+  // every other fixture in this file is `channel: "email"`, so without this
+  // test, reverting that ternary back to always rendering PendingInviteRow
+  // would leave every test here green.
+  it("renders a Telegram invite as the waiting card, not the milestone-1 row", async () => {
+    stubFetchRoutes({ [`GET ${INVITES_URL}`]: { status: 200, body: [jane, christine] } });
+    renderList();
+
+    expect(await screen.findByText("Christine")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /get a new link/i })).toBeInTheDocument();
+    // The email row beside it is untouched: still Jane's plain row, no QR
+    // controls or knock copy bleeding across.
+    expect(screen.getByText("jane@example.com")).toBeInTheDocument();
   });
 
   // At 360px the detail line is about 214px wide, so even

@@ -9,6 +9,7 @@
 import { useState } from "react";
 import { apiErrorMessage } from "../../api/errorMessage";
 import { memberBadgeLabel, pendingInviteExpiryLine } from "./copy";
+import { PendingInviteCard } from "./PendingInviteCard";
 import { type PendingInvite } from "./schemas";
 import { usePendingInvites, useWithdrawInvite } from "./usePendingInvites";
 
@@ -112,15 +113,25 @@ export function PendingInvitesList() {
     <div className="mt-5 border-t border-hairline pt-4">
       <h3 className="text-xs font-semibold text-label">Pending invites</h3>
       <ul className="mt-2.5 flex flex-col gap-3">
-        {invites.data.map((invite) => (
-          <PendingInviteRow
-            key={invite.id}
-            invite={invite}
-            withdrawing={withdrawingIds.has(invite.id)}
-            errorMessage={rowErrors[invite.id]}
-            onWithdraw={() => handleWithdraw(invite.id)}
-          />
-        ))}
+        {invites.data.map((invite) =>
+          // A Telegram invite gets the full waiting/knocked/admitted card;
+          // an email invite keeps milestone 1's plain row unchanged. This
+          // list holds no link -- a link only ever exists in the hand of
+          // the session that just minted it (a 201 or a new-link response),
+          // and this list observes neither -- so PendingInviteCard gets no
+          // `link` prop here.
+          invite.channel === "telegram" ? (
+            <PendingInviteCard key={invite.id} invite={invite} />
+          ) : (
+            <PendingInviteRow
+              key={invite.id}
+              invite={invite}
+              withdrawing={withdrawingIds.has(invite.id)}
+              errorMessage={rowErrors[invite.id]}
+              onWithdraw={() => handleWithdraw(invite.id)}
+            />
+          ),
+        )}
       </ul>
     </div>
   );
