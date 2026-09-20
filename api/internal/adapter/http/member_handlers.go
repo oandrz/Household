@@ -83,15 +83,20 @@ type inviteMemberRequest struct {
 	Channel      string   `json:"channel"`
 }
 
-// inviteCreatedDTO answers every channel. Link is omitted for an email
-// invite, which has none, rather than sent as an empty string: the
-// frontend switches on its presence to decide whether to show the waiting
-// card. Every 2xx except 204 carries a JSON body (CLAUDE.md), so this is
-// returned on the profile and email paths too, both with a zero value.
+// inviteCreatedDTO answers every channel. All three fields are omitted when
+// absent rather than sent as a zero value: an email invite has no id to
+// report (Create predates this shape and returns none), and a profile or
+// email invite has no expiry or link at all -- serialising ExpiresAt as
+// Go's zero time would print "0001-01-01T00:00:00Z", a real-looking date
+// that is actually a lie. ID and ExpiresAt are pointers because
+// `omitempty` does not suppress a zero time.Time (a non-empty struct); Link
+// is already a string, so its own zero value ("") is enough. Every 2xx
+// except 204 still carries a JSON body (CLAUDE.md): the profile and email
+// arms answer `{}`, which is a body, just an empty one.
 type inviteCreatedDTO struct {
-	ID        string    `json:"id"`
-	ExpiresAt time.Time `json:"expiresAt"`
-	Link      string    `json:"link,omitempty"`
+	ID        *string    `json:"id,omitempty"`
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
+	Link      string     `json:"link,omitempty"`
 }
 
 // An inviteChannelChoice is how the person being added will sign in, as the
@@ -221,7 +226,7 @@ func handleInviteMember(deps Deps) http.HandlerFunc {
 				MapDomainError(w, r, err)
 				return
 			}
-			WriteJSON(w, http.StatusCreated, inviteCreatedDTO{ID: link.ID, ExpiresAt: link.ExpiresAt, Link: link.URL})
+			WriteJSON(w, http.StatusCreated, inviteCreatedDTO{ID: &link.ID, ExpiresAt: &link.ExpiresAt, Link: link.URL})
 		default:
 			// Unreachable while parseInviteChannelChoice is the only way
 			// in, and present anyway: a choice added without a case here

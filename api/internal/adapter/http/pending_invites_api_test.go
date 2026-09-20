@@ -361,10 +361,10 @@ func TestEmailInviteWorksWhenTheOperatorTurnsTheFlagOn(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("email invite with the flag on: got %d, want 201", rec.Code)
 	}
-	// Counted, not merely found: findPendingInvite below returns the first
-	// match, so a switch arm that fell through to a second Create call
-	// (the shape TestEmailInviteWithNoAddressIsRefused's mutation check
-	// pins the email arm against) would still pass a bare "found" check
+	// Counted, not merely present: before this assertion, the test checked
+	// only rec.Code == 201, which a switch arm that fell through to a
+	// second Create call (the shape TestEmailInviteWithNoAddressIsRefused's
+	// mutation check pins the email arm against) would also have passed
 	// while writing Jane's invite twice.
 	pending := env.pendingInvites(t, session)
 	count := 0

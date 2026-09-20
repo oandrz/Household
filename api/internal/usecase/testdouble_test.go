@@ -776,9 +776,10 @@ func (d *inviteDouble) Create(_ context.Context, householdID, email, name string
 	d.rows[string(tokenHash)] = &inviteRow{
 		ID: id, HouseholdID: householdID, Email: email, Name: name, Role: role,
 		Capabilities: caps, InvitedBy: invitedBy, ExpiresAt: expiresAt,
-		// Every invite this double's callers create today is an email
-		// invite, the same default migration 00021 gives every existing
-		// row. Nothing writes ChannelTelegram here yet -- that is Task 7.
+		// Every invite through this method is an email invite, the same
+		// default migration 00021 gives every existing row -- Create's
+		// callers always have a real address. CreateTelegram below is this
+		// double's other path, for the invite with none.
 		Channel:   domain.ChannelEmail,
 		CreatedAt: d.clock.Now(), Seq: d.n,
 	}
