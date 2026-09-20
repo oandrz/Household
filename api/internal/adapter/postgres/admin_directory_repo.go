@@ -174,10 +174,17 @@ func (r *AdminDirectoryRepo) Household(ctx context.Context, householdID string, 
 		if err != nil {
 			return usecase.HouseholdDetail{}, fmt.Errorf("invite for %s: %w", stringOrEmpty(row.Email), err)
 		}
+		// Read through ParseInviteChannel, exactly as role above: a value
+		// this build does not define must fail the read, not reach the wire.
+		channel, err := domain.ParseInviteChannel(row.Channel)
+		if err != nil {
+			return usecase.HouseholdDetail{}, fmt.Errorf("invite for %s: %w", stringOrEmpty(row.Email), err)
+		}
 		detail.PendingInvites = append(detail.PendingInvites, usecase.PendingInvite{
 			Name:          row.Name,
 			Email:         stringOrEmpty(row.Email),
 			Role:          role,
+			Channel:       channel,
 			InvitedByName: row.InvitedByName,
 			ExpiresAt:     timeOf(row.ExpiresAt),
 		})

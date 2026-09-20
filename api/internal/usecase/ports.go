@@ -531,10 +531,19 @@ type HouseholdMember struct {
 	LastActiveAt *time.Time
 }
 
+// PendingInvite is the operator admin directory's own, differently-shaped
+// view of an invite -- read-only, no ID, never withdrawn from this screen.
+// See InviteSummary's doc comment below for why the two keep separate names
+// despite the design doc calling both "PendingInvite".
 type PendingInvite struct {
-	Name          string
-	Email         string
-	Role          domain.Role
+	Name  string
+	Email string // "" for a Telegram invite, which has no address
+	Role  domain.Role
+	// Channel is domain.InviteChannel, not the MemberChannel above: it comes
+	// straight off the invite row's own channel column (via
+	// domain.ParseInviteChannel), not derived from a telegram_accounts join
+	// the way a member's channel is.
+	Channel       domain.InviteChannel
 	InvitedByName string
 	ExpiresAt     time.Time
 }

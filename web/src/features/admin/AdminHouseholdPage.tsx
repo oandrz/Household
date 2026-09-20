@@ -168,7 +168,14 @@ function HouseholdDetail({ data }: { data: PageData }) {
                 className="flex flex-col gap-0.5 py-2 md:flex-row md:items-center md:gap-4"
               >
                 <span className="font-semibold text-ink">{invite.name}</span>
-                <span className="text-ink">{invite.email}</span>
+                {/* A Telegram invite has no address -- invite.email is "",
+                    and rendering that blank reads as data loss rather than a
+                    different channel, so the word stands in for it. */}
+                <span className="text-ink">
+                  {invite.channel === "telegram"
+                    ? "Telegram link"
+                    : invite.email}
+                </span>
                 <span className="text-muted">
                   {memberBadgeLabel(invite.role)}
                 </span>

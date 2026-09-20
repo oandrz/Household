@@ -66,6 +66,11 @@ const adminPendingInviteSchema = z
     name: z.string(),
     email: z.string(),
     role: z.enum(["owner", "limited"]),
+    // Optional with an "email" default, matching pendingInviteSchema in
+    // features/settings/schemas.ts: a server that predates this milestone's
+    // admin_directory.sql change sends no channel at all, and must still
+    // parse as the milestone-1 shape rather than fail the whole page.
+    channel: z.string().default("email"),
     invitedByName: z.string(),
     expiresAt: z.string(),
   })

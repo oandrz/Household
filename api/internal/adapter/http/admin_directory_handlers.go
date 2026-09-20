@@ -114,9 +114,13 @@ type householdMemberDTO struct {
 }
 
 type pendingInviteDTO struct {
-	Name          string    `json:"name"`
+	Name string `json:"name"`
+	// Email is "" for a Telegram invite, matching InviteSummary's own DTO
+	// in pending_invite_handlers.go -- the frontend renders "Telegram link"
+	// off Channel rather than treating "" as a blank address.
 	Email         string    `json:"email"`
 	Role          string    `json:"role"`
+	Channel       string    `json:"channel"`
 	InvitedByName string    `json:"invitedByName"`
 	ExpiresAt     time.Time `json:"expiresAt"`
 }
@@ -189,7 +193,7 @@ func handleAdminHousehold(deps Deps) http.HandlerFunc {
 		}
 		for _, i := range page.PendingInvites {
 			body.PendingInvites = append(body.PendingInvites, pendingInviteDTO{
-				Name: i.Name, Email: i.Email, Role: string(i.Role),
+				Name: i.Name, Email: i.Email, Role: string(i.Role), Channel: string(i.Channel),
 				InvitedByName: i.InvitedByName, ExpiresAt: i.ExpiresAt.UTC(),
 			})
 		}

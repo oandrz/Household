@@ -38,6 +38,7 @@ function page(overrides: Partial<PageData> = {}): PageData {
       {
         name: "Christine",
         email: "c@example.org",
+        channel: "email",
         role: "owner",
         invitedByName: "Andreas",
         expiresAt: "2026-09-05T02:11:09Z",
@@ -137,6 +138,31 @@ describe("AdminHouseholdPage", () => {
     });
     renderWithRouter(<AdminHouseholdPage householdId="h1" />);
     expect(await screen.findByText("None pending.")).toBeInTheDocument();
+  });
+
+  // Task 13: ListPendingInvitesForAdmin now returns "" for a Telegram
+  // invite's email (it has no address), so rendering it plain would read as
+  // a blank cell -- data loss, not a different channel.
+  it("shows a Telegram invite as a Telegram link, not a blank cell", async () => {
+    stubFetchRoutes({
+      [route]: {
+        status: 200,
+        body: page({
+          pendingInvites: [
+            {
+              name: "Christine",
+              email: "",
+              channel: "telegram",
+              role: "owner",
+              expiresAt: "2026-09-21T00:00:00Z",
+              invitedByName: "Andreas",
+            },
+          ],
+        }),
+      },
+    });
+    renderWithRouter(<AdminHouseholdPage householdId="h1" />);
+    expect(await screen.findByText("Telegram link")).toBeInTheDocument();
   });
 
   // A lapsed grant (or a revoked admin) is a gate-layer failure -- AdminShell's
