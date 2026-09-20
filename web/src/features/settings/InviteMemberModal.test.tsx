@@ -281,6 +281,40 @@ describe("InviteMemberModal", () => {
     expect(screen.queryByRole("button", { name: /copy/i })).not.toBeInTheDocument();
   });
 
+  // The brief's own third meaning for "limited": a kid can also get a real
+  // sign-in, via Telegram, instead of the profile-only default -- offered
+  // as a radio, since "profile" stays available too (spec decision 9). This
+  // is the only test that ever touches that radio; nothing else proves
+  // `setManualChannel` is wired to anything.
+  it("offers a kid a Telegram sign-in instead of profile-only, and sends it when chosen", async () => {
+    let capturedBody: unknown;
+    renderModal({
+      features: { email_invites: false, telegram_sign_in: true },
+      defaultRole: "limited",
+      routes: {
+        [`POST ${INVITE_URL}`]: {
+          status: 201,
+          body: { id: "1", expiresAt: "2026-09-21T00:00:00Z", link: "https://t.me/HearthBot?start=inv_kid" },
+          capture: (body) => {
+            capturedBody = body;
+          },
+        },
+        [`GET ${INVITES_URL}`]: { status: 200, body: [] },
+      },
+    });
+
+    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: "Ethan" } });
+    fireEvent.click(screen.getByRole("radio", { name: /can sign in \(telegram link\)/i }));
+    fireEvent.click(screen.getByRole("button", { name: /send invite/i }));
+
+    await waitFor(() =>
+      expect(capturedBody).toMatchObject({ role: "limited", channel: "telegram" }),
+    );
+    // A link came back, same as any other Telegram invite: the waiting card
+    // shows, it does not just quietly close.
+    expect(await screen.findByRole("button", { name: /copy/i })).toBeInTheDocument();
+  });
+
   // The round trip a previous review flagged as untested: prop `link`
   // present -> mint a new link -> onNewLink fires -> the modal's own
   // `created` state updates -> the card still shows the right link. This is
