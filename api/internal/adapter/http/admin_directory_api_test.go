@@ -145,8 +145,34 @@ type householdPageBody struct {
 	Lockout        json.RawMessage   `json:"lockout"`
 }
 
+// pendingInviteChannelBody decodes just the one field the drill-in test
+// below needs a real value from, not only its presence: assertKeys checks
+// the key set, so a dropped struct field or json tag fails it, but a
+// dropped literal assignment (the field stays, the value silently becomes
+// Go's zero value) does not change the key set at all and needs this.
+type pendingInviteChannelBody struct {
+	Channel string `json:"channel"`
+}
+
 func TestAdminHouseholdDrillInShowsMembersAndTheLockout(t *testing.T) {
 	env := newTestEnv(t)
+	// One pending invite, seeded through the real invite endpoint rather
+	// than the repo directly, so pendingInviteDTO is exercised with a row
+	// present -- this household otherwise has none, and nothing else in
+	// this file drills into one that does. Without this, a dropped Channel
+	// (from the struct, its json tag, or just the literal below at
+	// handleAdminHousehold's `Channel: string(i.Channel)`) would still pass
+	// the whole suite, and the row would render as the blank cell this
+	// task exists to eliminate. assertKeys alone would not have been
+	// enough: dropping the struct field removes the "channel" key
+	// entirely, which assertKeys catches, but dropping only the literal
+	// assignment leaves the key present with its Go zero value "" --
+	// assertKeys checks the key set, never values, so that mutation would
+	// have passed silently. The Channel value check below is what closes
+	// that half.
+	ownerSession, ownerCSRF := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	env.mustInviteOwner(t, ownerSession, ownerCSRF, "Christine", "christine@example.test")
+
 	session := grantedAdmin(t, env)
 	path := "/api/v1/admin/households/" + env.householdID
 
@@ -165,6 +191,18 @@ func TestAdminHouseholdDrillInShowsMembersAndTheLockout(t *testing.T) {
 	}
 	assertKeys(t, "member", page.Members[0],
 		"userId", "name", "email", "channel", "role", "capabilities", "lastActiveAt")
+	if len(page.PendingInvites) != 1 {
+		t.Fatalf("pendingInvites = %d, want 1", len(page.PendingInvites))
+	}
+	assertKeys(t, "pendingInvite", page.PendingInvites[0],
+		"name", "email", "role", "channel", "invitedByName", "expiresAt")
+	var invite pendingInviteChannelBody
+	if err := json.Unmarshal(page.PendingInvites[0], &invite); err != nil {
+		t.Fatalf("decode pending invite: %v", err)
+	}
+	if invite.Channel != "email" {
+		t.Fatalf("pendingInvite channel = %q, want %q (mustInviteOwner's own channel)", invite.Channel, "email")
+	}
 	if string(page.Lockout) != "null" {
 		t.Fatalf("an unlocked household reported lockout = %s", page.Lockout)
 	}
