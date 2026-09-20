@@ -108,11 +108,19 @@ export function useAdmitInvite() {
       fetchAndParse(admitResultSchema, `/api/v1/household/invites/${encodeURIComponent(id)}/admit`, {
         method: "POST",
       }),
-    // Three lists change, and naming each one is the rule
-    // docs/LEARNING.md pattern 22 exists for: the invite leaves the pending
-    // list, the member joins the members list, and Overview's setup
-    // checklist counts owners -- a screen that reads a derived figure needs
-    // its query invalidated by name, or it shows yesterday's answer.
+    // pendingInvitesQueryKey and householdMembersQueryKey are the two that
+    // matter, named by docs/LEARNING.md pattern 22: the invite leaves the
+    // pending list, the member joins the members list, and Overview's
+    // partner step (partnerStep.ts) reads exactly those two arrays -- a
+    // screen that reads a derived figure needs its query invalidated by
+    // name, or it shows yesterday's answer.
+    //
+    // meQueryKey is invalidated too, but not because anything has been
+    // shown to depend on it: /me carries the caller's own membership and
+    // capability flags, and nothing about household composition changes
+    // when someone else joins. Kept for consistency with useInviteMember's
+    // existing three-key invalidation on this same screen -- cheap
+    // insurance, not a proven dependency.
     onSettled: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: pendingInvitesQueryKey }),
