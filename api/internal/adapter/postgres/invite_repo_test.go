@@ -498,7 +498,7 @@ func newInviteTestHousehold(t *testing.T) (*postgres.DB, inviteTestHousehold) {
 // anything else that ever writes this table.
 func TestInviteChannelConstraintsRefuseHalfWrittenRows(t *testing.T) {
 	ctx := context.Background()
-	db, h := newInviteTestHousehold(t) // the file's existing helper
+	db, h := newInviteTestHousehold(t)
 
 	cases := []struct {
 		name string
