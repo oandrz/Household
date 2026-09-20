@@ -977,6 +977,61 @@ func TestAdmitReportsAFailedSendWithoutLosingTheMember(t *testing.T) {
 	}
 }
 
+// A nil Chats is what an install that has removed its bot and restarted
+// looks like (docs/INFRASTRUCTURE.md's leaked-token runbook): a knock
+// recorded while the bot was still configured can still be sitting in the
+// table. Admit must report the member with SignInSent: false, the same
+// answer a failed send gets, and must not panic -- see Admit's own doc
+// comment and SetChats' for why Admit, not NewLink, needs this guard.
+func TestAdmitWithNoChatSenderConfiguredReturnsTheMemberWithoutPanicking(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	invite, err := f.invites.CreateTelegram(ctx, f.householdID, f.andreasID, "Christine", domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	rawToken := telegramRawToken(t, invite.URL)
+	if _, err := f.invites.Knock(ctx, rawToken, 4242, "christine_t"); err != nil {
+		t.Fatalf("Knock: %v", err)
+	}
+
+	// A second InviteService sharing f's own repositories, standing in for
+	// the same process after BOT_TOKEN and BOT_USERNAME are removed: the
+	// row Knock just wrote is still there, but nothing was ever told to
+	// SetChats.
+	noChats := usecase.NewInviteService(usecase.InviteDeps{
+		Invites:           f.inviteRepo,
+		Users:             f.users,
+		Sessions:          f.sessions,
+		Mailer:            f.mailer,
+		Hasher:            f.hasher,
+		Tokens:            &seqTokens{},
+		Clock:             f.clock,
+		SessionTTL:        30 * 24 * time.Hour,
+		BaseURL:           "http://localhost:5173",
+		BotUsername:       "HearthBot",
+		TelegramInviteTTL: usecase.TelegramInviteTTL,
+		Codes:             newPairingCodesDouble(),
+		Accounts:          f.inviteAccounts,
+		Chats:             nil,
+	})
+
+	member, err := noChats.Admit(ctx, f.householdID, invite.ID)
+	if err != nil {
+		t.Fatalf("Admit: %v, want no error even with no chat sender configured", err)
+	}
+	if member.SignInSent {
+		t.Fatal("signInSent is true although no chat sender is configured")
+	}
+	if member.MembershipID == "" {
+		t.Fatal("the member was lost when no chat sender is configured")
+	}
+	if bound := f.inviteAccounts.userForChat(4242); bound != member.UserID {
+		t.Fatalf("chat 4242 is bound to %q, want the new member %q -- a missing chat sender must not undo the binding", bound, member.UserID)
+	}
+}
+
 // The chat may have bound itself to a different account between the knock
 // and the click (spec decision 15) -- the same race
 // TestAdmitLeavesNothingBehindWhenTheChatIsAlreadyBound proves against real

@@ -104,10 +104,17 @@ func NewInviteService(d InviteDeps) *InviteService {
 // constructed with the other already built -- a cycle in the wiring, not in
 // the types -- so main.go builds both, handing this service to
 // TelegramAuthDeps.Invites directly, and closes the remaining half of the
-// loop here. Called exactly once, at startup, before any request is
-// served: NewLink dereferences d.Chats with no nil check, deliberately (see
-// its own doc comment), so a caller that forgets this panics loudly instead
-// of silently never telling a knocked chat its link died.
+// loop here. Called exactly once, at startup, before any request is served.
+//
+// NewLink dereferences d.Chats with no nil check, deliberately (see its own
+// doc comment): it can never reach a nil Chats, because it returns early
+// whenever BotUsername is empty. Admit is the method that actually can --
+// a knock recorded while a bot was configured can still be sitting in the
+// table after the bot is removed and this process restarted
+// (docs/INFRASTRUCTURE.md's leaked-token runbook), so BotUsername's
+// absence is not available to Admit as a guard the way it is to NewLink.
+// Admit's own nil check on Chats is what covers that case; see its doc
+// comment.
 func (s *InviteService) SetChats(chats InviteChats) { s.d.Chats = chats }
 
 // InvitePreview is what a caller sees before signing in: enough to render
@@ -332,6 +339,14 @@ func (s *InviteService) Knock(ctx context.Context, rawToken string, chatID int64
 // (docs/LEARNING.md pattern 5) -- no new recovery path is needed, because
 // the chat is bound by then, so any /start it sends already gets a fresh
 // sign-in link.
+//
+// A nil Chats is checked here, unlike NewLink (see SetChats' own doc
+// comment for why the two methods differ): the write above has already
+// committed, so a knocked invite can still be waiting when this runs on an
+// install that has since dropped its bot (docs/INFRASTRUCTURE.md's
+// leaked-token runbook -- remove both .env values and restart). Reported
+// the same way a failed send already is, never a panic: the member is not
+// lost because nobody was left to tell.
 func (s *InviteService) Admit(ctx context.Context, householdID, inviteID string) (AdmittedMember, error) {
 	admitted, err := s.d.Invites.Admit(ctx, householdID, inviteID, s.d.Clock.Now())
 	if err != nil {
@@ -344,6 +359,11 @@ func (s *InviteService) Admit(ctx context.Context, householdID, inviteID string)
 		Role:         admitted.Role,
 		Capabilities: admitted.Capabilities,
 		SignInSent:   true,
+	}
+	if s.d.Chats == nil {
+		slog.Error("admitted a member but no telegram chat sender is configured")
+		member.SignInSent = false
+		return member, nil
 	}
 	if err := s.d.Chats.SendSignIn(ctx, admitted.ChatID, admitted.UserID); err != nil {
 		slog.Error("admitted a member but could not send their sign-in link", "error", err)
