@@ -25,7 +25,7 @@ export const membersListSchema = z.array(memberSchema);
 // words rather than rendering an empty "@". `code` is the four digits the
 // owner compares with the phone in front of them; it is display-only and no
 // request ever carries it back.
-export const inviteKnockSchema = z.object({
+const inviteKnockSchema = z.object({
   username: z.string().nullable(),
   code: z.string(),
   knockedAt: z.string(),
