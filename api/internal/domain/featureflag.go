@@ -22,6 +22,13 @@ const (
 	// FlagFamilyCalendar gates an unbuilt page. It exists now so that
 	// dark-shipping is exercised before it is needed in anger.
 	FlagFamilyCalendar Flag = "family_calendar"
+	// FlagEmailInvites gates the email channel on an invite. Default off:
+	// production mail never leaves the box (ADR 3), so an email invite
+	// lands in the operator's Mailpit and the partner never receives it.
+	// This follows FlagNotificationDelivery's own reasoning -- a flag that
+	// is on for something that cannot happen is a lie. The operator turns
+	// it on in /admin the day real mail exists, with no code change.
+	FlagEmailInvites Flag = "email_invites"
 )
 
 // FlagDefinition is one flag as this build knows it. Default is what a fresh
@@ -40,6 +47,7 @@ func AllFlags() []FlagDefinition {
 		{FlagTelegramSignIn, "Offer Telegram as a sign-in and sign-up channel.", true},
 		{FlagNotificationDelivery, "Actually send the notifications members have asked for.", false},
 		{FlagFamilyCalendar, "Show the Family calendar page.", false},
+		{FlagEmailInvites, "Offer email as an invite channel. Off while mail cannot leave the box.", false},
 	}
 }
 

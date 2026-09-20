@@ -18,8 +18,18 @@ var (
 	ErrInviteAlreadyAccepted     = errors.New("invite has already been accepted")
 	ErrInviteRequiresEmail       = errors.New("an invite requires an email address")
 	ErrUnknownInviteChannel      = errors.New("unknown invite channel")
-	ErrTokenExpired              = errors.New("token has expired or been used")
-	ErrRateLimited               = errors.New("too many requests")
+	// ErrEmailInvitesDisabled is FlagEmailInvites' refusal: an install
+	// whose mail cannot leave the box (ADR 3) must not create an invite
+	// nobody can ever receive, and enforcing that only in the UI would
+	// leave hearthctl and any crafted request still able to create one
+	// (spec decision 10).
+	ErrEmailInvitesDisabled = errors.New("email invites are disabled on this install")
+	// ErrTelegramInvitesUnavailable is the Telegram channel's answer until
+	// a later task teaches it to actually create an invite -- the honest
+	// refusal for a channel this build cannot yet deliver.
+	ErrTelegramInvitesUnavailable = errors.New("telegram invites are unavailable on this install")
+	ErrTokenExpired               = errors.New("token has expired or been used")
+	ErrRateLimited                = errors.New("too many requests")
 
 	// Added in the Task 6 fix round (see task-6-report.md, "Fix round 1").
 	ErrAmountOverflow               = errors.New("amount overflows a signed 64-bit integer")

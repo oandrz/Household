@@ -289,6 +289,24 @@ var domainErrorResponses = []domainErrorResponse{
 		message:   "An invite requires an email address.",
 	},
 	{
+		sentinels: []error{domain.ErrEmailInvitesDisabled},
+		status:    http.StatusConflict,
+		code:      "EMAIL_INVITES_DISABLED",
+		message:   "Email can't leave this install yet. Use a Telegram link.",
+	},
+	{
+		sentinels: []error{domain.ErrTelegramInvitesUnavailable},
+		status:    http.StatusConflict,
+		code:      "TELEGRAM_INVITES_UNAVAILABLE",
+		message:   "Inviting by Telegram is unavailable on this install.",
+	},
+	{
+		sentinels: []error{domain.ErrUnknownInviteChannel},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_INVITE_CHANNEL",
+		message:   "That invite channel is not valid.",
+	},
+	{
 		sentinels: []error{usecase.ErrPasswordTooShort},
 		status:    http.StatusUnprocessableEntity,
 		code:      "PASSWORD_TOO_SHORT",

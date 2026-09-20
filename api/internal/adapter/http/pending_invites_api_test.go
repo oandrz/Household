@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
 // Pending invites: docs/superpowers/specs/2026-09-19-hearth-partner-invite-lobby-design.md,
@@ -21,10 +23,17 @@ type pendingInviteBody struct {
 	ExpiresAt    time.Time `json:"expiresAt"`
 }
 
+// mustInviteOwner exercises the email channel, which this task hides behind
+// FlagEmailInvites -- every caller of this helper is testing the pending-
+// invite mechanics (list, withdraw, expiry), not the flag itself, so the
+// flag is turned on here rather than in each of those tests.
 func (env *testEnv) mustInviteOwner(t *testing.T, session, csrf *http.Cookie, name, email string) {
 	t.Helper()
+	if err := env.featureFlags.SetGlobal(context.Background(), string(domain.FlagEmailInvites), true, ""); err != nil {
+		t.Fatalf("enable email invites: %v", err)
+	}
 	rec := env.authed(t, http.MethodPost, "/api/v1/household/members/invite", map[string]any{
-		"name": name, "email": email, "role": "owner",
+		"name": name, "email": email, "role": "owner", "channel": "email",
 		"capabilities": []string{"calendar", "chores", "money", "marriage"},
 	}, session, csrf)
 	if rec.Code != http.StatusCreated {
@@ -252,5 +261,104 @@ func TestATokenCannotChangeWhoIsInTheHousehold(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("the remove-member case was refused with 403 but the member is gone anyway")
+	}
+}
+
+// --- Task 4: the email_invites flag, refused at the edge as well as the UI ---
+
+// Email invites are hidden while mail cannot leave the box (ADR 3). The
+// flag is not only a UI affordance: hearthctl and any crafted request reach
+// the same route, and an invite nobody can deliver is worse than a refusal
+// the owner can read (spec decision 10).
+func TestEmailInviteIsRefusedWhileTheFlagIsOff(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/household/members/invite", map[string]any{
+		"name": "Jane", "email": "jane@example.com", "role": "owner", "channel": "email",
+		"capabilities": []string{"money", "calendar", "chores", "marriage"},
+	}, session, csrf)
+	assertErrorResponse(t, rec, http.StatusConflict, "EMAIL_INVITES_DISABLED")
+}
+
+// A channel this build does not define is refused before anything is
+// written, and so is an absent one: the spec asks for a default that
+// refuses rather than one that guesses.
+func TestInviteChannelMustBeNamedExplicitly(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	cases := map[string]map[string]any{
+		"absent": {
+			"name": "Jane", "role": "owner",
+			"capabilities": []string{"money", "calendar", "chores", "marriage"},
+		},
+		"empty": {
+			"name": "Jane", "role": "owner", "channel": "",
+			"capabilities": []string{"money", "calendar", "chores", "marriage"},
+		},
+		"unknown": {
+			"name": "Jane", "role": "owner", "channel": "carrier_pigeon",
+			"capabilities": []string{"money", "calendar", "chores", "marriage"},
+		},
+		"profile for an owner": {
+			"name": "Jane", "role": "owner", "channel": "profile",
+			"capabilities": []string{"money", "calendar", "chores", "marriage"},
+		},
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			rec := env.authed(t, http.MethodPost, "/api/v1/household/members/invite", body, session, csrf)
+			if rec.Code == http.StatusCreated {
+				t.Fatalf("channel %s was accepted; it must be refused", name)
+			}
+		})
+	}
+}
+
+// The kid profile is unchanged by this milestone: a limited member with no
+// sign-in, created directly, with no invite row and no link. It says
+// "profile" out loud rather than being inferred from an absent field,
+// because inference is how an invite goes somewhere nobody meant.
+func TestAProfileOnlyMemberIsStillCreatedDirectly(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/household/members/invite", map[string]any{
+		"name": "Kayla", "role": "limited", "channel": "profile",
+		"capabilities": []string{"calendar", "chores"},
+	}, session, csrf)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("got %d, want 201: %s", rec.Code, rec.Body.String())
+	}
+	// No invite row: the member exists already, so there is nothing pending.
+	list := env.authedGet(t, "/api/v1/household/invites", session)
+	if strings.Contains(list.Body.String(), "Kayla") {
+		t.Fatal("a kid profile wrote an invite row")
+	}
+	// Counted, not merely found: the profile arm has to answer and return,
+	// and an arm that fell through to the create call below the switch
+	// would produce two Kaylas that a "contains" assertion would pass.
+	members := env.authedGet(t, "/api/v1/household/members", session)
+	if got := strings.Count(members.Body.String(), `"Kayla"`); got != 1 {
+		t.Fatalf("the members list names Kayla %d times, want exactly 1", got)
+	}
+}
+
+// With the flag on, the email path is exactly what it was before this
+// milestone: the flag hides a channel, it does not change one.
+func TestEmailInviteWorksWhenTheOperatorTurnsTheFlagOn(t *testing.T) {
+	env := newTestEnv(t)
+	if err := env.featureFlags.SetGlobal(context.Background(), string(domain.FlagEmailInvites), true, ""); err != nil {
+		t.Fatalf("enable email invites: %v", err)
+	}
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/household/members/invite", map[string]any{
+		"name": "Jane", "email": "jane@example.com", "role": "owner", "channel": "email",
+		"capabilities": []string{"money", "calendar", "chores", "marriage"},
+	}, session, csrf)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("email invite with the flag on: got %d, want 201", rec.Code)
 	}
 }

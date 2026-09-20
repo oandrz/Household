@@ -2,6 +2,7 @@ package httpadapter_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -505,10 +506,16 @@ func TestCreateSpaceWithABlankNameReturns422(t *testing.T) {
 // the address can see it and act on it.
 func TestInviteMemberRejectsAnAddressThatAlreadyHasAUsersRow(t *testing.T) {
 	env := newTestEnv(t)
+	// This exercises the email channel's own duplicate-address check, which
+	// sits behind FlagEmailInvites (Task 4) -- turn it on so the request
+	// reaches that check instead of being refused for the channel being off.
+	if err := env.featureFlags.SetGlobal(context.Background(), string(domain.FlagEmailInvites), true, ""); err != nil {
+		t.Fatalf("enable email invites: %v", err)
+	}
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
 
 	rec := env.authed(t, http.MethodPost, "/api/v1/household/members/invite", map[string]any{
-		"name": "Ethan Again", "email": env.limitedEmail, "role": "limited",
+		"name": "Ethan Again", "email": env.limitedEmail, "role": "limited", "channel": "email",
 		"capabilities": []string{"calendar"},
 	}, session, csrf)
 	assertErrorResponse(t, rec, http.StatusConflict, "EMAIL_ALREADY_REGISTERED")

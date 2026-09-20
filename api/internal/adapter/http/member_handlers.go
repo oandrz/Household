@@ -2,6 +2,7 @@ package httpadapter
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -78,6 +79,37 @@ type inviteMemberRequest struct {
 	Email        string   `json:"email"`
 	Role         string   `json:"role"`
 	Capabilities []string `json:"capabilities"`
+	Channel      string   `json:"channel"`
+}
+
+// An inviteChannelChoice is how the person being added will sign in, as the
+// request says it. It has one value more than domain.InviteChannel, and the
+// extra one is the point: "profile" means they never sign in at all, so no
+// invite row is written and there is no channel to store. Keeping it out of
+// the domain type keeps that type equal to what the column holds.
+type inviteChannelChoice string
+
+const (
+	channelChoiceProfile  inviteChannelChoice = "profile"
+	channelChoiceEmail    inviteChannelChoice = "email"
+	channelChoiceTelegram inviteChannelChoice = "telegram"
+)
+
+// parseInviteChannelChoice refuses anything else, "" included -- which is
+// what an omitted field decodes to. A caller must say how this person signs
+// in; inferring it from which other fields happen to be filled in is how an
+// invite goes somewhere nobody meant.
+func parseInviteChannelChoice(s string) (inviteChannelChoice, error) {
+	switch inviteChannelChoice(s) {
+	case channelChoiceProfile:
+		return channelChoiceProfile, nil
+	case channelChoiceEmail:
+		return channelChoiceEmail, nil
+	case channelChoiceTelegram:
+		return channelChoiceTelegram, nil
+	default:
+		return "", fmt.Errorf("%w: %q", domain.ErrUnknownInviteChannel, s)
+	}
 }
 
 // handleInviteMember sits behind requireOwner: only an owner may add a
@@ -106,6 +138,55 @@ func handleInviteMember(deps Deps) http.HandlerFunc {
 			MapDomainError(w, r, err)
 			return
 		}
+
+		choice, err := parseInviteChannelChoice(req.Channel)
+		if err != nil {
+			MapDomainError(w, r, err)
+			return
+		}
+		// The flag is enforced here as well as in the modal, because this
+		// route is reachable from hearthctl and from anything else holding
+		// a session: an invite that can never be delivered must not be
+		// creatable at all (spec decision 10). adminctl is deliberately
+		// outside this gate -- it calls InviteService directly and prints
+		// the URL it captured, which is how an operator hands an invite
+		// over today.
+		switch choice {
+		case channelChoiceProfile:
+			// Today's kid path, untouched: Create's own empty-email branch
+			// creates the member directly and writes no invite row. It
+			// refuses any role but limited, which is the check this arm
+			// deliberately does not repeat -- one rule, one place.
+			//
+			// It answers and RETURNS. Falling through would reach the
+			// Create call below the switch and create the member a second
+			// time, with the same empty email -- a defect no "the member
+			// exists" assertion would catch, which is why the test counts.
+			if err := deps.Invites.Create(r.Context(), scope.HouseholdID, scope.UserID,
+				req.Name, "", role, caps); err != nil {
+				MapDomainError(w, r, err)
+				return
+			}
+			WriteJSON(w, http.StatusCreated, map[string]string{"status": "invited"})
+			return
+		case channelChoiceEmail:
+			if !scope.Flags.Enabled(domain.FlagEmailInvites) {
+				MapDomainError(w, r, domain.ErrEmailInvitesDisabled)
+				return
+			}
+		case channelChoiceTelegram:
+			// Task 5 fills this in. Until then it refuses, which is the
+			// correct answer for a channel this build cannot yet deliver.
+			MapDomainError(w, r, domain.ErrTelegramInvitesUnavailable)
+			return
+		default:
+			// Unreachable while parseInviteChannelChoice is the only way
+			// in, and present anyway: a choice added without a case here
+			// refuses rather than falling through to the email path.
+			MapDomainError(w, r, domain.ErrUnknownInviteChannel)
+			return
+		}
+
 		if err := deps.Invites.Create(r.Context(), scope.HouseholdID, scope.UserID, req.Name, req.Email, role, caps); err != nil {
 			MapDomainError(w, r, err)
 			return
