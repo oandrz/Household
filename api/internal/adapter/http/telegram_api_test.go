@@ -24,7 +24,7 @@ import (
 //
 // POST /auth/telegram/start only ever calls StartLink, which touches Tokens
 // and Links.Create. Every other port TelegramAuthDeps requires (Accounts,
-// MagicLinks, Signups, Sender) exists solely to satisfy the struct --
+// MagicLinks, Signups, Sender, Invites) exists solely to satisfy the struct --
 // HandleStart's own behaviour is usecase/telegram_auth_test.go's job, not
 // this package's -- so each unused method panics: a future test that
 // accidentally exercises one fails loudly at the call site instead of
@@ -111,6 +111,12 @@ func (unusedTelegramSender) SendMessage(context.Context, int64, string) error {
 	panic("unusedTelegramSender: SendMessage should not be called by these tests")
 }
 
+type unusedInviteKnocker struct{}
+
+func (unusedInviteKnocker) Knock(context.Context, string, int64, string) (string, error) {
+	panic("unusedInviteKnocker: Knock should not be called by these tests")
+}
+
 // newTelegramAuthServiceForTest builds a real TelegramAuthService over the
 // doubles above: StartLink is genuinely exercised end to end (a real
 // crypto.TokenGenerator, a real clock), and everything HandleStart alone
@@ -126,6 +132,7 @@ func newTelegramAuthServiceForTest() *usecase.TelegramAuthService {
 		Clock:       clock.System{},
 		BaseURL:     "http://localhost:5173",
 		BotUsername: "HearthBot",
+		Invites:     unusedInviteKnocker{},
 	})
 }
 
