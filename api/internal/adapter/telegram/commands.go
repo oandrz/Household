@@ -51,6 +51,9 @@ func ParseCommand(u Update) (Command, bool) {
 	if u.Message == nil {
 		return Command{}, false
 	}
+	if !isPrivateChatWithItsOwner(u.Message) {
+		return Command{}, false
+	}
 	text := strings.TrimSpace(u.Message.Text)
 	cmd := Command{ChatID: u.Message.Chat.ID, UpdateID: u.UpdateID}
 	if text == "" {
@@ -64,6 +67,9 @@ func ParseCommand(u Update) (Command, bool) {
 	}
 	word, rest, _ := strings.Cut(text, " ")
 	// Telegram appends @botname to commands in groups: "/spend@HearthBot".
+	// Group traffic no longer reaches here (isPrivateChatWithItsOwner above),
+	// but a person may still type the suffix by hand after copying a command
+	// out of a group, so the strip stays.
 	word, _, _ = strings.Cut(strings.ToLower(word), "@")
 	switch word {
 	case "/balance", "/recent", "/help", "/yes", "/no":

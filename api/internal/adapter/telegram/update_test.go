@@ -21,6 +21,8 @@ func TestParseStart(t *testing.T) {
 			u := Update{UpdateID: 1}
 			u.Message = &Message{Text: tc.text}
 			u.Message.Chat.ID = 55
+			u.Message.Chat.Type = "private"
+			u.Message.From = &User{ID: 55}
 
 			got, ok := ParseStart(u)
 			if ok != tc.wantOK {
@@ -50,7 +52,8 @@ func TestParseStartIgnoresUpdatesWithNoMessage(t *testing.T) {
 func TestParseStartReadsTheSenderName(t *testing.T) {
 	u := Update{UpdateID: 7, Message: &Message{Text: "/start abc"}}
 	u.Message.Chat.ID = 501
-	u.Message.From = &User{Username: "andreas", FirstName: "Andreas"}
+	u.Message.Chat.Type = "private"
+	u.Message.From = &User{ID: 501, Username: "andreas", FirstName: "Andreas"}
 
 	got, ok := ParseStart(u)
 	if !ok || got.Username != "andreas" {
@@ -69,7 +72,8 @@ func TestParseStartReadsTheSenderName(t *testing.T) {
 func TestParseStartRefusesAFirstNameAsTheSenderName(t *testing.T) {
 	u := Update{UpdateID: 71, Message: &Message{Text: "/start abc"}}
 	u.Message.Chat.ID = 511
-	u.Message.From = &User{FirstName: "andreas"}
+	u.Message.Chat.Type = "private"
+	u.Message.From = &User{ID: 511, FirstName: "andreas"}
 
 	got, ok := ParseStart(u)
 	if !ok || got.Username != "" {
@@ -78,13 +82,15 @@ func TestParseStartRefusesAFirstNameAsTheSenderName(t *testing.T) {
 }
 
 // Telegram omits `from` on a channel post. A nil there must not panic the
-// poller: the update is still a /start, it just names nobody.
+// poller, but also: a nil From means the message is not from the chat itself,
+// so the chat is not a private chat with its owner, so ParseStart must refuse.
 func TestParseStartToleratesAMissingSender(t *testing.T) {
 	u := Update{UpdateID: 8, Message: &Message{Text: "/start abc"}}
 	u.Message.Chat.ID = 502
+	u.Message.Chat.Type = "private"
 
 	got, ok := ParseStart(u)
-	if !ok || got.Username != "" {
-		t.Fatalf("ParseStart() = %+v, %v; want ok with an empty Username", got, ok)
+	if ok {
+		t.Fatalf("ParseStart() = %+v, %v; want false for a nil From", got, ok)
 	}
 }
