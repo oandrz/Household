@@ -45,12 +45,11 @@ type Command struct {
 // may contain spaces when written as #"dining out" or @"DBS Savings"; the
 // rest of the words are the description. Anything else -- /start, plain
 // text, an unknown slash -- returns false, and the caller decides whether
-// plain text means anything (it does not, in this stage). A message that is
-// not a private chat with its own sender (isPrivateChatWithItsOwner) also
-// returns false, the same gate ParseStart applies, so a command posted in a
-// group or on someone else's behalf is refused before its grammar is even
-// read. Refuse what you did not construct: an unknown command is ignored,
-// never guessed at.
+// plain text means anything (it does not, in this stage). A message whose
+// chat is not private or whose sender is not the chat itself
+// (isPrivateChatWithItsOwner) also returns false, the same gate ParseStart
+// applies, refused before its grammar is even read. Refuse what you did not
+// construct: an unknown command is ignored, never guessed at.
 func ParseCommand(u Update) (Command, bool) {
 	if u.Message == nil {
 		return Command{}, false

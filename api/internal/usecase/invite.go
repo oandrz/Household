@@ -106,9 +106,9 @@ func NewInviteService(d InviteDeps) *InviteService {
 // TelegramAuthDeps.Invites directly, and closes the remaining half of the
 // loop here. Called exactly once, at startup, before any request is served.
 //
-// NewLink dereferences d.Chats with no nil check, deliberately (see its own
-// doc comment): it can never reach a nil Chats, because it returns early
-// whenever BotUsername is empty. Admit is the method that actually can --
+// NewLink dereferences d.Chats with no nil check, deliberately: it can
+// never reach a nil Chats, because it returns early whenever BotUsername is
+// empty. Admit is the method that actually can --
 // a knock recorded while a bot was configured can still be sitting in the
 // table after the bot is removed and this process restarted
 // (docs/INFRASTRUCTURE.md's leaked-token runbook), so BotUsername's
