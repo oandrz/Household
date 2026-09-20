@@ -194,6 +194,10 @@ not" shape this product has refused twice before.
   caller genuinely has to choose between two.
 - **Removing Mailpit.** `SMTP_ADDR` is required by `config.Load`, and email
   flows still serve every user who has an address — including every invite.
+  **Qualified by [ADR 11](0011-joining-a-household-by-knock.md), 2026-09-20:**
+  an invite no longer travels this path by default — `email_invites` gates
+  it off until an operator turns it on, and a Telegram invite has no email
+  address at all.
 
 ## Exit condition
 

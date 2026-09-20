@@ -4480,8 +4480,9 @@ context the check was silently assuming, and require it explicitly.
   invites prior WHERE prior.id = $1), 0)::bigint`. A postgres test proves
   the subselect sees the pre-`UPDATE` row in the steady state — seed a
   knock, replace the token, read back the knocked chat's id, not `NULL` —
-  and the SQL comment above the statement calls that "safe to trust." Both
-  are true only outside one window: a knock landing between the
+  and `InviteRepo.ReplaceToken`'s own Go doc comment
+  (`invite_repo.go:331`) points at the SQL comment and calls that "safe to
+  trust." Both are true only outside one window: a knock landing between the
   subselect's own evaluation (an `InitPlan`, run against the statement's
   snapshot) and the `UPDATE`'s row lock. Under READ COMMITTED,
   `EvalPlanQual` re-checks the outer `WHERE` against the now-current row
@@ -4489,13 +4490,15 @@ context the check was silently assuming, and require it explicitly.
   subselect already ran, against the *older* snapshot, and returns the
   pre-knock `NULL` → `COALESCE` → `0`. The chat that just knocked is
   silently never told its link died. No security consequence — the knock is
-  lost, not honoured wrongly, and the invite is not compromised — but the
-  SQL comment's "safe to trust" now overclaims what the proof actually
-  covers, and does not name the window. **A same-transaction proof against
-  a seeded, static row proves the steady state; it does not prove the
-  interleaving, and a comment built from that proof should say so.** Left
-  unfixed and recorded here rather than in the code, per this task's own
-  scope.
+  lost, not honoured wrongly, and the invite is not compromised — but
+  `ReplaceToken`'s Go doc comment's "safe to trust" (`invite_repo.go:331`)
+  now overclaims what the proof actually covers, and does not name the
+  window; the SQL comment it points at makes no such claim itself, only
+  the narrower, accurate one that the test proves the subselect against
+  the seeded row. **A same-transaction proof against a seeded, static row
+  proves the steady state; it does not prove the interleaving, and a
+  comment built from that proof should say so.** Left unfixed and recorded
+  here rather than in the code, per this task's own scope.
 
 ### HTTP layer
 
