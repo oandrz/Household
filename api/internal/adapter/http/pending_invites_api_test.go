@@ -195,3 +195,62 @@ func TestWithdrawingAnUnknownInviteIs404(t *testing.T) {
 		}
 	}
 }
+
+// A personal API token is a headless credential. It must not be able to
+// change who can get into the household: minting a co-owner, demoting the
+// other owner, or removing them are all browser-session actions (spec
+// decision 12, the reason behind ADR 7 rule 2). Milestone 1 put this guard
+// on withdraw only -- see TestATokenCanListPendingInvitesButNotWithdrawThem
+// above; this is its sibling for the other three routes that manage
+// household membership.
+func TestATokenCannotChangeWhoIsInTheHousehold(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	tok := env.mustCreateToken(t, session, csrf, "agent")
+
+	cases := []struct {
+		name   string
+		method string
+		path   string
+		body   map[string]any
+	}{
+		{"invite", http.MethodPost, "/api/v1/household/members/invite", map[string]any{
+			"name": "Jane", "email": "jane@example.com", "role": "owner",
+			"capabilities": []string{"calendar", "chores", "money", "marriage"},
+		}},
+		// The mint-a-co-owner attack itself: promote the seeded limited
+		// member to owner with a full capability set, exactly what an
+		// owner's own PATCH would need to succeed.
+		{"update member", http.MethodPatch, "/api/v1/household/members/" + env.limitedMembership,
+			map[string]any{"role": "owner", "capabilities": []string{"calendar", "chores", "money", "marriage"}}},
+		{"remove member", http.MethodDelete, "/api/v1/household/members/" + env.limitedMembership, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := env.bearer(t, tc.method, tc.path, tc.body, tok.Token)
+			if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "SESSION_REQUIRED") {
+				t.Fatalf("token reached %s %s: got %d %s, want 403 SESSION_REQUIRED", tc.method, tc.path, rec.Code, rec.Body.String())
+			}
+		})
+	}
+
+	// Every case above must be a true refusal, not a guard that answers
+	// wrong but still lets the write through: nothing was invited, the
+	// limited member is still there, and still limited.
+	if _, ok := findPendingInvite(env.pendingInvites(t, session), "jane@example.com"); ok {
+		t.Fatal("the invite case was refused with 403 but the invite was created anyway")
+	}
+	found := false
+	for _, m := range env.getMembers(t, session) {
+		if m.ID != env.limitedMembership {
+			continue
+		}
+		found = true
+		if m.Role != "limited" {
+			t.Fatalf("the update-member case was refused with 403 but the role became %q anyway", m.Role)
+		}
+	}
+	if !found {
+		t.Fatal("the remove-member case was refused with 403 but the member is gone anyway")
+	}
+}
