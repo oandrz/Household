@@ -476,3 +476,44 @@ func TestTelegramInviteIsRefusedWhileTheFlagIsOff(t *testing.T) {
 	}, session, csrf)
 	assertErrorResponse(t, rec, http.StatusConflict, "TELEGRAM_INVITES_UNAVAILABLE")
 }
+
+// The service test (TestTheWebFormCannotAcceptATelegramInvite) proves the
+// rule; this proves the route reports it the way a stranger's request would
+// be reported -- 404, not the 410 an expired invite gets or a 500 -- so
+// nothing about the response tells a caller holding a real Telegram token
+// that it differs from one that was never issued (spec decision 7).
+func TestPublicInviteRoutesTreatATelegramTokenAsUnknown(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/household/members/invite", map[string]any{
+		"name": "Christine", "role": "owner", "channel": "telegram",
+		"capabilities": []string{"money", "calendar", "chores", "marriage"},
+	}, session, csrf)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create telegram invite: got %d, want 201: %s", rec.Code, rec.Body.String())
+	}
+	var created inviteCreatedBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode invite response: %v %s", err, rec.Body.String())
+	}
+	// Guard the slice below: a miss on Index would return -1, and
+	// -1+len("start=inv_") still slices a plausible-looking (wrong) offset
+	// rather than failing loudly -- so this test could 404 for the wrong
+	// reason and still look like it proved the rule.
+	if !strings.Contains(created.Link, "start=inv_") {
+		t.Fatalf("link %q carries no inv_ payload", created.Link)
+	}
+	rawToken := created.Link[strings.Index(created.Link, "start=inv_")+len("start=inv_"):]
+
+	preview := env.do(http.MethodGet, "/api/v1/invites/"+rawToken, nil)
+	if preview.Code != http.StatusNotFound {
+		t.Fatalf("preview: got %d, want 404: %s", preview.Code, preview.Body.String())
+	}
+	accept := env.do(http.MethodPost, "/api/v1/invites/"+rawToken+"/accept", map[string]any{
+		"password": "a-long-enough-password", "displayName": "Christine",
+	})
+	if accept.Code != http.StatusNotFound {
+		t.Fatalf("accept: got %d, want 404: %s", accept.Code, accept.Body.String())
+	}
+}

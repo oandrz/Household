@@ -144,7 +144,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, 'telegram')
 RETURNING id;
 
 -- name: GetInviteByTokenHash :one
-SELECT i.id, i.household_id, i.email, i.name, i.role, i.capabilities,
+SELECT i.id, i.household_id, i.email, i.name, i.role, i.capabilities, i.channel,
        i.expires_at, i.accepted_at, h.family_name, u.display_name AS inviter_name
 FROM invites i
 JOIN households h ON h.id = i.household_id
@@ -152,7 +152,7 @@ JOIN users u ON u.id = i.invited_by
 WHERE i.token_hash = $1;
 
 -- name: GetLiveInviteForEmail :one
-SELECT i.id, i.household_id, i.email, i.name, i.role, i.capabilities,
+SELECT i.id, i.household_id, i.email, i.name, i.role, i.capabilities, i.channel,
        i.expires_at, i.accepted_at, h.family_name, u.display_name AS inviter_name
 FROM invites i
 JOIN households h ON h.id = i.household_id

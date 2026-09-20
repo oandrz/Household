@@ -402,7 +402,7 @@ func (q *Queries) GetHousehold(ctx context.Context, id pgtype.UUID) (GetHousehol
 }
 
 const getInviteByTokenHash = `-- name: GetInviteByTokenHash :one
-SELECT i.id, i.household_id, i.email, i.name, i.role, i.capabilities,
+SELECT i.id, i.household_id, i.email, i.name, i.role, i.capabilities, i.channel,
        i.expires_at, i.accepted_at, h.family_name, u.display_name AS inviter_name
 FROM invites i
 JOIN households h ON h.id = i.household_id
@@ -417,6 +417,7 @@ type GetInviteByTokenHashRow struct {
 	Name         string
 	Role         string
 	Capabilities []string
+	Channel      string
 	ExpiresAt    pgtype.Timestamptz
 	AcceptedAt   pgtype.Timestamptz
 	FamilyName   string
@@ -433,6 +434,7 @@ func (q *Queries) GetInviteByTokenHash(ctx context.Context, tokenHash []byte) (G
 		&i.Name,
 		&i.Role,
 		&i.Capabilities,
+		&i.Channel,
 		&i.ExpiresAt,
 		&i.AcceptedAt,
 		&i.FamilyName,
@@ -442,7 +444,7 @@ func (q *Queries) GetInviteByTokenHash(ctx context.Context, tokenHash []byte) (G
 }
 
 const getLiveInviteForEmail = `-- name: GetLiveInviteForEmail :one
-SELECT i.id, i.household_id, i.email, i.name, i.role, i.capabilities,
+SELECT i.id, i.household_id, i.email, i.name, i.role, i.capabilities, i.channel,
        i.expires_at, i.accepted_at, h.family_name, u.display_name AS inviter_name
 FROM invites i
 JOIN households h ON h.id = i.household_id
@@ -465,6 +467,7 @@ type GetLiveInviteForEmailRow struct {
 	Name         string
 	Role         string
 	Capabilities []string
+	Channel      string
 	ExpiresAt    pgtype.Timestamptz
 	AcceptedAt   pgtype.Timestamptz
 	FamilyName   string
@@ -481,6 +484,7 @@ func (q *Queries) GetLiveInviteForEmail(ctx context.Context, arg GetLiveInviteFo
 		&i.Name,
 		&i.Role,
 		&i.Capabilities,
+		&i.Channel,
 		&i.ExpiresAt,
 		&i.AcceptedAt,
 		&i.FamilyName,

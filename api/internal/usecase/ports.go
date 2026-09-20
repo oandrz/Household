@@ -565,10 +565,15 @@ type InviteDetails struct {
 	Name         string
 	Role         domain.Role
 	Capabilities domain.Capabilities
-	FamilyName   string
-	InviterName  string
-	ExpiresAt    time.Time
-	AcceptedAt   *time.Time
+	// Channel is read by the public web routes, which serve only the email
+	// channel: a Telegram invite is admitted by an owner in their own
+	// browser, so the web form must answer its token as an unknown one
+	// (spec decision 7).
+	Channel     domain.InviteChannel
+	FamilyName  string
+	InviterName string
+	ExpiresAt   time.Time
+	AcceptedAt  *time.Time
 }
 
 // AcceptedInvite is what a successful acceptance produces.

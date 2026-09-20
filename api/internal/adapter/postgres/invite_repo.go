@@ -84,6 +84,10 @@ func (r *InviteRepo) ByTokenHash(ctx context.Context, tokenHash []byte) (usecase
 	if err != nil {
 		return usecase.InviteDetails{}, err
 	}
+	channel, err := domain.ParseInviteChannel(row.Channel)
+	if err != nil {
+		return usecase.InviteDetails{}, err
+	}
 	return usecase.InviteDetails{
 		ID:           uuidToString(row.ID),
 		HouseholdID:  uuidToString(row.HouseholdID),
@@ -91,6 +95,7 @@ func (r *InviteRepo) ByTokenHash(ctx context.Context, tokenHash []byte) (usecase
 		Name:         row.Name,
 		Role:         role,
 		Capabilities: caps,
+		Channel:      channel,
 		FamilyName:   row.FamilyName,
 		InviterName:  row.InviterName,
 		ExpiresAt:    timeOf(row.ExpiresAt),
@@ -117,6 +122,10 @@ func (r *InviteRepo) LiveInviteForEmail(ctx context.Context, householdID, email 
 	if err != nil {
 		return usecase.InviteDetails{}, err
 	}
+	channel, err := domain.ParseInviteChannel(row.Channel)
+	if err != nil {
+		return usecase.InviteDetails{}, err
+	}
 	return usecase.InviteDetails{
 		ID:           uuidToString(row.ID),
 		HouseholdID:  uuidToString(row.HouseholdID),
@@ -124,6 +133,7 @@ func (r *InviteRepo) LiveInviteForEmail(ctx context.Context, householdID, email 
 		Name:         row.Name,
 		Role:         role,
 		Capabilities: caps,
+		Channel:      channel,
 		FamilyName:   row.FamilyName,
 		InviterName:  row.InviterName,
 		ExpiresAt:    timeOf(row.ExpiresAt),

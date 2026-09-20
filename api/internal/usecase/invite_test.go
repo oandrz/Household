@@ -675,3 +675,62 @@ func TestCreateTelegramRefusesWhenNoBotIsConfigured(t *testing.T) {
 		t.Fatalf("invite rows written = %d, want 0 -- refused before any write", got)
 	}
 }
+
+// A Telegram invite is admitted by its household's owner, in their own
+// browser, and nowhere else (spec decisions 4 and 7). The public web form
+// must therefore treat its token as though it had never existed -- not
+// refuse it with a reason, which would confirm the token is real.
+func TestTheWebFormCannotAcceptATelegramInvite(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	link, err := f.invites.CreateTelegram(ctx, f.householdID, f.andreasID, "Christine",
+		domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	// The raw token is recoverable only by stripping the inv_ prefix off the
+	// returned link -- exactly how a real owner's browser would read it,
+	// since nothing else ever holds it (same approach as
+	// TestCreateTelegramWritesARowWithNoEmailAndReturnsTheLinkOnce above).
+	rawToken := strings.TrimPrefix(link.URL, "https://t.me/HearthBot?start=inv_")
+	if rawToken == "" {
+		t.Fatal("link carried no token after the inv_ prefix")
+	}
+
+	usersBefore := f.users.count()
+
+	if _, err := f.invites.Preview(ctx, rawToken); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Preview of a Telegram invite: got %v, want domain.ErrNotFound", err)
+	}
+	if _, err := f.invites.Accept(ctx, rawToken, "a-long-enough-password", "Christine"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Accept of a Telegram invite: got %v, want domain.ErrNotFound", err)
+	}
+
+	// Nothing was written: no user, no membership, and the invite is still
+	// waiting for its knock.
+	row := f.inviteRepo.byID(link.ID)
+	if row == nil {
+		t.Fatal("the invite row went missing")
+	}
+	if row.AcceptedAt != nil {
+		t.Fatal("the invite was stamped accepted by the web form")
+	}
+	if got := f.users.count(); got != usersBefore {
+		t.Fatalf("users = %d, want %d unchanged -- the web form created a user for a Telegram invite", got, usersBefore)
+	}
+
+	// The guard sits before checkInviteLive precisely so this stays
+	// domain.ErrNotFound rather than domain.ErrInviteExpired once the
+	// invite's TTL has actually passed -- ErrInviteExpired would tell a
+	// caller the token was real, just late, which is exactly the leak spec
+	// decision 7 rules out. If the guard were ever moved after
+	// checkInviteLive, this is the assertion that would start failing.
+	f.clock.Advance(usecase.TelegramInviteTTL + time.Second)
+	if _, err := f.invites.Preview(ctx, rawToken); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Preview of an expired Telegram invite: got %v, want domain.ErrNotFound", err)
+	}
+	if _, err := f.invites.Accept(ctx, rawToken, "a-long-enough-password", "Christine"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Accept of an expired Telegram invite: got %v, want domain.ErrNotFound", err)
+	}
+}

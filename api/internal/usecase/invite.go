@@ -230,6 +230,15 @@ func (s *InviteService) Preview(ctx context.Context, token string) (InvitePrevie
 	if err != nil {
 		return InvitePreview{}, err
 	}
+	// A Telegram invite is not servable here at all, so it is answered as
+	// an unknown token would be -- before the liveness check, so that even
+	// the difference between "expired" and "unknown" cannot leak for a
+	// token this route never serves (spec decision 7). This is one of the
+	// milestone's named mutation checks: removing it must turn
+	// TestTheWebFormCannotAcceptATelegramInvite red.
+	if details.Channel != domain.ChannelEmail {
+		return InvitePreview{}, domain.ErrNotFound
+	}
 	if err := checkInviteLive(details, s.d.Clock.Now()); err != nil {
 		return InvitePreview{}, err
 	}
@@ -290,6 +299,15 @@ func (s *InviteService) Accept(ctx context.Context, token, password, displayName
 	details, err := s.d.Invites.ByTokenHash(ctx, s.d.Tokens.HashToken(token))
 	if err != nil {
 		return SignInResult{}, err
+	}
+	// A Telegram invite is not servable here at all, so it is answered as
+	// an unknown token would be -- before the liveness check, so that even
+	// the difference between "expired" and "unknown" cannot leak for a
+	// token this route never serves (spec decision 7). This is one of the
+	// milestone's named mutation checks: removing it must turn
+	// TestTheWebFormCannotAcceptATelegramInvite red.
+	if details.Channel != domain.ChannelEmail {
+		return SignInResult{}, domain.ErrNotFound
 	}
 	if err := checkInviteLive(details, now); err != nil {
 		return SignInResult{}, err

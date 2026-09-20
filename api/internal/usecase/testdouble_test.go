@@ -848,7 +848,7 @@ func (d *inviteDouble) details(row *inviteRow) usecase.InviteDetails {
 	inviter := d.users.byID[row.InvitedBy]
 	return usecase.InviteDetails{
 		ID: row.ID, HouseholdID: row.HouseholdID, Email: row.Email, Name: row.Name,
-		Role: row.Role, Capabilities: row.Capabilities,
+		Role: row.Role, Capabilities: row.Capabilities, Channel: row.Channel,
 		FamilyName: d.familyName[row.HouseholdID], InviterName: inviter.DisplayName,
 		ExpiresAt: row.ExpiresAt, AcceptedAt: row.AcceptedAt,
 	}
