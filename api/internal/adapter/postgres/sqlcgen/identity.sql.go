@@ -249,6 +249,39 @@ func (q *Queries) CreateSpace(ctx context.Context, arg CreateSpaceParams) (Space
 	return i, err
 }
 
+const createTelegramInvite = `-- name: CreateTelegramInvite :one
+INSERT INTO invites (household_id, name, role, capabilities, token_hash, invited_by, expires_at, channel)
+VALUES ($1, $2, $3, $4, $5, $6, $7, 'telegram')
+RETURNING id
+`
+
+type CreateTelegramInviteParams struct {
+	HouseholdID  pgtype.UUID
+	Name         string
+	Role         string
+	Capabilities []string
+	TokenHash    []byte
+	InvitedBy    pgtype.UUID
+	ExpiresAt    pgtype.Timestamptz
+}
+
+// No email column at all, which is what invites_channel_matches_email
+// requires of this channel (migration 00021).
+func (q *Queries) CreateTelegramInvite(ctx context.Context, arg CreateTelegramInviteParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, createTelegramInvite,
+		arg.HouseholdID,
+		arg.Name,
+		arg.Role,
+		arg.Capabilities,
+		arg.TokenHash,
+		arg.InvitedBy,
+		arg.ExpiresAt,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, password_hash, display_name, avatar_initial)
 VALUES ($1, $2, $3, $4)

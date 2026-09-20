@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -82,6 +83,17 @@ type inviteMemberRequest struct {
 	Channel      string   `json:"channel"`
 }
 
+// inviteCreatedDTO answers every channel. Link is omitted for an email
+// invite, which has none, rather than sent as an empty string: the
+// frontend switches on its presence to decide whether to show the waiting
+// card. Every 2xx except 204 carries a JSON body (CLAUDE.md), so this is
+// returned on the profile and email paths too, both with a zero value.
+type inviteCreatedDTO struct {
+	ID        string    `json:"id"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	Link      string    `json:"link,omitempty"`
+}
+
 // An inviteChannelChoice is how the person being added will sign in, as the
 // request says it. It has one value more than domain.InviteChannel, and the
 // extra one is the point: "profile" means they never sign in at all, so no
@@ -152,34 +164,64 @@ func handleInviteMember(deps Deps) http.HandlerFunc {
 		// outside this gate -- it calls InviteService directly and prints
 		// the URL it captured, which is how an operator hands an invite
 		// over today.
+		//
+		// Every arm below answers and returns. None falls through to a
+		// shared call after the switch: that shape is what let a
+		// {"channel":"email","email":""} request slip past the flag check
+		// and land in Create's own empty-email branch, silently creating a
+		// profile-only member with no invite row, no token and no mail for
+		// a caller who explicitly asked for the email channel. The profile
+		// arm's own return already avoided a double-create for the same
+		// reason; every arm now does the same.
 		switch choice {
 		case channelChoiceProfile:
 			// Today's kid path, untouched: Create's own empty-email branch
 			// creates the member directly and writes no invite row. It
 			// refuses any role but limited, which is the check this arm
 			// deliberately does not repeat -- one rule, one place.
-			//
-			// It answers and RETURNS. Falling through would reach the
-			// Create call below the switch and create the member a second
-			// time, with the same empty email -- a defect no "the member
-			// exists" assertion would catch, which is why the test counts.
 			if err := deps.Invites.Create(r.Context(), scope.HouseholdID, scope.UserID,
 				req.Name, "", role, caps); err != nil {
 				MapDomainError(w, r, err)
 				return
 			}
-			WriteJSON(w, http.StatusCreated, map[string]string{"status": "invited"})
-			return
+			WriteJSON(w, http.StatusCreated, inviteCreatedDTO{})
 		case channelChoiceEmail:
 			if !scope.Flags.Enabled(domain.FlagEmailInvites) {
 				MapDomainError(w, r, domain.ErrEmailInvitesDisabled)
 				return
 			}
+			// A caller who explicitly asked for the email channel but sent
+			// no address must be refused here, not handed to Create: its
+			// own empty-email branch exists for the profile arm's kid
+			// case, and would otherwise silently create a profile-only
+			// member with no invite row, no token and no mail for a
+			// request that asked for one.
+			if req.Email == "" {
+				MapDomainError(w, r, domain.ErrInviteRequiresEmail)
+				return
+			}
+			if err := deps.Invites.Create(r.Context(), scope.HouseholdID, scope.UserID,
+				req.Name, req.Email, role, caps); err != nil {
+				MapDomainError(w, r, err)
+				return
+			}
+			// The email path has no id to report: Create predates this
+			// response shape and returns none. It is the deprecated channel
+			// and gains nothing from being reshaped -- the frontend reads
+			// only `link`, and the list route supplies the row.
+			WriteJSON(w, http.StatusCreated, inviteCreatedDTO{})
 		case channelChoiceTelegram:
-			// Task 5 fills this in. Until then it refuses, which is the
-			// correct answer for a channel this build cannot yet deliver.
-			MapDomainError(w, r, domain.ErrTelegramInvitesUnavailable)
-			return
+			if !scope.Flags.Enabled(domain.FlagTelegramSignIn) {
+				MapDomainError(w, r, domain.ErrTelegramInvitesUnavailable)
+				return
+			}
+			link, err := deps.Invites.CreateTelegram(r.Context(), scope.HouseholdID, scope.UserID,
+				req.Name, role, caps)
+			if err != nil {
+				MapDomainError(w, r, err)
+				return
+			}
+			WriteJSON(w, http.StatusCreated, inviteCreatedDTO{ID: link.ID, ExpiresAt: link.ExpiresAt, Link: link.URL})
 		default:
 			// Unreachable while parseInviteChannelChoice is the only way
 			// in, and present anyway: a choice added without a case here
@@ -187,12 +229,6 @@ func handleInviteMember(deps Deps) http.HandlerFunc {
 			MapDomainError(w, r, domain.ErrUnknownInviteChannel)
 			return
 		}
-
-		if err := deps.Invites.Create(r.Context(), scope.HouseholdID, scope.UserID, req.Name, req.Email, role, caps); err != nil {
-			MapDomainError(w, r, err)
-			return
-		}
-		WriteJSON(w, http.StatusCreated, map[string]string{"status": "invited"})
 	}
 }
 

@@ -794,6 +794,27 @@ func (d *inviteDouble) Create(_ context.Context, householdID, email, name string
 	return id, nil
 }
 
+// CreateTelegram mirrors Create but writes a row with no address at all --
+// Email stays "", this double's stand-in for the real table's NULL -- and
+// Channel is domain.ChannelTelegram rather than Create's hardcoded
+// ChannelEmail.
+func (d *inviteDouble) CreateTelegram(_ context.Context, householdID, name string, role domain.Role,
+	caps domain.Capabilities, tokenHash []byte, invitedBy string, expiresAt time.Time) (string, error) {
+	if _, exists := d.rows[string(tokenHash)]; exists {
+		return "", domain.ErrAlreadyExists
+	}
+
+	d.n++
+	id := fmt.Sprintf("invite-%d", d.n)
+	d.rows[string(tokenHash)] = &inviteRow{
+		ID: id, HouseholdID: householdID, Email: "", Name: name, Role: role,
+		Capabilities: caps, InvitedBy: invitedBy, ExpiresAt: expiresAt,
+		Channel:   domain.ChannelTelegram,
+		CreatedAt: d.clock.Now(), Seq: d.n,
+	}
+	return id, nil
+}
+
 func (d *inviteDouble) ByTokenHash(_ context.Context, tokenHash []byte) (usecase.InviteDetails, error) {
 	row, ok := d.rows[string(tokenHash)]
 	if !ok {
@@ -1810,15 +1831,17 @@ func newFixture(t *testing.T) *fixture {
 	inviteRepo.setFamilyName(householdID, "Oentoro")
 
 	invites := usecase.NewInviteService(usecase.InviteDeps{
-		Invites:    inviteRepo,
-		Users:      users,
-		Sessions:   sessions,
-		Mailer:     mailer,
-		Hasher:     hasher,
-		Tokens:     &seqTokens{},
-		Clock:      clock,
-		SessionTTL: 30 * 24 * time.Hour,
-		BaseURL:    "http://localhost:5173",
+		Invites:           inviteRepo,
+		Users:             users,
+		Sessions:          sessions,
+		Mailer:            mailer,
+		Hasher:            hasher,
+		Tokens:            &seqTokens{},
+		Clock:             clock,
+		SessionTTL:        30 * 24 * time.Hour,
+		BaseURL:           "http://localhost:5173",
+		BotUsername:       "HearthBot",
+		TelegramInviteTTL: usecase.TelegramInviteTTL,
 	})
 
 	apiTokens := newAPITokenDouble()

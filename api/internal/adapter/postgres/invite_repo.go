@@ -32,10 +32,10 @@ func (r *InviteRepo) Create(ctx context.Context, householdID, email, name string
 	id, err := r.q.CreateInvite(ctx, sqlcgen.CreateInviteParams{
 		HouseholdID: uuid(householdID),
 		// text(), not nullableText(): Create's caller always has a real
-		// address today (Task 7 is what gives this repository a Telegram
-		// invite with none), and nullableText would turn "" into NULL,
-		// which invites_channel_matches_email then refuses against the
-		// default channel of 'email'.
+		// address -- CreateTelegram below is the repository's other path,
+		// for the invite with none -- and nullableText would turn "" into
+		// NULL, which invites_channel_matches_email then refuses against
+		// the default channel of 'email'.
 		Email:        text(email),
 		Name:         name,
 		Role:         string(role),
@@ -46,6 +46,27 @@ func (r *InviteRepo) Create(ctx context.Context, householdID, email, name string
 	})
 	if err != nil {
 		return "", translate(err, "create invite")
+	}
+	return uuidToString(id), nil
+}
+
+// CreateTelegram writes an invite with no email column touched at all --
+// not even as an explicit NULL -- because CreateTelegramInvite's own INSERT
+// never names the column, letting it take its schema default. That is what
+// invites_channel_matches_email requires of a 'telegram' row.
+func (r *InviteRepo) CreateTelegram(ctx context.Context, householdID, name string, role domain.Role,
+	caps domain.Capabilities, tokenHash []byte, invitedBy string, expiresAt time.Time) (string, error) {
+	id, err := r.q.CreateTelegramInvite(ctx, sqlcgen.CreateTelegramInviteParams{
+		HouseholdID:  uuid(householdID),
+		Name:         name,
+		Role:         string(role),
+		Capabilities: caps.Strings(),
+		TokenHash:    tokenHash,
+		InvitedBy:    uuid(invitedBy),
+		ExpiresAt:    timestamptz(expiresAt),
+	})
+	if err != nil {
+		return "", translate(err, "create telegram invite")
 	}
 	return uuidToString(id), nil
 }

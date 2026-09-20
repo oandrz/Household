@@ -622,6 +622,12 @@ type InviteSummary struct {
 type InviteRepository interface {
 	Create(ctx context.Context, householdID, email, name string, role domain.Role,
 		caps domain.Capabilities, tokenHash []byte, invitedBy string, expiresAt time.Time) (string, error)
+	// CreateTelegram writes a telegram-channel invite: no email address at
+	// all, which invites_channel_matches_email in migration 00021 requires
+	// for this channel. Returns the new invite's id. A colliding token hash
+	// reports domain.ErrAlreadyExists, exactly as Create does.
+	CreateTelegram(ctx context.Context, householdID, name string, role domain.Role,
+		caps domain.Capabilities, tokenHash []byte, invitedBy string, expiresAt time.Time) (string, error)
 	ByTokenHash(ctx context.Context, tokenHash []byte) (InviteDetails, error)
 	// LiveInviteForEmail answers "is there already something usable in
 	// flight for this address in this household" -- neither accepted nor

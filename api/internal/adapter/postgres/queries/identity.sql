@@ -136,6 +136,13 @@ INSERT INTO invites (household_id, email, name, role, capabilities, token_hash, 
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING id;
 
+-- name: CreateTelegramInvite :one
+-- No email column at all, which is what invites_channel_matches_email
+-- requires of this channel (migration 00021).
+INSERT INTO invites (household_id, name, role, capabilities, token_hash, invited_by, expires_at, channel)
+VALUES ($1, $2, $3, $4, $5, $6, $7, 'telegram')
+RETURNING id;
+
 -- name: GetInviteByTokenHash :one
 SELECT i.id, i.household_id, i.email, i.name, i.role, i.capabilities,
        i.expires_at, i.accepted_at, h.family_name, u.display_name AS inviter_name

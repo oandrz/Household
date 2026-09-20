@@ -3,6 +3,7 @@ package usecase_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -570,5 +571,107 @@ func TestWithdrawCannotReachAnotherHouseholdsInvite(t *testing.T) {
 	}
 	if left, _ := f.inviteRepo.ListPending(ctx, "household-2", f.clock.Now()); len(left) != 1 {
 		t.Fatalf("the other household's invite must survive: %+v", left)
+	}
+}
+
+// --- Task 5: CreateTelegram ---------------------------------------------
+
+// A Telegram invite has no address anywhere: not in the request, not in the
+// row, not in any mail. ErrInviteRequiresEmail guarded delivery, not
+// identity -- users.email is already nullable and Telegram sign-up already
+// creates owners with no address (spec decision 9).
+//
+// The exact 47-character payload length ("inv_" plus NewToken's 43
+// base64url characters, under Telegram's 64-character start limit) is a
+// property of the real crypto.TokenGenerator this fixture's seqTokens
+// double does not reproduce (it hands out "token-1", "token-2", ...), so
+// that invariant is pinned instead by
+// TestCreatingATelegramInviteReturnsTheLinkOnce in the http package, which
+// runs CreateTelegram over the real token generator end to end.
+func TestCreateTelegramWritesARowWithNoEmailAndReturnsTheLinkOnce(t *testing.T) {
+	f := newFixture(t)
+
+	link, err := f.invites.CreateTelegram(context.Background(), f.householdID, f.andreasID, "Christine",
+		domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	if !strings.HasPrefix(link.URL, "https://t.me/HearthBot?start=inv_") {
+		t.Fatalf("link %q does not carry the inv_ payload prefix migration 00018 reserved", link.URL)
+	}
+	// The raw token is recoverable only by stripping this same prefix --
+	// exactly how a real owner's browser would read it off the link, since
+	// nothing else ever holds it.
+	rawToken := strings.TrimPrefix(link.URL, "https://t.me/HearthBot?start=inv_")
+	if rawToken == "" {
+		t.Fatal("link carried no token after the inv_ prefix")
+	}
+	if got, want := link.ExpiresAt, f.clock.now.Add(24*time.Hour); !got.Equal(want) {
+		t.Fatalf("expires at %v, want %v (spec decision 8: 24 hours)", got, want)
+	}
+
+	row := f.inviteRepo.byID(link.ID)
+	if row == nil {
+		t.Fatal("no invite row was written")
+	}
+	if row.Email != "" {
+		t.Fatalf("a Telegram invite carries no address, got %q", row.Email)
+	}
+	if row.Channel != domain.ChannelTelegram {
+		t.Fatalf("channel is %q, want telegram", row.Channel)
+	}
+	if f.mailer.invitesSentCount() != 0 {
+		t.Fatal("a Telegram invite must send no mail at all")
+	}
+}
+
+// The list route never shows the link again: the raw token is not stored,
+// so there is nothing to show. This pins that the summary has no way to
+// carry one.
+func TestPendingListNeverCarriesAnInviteLink(t *testing.T) {
+	f := newFixture(t)
+
+	link, err := f.invites.CreateTelegram(context.Background(), f.householdID, f.andreasID, "Christine",
+		domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	summaries, err := f.invites.ListPending(context.Background(), f.householdID)
+	if err != nil {
+		t.Fatalf("ListPending: %v", err)
+	}
+	for _, s := range summaries {
+		if s.ID == link.ID && strings.Contains(fmt.Sprint(s), "t.me") {
+			t.Fatal("a pending row carried the deep link; it is shown once, at creation")
+		}
+	}
+}
+
+// CreateTelegram is refused outright when no bot is configured on this
+// install -- the other half of spec decision 11 (the flag is the HTTP
+// layer's job; see TestTelegramInviteIsRefusedWhileTheFlagIsOff in the http
+// package).
+func TestCreateTelegramRefusesWhenNoBotIsConfigured(t *testing.T) {
+	f := newFixture(t)
+	f.invites = usecase.NewInviteService(usecase.InviteDeps{
+		Invites:           f.inviteRepo,
+		Users:             f.users,
+		Sessions:          f.sessions,
+		Mailer:            f.mailer,
+		Hasher:            f.hasher,
+		Tokens:            &seqTokens{},
+		Clock:             f.clock,
+		SessionTTL:        30 * 24 * time.Hour,
+		BaseURL:           "http://localhost:5173",
+		TelegramInviteTTL: usecase.TelegramInviteTTL,
+		// BotUsername left "" on purpose: no bot configured.
+	})
+
+	if _, err := f.invites.CreateTelegram(context.Background(), f.householdID, f.andreasID, "Christine",
+		domain.RoleOwner, domain.AllCapabilities()); !errors.Is(err, domain.ErrTelegramInvitesUnavailable) {
+		t.Fatalf("CreateTelegram with no bot configured: got %v, want domain.ErrTelegramInvitesUnavailable", err)
+	}
+	if got := f.inviteRepo.count(); got != 0 {
+		t.Fatalf("invite rows written = %d, want 0 -- refused before any write", got)
 	}
 }

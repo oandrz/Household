@@ -14,6 +14,17 @@ import (
 // can move it.
 const inviteTTL = 7 * 24 * time.Hour
 
+// TelegramInviteTTL is 24 hours (partner-invite spec decision 8), exported
+// so main.go and the test wiring cannot drift apart on it.
+const TelegramInviteTTL = 24 * time.Hour
+
+// telegramInvitePayloadPrefix routes a /start payload to an invite rather
+// than to the sign-in nonce table. Reserved by migration 00018's own
+// comment. "inv_" plus NewToken's 43 base64url characters is 47, under
+// Telegram's 64-character start limit -- check that arithmetic again before
+// ever lengthening either half.
+const telegramInvitePayloadPrefix = "inv_"
+
 // ErrInviteeAlreadyRegistered is Create's rejection of an invite to an email
 // address that already has a users row. Without this check, Create wrote the
 // invite and sent the mail anyway -- InviteRepo.Accept unconditionally calls
@@ -52,6 +63,15 @@ type InviteDeps struct {
 	Clock      Clock
 	SessionTTL time.Duration
 	BaseURL    string
+	// BotUsername is the @name in the t.me deep link. Empty means no bot is
+	// configured on this install, which is one of the two conditions that
+	// make a Telegram invite impossible (spec decision 11).
+	BotUsername string
+	// TelegramInviteTTL is 24 hours (spec decision 8). Email invites keep
+	// inviteTTL's seven days: getting a new Telegram link is one click, so
+	// a short life costs almost nothing, and a link forgotten in a chat
+	// history dies the next day.
+	TelegramInviteTTL time.Duration
 }
 
 type InviteService struct {
@@ -152,6 +172,54 @@ func (s *InviteService) Create(ctx context.Context, householdID, invitedByUserID
 
 	url := fmt.Sprintf("%s/invite/%s", s.d.BaseURL, raw)
 	return s.d.Mailer.SendInvite(ctx, email, name, inviter.DisplayName, url)
+}
+
+// TelegramInviteLink is a one-time deep link, returned once at creation and
+// once per new link (NewLink). The raw token is never stored -- only its
+// hash is -- so nothing can show this URL a second time.
+type TelegramInviteLink struct {
+	ID        string
+	URL       string
+	ExpiresAt time.Time
+}
+
+// CreateTelegram writes an invite nobody has to have an email address for,
+// and returns the deep link the owner hands over.
+//
+// There is no ErrInviteeAlreadyRegistered pre-check here, and that absence
+// is deliberate: that check exists because users.email is unique, so a
+// second account for the same address could never be created. A Telegram
+// invite has no address, and the collision it *can* hit -- the chat already
+// belonging to a Hearth account -- is not knowable at creation time,
+// because nobody has tapped yet. It is checked at the knock (spec decision
+// 15) and again inside Admit's transaction.
+func (s *InviteService) CreateTelegram(ctx context.Context, householdID, invitedByUserID, name string,
+	role domain.Role, caps domain.Capabilities) (TelegramInviteLink, error) {
+	if s.d.BotUsername == "" {
+		return TelegramInviteLink{}, domain.ErrTelegramInvitesUnavailable
+	}
+	if _, err := domain.NewMembership("", householdID, "", role, caps); err != nil {
+		return TelegramInviteLink{}, err
+	}
+
+	raw, hash, err := s.d.Tokens.NewToken()
+	if err != nil {
+		return TelegramInviteLink{}, fmt.Errorf("generate telegram invite token: %w", err)
+	}
+	expiresAt := s.d.Clock.Now().Add(s.d.TelegramInviteTTL)
+	id, err := s.d.Invites.CreateTelegram(ctx, householdID, name, role, caps, hash, invitedByUserID, expiresAt)
+	if err != nil {
+		return TelegramInviteLink{}, err
+	}
+	return TelegramInviteLink{ID: id, URL: s.telegramInviteURL(raw), ExpiresAt: expiresAt}, nil
+}
+
+// telegramInviteURL is the one place the inv_ prefix is written. Migration
+// 00018's comment reserved it so an invite routes by payload rather than
+// through telegram_link_requests; HandleStart strips it before handing the
+// rest to the knocker.
+func (s *InviteService) telegramInviteURL(rawToken string) string {
+	return fmt.Sprintf("https://t.me/%s?start=%s%s", s.d.BotUsername, telegramInvitePayloadPrefix, rawToken)
 }
 
 // Preview lets a caller see what an invite offers before they sign in or

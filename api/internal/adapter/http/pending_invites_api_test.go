@@ -361,4 +361,118 @@ func TestEmailInviteWorksWhenTheOperatorTurnsTheFlagOn(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("email invite with the flag on: got %d, want 201", rec.Code)
 	}
+	// Counted, not merely found: findPendingInvite below returns the first
+	// match, so a switch arm that fell through to a second Create call
+	// (the shape TestEmailInviteWithNoAddressIsRefused's mutation check
+	// pins the email arm against) would still pass a bare "found" check
+	// while writing Jane's invite twice.
+	pending := env.pendingInvites(t, session)
+	count := 0
+	for _, invite := range pending {
+		if invite.Email == "jane@example.com" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("jane@example.com appears %d times in the pending list, want exactly 1", count)
+	}
+}
+
+// --- Task 5: the telegram channel, and the email arm's empty-address loophole ---
+
+// A caller that explicitly names the email channel but sends no address
+// must be refused, not silently handed to Create -- whose own empty-email
+// branch exists for the profile arm's kid case and would otherwise create a
+// profile-only member with no invite row, no token and no mail for a
+// request that asked for a real invite.
+func TestEmailInviteWithNoAddressIsRefused(t *testing.T) {
+	env := newTestEnv(t)
+	if err := env.featureFlags.SetGlobal(context.Background(), string(domain.FlagEmailInvites), true, ""); err != nil {
+		t.Fatalf("enable email invites: %v", err)
+	}
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/household/members/invite", map[string]any{
+		"name": "Jane", "email": "", "role": "limited", "channel": "email",
+		"capabilities": []string{"calendar", "chores"},
+	}, session, csrf)
+	assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "INVITE_REQUIRES_EMAIL")
+
+	// The loophole this closes wrote a profile-only member with the empty
+	// email arm's shape (Create's role != limited guard means a "limited"
+	// role is exactly the case that would otherwise have quietly
+	// succeeded) -- so the strongest proof of the fix is that nobody named
+	// Jane exists afterward.
+	members := env.authedGet(t, "/api/v1/household/members", session)
+	if strings.Contains(members.Body.String(), `"Jane"`) {
+		t.Fatal("a refused email invite with no address created a member anyway")
+	}
+}
+
+type inviteCreatedBody struct {
+	ID        string    `json:"id"`
+	Link      string    `json:"link"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+// The owner picks Telegram and gets back a one-time t.me deep link -- the
+// point of milestone 2's task 5. The list route shows the invite exists but
+// never repeats the link: the raw token behind it is never stored, so
+// there is nothing left to show a second time.
+func TestCreatingATelegramInviteReturnsTheLinkOnce(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/household/members/invite", map[string]any{
+		"name": "Christine", "role": "owner", "channel": "telegram",
+		"capabilities": []string{"money", "calendar", "chores", "marriage"},
+	}, session, csrf)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("got %d, want 201: %s", rec.Code, rec.Body.String())
+	}
+	var body inviteCreatedBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode invite response: %v %s", err, rec.Body.String())
+	}
+	if !strings.Contains(body.Link, "?start=inv_") {
+		t.Fatalf("link %q carries no inv_ payload", body.Link)
+	}
+	// The exact 47-character payload -- "inv_" plus NewToken's 43
+	// base64url characters -- is what keeps this under Telegram's
+	// 64-character /start limit. This is the one test in the suite that
+	// runs CreateTelegram over the real crypto.TokenGenerator rather than
+	// a fixture double, so it is where that invariant is actually pinned.
+	payload := body.Link[strings.Index(body.Link, "start=")+len("start="):]
+	if len(payload) != 47 {
+		t.Fatalf("payload is %d characters; Telegram's start limit is 64 and the spec budgets 47", len(payload))
+	}
+	if body.ID == "" {
+		t.Fatal("a telegram invite response carried no id")
+	}
+
+	// The list route shows the invite but never the link again.
+	list := env.authedGet(t, "/api/v1/household/invites", session)
+	if strings.Contains(list.Body.String(), "t.me") {
+		t.Fatal("the pending list leaked the deep link")
+	}
+	if !strings.Contains(list.Body.String(), `"channel":"telegram"`) {
+		t.Fatalf("the pending list does not report the channel: %s", list.Body.String())
+	}
+}
+
+// Telegram invites are hidden while the telegram_sign_in flag is off, the
+// same edge-enforced rule TestEmailInviteIsRefusedWhileTheFlagIsOff pins for
+// the email channel (spec decision 10).
+func TestTelegramInviteIsRefusedWhileTheFlagIsOff(t *testing.T) {
+	env := newTestEnv(t)
+	if err := env.featureFlags.SetGlobal(context.Background(), string(domain.FlagTelegramSignIn), false, ""); err != nil {
+		t.Fatalf("disable telegram sign-in: %v", err)
+	}
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/household/members/invite", map[string]any{
+		"name": "Christine", "role": "owner", "channel": "telegram",
+		"capabilities": []string{"money", "calendar", "chores", "marriage"},
+	}, session, csrf)
+	assertErrorResponse(t, rec, http.StatusConflict, "TELEGRAM_INVITES_UNAVAILABLE")
 }

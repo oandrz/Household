@@ -257,15 +257,17 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		BaseURL:    "http://localhost:5173",
 	})
 	inviteSvc := usecase.NewInviteService(usecase.InviteDeps{
-		Invites:    invites,
-		Users:      users,
-		Sessions:   sessions,
-		Mailer:     mailer,
-		Hasher:     hasher,
-		Tokens:     tokens,
-		Clock:      clk,
-		SessionTTL: httpadapter.SessionTTL,
-		BaseURL:    "http://localhost:5173",
+		Invites:           invites,
+		Users:             users,
+		Sessions:          sessions,
+		Mailer:            mailer,
+		Hasher:            hasher,
+		Tokens:            tokens,
+		Clock:             clk,
+		SessionTTL:        httpadapter.SessionTTL,
+		BaseURL:           "http://localhost:5173",
+		BotUsername:       "HearthBot",
+		TelegramInviteTTL: usecase.TelegramInviteTTL,
 	})
 	apiTokens := postgres.NewAPITokenRepo(db)
 	memberSvc := usecase.NewMemberService(usecase.MemberDeps{Members: memberships, Sessions: sessions, APITokens: apiTokens})

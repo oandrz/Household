@@ -149,15 +149,17 @@ func run() error {
 		BaseURL:    cfg.AppBaseURL,
 	})
 	inviteSvc := usecase.NewInviteService(usecase.InviteDeps{
-		Invites:    invites,
-		Users:      users,
-		Sessions:   sessions,
-		Mailer:     mailer,
-		Hasher:     hasher,
-		Tokens:     tokens,
-		Clock:      sysClock,
-		SessionTTL: httpadapter.SessionTTL,
-		BaseURL:    cfg.AppBaseURL,
+		Invites:           invites,
+		Users:             users,
+		Sessions:          sessions,
+		Mailer:            mailer,
+		Hasher:            hasher,
+		Tokens:            tokens,
+		Clock:             sysClock,
+		SessionTTL:        httpadapter.SessionTTL,
+		BaseURL:           cfg.AppBaseURL,
+		BotUsername:       cfg.TelegramBotUsername,
+		TelegramInviteTTL: usecase.TelegramInviteTTL,
 	})
 	apiTokens := postgres.NewAPITokenRepo(db)
 	memberSvc := usecase.NewMemberService(usecase.MemberDeps{
