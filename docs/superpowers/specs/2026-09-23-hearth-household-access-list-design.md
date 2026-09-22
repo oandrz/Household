@@ -184,8 +184,8 @@ nothing. A row whose user is not a current member is dropped by the service
   (decision 10).
 - `features/settings/LinkedChatList.tsx` — `TelegramConnection` for the
   caller, then read-only rows for the other members' chats.
-- `features/settings/useHouseholdAccess.ts` — the query; `useApiTokens.ts`
-  mutations for create and revoke, both invalidating the access query.
+- `features/settings/useHouseholdAccess.ts` — the query, plus the create and
+  revoke token mutations, both invalidating the access query.
 - `schemas.ts` gains the access response schema.
 - `SettingsPage.tsx` drops the standalone `TelegramPanel` and renders
   `AccessPanel`.

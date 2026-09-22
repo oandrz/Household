@@ -955,7 +955,7 @@ func TestAnOwnerCannotRevokeAnotherMembersToken(t *testing.T) {
 - [ ] **Step 4: Run the tests to verify they fail**
 
 Run: `go test ./internal/adapter/http/ -run 'AccessList|EveryMembersTokensAndChats|OnlyTheirOwnTokensAndChat|RevokeAnotherMembersToken' -count=1`
-Expected: FAIL — the route does not exist yet, so `GET access` answers 404 (`GET access: 404`).
+Expected: FAIL — the route does not exist yet, so `GET access` answers 404 (`GET access: 404`). One exception: `TestAnOwnerCannotRevokeAnotherMembersToken` **passes already** — it never touches the new route; it pins the existing `DELETE /auth/tokens/{id}` scoping the access list relies on. That is expected, not a broken env.
 
 - [ ] **Step 5: Write the handler**
 
@@ -1731,8 +1731,6 @@ export function NewApiTokenModal({ open, onClose }: { open: boolean; onClose: ()
 }
 ```
 
-If `FIELD_CONTROL_CLASS` is not the class `InviteMemberModal.tsx` puts on its text inputs, use the one it does use.
-
 - [ ] **Step 9: Run both test files to verify they pass**
 
 Run: `npx vitest run src/features/settings/ApiTokenList.test.tsx src/features/settings/NewApiTokenModal.test.tsx`
@@ -1871,8 +1869,6 @@ describe("AccessPanel", () => {
   });
 });
 ```
-
-If `pendingInvite(...)` does not parse against `pendingInviteSchema`, copy a row from `PendingInvitesList.test.tsx`.
 
 - [ ] **Step 3: Run it to verify it fails**
 
@@ -2053,7 +2049,7 @@ Create the verification file with a "Mutation checks" section. For each: make th
 4. `ApiTokenList.tsx`: change `isMine={t.memberId === myUserId}` to `isMine={true}`.
    Run: `npx vitest run src/features/settings/ApiTokenList.test.tsx` → must FAIL.
 
-After reverting all four, re-run `make test` → green.
+None of these four should turn `TestAnOwnerCannotRevokeAnotherMembersToken` red — it guards the existing DELETE, not the new code. After reverting all four, re-run `make test` → green.
 
 - [ ] **Step 3: Update the docs**
 
