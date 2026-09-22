@@ -45,10 +45,16 @@ type Command struct {
 // may contain spaces when written as #"dining out" or @"DBS Savings"; the
 // rest of the words are the description. Anything else -- /start, plain
 // text, an unknown slash -- returns false, and the caller decides whether
-// plain text means anything (it does not, in this stage). Refuse what you
-// did not construct: an unknown command is ignored, never guessed at.
+// plain text means anything (it does not, in this stage). A message whose
+// chat is not private or whose sender is not the chat itself
+// (isPrivateChatWithItsOwner) also returns false, the same gate ParseStart
+// applies, refused before its grammar is even read. Refuse what you did not
+// construct: an unknown command is ignored, never guessed at.
 func ParseCommand(u Update) (Command, bool) {
 	if u.Message == nil {
+		return Command{}, false
+	}
+	if !isPrivateChatWithItsOwner(u.Message) {
 		return Command{}, false
 	}
 	text := strings.TrimSpace(u.Message.Text)
@@ -64,6 +70,9 @@ func ParseCommand(u Update) (Command, bool) {
 	}
 	word, rest, _ := strings.Cut(text, " ")
 	// Telegram appends @botname to commands in groups: "/spend@HearthBot".
+	// Group traffic no longer reaches here (isPrivateChatWithItsOwner above),
+	// but a person may still type the suffix by hand after copying a command
+	// out of a group, so the strip stays.
 	word, _, _ = strings.Cut(strings.ToLower(word), "@")
 	switch word {
 	case "/balance", "/recent", "/help", "/yes", "/no":

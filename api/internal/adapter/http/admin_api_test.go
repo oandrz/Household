@@ -481,6 +481,54 @@ func TestMeCarriesEveryDefinedFlag(t *testing.T) {
 	}
 }
 
+// TestMeMasksTelegramSignInWhenNoBotIsConfigured is the spec's decision 11
+// edge: telegram_sign_in's stored value (set to true here, the flag's own
+// default) is left alone -- ResolveFlags stays a pure function of the
+// stored rows -- but buildMeResponse masks it to false in the response when
+// this install has no bot (deps.Telegram is nil, env's own router). That is
+// what makes InviteMemberModal's "Inviting is unavailable on this install"
+// copy render instead of a Send invite button that always answers 409
+// TELEGRAM_INVITES_UNAVAILABLE.
+//
+// A second router sharing every other dependency but with Telegram wired in
+// (telegramRouter, telegram_api_test.go) proves the true value still passes
+// through unmasked -- the false answer above is masking, not the flag
+// actually being off.
+func TestMeMasksTelegramSignInWhenNoBotIsConfigured(t *testing.T) {
+	env := newTestEnv(t)
+	if err := env.featureFlags.SetGlobal(context.Background(),
+		string(domain.FlagTelegramSignIn), true, ""); err != nil {
+		t.Fatalf("SetGlobal: %v", err)
+	}
+	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	rec := env.authedGet(t, "/api/v1/auth/me", session)
+	var body struct {
+		Features map[string]bool `json:"features"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode me: %v", err)
+	}
+	if body.Features["telegram_sign_in"] {
+		t.Fatal("telegram_sign_in is true although this install's router has no bot configured")
+	}
+
+	withBot := telegramRouter(env, newTelegramAuthServiceForTest())
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	req.AddCookie(session)
+	rec2 := httptest.NewRecorder()
+	withBot.ServeHTTP(rec2, req)
+	var withBotBody struct {
+		Features map[string]bool `json:"features"`
+	}
+	if err := json.Unmarshal(rec2.Body.Bytes(), &withBotBody); err != nil {
+		t.Fatalf("decode me (with bot): %v", err)
+	}
+	if !withBotBody.Features["telegram_sign_in"] {
+		t.Fatal("telegram_sign_in is false although a bot is configured and the flag is on")
+	}
+}
+
 func TestMeMarksAPlatformAdmin(t *testing.T) {
 	env := newTestEnv(t)
 	env.makePlatformAdmin(t, env.ownerEmail)

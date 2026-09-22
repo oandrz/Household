@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/andreasoentoro/hearth/api/internal/domain"
@@ -46,6 +47,10 @@ type TelegramAuthDeps struct {
 	Clock       Clock
 	BaseURL     string
 	BotUsername string
+	// Invites answers an inv_ payload: everything about the household
+	// invite it names lives behind this one method, so this service holds
+	// no invite rule of its own.
+	Invites InviteKnocker
 }
 
 // TelegramAuthService delivers Hearth's existing sign-in and sign-up tokens
@@ -96,6 +101,15 @@ func (s *TelegramAuthService) StartLink(ctx context.Context) (TelegramStartLink,
 // told anything -- an ordinary refusal MUST be answered here, in the chat, or
 // it is answered nowhere.
 func (s *TelegramAuthService) HandleStart(ctx context.Context, chatID int64, payload, username string) error {
+	// An invite payload is routed here before the nonce table is touched at
+	// all: migration 00018's comment reserved the inv_ prefix so an invite
+	// never has to occupy a telegram_link_requests row, which lives ten
+	// minutes while an invite lives a day. Consuming first would spend a
+	// nonce that was never minted and answer a real invite as a dead link.
+	if rawToken, ok := strings.CutPrefix(payload, telegramInvitePayloadPrefix); ok {
+		return s.handleInviteStart(ctx, chatID, rawToken, username)
+	}
+
 	now := s.d.Clock.Now()
 
 	// Consume first, then check the limit. A refused attempt still spends its
@@ -183,6 +197,32 @@ func (s *TelegramAuthService) handleLinkStartForUnboundChat(ctx context.Context,
 	}
 }
 
+// handleInviteStart answers a tap on a household invite link. It writes no
+// membership: the owner's signed-in browser admits, and that is the whole
+// of the protection against a leaked link (ADR 11, following ADR 10).
+//
+// Every refusal is telegramDeadLinkMessage, the same sentence an unknown
+// sign-in nonce gets, for the reason that constant's own comment gives.
+// A chat that already belongs to a Hearth account is refused with a
+// different, self-describing line: it tells the tapper only about their own
+// chat, which they already know, and saves them tapping a dead link
+// forever (spec decision 15).
+func (s *TelegramAuthService) handleInviteStart(ctx context.Context, chatID int64, rawToken, username string) error {
+	code, err := s.d.Invites.Knock(ctx, rawToken, chatID, username)
+	switch {
+	case err == nil:
+		return s.say(ctx, chatID, fmt.Sprintf(
+			"Your code is %s.\n\nShow it to whoever invited you. They'll let you in, and then I'll send you a sign-in link.",
+			code))
+	case errors.Is(err, domain.ErrChatAlreadyBound):
+		return s.say(ctx, chatID, "This Telegram account already belongs to a Hearth household.")
+	case errors.Is(err, domain.ErrNotFound):
+		return s.say(ctx, chatID, telegramDeadLinkMessage)
+	default:
+		return fmt.Errorf("record invite knock: %w", err)
+	}
+}
+
 func (s *TelegramAuthService) sendSignIn(ctx context.Context, chatID int64, userID string) error {
 	raw, hash, err := s.d.Tokens.NewToken()
 	if err != nil {
@@ -257,6 +297,21 @@ func (s *TelegramAuthService) sendSignUp(ctx context.Context, chatID int64, now 
 		"Tap to create your Hearth household:\n%s/sign-up/%s\n\nThis link works once, for 24 hours.",
 		s.d.BaseURL, raw))
 }
+
+// SendSignIn and SendLinkCancelled implement InviteChats. They live here
+// rather than in InviteService because TelegramAuthService owns every word
+// the bot says and owns the one path that mints a magic link -- a second
+// one would mean two expiry rules and two rate limits drifting apart, which
+// is the same reasoning this type's own doc comment gives.
+func (s *TelegramAuthService) SendSignIn(ctx context.Context, chatID int64, userID string) error {
+	return s.sendSignIn(ctx, chatID, userID)
+}
+
+func (s *TelegramAuthService) SendLinkCancelled(ctx context.Context, chatID int64) error {
+	return s.say(ctx, chatID, "That link is no longer valid. Ask whoever invited you for a new one.")
+}
+
+var _ InviteChats = (*TelegramAuthService)(nil)
 
 // say sends text to chatID and wraps any failure with the calling method's
 // context, never with text itself: text carries a live magic-link or sign-up

@@ -8,8 +8,9 @@
 // owner, so a limited member never fires the request at all.
 import { useState } from "react";
 import { apiErrorMessage } from "../../api/errorMessage";
-import { memberBadgeLabel, pendingInviteExpiryLine } from "./copy";
-import { type PendingInvite } from "./schemas";
+import { admittedLine, memberBadgeLabel, pendingInviteExpiryLine } from "./copy";
+import { PendingInviteCard } from "./PendingInviteCard";
+import { type AdmitResult, type PendingInvite } from "./schemas";
 import { usePendingInvites, useWithdrawInvite } from "./usePendingInvites";
 
 function PendingInviteRow({
@@ -76,6 +77,16 @@ export function PendingInvitesList() {
   // runs, so the second click lands on a disabled button and never fires.
   const [withdrawingIds, setWithdrawingIds] = useState<Set<string>>(new Set());
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
+  // Keyed by invite id, populated the moment Admit succeeds
+  // (PendingInviteCard.tsx's own `onAdmitted` prop) rather than read off
+  // `invites.data`, deliberately: Admit's own invalidation removes the row
+  // from that list moments later, and PendingInviteCard unmounts along with
+  // it. Without this, an owner who admits an invite would see the
+  // signInSent: false warning -- the only thing telling them the bot
+  // couldn't reach their partner -- disappear along with the row
+  // describing it, sometimes before they finish reading it (see
+  // PendingInviteCard.tsx's own header comment for the full trace).
+  const [admittedResults, setAdmittedResults] = useState<Record<string, AdmitResult>>({});
 
   if (invites.isError) {
     return (
@@ -84,9 +95,22 @@ export function PendingInvitesList() {
       </p>
     );
   }
-  // Loading and "none pending" both render nothing: a heading over an empty
-  // list would be noise on every settled household's Settings page.
-  if (!invites.isSuccess || invites.data.length === 0) return null;
+  if (!invites.isSuccess) return null;
+
+  const pendingIds = new Set(invites.data.map((invite) => invite.id));
+  // Only a result whose row has actually left `invites.data` renders here.
+  // In the moment right after Admit succeeds -- before its own refetch
+  // lands -- the row (and PendingInviteCard's own state-0 render) is still
+  // present, so showing this too would just be a flash of duplicate text;
+  // this only takes over once the card describing it is gone.
+  const orphanedAdmits = Object.entries(admittedResults).filter(([id]) => !pendingIds.has(id));
+
+  // Loading and "nothing to show" both render nothing: a heading over an
+  // empty list would be noise on every settled household's Settings page.
+  // "Nothing to show" means zero pending invites AND zero notices still
+  // owed -- checking `invites.data.length` alone would hide a just-admitted
+  // invite's own warning the moment it was the only row in the list.
+  if (invites.data.length === 0 && orphanedAdmits.length === 0) return null;
 
   function handleWithdraw(id: string) {
     setRowErrors((prev) => ({ ...prev, [id]: "" }));
@@ -112,14 +136,40 @@ export function PendingInvitesList() {
     <div className="mt-5 border-t border-hairline pt-4">
       <h3 className="text-xs font-semibold text-label">Pending invites</h3>
       <ul className="mt-2.5 flex flex-col gap-3">
-        {invites.data.map((invite) => (
-          <PendingInviteRow
-            key={invite.id}
-            invite={invite}
-            withdrawing={withdrawingIds.has(invite.id)}
-            errorMessage={rowErrors[invite.id]}
-            onWithdraw={() => handleWithdraw(invite.id)}
-          />
+        {invites.data.map((invite) =>
+          // A Telegram invite gets the full waiting/knocked/admitted card;
+          // an email invite keeps milestone 1's plain row unchanged. This
+          // list holds no link -- a link only ever exists in the hand of
+          // the session that just minted it (a 201 or a new-link response),
+          // and this list observes neither -- so PendingInviteCard gets no
+          // `link` prop here.
+          invite.channel === "telegram" ? (
+            <PendingInviteCard
+              key={invite.id}
+              invite={invite}
+              onAdmitted={(result) =>
+                setAdmittedResults((prev) => ({ ...prev, [invite.id]: result }))
+              }
+            />
+          ) : (
+            <PendingInviteRow
+              key={invite.id}
+              invite={invite}
+              withdrawing={withdrawingIds.has(invite.id)}
+              errorMessage={rowErrors[invite.id]}
+              onWithdraw={() => handleWithdraw(invite.id)}
+            />
+          ),
+        )}
+        {/* The durable half of the admitted notice -- see admittedResults'
+            own comment above. Same card look (name, then the line) as
+            PendingInviteCard's state 3, so the handoff from "the card was
+            here" to "this notice is here instead" doesn't jump styles. */}
+        {orphanedAdmits.map(([id, result]) => (
+          <li key={id} className="flex flex-col gap-2 rounded-xl border border-hairline bg-card p-4">
+            <div className="text-[13.5px] font-semibold text-ink">{result.member.name}</div>
+            <p className="text-[13px] text-ink">{admittedLine(result.signInSent)}</p>
+          </li>
         ))}
       </ul>
     </div>

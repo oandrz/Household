@@ -1996,6 +1996,34 @@ never mounted, and a reordering of two statements that do not interact.
   *when* it was called, and does jsdom model that?** For anything gated on
   user activation — `window.open`, clipboard writes, fullscreen, autoplay,
   Web Share — the answer to the second half is no.
+- **An isolated `QueryClient` with no active observer is a simulated
+  environment too, and it hid a real bug the same way jsdom's `<dialog>`
+  stub did above — partner-invite lobby milestone 2, caught in review before
+  it shipped.** `useAdmitInvite`'s `onSettled` **returned** its own
+  `Promise.all([...invalidateQueries])`. TanStack Query's mutation dispatch
+  order is `await onSettled(); dispatch({type: "success", data})` — so
+  `admit.data` (carrying `signInSent: false`, the *only* signal an owner
+  gets that the bot could not reach their partner) landed only **after**
+  the invalidated pending-invites list had already refetched. In the real
+  app that refetch is exactly what removes the invite's row from the list,
+  so `PendingInviteCard` was unmounted before `admit.data` had anything to
+  render — a real failure mode, invisible on every screen it was meant to
+  warn from. Every existing test passed anyway, because
+  `PendingInviteCard.test.tsx` mounts the card under its own fresh
+  `QueryClient` with no other observer of the invites query: nothing is
+  watching when `invalidateQueries` fires, so it resolves near-instantly and
+  the card is still there when `.data` lands. The isolation that makes a
+  component test fast and independent is precisely what a live list's own
+  refetch-then-unmount race needs a real observer to reproduce. Fixed by (1)
+  firing the invalidations without returning their promise, so the mutation's
+  own success dispatch is not gated on a refetch it triggers; (2) hoisting
+  the confirmation into the parent list, keyed by invite id, so it survives
+  the row leaving; (3) a new test that mounts the card under a **live**
+  `usePendingInvites` observer and lets that observer's own refetch drop the
+  invite — which fails on the pre-fix code and passes after. **When a
+  mutation's own side effect can remove the thing that would show its
+  result, the test has to reproduce that side effect's real timing, not
+  just call the mutation in isolation and check what it returns.**
 
 **If a behaviour depends on the platform, verify it in the platform.** A real
 browser is what found every frontend defect above **except one**, and nothing
@@ -2155,6 +2183,25 @@ output.
   check was gated. The test that should have caught it passed anyway — its
   double let a caller force the counter's state directly (`setEmailCount`), a
   state no amount of real traffic sent through the real path could produce.
+- **Ordering a channel check *after* a three-way liveness switch, instead of
+  before it, would have leaked which of two Telegram invite states a caller
+  was holding — caught before it shipped, partner-invite lobby milestone 2.**
+  `GET /invites/{token}` and `POST /invites/{token}/accept` serve the email
+  channel only; a Telegram invite must answer `domain.ErrNotFound`, the same
+  as an unknown token. The naive place to put that check is *inside*
+  `checkInviteLive`, alongside its three lifecycle answers
+  (live/`ErrInviteAlreadyAccepted`/`ErrInviteExpired`). Put there, an
+  **expired** Telegram token would reach the expiry branch first and answer
+  `410 TOKEN_EXPIRED` — telling a caller holding that dead link "this token
+  was real, it just ran out," which a token this route never serves at all
+  must not say. The fix checks the channel immediately after `ByTokenHash`,
+  before `checkInviteLive` runs at all, so every Telegram token — live,
+  expired, accepted, whichever — collapses into the identical answer an
+  unknown token gets. The general shape: **when a request is refused for a
+  reason unrelated to a value's lifecycle, check that reason before the
+  lifecycle switch, not inside or after it** — a lifecycle check's whole job
+  is to distinguish states, and running it first hands a caller exactly the
+  distinction the earlier refusal exists to deny them.
 
 **Ask what a caller can measure, not what it is told:** status, body, timing,
 number of round trips, whether an email arrived — and how much of it.
@@ -3799,9 +3846,13 @@ partner step from Set up → Invite sent → ✓ by clicking through the app's o
 links, not by reloading. The one staleness it found is outside this rule: an
 invite accepted in *another* browser does not reach an owner's Settings tab
 that is just sitting open (nothing refetches it) until they move to another
-page. That is a push/poll question, not a missing invalidation. Milestone 2's
-planned 3-second poll covers only Telegram invites waiting for a knock, so an
-emailed invite accepted elsewhere is still unaddressed.
+page. That is a push/poll question, not a missing invalidation. **Milestone 2
+shipped (2026-09-20) with the 3-second poll built as planned**
+(`invitePollInterval`, `usePendingInvites.ts`), and it covers exactly what
+this entry predicted and no more: it runs only while a Telegram invite in
+the current list has no knock yet, so an emailed invite accepted elsewhere,
+or a Telegram invite that has already knocked, still needs the next
+navigation to refresh. Not addressed by this milestone either.
 
 ### 24. A delete scoped to the parent's parent, and a scope check thrown away
 
@@ -3875,6 +3926,84 @@ written, and then the next dependency was added to one place.
 route; what would catch it earlier is the compiler, if `Deps` were constructed
 by one shared helper rather than two literals — which is the real fix and is
 not yet made.
+
+### 25. A credential was checked, but not bound to the context that presented it
+
+Named by the 2026-09-19 security review
+(`docs/reviews/2026-09-19-security-review.md`) as one shape behind three
+separate findings, numbered 1, 2 and 5 there. All three pass some check —
+the address is real, the chat is bound, the minting session confirmed — and
+then trust what that check proved past the one context it was actually
+proved in. **Only finding 2 is fixed as of this entry**; 1 and 5 are named
+here so the pattern is recorded against all three, not rewritten to look
+like it was closed by one milestone's own fix.
+
+- **Finding 2, fixed here (partner-invite lobby milestone 2, 2026-09-20).**
+  `adapter/telegram`'s whole design keyed every Telegram capability off
+  `chat_id` alone — `Accounts.ByChatID` for sign-in, the pending-spend map
+  for `/yes`, `telegram_accounts` itself for the binding. The check "is this
+  chat bound to an account" is real and correctly enforced everywhere it is
+  asked. What none of those call sites asked is **whose** chat: Telegram
+  hands a group and a one-to-one conversation through the identical
+  `chat_id` field, and a bound *group* chat made every member of the room
+  the account holder — any member's `/spend` posted to the household's
+  ledger, any member's `/yes` confirmed a sentence someone else typed, and
+  "Sign in with Telegram" posted a **working magic link into the room**,
+  because the binding check that gates all of it says nothing about how
+  many people are on the other end of the chat id that passed it. Fixed by
+  adding the context the credential was missing — `Message.Chat.Type`,
+  gated with a `switch` whose `default` refuses — to both `ParseStart` and
+  `ParseCommand`, plus `From.ID == Chat.ID`, the arithmetic that only holds
+  in a genuine one-to-one chat (`adapter/telegram/update.go`,
+  `isPrivateChatWithItsOwner`; [ADR 11](adr/0011-joining-a-household-by-knock.md)).
+  This had to land before this milestone's own knock could mean anything —
+  a knock recorded from a group would carry the identical ambiguity.
+- **Second instance, same milestone: the public invite-accept route.** A
+  token's validity (`ByTokenHash` succeeds, not expired, not accepted) was
+  checked correctly and still not enough, because the route it was being
+  checked *for* — the public, pre-sign-in web form — is not the channel
+  every valid invite belongs to. A Telegram-channel invite's token is
+  exactly as live as an email invite's; the missing check was which
+  *route* may honour it, not whether it was real. Fixed the same way as
+  finding 2: add the context (`details.Channel != domain.ChannelEmail`)
+  and refuse before anything downstream can act on the credential as if it
+  belonged here. See the enumeration-ordering half of this same fix under
+  pattern 6.
+- **Findings 1 and 5 are the same shape and remain open — not this
+  milestone's work, named here so the pattern's ledger is honest.**
+  Finding 1 (login CSRF): a JSON-shaped body is accepted from **any**
+  origin because `decodeJSONBodyLimit` checks that the body parses, never
+  that the request came from a context Hearth's own frontend controls —
+  the credential (a well-formed sign-in body) is checked, the context
+  (who sent it) is not. Finding 5 (the Telegram link confirm): ADR 10's
+  `Confirm` re-checks the minting session's own state exhaustively and
+  never asks whether the *chat* being bound agreed — a stolen or
+  social-engineered link lets an attacker's own browser confirm a chat the
+  attacker talked a victim into tapping, because the check runs in one
+  direction only. Pattern 1 ("fixing an instance rarely fixes the class")
+  applies here directly: fixing the group-chat instance of this shape did
+  not fix the shape, only that instance of it.
+- **A deliberately incomplete instance of the finding-2 fix, recorded so
+  it is not mistaken for an oversight (plan Ruling 6).** The new
+  `invites_knock_chat_is_a_person` CHECK (`knock_chat_id > 0`) landed only
+  on `invites`, free to add because no row there has ever held that
+  column. The same CHECK on `telegram_accounts` and
+  `telegram_link_requests` — the two tables that would actually hold a
+  group-chat-shaped row if the application-layer gate above is ever
+  bypassed — was **not** added: both hold real production data, and
+  constraining a populated table needs a restored-dump run first
+  (migration `00011`'s own rule) plus confirming against the Bot API that
+  a private chat id is always positive. The database-level half of this
+  fix is therefore two-thirds done, on purpose, and the gap is a live
+  security-review item, not a closed one.
+
+**When a check passes, ask what it actually proved, and about whom.** "This
+chat is bound" proved a binding exists, not that one person is on the other
+end of it. "This token is valid" proved the invite is real, not that this
+route is allowed to redeem it. "This session confirmed" proved someone
+clicked, not that the someone was the person the click was supposed to
+protect. The fix is never to trust the check harder — it is to name the
+context the check was silently assuming, and require it explicitly.
 
 ## Catalogue by area
 
@@ -4315,6 +4444,61 @@ not yet made.
   other, ask which row the second writer actually reads before deciding
   which one to lock** — the row being written and the row that would prove
   the collision are not always the same row.
+- **`ALTER COLUMN … DROP NOT NULL` makes sqlc re-infer nullability for a
+  parameter, not only for a selected column — partner-invite lobby
+  milestone 2, migration `00021_invite_channels.sql`.** The task's own
+  brief predicted four broken call sites once `invites.email` became
+  nullable; running `make sqlc` after the `ALTER` produced **six**. The two
+  it missed were both *parameters*, not row scans: `GetLiveInviteForEmailParams.Email`
+  (an `email = $2` comparison against the now-nullable column) and
+  `CreateInviteParams.Email` (an `INSERT … VALUES (…)` whose target column's
+  nullability sqlc reads back onto the inserted value's own type), both
+  turned from `string` into `*string`. The two row-mapping sites the brief
+  did predict (`ByTokenHash`, `LiveInviteForEmail`'s own row) needed
+  `stringOrEmpty(row.Email)`; the two parameter sites needed the opposite
+  fix, `text(email)` rather than `nullableText(email)` — using
+  `nullableText` on an always-populated email-channel invite would have
+  turned `""` into a real `NULL` and tripped the new
+  `invites_channel_matches_email` CHECK against the row's own `'email'`
+  default. A fifth site, `ListPendingInvitesRow.Email`, was the same
+  row-mapping shape folded into the same task's channel/knock work. A
+  sixth, `admin_directory_repo.go`'s `fmt.Errorf("invite for %s: %w",
+  row.Email, err)`, was not a compile error at all — `%s` accepts any type
+  — but printed a pointer address instead of an address once `row.Email`
+  became `*string`; `go vet` caught it. **Widening a nullable column
+  changes the type on both sides of every statement that touches it, not
+  only the side that reads it back** — a plan estimating the blast radius
+  of a `DROP NOT NULL` has to check parameters as carefully as selected
+  columns, and `go vet` is worth running even after a change that compiles
+  clean, because a `%s`-on-a-pointer defect compiles every time.
+- **A `RETURNING (SELECT …)` subselect reads the statement's own snapshot,
+  which is taken before its row lock — a real, narrow race found in
+  review, not fixed, partner-invite lobby milestone 2.**
+  `ReplaceInviteToken` (`queries/identity.sql`) replaces an invite's token
+  and clears its knock in one `UPDATE`, and reports the chat that *had*
+  knocked through `RETURNING COALESCE((SELECT prior.knock_chat_id FROM
+  invites prior WHERE prior.id = $1), 0)::bigint`. A postgres test proves
+  the subselect sees the pre-`UPDATE` row in the steady state — seed a
+  knock, replace the token, read back the knocked chat's id, not `NULL` —
+  and `InviteRepo.ReplaceToken`'s own Go doc comment
+  (`invite_repo.go:331`) points at the SQL comment and calls that "safe to
+  trust." Both are true only outside one window: a knock landing between the
+  subselect's own evaluation (an `InitPlan`, run against the statement's
+  snapshot) and the `UPDATE`'s row lock. Under READ COMMITTED,
+  `EvalPlanQual` re-checks the outer `WHERE` against the now-current row
+  and the `UPDATE` still matches and still clears the fresh knock — but the
+  subselect already ran, against the *older* snapshot, and returns the
+  pre-knock `NULL` → `COALESCE` → `0`. The chat that just knocked is
+  silently never told its link died. No security consequence — the knock is
+  lost, not honoured wrongly, and the invite is not compromised — but
+  `ReplaceToken`'s Go doc comment's "safe to trust" (`invite_repo.go:331`)
+  now overclaims what the proof actually covers, and does not name the
+  window; the SQL comment it points at makes no such claim itself, only
+  the narrower, accurate one that the test proves the subselect against
+  the seeded row. **A same-transaction proof against a seeded, static row
+  proves the steady state; it does not prove the interleaving, and a
+  comment built from that proof should say so.** Left unfixed and recorded
+  here rather than in the code, per this task's own scope.
 
 ### HTTP layer
 

@@ -100,7 +100,7 @@ WHERE m.household_id = $1
 ORDER BY m.joined_at;
 
 -- name: ListPendingInvitesForAdmin :many
-SELECT i.name, i.email, i.role, i.expires_at, inviter.display_name AS invited_by_name
+SELECT i.name, i.email, i.role, i.channel, i.expires_at, inviter.display_name AS invited_by_name
 FROM invites i
 JOIN users inviter ON inviter.id = i.invited_by
 WHERE i.household_id = $1 AND i.accepted_at IS NULL AND i.expires_at > $2

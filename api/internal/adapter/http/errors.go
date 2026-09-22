@@ -289,6 +289,30 @@ var domainErrorResponses = []domainErrorResponse{
 		message:   "An invite requires an email address.",
 	},
 	{
+		sentinels: []error{domain.ErrEmailInvitesDisabled},
+		status:    http.StatusConflict,
+		code:      "EMAIL_INVITES_DISABLED",
+		message:   "Email can't leave this install yet. Use a Telegram link.",
+	},
+	{
+		sentinels: []error{domain.ErrTelegramInvitesUnavailable},
+		status:    http.StatusConflict,
+		code:      "TELEGRAM_INVITES_UNAVAILABLE",
+		message:   "Inviting by Telegram is unavailable on this install.",
+	},
+	{
+		sentinels: []error{domain.ErrInviteNotTelegram},
+		status:    http.StatusConflict,
+		code:      "INVITE_NOT_TELEGRAM",
+		message:   "Only Telegram invites have a link.",
+	},
+	{
+		sentinels: []error{domain.ErrUnknownInviteChannel},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_INVITE_CHANNEL",
+		message:   "That invite channel is not valid.",
+	},
+	{
 		sentinels: []error{usecase.ErrPasswordTooShort},
 		status:    http.StatusUnprocessableEntity,
 		code:      "PASSWORD_TOO_SHORT",
@@ -305,6 +329,12 @@ var domainErrorResponses = []domainErrorResponse{
 		status:    http.StatusConflict,
 		code:      "INVITE_ALREADY_ACCEPTED",
 		message:   "This invite has already been accepted.",
+	},
+	{
+		sentinels: []error{domain.ErrInviteNotKnocked},
+		status:    http.StatusConflict,
+		code:      "INVITE_NOT_KNOCKED",
+		message:   "No one is waiting on this link.",
 	},
 	{
 		sentinels: []error{domain.ErrTokenExpired},
@@ -1068,6 +1098,15 @@ var domainErrorResponses = []domainErrorResponse{
 		status:    http.StatusTooManyRequests,
 		code:      "TELEGRAM_LINK_RATE_LIMITED",
 		message:   "Too many attempts. Try again in an hour.",
+	},
+	{
+		// Admit's (Let in) re-check, run inside InviteRepo.Admit's own
+		// transaction (spec decision 15): the chat the owner is looking at
+		// joined a different household between the knock and this click.
+		sentinels: []error{domain.ErrChatAlreadyBound},
+		status:    http.StatusConflict,
+		code:      "CHAT_ALREADY_BOUND",
+		message:   "That Telegram account joined another household. Get a new link.",
 	},
 	{
 		// Every service that means a genuine, nameable conflict already

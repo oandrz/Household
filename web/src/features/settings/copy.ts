@@ -99,3 +99,38 @@ export function pendingInviteExpiryLine(expiresAt: string): string {
   const day = new Date(expiresAt).toLocaleDateString(undefined, { day: "numeric", month: "short" });
   return `Expires ${day}`;
 }
+
+// The knocker's line on PendingInviteCard.tsx, shown just above "Does their
+// phone show 4812?". Telegram's @username is optional, and this codebase
+// never falls back to a first name -- adapter/telegram/update.go's
+// senderName spells out why: a first name is attacker-chosen, so a chat
+// with no @username and a first name of "andreas" would render as
+// "@andreas", forging the one piece of evidence this exact sentence exists
+// to give the owner.
+//
+// This mirrors telegramChatLabel's reasoning (above) rather than composing
+// this string from it: telegramChatLabel's no-username text -- "a Telegram
+// chat with no username" -- is written to follow "Connected as ...", whose
+// subject is the chat. This sentence's subject is the person who tapped
+// ("... tapped the link"), which reads honestly only with its own wording,
+// not telegramChatLabel's fitted in front of a verb it wasn't shaped for.
+// Same choice (name the gap, never render a bare "@"), made twice on
+// purpose rather than shared, because sharing it here would produce "a
+// Telegram chat with no username tapped the link" -- true, but a stray
+// sentence about a chat where every other sentence on this card is about a
+// person.
+export function knockLine(username: string | null): string {
+  return username ? `@${username} tapped the link` : "Someone with no Telegram username tapped the link";
+}
+
+// PendingInviteCard.tsx's admitted state (see that file's header comment
+// for why it is the one state held in local mutation data rather than read
+// off the invite). Always "Let in." -- signInSent only ever appends the
+// second sentence; it never replaces the first, because the member was
+// created either way (spec decision 6) and losing that confirmation would
+// read as the join itself having failed.
+export function admittedLine(signInSent: boolean): string {
+  return signInSent
+    ? "Let in."
+    : "Let in. If no message arrived, ask them to send /start to the bot.";
+}

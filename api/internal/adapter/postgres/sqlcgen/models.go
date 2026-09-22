@@ -254,17 +254,22 @@ type HouseholdFeatureFlag struct {
 }
 
 type Invite struct {
-	ID           pgtype.UUID
-	HouseholdID  pgtype.UUID
-	Email        string
-	Name         string
-	Role         string
-	Capabilities []string
-	TokenHash    []byte
-	InvitedBy    pgtype.UUID
-	ExpiresAt    pgtype.Timestamptz
-	AcceptedAt   pgtype.Timestamptz
-	CreatedAt    pgtype.Timestamptz
+	ID                pgtype.UUID
+	HouseholdID       pgtype.UUID
+	Email             *string
+	Name              string
+	Role              string
+	Capabilities      []string
+	TokenHash         []byte
+	InvitedBy         pgtype.UUID
+	ExpiresAt         pgtype.Timestamptz
+	AcceptedAt        pgtype.Timestamptz
+	CreatedAt         pgtype.Timestamptz
+	Channel           string
+	KnockChatID       *int64
+	KnockChatUsername *string
+	KnockCode         *string
+	KnockedAt         pgtype.Timestamptz
 }
 
 type LoginAttempt struct {

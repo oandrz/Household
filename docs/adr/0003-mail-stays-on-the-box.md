@@ -3,8 +3,11 @@
 **Status:** Accepted — 2026-08-12. Explicitly interim; see "Exit condition".
 **Amended 2026-09-01** — the exit condition changed, because
 [ADR 4](0004-telegram-as-a-second-delivery-channel.md) added a delivery channel
-that carries strangers without mail. The amendment is at the bottom, and the
-original text is left standing above it.
+that carries strangers without mail. **Amended again 2026-09-20** — invites
+now have a Telegram path of their own and email invites are flag-gated off by
+default, because [ADR 11](0011-joining-a-household-by-knock.md) shipped. Both
+amendments are at the bottom, in order, and the original text is left
+standing above them.
 
 ## Context
 
@@ -142,12 +145,52 @@ Compose edit above are still the whole of it. That is ADR 1's exit-cost
 principle paying off twice now: adding a whole second delivery channel needed no
 change to the mailer either.
 
+### Amended 2026-09-20 — invites now have a Telegram path, and email invites are gated
+
+[ADR 11](0011-joining-a-household-by-knock.md) shipped the partner-invite
+lobby's milestone 2: an owner can now invite a partner over Telegram — a
+one-time link, a knock, and an owner's own **Let in** — with no mail
+involved at all. A new feature flag, `email_invites`, gates the email
+channel and defaults to **off**, enforced both at the HTTP edge and in the
+invite modal, for the same reason `notification_delivery` already defaults
+off: a channel that cannot deliver must not be offered as though it could.
+
+**This amendment qualifies two earlier passages, rather than deleting
+them:**
+
+- **The 2026-09-01 amendment's own Consequences qualification**, "Invites
+  and notification preferences are not [self-service]." Narrowed again:
+  inviting a partner **is** now self-service when the partner is on
+  Telegram — the whole point of ADR 11's knock and Let in — so the install
+  is two-person only for an invite to someone who is not on Telegram, or
+  for notification preferences, which remain unsent by anything.
+- **The exit-condition table's first row**, "An invite to someone who is
+  not on Telegram" — "Yes." That row describes a mechanism that no longer
+  exists as written. Before this change, every invite stayed on email
+  because ADR 4's slice deliberately left it there — the row's "Yes" meant
+  "an invite is live on email, and email cannot leave the box." Now the
+  opposite is true by default: email invites are switched **off**, and an
+  invite to someone who is not on Telegram has **no path at all** until an
+  operator turns `email_invites` on. The trigger is still live today, but
+  for the reverse reason — not because email is the only channel and it is
+  broken, but because Telegram is the only channel and it does not reach
+  everyone. The table's other two rows are unaffected by this amendment and
+  stand as written.
+
+**Nothing about the exit condition itself changed.** The day something
+Hearth must deliver cannot go over Telegram is still the trigger, and an
+invite to someone without Telegram is still one live instance of it — this
+amendment corrects *why* that row reads "Yes," not the row's answer.
+
 ## See also
 
 - [ADR 1 — optimise for exit cost](0001-optimise-for-exit-cost.md)
 - [ADR 2 — first production host](0002-first-production-host.md)
 - [ADR 4 — Telegram as a second delivery channel](0004-telegram-as-a-second-delivery-channel.md),
   which amended this one's exit condition
+- [ADR 11 — joining a household by knock](0011-joining-a-household-by-knock.md),
+  which amended this one's exit-condition table and gated email invites
+  behind `email_invites`
 - `docs/superpowers/specs/2026-08-10-hearth-production-deployment-design.md`,
   whose decisions 6 and 11 assumed Resend and are superseded for as long as this
   ADR stands.

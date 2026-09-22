@@ -330,7 +330,8 @@ func TestHouseholdDetailNamesTheChannelFromTheTelegramJoin(t *testing.T) {
 	if byName["Kid"].LastActiveAt != nil {
 		t.Fatalf("a member with no session reported LastActiveAt = %v", byName["Kid"].LastActiveAt)
 	}
-	if len(detail.PendingInvites) != 1 || detail.PendingInvites[0].InvitedByName != "Owner" || detail.PendingInvites[0].Email != "c@example.test" {
+	if len(detail.PendingInvites) != 1 || detail.PendingInvites[0].InvitedByName != "Owner" || detail.PendingInvites[0].Email != "c@example.test" ||
+		detail.PendingInvites[0].Channel != domain.ChannelEmail {
 		t.Fatalf("pending invites = %+v", detail.PendingInvites)
 	}
 

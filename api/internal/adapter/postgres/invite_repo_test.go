@@ -3,11 +3,13 @@ package postgres_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres"
 	"github.com/andreasoentoro/hearth/api/internal/domain"
+	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
 func TestInviteLifecycle(t *testing.T) {
@@ -382,6 +384,12 @@ func TestListPendingInvites(t *testing.T) {
 		got[0].Role != domain.RoleOwner || !got[0].ExpiresAt.After(now) || got[0].CreatedAt.IsZero() {
 		t.Fatalf("pending[0] = %+v", got[0])
 	}
+	// Every row this test creates predates Telegram invites, so migration
+	// 00021's DEFAULT 'email' is what this invite's channel column actually
+	// holds -- and nobody has knocked on it.
+	if got[0].Channel != domain.ChannelEmail || got[0].Knock != nil {
+		t.Fatalf("pending[0] channel/knock = %q/%+v, want email/nil", got[0].Channel, got[0].Knock)
+	}
 
 	none, err := invites.ListPending(ctx, empty.ID, now)
 	if err != nil {
@@ -464,4 +472,451 @@ func TestDeleteInvite(t *testing.T) {
 	if err := invites.Delete(ctx, h.ID, "not-a-uuid"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("a malformed id: got %v, want domain.ErrNotFound", err)
 	}
+}
+
+// inviteTestHousehold is a household and its owner, built once so the
+// tests that only need somewhere to point household_id and invited_by at
+// do not each repeat households.Create/users.Create inline. Tasks 7 and 9
+// reuse this helper rather than inventing their own.
+type inviteTestHousehold struct{ ID, OwnerUserID string }
+
+func newInviteTestHousehold(t *testing.T) (*postgres.DB, inviteTestHousehold) {
+	t.Helper()
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	h, err := postgres.NewHouseholdRepo(db).Create(ctx, domain.Household{
+		Name: "Andreas & Christine", FamilyName: "Oentoro",
+		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
+	})
+	if err != nil {
+		t.Fatalf("create household: %v", err)
+	}
+	owner, err := postgres.NewUserRepo(db).Create(ctx, "andreas@hearth.family", "hash", "Andreas")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	return db, inviteTestHousehold{ID: h.ID, OwnerUserID: owner.ID}
+}
+
+// The two CHECK constraints are the schema's own fail-closed rule: a row
+// that says one thing in its channel and another in its columns never
+// exists, whatever a future caller writes. Asserted against real Postgres
+// because a constraint is not a Go rule -- it holds for psql, adminctl and
+// anything else that ever writes this table.
+func TestInviteChannelConstraintsRefuseHalfWrittenRows(t *testing.T) {
+	ctx := context.Background()
+	db, h := newInviteTestHousehold(t)
+
+	cases := []struct {
+		name string
+		sql  string
+	}{
+		{"an email invite with no address",
+			`INSERT INTO invites (household_id, email, name, role, capabilities, token_hash, invited_by, expires_at, channel)
+			 VALUES ($1, NULL, 'Nobody', 'owner', '{money}', '\x01', $2, now() + interval '1 day', 'email')`},
+		{"a telegram invite carrying an address",
+			`INSERT INTO invites (household_id, email, name, role, capabilities, token_hash, invited_by, expires_at, channel)
+			 VALUES ($1, 'jane@example.com', 'Jane', 'owner', '{money}', '\x02', $2, now() + interval '1 day', 'telegram')`},
+		{"a knock with no code",
+			`INSERT INTO invites (household_id, email, name, role, capabilities, token_hash, invited_by, expires_at, channel, knock_chat_id, knocked_at)
+			 VALUES ($1, NULL, 'Jane', 'owner', '{money}', '\x03', $2, now() + interval '1 day', 'telegram', 4242, now())`},
+		{"a knock on an email invite",
+			`INSERT INTO invites (household_id, email, name, role, capabilities, token_hash, invited_by, expires_at, channel, knock_chat_id, knock_code, knocked_at)
+			 VALUES ($1, 'jane@example.com', 'Jane', 'owner', '{money}', '\x04', $2, now() + interval '1 day', 'email', 4242, '4812', now())`},
+		{"a knock from a group chat",
+			`INSERT INTO invites (household_id, email, name, role, capabilities, token_hash, invited_by, expires_at, channel, knock_chat_id, knock_code, knocked_at)
+			 VALUES ($1, NULL, 'Jane', 'owner', '{money}', '\x05', $2, now() + interval '1 day', 'telegram', -100500, '4812', now())`},
+		{"a channel this build does not define",
+			`INSERT INTO invites (household_id, email, name, role, capabilities, token_hash, invited_by, expires_at, channel)
+			 VALUES ($1, NULL, 'Jane', 'owner', '{money}', '\x06', $2, now() + interval '1 day', 'carrier_pigeon')`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := db.Pool().Exec(ctx, tc.sql, h.ID, h.OwnerUserID); err == nil {
+				t.Fatal("the row was accepted; a CHECK constraint should have refused it")
+			}
+		})
+	}
+}
+
+// Two chats tap the same link at the same instant. Exactly one knock is
+// recorded, and the other gets the same ErrNotFound a dead link gets. The
+// overlap is forced with a barrier rather than hoped for: two goroutines
+// started back to back usually do not overlap, so a test without one would
+// pass while the guard was missing.
+func TestTwoSimultaneousKnocksProduceExactlyOneWinner(t *testing.T) {
+	ctx := context.Background()
+	db, h := newInviteTestHousehold(t)
+	invites := postgres.NewInviteRepo(db)
+
+	tokenHash := []byte("a-token-hash-32-bytes-long-------")
+	if _, err := invites.CreateTelegram(ctx, h.ID, "Christine", domain.RoleOwner,
+		domain.AllCapabilities(), tokenHash, h.OwnerUserID, time.Now().Add(24*time.Hour)); err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for _, chatID := range []int64{4242, 9999} {
+		go func(chatID int64) {
+			<-start // the barrier: both goroutines are parked here
+			results <- invites.RecordKnock(ctx, tokenHash, chatID, "someone", "4812", time.Now())
+		}(chatID)
+	}
+	close(start)
+
+	var wins, refusals int
+	for i := 0; i < 2; i++ {
+		switch err := <-results; {
+		case err == nil:
+			wins++
+		case errors.Is(err, domain.ErrNotFound):
+			refusals++
+		default:
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	if wins != 1 || refusals != 1 {
+		t.Fatalf("got %d wins and %d refusals, want exactly 1 and 1", wins, refusals)
+	}
+}
+
+// --- Task 8: ReplaceToken -------------------------------------------------
+
+// TestReplaceInviteTokenReturnsThePreviousKnockChatID is the empirical
+// proof task-8-brief.md asked for before anything is built on top of it:
+// ReplaceInviteToken's RETURNING clause is
+// "COALESCE((SELECT prior.knock_chat_id FROM invites prior WHERE prior.id
+// = $1), 0)" -- a subquery against the very table the UPDATE is writing to,
+// in the same statement. The claim is that under READ COMMITTED this
+// subquery sees the row as it stood when the statement began, so it
+// returns the chat that had knocked (4242) rather than the NULL the
+// UPDATE's own SET clause just wrote. If that claim were wrong, this test
+// would observe 0 here, and nothing else in the suite would catch it -- the
+// knocked chat would simply never be told its link died, silently.
+func TestReplaceInviteTokenReturnsThePreviousKnockChatID(t *testing.T) {
+	ctx := context.Background()
+	db, h := newInviteTestHousehold(t)
+	invites := postgres.NewInviteRepo(db)
+
+	oldHash := []byte("replace-old-hash-replace-old-0001")
+	inviteID, err := invites.CreateTelegram(ctx, h.ID, "Christine", domain.RoleOwner,
+		domain.AllCapabilities(), oldHash, h.OwnerUserID, time.Now().Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	if err := invites.RecordKnock(ctx, oldHash, 4242, "jane_t", "4812", time.Now()); err != nil {
+		t.Fatalf("RecordKnock: %v", err)
+	}
+
+	newHash := []byte("replace-new-hash-replace-new-0001")
+	got, err := invites.ReplaceToken(ctx, h.ID, inviteID, newHash, time.Now().Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("ReplaceToken: %v", err)
+	}
+	if got != 4242 {
+		t.Fatalf("ReplaceToken returned %d, want 4242 (the chat that had knocked) -- "+
+			"a 0 here means the RETURNING subselect saw the post-update NULL, not the pre-update row", got)
+	}
+
+	// The old token is dead...
+	if _, err := invites.ByTokenHash(ctx, oldHash); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("the old token still resolves: got %v, want domain.ErrNotFound", err)
+	}
+	// ...the new one resolves to the same invite...
+	details, err := invites.ByTokenHash(ctx, newHash)
+	if err != nil {
+		t.Fatalf("the new token does not resolve: %v", err)
+	}
+	if details.ID != inviteID {
+		t.Fatalf("the new token resolves to invite %q, want %q", details.ID, inviteID)
+	}
+	// ...and the knock is cleared, not merely orphaned under the old hash.
+	pending, err := invites.ListPending(ctx, h.ID, time.Now())
+	if err != nil {
+		t.Fatalf("ListPending: %v", err)
+	}
+	found := false
+	for _, s := range pending {
+		if s.ID != inviteID {
+			continue
+		}
+		found = true
+		if s.Knock != nil {
+			t.Fatalf("the knock was not cleared: %+v", s.Knock)
+		}
+	}
+	if !found {
+		t.Fatal("the invite is missing from the pending list")
+	}
+
+	// A second replace, with nobody having knocked the new link, returns 0
+	// -- the plain no-knock case, alongside the 4242 case above.
+	thirdHash := []byte("replace-third-hash-replace-3-0001")
+	got, err = invites.ReplaceToken(ctx, h.ID, inviteID, thirdHash, time.Now().Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("second ReplaceToken: %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("ReplaceToken with nobody knocked = %d, want 0", got)
+	}
+}
+
+// TestReplaceTokenRefusesEverythingButALiveTelegramInviteInThisHousehold
+// covers ReplaceToken's whole error surface in one database: another
+// household's invite (whatever its channel) is domain.ErrNotFound -- the
+// household check must win over the channel check, not merely happen to
+// agree with it -- this household's own email invite is
+// domain.ErrInviteNotTelegram, and an already-accepted Telegram invite in
+// this household is domain.ErrNotFound too: "get a new link" is not
+// something an accepted invite offers, the same two-way split
+// DeleteUnacceptedInvite's own fallback read makes for Withdraw.
+func TestReplaceTokenRefusesEverythingButALiveTelegramInviteInThisHousehold(t *testing.T) {
+	ctx := context.Background()
+	db, h := newInviteTestHousehold(t)
+	invites := postgres.NewInviteRepo(db)
+	other := createHouseholdForInviteTest(t, postgres.NewHouseholdRepo(db), "Someone Else")
+	later := time.Now().Add(24 * time.Hour)
+
+	otherTelegramHash := []byte("scope-other-telegram-hash-00001")
+	otherTelegramID, err := invites.CreateTelegram(ctx, other.ID, "Someone", domain.RoleOwner,
+		domain.AllCapabilities(), otherTelegramHash, h.OwnerUserID, later)
+	if err != nil {
+		t.Fatalf("CreateTelegram (other household): %v", err)
+	}
+	if _, err := invites.ReplaceToken(ctx, h.ID, otherTelegramID, []byte("newhash1-000000000000000000001"), later); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("another household's telegram invite: got %v, want domain.ErrNotFound", err)
+	}
+
+	// Another household's email invite is still domain.ErrNotFound -- proof
+	// the household check runs regardless of channel, not only when the
+	// channel happens to match.
+	otherEmailHash := []byte("scope-other-email-hash-000000001")
+	otherEmailID, err := invites.Create(ctx, other.ID, "jane@example.com", "Jane", domain.RoleLimited,
+		domain.Capabilities{domain.CapCalendar}, otherEmailHash, h.OwnerUserID, later)
+	if err != nil {
+		t.Fatalf("Create (other household, email): %v", err)
+	}
+	if _, err := invites.ReplaceToken(ctx, h.ID, otherEmailID, []byte("newhash2-000000000000000000001"), later); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("another household's email invite: got %v, want domain.ErrNotFound", err)
+	}
+
+	mineEmailHash := []byte("scope-mine-email-hash-0000000001")
+	mineEmailID, err := invites.Create(ctx, h.ID, "kid@example.com", "Kid", domain.RoleLimited,
+		domain.Capabilities{domain.CapCalendar}, mineEmailHash, h.OwnerUserID, later)
+	if err != nil {
+		t.Fatalf("Create (this household, email): %v", err)
+	}
+	if _, err := invites.ReplaceToken(ctx, h.ID, mineEmailID, []byte("newhash3-000000000000000000001"), later); !errors.Is(err, domain.ErrInviteNotTelegram) {
+		t.Fatalf("this household's email invite: got %v, want domain.ErrInviteNotTelegram", err)
+	}
+
+	mineAcceptedHash := []byte("scope-mine-accepted-hash-000001")
+	mineAcceptedID, err := invites.CreateTelegram(ctx, h.ID, "Accepted", domain.RoleOwner,
+		domain.AllCapabilities(), mineAcceptedHash, h.OwnerUserID, later)
+	if err != nil {
+		t.Fatalf("CreateTelegram (accepted): %v", err)
+	}
+	if err := invites.MarkAccepted(ctx, mineAcceptedID); err != nil {
+		t.Fatalf("MarkAccepted: %v", err)
+	}
+	if _, err := invites.ReplaceToken(ctx, h.ID, mineAcceptedID, []byte("newhash4-000000000000000000001"), later); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("an already-accepted telegram invite: got %v, want domain.ErrNotFound", err)
+	}
+
+	if _, err := invites.ReplaceToken(ctx, h.ID, "not-a-uuid", []byte("newhash5-000000000000000000001"), later); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("a malformed id: got %v, want domain.ErrNotFound", err)
+	}
+}
+
+// --- Task 9: Admit -- Let in, the transaction the whole milestone exists
+// for. One repository call creates the user, the membership and the
+// telegram_accounts row and stamps the invite accepted; either all four
+// happen or none do.
+
+// TestAdmitCreatesUserMembershipAndTelegramAccountAtomically is the happy
+// path against real Postgres, proving all four writes land together: a
+// user with no credentials, a membership carrying the invite's own role
+// and capabilities, a telegram_accounts row binding the knocked chat to
+// that new user, and the invite stamped accepted.
+func TestAdmitCreatesUserMembershipAndTelegramAccountAtomically(t *testing.T) {
+	ctx := context.Background()
+	db, h := newInviteTestHousehold(t)
+	invites := postgres.NewInviteRepo(db)
+	accounts := postgres.NewTelegramAccountRepo(db)
+
+	tokenHash := []byte("admit-happy-path-token-hash-3201")
+	inviteID, err := invites.CreateTelegram(ctx, h.ID, "Christine", domain.RoleOwner,
+		domain.AllCapabilities(), tokenHash, h.OwnerUserID, time.Now().Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	if err := invites.RecordKnock(ctx, tokenHash, 4242, "christine_t", "4812", time.Now()); err != nil {
+		t.Fatalf("RecordKnock: %v", err)
+	}
+
+	admitted, err := invites.Admit(ctx, h.ID, inviteID, time.Now())
+	if err != nil {
+		t.Fatalf("Admit: %v", err)
+	}
+	if admitted.UserID == "" || admitted.MembershipID == "" {
+		t.Fatalf("admitted = %+v, want a real user and membership id", admitted)
+	}
+	if admitted.Name != "Christine" || admitted.Role != domain.RoleOwner || admitted.ChatID != 4242 {
+		t.Fatalf("admitted = %+v", admitted)
+	}
+	if len(admitted.Capabilities) != len(domain.AllCapabilities()) || !admitted.Capabilities.Has(domain.CapMoney) {
+		t.Fatalf("capabilities = %v, want everything the invite granted", admitted.Capabilities)
+	}
+
+	// The user has no email and no password: this member was let in from a
+	// Telegram knock, never typed a password.
+	stored, err := postgres.NewUserRepo(db).ByID(ctx, admitted.UserID)
+	if err != nil {
+		t.Fatalf("read back the new user: %v", err)
+	}
+	if stored.Email != "" || stored.PasswordHash != "" {
+		t.Fatalf("user = %+v, want no email and no password", stored)
+	}
+
+	binding, err := accounts.ByUserID(ctx, admitted.UserID)
+	if err != nil {
+		t.Fatalf("read back the telegram account: %v", err)
+	}
+	if binding.ChatID != 4242 || binding.ChatUsername != "christine_t" {
+		t.Fatalf("binding = %+v, want chat 4242 (christine_t)", binding)
+	}
+
+	details, err := invites.ByTokenHash(ctx, tokenHash)
+	if err != nil {
+		t.Fatalf("ByTokenHash: %v", err)
+	}
+	if details.AcceptedAt == nil {
+		t.Fatal("the invite was not stamped accepted")
+	}
+}
+
+// TestAdmitRefusesAnInviteNobodyHasKnockedOn proves the fallback read
+// invite_repo.go's Admit runs after ClaimKnockedInvite's guarded UPDATE
+// matches nothing: a live Telegram invite that nobody has tapped answers
+// domain.ErrInviteNotKnocked, and nothing is written.
+func TestAdmitRefusesAnInviteNobodyHasKnockedOn(t *testing.T) {
+	ctx := context.Background()
+	db, h := newInviteTestHousehold(t)
+	invites := postgres.NewInviteRepo(db)
+
+	tokenHash := []byte("admit-not-knocked-token-hash-320")
+	inviteID, err := invites.CreateTelegram(ctx, h.ID, "Christine", domain.RoleOwner,
+		domain.AllCapabilities(), tokenHash, h.OwnerUserID, time.Now().Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+
+	usersBefore := countRows(t, db, "users")
+	if _, err := invites.Admit(ctx, h.ID, inviteID, time.Now()); !errors.Is(err, domain.ErrInviteNotKnocked) {
+		t.Fatalf("Admit: got %v, want domain.ErrInviteNotKnocked", err)
+	}
+	if got := countRows(t, db, "users"); got != usersBefore {
+		t.Errorf("users: %d rows after a refused Admit, want %d", got, usersBefore)
+	}
+}
+
+// TestAdmitIsSingleUse proves the guarded stamp itself: a second Admit call
+// on an already-admitted invite answers domain.ErrInviteAlreadyAccepted and
+// writes no second user or membership -- the same guard-runs-first property
+// TestInviteAcceptIsSingleUse proves for Accept.
+func TestAdmitIsSingleUse(t *testing.T) {
+	ctx := context.Background()
+	db, h := newInviteTestHousehold(t)
+	invites := postgres.NewInviteRepo(db)
+
+	tokenHash := []byte("admit-single-use-token-hash-3201")
+	inviteID, err := invites.CreateTelegram(ctx, h.ID, "Christine", domain.RoleOwner,
+		domain.AllCapabilities(), tokenHash, h.OwnerUserID, time.Now().Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	if err := invites.RecordKnock(ctx, tokenHash, 4242, "christine_t", "4812", time.Now()); err != nil {
+		t.Fatalf("RecordKnock: %v", err)
+	}
+	if _, err := invites.Admit(ctx, h.ID, inviteID, time.Now()); err != nil {
+		t.Fatalf("first Admit: %v", err)
+	}
+
+	usersAfterFirst := countRows(t, db, "users")
+	membershipsAfterFirst := countRows(t, db, "memberships")
+
+	if _, err := invites.Admit(ctx, h.ID, inviteID, time.Now()); !errors.Is(err, domain.ErrInviteAlreadyAccepted) {
+		t.Fatalf("second Admit: got %v, want domain.ErrInviteAlreadyAccepted", err)
+	}
+	if got := countRows(t, db, "users"); got != usersAfterFirst {
+		t.Errorf("users: %d rows after a refused second Admit, want %d", got, usersAfterFirst)
+	}
+	if got := countRows(t, db, "memberships"); got != membershipsAfterFirst {
+		t.Errorf("memberships: %d rows after a refused second Admit, want %d", got, membershipsAfterFirst)
+	}
+}
+
+// Admit is all or nothing. Forcing the last insert to fail -- by binding
+// the chat to somebody else first -- must leave no user and no membership
+// behind, because a half-admitted member is a row nobody can clean up from
+// the product.
+func TestAdmitLeavesNothingBehindWhenTheChatIsAlreadyBound(t *testing.T) {
+	ctx := context.Background()
+	db, h := newInviteTestHousehold(t)
+	invites := postgres.NewInviteRepo(db)
+	accounts := postgres.NewTelegramAccountRepo(db)
+
+	tokenHash := []byte("another-token-hash-32-bytes-----")
+	inviteID, err := invites.CreateTelegram(ctx, h.ID, "Christine", domain.RoleOwner,
+		domain.AllCapabilities(), tokenHash, h.OwnerUserID, time.Now().Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	if err := invites.RecordKnock(ctx, tokenHash, 4242, "christine_t", "4812", time.Now()); err != nil {
+		t.Fatalf("RecordKnock: %v", err)
+	}
+	// The chat signs up somewhere else between the knock and the click --
+	// spec decision 15's race, forced rather than waited for.
+	if err := accounts.Create(ctx, usecase.TelegramBinding{
+		UserID: h.OwnerUserID, ChatID: 4242, ChatUsername: "christine_t",
+	}); err != nil {
+		t.Fatalf("bind the chat elsewhere: %v", err)
+	}
+
+	usersBefore := countRows(t, db, "users")
+	membershipsBefore := countRows(t, db, "memberships")
+
+	if _, err := invites.Admit(ctx, h.ID, inviteID, time.Now()); !errors.Is(err, domain.ErrChatAlreadyBound) {
+		t.Fatalf("Admit: got %v, want domain.ErrChatAlreadyBound", err)
+	}
+	if got := countRows(t, db, "users"); got != usersBefore {
+		t.Errorf("users: %d rows after a refused Admit, want %d -- the transaction leaked a user", got, usersBefore)
+	}
+	if got := countRows(t, db, "memberships"); got != membershipsBefore {
+		t.Errorf("memberships: %d rows after a refused Admit, want %d", got, membershipsBefore)
+	}
+	var acceptedAt *time.Time
+	if err := db.Pool().QueryRow(ctx, `SELECT accepted_at FROM invites WHERE id = $1`, inviteID).
+		Scan(&acceptedAt); err != nil {
+		t.Fatalf("read the invite back: %v", err)
+	}
+	if acceptedAt != nil {
+		t.Error("the invite was stamped accepted although nothing else was written")
+	}
+}
+
+// countRows is a whole-table count, used only to prove a failed
+// transaction left nothing behind. Whole-table rather than scoped because
+// the claim being tested is "nothing was written anywhere".
+func countRows(t *testing.T, db *postgres.DB, table string) int {
+	t.Helper()
+	var n int
+	// table is a literal from this test file, never caller input.
+	if err := db.Pool().QueryRow(context.Background(),
+		fmt.Sprintf(`SELECT count(*) FROM %s`, table)).Scan(&n); err != nil {
+		t.Fatalf("count %s: %v", table, err)
+	}
+	return n
 }

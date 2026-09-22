@@ -56,8 +56,8 @@ func TestPollerDispatchesStartCommands(t *testing.T) {
 			return
 		}
 		_, _ = w.Write([]byte(`{"ok":true,"result":[
-			{"update_id":11,"message":{"text":"/start nonce-a","chat":{"id":501}}},
-			{"update_id":12,"message":{"text":"chatter","chat":{"id":501}}}]}`))
+			{"update_id":11,"message":{"text":"/start nonce-a","chat":{"id":501,"type":"private"},"from":{"id":501,"username":"jane_t"}}},
+			{"update_id":12,"message":{"text":"chatter","chat":{"id":501,"type":"private"},"from":{"id":501,"username":"jane_t"}}}]}`))
 	}))
 	defer srv.Close()
 
@@ -95,8 +95,8 @@ func TestPollerDispatchesTheSendersUsername(t *testing.T) {
 			return
 		}
 		_, _ = w.Write([]byte(`{"ok":true,"result":[
-			{"update_id":13,"message":{"text":"/start nonce-b","chat":{"id":503},
-			  "from":{"username":"andreas","first_name":"Andreas"}}}]}`))
+			{"update_id":13,"message":{"text":"/start nonce-b","chat":{"id":503,"type":"private"},
+			  "from":{"id":503,"username":"andreas","first_name":"Andreas"}}}]}`))
 	}))
 	defer srv.Close()
 
@@ -132,7 +132,7 @@ func TestPollerAdvancesTheOffsetPastIgnoredUpdates(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		if first {
 			_, _ = w.Write([]byte(`{"ok":true,"result":[
-				{"update_id":30,"message":{"text":"/help","chat":{"id":9}}}]}`))
+				{"update_id":30,"message":{"text":"/help","chat":{"id":9,"type":"group"},"from":{"id":9999,"username":"jane_t"}}}]}`))
 			return
 		}
 		_, _ = w.Write([]byte(`{"ok":true,"result":[]}`))
@@ -182,8 +182,8 @@ func TestPollerSurvivesAPanickingHandler(t *testing.T) {
 			return
 		}
 		_, _ = w.Write([]byte(`{"ok":true,"result":[
-			{"update_id":40,"message":{"text":"/start boom","chat":{"id":7}}},
-			{"update_id":41,"message":{"text":"/start boom-again","chat":{"id":7}}}]}`))
+			{"update_id":40,"message":{"text":"/start boom","chat":{"id":7,"type":"private"},"from":{"id":7,"username":"jane_t"}}},
+			{"update_id":41,"message":{"text":"/start boom-again","chat":{"id":7,"type":"private"},"from":{"id":7,"username":"jane_t"}}}]}`))
 	}))
 	defer srv.Close()
 
@@ -311,9 +311,9 @@ func (c *commandSpy) seen() []Command {
 // stays exactly that.
 func TestPollerDispatchesChatCommandsOnlyWhenEnabled(t *testing.T) {
 	updates := `{"ok":true,"result":[
-		{"update_id":21,"message":{"text":"/start nonce-b","chat":{"id":7}}},
-		{"update_id":22,"message":{"text":"/spend 5 gum","chat":{"id":7}}},
-		{"update_id":23,"message":{"text":"hello","chat":{"id":7}}}]}`
+		{"update_id":21,"message":{"text":"/start nonce-b","chat":{"id":7,"type":"private"},"from":{"id":7,"username":"jane_t"}}},
+		{"update_id":22,"message":{"text":"/spend 5 gum","chat":{"id":7,"type":"private"},"from":{"id":7,"username":"jane_t"}}},
+		{"update_id":23,"message":{"text":"hello","chat":{"id":7,"type":"private"},"from":{"id":7,"username":"jane_t"}}}]}`
 	newServer := func() *httptest.Server {
 		var mu sync.Mutex
 		delivered := false

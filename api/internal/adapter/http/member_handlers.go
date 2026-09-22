@@ -2,7 +2,9 @@ package httpadapter
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -78,13 +80,61 @@ type inviteMemberRequest struct {
 	Email        string   `json:"email"`
 	Role         string   `json:"role"`
 	Capabilities []string `json:"capabilities"`
+	Channel      string   `json:"channel"`
+}
+
+// inviteCreatedDTO answers every channel. All three fields are omitted when
+// absent rather than sent as a zero value: an email invite has no id to
+// report (Create predates this shape and returns none), and a profile or
+// email invite has no expiry or link at all -- serialising ExpiresAt as
+// Go's zero time would print "0001-01-01T00:00:00Z", a real-looking date
+// that is actually a lie. ID and ExpiresAt are pointers because
+// `omitempty` does not suppress a zero time.Time (a non-empty struct); Link
+// is already a string, so its own zero value ("") is enough. Every 2xx
+// except 204 still carries a JSON body (CLAUDE.md): the profile and email
+// arms answer `{}`, which is a body, just an empty one.
+type inviteCreatedDTO struct {
+	ID        *string    `json:"id,omitempty"`
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
+	Link      string     `json:"link,omitempty"`
+}
+
+// An inviteChannelChoice is how the person being added will sign in, as the
+// request says it. It has one value more than domain.InviteChannel, and the
+// extra one is the point: "profile" means they never sign in at all, so no
+// invite row is written and there is no channel to store. Keeping it out of
+// the domain type keeps that type equal to what the column holds.
+type inviteChannelChoice string
+
+const (
+	channelChoiceProfile  inviteChannelChoice = "profile"
+	channelChoiceEmail    inviteChannelChoice = "email"
+	channelChoiceTelegram inviteChannelChoice = "telegram"
+)
+
+// parseInviteChannelChoice refuses anything else, "" included -- which is
+// what an omitted field decodes to. A caller must say how this person signs
+// in; inferring it from which other fields happen to be filled in is how an
+// invite goes somewhere nobody meant.
+func parseInviteChannelChoice(s string) (inviteChannelChoice, error) {
+	switch inviteChannelChoice(s) {
+	case channelChoiceProfile:
+		return channelChoiceProfile, nil
+	case channelChoiceEmail:
+		return channelChoiceEmail, nil
+	case channelChoiceTelegram:
+		return channelChoiceTelegram, nil
+	default:
+		return "", fmt.Errorf("%w: %q", domain.ErrUnknownInviteChannel, s)
+	}
 }
 
 // handleInviteMember sits behind requireOwner: only an owner may add a
-// member. It parses role and capabilities itself (rather than handing raw
-// strings to the service) so a malformed value is reported through the same
-// MapDomainError table (INVALID_ROLE / INVALID_CAPABILITIES) that a value
-// domain.NewMembership itself rejects would be.
+// member. It parses role, capabilities and channel itself (rather than
+// handing raw strings to the service) so a malformed value is reported
+// through the same MapDomainError table (INVALID_ROLE / INVALID_CAPABILITIES
+// / INVALID_INVITE_CHANNEL) that a value domain.NewMembership itself rejects
+// would be.
 func handleInviteMember(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, ok := RequestScope(r)
@@ -106,11 +156,84 @@ func handleInviteMember(deps Deps) http.HandlerFunc {
 			MapDomainError(w, r, err)
 			return
 		}
-		if err := deps.Invites.Create(r.Context(), scope.HouseholdID, scope.UserID, req.Name, req.Email, role, caps); err != nil {
+
+		choice, err := parseInviteChannelChoice(req.Channel)
+		if err != nil {
 			MapDomainError(w, r, err)
 			return
 		}
-		WriteJSON(w, http.StatusCreated, map[string]string{"status": "invited"})
+		// The flag is enforced here as well as in the modal, because this
+		// route is reachable from hearthctl and from anything else holding
+		// a session: an invite that can never be delivered must not be
+		// creatable at all (spec decision 10). adminctl is deliberately
+		// outside this gate -- it calls InviteService directly and prints
+		// the URL it captured, which is how an operator hands an invite
+		// over today.
+		//
+		// Every arm below answers and returns. None falls through to a
+		// shared call after the switch: that shape is what let a
+		// {"channel":"email","email":""} request slip past the flag check
+		// and land in Create's own empty-email branch, silently creating a
+		// profile-only member with no invite row, no token and no mail for
+		// a caller who explicitly asked for the email channel. The profile
+		// arm's own return already avoided a double-create for the same
+		// reason; every arm now does the same.
+		switch choice {
+		case channelChoiceProfile:
+			// Today's kid path, untouched: Create's own empty-email branch
+			// creates the member directly and writes no invite row. It
+			// refuses any role but limited, which is the check this arm
+			// deliberately does not repeat -- one rule, one place.
+			if err := deps.Invites.Create(r.Context(), scope.HouseholdID, scope.UserID,
+				req.Name, "", role, caps); err != nil {
+				MapDomainError(w, r, err)
+				return
+			}
+			WriteJSON(w, http.StatusCreated, inviteCreatedDTO{})
+		case channelChoiceEmail:
+			if !scope.Flags.Enabled(domain.FlagEmailInvites) {
+				MapDomainError(w, r, domain.ErrEmailInvitesDisabled)
+				return
+			}
+			// A caller who explicitly asked for the email channel but sent
+			// no address must be refused here, not handed to Create: its
+			// own empty-email branch exists for the profile arm's kid
+			// case, and would otherwise silently create a profile-only
+			// member with no invite row, no token and no mail for a
+			// request that asked for one.
+			if req.Email == "" {
+				MapDomainError(w, r, domain.ErrInviteRequiresEmail)
+				return
+			}
+			if err := deps.Invites.Create(r.Context(), scope.HouseholdID, scope.UserID,
+				req.Name, req.Email, role, caps); err != nil {
+				MapDomainError(w, r, err)
+				return
+			}
+			// The email path has no id to report: Create predates this
+			// response shape and returns none. It is the deprecated channel
+			// and gains nothing from being reshaped -- the frontend reads
+			// only `link`, and the list route supplies the row.
+			WriteJSON(w, http.StatusCreated, inviteCreatedDTO{})
+		case channelChoiceTelegram:
+			if !scope.Flags.Enabled(domain.FlagTelegramSignIn) {
+				MapDomainError(w, r, domain.ErrTelegramInvitesUnavailable)
+				return
+			}
+			link, err := deps.Invites.CreateTelegram(r.Context(), scope.HouseholdID, scope.UserID,
+				req.Name, role, caps)
+			if err != nil {
+				MapDomainError(w, r, err)
+				return
+			}
+			WriteJSON(w, http.StatusCreated, inviteCreatedDTO{ID: &link.ID, ExpiresAt: &link.ExpiresAt, Link: link.URL})
+		default:
+			// Unreachable while parseInviteChannelChoice is the only way
+			// in, and present anyway: a choice added without a case here
+			// refuses rather than falling through to the email path.
+			MapDomainError(w, r, domain.ErrUnknownInviteChannel)
+			return
+		}
 	}
 }
 

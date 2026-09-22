@@ -165,7 +165,7 @@ func (q *Queries) ListMembersForAdmin(ctx context.Context, householdID pgtype.UU
 }
 
 const listPendingInvitesForAdmin = `-- name: ListPendingInvitesForAdmin :many
-SELECT i.name, i.email, i.role, i.expires_at, inviter.display_name AS invited_by_name
+SELECT i.name, i.email, i.role, i.channel, i.expires_at, inviter.display_name AS invited_by_name
 FROM invites i
 JOIN users inviter ON inviter.id = i.invited_by
 WHERE i.household_id = $1 AND i.accepted_at IS NULL AND i.expires_at > $2
@@ -179,8 +179,9 @@ type ListPendingInvitesForAdminParams struct {
 
 type ListPendingInvitesForAdminRow struct {
 	Name          string
-	Email         string
+	Email         *string
 	Role          string
+	Channel       string
 	ExpiresAt     pgtype.Timestamptz
 	InvitedByName string
 }
@@ -198,6 +199,7 @@ func (q *Queries) ListPendingInvitesForAdmin(ctx context.Context, arg ListPendin
 			&i.Name,
 			&i.Email,
 			&i.Role,
+			&i.Channel,
 			&i.ExpiresAt,
 			&i.InvitedByName,
 		); err != nil {

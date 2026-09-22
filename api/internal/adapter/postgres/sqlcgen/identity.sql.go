@@ -11,6 +11,51 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimKnockedInvite = `-- name: ClaimKnockedInvite :one
+UPDATE invites
+SET accepted_at = $3
+WHERE id = $1 AND household_id = $2
+  AND channel = 'telegram'
+  AND accepted_at IS NULL
+  AND expires_at > $3
+  AND knocked_at IS NOT NULL
+RETURNING name, role, capabilities, knock_chat_id, knock_chat_username
+`
+
+type ClaimKnockedInviteParams struct {
+	ID          pgtype.UUID
+	HouseholdID pgtype.UUID
+	AcceptedAt  pgtype.Timestamptz
+}
+
+type ClaimKnockedInviteRow struct {
+	Name              string
+	Role              string
+	Capabilities      []string
+	KnockChatID       *int64
+	KnockChatUsername *string
+}
+
+// The guard and the read in one statement: it stamps the invite accepted
+// only if it is a telegram invite, unaccepted, unexpired, and somebody has
+// knocked -- and returns everything the rest of InviteRepo.Admit's
+// transaction needs, so no separate read can see a different row than the
+// one this statement just claimed. Zero rows means one of those five
+// conditions failed; the caller (InviteRepo.Admit) tells them apart with
+// one more read, as Delete already does with InviteAcceptedInHousehold.
+func (q *Queries) ClaimKnockedInvite(ctx context.Context, arg ClaimKnockedInviteParams) (ClaimKnockedInviteRow, error) {
+	row := q.db.QueryRow(ctx, claimKnockedInvite, arg.ID, arg.HouseholdID, arg.AcceptedAt)
+	var i ClaimKnockedInviteRow
+	err := row.Scan(
+		&i.Name,
+		&i.Role,
+		&i.Capabilities,
+		&i.KnockChatID,
+		&i.KnockChatUsername,
+	)
+	return i, err
+}
+
 const clearFailures = `-- name: ClearFailures :exec
 DELETE FROM login_attempts WHERE household_id = $1 AND succeeded = false
 `
@@ -105,7 +150,7 @@ RETURNING id
 
 type CreateInviteParams struct {
 	HouseholdID  pgtype.UUID
-	Email        string
+	Email        *string
 	Name         string
 	Role         string
 	Capabilities []string
@@ -249,6 +294,39 @@ func (q *Queries) CreateSpace(ctx context.Context, arg CreateSpaceParams) (Space
 	return i, err
 }
 
+const createTelegramInvite = `-- name: CreateTelegramInvite :one
+INSERT INTO invites (household_id, name, role, capabilities, token_hash, invited_by, expires_at, channel)
+VALUES ($1, $2, $3, $4, $5, $6, $7, 'telegram')
+RETURNING id
+`
+
+type CreateTelegramInviteParams struct {
+	HouseholdID  pgtype.UUID
+	Name         string
+	Role         string
+	Capabilities []string
+	TokenHash    []byte
+	InvitedBy    pgtype.UUID
+	ExpiresAt    pgtype.Timestamptz
+}
+
+// No email column at all, which is what invites_channel_matches_email
+// requires of this channel (migration 00021).
+func (q *Queries) CreateTelegramInvite(ctx context.Context, arg CreateTelegramInviteParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, createTelegramInvite,
+		arg.HouseholdID,
+		arg.Name,
+		arg.Role,
+		arg.Capabilities,
+		arg.TokenHash,
+		arg.InvitedBy,
+		arg.ExpiresAt,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, password_hash, display_name, avatar_initial)
 VALUES ($1, $2, $3, $4)
@@ -369,7 +447,7 @@ func (q *Queries) GetHousehold(ctx context.Context, id pgtype.UUID) (GetHousehol
 }
 
 const getInviteByTokenHash = `-- name: GetInviteByTokenHash :one
-SELECT i.id, i.household_id, i.email, i.name, i.role, i.capabilities,
+SELECT i.id, i.household_id, i.email, i.name, i.role, i.capabilities, i.channel,
        i.expires_at, i.accepted_at, h.family_name, u.display_name AS inviter_name
 FROM invites i
 JOIN households h ON h.id = i.household_id
@@ -380,10 +458,11 @@ WHERE i.token_hash = $1
 type GetInviteByTokenHashRow struct {
 	ID           pgtype.UUID
 	HouseholdID  pgtype.UUID
-	Email        string
+	Email        *string
 	Name         string
 	Role         string
 	Capabilities []string
+	Channel      string
 	ExpiresAt    pgtype.Timestamptz
 	AcceptedAt   pgtype.Timestamptz
 	FamilyName   string
@@ -400,6 +479,7 @@ func (q *Queries) GetInviteByTokenHash(ctx context.Context, tokenHash []byte) (G
 		&i.Name,
 		&i.Role,
 		&i.Capabilities,
+		&i.Channel,
 		&i.ExpiresAt,
 		&i.AcceptedAt,
 		&i.FamilyName,
@@ -409,7 +489,7 @@ func (q *Queries) GetInviteByTokenHash(ctx context.Context, tokenHash []byte) (G
 }
 
 const getLiveInviteForEmail = `-- name: GetLiveInviteForEmail :one
-SELECT i.id, i.household_id, i.email, i.name, i.role, i.capabilities,
+SELECT i.id, i.household_id, i.email, i.name, i.role, i.capabilities, i.channel,
        i.expires_at, i.accepted_at, h.family_name, u.display_name AS inviter_name
 FROM invites i
 JOIN households h ON h.id = i.household_id
@@ -422,16 +502,17 @@ LIMIT 1
 
 type GetLiveInviteForEmailParams struct {
 	HouseholdID pgtype.UUID
-	Email       string
+	Email       *string
 }
 
 type GetLiveInviteForEmailRow struct {
 	ID           pgtype.UUID
 	HouseholdID  pgtype.UUID
-	Email        string
+	Email        *string
 	Name         string
 	Role         string
 	Capabilities []string
+	Channel      string
 	ExpiresAt    pgtype.Timestamptz
 	AcceptedAt   pgtype.Timestamptz
 	FamilyName   string
@@ -448,6 +529,7 @@ func (q *Queries) GetLiveInviteForEmail(ctx context.Context, arg GetLiveInviteFo
 		&i.Name,
 		&i.Role,
 		&i.Capabilities,
+		&i.Channel,
 		&i.ExpiresAt,
 		&i.AcceptedAt,
 		&i.FamilyName,
@@ -658,6 +740,33 @@ func (q *Queries) InviteAcceptedInHousehold(ctx context.Context, arg InviteAccep
 	return accepted, err
 }
 
+const inviteChannelForReplace = `-- name: InviteChannelForReplace :one
+SELECT channel
+FROM invites
+WHERE id = $1 AND household_id = $2 AND accepted_at IS NULL
+`
+
+type InviteChannelForReplaceParams struct {
+	ID          pgtype.UUID
+	HouseholdID pgtype.UUID
+}
+
+// Read only after ReplaceInviteToken's guarded UPDATE matched nothing, to
+// tell "this invite has no email channel" apart from "no such invite in
+// this household" -- the same fallback-read shape
+// InviteAcceptedInHousehold gives DeleteUnacceptedInvite. accepted_at IS
+// NULL is part of the WHERE, not read back as its own column: a row that
+// fails to match here is either in another household, unknown, or already
+// accepted, and InviteRepo.ReplaceToken answers domain.ErrNotFound for all
+// three -- an accepted invite is not something "get a new link" acts on,
+// the same way it is not something Delete acts on.
+func (q *Queries) InviteChannelForReplace(ctx context.Context, arg InviteChannelForReplaceParams) (string, error) {
+	row := q.db.QueryRow(ctx, inviteChannelForReplace, arg.ID, arg.HouseholdID)
+	var channel string
+	err := row.Scan(&channel)
+	return channel, err
+}
+
 const listMemberships = `-- name: ListMemberships :many
 SELECT m.id, m.household_id, m.user_id, m.role, m.capabilities,
        u.email, u.display_name, u.avatar_initial
@@ -707,7 +816,9 @@ func (q *Queries) ListMemberships(ctx context.Context, householdID pgtype.UUID) 
 }
 
 const listPendingInvites = `-- name: ListPendingInvites :many
-SELECT id, email, name, role, capabilities, expires_at, created_at
+SELECT id, email, name, role, capabilities, channel,
+       knock_chat_username, knock_code, knocked_at,
+       expires_at, created_at
 FROM invites
 WHERE household_id = $1 AND accepted_at IS NULL AND expires_at > $2
 ORDER BY created_at, id
@@ -719,13 +830,17 @@ type ListPendingInvitesParams struct {
 }
 
 type ListPendingInvitesRow struct {
-	ID           pgtype.UUID
-	Email        string
-	Name         string
-	Role         string
-	Capabilities []string
-	ExpiresAt    pgtype.Timestamptz
-	CreatedAt    pgtype.Timestamptz
+	ID                pgtype.UUID
+	Email             *string
+	Name              string
+	Role              string
+	Capabilities      []string
+	Channel           string
+	KnockChatUsername *string
+	KnockCode         *string
+	KnockedAt         pgtype.Timestamptz
+	ExpiresAt         pgtype.Timestamptz
+	CreatedAt         pgtype.Timestamptz
 }
 
 // "Pending" is the partner-invite spec's one definition: not accepted and not
@@ -746,6 +861,10 @@ func (q *Queries) ListPendingInvites(ctx context.Context, arg ListPendingInvites
 			&i.Name,
 			&i.Role,
 			&i.Capabilities,
+			&i.Channel,
+			&i.KnockChatUsername,
+			&i.KnockCode,
+			&i.KnockedAt,
 			&i.ExpiresAt,
 			&i.CreatedAt,
 		); err != nil {
@@ -906,6 +1025,42 @@ func (q *Queries) PruneLoginAttempts(ctx context.Context, at pgtype.Timestamptz)
 	return result.RowsAffected(), nil
 }
 
+const recordInviteKnock = `-- name: RecordInviteKnock :one
+UPDATE invites
+SET knock_chat_id = $2, knock_chat_username = $3, knock_code = $4, knocked_at = $5
+WHERE token_hash = $1
+  AND channel = 'telegram'
+  AND accepted_at IS NULL
+  AND expires_at > $5
+  AND knocked_at IS NULL
+RETURNING id
+`
+
+type RecordInviteKnockParams struct {
+	TokenHash         []byte
+	KnockChatID       *int64
+	KnockChatUsername *string
+	KnockCode         *string
+	KnockedAt         pgtype.Timestamptz
+}
+
+// One guarded UPDATE is the whole of "one knock per link" (spec decision
+// 2): knocked_at IS NULL is what makes the second tap -- and two taps at
+// the same instant -- lose. Every other condition is here for the same
+// reason it is in the SQL and not in Go: a caller cannot forget it.
+func (q *Queries) RecordInviteKnock(ctx context.Context, arg RecordInviteKnockParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, recordInviteKnock,
+		arg.TokenHash,
+		arg.KnockChatID,
+		arg.KnockChatUsername,
+		arg.KnockCode,
+		arg.KnockedAt,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const recordLoginAttempt = `-- name: RecordLoginAttempt :exec
 INSERT INTO login_attempts (household_id, user_id, email, succeeded, at)
 VALUES ($1, $2, $3, $4, $5)
@@ -928,6 +1083,55 @@ func (q *Queries) RecordLoginAttempt(ctx context.Context, arg RecordLoginAttempt
 		arg.At,
 	)
 	return err
+}
+
+const replaceInviteToken = `-- name: ReplaceInviteToken :one
+UPDATE invites AS target
+SET token_hash = $3, expires_at = $4,
+    knock_chat_id = NULL, knock_chat_username = NULL, knock_code = NULL, knocked_at = NULL
+WHERE target.id = $1 AND target.household_id = $2
+  AND target.channel = 'telegram'
+  AND target.accepted_at IS NULL
+RETURNING COALESCE((SELECT prior.knock_chat_id FROM invites prior WHERE prior.id = $1), 0)::bigint AS previous_knock_chat_id
+`
+
+type ReplaceInviteTokenParams struct {
+	ID          pgtype.UUID
+	HouseholdID pgtype.UUID
+	TokenHash   []byte
+	ExpiresAt   pgtype.Timestamptz
+}
+
+// One statement replaces the token and clears the knock together, so there
+// is never an instant where a fresh link carries a stale knock. It returns
+// the chat that had knocked, if any, so the caller can tell them their link
+// is dead -- from their side it simply stopped working. The subselect reads
+// the row as it stood when this statement began (READ COMMITTED's own
+// snapshot rule), before the UPDATE's own SET clears it, which
+// TestReplaceInviteTokenReturnsThePreviousKnockChatID proves against a real
+// database rather than trusting as documentation. No expires_at condition,
+// deliberately: an expired link is the main reason an owner asks for a new
+// one, so ReplaceToken must still work on it.
+//
+// The UPDATE names its own target "target" and the subselect its own copy
+// "prior": without both aliases sqlc's analyzer (not real Postgres -- the
+// unaliased form runs fine by hand in psql) reports the outer WHERE's `id`
+// as ambiguous. COALESCE(..., 0) turns "nobody had knocked" into 0 inside
+// the query itself, matching InviteRepository.ReplaceToken's contract
+// exactly -- without it sqlc infers this column as a plain, non-nullable
+// int64, and scanning a genuine SQL NULL into that type fails at runtime
+// the first time an owner asks for a new link on an invite nobody has
+// tapped yet.
+func (q *Queries) ReplaceInviteToken(ctx context.Context, arg ReplaceInviteTokenParams) (int64, error) {
+	row := q.db.QueryRow(ctx, replaceInviteToken,
+		arg.ID,
+		arg.HouseholdID,
+		arg.TokenHash,
+		arg.ExpiresAt,
+	)
+	var previous_knock_chat_id int64
+	err := row.Scan(&previous_knock_chat_id)
+	return previous_knock_chat_id, err
 }
 
 const revokeSessionByToken = `-- name: RevokeSessionByToken :exec

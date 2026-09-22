@@ -17,8 +17,35 @@ var (
 	ErrInviteExpired             = errors.New("invite has expired")
 	ErrInviteAlreadyAccepted     = errors.New("invite has already been accepted")
 	ErrInviteRequiresEmail       = errors.New("an invite requires an email address")
-	ErrTokenExpired              = errors.New("token has expired or been used")
-	ErrRateLimited               = errors.New("too many requests")
+	ErrUnknownInviteChannel      = errors.New("unknown invite channel")
+	// ErrEmailInvitesDisabled is FlagEmailInvites' refusal: an install
+	// whose mail cannot leave the box (ADR 3) must not create an invite
+	// nobody can ever receive, and enforcing that only in the UI would
+	// leave hearthctl and any crafted request still able to create one
+	// (spec decision 10).
+	ErrEmailInvitesDisabled = errors.New("email invites are disabled on this install")
+	// ErrTelegramInvitesUnavailable is the Telegram channel's refusal, and
+	// now covers two distinct causes: no bot is configured on this install
+	// at all (invite.go's CreateTelegram and NewLink, checking
+	// BotUsername), or a bot is configured but the household has the
+	// telegram_sign_in flag off (member_handlers.go, checking
+	// scope.Flags). Both answer the same sentinel because a caller cannot
+	// act differently on the two -- either way there is no Telegram invite
+	// to offer.
+	ErrTelegramInvitesUnavailable = errors.New("telegram invites are unavailable on this install")
+	// ErrInviteNotTelegram is InviteService.NewLink's refusal for an email
+	// invite: "get a new link" and "Not them" only make sense for a
+	// Telegram invite's t.me link, and an email invite's channel is fixed
+	// at creation (spec decision 9), so there is nothing here to replace.
+	ErrInviteNotTelegram = errors.New("only telegram invites have a link")
+
+	// ErrInviteNotKnocked is Admit's ("Let in") refusal when nobody has
+	// knocked on this Telegram invite -- nobody has tapped the link yet, or
+	// NewLink cleared a previous knock when a fresh link replaced it. There
+	// is no one waiting for the owner to let in.
+	ErrInviteNotKnocked = errors.New("no one is waiting on this invite")
+	ErrTokenExpired     = errors.New("token has expired or been used")
+	ErrRateLimited      = errors.New("too many requests")
 
 	// Added in the Task 6 fix round (see task-6-report.md, "Fix round 1").
 	ErrAmountOverflow               = errors.New("amount overflows a signed 64-bit integer")
@@ -399,4 +426,12 @@ var (
 	// ErrTelegramMintsRateLimited bounds how many link attempts one member
 	// can start in an hour. Table growth, not a security control.
 	ErrTelegramMintsRateLimited = errors.New("too many telegram link attempts")
+
+	// ErrChatAlreadyBound is InviteService.Knock's refusal for a chat that
+	// already belongs to a Hearth account. It is the one invite-knock
+	// refusal that is NOT the bland dead-link answer every other case
+	// gets: it says nothing about the *link*, only about the tapper's own
+	// chat, which they could already learn by sending /start with no
+	// payload at all (spec decision 15).
+	ErrChatAlreadyBound = errors.New("this telegram chat already belongs to an account")
 )

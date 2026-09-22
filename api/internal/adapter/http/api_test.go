@@ -73,6 +73,20 @@ func (noopMailer) SendSignupForExistingAccount(context.Context, string, string) 
 	return nil
 }
 
+// noopInviteChats satisfies usecase.InviteChats the same way noopMailer
+// satisfies usecase.Mailer just above: this file's tests exercise the HTTP
+// layer's wiring and authorization for POST /household/invites/{id}/link,
+// not Telegram delivery, and there is no bot available in this test
+// binary's environment. It must not panic the way telegram_api_test.go's
+// unused* doubles do -- InviteService.NewLink calls SendLinkCancelled for
+// real whenever a test's invite was knocked before the route is called, and
+// a courtesy send is best-effort by design (NewLink's own doc comment), so
+// silently succeeding is the correct double here, not a loud failure.
+type noopInviteChats struct{}
+
+func (noopInviteChats) SendSignIn(context.Context, int64, string) error { return nil }
+func (noopInviteChats) SendLinkCancelled(context.Context, int64) error  { return nil }
+
 // signupMailer is a usecase.Mailer stub used only for SignupService, so tests
 // can recover the raw token a sign-up link carried -- exactly the same need
 // noopMailer's silence can't satisfy.
@@ -233,6 +247,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 	spaces := postgres.NewSpaceRepo(db)
 	notifications := postgres.NewNotificationRepo(db)
 	signups := postgres.NewSignupRepo(db)
+	telegramAccounts := postgres.NewTelegramAccountRepo(db)
 
 	// Cheap argon2 cost parameters: these tests perform many real sign-ins
 	// under -race, and production cost parameters (65536 KiB, 3 passes)
@@ -257,15 +272,20 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		BaseURL:    "http://localhost:5173",
 	})
 	inviteSvc := usecase.NewInviteService(usecase.InviteDeps{
-		Invites:    invites,
-		Users:      users,
-		Sessions:   sessions,
-		Mailer:     mailer,
-		Hasher:     hasher,
-		Tokens:     tokens,
-		Clock:      clk,
-		SessionTTL: httpadapter.SessionTTL,
-		BaseURL:    "http://localhost:5173",
+		Invites:           invites,
+		Users:             users,
+		Sessions:          sessions,
+		Mailer:            mailer,
+		Hasher:            hasher,
+		Tokens:            tokens,
+		Clock:             clk,
+		SessionTTL:        httpadapter.SessionTTL,
+		BaseURL:           "http://localhost:5173",
+		BotUsername:       "HearthBot",
+		TelegramInviteTTL: usecase.TelegramInviteTTL,
+		Codes:             crypto.PairCodes{},
+		Accounts:          telegramAccounts,
+		Chats:             noopInviteChats{},
 	})
 	apiTokens := postgres.NewAPITokenRepo(db)
 	memberSvc := usecase.NewMemberService(usecase.MemberDeps{Members: memberships, Sessions: sessions, APITokens: apiTokens})

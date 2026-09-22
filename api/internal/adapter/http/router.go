@@ -273,19 +273,23 @@ func NewRouter(deps Deps) http.Handler {
 					o.Use(requireOwner)
 					o.Patch("/household", handleUpdateHousehold(deps))
 					o.Patch("/notification-preferences", handleUpdateNotificationPreferences(deps))
-					o.Post("/household/members/invite", handleInviteMember(deps))
-					o.Patch("/household/members/{id}", handleUpdateMember(deps))
-					o.Delete("/household/members/{id}", handleRemoveMember(deps))
 					o.Post("/spaces", handleCreateSpace(deps))
 
-					// Withdrawing an invite changes who may join the
-					// household, so it needs a browser session as well as
-					// an owner: a leaked API token must not be able to
-					// manage who gets in (partner-invite spec decision 12,
-					// the reason behind ADR 7 rule 2).
+					// Creating, changing or removing a way into the
+					// household needs a browser session as well as an
+					// owner: a leaked API token must not be able to mint a
+					// co-owner, demote the other owner, or remove them
+					// (partner-invite spec decision 12, the reason behind
+					// ADR 7 rule 2). hearthctl is unaffected -- it signs in
+					// with a cookie.
 					o.Group(func(c chi.Router) {
 						c.Use(requireCookieSession)
+						c.Post("/household/members/invite", handleInviteMember(deps))
+						c.Patch("/household/members/{id}", handleUpdateMember(deps))
+						c.Delete("/household/members/{id}", handleRemoveMember(deps))
 						c.Delete("/household/invites/{id}", handleWithdrawInvite(deps))
+						c.Post("/household/invites/{id}/link", handleNewInviteLink(deps))
+						c.Post("/household/invites/{id}/admit", handleAdmitInvite(deps))
 					})
 				})
 			})

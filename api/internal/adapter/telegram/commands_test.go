@@ -15,6 +15,8 @@ import (
 func msg(id int64, chat int64, text string) Update {
 	u := Update{UpdateID: id, Message: &Message{Text: text}}
 	u.Message.Chat.ID = chat
+	u.Message.Chat.Type = "private"
+	u.Message.From = &User{ID: chat}
 	return u
 }
 
@@ -342,6 +344,8 @@ func TestNudgesOnOffTogglesThisChatAndAnythingElseIsUsage(t *testing.T) {
 	for _, arg := range []string{"off", "on", "maybe"} {
 		m := &Message{Text: "/nudges " + arg}
 		m.Chat.ID = 1
+		m.Chat.Type = "private"
+		m.From = &User{ID: 1}
 		cmd, ok := ParseCommand(Update{UpdateID: 1, Message: m})
 		if !ok || cmd.Name != "nudges" {
 			t.Fatalf("/nudges %s parsed as %+v ok=%v", arg, cmd, ok)

@@ -158,6 +158,23 @@ func buildMeResponse(ctx context.Context, deps Deps, userID, householdID string)
 	if err != nil {
 		return meResponseBody{}, err
 	}
+	features := flags.Strings()
+	// telegram_sign_in's stored value says whether the household wants the
+	// channel; it says nothing about whether this install has a bot to
+	// offer it through. Masking it here -- not in the flag's own default or
+	// resolution, which must stay a pure function of the stored rows -- is
+	// what keeps those two questions separate (spec decision 11): a
+	// bot-less install (deps.Telegram is nil, which is how the router
+	// itself tells the two apart -- see Deps' own doc comment) must report
+	// the channel as off no matter what the flag says, so
+	// InviteMemberModal's "Inviting is unavailable on this install" copy
+	// renders instead of a Send invite button that always answers 409
+	// TELEGRAM_INVITES_UNAVAILABLE. This is display-only: requireFeature
+	// still reads the real, unmasked value from scope.Flags, so the routes
+	// themselves are untouched.
+	if deps.Telegram == nil {
+		features[string(domain.FlagTelegramSignIn)] = false
+	}
 	return meResponseBody{
 		User:            toUserDTO(user.User),
 		Household:       toHouseholdDTO(household),
@@ -165,7 +182,7 @@ func buildMeResponse(ctx context.Context, deps Deps, userID, householdID string)
 		Capabilities:    membership.Capabilities.Strings(),
 		Spaces:          toSpaceDTOs(spaces),
 		IsPlatformAdmin: isAdmin,
-		Features:        flags.Strings(),
+		Features:        features,
 	}, nil
 }
 

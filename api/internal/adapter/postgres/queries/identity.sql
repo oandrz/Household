@@ -136,8 +136,15 @@ INSERT INTO invites (household_id, email, name, role, capabilities, token_hash, 
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING id;
 
+-- name: CreateTelegramInvite :one
+-- No email column at all, which is what invites_channel_matches_email
+-- requires of this channel (migration 00021).
+INSERT INTO invites (household_id, name, role, capabilities, token_hash, invited_by, expires_at, channel)
+VALUES ($1, $2, $3, $4, $5, $6, $7, 'telegram')
+RETURNING id;
+
 -- name: GetInviteByTokenHash :one
-SELECT i.id, i.household_id, i.email, i.name, i.role, i.capabilities,
+SELECT i.id, i.household_id, i.email, i.name, i.role, i.capabilities, i.channel,
        i.expires_at, i.accepted_at, h.family_name, u.display_name AS inviter_name
 FROM invites i
 JOIN households h ON h.id = i.household_id
@@ -145,7 +152,7 @@ JOIN users u ON u.id = i.invited_by
 WHERE i.token_hash = $1;
 
 -- name: GetLiveInviteForEmail :one
-SELECT i.id, i.household_id, i.email, i.name, i.role, i.capabilities,
+SELECT i.id, i.household_id, i.email, i.name, i.role, i.capabilities, i.channel,
        i.expires_at, i.accepted_at, h.family_name, u.display_name AS inviter_name
 FROM invites i
 JOIN households h ON h.id = i.household_id
@@ -164,7 +171,9 @@ RETURNING id;
 -- "Pending" is the partner-invite spec's one definition: not accepted and not
 -- expired. $2 is the caller's clock rather than now(), so a test can move it,
 -- the same shape ListPendingInvitesForAdmin uses.
-SELECT id, email, name, role, capabilities, expires_at, created_at
+SELECT id, email, name, role, capabilities, channel,
+       knock_chat_username, knock_code, knocked_at,
+       expires_at, created_at
 FROM invites
 WHERE household_id = $1 AND accepted_at IS NULL AND expires_at > $2
 ORDER BY created_at, id;
@@ -186,6 +195,80 @@ RETURNING id;
 SELECT (accepted_at IS NOT NULL)::boolean AS accepted
 FROM invites
 WHERE id = $1 AND household_id = $2;
+
+-- name: RecordInviteKnock :one
+-- One guarded UPDATE is the whole of "one knock per link" (spec decision
+-- 2): knocked_at IS NULL is what makes the second tap -- and two taps at
+-- the same instant -- lose. Every other condition is here for the same
+-- reason it is in the SQL and not in Go: a caller cannot forget it.
+UPDATE invites
+SET knock_chat_id = $2, knock_chat_username = $3, knock_code = $4, knocked_at = $5
+WHERE token_hash = $1
+  AND channel = 'telegram'
+  AND accepted_at IS NULL
+  AND expires_at > $5
+  AND knocked_at IS NULL
+RETURNING id;
+
+-- name: ClaimKnockedInvite :one
+-- The guard and the read in one statement: it stamps the invite accepted
+-- only if it is a telegram invite, unaccepted, unexpired, and somebody has
+-- knocked -- and returns everything the rest of InviteRepo.Admit's
+-- transaction needs, so no separate read can see a different row than the
+-- one this statement just claimed. Zero rows means one of those five
+-- conditions failed; the caller (InviteRepo.Admit) tells them apart with
+-- one more read, as Delete already does with InviteAcceptedInHousehold.
+UPDATE invites
+SET accepted_at = $3
+WHERE id = $1 AND household_id = $2
+  AND channel = 'telegram'
+  AND accepted_at IS NULL
+  AND expires_at > $3
+  AND knocked_at IS NOT NULL
+RETURNING name, role, capabilities, knock_chat_id, knock_chat_username;
+
+-- name: ReplaceInviteToken :one
+-- One statement replaces the token and clears the knock together, so there
+-- is never an instant where a fresh link carries a stale knock. It returns
+-- the chat that had knocked, if any, so the caller can tell them their link
+-- is dead -- from their side it simply stopped working. The subselect reads
+-- the row as it stood when this statement began (READ COMMITTED's own
+-- snapshot rule), before the UPDATE's own SET clears it, which
+-- TestReplaceInviteTokenReturnsThePreviousKnockChatID proves against a real
+-- database rather than trusting as documentation. No expires_at condition,
+-- deliberately: an expired link is the main reason an owner asks for a new
+-- one, so ReplaceToken must still work on it.
+--
+-- The UPDATE names its own target "target" and the subselect its own copy
+-- "prior": without both aliases sqlc's analyzer (not real Postgres -- the
+-- unaliased form runs fine by hand in psql) reports the outer WHERE's `id`
+-- as ambiguous. COALESCE(..., 0) turns "nobody had knocked" into 0 inside
+-- the query itself, matching InviteRepository.ReplaceToken's contract
+-- exactly -- without it sqlc infers this column as a plain, non-nullable
+-- int64, and scanning a genuine SQL NULL into that type fails at runtime
+-- the first time an owner asks for a new link on an invite nobody has
+-- tapped yet.
+UPDATE invites AS target
+SET token_hash = $3, expires_at = $4,
+    knock_chat_id = NULL, knock_chat_username = NULL, knock_code = NULL, knocked_at = NULL
+WHERE target.id = $1 AND target.household_id = $2
+  AND target.channel = 'telegram'
+  AND target.accepted_at IS NULL
+RETURNING COALESCE((SELECT prior.knock_chat_id FROM invites prior WHERE prior.id = $1), 0)::bigint AS previous_knock_chat_id;
+
+-- name: InviteChannelForReplace :one
+-- Read only after ReplaceInviteToken's guarded UPDATE matched nothing, to
+-- tell "this invite has no email channel" apart from "no such invite in
+-- this household" -- the same fallback-read shape
+-- InviteAcceptedInHousehold gives DeleteUnacceptedInvite. accepted_at IS
+-- NULL is part of the WHERE, not read back as its own column: a row that
+-- fails to match here is either in another household, unknown, or already
+-- accepted, and InviteRepo.ReplaceToken answers domain.ErrNotFound for all
+-- three -- an accepted invite is not something "get a new link" acts on,
+-- the same way it is not something Delete acts on.
+SELECT channel
+FROM invites
+WHERE id = $1 AND household_id = $2 AND accepted_at IS NULL;
 
 -- name: ListSpaces :many
 -- ORDER BY position, key: position alone has no tiebreaker, so two spaces

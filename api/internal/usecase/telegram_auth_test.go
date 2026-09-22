@@ -426,3 +426,133 @@ func TestHandleStartAnswersALinkNonceBeforeTheRateLimitBites(t *testing.T) {
 		t.Fatalf("message = %q, want the confirm instruction to actually have been sent", got)
 	}
 }
+
+// The bot's inv_ branch: a first tap records a knock and is answered with
+// the code, and every other outcome gets the one bland dead-link reply
+// (telegramDeadLinkMessage), so a chat holding a link it may have stolen
+// learns nothing by probing.
+func TestStartWithAnInviteTokenRecordsOneKnock(t *testing.T) {
+	svc, doubles := newTelegramAuthService(t)
+	ctx := context.Background()
+	rawToken := doubles.seedTelegramInvite(t, defaultTestHouseholdID, "Christine")
+
+	if err := svc.HandleStart(ctx, 4242, "inv_"+rawToken, "jane_t"); err != nil {
+		t.Fatalf("HandleStart: %v", err)
+	}
+	said := doubles.sender.lastTo(4242)
+	code := doubles.invites.knockCode(rawToken)
+	if !strings.Contains(said, code) {
+		t.Fatalf("the chat was told %q, which does not contain its code %q", said, code)
+	}
+
+	// One knock per link (spec decision 2). A second tap -- by the same
+	// chat or another -- gets the dead-link reply and changes nothing.
+	if err := svc.HandleStart(ctx, 9999, "inv_"+rawToken, "someone_else"); err != nil {
+		t.Fatalf("second HandleStart: %v", err)
+	}
+	if got := doubles.sender.lastTo(9999); got != "That sign-in link has expired. Start again from the app." {
+		t.Fatalf("second tap was told %q, want the bland dead-link reply", got)
+	}
+	if doubles.invites.knockChatID(rawToken) != 4242 {
+		t.Fatal("the second tap overwrote the first knock")
+	}
+}
+
+// Every refusal is the same sentence. Listed together because the point is
+// that they are indistinguishable, which a test per case would not show.
+func TestEveryRefusedInviteStartGetsTheSameReply(t *testing.T) {
+	const dead = "That sign-in link has expired. Start again from the app."
+	for name, setup := range map[string]func(t *testing.T, d *telegramDoubles) (payload string, chatID int64){
+		"unknown token": func(t *testing.T, d *telegramDoubles) (string, int64) { return "inv_nosuchtoken", 4242 },
+		"expired invite": func(t *testing.T, d *telegramDoubles) (string, int64) {
+			return "inv_" + d.seedExpiredTelegramInvite(t), 4242
+		},
+		"email invite": func(t *testing.T, d *telegramDoubles) (string, int64) { return "inv_" + d.seedEmailInvite(t), 4242 },
+		"already accepted": func(t *testing.T, d *telegramDoubles) (string, int64) {
+			return "inv_" + d.seedAcceptedTelegramInvite(t), 4242
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc, doubles := newTelegramAuthService(t)
+			payload, chatID := setup(t, doubles)
+			if err := svc.HandleStart(context.Background(), chatID, payload, "jane_t"); err != nil {
+				t.Fatalf("HandleStart: %v", err)
+			}
+			if got := doubles.sender.lastTo(chatID); got != dead {
+				t.Fatalf("got %q, want the one bland reply %q", got, dead)
+			}
+		})
+	}
+}
+
+// A chat that already belongs to a Hearth account is the one refusal that
+// is NOT bland, and that is safe because it is not about the link: it tells
+// the tapper only about their own chat, which they could learn by sending
+// /start with no payload at all. Saying it plainly saves them tapping a
+// link that will never work for them (spec decision 15).
+func TestAChatThatAlreadyBelongsToAnAccountIsToldSo(t *testing.T) {
+	svc, doubles := newTelegramAuthService(t)
+	boundChat := doubles.seedBoundChat(t)
+	rawToken := doubles.seedTelegramInvite(t, defaultTestHouseholdID, "Christine")
+
+	if err := svc.HandleStart(context.Background(), boundChat, "inv_"+rawToken, "jane_t"); err != nil {
+		t.Fatalf("HandleStart: %v", err)
+	}
+	if got := doubles.sender.lastTo(boundChat); got != "This Telegram account already belongs to a Hearth household." {
+		t.Fatalf("got %q, want decision 15's own sentence", got)
+	}
+	// And it did not spend the link on its way to being refused: the check
+	// runs before the guarded UPDATE, so somebody else can still knock.
+	if doubles.invites.knockChatID(rawToken) != 0 {
+		t.Fatal("a refused chat consumed the invite link")
+	}
+}
+
+// Everything that is not an invite payload behaves exactly as it did
+// before: the sign-in nonce, the sign-up path and the chat-link path are
+// untouched.
+func TestStartWithoutTheInvitePrefixIsUnchanged(t *testing.T) {
+	svc, doubles := newTelegramAuthService(t)
+	nonce := doubles.seedSignInNonce(t)
+	if err := svc.HandleStart(context.Background(), 4242, nonce, "jane_t"); err != nil {
+		t.Fatalf("HandleStart: %v", err)
+	}
+	if !strings.Contains(doubles.sender.lastTo(4242), "/sign-up/") &&
+		!strings.Contains(doubles.sender.lastTo(4242), "/sign-in/magic?token=") {
+		t.Fatalf("an ordinary nonce no longer produces a link: %q", doubles.sender.lastTo(4242))
+	}
+}
+
+// --- Task 8: TelegramAuthService as InviteService's InviteChats ----------
+
+// SendSignIn is InviteChats' half of admitting a knocked chat. It must mint
+// through the same sendSignIn HandleStart itself uses -- a second magic-link
+// path would mean two expiry rules and two rate limits drifting apart (the
+// type's own doc comment).
+func TestSendSignInReusesTheOrdinaryMagicLinkPath(t *testing.T) {
+	svc, doubles := newTelegramAuthService(t)
+
+	if err := svc.SendSignIn(context.Background(), 4242, "user-1"); err != nil {
+		t.Fatalf("SendSignIn: %v", err)
+	}
+	sent := doubles.sender.lastTo(4242)
+	if !strings.Contains(sent, "/sign-in/magic?token=") {
+		t.Fatalf("message = %q, want it to carry a magic-link URL", sent)
+	}
+	if doubles.magicLinks.countFor("user-1") != 1 {
+		t.Fatalf("magic links minted = %d, want 1", doubles.magicLinks.countFor("user-1"))
+	}
+}
+
+// SendLinkCancelled is InviteChats' other half: the courtesy told to a
+// knocked chat when the owner replaces the link.
+func TestSendLinkCancelledTellsTheChatItsLinkIsDead(t *testing.T) {
+	svc, doubles := newTelegramAuthService(t)
+
+	if err := svc.SendLinkCancelled(context.Background(), 4242); err != nil {
+		t.Fatalf("SendLinkCancelled: %v", err)
+	}
+	if got := doubles.sender.lastTo(4242); got != "That link is no longer valid. Ask whoever invited you for a new one." {
+		t.Fatalf("got %q", got)
+	}
+}

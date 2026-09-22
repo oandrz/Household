@@ -3,6 +3,7 @@ package usecase_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -570,5 +571,495 @@ func TestWithdrawCannotReachAnotherHouseholdsInvite(t *testing.T) {
 	}
 	if left, _ := f.inviteRepo.ListPending(ctx, "household-2", f.clock.Now()); len(left) != 1 {
 		t.Fatalf("the other household's invite must survive: %+v", left)
+	}
+}
+
+// --- Task 5: CreateTelegram ---------------------------------------------
+
+// A Telegram invite has no address anywhere: not in the request, not in the
+// row, not in any mail. ErrInviteRequiresEmail guarded delivery, not
+// identity -- users.email is already nullable and Telegram sign-up already
+// creates owners with no address (spec decision 9).
+//
+// The exact 47-character payload length ("inv_" plus NewToken's 43
+// base64url characters, under Telegram's 64-character start limit) is a
+// property of the real crypto.TokenGenerator this fixture's seqTokens
+// double does not reproduce (it hands out "token-1", "token-2", ...), so
+// that invariant is pinned instead by
+// TestCreatingATelegramInviteReturnsTheLinkOnce in the http package, which
+// runs CreateTelegram over the real token generator end to end.
+func TestCreateTelegramWritesARowWithNoEmailAndReturnsTheLinkOnce(t *testing.T) {
+	f := newFixture(t)
+
+	link, err := f.invites.CreateTelegram(context.Background(), f.householdID, f.andreasID, "Christine",
+		domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	if !strings.HasPrefix(link.URL, "https://t.me/HearthBot?start=inv_") {
+		t.Fatalf("link %q does not carry the inv_ payload prefix migration 00018 reserved", link.URL)
+	}
+	// The raw token is recoverable only by stripping this same prefix --
+	// exactly how a real owner's browser would read it off the link, since
+	// nothing else ever holds it.
+	rawToken := strings.TrimPrefix(link.URL, "https://t.me/HearthBot?start=inv_")
+	if rawToken == "" {
+		t.Fatal("link carried no token after the inv_ prefix")
+	}
+	if got, want := link.ExpiresAt, f.clock.now.Add(24*time.Hour); !got.Equal(want) {
+		t.Fatalf("expires at %v, want %v (spec decision 8: 24 hours)", got, want)
+	}
+
+	row := f.inviteRepo.byID(link.ID)
+	if row == nil {
+		t.Fatal("no invite row was written")
+	}
+	if row.Email != "" {
+		t.Fatalf("a Telegram invite carries no address, got %q", row.Email)
+	}
+	if row.Channel != domain.ChannelTelegram {
+		t.Fatalf("channel is %q, want telegram", row.Channel)
+	}
+	if f.mailer.invitesSentCount() != 0 {
+		t.Fatal("a Telegram invite must send no mail at all")
+	}
+}
+
+// The list route never shows the link again: the raw token is not stored,
+// so there is nothing to show. This pins that the summary has no way to
+// carry one.
+func TestPendingListNeverCarriesAnInviteLink(t *testing.T) {
+	f := newFixture(t)
+
+	link, err := f.invites.CreateTelegram(context.Background(), f.householdID, f.andreasID, "Christine",
+		domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	summaries, err := f.invites.ListPending(context.Background(), f.householdID)
+	if err != nil {
+		t.Fatalf("ListPending: %v", err)
+	}
+	for _, s := range summaries {
+		if s.ID == link.ID && strings.Contains(fmt.Sprint(s), "t.me") {
+			t.Fatal("a pending row carried the deep link; it is shown once, at creation")
+		}
+	}
+}
+
+// CreateTelegram is refused outright when no bot is configured on this
+// install -- the other half of spec decision 11 (the flag is the HTTP
+// layer's job; see TestTelegramInviteIsRefusedWhileTheFlagIsOff in the http
+// package).
+func TestCreateTelegramRefusesWhenNoBotIsConfigured(t *testing.T) {
+	f := newFixture(t)
+	f.invites = usecase.NewInviteService(usecase.InviteDeps{
+		Invites:           f.inviteRepo,
+		Users:             f.users,
+		Sessions:          f.sessions,
+		Mailer:            f.mailer,
+		Hasher:            f.hasher,
+		Tokens:            &seqTokens{},
+		Clock:             f.clock,
+		SessionTTL:        30 * 24 * time.Hour,
+		BaseURL:           "http://localhost:5173",
+		TelegramInviteTTL: usecase.TelegramInviteTTL,
+		// BotUsername left "" on purpose: no bot configured.
+	})
+
+	if _, err := f.invites.CreateTelegram(context.Background(), f.householdID, f.andreasID, "Christine",
+		domain.RoleOwner, domain.AllCapabilities()); !errors.Is(err, domain.ErrTelegramInvitesUnavailable) {
+		t.Fatalf("CreateTelegram with no bot configured: got %v, want domain.ErrTelegramInvitesUnavailable", err)
+	}
+	if got := f.inviteRepo.count(); got != 0 {
+		t.Fatalf("invite rows written = %d, want 0 -- refused before any write", got)
+	}
+}
+
+// A Telegram invite is admitted by its household's owner, in their own
+// browser, and nowhere else (spec decisions 4 and 7). The public web form
+// must therefore treat its token as though it had never existed -- not
+// refuse it with a reason, which would confirm the token is real.
+func TestTheWebFormCannotAcceptATelegramInvite(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	link, err := f.invites.CreateTelegram(ctx, f.householdID, f.andreasID, "Christine",
+		domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	// The raw token is recoverable only by stripping the inv_ prefix off the
+	// returned link -- exactly how a real owner's browser would read it,
+	// since nothing else ever holds it (same approach as
+	// TestCreateTelegramWritesARowWithNoEmailAndReturnsTheLinkOnce above).
+	rawToken := strings.TrimPrefix(link.URL, "https://t.me/HearthBot?start=inv_")
+	if rawToken == "" {
+		t.Fatal("link carried no token after the inv_ prefix")
+	}
+
+	usersBefore := f.users.count()
+
+	if _, err := f.invites.Preview(ctx, rawToken); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Preview of a Telegram invite: got %v, want domain.ErrNotFound", err)
+	}
+	if _, err := f.invites.Accept(ctx, rawToken, "a-long-enough-password", "Christine"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Accept of a Telegram invite: got %v, want domain.ErrNotFound", err)
+	}
+
+	// Nothing was written: no user, no membership, and the invite is still
+	// waiting for its knock.
+	row := f.inviteRepo.byID(link.ID)
+	if row == nil {
+		t.Fatal("the invite row went missing")
+	}
+	if row.AcceptedAt != nil {
+		t.Fatal("the invite was stamped accepted by the web form")
+	}
+	if got := f.users.count(); got != usersBefore {
+		t.Fatalf("users = %d, want %d unchanged -- the web form created a user for a Telegram invite", got, usersBefore)
+	}
+
+	// The guard sits before checkInviteLive precisely so this stays
+	// domain.ErrNotFound rather than domain.ErrInviteExpired once the
+	// invite's TTL has actually passed -- ErrInviteExpired would tell a
+	// caller the token was real, just late, which is exactly the leak spec
+	// decision 7 rules out. If the guard were ever moved after
+	// checkInviteLive, this is the assertion that would start failing.
+	f.clock.Advance(usecase.TelegramInviteTTL + time.Second)
+	if _, err := f.invites.Preview(ctx, rawToken); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Preview of an expired Telegram invite: got %v, want domain.ErrNotFound", err)
+	}
+	if _, err := f.invites.Accept(ctx, rawToken, "a-long-enough-password", "Christine"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Accept of an expired Telegram invite: got %v, want domain.ErrNotFound", err)
+	}
+}
+
+// --- Task 8: NewLink -- a new link, which is also "Not them" -------------
+
+// telegramRawToken recovers the raw token from a TelegramInviteLink's URL by
+// stripping the inv_ payload prefix -- exactly how a real owner's browser
+// would read it off the link, and the same approach every other Telegram
+// invite test in this file uses.
+func telegramRawToken(t *testing.T, url string) string {
+	t.Helper()
+	raw := strings.TrimPrefix(url, "https://t.me/HearthBot?start=inv_")
+	if raw == "" || raw == url {
+		t.Fatalf("could not extract a token from telegram link %q", url)
+	}
+	return raw
+}
+
+// One route does "get a new link" and "Not them". The old link stops
+// working the moment the new one exists -- that is what makes a leaked link
+// cost one new link rather than a takeover (spec decision 2).
+func TestANewLinkKillsTheOldOneAndClearsTheKnock(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	first, err := f.invites.CreateTelegram(ctx, f.householdID, f.andreasID, "Christine", domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	firstToken := telegramRawToken(t, first.URL)
+	if _, err := f.invites.Knock(ctx, firstToken, 4242, "jane_t"); err != nil {
+		t.Fatalf("Knock: %v", err)
+	}
+
+	second, err := f.invites.NewLink(ctx, f.householdID, first.ID)
+	if err != nil {
+		t.Fatalf("NewLink: %v", err)
+	}
+	if second.URL == first.URL {
+		t.Fatal("the new link is the old link")
+	}
+	// The knocked chat is told, because from their side the link simply
+	// stopped working and nobody would otherwise say why.
+	if got := f.chats.lastCancelledChat(); got != 4242 {
+		t.Fatalf("cancelled chat %d, want 4242", got)
+	}
+	// The old token knocks no more, and the row is back to waiting.
+	if _, err := f.invites.Knock(ctx, firstToken, 5555, "someone"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("the old token still knocks: %v", err)
+	}
+	if row := f.inviteRepo.byID(first.ID); row.KnockedAt != nil {
+		t.Fatal("the knock was not cleared")
+	}
+	// And the fresh token does.
+	secondToken := telegramRawToken(t, second.URL)
+	if _, err := f.invites.Knock(ctx, secondToken, 5555, "someone"); err != nil {
+		t.Fatalf("the new token does not knock: %v", err)
+	}
+}
+
+// An email invite has no link to replace. Refused with its own message
+// rather than silently converted: the channel is fixed when the invite is
+// created (spec decision 9).
+func TestANewLinkIsRefusedForAnEmailInvite(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	// No flag setup here: the email_invites flag is enforced at the HTTP
+	// edge, and InviteService.Create never reads a flag. Setting one here
+	// would imply a coupling that does not exist.
+	if err := f.invites.Create(ctx, f.householdID, f.andreasID, "Jane", "jane@example.com",
+		domain.RoleOwner, domain.AllCapabilities()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	pending, err := f.invites.ListPending(ctx, f.householdID)
+	if err != nil {
+		t.Fatalf("ListPending: %v", err)
+	}
+
+	if _, err := f.invites.NewLink(ctx, f.householdID, pending[0].ID); !errors.Is(err, domain.ErrInviteNotTelegram) {
+		t.Fatalf("got %v, want domain.ErrInviteNotTelegram", err)
+	}
+}
+
+// An id from another household is a 404, never a 403: the answer must not
+// confirm that another household's invite exists (docs/LEARNING.md pattern
+// 24).
+func TestANewLinkForAnotherHouseholdsInviteIsNotFound(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	mine, err := f.invites.CreateTelegram(ctx, f.householdID, f.andreasID, "Christine", domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	if _, err := f.invites.NewLink(ctx, "some-other-household", mine.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("got %v, want domain.ErrNotFound", err)
+	}
+}
+
+// The courtesy message to the knocked chat is best-effort: NewLink's own
+// doc comment says the send happens after the write and its failure is
+// logged, never returned, because the owner must still get the new link
+// they asked for. Mutation check: inline the return of that error and this
+// test turns red.
+func TestANewLinkStillArrivesWhenTellingTheKnockedChatFails(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	first, err := f.invites.CreateTelegram(ctx, f.householdID, f.andreasID, "Christine", domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	firstToken := telegramRawToken(t, first.URL)
+	if _, err := f.invites.Knock(ctx, firstToken, 4242, "jane_t"); err != nil {
+		t.Fatalf("Knock: %v", err)
+	}
+	f.chats.failNextSendLinkCancelled(errors.New("telegram is down"))
+
+	second, err := f.invites.NewLink(ctx, f.householdID, first.ID)
+	if err != nil {
+		t.Fatalf("NewLink: %v, want nil -- a courtesy-message failure must not cost the owner their new link", err)
+	}
+	if second.URL == "" {
+		t.Fatal("no link was returned")
+	}
+	// The send was still attempted, and its failure is what this test
+	// arms -- only the return value to the caller is unaffected.
+	if got := f.chats.lastCancelledChat(); got != 4242 {
+		t.Fatalf("the send was still attempted for chat %d, want 4242", got)
+	}
+}
+
+// --- Task 9: Admit -- Let in, the whole point of the milestone ----------
+
+// Let in, the whole point of the milestone: one click turns a knock into a
+// member, and the bot sends them a sign-in link in their own chat.
+func TestAdmitCreatesTheMemberAndSendsTheirSignInLink(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	invite, err := f.invites.CreateTelegram(ctx, f.householdID, f.andreasID, "Christine", domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	rawToken := telegramRawToken(t, invite.URL)
+	if _, err := f.invites.Knock(ctx, rawToken, 4242, "christine_t"); err != nil {
+		t.Fatalf("Knock: %v", err)
+	}
+
+	member, err := f.invites.Admit(ctx, f.householdID, invite.ID)
+	if err != nil {
+		t.Fatalf("Admit: %v", err)
+	}
+	if !member.SignInSent {
+		t.Fatal("signInSent is false although the send succeeded")
+	}
+	if member.Role != domain.RoleOwner {
+		t.Fatalf("role is %q; Let in grants exactly what the invite said (spec decision 14)", member.Role)
+	}
+	if got := f.chats.lastSignInChat(); got != 4242 {
+		t.Fatalf("the sign-in link went to chat %d, want the chat that knocked (4242)", got)
+	}
+	if bound := f.inviteAccounts.userForChat(4242); bound != member.UserID {
+		t.Fatalf("chat 4242 is bound to %q, want the new member %q", bound, member.UserID)
+	}
+	// The invite is spent: a second Let in, and a second knock, both refuse.
+	if _, err := f.invites.Admit(ctx, f.householdID, invite.ID); !errors.Is(err, domain.ErrInviteAlreadyAccepted) {
+		t.Fatalf("second Admit: got %v, want domain.ErrInviteAlreadyAccepted", err)
+	}
+	if _, err := f.invites.Knock(ctx, rawToken, 5555, "someone"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("second Knock on an admitted invite: got %v, want domain.ErrNotFound", err)
+	}
+}
+
+// Nobody has knocked yet, or a new link was issued since. Either way there
+// is no one to let in, and nothing is written.
+func TestAdmitRefusesWhenNobodyIsWaiting(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	invite, err := f.invites.CreateTelegram(ctx, f.householdID, f.andreasID, "Christine", domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+
+	usersBefore := f.users.count()
+	if _, err := f.invites.Admit(ctx, f.householdID, invite.ID); !errors.Is(err, domain.ErrInviteNotKnocked) {
+		t.Fatalf("got %v, want domain.ErrInviteNotKnocked", err)
+	}
+	if got := f.users.count(); got != usersBefore {
+		t.Fatal("a user was created for an invite nobody knocked on")
+	}
+}
+
+// An id from another household is a 404, never a 409 or anything else that
+// would confirm the invite exists (docs/LEARNING.md pattern 24).
+func TestAdmitForAnotherHouseholdsInviteIsNotFound(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	invite, err := f.invites.CreateTelegram(ctx, f.householdID, f.andreasID, "Christine", domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	rawToken := telegramRawToken(t, invite.URL)
+	if _, err := f.invites.Knock(ctx, rawToken, 4242, "christine_t"); err != nil {
+		t.Fatalf("Knock: %v", err)
+	}
+
+	if _, err := f.invites.Admit(ctx, "some-other-household", invite.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("got %v, want domain.ErrNotFound", err)
+	}
+}
+
+// The member exists; only the message failed. Saying so is the whole of the
+// recovery path -- the chat is bound now, so any /start already sends them
+// a fresh sign-in link (spec decision 6).
+func TestAdmitReportsAFailedSendWithoutLosingTheMember(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	invite, err := f.invites.CreateTelegram(ctx, f.householdID, f.andreasID, "Christine", domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	rawToken := telegramRawToken(t, invite.URL)
+	if _, err := f.invites.Knock(ctx, rawToken, 4242, "christine_t"); err != nil {
+		t.Fatalf("Knock: %v", err)
+	}
+	f.chats.failNextSignIn()
+
+	member, err := f.invites.Admit(ctx, f.householdID, invite.ID)
+	if err != nil {
+		t.Fatalf("Admit must succeed when only the send failed: %v", err)
+	}
+	if member.SignInSent {
+		t.Fatal("signInSent is true although the send failed")
+	}
+	if member.MembershipID == "" {
+		t.Fatal("the member was lost because a message could not be sent")
+	}
+	if bound := f.inviteAccounts.userForChat(4242); bound != member.UserID {
+		t.Fatalf("chat 4242 is bound to %q, want the new member %q -- a failed send must not undo the binding", bound, member.UserID)
+	}
+}
+
+// A nil Chats is what an install that has removed its bot and restarted
+// looks like (docs/INFRASTRUCTURE.md's leaked-token runbook): a knock
+// recorded while the bot was still configured can still be sitting in the
+// table. Admit must report the member with SignInSent: false, the same
+// answer a failed send gets, and must not panic -- see Admit's own doc
+// comment and SetChats' for why Admit, not NewLink, needs this guard.
+func TestAdmitWithNoChatSenderConfiguredReturnsTheMemberWithoutPanicking(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	invite, err := f.invites.CreateTelegram(ctx, f.householdID, f.andreasID, "Christine", domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	rawToken := telegramRawToken(t, invite.URL)
+	if _, err := f.invites.Knock(ctx, rawToken, 4242, "christine_t"); err != nil {
+		t.Fatalf("Knock: %v", err)
+	}
+
+	// A second InviteService sharing f's own repositories, standing in for
+	// the same process after BOT_TOKEN and BOT_USERNAME are removed: the
+	// row Knock just wrote is still there, but nothing was ever told to
+	// SetChats.
+	noChats := usecase.NewInviteService(usecase.InviteDeps{
+		Invites:           f.inviteRepo,
+		Users:             f.users,
+		Sessions:          f.sessions,
+		Mailer:            f.mailer,
+		Hasher:            f.hasher,
+		Tokens:            &seqTokens{},
+		Clock:             f.clock,
+		SessionTTL:        30 * 24 * time.Hour,
+		BaseURL:           "http://localhost:5173",
+		BotUsername:       "HearthBot",
+		TelegramInviteTTL: usecase.TelegramInviteTTL,
+		Codes:             newPairingCodesDouble(),
+		Accounts:          f.inviteAccounts,
+		Chats:             nil,
+	})
+
+	member, err := noChats.Admit(ctx, f.householdID, invite.ID)
+	if err != nil {
+		t.Fatalf("Admit: %v, want no error even with no chat sender configured", err)
+	}
+	if member.SignInSent {
+		t.Fatal("signInSent is true although no chat sender is configured")
+	}
+	if member.MembershipID == "" {
+		t.Fatal("the member was lost when no chat sender is configured")
+	}
+	if bound := f.inviteAccounts.userForChat(4242); bound != member.UserID {
+		t.Fatalf("chat 4242 is bound to %q, want the new member %q -- a missing chat sender must not undo the binding", bound, member.UserID)
+	}
+}
+
+// The chat may have bound itself to a different account between the knock
+// and the click (spec decision 15) -- the same race
+// TestAdmitLeavesNothingBehindWhenTheChatIsAlreadyBound proves against real
+// Postgres. Here it is forced through the double to prove
+// InviteService.Admit itself passes the sentinel through untranslated.
+func TestAdmitRefusesWhenTheChatIsAlreadyBound(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	invite, err := f.invites.CreateTelegram(ctx, f.householdID, f.andreasID, "Christine", domain.RoleOwner, domain.AllCapabilities())
+	if err != nil {
+		t.Fatalf("CreateTelegram: %v", err)
+	}
+	rawToken := telegramRawToken(t, invite.URL)
+	if _, err := f.invites.Knock(ctx, rawToken, 4242, "christine_t"); err != nil {
+		t.Fatalf("Knock: %v", err)
+	}
+	f.inviteAccounts.bind(4242, "someone-else-entirely")
+
+	usersBefore := f.users.count()
+	membersBefore := f.members.count()
+	if _, err := f.invites.Admit(ctx, f.householdID, invite.ID); !errors.Is(err, domain.ErrChatAlreadyBound) {
+		t.Fatalf("got %v, want domain.ErrChatAlreadyBound", err)
+	}
+	if got := f.users.count(); got != usersBefore {
+		t.Errorf("users = %d, want %d -- a refused Admit must leave no user behind", got, usersBefore)
+	}
+	if got := f.members.count(); got != membersBefore {
+		t.Errorf("memberships = %d, want %d -- a refused Admit must leave no membership behind", got, membersBefore)
 	}
 }
