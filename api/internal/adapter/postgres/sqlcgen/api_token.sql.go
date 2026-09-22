@@ -113,6 +113,46 @@ func (q *Queries) ListAPITokensForUser(ctx context.Context, userID pgtype.UUID) 
 	return items, nil
 }
 
+const listLiveAPITokensForHousehold = `-- name: ListLiveAPITokensForHousehold :many
+SELECT id, user_id, household_id, name, token_hash, prefix, created_at, expires_at, last_used_at, revoked_at FROM api_tokens
+WHERE household_id = $1 AND revoked_at IS NULL AND expires_at > now()
+ORDER BY created_at DESC
+`
+
+// The household access list: every member's LIVE tokens. Unlike
+// ListAPITokensForUser this also leaves out expired rows -- the list answers
+// "what can get in right now", and an expired token cannot.
+func (q *Queries) ListLiveAPITokensForHousehold(ctx context.Context, householdID pgtype.UUID) ([]ApiToken, error) {
+	rows, err := q.db.Query(ctx, listLiveAPITokensForHousehold, householdID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ApiToken
+	for rows.Next() {
+		var i ApiToken
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.HouseholdID,
+			&i.Name,
+			&i.TokenHash,
+			&i.Prefix,
+			&i.CreatedAt,
+			&i.ExpiresAt,
+			&i.LastUsedAt,
+			&i.RevokedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const revokeAPIToken = `-- name: RevokeAPIToken :execrows
 UPDATE api_tokens SET revoked_at = now()
 WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL

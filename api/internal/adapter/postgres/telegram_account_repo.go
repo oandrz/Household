@@ -36,6 +36,25 @@ func (r *TelegramAccountRepo) ByUserID(ctx context.Context, userID string) (usec
 	}, nil
 }
 
+// ListForHousehold returns every chat bound to a member of this household,
+// most recently linked first. Empty is an empty slice, never ErrNotFound.
+func (r *TelegramAccountRepo) ListForHousehold(ctx context.Context, householdID string) ([]usecase.TelegramBinding, error) {
+	rows, err := r.q.ListTelegramAccountsForHousehold(ctx, uuid(householdID))
+	if err != nil {
+		return nil, translate(err, "list household telegram accounts")
+	}
+	out := make([]usecase.TelegramBinding, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, usecase.TelegramBinding{
+			UserID:       uuidToString(row.UserID),
+			ChatID:       row.ChatID,
+			ChatUsername: stringOrEmpty(row.ChatUsername),
+			LinkedAt:     timeOf(row.LinkedAt),
+		})
+	}
+	return out, nil
+}
+
 // Create's contract for which UNIQUE wins and why b.LinkedAt is ignored is
 // on the port (usecase.TelegramAccountRepository.Create); linked_at is left
 // to the column's own DEFAULT now().
