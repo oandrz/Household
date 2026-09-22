@@ -36,14 +36,20 @@ type MemberLister interface {
 	List(ctx context.Context, householdID string) ([]MemberView, error)
 }
 
+// AccessListDeps is what AccessListService needs to answer -- one narrow
+// port per source, so a caller wiring it up (or a test double) only has to
+// satisfy the methods this service actually calls.
 type AccessListDeps struct {
 	Tokens  HouseholdTokenLister
 	Chats   HouseholdChatLister
 	Members MemberLister
 }
 
+// AccessListService answers "what can get into this household that isn't a
+// password". See the package-level comment above for the actor-free design.
 type AccessListService struct{ d AccessListDeps }
 
+// NewAccessListService wires an AccessListService to its dependencies.
 func NewAccessListService(d AccessListDeps) *AccessListService { return &AccessListService{d: d} }
 
 // AccessToken is one token row, labelled with whose it is.
