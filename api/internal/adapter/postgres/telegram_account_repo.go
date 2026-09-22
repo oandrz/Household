@@ -8,6 +8,7 @@ import (
 )
 
 var _ usecase.TelegramAccountRepository = (*TelegramAccountRepo)(nil)
+var _ usecase.HouseholdChatLister = (*TelegramAccountRepo)(nil)
 
 type TelegramAccountRepo struct{ q *sqlcgen.Queries }
 

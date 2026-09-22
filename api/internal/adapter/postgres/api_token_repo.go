@@ -6,7 +6,10 @@ import (
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres/sqlcgen"
 	"github.com/andreasoentoro/hearth/api/internal/domain"
+	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
+
+var _ usecase.HouseholdTokenLister = (*APITokenRepo)(nil)
 
 type APITokenRepo struct{ q *sqlcgen.Queries }
 
