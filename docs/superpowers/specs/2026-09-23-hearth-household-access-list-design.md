@@ -66,22 +66,25 @@ No new write route. No migration.
    caller's own rows; the `404` is the second line.
 7. **Telegram off means no chats group.** When the `telegram_sign_in` flag is
    off for the household, or no bot is configured (`deps.TelegramLink == nil`),
-   the response carries `"telegram_enabled": false` and `"chats": []`, and the
+   the response carries `"telegramEnabled": false` and `"chats": []`, and the
    panel hides the Linked chats group. The route itself stays available — the
    tokens half does not depend on Telegram.
 8. **Flat lists, each row carrying its member.** Not nested per member: the
    panel groups by kind (tokens, chats), not by person, so flat is the shape
    it renders.
-9. **The chat id never leaves the server.** Rows carry `chat_username`
-   (nullable — Telegram users may have none) and `linked_at`, never
-   `chat_id`. The panel shows `@username`, or "Telegram chat" when it is null.
+9. **The chat id never leaves the server.** Rows carry `chatUsername`
+   (empty when Telegram sent none) and `linkedAt`, never `chatId`. The panel shows `@username`, or "Telegram chat" when it is empty.
 10. **The existing Telegram connect flow is embedded, not rewritten.**
-    `TelegramPanel`'s connect / poll / confirm / unlink behaviour moves inside
-    the Access panel's own row unchanged; only its outer card and heading go.
-    Its tests move with it.
-11. **The new-token dialog reuses the shown-once pattern** of
-    `InviteLinkShare.tsx` (PRD 14): the raw `hearth_…` secret appears once
-    with Copy, and closing the dialog drops it from memory. Name is required;
+    `TelegramPanel.tsx` is renamed `TelegramConnection.tsx`; its connect /
+    poll / confirm / disconnect behaviour is unchanged and only its outer card
+    and heading go. It renders **the caller's own chat** at the top of the
+    Linked chats group (Connect when none, Disconnect when linked). The
+    access list's chat rows then show **the other members'** chats only, so
+    the caller's own chat is never drawn twice. Its tests move with it.
+11. **The new-token dialog follows the shown-once rule** of the invite link
+    (PRD 14): the raw `hearth_…` secret appears once with Copy — but **no QR
+    and no Share-to-Telegram**, unlike `InviteLinkShare.tsx`: a token is a
+    long-lived credential, not a link meant for another person, and closing the dialog drops it from memory. Name is required;
     expiry offers 30 / 90 (default) / 365 days, matching ADR 7's bounds.
 
 ## Backend
@@ -91,8 +94,8 @@ No new write route. No migration.
 ```
 GET /api/v1/household/access
   guards: requireSession → requireCookieSession
-  owner   → AccessListService.ForHousehold(householdID)
-  limited → AccessListService.ForMember(householdID, userID)
+  owner   → AccessListService.ForHousehold(householdID, withChats)
+  limited → AccessListService.ForMember(householdID, userID, withChats)
 ```
 
 It sits in a group of its own in `router.go` with a comment saying why it is
@@ -102,24 +105,27 @@ cookie-only (decision 5). No CSRF guard is needed for a `GET`.
 
 ```json
 {
-  "telegram_enabled": true,
+  "telegramEnabled": true,
   "tokens": [
     {
-      "id": "…", "member_id": "…", "member_name": "Alex",
-      "name": "laptop script", "prefix": "hearth_ab",
-      "created_at": "…", "last_used_at": null, "expires_at": "…"
+      "id": "…", "memberId": "…", "memberName": "Alex",
+      "name": "laptop script", "prefix": "ab12cd34",
+      "createdAt": "…", "lastUsedAt": null, "expiresAt": "…"
     }
   ],
   "chats": [
     {
-      "member_id": "…", "member_name": "Sam",
-      "chat_username": "sam_k", "linked_at": "…"
+      "memberId": "…", "memberName": "Sam",
+      "chatUsername": "sam_k", "linkedAt": "…"
     }
   ]
 }
 ```
 
-Tokens newest first; chats by `linked_at`, newest first. Only **live** tokens:
+Field names are camelCase, like every other response (`apiTokenDTO`,
+`telegramBindingResponse`). `memberId` is the member's **user id**, the same
+value as `/auth/me`'s `user.id`. Tokens newest first; chats by `linkedAt`,
+newest first. Only **live** tokens:
 revoked or expired rows never appear, the same rule as `ByTokenHash`.
 
 ### Usecase
@@ -130,13 +136,12 @@ enforces who is asking).
 
 ```go
 type AccessList struct {
-    TelegramEnabled bool
     Tokens          []AccessToken // domain.APIToken + member display name
     Chats           []AccessChat  // member id, display name, username, linked at
 }
 
-func (s *AccessListService) ForHousehold(ctx, householdID string) (AccessList, error)
-func (s *AccessListService) ForMember(ctx, householdID, userID string) (AccessList, error)
+func (s *AccessListService) ForHousehold(ctx, householdID string, withChats bool) (AccessList, error)
+func (s *AccessListService) ForMember(ctx, householdID, userID string, withChats bool) (AccessList, error)
 ```
 
 `ForMember` is `ForHousehold` filtered to one user, done in the service rather
@@ -144,35 +149,48 @@ than by a second pair of queries, so both paths share one query and one set of
 repository tests. The member display name comes from the existing membership
 listing the Members panel already uses.
 
-`TelegramEnabled` is decided at the HTTP edge (flag resolution already lives
-there) and passed in, not looked up by the service.
+`telegramEnabled` is decided at the HTTP edge (flag resolution already lives
+there): when it is false the handler skips the chats and never asks the
+service for them. The service knows nothing about flags.
 
 ### Ports (`internal/usecase/ports.go`)
 
-Two narrow additions, each with a doc comment stating its contract:
+Three **new narrow ports**, declared beside the service that needs them
+(interface segregation, CLAUDE.md). They are not added to the existing
+`APITokenRepository` / `TelegramAccountRepository` / `MembershipRepository`
+interfaces: that would force every test double of those wide ports to grow a
+method it never uses. The existing Postgres repos implement the new ports.
 
-- `APITokenRepository.ListForHousehold(ctx, householdID) ([]domain.APIToken, error)`
-  — live tokens only, newest first, never another household's.
-- `TelegramAccountRepository.ListForHousehold(ctx, householdID) ([]TelegramBinding, error)`
+- `HouseholdTokenLister.ListForHousehold(ctx, householdID) ([]domain.APIToken, error)`
+  — live tokens only (not revoked, not expired), newest first, never another
+  household's. Note: the existing `ListForUser` leaves expired rows in; this
+  one does not, on purpose — the access list answers "what can get in now".
+- `HouseholdChatLister.ListForHousehold(ctx, householdID) ([]TelegramBinding, error)`
   — `telegram_accounts` has only `user_id`, so the Postgres adapter joins
   through `memberships`. Never another household's.
+- `MemberLister.List(ctx, householdID) ([]MemberView, error)` — satisfied by
+  the existing `MembershipRepository`; used for display names.
 
-Both return an empty slice, not `domain.ErrNotFound`, when there is nothing.
+Both listers return an empty slice, not `domain.ErrNotFound`, when there is
+nothing. A row whose user is not a current member is dropped by the service
+(fail closed).
 
 ## Frontend
 
 - `features/settings/AccessPanel.tsx` — the card and its two groups.
 - `features/settings/ApiTokenList.tsx` — token rows; Revoke on own rows.
 - `features/settings/NewApiTokenModal.tsx` — create, then show once.
-- `features/settings/LinkedChatList.tsx` — chat rows; the caller's own row
-  renders the extracted connect/unlink component.
+- `features/settings/TelegramConnection.tsx` — renamed from `TelegramPanel.tsx`
+  (decision 10).
+- `features/settings/LinkedChatList.tsx` — `TelegramConnection` for the
+  caller, then read-only rows for the other members' chats.
 - `features/settings/useHouseholdAccess.ts` — the query; `useApiTokens.ts`
   mutations for create and revoke, both invalidating the access query.
 - `schemas.ts` gains the access response schema.
 - `SettingsPage.tsx` drops the standalone `TelegramPanel` and renders
   `AccessPanel`.
 
-"Own row" is decided by `member_id === me.id`, never by role.
+"Own row" is decided by `memberId === me.user.id`, never by role.
 
 Every visible string goes in `copy.ts`, the same as the other panels.
 
@@ -182,7 +200,7 @@ Every visible string goes in `copy.ts`, the same as the other panels.
 |---|---|
 | API token instead of a browser session | `403 SESSION_REQUIRED` |
 | Not signed in | `401` |
-| Telegram flag off / no bot | `200`, `telegram_enabled: false`, `chats: []` |
+| Telegram flag off / no bot | `200`, `telegramEnabled: false`, `chats: []` |
 | Owner revokes partner's token id | `404` from the existing route; the panel refreshes |
 | Revoke of an already-revoked token (two tabs) | `404`; the panel refreshes and the row is gone |
 | Repository failure | `500` through `MapDomainError`, as everywhere |
@@ -204,14 +222,14 @@ Tests first, and each named for the behaviour it shows.
 - an owner sees the partner's token and chat
 - a limited member sees only their own, even when the partner has both
 - a token-authenticated request is `403 SESSION_REQUIRED`
-- the Telegram flag off gives `telegram_enabled: false` and an empty `chats`
-- no response carries `chat_id` (asserted on the raw JSON)
+- the Telegram flag off gives `telegramEnabled: false` and an empty `chats`
+- no response carries `chatId` (asserted on the raw JSON)
 - an owner `DELETE`ing the partner's token id gets `404`, and the token still works
 
 **Frontend**
 - Revoke appears on own rows only
 - the new-token dialog shows the secret once and not after reopening
-- the chats group is hidden when `telegram_enabled` is false
+- the chats group is hidden when `telegramEnabled` is false
 - the pending-invite pointer shows the count and links to Members
 
 **Mutation checks (at least these)**
