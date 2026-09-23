@@ -82,6 +82,11 @@ WHERE user_id = $1 AND revoked_at IS NULL
 ORDER BY created_at DESC
 `
 
+// One person's own tokens, newest first, revoked ones excluded -- but not
+// expired ones: unlike ListLiveAPITokensForHousehold below, this answers
+// "what has this member ever minted", not "what can get in right now", so
+// an expired token still shows up (the caller reads ExpiresAt to tell) and
+// is not silently dropped from the list.
 func (q *Queries) ListAPITokensForUser(ctx context.Context, userID pgtype.UUID) ([]ApiToken, error) {
 	rows, err := q.db.Query(ctx, listAPITokensForUser, userID)
 	if err != nil {
