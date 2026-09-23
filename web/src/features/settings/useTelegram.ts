@@ -12,6 +12,7 @@ import {
   type TelegramLinkStart,
   type TelegramLinkStatus,
 } from "./schemas";
+import { householdAccessQueryKey } from "./useHouseholdAccess";
 
 const telegramBindingQueryKey = ["telegram-binding"] as const;
 
@@ -61,7 +62,13 @@ export function useConfirmTelegramLink() {
         { method: "POST" },
       );
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: telegramBindingQueryKey }),
+    // The access list shows this chat too (other owners see it there), so
+    // it goes stale at the same moment the binding does.
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: telegramBindingQueryKey }),
+        queryClient.invalidateQueries({ queryKey: householdAccessQueryKey }),
+      ]),
   });
 }
 
@@ -71,6 +78,12 @@ export function useDisconnectTelegram() {
     mutationFn: async (): Promise<TelegramBinding> => {
       return fetchAndParse(telegramBindingSchema, "/api/v1/auth/telegram", { method: "DELETE" });
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: telegramBindingQueryKey }),
+    // The access list shows this chat too (other owners see it there), so
+    // it goes stale at the same moment the binding does.
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: telegramBindingQueryKey }),
+        queryClient.invalidateQueries({ queryKey: householdAccessQueryKey }),
+      ]),
   });
 }

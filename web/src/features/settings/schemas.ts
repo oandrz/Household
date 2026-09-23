@@ -149,3 +149,44 @@ export const telegramLinkStatusSchema = z.object({
   reason: z.string().optional(),
 });
 export type TelegramLinkStatus = z.infer<typeof telegramLinkStatusSchema>;
+
+// GET /household/access (access_handlers.go). An owner gets every member's
+// rows, a limited member only their own -- the server decides, so this
+// schema has no notion of role. chatUsername is "" when Telegram sent none.
+export const accessTokenSchema = z.object({
+  id: z.string(),
+  memberId: z.string(),
+  memberName: z.string(),
+  name: z.string(),
+  prefix: z.string(),
+  createdAt: z.string(),
+  expiresAt: z.string(),
+  lastUsedAt: z.string().nullable(),
+});
+export type AccessToken = z.infer<typeof accessTokenSchema>;
+
+export const accessChatSchema = z.object({
+  memberId: z.string(),
+  memberName: z.string(),
+  chatUsername: z.string(),
+  linkedAt: z.string(),
+});
+export type AccessChat = z.infer<typeof accessChatSchema>;
+
+export const householdAccessSchema = z.object({
+  telegramEnabled: z.boolean(),
+  tokens: z.array(accessTokenSchema),
+  chats: z.array(accessChatSchema),
+});
+export type HouseholdAccess = z.infer<typeof householdAccessSchema>;
+
+// POST /auth/tokens' 201 body. `token` is the raw secret, and this is the
+// only response that ever carries it (ADR 7 rule 7).
+export const createdApiTokenSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  prefix: z.string(),
+  expiresAt: z.string(),
+  token: z.string(),
+});
+export type CreatedApiToken = z.infer<typeof createdApiTokenSchema>;
