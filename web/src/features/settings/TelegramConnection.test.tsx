@@ -50,7 +50,12 @@ describe("TelegramConnection", () => {
     const disconnectButton = screen.getByRole("button", { name: "Disconnect" });
     expect(disconnectButton).toBeInTheDocument();
 
+    // Disconnecting is destructive (it stops reminders and bot commands for
+    // this chat) -- like every other such action in this app, it asks for
+    // an in-page confirm before it sends anything (useConfirmAction, the
+    // ApiTokenList Revoke pattern), never a single click straight to DELETE.
     fireEvent.click(disconnectButton);
+    fireEvent.click(await screen.findByRole("button", { name: "Yes, disconnect" }));
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(
@@ -61,6 +66,31 @@ describe("TelegramConnection", () => {
     });
 
     expect(await screen.findByRole("button", { name: "Connect Telegram" })).toBeInTheDocument();
+  });
+
+  it("sends no DELETE and returns to Disconnect when the confirm is cancelled", async () => {
+    const fetchMock = stubFetchRoutes({
+      [`GET ${BINDING_URL}`]: {
+        status: 200,
+        body: { connected: true, chatUsername: "andreas_o", linkedAt: "2026-09-01T10:00:00Z" },
+      },
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Disconnect" }));
+    expect(
+      await screen.findByText("Disconnect this chat? Reminders and bot commands stop working there."),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep" }));
+
+    expect(await screen.findByRole("button", { name: "Disconnect" })).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(
+        ([input, init]) =>
+          String(input) === BINDING_URL && (init?.method ?? "").toUpperCase() === "DELETE",
+      ),
+    ).toBe(false);
   });
 
   it("names the chat that opened the link before asking to confirm", async () => {
