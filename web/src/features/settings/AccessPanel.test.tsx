@@ -41,7 +41,15 @@ describe("AccessPanel", () => {
     renderPanel();
 
     expect(await screen.findByText("@chris_o")).toBeInTheDocument();
-    expect(await screen.findAllByText("@andreas_o")).toHaveLength(1);
+    // TelegramConnection's own binding query and the access-list query settle
+    // independently; "Disconnect" only renders once the binding query has
+    // resolved and drawn my own connected row. Without this anchor,
+    // findAllByText below can return as soon as it sees the access list's
+    // row alone -- before TelegramConnection's row has appeared -- which
+    // would let a de-dup regression (my own chat also drawn as a read-only
+    // row) through undetected.
+    await screen.findByRole("button", { name: "Disconnect" });
+    expect(screen.getAllByText("@andreas_o")).toHaveLength(1);
   });
 
   it("hides the Linked chats group when Telegram is off", async () => {
