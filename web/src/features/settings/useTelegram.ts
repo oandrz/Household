@@ -1,5 +1,5 @@
-// Fetch orchestration for TelegramPanel: the binding, and the two-phase link
-// (start, poll, confirm) docs/adr/0010-binding-a-chat-needs-a-confirm.md
+// Fetch orchestration for TelegramConnection: the binding, and the two-phase
+// link (start, poll, confirm) docs/adr/0010-binding-a-chat-needs-a-confirm.md
 // describes.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchAndParse } from "../../api/client";

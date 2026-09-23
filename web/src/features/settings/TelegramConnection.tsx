@@ -4,7 +4,9 @@
 // leaked deep link therefore connects nobody. See
 // docs/adr/0010-binding-a-chat-needs-a-confirm.md before simplifying this
 // into a single click.
-// Rendered inside AccessPanel's Linked chats group as the caller's own row (docs/superpowers/specs/2026-09-23-hearth-household-access-list-design.md, decision 10). Renamed from TelegramPanel; behaviour unchanged.
+// Rendered inside AccessPanel's Linked chats group as the caller's own row
+// (docs/superpowers/specs/2026-09-23-hearth-household-access-list-design.md,
+// decision 10). Renamed from TelegramPanel; behaviour unchanged.
 import { useState } from "react";
 import { ApiError } from "../../api/client";
 import { apiErrorMessage } from "../../api/errorMessage";
