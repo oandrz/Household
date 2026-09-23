@@ -23,7 +23,7 @@ gets rebuilt.
 
 ### 1. Fixing an instance rarely fixes the class
 
-This happened **twenty-three times** — one bullet each below, and the count is
+This happened **twenty-four times** — one bullet each below, and the count is
 the number of bullets, so recount it when you add one (it had already drifted
 by one before the UX-repair round noticed). Almost every time, the fix was
 correct and the sibling kept the bug; two of them are the variant where
@@ -382,6 +382,25 @@ writing a hook for it.
   label that lies, the class is every other label on that screen, not the one
   the bug report named** — and the instrument that found it was driving the
   real page, not any test that could have been written for the fix as scoped.
+
+- **The same lying-label shape, one layer earlier: a label whose target
+  never renders at all (M3, 2026-09-23).** `CurrencyPanel.tsx`'s `<label
+  htmlFor="primary-currency">` rendered for every member, but the
+  `id="primary-currency"` input only renders for an owner (`isOwner ?
+  <form><input .../></form> : <span>...</span>`) — a limited member's
+  browser had a `<label for>` pointing at an id that is never in the DOM, a
+  dangling-label DevTools accessibility issue invisible in a plain visual
+  check. The Transactions header bullet above was found by driving the real
+  page and reading it; this one was found the same way but by a different
+  instrument — DevTools' own **Issues** panel, flagging "Incorrect use of
+  `<label for=FORM_ELEMENT>`" while walking a limited member's Settings
+  screen for something else entirely. Only afterward did a grep for the
+  shape (`grep -rn 'htmlFor=' web/src/features/settings/`) confirm no
+  sibling was left — the grep swept for company once the instance was
+  already found, it did not find the instance itself. Any `<label htmlFor>`
+  whose sibling control is gated on a condition the label itself isn't
+  gated on is this bug waiting to happen — check the two render conditions
+  match.
 
 - **Giving a month-less request a meaning changed what every other caller of
   that endpoint was asking for.** Fixing the Transactions month contract made
@@ -6475,29 +6494,28 @@ no test suite can hold.
 
 ### M3 leftovers from the household access list walk (2026-09-23)
 
-- **A label rendered for a role that never renders its control.**
-  `CurrencyPanel.tsx`'s `<label htmlFor="primary-currency">` rendered for
-  every member, but the `id="primary-currency"` input only renders for an
-  owner (`isOwner ? <form><input .../></form> : <span>...</span>`) — a
-  limited member's browser had a `<label for>` pointing at an id that is
-  never in the DOM, a dangling-label DevTools accessibility issue invisible
-  in a plain visual check. This is the same shape as the lying-label entries
-  above ("the fix for a lying label left the same lie one row below it"),
-  one step earlier: there the label's *text* was wrong, here the label's
-  *target* doesn't exist at all, and both were found by grepping for the
-  shape (`grep -rn 'htmlFor=' web/src/features/settings/`) rather than by
-  reading each file in isolation. Any `<label htmlFor>` whose sibling
-  control is gated on something the label itself isn't gated on is this bug
-  waiting to happen — check the two render conditions match.
+- The dangling-label finding from this walk (`CurrencyPanel.tsx`'s
+  owner-only input, labelled for every role) is filed as evidence under
+  Pattern 1 above, next to the Transactions lying-label entry it's the same
+  shape as — see that bullet, not here.
 - **A destructive action with no confirm step is the odd one out, not a
   style choice.** `TelegramConnection.tsx`'s Disconnect button fired the
-  DELETE on a single click while every other destructive control in this
-  app (Revoke a token, Withdraw an invite, Discard a draft) goes through
-  `useConfirmAction` first. Nothing broke a test to catch this — it was
-  simply never built with one. Grepping for a raw `.mutate()` /
-  `.mutateAsync()` next to a button whose label reads as destructive
-  (Disconnect, Delete, Remove, Revoke, Withdraw) is the check; this one
-  had shipped and been walked without anyone clicking Disconnect.
+  DELETE on a single click while other destructive controls in this app
+  (Revoke a token — `ApiTokenList.tsx`; Discard a draft —
+  `DiscardDraftControl.tsx`) go through `useConfirmAction` first. Nothing
+  broke a test to catch this — it was simply never built with one.
+  Grepping for a raw `.mutate()` / `.mutateAsync()` next to a button whose
+  label reads as destructive (Disconnect, Delete, Remove, Revoke, Withdraw)
+  is the check; this one had shipped and been walked without anyone
+  clicking Disconnect. **Invite Withdraw is the still-open sibling, not
+  fixed on this branch:** `PendingInvitesList.tsx`'s and
+  `PendingInviteCard.tsx`'s own `handleWithdraw` both call
+  `withdraw.mutate(...)` straight from the click handler, with no
+  `useConfirmAction` in either file. The verification walk that found the
+  Disconnect gap logged this one too (`docs/superpowers/plans/2026-09-23-
+  hearth-household-access-list-m3-verification.md`'s "Telegram Disconnect
+  and invite Withdraw act on one click" line) and it was left for a
+  separate pass — grep for it again before assuming it's fixed.
 
 ## Before you call something done
 

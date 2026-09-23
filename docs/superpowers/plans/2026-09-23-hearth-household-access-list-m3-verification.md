@@ -284,10 +284,13 @@ reset-password` sets them back to anything else.
 
 The three items under "Seen, not a failure of this milestone" above, plus
 the leftover shared password hash, closed out as a separate small change on
-`partner-invite-lobby-m3` (commits `94f6b50`, `2751382`, `6a63600`).
-Criterion 12 above is untouched — the fake `telegram_accounts` row it used
-was already removed by that walk's own Disconnect click; this follow-up does
-not re-walk Telegram, the controller does that separately with the owner.
+`partner-invite-lobby-m3` (commits `94f6b50`, `2751382`, `6a63600`, `6d400a4`
+docs, `19e5f51` a review-fix on `2751382` — see Item 4 below — and `6d218f6`
+a docs-only correction to a claim this doc's own `expect` note made without
+testing it). Criterion 12 above is untouched — the fake `telegram_accounts`
+row it used was already removed by that walk's own Disconnect click; this
+follow-up does not re-walk Telegram, the controller does that separately
+with the owner.
 
 ### Item 2 — dev database passwords
 
@@ -322,16 +325,36 @@ password from item 2 — itself end-to-end proof that reset worked —
 
 `MembersPanel.tsx`'s `<h2>` inside `<section id="members">` now carries
 `id="members-heading"` and `tabIndex={-1}`. `AccessPanel.tsx`'s pointer
-button scrolls to that heading and then calls `.focus({ preventScroll:
-true })` on it, with a comment on why. RED: a new AccessPanel test rendered
-the panel next to a stand-in `<section id="members"><h2 id="members-heading"
-tabIndex={-1}>` (jsdom has no `scrollIntoView`, stubbed with `vi.fn()`),
-focused the pointer, clicked it, and asserted `document.activeElement` was
-the heading — failed (focus stayed on the button) against the unfixed
-component. GREEN after the fix. Browser: signed in as Andreas, created a
-real pending invite ("Verify Walk", Telegram channel), clicked "1 pending
-invite — in Members", and read `document.activeElement` back from the page
-— `{"tag":"H2","id":"members-heading",...}`. Invite withdrawn afterward.
+button scrolls `#members` (the whole card, unchanged from before either
+fix) into view and then, separately, calls `.focus({ preventScroll: true
+})` on `#members-heading`.
+
+The first commit (`2751382`) scrolled straight to `#members-heading` — one
+element doing both jobs. A review pass before declaring the branch done
+(`19e5f51`) caught that this silently moved the scroll landing position
+from the card's own top edge (padding and border included) to the
+heading's, a behaviour change nobody asked for, and made `preventScroll`
+on the focus call meaningless — it only does anything when the scroll
+target and the focus target are different elements, which they weren't.
+Fixed by giving each job its own `getElementById` call, and strengthened
+the test to assert `scrollIntoView`'s call target is `#members`, not the
+heading (proven to fail against the single-target version first).
+
+RED: a new AccessPanel test rendered the panel next to a stand-in
+`<section id="members"><h2 id="members-heading" tabIndex={-1}>` (jsdom has
+no `scrollIntoView`, stubbed with `vi.fn()`), focused the pointer, clicked
+it, and asserted `document.activeElement` was the heading — failed (focus
+stayed on the button) against the unfixed component. GREEN after the fix.
+Browser (re-run after `19e5f51`): signed in as Andreas, created a real
+pending invite ("Recheck", Telegram channel), clicked "1 pending invite —
+in Members", and read both the scroll position and `document.activeElement`
+back from the page —
+`{"activeTag":"H2","activeId":"members-heading","sectionTop":0,"headingTop":23}`:
+the `#members` card's top edge lands at the viewport top (`sectionTop: 0`,
+matching this same walk's criterion 10, which recorded the heading landing
+at 23px — the card's own top padding), while focus is on the heading
+specifically (`activeId: "members-heading"`), not the card. Invite
+withdrawn afterward.
 
 ### Item 5 — Telegram Disconnect confirm step
 
