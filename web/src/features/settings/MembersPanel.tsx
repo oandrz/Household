@@ -241,7 +241,7 @@ export function MembersPanel({ openPartnerInvite = false }: { openPartnerInvite?
   }
 
   return (
-    <section className="rounded-xl border border-hairline bg-card p-[22px]">
+    <section id="members" className="rounded-xl border border-hairline bg-card p-[22px]">
       <div className="mb-4 flex items-baseline justify-between">
         <h2 className="text-sm font-semibold text-ink">Members</h2>
         {isOwner && (

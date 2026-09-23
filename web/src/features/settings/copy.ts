@@ -154,3 +154,10 @@ export function tokenMetaLine(token: { lastUsedAt: string | null; expiresAt: str
   const used = token.lastUsedAt ? `Last used ${shortDate(token.lastUsedAt)}` : "Never used";
   return `${used} · Expires ${shortDate(token.expiresAt)}`;
 }
+
+// The Access panel's one line about invites. Pending invites stay listed
+// under Members, beside "+ Invite" (spec decision 2); this only points there.
+export function pendingInvitesPointer(count: number): string | null {
+  if (count === 0) return null;
+  return count === 1 ? "1 pending invite — in Members" : `${count} pending invites — in Members`;
+}
