@@ -32,9 +32,13 @@ function TokenRow({ token, isMine }: { token: AccessToken; isMine: boolean }) {
     <li className="flex flex-col gap-1.5 py-2.5 text-[13px]">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="truncate text-ink">
-            <span className="font-semibold">{token.name}</span>{" "}
-            <span className="text-muted">· {token.memberName}</span>
+          {/* Only the name truncates (min-w-0 truncate); the member name is
+              shrink-0 so it always stays fully readable -- a long name used
+              to clip "· memberName" off the end at 375px because the whole
+              line truncated together. */}
+          <div className="flex min-w-0 items-baseline gap-1">
+            <span className="min-w-0 truncate font-semibold text-ink">{token.name}</span>
+            <span className="shrink-0 text-muted">· {token.memberName}</span>
           </div>
           <div className="mt-0.5 text-[11.5px] text-muted">
             <span className="font-mono">{token.prefix}…</span> · {tokenMetaLine(token)}
