@@ -76,4 +76,14 @@ describe("NewApiTokenModal", () => {
     renderModal();
     expect(screen.getByRole("button", { name: "Create token" })).toBeDisabled();
   });
+
+  // Pinned to the literal 80, not to MAX_TOKEN_NAME_LENGTH -- importing the
+  // same constant the component uses would let this drift silently along
+  // with it. 80 is api/internal/domain/api_token.go's MaxAPITokenNameLength,
+  // the value ValidateAPITokenName actually enforces server-side.
+  it("caps the name field at the domain's own MaxAPITokenNameLength, 80", () => {
+    stubFetchRoutes({});
+    renderModal();
+    expect(screen.getByLabelText("Name")).toHaveAttribute("maxlength", "80");
+  });
 });

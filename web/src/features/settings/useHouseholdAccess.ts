@@ -29,6 +29,13 @@ export type NewApiToken = { name: string; expiresInDays: number };
 export function useCreateApiToken() {
   const queryClient = useQueryClient();
   return useMutation({
+    // gcTime: 0 -- the response carries the raw secret (`.token`, shown
+    // exactly once, ADR 7 rule 7). TanStack's MutationCache otherwise keeps
+    // a settled mutation, secret and all, for its default five minutes after
+    // it stops being observed; NewApiTokenModal.tsx's `create.reset()` on
+    // close only resets THIS hook's own observer, not that cache entry. This
+    // is what makes NewApiTokenModal's "nothing else holds it" comment true.
+    gcTime: 0,
     // apiFetch sets Content-Type: application/json whenever a body is given.
     mutationFn: async (input: NewApiToken): Promise<CreatedApiToken> =>
       fetchAndParse(createdApiTokenSchema, "/api/v1/auth/tokens", {

@@ -1,7 +1,10 @@
 // Create a personal API token, then show its secret exactly once (ADR 7
 // rule 7; PRD item 14). The secret lives only in this component's mutation
-// state: closing the dialog resets it, and nothing else ever holds it -- not
-// the query cache, not storage.
+// state: closing the dialog resets it, and useCreateApiToken's own
+// `gcTime: 0` (useHouseholdAccess.ts) stops TanStack's MutationCache from
+// holding onto the settled mutation -- secret included -- for its default
+// five minutes after that reset. Nothing else holds it: not the query
+// cache (a create is invalidated, never cached), not storage.
 //
 // Copy only. No QR and no Share-to-Telegram, unlike InviteLinkShare.tsx: an
 // invite link is meant for another person; a token is a long-lived
@@ -12,7 +15,7 @@ import { Field } from "../../components/Field";
 import { FIELD_CONTROL_CLASS } from "../../components/fieldClasses";
 import { Modal } from "../../components/Modal";
 import { ModalActions } from "../../components/ModalActions";
-import { TOKEN_LIFETIME_OPTIONS } from "./copy";
+import { MAX_TOKEN_NAME_LENGTH, TOKEN_LIFETIME_OPTIONS } from "./copy";
 import { useCreateApiToken, type NewApiToken } from "./useHouseholdAccess";
 
 const DEFAULT_DAYS = 90;
@@ -78,7 +81,7 @@ export function NewApiTokenModal({ open, onClose }: { open: boolean; onClose: ()
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. laptop script"
               className={FIELD_CONTROL_CLASS}
-              maxLength={60}
+              maxLength={MAX_TOKEN_NAME_LENGTH}
             />
           </Field>
           <Field label="Expires after" htmlFor={lifetimeId}>

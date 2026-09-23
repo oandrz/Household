@@ -143,6 +143,13 @@ export const TOKEN_LIFETIME_OPTIONS = [
   { days: 365, label: "1 year" },
 ] as const;
 
+// Mirrors api/internal/domain/api_token.go's MaxAPITokenNameLength -- kept
+// in sync by hand; ValidateAPITokenName is the one place that actually
+// enforces it. This is only the client-side maxLength on the name field
+// (NewApiTokenModal.tsx), so an over-length name is refused by the browser
+// before it ever makes a round trip to learn that from the server.
+export const MAX_TOKEN_NAME_LENGTH = 80;
+
 function shortDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
