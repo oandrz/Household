@@ -76,7 +76,13 @@ type Deps struct {
 	// so an install with no bot gives away nothing about whether the
 	// feature exists.
 	TelegramLink *usecase.TelegramLinkService
-	// Access serves the household access list (GET /household/access).
+	// Access serves the household access list (GET /household/access). Like
+	// Admin below, it is never nil in a real deployment: main.go constructs
+	// it unconditionally, behind no feature flag or optional config, unlike
+	// Telegram/TelegramLink above which are nil until a bot is configured.
+	// Unlike Admin, though, nothing outside its own handler reads it, so a
+	// nil Access would only ever panic that one route, not the rest of the
+	// authenticated surface.
 	Access *usecase.AccessListService
 	// Admin and AdminReauth are the platform-operator surface's two
 	// services. Unlike Telegram above they are never nil in a real
