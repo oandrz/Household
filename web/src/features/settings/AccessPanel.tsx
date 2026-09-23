@@ -48,7 +48,10 @@ export function AccessPanel() {
           <button
             type="button"
             onClick={() => document.getElementById("members")?.scrollIntoView({ behavior: "smooth" })}
-            className="font-semibold text-accent"
+            // min-h-11/sm:min-h-0: same padding-less-button gap
+            // MembersPanel's "+ Invite" button comments on -- no padding to
+            // reach the 44px floor without this.
+            className="min-h-11 font-semibold text-accent sm:min-h-0"
           >
             {pointer}
           </button>
