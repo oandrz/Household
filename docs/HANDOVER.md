@@ -138,7 +138,9 @@ same statement imported twice creates nothing new. Both walked live. **Then
 personal API tokens** ([ADR 7](adr/0007-personal-api-tokens.md), migration
 `00016`): `Authorization: Bearer hearth_…` resolves to the member's own
 Scope, `hearthctl token create|list|revoke` and `login --token`; walked
-live the same day. No Settings screen for tokens yet (tracker §10). **Then
+live the same day. Settings now has a screen for tokens — the **Access
+panel** (`AccessPanel.tsx`, tracker §10), built by the household access list
+milestone. **Then
 Telegram chat commands** ([ADR 8](adr/0008-authorisation-at-each-channels-inbound-edge.md)):
 `/spend`, `/income`, `/balance`, `/recent` on the existing poller, guarded at
 the adapter's edge — ✅, walked live against a development bot
