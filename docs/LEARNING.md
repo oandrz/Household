@@ -6453,15 +6453,18 @@ no test suite can hold.
   lockout risk, and it works for any seeded member who has an email.
   **Correction (2026-09-23 follow-up):** `adminctl reset-password` *can* be
   driven by an agent after all — the earlier claim here was wrong. The
-  blocker isn't the tool, it's `docker compose exec -T`: `-T` disables the
-  container's pseudo-TTY, and `term.ReadPassword` needs a real terminal fd
-  (fails "inappropriate ioctl for device"). Drop `-T` and wrap the call in
-  `expect` (`spawn docker compose exec api go run ./cmd/adminctl
-  reset-password --email=...`, `expect "New password:"`, `send -- "$pw\r"`):
-  `expect` allocates a local pty, which is what lets `docker compose exec`
-  allocate one on the container side too, satisfying `term.ReadPassword`
-  without any human typing. A plain shell pipe (`echo "$pw" | ... -T ...`)
-  still fails for the reason above.
+  blocker isn't the tool, it's the container's stdin never being a real
+  terminal, and `term.ReadPassword` needs one (fails "inappropriate ioctl
+  for device" without it). `-T` explicitly disables the pseudo-TTY, but
+  dropping `-T` alone does not fix it either: Compose only allocates one
+  when *its own* stdin is a terminal, and silently falls back to no-TTY
+  otherwise (confirmed with `printf 'x\n' | docker compose exec api tty` →
+  `not a tty`, no error, no `-T` involved). `expect` is what actually
+  closes the gap — it gives the docker client a local pty of its own
+  (`spawn docker compose exec api go run ./cmd/adminctl reset-password
+  --email=...`, `expect "New password:"`, `send -- "$pw\r"`), which is what
+  lets Compose allocate one on the container side too, satisfying
+  `term.ReadPassword` without any human typing.
 - **Chrome DevTools MCP isolated contexts carried a three-person walk**
   (owner, partner owner, limited member) in one browser. Two limits to
   know: `resize_page` stops at the window's 500px minimum, so use
