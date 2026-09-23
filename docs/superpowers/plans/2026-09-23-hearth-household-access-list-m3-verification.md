@@ -411,3 +411,66 @@ disconnect" — the controller re-walks the real Telegram flow with the owner
 separately) → confirmed by SQL that the row was untouched. The temporary row
 was then deleted and the page reloaded to confirm the UI matched ("Connect
 Telegram" again).
+
+### Item 6 — Withdraw confirm (2026-09-24)
+
+`PendingInvitesList.tsx` (the email row) and `PendingInviteCard.tsx` (the
+Telegram card — `docs/LEARNING.md`'s 2026-09-23 M3-leftovers bullet named
+this the sibling left open when Item 5 above shipped) fixed the same way:
+Withdraw now asks first, using the same `useConfirmAction` pattern as
+ApiTokenList's Revoke and TelegramConnection's Disconnect (Item 5) —
+"Withdraw this invite? The link stops working." with "Yes, withdraw" /
+"Keep" buttons, `withdraw.mutateAsync(id)` inside `confirm()`.
+`PendingInvitesList.tsx` keys one `useConfirmAction()` instance by invite
+id, since that one hook instance now serves every email row in the list;
+`PendingInviteCard.tsx` mounts one card per invite, so it stays on the
+default single-item key, same as `ApiTokenList`'s own per-row `TokenRow`.
+
+RED (implementation reverted with `git stash push -- PendingInviteCard.tsx
+PendingInvitesList.tsx`, test changes kept, the same isolation Item 5 used):
+9 of 42 tests across the three touched files failed against the old
+one-click components — the updated "withdraws an invite … after a confirm"
+and "withdraws a knocked invite, after a confirm" tests (no "Yes, withdraw"
+button to find), the double-click test rewritten to target "Yes, withdraw"
+instead of the old Withdraw trigger, two new "sends no DELETE and returns to
+Withdraw when the confirm is cancelled" (Keep) tests, a new "confirming one
+invite's withdraw does not open the confirm pair on another" test, and
+`MembersPanel.test.tsx`'s existing 409 test. The other 33 tests in the same
+three files passed unchanged. GREEN after restoring the fix: `PendingInvitesList.test.tsx`
++ `PendingInviteCard.test.tsx` + `MembersPanel.test.tsx` (42/42) and the
+whole frontend suite (961/961) pass; `npx tsc --noEmit -p .`, `npx eslint
+src/features/settings/` and `make lint` (arch-lint, tsc, eslint, deadcode,
+staticcheck, knip, `go vet`) all clean.
+
+Mutation check: changed `PendingInviteRow`'s trigger button's `onClick` from
+`onAsk` to `onConfirm` (bypassing the gate so a click goes straight to the
+DELETE). 6 of 12 `PendingInvitesList.test.tsx` tests failed for the expected
+reason — no "Yes, withdraw" button ever rendered, since the row skipped the
+confirm step entirely. Reverted; suite green again.
+
+Sibling grep (`docs/LEARNING.md`'s own "before you call something done"
+checklist item 3): `grep -rn '\.mutate(\|\.mutateAsync('
+web/src --include="*.tsx"` filtered to Delete/Remove/Revoke/Disconnect/
+Withdraw/Discard-labelled buttons found three more hits —
+`HoldingIncomePanel.tsx`, `HoldingLotsPanel.tsx`, `TransactionsPage.tsx` —
+all three already gated (the first two through their own `useConfirmAction`
+instance, the third through `TransactionModal`'s in-modal confirm; both are
+named in `useConfirmAction.ts`'s own header comment as pre-existing
+callers). No further fix needed.
+
+Browser (Docker Desktop stack, signed in as `andreas@hearth.family`):
+created a Telegram invite ("Withdraw Test Invite") via **+ Invite**, closed
+the modal, and drove the row in Settings' own Pending invites list — not the
+modal's copy of the same card. Clicked **Withdraw** → saw "Withdraw this
+invite? The link stops working." with **Yes, withdraw** / **Keep** →
+clicked **Keep** → invite still listed, Withdraw button back, no DELETE in
+the request log. Clicked **Withdraw** again → **Yes, withdraw** → the
+invite and the whole "Pending invites" heading disappeared, and the Access
+panel's "1 pending invite — in Members" pointer button disappeared with it.
+No console errors or warnings at any point. Repeated at `375x812x2,mobile,
+touch` (this doc's own criterion-12 note on the resize-page minimum) with a
+second invite ("Phone Width Invite"): the confirm line and both buttons
+render full width below the row, both meet the 44px touch target, nothing
+clips. Console checked again afterward, still clean.
+
+Commit: `fix(web): ask before withdrawing an invite` (`55cea7f`).

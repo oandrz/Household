@@ -6507,15 +6507,17 @@ no test suite can hold.
   Grepping for a raw `.mutate()` / `.mutateAsync()` next to a button whose
   label reads as destructive (Disconnect, Delete, Remove, Revoke, Withdraw)
   is the check; this one had shipped and been walked without anyone
-  clicking Disconnect. **Invite Withdraw is the still-open sibling, not
-  fixed on this branch:** `PendingInvitesList.tsx`'s and
-  `PendingInviteCard.tsx`'s own `handleWithdraw` both call
-  `withdraw.mutate(...)` straight from the click handler, with no
-  `useConfirmAction` in either file. The verification walk that found the
-  Disconnect gap logged this one too (`docs/superpowers/plans/2026-09-23-
-  hearth-household-access-list-m3-verification.md`'s "Telegram Disconnect
-  and invite Withdraw act on one click" line) and it was left for a
-  separate pass — grep for it again before assuming it's fixed.
+  clicking Disconnect. Invite Withdraw was logged as the still-open sibling
+  in this same walk — `PendingInvitesList.tsx`'s and `PendingInviteCard.tsx`'s
+  own `handleWithdraw` both called `withdraw.mutate(...)` straight from the
+  click handler, with no `useConfirmAction` in either file — and left for a
+  separate pass rather than fixed here. **It is fixed as of `55cea7f`
+  (2026-09-24, this branch):** both files now gate the DELETE behind
+  `useConfirmAction`, the same "Yes, withdraw" / "Keep" pair as Disconnect's
+  fix above; `PendingInvitesList.tsx` keys one hook instance by invite id so
+  several rows confirm independently. Grep for the shape again before
+  assuming a *third* one is fixed — a pattern seen twice in the same walk is
+  not proof there is no third instance elsewhere.
 
 ## Before you call something done
 
