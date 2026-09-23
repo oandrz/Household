@@ -6399,6 +6399,33 @@ no test suite can hold.
   about a minute through Mailpit, needs no volume drop, and leaves the seeded
   household alone.
 
+### The household access list's browser walk (2026-09-23)
+
+- **The dev stack served a crash page while `make lint && make test` were
+  green.** Vite's overlay read `Failed to resolve import "qrcode-generator"`:
+  the web service installs into the `hearth-node-modules` named volume, and
+  that volume predated the dependency. `docker compose up --build` does not
+  touch it, because the `web` service has no image to build. What caught it:
+  loading the page. What fixes it: restart the web container, so its
+  `npm install` runs again. The same walk found the dev database one
+  migration behind (`00021`) — run `docker compose run --rm migrate` against
+  the engine that owns port 5173 before a walk, not only the suite's
+  throwaway containers. Both are pattern 3's two-Docker-engines trap again,
+  in a new shape: the thing answering the browser is not the thing the suite
+  tested.
+- **Sign in by magic link, not by password.** `POST /api/v1/auth/magic-link`
+  with the member's email, then read the link from Mailpit's API
+  (`/api/v1/search?query=to:<email>`). No password is typed, so there is no
+  lockout risk, and it works for any seeded member who has an email.
+  `adminctl reset-password` needs a real TTY, so an agent cannot drive it.
+- **Chrome DevTools MCP isolated contexts carried a three-person walk**
+  (owner, partner owner, limited member) in one browser. Two limits to
+  know: `resize_page` stops at the window's 500px minimum, so use
+  `emulate` with a `375x812x2,mobile,touch` viewport for a phone-width check;
+  and `list_console_messages` keeps only the last three navigations, so for
+  a "no console errors" claim do the whole flow again without reloading,
+  then read the console.
+
 ## Before you call something done
 
 1. `make lint && make test` — both, on the tree you are about to integrate.

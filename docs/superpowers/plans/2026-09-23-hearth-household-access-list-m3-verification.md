@@ -199,3 +199,83 @@ query that forgets its household filter, and a frontend that forgets whose
 row it is rendering. It does not repeat the milestone's browser walk — that
 is Task 9 — and it does not claim any coverage beyond the four checks and
 the full `make lint && make test` run recorded above.
+
+---
+
+## 3. Browser walk (Task 9)
+
+**Walked 2026-09-23, 01:31–01:45 UTC, in real Chromium** (the
+chrome-devtools MCP) against the running Docker stack at
+`http://localhost:5173`. **Result: 14 of 14 passed.** No product defect
+found. Two environment problems were found and fixed on the way (below).
+
+### Environment — proving the served build is this branch
+
+- `lsof -i :5173` → held by Docker Desktop (`com.docke…`). `docker --context
+  desktop-linux ps` showed the `hearth` compose project, working dir this
+  repo; colima had nothing running. The shell's default context is colima,
+  so every compose command needed `DOCKER_CONTEXT=desktop-linux`.
+- **The dev database was one migration behind:** `docker compose run --rm
+  migrate` applied `00021_invite_channels.sql` (goose version 21). Then
+  `docker compose up -d --build api web`; api log: `telegram sign-in and
+  chat commands enabled bot_username=HearthOinkDevBot`.
+- **The web container served a Vite crash overlay, not the app:**
+  `Failed to resolve import "qrcode-generator" from
+  "src/features/settings/InviteLinkShare.tsx"`. The `hearth-node-modules`
+  named volume predates that dependency; `docker restart hearth-web-1` re-ran
+  `npm install` and the page loaded. `make test` could never see this — the
+  suite does not use that volume.
+- Branch proof: `GET /api/v1/household/access` unauthenticated → **401
+  `UNAUTHENTICATED`**, while an unknown route (`/api/v1/zzz-nonexistent`) →
+  **404 `NOT_FOUND`**, so the route exists; and Settings shows the **Access**
+  card.
+- `make seed`, `make hearthctl`. Sign-in for every session was by
+  **one-time magic link** read from Mailpit, not by typing passwords.
+
+**Three isolated sessions**, one browser, separate cookie jars
+(chrome-devtools `isolatedContext`): **owner** = Andreas (owner, platform
+admin), **partner** = Christine (owner — `/auth/me` in that context returned
+`Christine`, role `owner`, proving isolation), **kid** = Jamie (limited,
+money only; the seeded Kayla/Ethan have no email and cannot sign in). This
+differs from the brief's Claude-in-Chrome + Playwright pairing: the
+Claude-in-Chrome window returned screenshots that did not match its own
+viewport, so it was dropped after criterion 1's first read.
+
+### Criteria
+
+| # | Result | What was actually seen |
+|---|---|---|
+| 1 | ✅ | Owner's Settings: `Access` h2, "Every way into your household besides a password.", `API TOKENS` h3 and `LINKED CHATS` h3 (Telegram is on in this stack). No other card mentions Telegram — the only occurrence is the `Connect Telegram` button inside Linked chats. |
+| 2 | ✅ | New token → dialog "New API token", Name empty, Expires after = **90 days** (options 30 days / 90 days / 1 year), Create disabled until named. Named `walk-owner`, Create → "Your new token", "Copy it now. You won't see it again", secret `hearth_DM3P…EXg` (51 chars), buttons **Copy** and **Done**. |
+| 3 | ✅ | Done, then New token: one open dialog, `:modal` true, Name `""`, select `90`. `document.documentElement.outerHTML.includes(<secret fragment>)` → **false**; no `hearth_…` string anywhere in `body.innerText`. |
+| 4 | ✅ | Row: `walk-owner · Andreas` / `DM3Pkdd2… · Never used · Expires Dec 22, 2026` / **Revoke**. Sep 23 + 90 days = Dec 22. |
+| 5 | ✅ | `HEARTH_TOKEN=<secret> hearthctl login --token` → "token accepted for andreas@hearth.family", exit 0; `hearthctl whoami` → Andreas, role owner, exit 0. After reload the row read `Last used Sep 23, 2026`. |
+| 6 | ✅ | `curl -H "Authorization: Bearer <secret>" …/api/v1/household/access` → **HTTP 403** `{"error":{"code":"SESSION_REQUIRED",…}}`. |
+| 7 | ✅ | Partner created `walk-partner` (secret shown once). Owner reload: row `walk-partner · Christine` / `6ebkhkpI… · Never used · Expires Dec 22, 2026` with **no buttons** in the row; the owner's own two rows each have Revoke. |
+| 8 | ✅ | Partner clicked Revoke → the row changed in place to **Yes, revoke / Keep** (in-page, no `window.confirm`, no dialog). Yes, revoke → row gone from the partner's list. Owner reload → row gone. The revoked secret then got **401** on `/auth/me`. |
+| 9 | ✅ | Owner Revoke → Yes, revoke → list shows only the old `test` row. `hearthctl whoami` → "the API answered 401 … Run: hearthctl login", **exit 2**. |
+| 10 | ✅ | Owner invited "Walk Invitee" (Kid, Telegram link) → Access card: **"1 pending invite — in Members"** (a button, 44px tall). Scrolled to page bottom (Members h2 at −709px), clicked it → `scrollY` 110, Members h2 at **23px** from the top. After withdrawing the invite the pointer was gone. |
+| 11 | ✅ | Kid's Access: "Your own ways in besides a password.", `API TOKENS` → "No API tokens." while the owner has a live `test` token; no invite pointer (the owner's invite was pending at the time); Linked chats shows only Connect. After the kid made its own token, only that one row showed. Network (xhr/fetch) on load: `auth/me, household/members, spaces, household, currencies, notification-preferences, household/access, auth/telegram` — **no `/household/invites`**, confirmed again from `performance.getEntriesByType('resource')` after a reload. |
+| 12 | ✅ (scoped) | Dev bot `@HearthOinkDevBot` is configured. **Connect**: opened `https://t.me/HearthOinkDevBot?start=<code>` in a new tab; the card switched to "Open Telegram and press Start … We'll check automatically." **The link handshake itself was not exercised** — nothing could press Start in a Telegram client. To test the linked state, a `telegram_accounts` row for Andreas (`chat_username walk_fake_chat`, fake chat id, nudges off) was **inserted by SQL**. Owner reload: "Connected as @walk_fake_chat · Linked Sep 23, 2026 · **Disconnect**"; partner saw `@walk_fake_chat · Andreas` with no Disconnect. Owner clicked **Disconnect** (real click) → list refreshed at once to "Connect Telegram"; DB count for that user → 0; partner reload no longer lists it. |
+| 13 | ✅ | `resize_page` stops at the window's 500px minimum, so a 375×812 mobile viewport was emulated. Owner and kid pages: `innerWidth 375`, `documentElement.scrollWidth 375`, `scrollBy(50,0)` left `scrollX 0`. The 59-char name `walk-kid-a-very-long-token-name-for-the-narrow-screen-check` renders `walk-kid-a-very-long-token-nam…` — its div is `overflow:hidden; text-overflow:ellipsis`, width 220, scrollWidth 450 (the two spans past the viewport edge are inside that clipped div). New token 82×44, Revoke 65×44, Connect Telegram 122×44; `elementFromPoint` at each centre hits the button. Tapping Revoke gave Yes, revoke 84×44 / Keep 53×44 in-row; tapping New token opened a `:modal` dialog 375 wide with no page overflow. |
+| 14 | ✅ | No console errors or warnings in any of the three sessions. Owner: a final no-reload pass (create `walk-console` → Done → New token → Cancel → Revoke → Yes, revoke → Connect Telegram) then `list_console_messages` (error/warn/issue) → **none**. Partner and kid: only Vite/React DevTools info. api log for the window: no error lines. |
+
+### Seen, not a failure of this milestone
+
+- The kid's page raises a DevTools **issue** (not a console error):
+  "Incorrect use of `<label for=FORM_ELEMENT>`" — `CurrencyPanel.tsx`'s
+  `primary-currency` label points at a read-only text for limited members.
+  Last touched 2026-09-19 (#26), not on this branch. Follow-up.
+- Focus stays on the "1 pending invite" button after it scrolls to Members,
+  rather than moving to the Members card. Not a criterion; worth a look.
+- Telegram **Disconnect** and invite **Withdraw** act on one click with no
+  confirm step, unlike token Revoke. Not a criterion; noted for consistency.
+
+### State left in the dev database
+
+All walk tokens revoked (`walk-owner`, `walk-partner`, `walk-console`, the
+kid's long-named one), the invite withdrawn, the fake chat row removed by
+Disconnect. **Changed and not reverted:** Christine's and Jamie's
+`password_hash` were set to a copy of Andreas's seeded hash
+(`hearth-dev-password`) before switching to magic links; `make
+reset-password` sets them back to anything else.
