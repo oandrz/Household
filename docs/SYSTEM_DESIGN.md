@@ -78,13 +78,13 @@ repository files behind it, its seven routes joining Retros' and Vision's own
 route group (§3, §4), `AgreementService` and the propose → sign lifecycle
 (§5, "Agreements — propose → sign"), and its frontend — `AgreementsPage.tsx`,
 the three modals and the read-only "To discuss" block Retros gains — are all
-built (§7). **Its own fifteen-criterion browser walk has not run yet**; that
-is a separate task, and this document does not claim it has passed. Family is
-not built. See `docs/FEATURE_TRACKER.md` section 6 for exactly which of
+built (§7). **Its own fifteen-criterion browser walk ran 2026-09-06 and
+passed 15 of 15**, one real defect found, fixed and re-verified along the way
+(`docs/superpowers/plans/2026-09-05-hearth-agreements-verification.md`).
+Family is not built. See `docs/FEATURE_TRACKER.md` section 6 for exactly which of
 Marriage's rows are done, including the two deliberate divergences from the
 design spec's own prose Retros' walk found and left as shipped, and
-Agreements' rows, which read "code-complete, walk pending" until that walk
-runs.
+Agreements' rows, each carrying its own walk citation.
 Overview is **partly** built: `/` carries an interim page composed of six of
 the design's seven cards (the money row of four, Marriage's "Next retro",
 "This week" and "Vision 2026" — the header's own "+ Add" button is not a
@@ -186,9 +186,15 @@ and no migration. Evidence:
 `docs/superpowers/plans/2026-09-19-hearth-partner-invite-lobby-m1-verification.md`.
 Design: `docs/superpowers/specs/2026-09-19-hearth-partner-invite-lobby-design.md`.
 
-**Milestone 2 — a partner joins over Telegram, by a knock — is also built, on
-branch `worktree-partner-invite-lobby-m2` (2026-09-20). It is not merged to
-`main`, not deployed, and its own browser walk has not run yet.** An owner
+**Milestone 2 — a partner joins over Telegram, by a knock — is built and
+merged to `main`** (`26c45f7`, PR #29). **Its own walk ran 2026-09-20: 7 of
+the plan's 15 criteria were verified live in a real browser** (criterion 4
+only partially — the clipboard write itself was not read back) **plus direct
+HTTP checks against the running server; 6 need a second person holding a
+real phone and were not performed; the remaining 2 were already satisfied on
+the seed before the walk began and were not meaningfully testable** — see
+`docs/superpowers/plans/2026-09-20-hearth-partner-invite-lobby-m2-verification.md`
+for exactly which is which. **It is merged but not yet deployed.** An owner
 gets a one-time Telegram link for an invite (§4, §5); the partner's tap
 records a **knock** and nothing else; the owner compares a four-digit code
 and clicks **Let in** or **Not them**. One migration
@@ -201,8 +207,9 @@ security-review finding this milestone depended on (§5). Recorded as
 (the same spec covers both milestones).
 
 **Milestone 3 — the household access list — is built, its full gate and four
-mutation checks are recorded, and its own browser walk has not run yet.** It
-is not merged to `main` and not deployed. One new read route, `GET
+mutation checks are recorded, and its own browser walk ran 2026-09-23 and
+passed 14 of 14** (`docs/superpowers/plans/2026-09-23-hearth-household-access-list-m3-verification.md`,
+§3). **It is not merged to `main` and not deployed.** One new read route, `GET
 /household/access` (§4), guarded to a browser session only —
 `requireCookieSession`, stricter than most authenticated routes, because what
 it discloses (every member's token prefixes and chat usernames) is a map of
