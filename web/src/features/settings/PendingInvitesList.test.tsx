@@ -37,6 +37,19 @@ const knockedChristine: PendingInvite = {
   knock: { username: "christine_t", code: "4812", knockedAt: "2026-09-20T10:00:00Z" },
 };
 
+// A second email row, used only by the two-invite test below: it needs a row
+// beside Jane's that is never clicked, to prove confirming Jane's doesn't
+// open Jack's confirm pair too.
+const jack: PendingInvite = {
+  id: "inv-jack",
+  name: "Jack",
+  email: "jack@example.com",
+  role: "member",
+  capabilities: ["chores"],
+  channel: "email",
+  expiresAt: "2026-09-28T00:00:00Z",
+};
+
 function renderList() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -179,7 +192,7 @@ describe("PendingInvitesList", () => {
     await waitFor(() => expect(container).toBeEmptyDOMElement());
   });
 
-  it("withdraws an invite and drops it from the list", async () => {
+  it("withdraws an invite and drops it from the list, after a confirm", async () => {
     const fetchMock = stubFetchRoutes({
       [`GET ${INVITES_URL}`]: [
         { status: 200, body: [jane] },
@@ -190,6 +203,11 @@ describe("PendingInvitesList", () => {
     renderList();
 
     fireEvent.click(await screen.findByRole("button", { name: "Withdraw the invite to Jane" }));
+    // The in-page confirm step (never window.confirm -- ApiTokenList's Revoke
+    // and TelegramConnection's Disconnect give the reason): the DELETE must
+    // not fire until "Yes, withdraw" is clicked too.
+    expect(screen.getByText("Withdraw this invite? The link stops working.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Yes, withdraw" }));
 
     await waitFor(() => expect(screen.queryByText("Jane")).toBeNull());
     expect(
@@ -199,7 +217,10 @@ describe("PendingInvitesList", () => {
     ).toBe(true);
   });
 
-  it("disables Withdraw while its request runs, so a double click sends one DELETE", async () => {
+  // Withdraw itself just opens the confirm pair now -- no request fires until
+  // "Yes, withdraw" is clicked, so the double-click risk this test pins moved
+  // there with it.
+  it("disables Yes, withdraw while its request runs, so a double click sends one DELETE", async () => {
     let release: () => void = () => {};
     const routed = stubFetchRoutes({
       [`GET ${INVITES_URL}`]: { status: 200, body: [jane] },
@@ -212,13 +233,45 @@ describe("PendingInvitesList", () => {
     vi.stubGlobal("fetch", gated);
     renderList();
 
-    const button = await screen.findByRole("button", { name: "Withdraw the invite to Jane" });
-    fireEvent.click(button);
-    fireEvent.click(button);
-    await waitFor(() => expect(button).toBeDisabled());
+    fireEvent.click(await screen.findByRole("button", { name: "Withdraw the invite to Jane" }));
+    const confirmButton = await screen.findByRole("button", { name: "Yes, withdraw" });
+    fireEvent.click(confirmButton);
+    fireEvent.click(confirmButton);
+    await waitFor(() => expect(confirmButton).toBeDisabled());
     release();
 
     expect(gated.mock.calls.filter(([, init]) => init?.method === "DELETE")).toHaveLength(1);
+  });
+
+  it("sends no DELETE and returns to Withdraw when the confirm is cancelled", async () => {
+    const fetchMock = stubFetchRoutes({ [`GET ${INVITES_URL}`]: { status: 200, body: [jane] } });
+    renderList();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Withdraw the invite to Jane" }));
+    expect(screen.getByText("Withdraw this invite? The link stops working.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep" }));
+
+    expect(await screen.findByRole("button", { name: "Withdraw the invite to Jane" })).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(
+        ([input, init]) => String(input) === `${INVITES_URL}/inv-jane` && init?.method === "DELETE",
+      ),
+    ).toBe(false);
+  });
+
+  // useConfirmAction's own `key` is what makes this true -- one hook
+  // instance serves every row in the list, and only the key that was
+  // actually asked can be "confirming" at a time.
+  it("confirming one invite's withdraw does not open the confirm pair on another", async () => {
+    stubFetchRoutes({ [`GET ${INVITES_URL}`]: { status: 200, body: [jane, jack] } });
+    renderList();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Withdraw the invite to Jane" }));
+
+    expect(screen.getAllByRole("button", { name: "Yes, withdraw" })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Withdraw the invite to Jack" })).toBeInTheDocument();
+    expect(screen.getByText("Withdraw this invite? The link stops working.")).toBeInTheDocument();
   });
 
   it("shows the server's message when a withdraw fails", async () => {
@@ -232,6 +285,7 @@ describe("PendingInvitesList", () => {
     renderList();
 
     fireEvent.click(await screen.findByRole("button", { name: "Withdraw the invite to Jane" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Yes, withdraw" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("This invite has already been accepted.");
   });
@@ -253,6 +307,7 @@ describe("PendingInvitesList", () => {
     renderList();
 
     fireEvent.click(await screen.findByRole("button", { name: "Withdraw the invite to Jane" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Yes, withdraw" }));
 
     await waitFor(() => expect(screen.queryByText("Jane")).not.toBeInTheDocument());
   });

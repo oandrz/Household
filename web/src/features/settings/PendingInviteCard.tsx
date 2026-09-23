@@ -58,28 +58,66 @@ const PRIMARY_BUTTON_CLASS =
 const SECONDARY_BUTTON_CLASS =
   "min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[12px] font-semibold text-label disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0";
 
-function WithdrawButton({
-  name,
-  onClick,
-  disabled,
-}: {
-  name: string;
-  onClick: () => void;
-  disabled: boolean;
-}) {
+// Withdraw, in-page confirm first -- the same shape as NewLinkControl just
+// below (trigger, or the confirm line and its pair, never both), and the
+// same hook ApiTokenList's Revoke and TelegramConnection's Disconnect use.
+// Self-contained like NewLinkControl for the same reason: PendingInviteCard
+// is mounted once per invite, so this owns its own mutation and confirm
+// state rather than taking them as props.
+function WithdrawControl({ id, name }: { id: string; name: string }) {
+  const withdraw = useWithdrawInvite();
+  const action = useConfirmAction("Couldn't withdraw that invite. Please try again.");
+  const error = action.errorFor();
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={`Withdraw the invite to ${name}`}
-      // min-h-11/sm:min-h-0: PendingInvitesList.tsx's own Withdraw button
-      // has the measured reason a control this small misses the 44px phone
-      // floor.
-      className="min-h-11 flex-none text-xs font-semibold text-danger disabled:opacity-50 sm:min-h-0"
-    >
-      Withdraw
-    </button>
+    <>
+      {!action.isConfirming() && (
+        <button
+          type="button"
+          onClick={() => action.ask()}
+          disabled={action.isPending()}
+          aria-label={`Withdraw the invite to ${name}`}
+          // min-h-11/sm:min-h-0: PendingInvitesList.tsx's own Withdraw button
+          // has the measured reason a control this small misses the 44px phone
+          // floor.
+          className="min-h-11 flex-none text-xs font-semibold text-danger disabled:opacity-50 sm:min-h-0"
+        >
+          Withdraw
+        </button>
+      )}
+      {action.isConfirming() && (
+        <div className="flex flex-col gap-2">
+          <p className="text-[12px] text-muted">Withdraw this invite? The link stops working.</p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => void action.confirm(() => withdraw.mutateAsync(id))}
+              disabled={action.isPending()}
+              className="min-h-11 rounded-lg bg-danger px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-60 sm:min-h-0"
+            >
+              Yes, withdraw
+            </button>
+            <button
+              type="button"
+              onClick={() => action.cancel()}
+              className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-label sm:min-h-0"
+            >
+              Keep
+            </button>
+          </div>
+        </div>
+      )}
+      {/* Read outside both branches, like ApiTokenList's and
+          TelegramConnection's own `error` line: useConfirmAction's `confirm`
+          collapses the pair back to the trigger on every outcome, so a
+          message shown only inside the confirming branch above would vanish
+          with it. This is what keeps it on screen afterwards. */}
+      {error && (
+        <p role="alert" className="text-[11px] text-danger">
+          {error}
+        </p>
+      )}
+    </>
   );
 }
 
@@ -188,9 +226,7 @@ export function PendingInviteCard({
   // showing this same card's own state-0 render instead.
   onAdmitted?: (result: AdmitResult) => void;
 }) {
-  const withdraw = useWithdrawInvite();
   const admit = useAdmitInvite();
-  const [withdrawError, setWithdrawError] = useState<string | undefined>();
   // A link this card's own "Not them"/"Get a new link" just minted. Without
   // this, clicking either button in state 1 or state 3 would POST a new
   // link, hand it to `onNewLink` -- which PendingInvitesList.tsx's call site
@@ -218,23 +254,7 @@ export function PendingInviteCard({
   // behind it at all.
   if (invite.channel !== "telegram") return null;
 
-  function handleWithdraw() {
-    setWithdrawError(undefined);
-    withdraw.mutate(invite.id, {
-      onError: (error) => {
-        setWithdrawError(apiErrorMessage(error, "Couldn't withdraw that invite. Please try again."));
-      },
-    });
-  }
-
-  const withdrawButton = (
-    <WithdrawButton name={invite.name} onClick={handleWithdraw} disabled={withdraw.isPending} />
-  );
-  const withdrawErrorLine = withdrawError && (
-    <p role="alert" className="text-[11px] text-danger">
-      {withdrawError}
-    </p>
-  );
+  const withdrawControl = <WithdrawControl id={invite.id} name={invite.name} />;
 
   // State 0 -- admitted. See the file header for why this is the one state
   // read from the mutation's own result rather than from `invite`.
@@ -280,9 +300,8 @@ export function PendingInviteCard({
             confirmBody="This ends the tapped link. The phone that tapped it will see it no longer works, and you'll get a new link to share."
             onNewLink={handleNewLink}
           />
-          {withdrawButton}
+          {withdrawControl}
         </div>
-        {withdrawErrorLine}
       </li>
     );
   }
@@ -306,9 +325,8 @@ export function PendingInviteCard({
             confirmBody="The link above will stop working the moment you get a new one."
             onNewLink={handleNewLink}
           />
-          {withdrawButton}
+          {withdrawControl}
         </div>
-        {withdrawErrorLine}
       </li>
     );
   }
@@ -328,9 +346,8 @@ export function PendingInviteCard({
           confirmBody="This mints a new link and stops any earlier one from working."
           onNewLink={handleNewLink}
         />
-        {withdrawButton}
+        {withdrawControl}
       </div>
-      {withdrawErrorLine}
     </li>
   );
 }

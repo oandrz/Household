@@ -249,7 +249,7 @@ describe("PendingInviteCard", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("withdraws a knocked invite", async () => {
+  it("withdraws a knocked invite, after a confirm", async () => {
     const fetchMock = stubFetchRoutes({
       "DELETE /api/v1/household/invites/2": { status: 204, body: undefined },
       [`GET ${INVITES_URL}`]: { status: 200, body: [] },
@@ -257,6 +257,11 @@ describe("PendingInviteCard", () => {
     renderCard({ invite: knockedInvite });
 
     fireEvent.click(screen.getByRole("button", { name: "Withdraw the invite to Christine" }));
+    // The in-page confirm step (never window.confirm -- ApiTokenList's
+    // Revoke and TelegramConnection's Disconnect give the reason): the
+    // DELETE must not fire until "Yes, withdraw" is clicked too.
+    expect(screen.getByText("Withdraw this invite? The link stops working.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Yes, withdraw" }));
 
     await waitFor(() =>
       expect(
@@ -266,6 +271,19 @@ describe("PendingInviteCard", () => {
         ),
       ).toBe(true),
     );
+  });
+
+  it("sends no DELETE and returns to Withdraw when the confirm is cancelled", () => {
+    const fetchMock = stubFetchRoutes({});
+    renderCard({ invite: knockedInvite });
+
+    fireEvent.click(screen.getByRole("button", { name: "Withdraw the invite to Christine" }));
+    expect(screen.getByText("Withdraw this invite? The link stops working.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep" }));
+
+    expect(screen.getByRole("button", { name: "Withdraw the invite to Christine" })).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("renders nothing for a channel it does not own, so a caller cannot render Telegram-only controls over an email invite", () => {
