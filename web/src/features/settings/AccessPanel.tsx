@@ -4,9 +4,19 @@
 //
 // An owner gets every member's rows and a limited member only their own;
 // the server decides (GET /household/access), so nothing here branches on
-// role for *what to list*. The one role check is for the pending-invite
-// pointer, whose list is owner-only: a limited member must never send a
-// request whose 403 would then need hiding (usePendingInvites.ts).
+// role for *what to list*. Two things here do branch on role: the subtitle
+// text (copy only -- it never changes what is fetched or which rows render)
+// and the pending-invite pointer, whose list is owner-only -- a limited
+// member must never send a request whose 403 would then need hiding
+// (usePendingInvites.ts).
+//
+// If GET /household/access fails, the caller's own Telegram Connect/
+// Disconnect control disappears along with everything else below the error
+// line -- it lives inside LinkedChatList (TelegramConnection), which is
+// nested under access.isSuccess here and never gets its own, independent
+// fetch. Accepted trade-off: a second, standalone code path just to keep
+// that one control alive without the token/chat data it is grouped with
+// was judged not worth the duplication.
 import { useState } from "react";
 import { useMe } from "../auth/useAuth";
 import { ApiTokenList } from "./ApiTokenList";
@@ -37,9 +47,15 @@ export function AccessPanel() {
           New token
         </button>
       </div>
-      <p className="mb-4 text-xs text-muted">
-        {isOwner ? "Every way into your household besides a password." : "Your own ways in besides a password."}
-      </p>
+      {/* Gated on me.isSuccess: while /auth/me is still pending, me.data is
+          undefined and isOwner reads false -- the same shape a real limited
+          member has -- which would flash the limited-member copy at an
+          owner for one render every load. */}
+      {me.isSuccess && (
+        <p className="mb-4 text-xs text-muted">
+          {isOwner ? "Every way into your household besides a password." : "Your own ways in besides a password."}
+        </p>
+      )}
 
       {pointer && (
         <p className="mb-4 text-xs">

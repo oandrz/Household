@@ -96,4 +96,24 @@ describe("AccessPanel", () => {
     renderPanel();
     expect(await screen.findByRole("button", { name: "New token" })).toBeInTheDocument();
   });
+
+  // isOwner is computed from me.data, which is undefined while /auth/me is
+  // still pending -- `undefined?.membership.role === "owner"` is false, the
+  // same shape a real limited member's isOwner takes. Gating the subtitle on
+  // me.isSuccess is what stops an owner's screen from reading, even for one
+  // render, "Your own ways in besides a password."
+  it("does not flash the limited-member subtitle for an owner while /auth/me is still loading", () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      [`GET ${ACCESS_URL}`]: { status: 200, body: EMPTY_ACCESS },
+      "GET /api/v1/household/invites": { status: 200, body: [] },
+    });
+    renderPanel();
+
+    // Asserted synchronously, before either query's stubbed fetch promise
+    // has had a chance to resolve -- this is the exact frame the flash
+    // happens in.
+    expect(screen.queryByText("Your own ways in besides a password.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Every way into your household besides a password.")).not.toBeInTheDocument();
+  });
 });
