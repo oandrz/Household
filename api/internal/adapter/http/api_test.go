@@ -163,12 +163,15 @@ type testEnv struct {
 	// route that is itself audited; and featureFlags lets
 	// TestAdminLookupFailureIs500NotHidden rebuild a complete AdminService
 	// with only its Admins port swapped for a broken one.
-	users          usecase.UserRepository
-	apiTokens      usecase.APITokenRepository
-	tokens         usecase.TokenGenerator
-	platformAdmins usecase.PlatformAdminRepository
-	featureFlags   usecase.FeatureFlagRepository
-	adminAudit     usecase.AdminAuditRepository
+	users     usecase.UserRepository
+	apiTokens usecase.APITokenRepository
+	// telegramAccounts lets a test bind a chat directly: binding one through
+	// the API needs a real bot round trip the test env does not have.
+	telegramAccounts usecase.TelegramAccountRepository
+	tokens           usecase.TokenGenerator
+	platformAdmins   usecase.PlatformAdminRepository
+	featureFlags     usecase.FeatureFlagRepository
+	adminAudit       usecase.AdminAuditRepository
 
 	// db is the database behind every repository above. The audit port is
 	// write-only, so auditEntries and auditRowCount read admin_audit_log
@@ -290,6 +293,9 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 	apiTokens := postgres.NewAPITokenRepo(db)
 	memberSvc := usecase.NewMemberService(usecase.MemberDeps{Members: memberships, Sessions: sessions, APITokens: apiTokens})
 	apiTokenSvc := usecase.NewAPITokenService(usecase.APITokenDeps{Tokens: apiTokens, Gen: tokens, Clock: clk})
+	accessSvc := usecase.NewAccessListService(usecase.AccessListDeps{
+		Tokens: apiTokens, Chats: telegramAccounts, Members: memberships,
+	})
 	householdSvc := usecase.NewHouseholdService(usecase.HouseholdDeps{
 		Households:    households,
 		Spaces:        spaces,
@@ -425,6 +431,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Agreements:     agreementSvc,
 		APITokens:      apiTokenSvc,
 		APITokenRepo:   apiTokens,
+		Access:         accessSvc,
 		Admin:          adminSvc,
 		AdminReauth:    adminReauthSvc,
 		AdminDirectory: adminDirectorySvc,
@@ -439,16 +446,17 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 	router := httpadapter.NewRouter(deps)
 
 	env := &testEnv{
-		router:         router,
-		deps:           deps,
-		signupMailer:   sigMailer,
-		users:          users,
-		apiTokens:      apiTokens,
-		tokens:         tokens,
-		platformAdmins: platformAdminRepo,
-		featureFlags:   featureFlagRepo,
-		adminAudit:     adminAuditRepo,
-		db:             db,
+		router:           router,
+		deps:             deps,
+		signupMailer:     sigMailer,
+		users:            users,
+		apiTokens:        apiTokens,
+		telegramAccounts: telegramAccounts,
+		tokens:           tokens,
+		platformAdmins:   platformAdminRepo,
+		featureFlags:     featureFlagRepo,
+		adminAudit:       adminAuditRepo,
+		db:               db,
 	}
 
 	ctx := context.Background()

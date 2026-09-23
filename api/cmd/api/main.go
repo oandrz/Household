@@ -170,6 +170,9 @@ func run() error {
 		APITokens: apiTokens,
 	})
 	apiTokenSvc := usecase.NewAPITokenService(usecase.APITokenDeps{Tokens: apiTokens, Gen: tokens, Clock: sysClock})
+	accessSvc := usecase.NewAccessListService(usecase.AccessListDeps{
+		Tokens: apiTokens, Chats: telegramAccounts, Members: memberships,
+	})
 	householdSvc := usecase.NewHouseholdService(usecase.HouseholdDeps{
 		Holdings:      holdingRepo,
 		Households:    households,
@@ -360,6 +363,7 @@ func run() error {
 			APITokenRepo:   apiTokens,
 			Telegram:       telegramSvc,
 			TelegramLink:   telegramLinkSvc,
+			Access:         accessSvc,
 			Admin:          adminSvc,
 			AdminReauth:    adminReauthSvc,
 			AdminDirectory: adminDirectorySvc,
