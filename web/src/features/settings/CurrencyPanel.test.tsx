@@ -88,6 +88,30 @@ describe("CurrencyPanel", () => {
     expect(screen.queryByLabelText("Primary currency")).not.toBeInTheDocument();
   });
 
+  it("never renders a label pointing at an id that isn't in the DOM for a limited member", async () => {
+    // Primary currency's <label htmlFor="primary-currency"> used to render
+    // for every member, but the input carrying that id is owner-only
+    // (isOwner ? <form><input id="primary-currency" /></form> : <span>) --
+    // a limited member got a label pointing at nothing, a DevTools
+    // "no form control" accessibility issue.
+    stubFetchRoutes({
+      [`GET ${ME_URL}`]: { status: 200, body: meFixture("limited") },
+      [`GET ${HOUSEHOLD_URL}`]: { status: 200, body: householdFixture() },
+      [`GET ${CURRENCIES_URL}`]: { status: 200, body: currenciesFixture() },
+    });
+    const { container } = renderPanel();
+
+    await screen.findByText("SGD (S$)");
+    // The wording itself must still be on screen for a limited member --
+    // this only asserts it stopped being a dangling <label>, not that it
+    // disappeared.
+    expect(screen.getByText("Primary currency")).toBeInTheDocument();
+    container.querySelectorAll("label[for]").forEach((label) => {
+      const targetId = label.getAttribute("for");
+      expect(document.getElementById(targetId!)).not.toBeNull();
+    });
+  });
+
   it("issues a PATCH toggling showSecondaryCurrency for an owner", async () => {
     const fetchMock = stubFetchRoutes({
       [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
@@ -138,6 +162,9 @@ describe("CurrencyPanel", () => {
     renderPanel();
 
     const input = await screen.findByDisplayValue("SGD");
+    // The label keeps pointing at the real input for an owner -- only a
+    // non-owner's label became a plain span.
+    expect(screen.getByLabelText("Primary currency")).toBe(input);
     fireEvent.change(input, { target: { value: "usd" } });
     fireEvent.click(screen.getByRole("button", { name: /save/i }));
 

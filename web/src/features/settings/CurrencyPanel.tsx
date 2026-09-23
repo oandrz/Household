@@ -90,9 +90,19 @@ export function CurrencyPanel() {
       {household.isSuccess && (
         <div className="flex flex-col gap-3.5 text-[13px]">
           <div className="flex items-center justify-between">
-            <label htmlFor="primary-currency" className="text-ink">
-              Primary currency
-            </label>
+            {/* <label htmlFor> only when the input it names actually renders
+                (owner-only, below) -- a limited member's browser otherwise
+                has a <label for="primary-currency"> pointing at an id that
+                is never in the DOM, a dangling-label DevTools accessibility
+                issue. A plain <span> carries the same wording without
+                claiming to label a control that isn't there. */}
+            {isOwner ? (
+              <label htmlFor="primary-currency" className="text-ink">
+                Primary currency
+              </label>
+            ) : (
+              <span className="text-ink">Primary currency</span>
+            )}
             {isOwner ? (
               <form onSubmit={handleCurrencySubmit} className="flex items-center gap-2">
                 <input
