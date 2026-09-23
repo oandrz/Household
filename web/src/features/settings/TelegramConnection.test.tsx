@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubFetchRoutes } from "../../test/fetchStub";
 import { telegramPollInterval } from "./copy";
-import { TelegramPanel } from "./TelegramPanel";
+import { TelegramConnection } from "./TelegramConnection";
 
 const BINDING_URL = "/api/v1/auth/telegram";
 const LINK_START_URL = "/api/v1/auth/telegram/link";
@@ -20,7 +20,7 @@ function renderPanel() {
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <TelegramPanel />
+      <TelegramConnection />
     </QueryClientProvider>,
   );
 }
@@ -32,7 +32,7 @@ afterEach(() => {
 // Unlike NotificationsPanel, this panel never calls useMe() -- spec decision
 // 10 makes it available to any member, not owners only, so there is no
 // GET /api/v1/auth/me stub to register anywhere below.
-describe("TelegramPanel", () => {
+describe("TelegramConnection", () => {
   it("shows the connected chat and offers Disconnect", async () => {
     const fetchMock = stubFetchRoutes({
       [`GET ${BINDING_URL}`]: [

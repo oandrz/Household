@@ -11,7 +11,7 @@ import { CurrencyPanel } from "./CurrencyPanel";
 import { MembersPanel } from "./MembersPanel";
 import { NotificationsPanel } from "./NotificationsPanel";
 import { SpacesPanel } from "./SpacesPanel";
-import { TelegramPanel } from "./TelegramPanel";
+import { TelegramConnection } from "./TelegramConnection";
 
 // openPartnerInvite arrives from settingsRoute's validated ?invite=partner and
 // is passed straight through to the panel that owns the modal. Defaulted, so
@@ -41,7 +41,7 @@ export function SettingsPage({ openPartnerInvite = false }: { openPartnerInvite?
       </div>
 
       <NotificationsPanel />
-      <TelegramPanel />
+      <TelegramConnection />
     </PageContainer>
   );
 }

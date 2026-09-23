@@ -4,6 +4,7 @@
 // leaked deep link therefore connects nobody. See
 // docs/adr/0010-binding-a-chat-needs-a-confirm.md before simplifying this
 // into a single click.
+// Rendered inside AccessPanel's Linked chats group as the caller's own row (docs/superpowers/specs/2026-09-23-hearth-household-access-list-design.md, decision 10). Renamed from TelegramPanel; behaviour unchanged.
 import { useState } from "react";
 import { ApiError } from "../../api/client";
 import { apiErrorMessage } from "../../api/errorMessage";
@@ -16,7 +17,7 @@ import {
   useTelegramLinkStatus,
 } from "./useTelegram";
 
-export function TelegramPanel() {
+export function TelegramConnection() {
   const binding = useTelegramBinding();
   // Held in component state, not the URL or storage: a reload legitimately
   // abandons an in-progress attempt (the nonce expires on its own inside ten
@@ -65,9 +66,7 @@ export function TelegramPanel() {
   }
 
   return (
-    <section className="rounded-xl border border-hairline bg-card p-[22px]">
-      <h2 className="mb-4 text-sm font-semibold text-ink">Telegram</h2>
-
+    <div>
       {binding.isPending && <p className="text-xs text-muted">Loading…</p>}
 
       {binding.isError && !bindingUnavailable && (
@@ -235,6 +234,6 @@ export function TelegramPanel() {
           )}
         </div>
       )}
-    </section>
+    </div>
   );
 }
