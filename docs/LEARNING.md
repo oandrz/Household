@@ -3486,6 +3486,20 @@ distilled from nine of its own comments.
 A reviewer's claim and a code comment get the same treatment: run the
 mutation, read the failure.
 
+**The household access list, 2026-09-23 (whole-branch review, finding M3).**
+`NewApiTokenModal.tsx`'s own header comment said the raw token secret "lives
+only in this component's mutation state: closing the dialog resets it, and
+nothing else ever holds it -- not the query cache, not storage." Untested:
+TanStack Query's `MutationCache` keeps a settled mutation -- `.data`,
+secret included -- for its default five-minute `gcTime` after it stops being
+observed, and the modal's own `create.reset()` on close resets only the
+hook's local observer, never that cache entry. The comment was written the
+way this pattern warns against: stated as settled fact about a library's
+default, never checked against it. Fixed with `gcTime: 0` on
+`useCreateApiToken` (`useHouseholdAccess.ts`), which is what actually makes
+the claim true; the comment now cites that option instead of asserting the
+outcome on its own.
+
 ---
 
 ### 17. A requirement the plan drops is invisible to every review that reads the plan
@@ -3908,6 +3922,26 @@ this entry predicted and no more: it runs only while a Telegram invite in
 the current list has no knock yet, so an emailed invite accepted elsewhere,
 or a Telegram invite that has already knocked, still needs the next
 navigation to refresh. Not addressed by this milestone either.
+
+**Broke again, 2026-09-23 (household access list, whole-branch review,
+finding M2) -- this time from a write that has no client-side query key of
+its own to invalidate off.** `useUpdateMember`'s onSuccess invalidated
+members, `me` and spaces -- every key the *request it sent* visibly changes.
+It missed `["household", "access"]`, even though `MemberService.Update`
+(Go, `member.go`) revokes every one of the target member's API tokens
+server-side on any successful role or capability change
+(`revokeCredentials`, unconditional -- not only on a demotion). The Access
+panel kept showing a just-revoked token as live for up to its own
+`staleTime`, and nothing about the PATCH request or its response hinted at
+that side effect to a reader of the frontend alone; only reading the Go
+service's own doc comment showed it. **The rule has a third clause now:
+list every query key a write's *server-side side effects* make stale, not
+only the ones the request's own payload would suggest.** Fixed by adding
+the fourth key to the same `Promise.all`
+(`web/src/features/settings/useUpdateMember.ts`), pinned by a hook-level
+test in the shape `useAgreementsInvalidation.test.tsx` already established:
+render the read hook and the write hook together, assert a second `GET`
+after the mutation lands (`useUpdateMember.test.tsx`).
 
 ### 24. A delete scoped to the parent's parent, and a scope check thrown away
 
