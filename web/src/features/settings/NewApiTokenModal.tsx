@@ -13,7 +13,7 @@ import { FIELD_CONTROL_CLASS } from "../../components/fieldClasses";
 import { Modal } from "../../components/Modal";
 import { ModalActions } from "../../components/ModalActions";
 import { TOKEN_LIFETIME_OPTIONS } from "./copy";
-import { useCreateApiToken } from "./useHouseholdAccess";
+import { useCreateApiToken, type NewApiToken } from "./useHouseholdAccess";
 
 const DEFAULT_DAYS = 90;
 
@@ -67,7 +67,8 @@ export function NewApiTokenModal({ open, onClose }: { open: boolean; onClose: ()
           className="flex flex-col gap-3"
           onSubmit={(e) => {
             e.preventDefault();
-            create.mutate({ name: name.trim(), expiresInDays: days });
+            const input: NewApiToken = { name: name.trim(), expiresInDays: days };
+            create.mutate(input);
           }}
         >
           <Field label="Name" htmlFor={nameId}>
