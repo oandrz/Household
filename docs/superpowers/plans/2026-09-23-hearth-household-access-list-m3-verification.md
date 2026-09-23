@@ -279,3 +279,78 @@ Disconnect. **Changed and not reverted:** Christine's and Jamie's
 `password_hash` were set to a copy of Andreas's seeded hash
 (`hearth-dev-password`) before switching to magic links; `make
 reset-password` sets them back to anything else.
+
+## Follow-up fixes (2026-09-23)
+
+The three items under "Seen, not a failure of this milestone" above, plus
+the leftover shared password hash, closed out as a separate small change on
+`partner-invite-lobby-m3` (commits `94f6b50`, `2751382`, `6a63600`).
+Criterion 12 above is untouched — the fake `telegram_accounts` row it used
+was already removed by that walk's own Disconnect click; this follow-up does
+not re-walk Telegram, the controller does that separately with the owner.
+
+### Item 2 — dev database passwords
+
+Christine's and Jamie's `password_hash` still matched Andreas's exactly
+(copied during this walk and never reverted). Reset each independently with
+the project's own tool: `docker compose exec api go run ./cmd/adminctl
+reset-password --email=<email>`, driven through `expect` rather than `-T`
+(see LEARNING.md's correction to this walk's "an agent cannot drive it"
+note — `-T` disables the container pty that `term.ReadPassword` needs;
+`expect` supplies one). Verified by `SELECT email, password_hash FROM
+users WHERE email IN (...)`: all three hashes now distinct. New credentials
+are in the engineering report, not here (`.superpowers/sdd/m3-leftovers-
+report.md`) — this file is read by more people than need them.
+
+### Item 3 — CurrencyPanel dangling label
+
+`CurrencyPanel.tsx:93` fix: `<label htmlFor="primary-currency">` only when
+`isOwner` (the branch that also renders the input); a plain `<span
+className="text-ink">Primary currency</span>` otherwise. RED: a new
+CurrencyPanel test asserted every `label[for]` in the rendered tree resolves
+via `getElementById` — failed with `expected null not to be null` against
+the unfixed component. GREEN after the fix; full CurrencyPanel.test.tsx
+(7/7) and the whole frontend suite (958/958) still pass. Checked the rest of
+the file and the settings feature directory (`grep -rn 'htmlFor='
+web/src/features/settings/`) for the same shape — every other `htmlFor` is
+inside a modal whose control always renders with its label, so no sibling
+fix was needed. Browser: signed in as Jamie (limited member) with the new
+password from item 2 — itself end-to-end proof that reset worked —
+`document.querySelectorAll('label[for]')` on `/settings` returned `[]`.
+
+### Item 4 — focus after the pending-invite pointer
+
+`MembersPanel.tsx`'s `<h2>` inside `<section id="members">` now carries
+`id="members-heading"` and `tabIndex={-1}`. `AccessPanel.tsx`'s pointer
+button scrolls to that heading and then calls `.focus({ preventScroll:
+true })` on it, with a comment on why. RED: a new AccessPanel test rendered
+the panel next to a stand-in `<section id="members"><h2 id="members-heading"
+tabIndex={-1}>` (jsdom has no `scrollIntoView`, stubbed with `vi.fn()`),
+focused the pointer, clicked it, and asserted `document.activeElement` was
+the heading — failed (focus stayed on the button) against the unfixed
+component. GREEN after the fix. Browser: signed in as Andreas, created a
+real pending invite ("Verify Walk", Telegram channel), clicked "1 pending
+invite — in Members", and read `document.activeElement` back from the page
+— `{"tag":"H2","id":"members-heading",...}`. Invite withdrawn afterward.
+
+### Item 5 — Telegram Disconnect confirm step
+
+`TelegramConnection.tsx`: Disconnect now asks first, using the same
+`useConfirmAction` pattern as `ApiTokenList`'s Revoke — "Disconnect this
+chat? Reminders and bot commands stop working there." with "Yes,
+disconnect" / "Keep" buttons, `disconnect.mutateAsync()` inside `confirm()`.
+RED (component reverted with `git stash` to isolate the test change from the
+fix): the updated "shows the connected chat and offers Disconnect" test and
+a new "sends no DELETE ... when cancelled" test both failed against the old
+one-click component, the first on `findByText("Disconnect this chat?
+...")` timing out. GREEN after restoring the fix; full
+TelegramConnection.test.tsx + AccessPanel.test.tsx (16/16) pass. Browser: no
+real chat was connected for Andreas in this dev database (the criterion-12
+fake row had already been cleaned up by that walk's own Disconnect click),
+so a temporary `telegram_accounts` row was inserted by SQL for this
+verification only, exactly as criterion 12 above did. Clicked Disconnect →
+saw the confirm line and both buttons → clicked **Keep** (never "Yes,
+disconnect" — the controller re-walks the real Telegram flow with the owner
+separately) → confirmed by SQL that the row was untouched. The temporary row
+was then deleted and the page reloaded to confirm the UI matched ("Connect
+Telegram" again).
