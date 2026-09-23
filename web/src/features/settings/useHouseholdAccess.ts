@@ -35,7 +35,15 @@ export function useCreateApiToken() {
         method: "POST",
         body: JSON.stringify(input),
       }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: householdAccessQueryKey }),
+    // Fired, not returned: TanStack awaits a returned onSuccess promise
+    // before dispatching the mutation's own "success" (and so `.data`) --
+    // the same ordering usePendingInvites.ts's useAdmitInvite comment
+    // documents. `.data.token` is the raw secret, shown exactly once, and
+    // must be on screen the moment the POST lands, not after this
+    // invalidation's refetch of the access list has also completed.
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: householdAccessQueryKey });
+    },
   });
 }
 
