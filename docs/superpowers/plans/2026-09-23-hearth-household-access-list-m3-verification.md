@@ -292,6 +292,40 @@ row it used was already removed by that walk's own Disconnect click; this
 follow-up does not re-walk Telegram, the controller does that separately
 with the owner.
 
+### Criterion 12, re-walked with a real Telegram client (2026-09-24)
+
+The SQL-inserted row above proved the *linked* state; this proves the
+*handshake* with a real person pressing Start. Owner (Andreas, signed in on
+the Docker Desktop stack at http://localhost:5173, same branch) clicked
+**Connect Telegram** in the Access panel's Linked chats group; it opened
+`https://t.me/HearthOinkDevBot?start=<nonce>`. The product owner pressed
+Start in their own Telegram client (`@Andreas_oen`).
+
+- **The round trip is real.** `telegram_link_requests` row `7ebd624c…` was
+  created 23:31:48 UTC and consumed 23:31:52 UTC with a chat id set — the
+  dev bot received Start and the API redeemed the nonce four seconds later.
+- **The answer was a refusal, and the right one.** `GET
+  /api/v1/auth/telegram/link/7ebd624c…` →
+  `{"status":"refused","chatUsername":"Andreas_oen","reason":"That Telegram
+  chat is already connected to another Hearth account."}`. That chat is bound
+  to the Telegram-only account created by the Telegram sign-up walk on
+  2026-09-01; one chat belongs to one account (the UNIQUE on
+  `telegram_accounts.chat_id`), so Confirm was correctly never offered.
+- **"Link expired" on the second tap is the single-use nonce working.**
+  Opening the t.me page made Telegram Desktop send Start at once, which spent
+  the nonce; the owner's own later tap hit an already-consumed link.
+- **The card still read "Open Telegram and press Start…"** while Chrome was in
+  the background (`document.visibilityState` = `hidden`). That is
+  `refetchIntervalInBackground: false` doing its job, not a stuck poll — the
+  status endpoint already answered `refused`.
+
+**Not exercised live:** the Confirm step and the "Connected as @…" state
+reached through a real handshake. The owner chose not to free the chat by
+deleting the 2026-09-01 test account's binding. Confirm stays covered by
+`TelegramConnection.test.tsx`, and the linked state by the SQL-row walk
+above. Verdict for criterion 12: ✅ real round trip, refusal path; Confirm
+path by test only.
+
 ### Item 2 — dev database passwords
 
 Christine's and Jamie's `password_hash` still matched Andreas's exactly
