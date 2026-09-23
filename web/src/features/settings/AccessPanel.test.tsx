@@ -27,9 +27,9 @@ function pendingInvite(id: string, name: string) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  // jsdom has no scrollIntoView implementation at all -- beforeEach below
-  // stubs it in so the pointer's click doesn't throw; undo that here so it
-  // doesn't leak into a test that isn't expecting it.
+  // jsdom has no scrollIntoView implementation at all -- the one test below
+  // that clicks the pointer stubs it in inline so that click doesn't throw;
+  // undo it here so it doesn't leak into a test that isn't expecting it.
   delete (Element.prototype as unknown as { scrollIntoView?: unknown }).scrollIntoView;
 });
 
@@ -109,6 +109,15 @@ describe("AccessPanel", () => {
     expect(document.activeElement).toBe(pointer);
 
     pointer.click();
+
+    // Scroll target and focus target are deliberately different elements:
+    // the whole #members card scrolls into view (so its own padding and
+    // border are visible, not just the heading's text), while keyboard
+    // focus moves to its heading specifically.
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledOnce();
+    expect((Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>).mock.contexts[0]).toBe(
+      document.getElementById("members"),
+    );
 
     await waitFor(() => expect(document.activeElement).toBe(screen.getByText("Members")));
   });

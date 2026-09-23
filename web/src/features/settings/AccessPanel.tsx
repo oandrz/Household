@@ -64,16 +64,21 @@ export function AccessPanel() {
           <button
             type="button"
             onClick={() => {
-              // Scrolling alone leaves keyboard focus on this button -- a
-              // screen-reader or keyboard user's cursor stays here even
-              // though the page visibly moved to Members. Focusing the
-              // heading (tabIndex={-1} in MembersPanel.tsx makes it a valid
-              // target without adding it to the Tab order) lands them where
-              // the page actually took them, the way a same-page anchor
-              // link would.
-              const heading = document.getElementById("members-heading");
-              heading?.scrollIntoView({ behavior: "smooth" });
-              heading?.focus({ preventScroll: true });
+              // Scrolling the card into view alone leaves keyboard focus on
+              // this button -- a screen-reader or keyboard user's cursor
+              // stays here even though the page visibly moved to Members.
+              // The scroll target and the focus target are deliberately
+              // different elements: scrolling #members keeps the whole card
+              // (its padding and border) in view the way clicking it
+              // visually would, while focus moves to its heading
+              // (tabIndex={-1} in MembersPanel.tsx makes it a valid .focus()
+              // target without adding it to the Tab order) -- scrollIntoView
+              // already happened, so preventScroll on the focus call stops
+              // the browser's own default "scroll the focused element into
+              // view" from re-scrolling to a *different* position than the
+              // one just chosen.
+              document.getElementById("members")?.scrollIntoView({ behavior: "smooth" });
+              document.getElementById("members-heading")?.focus({ preventScroll: true });
             }}
             // min-h-11/sm:min-h-0: same padding-less-button gap
             // MembersPanel's "+ Invite" button comments on -- no padding to
