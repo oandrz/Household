@@ -159,7 +159,7 @@ Email invites are hidden while email cannot leave the box.
 |---|---|---|---|---|
 | 1 | Owners can see pending invites | Settings lists pending invites with role and expiry, and any owner can withdraw one. The Overview checklist gains "Invite your partner". No change to how an invite is delivered or accepted | **built, walked 2026-09-19** | [plan](../../docs/superpowers/plans/2026-09-19-hearth-partner-invite-lobby-m1.md) |
 | 2 | Partner joins over Telegram | The owner gets a one-time link (copy, QR, share). The partner taps it, the knock appears, the owner lets them in, and the partner gets a sign-in link. The email invite option is hidden while email cannot leave. **Hypothesis tested here** | **built 2026-09-20; not yet merged, deployed, or walked in a browser** | [plan](../../docs/superpowers/plans/2026-09-20-hearth-partner-invite-lobby-m2.md) |
-| 3 | Household access list | One place listing pending invites, API tokens and linked chats. Owners see all and revoke their own. Closes the tracker's "Manage API tokens in Settings" row | pending | — |
+| 3 | Household access list | One place listing pending invites, API tokens and linked chats. Owners see all and revoke their own. Closes the tracker's "Manage API tokens in Settings" row | **built, gate and mutation checks recorded 2026-09-23; not yet merged, deployed, or walked in a browser** | [plan](../../docs/superpowers/plans/2026-09-23-hearth-household-access-list-m3.md) |
 
 Each milestone ends with the project's usual definition of done: `make lint &&
 make test` green, a mutation-checked test, a browser walk, and
@@ -228,5 +228,9 @@ updated.
 *Status: Decisions 1-4 made by the product owner on 2026-09-19. Milestones 1
 and 2 are planned and built (see Delivery Milestones above and
 [ADR 11](../../docs/adr/0011-joining-a-household-by-knock.md)); all six open
-questions above are settled. Milestone 3, the household access list, is not
-yet planned.*
+questions above are settled. Milestone 3, the household access list, is
+planned and built (see Delivery Milestones above,
+[spec](../../docs/superpowers/specs/2026-09-23-hearth-household-access-list-design.md)
+and
+[plan](../../docs/superpowers/plans/2026-09-23-hearth-household-access-list-m3.md));
+its browser walk has not run yet.*

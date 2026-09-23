@@ -200,6 +200,29 @@ security-review finding this milestone depended on (§5). Recorded as
 `docs/superpowers/specs/2026-09-19-hearth-partner-invite-lobby-design.md`
 (the same spec covers both milestones).
 
+**Milestone 3 — the household access list — is built, its full gate and four
+mutation checks are recorded, and its own browser walk has not run yet.** It
+is not merged to `main` and not deployed. One new read route, `GET
+/household/access` (§4), guarded to a browser session only —
+`requireCookieSession`, stricter than most authenticated routes, because what
+it discloses (every member's token prefixes and chat usernames) is a map of
+the household's other credentials if a leaked API token could read it too.
+`AccessListService` and three new narrow ports declared beside it —
+`HouseholdTokenLister`, `HouseholdChatLister`, `MemberLister` (§2, §3) —
+assemble an owner's whole-household view or a limited member's own rows from
+the household's live API tokens and linked Telegram chats; the service takes
+no actor, the handler picks which method to call from the caller's role. No
+new table and no migration — two new repository methods on the existing
+`APITokenRepo` and `TelegramAccountRepo` (§3). In Settings, the Telegram
+card is gone: `TelegramPanel.tsx` is renamed `TelegramConnection.tsx` and now
+renders inside the new `AccessPanel.tsx`, alongside a token list with Revoke
+on the caller's own rows, a New-token dialog, and a pointer line to the
+pending-invites list Members already shows rather than a second copy of it
+(§7). Evidence:
+`docs/superpowers/plans/2026-09-23-hearth-household-access-list-m3-verification.md`.
+Design:
+`docs/superpowers/specs/2026-09-23-hearth-household-access-list-design.md`.
+
 **This is deployed.** Hearth has run at <https://oink.mywire.org> since
 2026-08-15, on one Hetzner CX23 in Falkenstein, serving a real household. §1
 carries the production topology; it is a drawing of something running, not a
@@ -662,6 +685,7 @@ graph TD
         Nudge["NudgeService — the daily digest (stage 6):<br/>Compose from BillsReader + BudgetReader, RunOnce<br/>claims a nudge_deliveries row before each send.<br/>Rules, no model. Recipients query = ADR 8 outbound"]
         Member["MemberService"]
         House["HouseholdService"]
+        AccessList["AccessListService — ForHousehold/ForMember<br/>assemble the household's live API tokens<br/>+ linked chats, labelled with each member.<br/>Takes no actor: the HTTP handler picks<br/>which method from the caller's role"]
         Account["AccountService — net worth is<br/>composed here, not stored"]
         Category["CategoryService — seeds the starter<br/>set on first read; create, rename, archive"]
         Transaction["TransactionService — MonthSummary<br/>converts then adds, like Account"]
@@ -783,6 +807,13 @@ refuses (spec decision 7).
   further up.
 - **No service takes an actor parameter.** Services enforce what is *valid*;
   middleware enforces who is *asking*. Authorisation exists in exactly one place.
+  `AccessListService` is the plainest example of the rule doing real work:
+  `ForHousehold` and `ForMember` are both public methods, and nothing about
+  the service stops either from being called for any household — it is
+  `handleHouseholdAccess` (§4), reading `scope.Membership.Role` from the
+  already-authenticated request, that decides which one a given caller gets.
+  A limited member who tampered with the client would still only ever reach
+  `ForMember`, because the server, not the request, chose the method.
 - **`adapter/telegram` both serves the usecase layer and drives it, and it does
   the second one without importing it.** Its `Client` is an ordinary *driven*
   adapter — it satisfies `usecase.TelegramSender`, declared in `ports.go`,
@@ -844,7 +875,8 @@ refuses (spec decision 7).
 | `TelegramAccountRepository` | `adapter/postgres` | Twenty-first. `ByChatID` resolves a chat to the user it is bound to, or `domain.ErrNotFound` — which is the entire branch key of the Telegram sign-in flow: found means "send a sign-in link", not found means "send a sign-up link" (§5). The binding is now written from **two** call sites, and this repository's own doc comment was rewritten to say so rather than to explain why `Create` did not exist: inside `SignupRepository.Provision`'s existing transaction, when a stranger creates a household from a chat, and by `Create(ctx, TelegramBinding) error`, called by `TelegramLinkService.Confirm` when a member who already has an account connects their chat from Settings. `Create` answers `domain.ErrAlreadyExists` for either `UNIQUE` — one chat per user, one user per chat — without distinguishing which: the caller already knows which side it was asking about (a fresh sign-up binds a chat that must be free; `Confirm` binds a user who must have no chat yet) and picks the sentence, rather than the repository guessing at intent. `ByUserID` reads a user's own binding back, `TelegramBinding{UserID, ChatID, ChatUsername, LinkedAt}`, and `Delete` removes it, idempotently — removing a binding that is not there is not an error, because the caller's goal ("this user has no chat") is already true. Both directions of the binding stay `UNIQUE` in the database, and that constraint, not any check in Go, is what makes a sign-in — and now a confirm — unambiguous |
 | `PlatformAdminRepository` | `adapter/postgres` | Twenty-second. `Get`/`Grant`/`Revoke`/`List` over `platform_admins`. `Grant` has exactly one call site in the whole repository outside test code — `adminctl`'s `runGrantPlatformAdmin` — which is the property [ADR 5](adr/0005-platform-admin-authorization.md) exists to keep true; there is no `AdminService` method that calls it, on purpose, since granting is not a decision the running service ever makes |
 | `NudgeRepository` | `adapter/postgres` | The daily digest's at-most-once ledger and opt-out ([ADR 9](adr/0009-scheduled-work-runs-inside-the-api.md)). `Recipients` is the authorisation for the outbound direction: `telegram_accounts ⋈ memberships` keeping only owners with Money whose chat has not said `/nudges off` — a postgres test plants each excluded shape. `Claim` is `INSERT … ON CONFLICT DO NOTHING` on `(chat_id, household_id, day)`, insert-first like the transaction idempotency key; `Release` deletes it after a failed send; `Prune` keeps a month. `BillsReader` and `BudgetReader` are the two narrow reads `NudgeService` declares, satisfied by the bill and budget services |
-| `APITokenRepository` | `adapter/postgres` | Personal API tokens ([ADR 7](adr/0007-personal-api-tokens.md)): `Create` stores only the SHA-256 and an 8-character prefix; `ByTokenHash` is the live lookup (revoked or expired is `ErrNotFound`, like `GetLiveSession`); `Revoke` is user-scoped so a guessed id from another member is a miss; `RevokeAllForUser` sits beside `SessionRepository.RevokeAllForUser` in `MemberService.revokeCredentials`; `Touch` is throttled by the caller to one write an hour |
+| `APITokenRepository` | `adapter/postgres` | Personal API tokens ([ADR 7](adr/0007-personal-api-tokens.md)): `Create` stores only the SHA-256 and an 8-character prefix; `ByTokenHash` is the live lookup (revoked or expired is `ErrNotFound`, like `GetLiveSession`); `Revoke` is user-scoped so a guessed id from another member is a miss; `RevokeAllForUser` sits beside `SessionRepository.RevokeAllForUser` in `MemberService.revokeCredentials`; `Touch` is throttled by the caller to one write an hour. `ListForUser` keeps expired rows in (revoked only is excluded) — see `HouseholdTokenLister` below for the query that does not |
+| `HouseholdTokenLister`, `HouseholdChatLister`, `MemberLister` | `adapter/postgres` (`*APITokenRepo`, `*TelegramAccountRepo` and `*MembershipRepo` already satisfy them) | Unnumbered, like `AccountLookup`/`GoalLookup` above — three narrow ports for the household access list (partner-invite lobby milestone 3), declared beside `AccessListService` in `access_list.go` rather than in `ports.go`, so the existing wide `APITokenRepository`/`TelegramAccountRepository`/`MembershipRepository` doubles never grow a method they do not use. `HouseholdTokenLister.ListForHousehold` is `ListLiveAPITokensForHousehold`: unlike `APITokenRepository.ListForUser` above, it drops expired rows as well as revoked ones, because this list answers "what can get in right now," not "what has this member ever minted" — the query's own SQL comment says so. `HouseholdChatLister.ListForHousehold` joins `telegram_accounts` through `memberships`, since the chat table itself carries no household id (§6). `MemberLister.List` is the one `MembershipRepository` method the service calls, for display names. Neither lister returns `domain.ErrNotFound` for an empty household — both answer `[]` — and a row whose user is no longer a member (left after its token or chat was created) is dropped by `AccessListService` itself, not by either query (fail closed) |
 | `IntentParser` | `adapter/openrouter` | The Telegram bot's free-text reader (stage 5b of the chat-commands spec): an open-weight model through OpenRouter's OpenAI-dialect API over plain `net/http`, up to three model ids tried in order. One implementation and one caller, which is normally the wrong shape for a port — it is one anyway because the implementation is a third-party API behind a key, and the product must behave identically without it: `nil` means "commands only". (A Claude adapter was its second implementation for one day, 2026-09-08, and was removed when the owner chose free models; git has it.) The prompt, the `log_transaction` schema, and the reader that turns the model's arguments into an `Intent` and fails closed on any kind it did not name live in `adapter/intent`, apart from the HTTP, because the reader is the last line between a model's output and the ledger and earns its own tests. The port returns text fields, never ids, so what the person confirms is what they can read. The Commander caps every call at 30 s, because the poller handles one update at a time and a stalled provider would hold every chat |
 | `FeatureFlagRepository` | `adapter/postgres` | Twenty-third. `OverridesFor` is the one query `requireSession` runs on every authenticated request — both the global and the household layer in a single `UNION ALL` statement, never two round trips. `key` carries no foreign key to a registry table, because the registry (`domain.AllFlags`) is compile-time; a row can outlive the `const` that named it, and `SetHousehold`/`ClearHousehold` are two different operations on purpose — setting a household's override to `false` and removing the override row entirely are different states downstream, not the same write with a different value |
 | `AdminAuditRepository` | `adapter/postgres` | Twenty-fourth, append-only by convention rather than by any database privilege, and **write-only**: `Record` is its one method, there is no `Delete`, and `adminctl prune` does not touch `admin_audit_log`. It had a `Recent` read and `AdminService.RecentAudit` over it for the audit screen; when that screen was descoped (2026-09-02, `docs/FEATURE_TRACKER.md`) the read stayed behind with no production caller, and it was deleted on 2026-09-13. The log is read through `psql`, or through the read-only database browse (§4), which audits its own reads. Tests that need to see what `Record` wrote query the table directly |
@@ -1270,6 +1302,7 @@ rows, and a link redemption writes neither.
 | DELETE | `/household/invites/{id}` | session · CSRF · owner · **cookie** session (`requireCookieSession`) — withdraws the invite by **deleting its row**, so its emailed link stops resolving (`GET /invites/{token}` answers `404`). `204` with no body. An id from another household, or one that never existed, is `404`; an accepted invite is `409 INVITE_ALREADY_ACCEPTED` and survives; an expired, unaccepted invite is deletable. A token gets `403 SESSION_REQUIRED` (spec decision 12) |
 | POST | `/household/invites/{id}/link` | session · CSRF · owner · **cookie** session (`requireCookieSession`) — milestone 2. Telegram invites only (`409 INVITE_NOT_TELEGRAM` for an email invite); issues a fresh one-time link and clears any knock in the same statement, and serves both "Get a new link" and **"Not them"** — the two have identical effects, so there is one route rather than two. `200 {link, expiresAt}` |
 | POST | `/household/invites/{id}/admit` | session · CSRF · owner · **cookie** session (`requireCookieSession`) — milestone 2, **Let in**. Reads no body — the four-digit code is compared by eye and accepted by no endpoint (`TestTheAdmitRequestHasNoCodeField`). `200 {member, signInSent}`; `signInSent: false` when the member was created but the bot could not reach their chat. `409 INVITE_NOT_KNOCKED` when nobody has knocked (or a new link cleared the knock since); `409 CHAT_ALREADY_BOUND` when the knocked chat joined another household meanwhile, the re-check spec decision 15 asks for, run inside `Admit`'s own transaction; `409 INVITE_ALREADY_ACCEPTED` for a second Let in |
+| GET | `/household/access` | session · **cookie** session (`requireCookieSession`) — milestone 3, in a route group of its own. Any member may read it; the handler reads `scope.Membership.Role` and calls `AccessListService.ForHousehold` (owner) or `ForMember` (limited), so a limited member's rows are narrowed by the server, never by a query parameter the client could omit. Cookie-only for the same reason the milestone-2 rows above are, but for a stricter cause: what this route discloses — every member's token prefixes and chat usernames — is a map of the household's other credentials if a leaked API token could read it too, where the milestone-2 routes leak only an invite. `200 {telegramEnabled, tokens: [...], chats: [...]}`; `telegramEnabled` is false and `chats` is `[]` when no bot is configured or the household's `telegram_sign_in` flag is off; no token row carries a secret and no chat row carries a `chatId` |
 | GET | `/family/calendar` | session · `requireFeature(family_calendar)` — no capability at all, the same as `/household`; an unbuilt page's API stub, dark by default, answering `{"events":[]}` once its flag is on rather than a stub-specific status, so the flag proves something real about the route it guards |
 | POST | `/admin/session` | session · CSRF — the one admin route reachable with no grant; how a grant is obtained |
 | GET | `/admin/flags` | session · admin (`requirePlatformAdmin`) · grant |
@@ -4278,19 +4311,41 @@ web/src/
                        email_invites/telegram_sign_in flags) instead of a
                        bare optional email field, and a Telegram pick hands
                        off into the same PendingInviteCard waiting-link
-                       state once the 201 lands. TelegramPanel.tsx
-                       (connect/disconnect a chat --
-                       mints, opens the deep link with a plain-link
-                       fallback for a blocked popup, polls status every 3s,
-                       confirms; renders nothing on a 404, this install's
-                       "no bot configured" answer). As in money/, marriage/
-                       and admin/, every request lives in a use*.ts hook file
-                       (useHousehold, useSpaces, useInviteMember,
-                       useUpdateMember, useNotificationPreferences,
-                       useTelegram, useHouseholdMembers,
-                       usePendingInvites -- now also exporting
-                       useNewInviteLink and useAdmitInvite); no settings
-                       component calls apiFetch itself
+                       state once the 201 lands. AccessPanel.tsx (milestone
+                       3, replacing the old standalone Telegram card) is one
+                       GET /household/access, rendered as two groups plus a
+                       pointer: "API tokens" (ApiTokenList.tsx -- every row
+                       the server sent, Revoke only where isMine, decided by
+                       memberId === me.user.id, never by role -- and a "New
+                       token" button opening NewApiTokenModal.tsx, whose
+                       30/90/365-day picker and shown-once secret follow
+                       InviteLinkShare.tsx's rule but drop its QR and
+                       Share-to-Telegram, since a token is a credential for
+                       the member's own scripts, not a link meant for
+                       another person) and "Linked chats" (LinkedChatList.tsx,
+                       hidden whole when telegramEnabled is false -- no bot
+                       configured, or the household's telegram_sign_in flag
+                       is off). TelegramConnection.tsx (renamed from
+                       TelegramPanel.tsx, its connect/disconnect/poll/confirm
+                       behaviour unchanged, only its own outer card and
+                       heading gone) renders at the top of Linked chats for
+                       the caller's own chat; LinkedChatList then filters the
+                       server's chat rows to every OTHER member's, so the
+                       caller's own chat is never drawn twice (spec decision
+                       10). A one-line pointer -- "N pending invites -- in
+                       Members" -- sits above both groups, owner-only, and
+                       scrolls to Members' own #members anchor rather than
+                       repeating that list here (spec decision 2). As in
+                       money/, marriage/ and admin/, every request lives in a
+                       use*.ts hook file (useHousehold, useSpaces,
+                       useInviteMember, useUpdateMember,
+                       useNotificationPreferences, useTelegram,
+                       useHouseholdMembers, usePendingInvites -- now also
+                       exporting useNewInviteLink and useAdmitInvite --
+                       and useHouseholdAccess, which also holds the create-
+                       and revoke-token mutations, both invalidating the
+                       access query); no settings component calls apiFetch
+                       itself
     money/             Finances page — net worth (now with its twelve-month
                        trend, NetWorthChart.tsx, inline SVG the same way
                        marriage/MoodChart.tsx draws its own line — no
