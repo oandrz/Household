@@ -243,7 +243,15 @@ export function MembersPanel({ openPartnerInvite = false }: { openPartnerInvite?
   return (
     <section id="members" className="rounded-xl border border-hairline bg-card p-[22px]">
       <div className="mb-4 flex items-baseline justify-between">
-        <h2 className="text-sm font-semibold text-ink">Members</h2>
+        {/* id + tabIndex={-1}: AccessPanel's pending-invite pointer scrolls
+            here and then calls .focus() on this heading, so a keyboard or
+            screen-reader user lands where the page visibly scrolled to
+            instead of keeping focus stuck on the button they just left. A
+            heading isn't focusable by default -- tabIndex={-1} makes it a
+            valid .focus() target without adding it to the Tab order. */}
+        <h2 id="members-heading" tabIndex={-1} className="text-sm font-semibold text-ink">
+          Members
+        </h2>
         {isOwner && (
           <button
             type="button"

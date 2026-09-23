@@ -63,7 +63,18 @@ export function AccessPanel() {
               than navigates. */}
           <button
             type="button"
-            onClick={() => document.getElementById("members")?.scrollIntoView({ behavior: "smooth" })}
+            onClick={() => {
+              // Scrolling alone leaves keyboard focus on this button -- a
+              // screen-reader or keyboard user's cursor stays here even
+              // though the page visibly moved to Members. Focusing the
+              // heading (tabIndex={-1} in MembersPanel.tsx makes it a valid
+              // target without adding it to the Tab order) lands them where
+              // the page actually took them, the way a same-page anchor
+              // link would.
+              const heading = document.getElementById("members-heading");
+              heading?.scrollIntoView({ behavior: "smooth" });
+              heading?.focus({ preventScroll: true });
+            }}
             // min-h-11/sm:min-h-0: same padding-less-button gap
             // MembersPanel's "+ Invite" button comments on -- no padding to
             // reach the 44px floor without this.

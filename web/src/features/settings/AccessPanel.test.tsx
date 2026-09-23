@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { meFixture } from "../marriage/agreementFixtures";
@@ -25,7 +25,13 @@ function pendingInvite(id: string, name: string) {
   return { id, name, email: "", role: "owner", capabilities: [], channel: "telegram", knock: null, expiresAt: "2026-12-01T00:00:00Z" };
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  // jsdom has no scrollIntoView implementation at all -- beforeEach below
+  // stubs it in so the pointer's click doesn't throw; undo that here so it
+  // doesn't leak into a test that isn't expecting it.
+  delete (Element.prototype as unknown as { scrollIntoView?: unknown }).scrollIntoView;
+});
 
 describe("AccessPanel", () => {
   it("lists the partner's chat, and mine only once, through my own connection", async () => {
@@ -73,6 +79,38 @@ describe("AccessPanel", () => {
     renderPanel();
 
     expect(await screen.findByRole("button", { name: "2 pending invites — in Members" })).toBeInTheDocument();
+  });
+
+  it("moves keyboard focus to the Members heading after the pointer scrolls there", async () => {
+    // jsdom has no scrollIntoView -- without this stub the pointer's click
+    // handler throws, which would fail the test for the wrong reason.
+    Element.prototype.scrollIntoView = vi.fn();
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      [`GET ${ACCESS_URL}`]: { status: 200, body: EMPTY_ACCESS },
+      "GET /api/v1/household/invites": { status: 200, body: [pendingInvite("i-1", "Jane")] },
+    });
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <AccessPanel />
+        {/* Stands in for MembersPanel's real <section id="members"> heading
+            (MembersPanel.tsx) -- same id and tabIndex, so the pointer's
+            scroll-and-focus targets exactly what the real page renders. */}
+        <section id="members">
+          <h2 id="members-heading" tabIndex={-1}>
+            Members
+          </h2>
+        </section>
+      </QueryClientProvider>,
+    );
+
+    const pointer = await screen.findByRole("button", { name: "1 pending invite — in Members" });
+    pointer.focus();
+    expect(document.activeElement).toBe(pointer);
+
+    pointer.click();
+
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByText("Members")));
   });
 
   it("never asks a limited member's browser for the owner-only invite list", async () => {
