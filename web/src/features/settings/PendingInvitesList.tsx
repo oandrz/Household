@@ -13,23 +13,22 @@ import { PendingInviteCard } from "./PendingInviteCard";
 import { type AdmitResult, type PendingInvite } from "./schemas";
 import { usePendingInvites, useWithdrawInvite } from "./usePendingInvites";
 
-function PendingInviteRow({
-  invite,
-  isConfirming,
-  isPending,
-  errorMessage,
-  onAsk,
-  onConfirm,
-  onCancel,
-}: {
-  invite: PendingInvite;
-  isConfirming: boolean;
-  isPending: boolean;
-  errorMessage: string | null;
-  onAsk: () => void;
-  onConfirm: () => void;
-  onCancel: () => void;
-}) {
+function PendingInviteRow({ invite }: { invite: PendingInvite }) {
+  // Its own useConfirmAction and useWithdrawInvite, one instance per row --
+  // the ApiTokenList TokenRow shape, not one hook instance shared and keyed
+  // across every row (a keyed shared instance was tried first and caught in
+  // review, 2026-09-24, before it shipped: it tracks only one `pendingKey`
+  // globally, so confirming a second row while a first row's DELETE is
+  // still in flight overwrites that marker and silently re-enables the
+  // first row's Withdraw before its own request has settled -- the test
+  // below, "keeps Jane's Yes, withdraw disabled while her DELETE is
+  // pending...", pins exactly this). Each row owning its hook keeps that
+  // state, and the double-click guard it gives, fully independent per row;
+  // no keying is needed at all.
+  const withdraw = useWithdrawInvite();
+  const action = useConfirmAction("Couldn't withdraw that invite. Please try again.");
+  const error = action.errorFor();
+
   return (
     <li className="flex flex-col gap-1">
       <div className="flex items-center justify-between gap-3">
@@ -52,11 +51,11 @@ function PendingInviteRow({
             <span className="shrink-0">{pendingInviteExpiryLine(invite.expiresAt)}</span>
           </div>
         </div>
-        {!isConfirming && (
+        {!action.isConfirming() && (
           <button
             type="button"
-            onClick={onAsk}
-            disabled={isPending}
+            onClick={() => action.ask()}
+            disabled={action.isPending()}
             aria-label={`Withdraw the invite to ${invite.name}`}
             // min-h-11/sm:min-h-0: MembersPanel's "+ Invite" comment has the
             // reason -- an unpadded text button misses the 44px phone floor.
@@ -73,21 +72,21 @@ function PendingInviteRow({
           is `flex-none` beside a `min-w-0` name/email column this file's own
           comment above already fights to protect at 360px -- a two-button
           pair squeezed into it would win that fight back. */}
-      {isConfirming && (
+      {action.isConfirming() && (
         <div className="flex flex-col gap-2">
           <p className="text-[12px] text-muted">Withdraw this invite? The link stops working.</p>
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={onConfirm}
-              disabled={isPending}
+              onClick={() => void action.confirm(() => withdraw.mutateAsync(invite.id))}
+              disabled={action.isPending()}
               className="min-h-11 rounded-lg bg-danger px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-60 sm:min-h-0"
             >
               Yes, withdraw
             </button>
             <button
               type="button"
-              onClick={onCancel}
+              onClick={() => action.cancel()}
               className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-label sm:min-h-0"
             >
               Keep
@@ -95,9 +94,9 @@ function PendingInviteRow({
           </div>
         </div>
       )}
-      {errorMessage && (
+      {error && (
         <p role="alert" className="text-[11px] text-danger">
-          {errorMessage}
+          {error}
         </p>
       )}
     </li>
@@ -106,14 +105,6 @@ function PendingInviteRow({
 
 export function PendingInvitesList() {
   const invites = usePendingInvites({ enabled: true });
-  const withdraw = useWithdrawInvite();
-  // One hook instance, keyed by invite id, serves every row in the list --
-  // useConfirmAction's own doc comment names this as the reason `key`
-  // exists. It also gives the double-click guard for free: `isPending(id)`
-  // disables that row's own "Yes, withdraw" while its DELETE is in flight,
-  // where a shared mutation's own `.isPending` would only ever reflect the
-  // latest call across every row.
-  const withdrawAction = useConfirmAction("Couldn't withdraw that invite. Please try again.");
   // Keyed by invite id, populated the moment Admit succeeds
   // (PendingInviteCard.tsx's own `onAdmitted` prop) rather than read off
   // `invites.data`, deliberately: Admit's own invalidation removes the row
@@ -149,14 +140,6 @@ export function PendingInvitesList() {
   // invite's own warning the moment it was the only row in the list.
   if (invites.data.length === 0 && orphanedAdmits.length === 0) return null;
 
-  // withdrawAction.confirm both runs the DELETE and, on failure, records the
-  // message useConfirmAction's own contract promises: the confirm pair
-  // collapses back to the trigger regardless of outcome, and the error
-  // outlives that collapse because `errorFor` is read outside it, below.
-  function handleWithdraw(id: string) {
-    void withdrawAction.confirm(() => withdraw.mutateAsync(id), id);
-  }
-
   return (
     <div className="mt-5 border-t border-hairline pt-4">
       <h3 className="text-xs font-semibold text-label">Pending invites</h3>
@@ -177,16 +160,7 @@ export function PendingInvitesList() {
               }
             />
           ) : (
-            <PendingInviteRow
-              key={invite.id}
-              invite={invite}
-              isConfirming={withdrawAction.isConfirming(invite.id)}
-              isPending={withdrawAction.isPending(invite.id)}
-              errorMessage={withdrawAction.errorFor(invite.id)}
-              onAsk={() => withdrawAction.ask(invite.id)}
-              onConfirm={() => handleWithdraw(invite.id)}
-              onCancel={() => withdrawAction.cancel()}
-            />
+            <PendingInviteRow key={invite.id} invite={invite} />
           ),
         )}
         {/* The durable half of the admitted notice -- see admittedResults'
