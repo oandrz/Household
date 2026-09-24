@@ -463,14 +463,19 @@ created a Telegram invite ("Withdraw Test Invite") via **+ Invite**, closed
 the modal, and drove the row in Settings' own Pending invites list — not the
 modal's copy of the same card. Clicked **Withdraw** → saw "Withdraw this
 invite? The link stops working." with **Yes, withdraw** / **Keep** →
-clicked **Keep** → invite still listed, Withdraw button back, no DELETE in
-the request log. Clicked **Withdraw** again → **Yes, withdraw** → the
-invite and the whole "Pending invites" heading disappeared, and the Access
-panel's "1 pending invite — in Members" pointer button disappeared with it.
-No console errors or warnings at any point. Repeated at `375x812x2,mobile,
-touch` (this doc's own criterion-12 note on the resize-page minimum) with a
-second invite ("Phone Width Invite"): the confirm line and both buttons
-render full width below the row, both meet the 44px touch target, nothing
-clips. Console checked again afterward, still clean.
+clicked **Keep** → invite still listed with its plain Withdraw button back
+(a DELETE would instead have removed the row on the refetch that follows
+it — the network log itself was not inspected). Clicked **Withdraw** again
+→ **Yes, withdraw** → the invite and the whole "Pending invites" heading
+disappeared, and the Access panel's "1 pending invite — in Members" pointer
+button disappeared with it. No console errors or warnings at any point.
+Repeated at `375x812x2,mobile,touch` (this doc's own criterion-12 note on
+the resize-page minimum) with a second invite ("Phone Width Invite"): the
+confirm line and both buttons render full width below the row, both meet
+the 44px touch target, nothing clips. Console checked again afterward,
+still clean. **Both browser invites were Telegram** (`PendingInviteCard`);
+`PendingInvitesList.tsx`'s own email row (`PendingInviteRow`) was not
+exercised live — its 12/12 `PendingInvitesList.test.tsx` coverage is jsdom
+only, which pins structure but not real layout.
 
 Commit: `fix(web): ask before withdrawing an invite` (`55cea7f`).
