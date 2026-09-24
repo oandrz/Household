@@ -6091,7 +6091,28 @@ route with a missing guard has no second line of defence.
   Tooling), and Vite passes `/api` through its proxy unchanged, so a stale
   module could not change a response status either. Do not read this as the
   extension being unreliable in general. Before chasing a server bug a tool
-  reports, check what the page's own code received.
+  reports, check what the page's own code received. *(l)* **A third instance
+  of the shape *(j)* fixed twice survived, uncaught, until a sibling change
+  went looking near it.** Building the invite Withdraw confirm step
+  (2026-09-24) found `PendingInviteCard.tsx`'s `NewLinkControl` still reads
+  `action.errorFor()` *inside* its `isConfirming()` branch — the exact shape
+  *(j)* already fixed once for retro discard and once for both Holding
+  panels. `useConfirmAction.confirm`'s `finally` unconditionally resets
+  `confirmingKey` to `null` on every outcome, success or failure, so the
+  branch reading the error stops matching the instant the error is set: a
+  failed "Get a new link" or "Not them" collapses silently back to the
+  trigger button with no visible reason why, exactly like the retro-discard
+  bug *(j)* describes. Found only because `WithdrawControl`, added in the
+  same file for the same task, was deliberately written the other way
+  (error read outside both branches, matching `ApiTokenList.tsx` and
+  `TelegramConnection.tsx`) and a reviewer asked why the two siblings
+  differed. **Found 2026-09-24, not fixed** — out of scope for that change,
+  and no existing test exercises a failed `useNewInviteLink` call to catch
+  it. `WithdrawControl`'s own test (`PendingInviteCard.test.tsx`, "shows the
+  server's message when withdrawing fails, without losing the knock") shows
+  the shape a fix here would need. Grepping `useConfirmAction.ts`'s own
+  callers for `isConfirming()` wrapping an `errorFor()` read would have
+  caught this the same day *(j)* was fixed, not two weeks later.
 
 ### Provisioning the read-only role on the box (2026-09-05)
 
