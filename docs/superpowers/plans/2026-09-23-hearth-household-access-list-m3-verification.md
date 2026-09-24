@@ -478,4 +478,43 @@ still clean. **Both browser invites were Telegram** (`PendingInviteCard`);
 exercised live — its 12/12 `PendingInvitesList.test.tsx` coverage is jsdom
 only, which pins structure but not real layout.
 
-Commit: `fix(web): ask before withdrawing an invite` (`55cea7f`).
+**Review before merge caught a bug in `PendingInvitesList.tsx`'s keying
+(2026-09-24).** The shared `useConfirmAction()` instance above, keyed by
+invite id, tracks only one `pendingKey` at a time — confirming a second
+row's Withdraw while a first row's DELETE was still in flight overwrote the
+first row's pending marker, silently re-enabling its control before its own
+request had settled (and, because the shared `confirmingKey` was overwritten
+too, the first row's control briefly reverted from the confirm pair back to
+its plain trigger along the way — clicking through that would have sent a
+second DELETE for the same invite). Fixed by giving each `PendingInviteRow`
+its own `useConfirmAction()` and `useWithdrawInvite()` instance instead —
+the `ApiTokenList.tsx` `TokenRow` shape, mounted once per row, with no key
+to collide on at all.
+
+RED (implementation reverted to the shared-keyed version with `git stash
+push -- web/src/features/settings/PendingInvitesList.tsx`, only the new
+test kept): the new "keeps Jane's own withdraw control disabled while her
+DELETE is pending, even after confirming Jack separately" test failed
+exactly as expected — with Jane's own DELETE held open by the test's gate,
+her row's trigger button (`Withdraw the invite to Jane`, reappeared the
+moment Jack's row was asked) rendered *enabled* the instant Jack's own
+confirm resolved. The other 12 tests in the file passed unchanged. GREEN
+after restoring the fix: `PendingInvitesList.test.tsx` (13/13, the new test
+added) and the whole frontend suite (963/963) pass; `tsc`, `eslint`,
+`make lint` clean. Commit `e330b84`.
+
+**Second mutation check, pinning `WithdrawControl`'s error placement**
+(the concern in the earlier engineering report, and `docs/LEARNING.md`'s new
+item *(l)* under "Fixing that review taught six more things"): moved
+`{error && ...}` from outside both branches into `WithdrawControl`'s own
+`isConfirming()` block (`PendingInviteCard.tsx`), the same shape its sibling
+`NewLinkControl` still uses uncorrected. 1 of 15 `PendingInviteCard.test.tsx`
+tests failed — the "shows the server's message when withdrawing fails,
+without losing the knock" test, on `findByRole("alert")` timing out, exactly
+as expected; the other 14 unaffected. Reverted; 15/15 again. Test added in
+commit `0faf2f0`.
+
+Commits: `fix(web): ask before withdrawing an invite` (`55cea7f`);
+`test(web): pin WithdrawControl's error-placement decision` (`0faf2f0`);
+`fix(web): give each pending-invite row its own confirm hook instance`
+(`e330b84`).
