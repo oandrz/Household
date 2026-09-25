@@ -7,23 +7,28 @@
 // Owner-only, like the route behind it. MembersPanel mounts it only for an
 // owner, so a limited member never fires the request at all.
 import { useState } from "react";
-import { apiErrorMessage } from "../../api/errorMessage";
+import { useConfirmAction } from "../../components/useConfirmAction";
 import { admittedLine, memberBadgeLabel, pendingInviteExpiryLine } from "./copy";
 import { PendingInviteCard } from "./PendingInviteCard";
 import { type AdmitResult, type PendingInvite } from "./schemas";
 import { usePendingInvites, useWithdrawInvite } from "./usePendingInvites";
 
-function PendingInviteRow({
-  invite,
-  withdrawing,
-  errorMessage,
-  onWithdraw,
-}: {
-  invite: PendingInvite;
-  withdrawing: boolean;
-  errorMessage?: string;
-  onWithdraw: () => void;
-}) {
+function PendingInviteRow({ invite }: { invite: PendingInvite }) {
+  // Its own useConfirmAction and useWithdrawInvite, one instance per row --
+  // the ApiTokenList TokenRow shape, not one hook instance shared and keyed
+  // across every row (a keyed shared instance was tried first and caught in
+  // review, 2026-09-24, before it shipped: it tracks only one `pendingKey`
+  // globally, so confirming a second row while a first row's DELETE is
+  // still in flight overwrites that marker and silently re-enables the
+  // first row's Withdraw before its own request has settled -- the test
+  // below, "keeps Jane's Yes, withdraw disabled while her DELETE is
+  // pending...", pins exactly this). Each row owning its hook keeps that
+  // state, and the double-click guard it gives, fully independent per row;
+  // no keying is needed at all.
+  const withdraw = useWithdrawInvite();
+  const action = useConfirmAction("Couldn't withdraw that invite. Please try again.");
+  const error = action.errorFor();
+
   return (
     <li className="flex flex-col gap-1">
       <div className="flex items-center justify-between gap-3">
@@ -46,21 +51,52 @@ function PendingInviteRow({
             <span className="shrink-0">{pendingInviteExpiryLine(invite.expiresAt)}</span>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={onWithdraw}
-          disabled={withdrawing}
-          aria-label={`Withdraw the invite to ${invite.name}`}
-          // min-h-11/sm:min-h-0: MembersPanel's "+ Invite" comment has the
-          // reason -- an unpadded text button misses the 44px phone floor.
-          className="min-h-11 flex-none text-xs font-semibold text-danger disabled:opacity-50 sm:min-h-0"
-        >
-          Withdraw
-        </button>
+        {!action.isConfirming() && (
+          <button
+            type="button"
+            onClick={() => action.ask()}
+            disabled={action.isPending()}
+            aria-label={`Withdraw the invite to ${invite.name}`}
+            // min-h-11/sm:min-h-0: MembersPanel's "+ Invite" comment has the
+            // reason -- an unpadded text button misses the 44px phone floor.
+            className="min-h-11 flex-none text-xs font-semibold text-danger disabled:opacity-50 sm:min-h-0"
+          >
+            Withdraw
+          </button>
+        )}
       </div>
-      {errorMessage && (
+      {/* In-page confirm, never window.confirm -- the reason is
+          TelegramConnection.tsx's Disconnect and ApiTokenList.tsx's Revoke,
+          the two patterns this copies. It renders full-width below the
+          header row rather than in the button's own cell, because that cell
+          is `flex-none` beside a `min-w-0` name/email column this file's own
+          comment above already fights to protect at 360px -- a two-button
+          pair squeezed into it would win that fight back. */}
+      {action.isConfirming() && (
+        <div className="flex flex-col gap-2">
+          <p className="text-[12px] text-muted">Withdraw this invite? The link stops working.</p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => void action.confirm(() => withdraw.mutateAsync(invite.id))}
+              disabled={action.isPending()}
+              className="min-h-11 rounded-lg bg-danger px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-60 sm:min-h-0"
+            >
+              Yes, withdraw
+            </button>
+            <button
+              type="button"
+              onClick={() => action.cancel()}
+              className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-label sm:min-h-0"
+            >
+              Keep
+            </button>
+          </div>
+        </div>
+      )}
+      {error && (
         <p role="alert" className="text-[11px] text-danger">
-          {errorMessage}
+          {error}
         </p>
       )}
     </li>
@@ -69,14 +105,6 @@ function PendingInviteRow({
 
 export function PendingInvitesList() {
   const invites = usePendingInvites({ enabled: true });
-  const withdraw = useWithdrawInvite();
-  // A Set, not one flag, for the reason MembersPanel's pendingIds gives: one
-  // shared mutation's isPending only reflects the latest call. It drives each
-  // row's `disabled` Withdraw, and that is what stops a double click sending
-  // two DELETEs: React re-renders after a click before the next click event
-  // runs, so the second click lands on a disabled button and never fires.
-  const [withdrawingIds, setWithdrawingIds] = useState<Set<string>>(new Set());
-  const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   // Keyed by invite id, populated the moment Admit succeeds
   // (PendingInviteCard.tsx's own `onAdmitted` prop) rather than read off
   // `invites.data`, deliberately: Admit's own invalidation removes the row
@@ -112,26 +140,6 @@ export function PendingInvitesList() {
   // invite's own warning the moment it was the only row in the list.
   if (invites.data.length === 0 && orphanedAdmits.length === 0) return null;
 
-  function handleWithdraw(id: string) {
-    setRowErrors((prev) => ({ ...prev, [id]: "" }));
-    setWithdrawingIds((prev) => new Set(prev).add(id));
-    withdraw.mutate(id, {
-      onError: (error) => {
-        setRowErrors((prev) => ({
-          ...prev,
-          [id]: apiErrorMessage(error, "Couldn't withdraw that invite. Please try again."),
-        }));
-      },
-      onSettled: () => {
-        setWithdrawingIds((prev) => {
-          const next = new Set(prev);
-          next.delete(id);
-          return next;
-        });
-      },
-    });
-  }
-
   return (
     <div className="mt-5 border-t border-hairline pt-4">
       <h3 className="text-xs font-semibold text-label">Pending invites</h3>
@@ -152,13 +160,7 @@ export function PendingInvitesList() {
               }
             />
           ) : (
-            <PendingInviteRow
-              key={invite.id}
-              invite={invite}
-              withdrawing={withdrawingIds.has(invite.id)}
-              errorMessage={rowErrors[invite.id]}
-              onWithdraw={() => handleWithdraw(invite.id)}
-            />
+            <PendingInviteRow key={invite.id} invite={invite} />
           ),
         )}
         {/* The durable half of the admitted notice -- see admittedResults'

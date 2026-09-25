@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchAndParse } from "../../api/client";
 import { meQueryKey } from "../auth/useAuth";
 import { updateMemberResponseSchema } from "./schemas";
+import { householdAccessQueryKey } from "./useHouseholdAccess";
 import { householdMembersQueryKey } from "./useHouseholdMembers";
 import { spacesQueryKey } from "./useSpaces";
 
@@ -63,6 +64,13 @@ export function useUpdateMember() {
         // keep listing a space like Marriage as visible after its own
         // viewer lost the access that used to grant it.
         queryClient.invalidateQueries({ queryKey: spacesQueryKey }),
+        // MemberService.Update (member.go) revokes every one of the target
+        // member's API tokens server-side on ANY successful change here, not
+        // only a demotion (revokeCredentials calls APITokens.RevokeAllForUser
+        // unconditionally). Without this, the Access panel would go on
+        // showing a token that the server has already revoked as live for
+        // up to householdAccessQueryKey's own staleTime.
+        queryClient.invalidateQueries({ queryKey: householdAccessQueryKey }),
       ]);
     },
   });

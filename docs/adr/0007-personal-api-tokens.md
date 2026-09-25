@@ -50,8 +50,9 @@ needs none of that.
 
 - `hearthctl login --token` (or `HEARTH_TOKEN`) is the headless sign-in.
   `hearthctl token create|list|revoke` manage tokens from a browser session.
-- There is no Settings screen for tokens yet; the feature tracker carries
-  it as a ⬜ row.
+- Settings' Access panel lists, creates and revokes a member's own tokens,
+  and shows owners every member's tokens read-only
+  (`docs/superpowers/specs/2026-09-23-hearth-household-access-list-design.md`).
 - `Scope.AuthVia` exists. Any switch over it refuses by default; a third
   credential kind cannot be added without every such switch being revisited.
 - Sessions and tokens are now two rows in two tables that both mean "this

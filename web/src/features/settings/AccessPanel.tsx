@@ -1,0 +1,118 @@
+// Settings' Access panel: every live way into the household that is not a
+// password -- API tokens and linked Telegram chats -- each labelled with its
+// member. docs/superpowers/specs/2026-09-23-hearth-household-access-list-design.md.
+//
+// An owner gets every member's rows and a limited member only their own;
+// the server decides (GET /household/access), so nothing here branches on
+// role for *what to list*. Two things here do branch on role: the subtitle
+// text (copy only -- it never changes what is fetched or which rows render)
+// and the pending-invite pointer, whose list is owner-only -- a limited
+// member must never send a request whose 403 would then need hiding
+// (usePendingInvites.ts).
+//
+// If GET /household/access fails, the caller's own Telegram Connect/
+// Disconnect control disappears along with everything else below the error
+// line -- it lives inside LinkedChatList (TelegramConnection), which is
+// nested under access.isSuccess here and never gets its own, independent
+// fetch. Accepted trade-off: a second, standalone code path just to keep
+// that one control alive without the token/chat data it is grouped with
+// was judged not worth the duplication.
+import { useState } from "react";
+import { useMe } from "../auth/useAuth";
+import { ApiTokenList } from "./ApiTokenList";
+import { pendingInvitesPointer } from "./copy";
+import { LinkedChatList } from "./LinkedChatList";
+import { NewApiTokenModal } from "./NewApiTokenModal";
+import { useHouseholdAccess } from "./useHouseholdAccess";
+import { usePendingInvites } from "./usePendingInvites";
+
+export function AccessPanel() {
+  const me = useMe();
+  const access = useHouseholdAccess();
+  const isOwner = me.data?.membership.role === "owner";
+  const invites = usePendingInvites({ enabled: isOwner });
+  const [creating, setCreating] = useState(false);
+
+  const pointer = isOwner ? pendingInvitesPointer(invites.data?.length ?? 0) : null;
+
+  return (
+    <section className="rounded-xl border border-hairline bg-card p-[22px]">
+      <div className="mb-1 flex items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold text-ink">Access</h2>
+        <button
+          type="button"
+          onClick={() => setCreating(true)}
+          className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-label sm:min-h-0"
+        >
+          New token
+        </button>
+      </div>
+      {/* Gated on me.isSuccess: while /auth/me is still pending, me.data is
+          undefined and isOwner reads false -- the same shape a real limited
+          member has -- which would flash the limited-member copy at an
+          owner for one render every load. */}
+      {me.isSuccess && (
+        <p className="mb-4 text-xs text-muted">
+          {isOwner ? "Every way into your household besides a password." : "Your own ways in besides a password."}
+        </p>
+      )}
+
+      {pointer && (
+        <p className="mb-4 text-xs">
+          {/* The Members card is on this same page, so this scrolls rather
+              than navigates. */}
+          <button
+            type="button"
+            onClick={() => {
+              // Scrolling the card into view alone leaves keyboard focus on
+              // this button -- a screen-reader or keyboard user's cursor
+              // stays here even though the page visibly moved to Members.
+              // The scroll target and the focus target are deliberately
+              // different elements: scrolling #members keeps the whole card
+              // (its padding and border) in view the way clicking it
+              // visually would, while focus moves to its heading
+              // (tabIndex={-1} in MembersPanel.tsx makes it a valid .focus()
+              // target without adding it to the Tab order) -- scrollIntoView
+              // already happened, so preventScroll on the focus call stops
+              // the browser's own default "scroll the focused element into
+              // view" from re-scrolling to a *different* position than the
+              // one just chosen.
+              document.getElementById("members")?.scrollIntoView({ behavior: "smooth" });
+              document.getElementById("members-heading")?.focus({ preventScroll: true });
+            }}
+            // min-h-11/sm:min-h-0: same padding-less-button gap
+            // MembersPanel's "+ Invite" button comments on -- no padding to
+            // reach the 44px floor without this.
+            className="min-h-11 font-semibold text-accent sm:min-h-0"
+          >
+            {pointer}
+          </button>
+        </p>
+      )}
+
+      {(access.isPending || me.isPending) && <p className="text-xs text-muted">Loading…</p>}
+      {access.isError && (
+        <p role="alert" className="text-xs text-danger">
+          Couldn't load the access list.
+        </p>
+      )}
+
+      {access.isSuccess && me.isSuccess && (
+        <div className="flex flex-col gap-5">
+          <div>
+            <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-muted">API tokens</h3>
+            <ApiTokenList tokens={access.data.tokens} myUserId={me.data.user.id} />
+          </div>
+          {access.data.telegramEnabled && (
+            <div>
+              <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-muted">Linked chats</h3>
+              <LinkedChatList chats={access.data.chats} myUserId={me.data.user.id} />
+            </div>
+          )}
+        </div>
+      )}
+
+      <NewApiTokenModal open={creating} onClose={() => setCreating(false)} />
+    </section>
+  );
+}

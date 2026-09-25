@@ -8,6 +8,7 @@ import (
 )
 
 var _ usecase.TelegramAccountRepository = (*TelegramAccountRepo)(nil)
+var _ usecase.HouseholdChatLister = (*TelegramAccountRepo)(nil)
 
 type TelegramAccountRepo struct{ q *sqlcgen.Queries }
 
@@ -34,6 +35,25 @@ func (r *TelegramAccountRepo) ByUserID(ctx context.Context, userID string) (usec
 		ChatUsername: stringOrEmpty(row.ChatUsername),
 		LinkedAt:     timeOf(row.LinkedAt),
 	}, nil
+}
+
+// ListForHousehold returns every chat bound to a member of this household,
+// most recently linked first. Empty is an empty slice, never ErrNotFound.
+func (r *TelegramAccountRepo) ListForHousehold(ctx context.Context, householdID string) ([]usecase.TelegramBinding, error) {
+	rows, err := r.q.ListTelegramAccountsForHousehold(ctx, uuid(householdID))
+	if err != nil {
+		return nil, translate(err, "list household telegram accounts")
+	}
+	out := make([]usecase.TelegramBinding, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, usecase.TelegramBinding{
+			UserID:       uuidToString(row.UserID),
+			ChatID:       row.ChatID,
+			ChatUsername: stringOrEmpty(row.ChatUsername),
+			LinkedAt:     timeOf(row.LinkedAt),
+		})
+	}
+	return out, nil
 }
 
 // Create's contract for which UNIQUE wins and why b.LinkedAt is ignored is

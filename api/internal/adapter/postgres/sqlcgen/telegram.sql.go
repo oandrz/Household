@@ -182,6 +182,49 @@ func (q *Queries) GetTelegramLinkRequest(ctx context.Context, id pgtype.UUID) (G
 	return i, err
 }
 
+const listTelegramAccountsForHousehold = `-- name: ListTelegramAccountsForHousehold :many
+SELECT ta.user_id, ta.chat_id, ta.chat_username, ta.linked_at
+FROM telegram_accounts ta
+JOIN memberships m ON m.user_id = ta.user_id
+WHERE m.household_id = $1
+ORDER BY ta.linked_at DESC
+`
+
+type ListTelegramAccountsForHouseholdRow struct {
+	UserID       pgtype.UUID
+	ChatID       int64
+	ChatUsername *string
+	LinkedAt     pgtype.Timestamptz
+}
+
+// The household access list's chats. telegram_accounts carries only
+// user_id, so the household boundary comes from memberships. chat_id is
+// selected because TelegramBinding has it; the HTTP layer never sends it.
+func (q *Queries) ListTelegramAccountsForHousehold(ctx context.Context, householdID pgtype.UUID) ([]ListTelegramAccountsForHouseholdRow, error) {
+	rows, err := q.db.Query(ctx, listTelegramAccountsForHousehold, householdID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTelegramAccountsForHouseholdRow
+	for rows.Next() {
+		var i ListTelegramAccountsForHouseholdRow
+		if err := rows.Scan(
+			&i.UserID,
+			&i.ChatID,
+			&i.ChatUsername,
+			&i.LinkedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const pruneTelegramLinkRequests = `-- name: PruneTelegramLinkRequests :execrows
 DELETE FROM telegram_link_requests
 WHERE created_at < $1

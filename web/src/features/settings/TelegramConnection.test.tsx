@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubFetchRoutes } from "../../test/fetchStub";
 import { telegramPollInterval } from "./copy";
-import { TelegramPanel } from "./TelegramPanel";
+import { TelegramConnection } from "./TelegramConnection";
 
 const BINDING_URL = "/api/v1/auth/telegram";
 const LINK_START_URL = "/api/v1/auth/telegram/link";
@@ -20,7 +20,7 @@ function renderPanel() {
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <TelegramPanel />
+      <TelegramConnection />
     </QueryClientProvider>,
   );
 }
@@ -32,7 +32,7 @@ afterEach(() => {
 // Unlike NotificationsPanel, this panel never calls useMe() -- spec decision
 // 10 makes it available to any member, not owners only, so there is no
 // GET /api/v1/auth/me stub to register anywhere below.
-describe("TelegramPanel", () => {
+describe("TelegramConnection", () => {
   it("shows the connected chat and offers Disconnect", async () => {
     const fetchMock = stubFetchRoutes({
       [`GET ${BINDING_URL}`]: [
@@ -50,7 +50,12 @@ describe("TelegramPanel", () => {
     const disconnectButton = screen.getByRole("button", { name: "Disconnect" });
     expect(disconnectButton).toBeInTheDocument();
 
+    // Disconnecting is destructive (it stops reminders and bot commands for
+    // this chat) -- like every other such action in this app, it asks for
+    // an in-page confirm before it sends anything (useConfirmAction, the
+    // ApiTokenList Revoke pattern), never a single click straight to DELETE.
     fireEvent.click(disconnectButton);
+    fireEvent.click(await screen.findByRole("button", { name: "Yes, disconnect" }));
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(
@@ -61,6 +66,31 @@ describe("TelegramPanel", () => {
     });
 
     expect(await screen.findByRole("button", { name: "Connect Telegram" })).toBeInTheDocument();
+  });
+
+  it("sends no DELETE and returns to Disconnect when the confirm is cancelled", async () => {
+    const fetchMock = stubFetchRoutes({
+      [`GET ${BINDING_URL}`]: {
+        status: 200,
+        body: { connected: true, chatUsername: "andreas_o", linkedAt: "2026-09-01T10:00:00Z" },
+      },
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Disconnect" }));
+    expect(
+      await screen.findByText("Disconnect this chat? Reminders and bot commands stop working there."),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep" }));
+
+    expect(await screen.findByRole("button", { name: "Disconnect" })).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(
+        ([input, init]) =>
+          String(input) === BINDING_URL && (init?.method ?? "").toUpperCase() === "DELETE",
+      ),
+    ).toBe(false);
   });
 
   it("names the chat that opened the link before asking to confirm", async () => {

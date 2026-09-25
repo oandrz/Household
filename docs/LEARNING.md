@@ -23,7 +23,7 @@ gets rebuilt.
 
 ### 1. Fixing an instance rarely fixes the class
 
-This happened **twenty-three times** — one bullet each below, and the count is
+This happened **twenty-four times** — one bullet each below, and the count is
 the number of bullets, so recount it when you add one (it had already drifted
 by one before the UX-repair round noticed). Almost every time, the fix was
 correct and the sibling kept the bug; two of them are the variant where
@@ -382,6 +382,25 @@ writing a hook for it.
   label that lies, the class is every other label on that screen, not the one
   the bug report named** — and the instrument that found it was driving the
   real page, not any test that could have been written for the fix as scoped.
+
+- **The same lying-label shape, one layer earlier: a label whose target
+  never renders at all (M3, 2026-09-23).** `CurrencyPanel.tsx`'s `<label
+  htmlFor="primary-currency">` rendered for every member, but the
+  `id="primary-currency"` input only renders for an owner (`isOwner ?
+  <form><input .../></form> : <span>...</span>`) — a limited member's
+  browser had a `<label for>` pointing at an id that is never in the DOM, a
+  dangling-label DevTools accessibility issue invisible in a plain visual
+  check. The Transactions header bullet above was found by driving the real
+  page and reading it; this one was found the same way but by a different
+  instrument — DevTools' own **Issues** panel, flagging "Incorrect use of
+  `<label for=FORM_ELEMENT>`" while walking a limited member's Settings
+  screen for something else entirely. Only afterward did a grep for the
+  shape (`grep -rn 'htmlFor=' web/src/features/settings/`) confirm no
+  sibling was left — the grep swept for company once the instance was
+  already found, it did not find the instance itself. Any `<label htmlFor>`
+  whose sibling control is gated on a condition the label itself isn't
+  gated on is this bug waiting to happen — check the two render conditions
+  match.
 
 - **Giving a month-less request a meaning changed what every other caller of
   that endpoint was asking for.** Fixing the Transactions month contract made
@@ -1566,6 +1585,26 @@ person to ask whether the test could ever have gone red in the first place.
   generated function and its params struct keep their signature (only the
   embedded SQL string changes) and only the behaviour moves. Both then
   failed on the cross-household assertion, as intended.
+- **The household access list's "the caller's own chat is drawn once" test
+  passed with the de-duplication filter deleted from `LinkedChatList.tsx`.**
+  `LinkedChatList` renders the caller's own chat two ways: `TelegramConnection`
+  draws it once its own binding query resolves, and the household `access`
+  query's rows are filtered to every *other* member's chat so the caller's
+  row is not drawn a second time. The test asserted
+  `(await screen.findAllByText("@andreas_o")).toHaveLength(1)` — but
+  `findAllByText` is an async query that returns as soon as it sees **any**
+  match, not once every query has settled, so it could resolve after only
+  `TelegramConnection`'s own row had rendered and *before* `LinkedChatList`'s
+  own (unfiltered, under the mutation) row had — count 1, passing, for a
+  reason that has nothing to do with the filter. Caught only by
+  mutation-checking, not by the test discriminating on its own; fixed by
+  first awaiting `TelegramConnection`'s own "Disconnect" button, which only
+  renders once its binding query has resolved and drawn the caller's row, so
+  by the time the count is read `LinkedChatList`'s own render has had every
+  chance to run too and a broken filter has nowhere left to hide. **An async
+  query that returns on the first match, not on every source settling, needs
+  an explicit anchor proving the slower source has rendered before the count
+  it draws is trusted.**
 
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
@@ -2024,6 +2063,19 @@ never mounted, and a reordering of two statements that do not interact.
   mutation's own side effect can remove the thing that would show its
   result, the test has to reproduce that side effect's real timing, not
   just call the mutation in isolation and check what it returns.**
+- **The identical shape recurred one milestone later, in the household
+  access list's `useCreateApiToken`.** Its planned `onSuccess` also
+  **returned** `queryClient.invalidateQueries(...)`, which would have
+  delayed `create.data.token` — the raw `hearth_…` secret
+  `NewApiTokenModal` shows exactly once — until after the access list's own
+  refetch had fired, gating the one-time-visible value on a write path it
+  triggers itself. Caught during the build, not by a passing-for-the-wrong-
+  reason test: this same page already named the shape, so the review
+  checked for it directly rather than waiting for a race to show up. Fixed
+  the same way, firing the invalidation with `void` instead of returning
+  it. **Recording a bug's shape once does not immunise the next hook that
+  uses the same library the same way — it has to be checked for on
+  purpose, on every `onSuccess`/`onSettled` that follows.**
 
 **If a behaviour depends on the platform, verify it in the platform.** A real
 browser is what found every frontend defect above **except one**, and nothing
@@ -3368,6 +3420,28 @@ backgrounded.
   state a document describes changes, grep the whole document for the old
   wording**, not only the section you came to edit: a fact stated in two
   sections drifts exactly the way a floor stated in two tests does.
+- **A thirteenth instance, the household access list, and the same shape
+  the fifth and sixth instances above name — a rule restated in a comment's
+  own words rather than pointed at — but this time the restatement was
+  simply wrong from the start, not drifted.**
+  `APITokenRepository.ListForUser`'s doc comment in `ports.go` read "returns
+  one person's **live** tokens, newest first." The query behind it,
+  `ListAPITokensForUser`, filters only `revoked_at IS NULL` — it keeps
+  expired rows in, excluding revoked ones alone — so the comment claimed a
+  filter the SQL never applied,
+  and nothing had reason to doubt it until this milestone's household-scoped
+  sibling, `HouseholdTokenLister.ListForHousehold`, was built deliberately
+  to answer a stricter question ("what can get in right now") and needed a
+  sentence explaining *why* it filters `expires_at` when the older query
+  does not. Writing that contrast down is what surfaced the older claim as
+  false — the same mechanism pattern 16's very first bullet names for the
+  net worth trend, a document read closely enough to be extended is a
+  document read closely enough to be checked. `ListAPITokensForUser` itself
+  carried no comment at all, so the asymmetry was not "two claims
+  disagreeing" but one wrong claim and one silent query; fixed by
+  correcting `ports.go` and adding a comment to the SQL naming the same
+  contrast, so both queries now say which question they answer rather than
+  one saying the wrong thing and the other saying nothing.
 
 **Treat a citation the way you'd treat a test assertion: something the next
 reader can verify against the thing it names, not something to trust because
@@ -3430,6 +3504,20 @@ distilled from nine of its own comments.
 
 A reviewer's claim and a code comment get the same treatment: run the
 mutation, read the failure.
+
+**The household access list, 2026-09-23 (whole-branch review, finding M3).**
+`NewApiTokenModal.tsx`'s own header comment said the raw token secret "lives
+only in this component's mutation state: closing the dialog resets it, and
+nothing else ever holds it -- not the query cache, not storage." Untested:
+TanStack Query's `MutationCache` keeps a settled mutation -- `.data`,
+secret included -- for its default five-minute `gcTime` after it stops being
+observed, and the modal's own `create.reset()` on close resets only the
+hook's local observer, never that cache entry. The comment was written the
+way this pattern warns against: stated as settled fact about a library's
+default, never checked against it. Fixed with `gcTime: 0` on
+`useCreateApiToken` (`useHouseholdAccess.ts`), which is what actually makes
+the claim true; the comment now cites that option instead of asserting the
+outcome on its own.
 
 ---
 
@@ -3853,6 +3941,26 @@ this entry predicted and no more: it runs only while a Telegram invite in
 the current list has no knock yet, so an emailed invite accepted elsewhere,
 or a Telegram invite that has already knocked, still needs the next
 navigation to refresh. Not addressed by this milestone either.
+
+**Broke again, 2026-09-23 (household access list, whole-branch review,
+finding M2) -- this time from a write that has no client-side query key of
+its own to invalidate off.** `useUpdateMember`'s onSuccess invalidated
+members, `me` and spaces -- every key the *request it sent* visibly changes.
+It missed `["household", "access"]`, even though `MemberService.Update`
+(Go, `member.go`) revokes every one of the target member's API tokens
+server-side on any successful role or capability change
+(`revokeCredentials`, unconditional -- not only on a demotion). The Access
+panel kept showing a just-revoked token as live for up to its own
+`staleTime`, and nothing about the PATCH request or its response hinted at
+that side effect to a reader of the frontend alone; only reading the Go
+service's own doc comment showed it. **The rule has a third clause now:
+list every query key a write's *server-side side effects* make stale, not
+only the ones the request's own payload would suggest.** Fixed by adding
+the fourth key to the same `Promise.all`
+(`web/src/features/settings/useUpdateMember.ts`), pinned by a hook-level
+test in the shape `useAgreementsInvalidation.test.tsx` already established:
+render the read hook and the write hook together, assert a second `GET`
+after the mutation lands (`useUpdateMember.test.tsx`).
 
 ### 24. A delete scoped to the parent's parent, and a scope check thrown away
 
@@ -5524,6 +5632,19 @@ route with a missing guard has no second line of defence.
   before 08:00 that is yesterday's date: a two-day horizon, and on the 1st,
   last month's budget. The fix is one `time.Date(…, time.UTC)` at the top
   of `RunOnce`, and a test that ticks at 00:15 SGT on the 1st.
+- **Household access list milestone: the same CHECK item (n) above names,
+  reached from a different direction.** Item (n) was a negative test tripping
+  a CHECK it should have read first; this time the plan's own implementation
+  task inlined a fresh test-household fixture from memory, and gave its
+  owner a partial capability set — `owners_hold_all_capabilities` refused
+  the insert before the test the fixture was building even ran. The rule
+  item (n) states for a negative test extends to any inline fixture: **a
+  plan that writes a household, membership or capability fixture from
+  scratch is re-deriving constraints the schema already enforces, and will
+  lose that race eventually.** Fixed by copying a known-good fixture already
+  used elsewhere in the suite rather than composing a new one — the schema's
+  CHECKs are read once, by whoever wrote the fixture being copied, instead
+  of by every plan that writes one from memory.
 - The architecture lint **never enforced the rule it existed for**. Both branches
   only matched imports *within* the module, so third-party imports in
   `internal/domain` passed. Proven by planting `pgx` and getting exit 0.
@@ -5970,7 +6091,28 @@ route with a missing guard has no second line of defence.
   Tooling), and Vite passes `/api` through its proxy unchanged, so a stale
   module could not change a response status either. Do not read this as the
   extension being unreliable in general. Before chasing a server bug a tool
-  reports, check what the page's own code received.
+  reports, check what the page's own code received. *(l)* **A third instance
+  of the shape *(j)* fixed twice survived, uncaught, until a sibling change
+  went looking near it.** Building the invite Withdraw confirm step
+  (2026-09-24) found `PendingInviteCard.tsx`'s `NewLinkControl` still reads
+  `action.errorFor()` *inside* its `isConfirming()` branch — the exact shape
+  *(j)* already fixed once for retro discard and once for both Holding
+  panels. `useConfirmAction.confirm`'s `finally` unconditionally resets
+  `confirmingKey` to `null` on every outcome, success or failure, so the
+  branch reading the error stops matching the instant the error is set: a
+  failed "Get a new link" or "Not them" collapses silently back to the
+  trigger button with no visible reason why, exactly like the retro-discard
+  bug *(j)* describes. Found only because `WithdrawControl`, added in the
+  same file for the same task, was deliberately written the other way
+  (error read outside both branches, matching `ApiTokenList.tsx` and
+  `TelegramConnection.tsx`) and a reviewer asked why the two siblings
+  differed. **Found 2026-09-24, not fixed** — out of scope for that change,
+  and no existing test exercises a failed `useNewInviteLink` call to catch
+  it. `WithdrawControl`'s own test (`PendingInviteCard.test.tsx`, "shows the
+  server's message when withdrawing fails, without losing the knock") shows
+  the shape a fix here would need. Grepping `useConfirmAction.ts`'s own
+  callers for `isConfirming()` wrapping an `errorFor()` read would have
+  caught this the same day *(j)* was fixed, not two weeks later.
 
 ### Provisioning the read-only role on the box (2026-09-05)
 
@@ -6330,6 +6472,73 @@ no test suite can hold.
   where Christine has already accepted, so it has two owners. Signing up takes
   about a minute through Mailpit, needs no volume drop, and leaves the seeded
   household alone.
+
+### The household access list's browser walk (2026-09-23)
+
+- **The dev stack served a crash page while `make lint && make test` were
+  green.** Vite's overlay read `Failed to resolve import "qrcode-generator"`:
+  the web service installs into the `hearth-node-modules` named volume, and
+  that volume predated the dependency. `docker compose up --build` does not
+  touch it, because the `web` service has no image to build. What caught it:
+  loading the page. What fixes it: restart the web container, so its
+  `npm install` runs again. The same walk found the dev database one
+  migration behind (`00021`) — run `docker compose run --rm migrate` against
+  the engine that owns port 5173 before a walk, not only the suite's
+  throwaway containers. Both are pattern 3's two-Docker-engines trap again,
+  in a new shape: the thing answering the browser is not the thing the suite
+  tested.
+- **Sign in by magic link, not by password.** `POST /api/v1/auth/magic-link`
+  with the member's email, then read the link from Mailpit's API
+  (`/api/v1/search?query=to:<email>`). No password is typed, so there is no
+  lockout risk, and it works for any seeded member who has an email.
+  **Correction (2026-09-23 follow-up):** `adminctl reset-password` *can* be
+  driven by an agent after all — the earlier claim here was wrong. The
+  blocker isn't the tool, it's the container's stdin never being a real
+  terminal, and `term.ReadPassword` needs one (fails "inappropriate ioctl
+  for device" without it). `-T` explicitly disables the pseudo-TTY, but
+  dropping `-T` alone does not fix it either: Compose only allocates one
+  when *its own* stdin is a terminal, and silently falls back to no-TTY
+  otherwise (confirmed with `printf 'x\n' | docker compose exec api tty` →
+  `not a tty`, no error, no `-T` involved). `expect` is what actually
+  closes the gap — it gives the docker client a local pty of its own
+  (`spawn docker compose exec api go run ./cmd/adminctl reset-password
+  --email=...`, `expect "New password:"`, `send -- "$pw\r"`), which is what
+  lets Compose allocate one on the container side too, satisfying
+  `term.ReadPassword` without any human typing.
+- **Chrome DevTools MCP isolated contexts carried a three-person walk**
+  (owner, partner owner, limited member) in one browser. Two limits to
+  know: `resize_page` stops at the window's 500px minimum, so use
+  `emulate` with a `375x812x2,mobile,touch` viewport for a phone-width check;
+  and `list_console_messages` keeps only the last three navigations, so for
+  a "no console errors" claim do the whole flow again without reloading,
+  then read the console.
+
+### M3 leftovers from the household access list walk (2026-09-23)
+
+- The dangling-label finding from this walk (`CurrencyPanel.tsx`'s
+  owner-only input, labelled for every role) is filed as evidence under
+  Pattern 1 above, next to the Transactions lying-label entry it's the same
+  shape as — see that bullet, not here.
+- **A destructive action with no confirm step is the odd one out, not a
+  style choice.** `TelegramConnection.tsx`'s Disconnect button fired the
+  DELETE on a single click while other destructive controls in this app
+  (Revoke a token — `ApiTokenList.tsx`; Discard a draft —
+  `DiscardDraftControl.tsx`) go through `useConfirmAction` first. Nothing
+  broke a test to catch this — it was simply never built with one.
+  Grepping for a raw `.mutate()` / `.mutateAsync()` next to a button whose
+  label reads as destructive (Disconnect, Delete, Remove, Revoke, Withdraw)
+  is the check; this one had shipped and been walked without anyone
+  clicking Disconnect. Invite Withdraw was logged as the still-open sibling
+  in this same walk — `PendingInvitesList.tsx`'s and `PendingInviteCard.tsx`'s
+  own `handleWithdraw` both called `withdraw.mutate(...)` straight from the
+  click handler, with no `useConfirmAction` in either file — and left for a
+  separate pass rather than fixed here. **It is fixed as of `55cea7f`
+  (2026-09-24, this branch):** both files now gate the DELETE behind
+  `useConfirmAction`, the same "Yes, withdraw" / "Keep" pair as Disconnect's
+  fix above; `PendingInvitesList.tsx` keys one hook instance by invite id so
+  several rows confirm independently. Grep for the shape again before
+  assuming a *third* one is fixed — a pattern seen twice in the same walk is
+  not proof there is no third instance elsewhere.
 
 ## Before you call something done
 

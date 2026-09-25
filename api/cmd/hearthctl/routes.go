@@ -44,6 +44,7 @@ var routeTable = []route{
 	{"PATCH", "/household/members/{id}", "owner+browser session+csrf", `{"role"?,"capabilities"?}`},
 	{"DELETE", "/household/members/{id}", "owner+browser session+csrf", "-"},
 	{"GET", "/household/invites", "owner", "-"},
+	{"GET", "/household/access", "browser session (a token cannot read it)", "-> {telegramEnabled,tokens,chats}; an owner sees every member, a limited member only themselves"},
 	{"DELETE", "/household/invites/{id}", "owner+browser session+csrf", "-"},
 	{"POST", "/household/invites/{id}/link", "owner+browser session+csrf", "-> {link,expiresAt}; telegram invites only"},
 	{"POST", "/household/invites/{id}/admit", "owner+browser session+csrf", "-> {member,signInSent}; no request body"},

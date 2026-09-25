@@ -355,7 +355,11 @@ type APITokenRepository interface {
 	// domain.ErrNotFound, indistinguishable from unknown. The middleware
 	// depends on that -- it never checks expiry itself.
 	ByTokenHash(ctx context.Context, tokenHash []byte) (domain.APIToken, error)
-	// ListForUser returns one person's live tokens, newest first.
+	// ListForUser returns one person's own tokens, newest first, with
+	// revoked ones excluded but expired ones kept in -- unlike
+	// HouseholdTokenLister.ListForHousehold (access_list.go), which answers
+	// "what can get in right now" and drops expired rows, this answers
+	// "what has this member ever minted".
 	ListForUser(ctx context.Context, userID string) ([]domain.APIToken, error)
 	// Revoke stamps one token, scoped to its owner: another user's id, an
 	// unknown id and an already-revoked token are all domain.ErrNotFound.

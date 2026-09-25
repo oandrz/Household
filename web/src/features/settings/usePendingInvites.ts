@@ -32,7 +32,7 @@ async function fetchPendingInvites(): Promise<PendingInvite[]> {
 
 // invitePollInterval is exported so a test can assert the rule directly:
 // proving it over real elapsed time would mean waiting out several
-// three-second polls (the reason TelegramPanel.test.tsx gives for the same
+// three-second polls (the reason TelegramConnection.test.tsx gives for the same
 // shape, over telegramPollInterval).
 //
 // The poll exists for one event -- a knock arriving from a phone the

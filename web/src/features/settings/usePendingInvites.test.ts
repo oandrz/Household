@@ -36,9 +36,9 @@ describe("invitePollInterval", () => {
   const emailRow: PendingInvite = { ...waiting, id: "3", channel: "email" };
 
   // The poll exists to catch a knock. Once there is one, or once there is
-  // nothing that could produce one, it stops -- the TelegramPanel rule,
+  // nothing that could produce one, it stops -- the TelegramConnection rule,
   // asserted against the exported function rather than over real elapsed
-  // time (TelegramPanel.test.tsx says why).
+  // time (TelegramConnection.test.tsx says why).
   it("polls only while a Telegram invite is still waiting for its knock", () => {
     expect(invitePollInterval([waiting])).toBe(3000);
     expect(invitePollInterval([waiting, knocked])).toBe(3000);

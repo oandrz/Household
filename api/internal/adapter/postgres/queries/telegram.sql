@@ -46,6 +46,16 @@ SELECT chat_id, chat_username, linked_at FROM telegram_accounts WHERE user_id = 
 -- name: DeleteTelegramAccount :exec
 DELETE FROM telegram_accounts WHERE user_id = $1;
 
+-- The household access list's chats. telegram_accounts carries only
+-- user_id, so the household boundary comes from memberships. chat_id is
+-- selected because TelegramBinding has it; the HTTP layer never sends it.
+-- name: ListTelegramAccountsForHousehold :many
+SELECT ta.user_id, ta.chat_id, ta.chat_username, ta.linked_at
+FROM telegram_accounts ta
+JOIN memberships m ON m.user_id = ta.user_id
+WHERE m.household_id = $1
+ORDER BY ta.linked_at DESC;
+
 -- PruneTelegramLinkRequests mirrors PruneSignups exactly: same retention
 -- condition (created before the cutoff, and either already consumed or
 -- expired), for the same reason -- a nonce nobody ever redeemed carries no

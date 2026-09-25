@@ -134,3 +134,37 @@ export function admittedLine(signInSent: boolean): string {
     ? "Let in."
     : "Let in. If no message arrived, ask them to send /start to the bot.";
 }
+
+// The expiry choices the new-token dialog offers, inside ADR 7's bounds
+// (default 90 days, at most 365).
+export const TOKEN_LIFETIME_OPTIONS = [
+  { days: 30, label: "30 days" },
+  { days: 90, label: "90 days" },
+  { days: 365, label: "1 year" },
+] as const;
+
+// Mirrors api/internal/domain/api_token.go's MaxAPITokenNameLength -- kept
+// in sync by hand; ValidateAPITokenName is the one place that actually
+// enforces it. This is only the client-side maxLength on the name field
+// (NewApiTokenModal.tsx), so an over-length name is refused by the browser
+// before it ever makes a round trip to learn that from the server.
+export const MAX_TOKEN_NAME_LENGTH = 80;
+
+function shortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+// One line under a token's name: when it was last used and when it dies.
+// "Never used" is worth saying -- a token nobody has used is the likeliest
+// one to have been forgotten.
+export function tokenMetaLine(token: { lastUsedAt: string | null; expiresAt: string }): string {
+  const used = token.lastUsedAt ? `Last used ${shortDate(token.lastUsedAt)}` : "Never used";
+  return `${used} · Expires ${shortDate(token.expiresAt)}`;
+}
+
+// The Access panel's one line about invites. Pending invites stay listed
+// under Members, beside "+ Invite" (spec decision 2); this only points there.
+export function pendingInvitesPointer(count: number): string | null {
+  if (count === 0) return null;
+  return count === 1 ? "1 pending invite — in Members" : `${count} pending invites — in Members`;
+}

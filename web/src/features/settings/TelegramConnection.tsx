@@ -4,9 +4,13 @@
 // leaked deep link therefore connects nobody. See
 // docs/adr/0010-binding-a-chat-needs-a-confirm.md before simplifying this
 // into a single click.
+// Rendered inside AccessPanel's Linked chats group as the caller's own row
+// (docs/superpowers/specs/2026-09-23-hearth-household-access-list-design.md,
+// decision 10). Renamed from TelegramPanel; behaviour unchanged.
 import { useState } from "react";
 import { ApiError } from "../../api/client";
 import { apiErrorMessage } from "../../api/errorMessage";
+import { useConfirmAction } from "../../components/useConfirmAction";
 import { formatTelegramLinkedAt, telegramChatLabel } from "./copy";
 import {
   useConfirmTelegramLink,
@@ -16,7 +20,7 @@ import {
   useTelegramLinkStatus,
 } from "./useTelegram";
 
-export function TelegramPanel() {
+export function TelegramConnection() {
   const binding = useTelegramBinding();
   // Held in component state, not the URL or storage: a reload legitimately
   // abandons an in-progress attempt (the nonce expires on its own inside ten
@@ -26,6 +30,13 @@ export function TelegramPanel() {
   const startLink = useStartTelegramLink();
   const confirmLink = useConfirmTelegramLink();
   const disconnect = useDisconnectTelegram();
+  // The in-page confirm every other destructive action here uses
+  // (ApiTokenList.tsx's Revoke is the pattern) -- never window.confirm, for
+  // the reason ADR 0010 and useConfirmAction's own comment both give.
+  // Disconnecting drops reminders and bot commands for this chat, which used
+  // to fire on a single click.
+  const disconnectAction = useConfirmAction("Couldn't disconnect that. Please try again.");
+  const disconnectError = disconnectAction.errorFor();
 
   // A 404 here means this install has no Telegram bot configured
   // (handleTelegramBinding's own comment: it answers exactly like an
@@ -65,9 +76,7 @@ export function TelegramPanel() {
   }
 
   return (
-    <section className="rounded-xl border border-hairline bg-card p-[22px]">
-      <h2 className="mb-4 text-sm font-semibold text-ink">Telegram</h2>
-
+    <div>
       {binding.isPending && <p className="text-xs text-muted">Loading…</p>}
 
       {binding.isError && !bindingUnavailable && (
@@ -92,18 +101,44 @@ export function TelegramPanel() {
                 </div>
               )}
             </div>
-            <button
-              type="button"
-              onClick={() => disconnect.mutate()}
-              disabled={disconnect.isPending}
-              className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-danger disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
-            >
-              Disconnect
-            </button>
+            {!disconnectAction.isConfirming() && (
+              <button
+                type="button"
+                onClick={() => disconnectAction.ask()}
+                disabled={disconnectAction.isPending()}
+                className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-danger disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
+              >
+                Disconnect
+              </button>
+            )}
           </div>
-          {disconnect.isError && (
+          {disconnectAction.isConfirming() && (
+            <div className="flex flex-col gap-2">
+              <p className="text-ink">
+                Disconnect this chat? Reminders and bot commands stop working there.
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void disconnectAction.confirm(() => disconnect.mutateAsync())}
+                  disabled={disconnectAction.isPending()}
+                  className="min-h-11 rounded-lg bg-danger px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-60 sm:min-h-0"
+                >
+                  Yes, disconnect
+                </button>
+                <button
+                  type="button"
+                  onClick={() => disconnectAction.cancel()}
+                  className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-label sm:min-h-0"
+                >
+                  Keep
+                </button>
+              </div>
+            </div>
+          )}
+          {disconnectError && (
             <p role="alert" className="text-[11px] text-danger">
-              {apiErrorMessage(disconnect.error, "Something went wrong disconnecting that. Please try again.")}
+              {disconnectError}
             </p>
           )}
         </div>
@@ -235,6 +270,6 @@ export function TelegramPanel() {
           )}
         </div>
       )}
-    </section>
+    </div>
   );
 }

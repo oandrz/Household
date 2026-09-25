@@ -9,6 +9,11 @@ RETURNING *;
 SELECT * FROM api_tokens
 WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now();
 
+-- One person's own tokens, newest first, revoked ones excluded -- but not
+-- expired ones: unlike ListLiveAPITokensForHousehold below, this answers
+-- "what has this member ever minted", not "what can get in right now", so
+-- an expired token still shows up (the caller reads ExpiresAt to tell) and
+-- is not silently dropped from the list.
 -- name: ListAPITokensForUser :many
 SELECT * FROM api_tokens
 WHERE user_id = $1 AND revoked_at IS NULL
@@ -27,3 +32,11 @@ WHERE user_id = $1 AND revoked_at IS NULL;
 
 -- name: TouchAPIToken :exec
 UPDATE api_tokens SET last_used_at = $2 WHERE id = $1;
+
+-- The household access list: every member's LIVE tokens. Unlike
+-- ListAPITokensForUser this also leaves out expired rows -- the list answers
+-- "what can get in right now", and an expired token cannot.
+-- name: ListLiveAPITokensForHousehold :many
+SELECT * FROM api_tokens
+WHERE household_id = $1 AND revoked_at IS NULL AND expires_at > now()
+ORDER BY created_at DESC;

@@ -76,6 +76,14 @@ type Deps struct {
 	// so an install with no bot gives away nothing about whether the
 	// feature exists.
 	TelegramLink *usecase.TelegramLinkService
+	// Access serves the household access list (GET /household/access). Like
+	// Admin below, it is never nil in a real deployment: main.go constructs
+	// it unconditionally, behind no feature flag or optional config, unlike
+	// Telegram/TelegramLink above which are nil until a bot is configured.
+	// Unlike Admin, though, nothing outside its own handler reads it, so a
+	// nil Access would only ever panic that one route, not the rest of the
+	// authenticated surface.
+	Access *usecase.AccessListService
 	// Admin and AdminReauth are the platform-operator surface's two
 	// services. Unlike Telegram above they are never nil in a real
 	// deployment: the /admin subtree is always routed, and
@@ -255,6 +263,17 @@ func NewRouter(deps Deps) http.Handler {
 			g.Group(func(o chi.Router) {
 				o.Use(requireOwner)
 				o.Get("/household/invites", handleListPendingInvites(deps))
+			})
+
+			// The household access list. Any member may read it -- the
+			// handler narrows a limited member to their own rows -- but only
+			// from a browser session: a leaked token that could list every
+			// member's token prefixes and chats would hand an attacker a map
+			// of the household's other credentials (spec decision 5). A GET,
+			// so no CSRF guard.
+			g.Group(func(a chi.Router) {
+				a.Use(requireCookieSession)
+				a.Get("/household/access", handleHouseholdAccess(deps))
 			})
 
 			// The Family calendar's API stub, dark behind its flag. It answers

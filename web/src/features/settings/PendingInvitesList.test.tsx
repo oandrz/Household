@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubFetchRoutes } from "../../test/fetchStub";
@@ -35,6 +35,19 @@ const christine: PendingInvite = {
 const knockedChristine: PendingInvite = {
   ...christine,
   knock: { username: "christine_t", code: "4812", knockedAt: "2026-09-20T10:00:00Z" },
+};
+
+// A second email row, used only by the two-invite test below: it needs a row
+// beside Jane's that is never clicked, to prove confirming Jane's doesn't
+// open Jack's confirm pair too.
+const jack: PendingInvite = {
+  id: "inv-jack",
+  name: "Jack",
+  email: "jack@example.com",
+  role: "member",
+  capabilities: ["chores"],
+  channel: "email",
+  expiresAt: "2026-09-28T00:00:00Z",
 };
 
 function renderList() {
@@ -179,7 +192,7 @@ describe("PendingInvitesList", () => {
     await waitFor(() => expect(container).toBeEmptyDOMElement());
   });
 
-  it("withdraws an invite and drops it from the list", async () => {
+  it("withdraws an invite and drops it from the list, after a confirm", async () => {
     const fetchMock = stubFetchRoutes({
       [`GET ${INVITES_URL}`]: [
         { status: 200, body: [jane] },
@@ -190,6 +203,11 @@ describe("PendingInvitesList", () => {
     renderList();
 
     fireEvent.click(await screen.findByRole("button", { name: "Withdraw the invite to Jane" }));
+    // The in-page confirm step (never window.confirm -- ApiTokenList's Revoke
+    // and TelegramConnection's Disconnect give the reason): the DELETE must
+    // not fire until "Yes, withdraw" is clicked too.
+    expect(screen.getByText("Withdraw this invite? The link stops working.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Yes, withdraw" }));
 
     await waitFor(() => expect(screen.queryByText("Jane")).toBeNull());
     expect(
@@ -199,7 +217,10 @@ describe("PendingInvitesList", () => {
     ).toBe(true);
   });
 
-  it("disables Withdraw while its request runs, so a double click sends one DELETE", async () => {
+  // Withdraw itself just opens the confirm pair now -- no request fires until
+  // "Yes, withdraw" is clicked, so the double-click risk this test pins moved
+  // there with it.
+  it("disables Yes, withdraw while its request runs, so a double click sends one DELETE", async () => {
     let release: () => void = () => {};
     const routed = stubFetchRoutes({
       [`GET ${INVITES_URL}`]: { status: 200, body: [jane] },
@@ -212,13 +233,103 @@ describe("PendingInvitesList", () => {
     vi.stubGlobal("fetch", gated);
     renderList();
 
-    const button = await screen.findByRole("button", { name: "Withdraw the invite to Jane" });
-    fireEvent.click(button);
-    fireEvent.click(button);
-    await waitFor(() => expect(button).toBeDisabled());
+    fireEvent.click(await screen.findByRole("button", { name: "Withdraw the invite to Jane" }));
+    const confirmButton = await screen.findByRole("button", { name: "Yes, withdraw" });
+    fireEvent.click(confirmButton);
+    fireEvent.click(confirmButton);
+    await waitFor(() => expect(confirmButton).toBeDisabled());
     release();
 
     expect(gated.mock.calls.filter(([, init]) => init?.method === "DELETE")).toHaveLength(1);
+  });
+
+  it("sends no DELETE and returns to Withdraw when the confirm is cancelled", async () => {
+    const fetchMock = stubFetchRoutes({ [`GET ${INVITES_URL}`]: { status: 200, body: [jane] } });
+    renderList();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Withdraw the invite to Jane" }));
+    expect(screen.getByText("Withdraw this invite? The link stops working.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep" }));
+
+    expect(await screen.findByRole("button", { name: "Withdraw the invite to Jane" })).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(
+        ([input, init]) => String(input) === `${INVITES_URL}/inv-jane` && init?.method === "DELETE",
+      ),
+    ).toBe(false);
+  });
+
+  // Each row mounts its own useConfirmAction instance (PendingInviteRow's
+  // own comment), so asking one row can never touch another's state at all
+  // -- there is no shared key to collide on.
+  it("confirming one invite's withdraw does not open the confirm pair on another", async () => {
+    stubFetchRoutes({ [`GET ${INVITES_URL}`]: { status: 200, body: [jane, jack] } });
+    renderList();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Withdraw the invite to Jane" }));
+
+    expect(screen.getAllByRole("button", { name: "Yes, withdraw" })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Withdraw the invite to Jack" })).toBeInTheDocument();
+    expect(screen.getByText("Withdraw this invite? The link stops working.")).toBeInTheDocument();
+  });
+
+  // Pins the bug a review caught before this shipped: an earlier version
+  // gave the whole list one useConfirmAction instance, keyed by invite id.
+  // That hook tracks a single `pendingKey`, not a set -- so confirming
+  // Jack's row while Jane's DELETE was still in flight overwrote Jane's own
+  // pending marker, silently re-enabling her control before her own request
+  // had settled (and, since her row had also reverted to the plain trigger
+  // the moment Jack was asked, a second click there would have sent a
+  // second DELETE for Jane on top of the first). `janeControl()` reads
+  // whichever element currently represents Jane's row -- the trigger or her
+  // half of the confirm pair -- so this catches the bug regardless of which
+  // shape the buggy version happened to show at each step.
+  it("keeps Jane's own withdraw control disabled while her DELETE is pending, even after confirming Jack separately", async () => {
+    let releaseJane: () => void = () => {};
+    const routed = stubFetchRoutes({
+      [`GET ${INVITES_URL}`]: [
+        { status: 200, body: [jane, jack] },
+        { status: 200, body: [jane] },
+        { status: 200, body: [] },
+      ],
+      [`DELETE ${INVITES_URL}/inv-jane`]: { status: 204, body: undefined },
+      [`DELETE ${INVITES_URL}/inv-jack`]: { status: 204, body: undefined },
+    });
+    const gated = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "DELETE" && String(input) === `${INVITES_URL}/inv-jane`) {
+        await new Promise<void>((r) => (releaseJane = r));
+      }
+      return routed(input, init);
+    });
+    vi.stubGlobal("fetch", gated);
+    renderList();
+
+    function janeControl() {
+      const trigger = screen.queryByRole("button", { name: "Withdraw the invite to Jane" });
+      if (trigger) return trigger;
+      const row = screen.getByText("Jane").closest("li")!;
+      return within(row).getByRole("button", { name: "Yes, withdraw" });
+    }
+
+    fireEvent.click(await screen.findByRole("button", { name: "Withdraw the invite to Jane" }));
+    fireEvent.click(screen.getByRole("button", { name: "Yes, withdraw" }));
+    await waitFor(() => expect(janeControl()).toBeDisabled());
+
+    // Ask and confirm Jack's row entirely separately, while Jane's own
+    // DELETE is still held pending above.
+    fireEvent.click(screen.getByRole("button", { name: "Withdraw the invite to Jack" }));
+    expect(janeControl()).toBeDisabled();
+    const jackRow = screen.getByText("Jack").closest("li")!;
+    fireEvent.click(within(jackRow).getByRole("button", { name: "Yes, withdraw" }));
+
+    // The moment that matters: Jane's own control must still be disabled
+    // here, regardless of which element it currently is.
+    expect(janeControl()).toBeDisabled();
+
+    releaseJane();
+    await waitFor(() => expect(screen.queryByText("Jane")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText("Jack")).not.toBeInTheDocument());
   });
 
   it("shows the server's message when a withdraw fails", async () => {
@@ -232,6 +343,7 @@ describe("PendingInvitesList", () => {
     renderList();
 
     fireEvent.click(await screen.findByRole("button", { name: "Withdraw the invite to Jane" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Yes, withdraw" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("This invite has already been accepted.");
   });
@@ -253,6 +365,7 @@ describe("PendingInvitesList", () => {
     renderList();
 
     fireEvent.click(await screen.findByRole("button", { name: "Withdraw the invite to Jane" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Yes, withdraw" }));
 
     await waitFor(() => expect(screen.queryByText("Jane")).not.toBeInTheDocument());
   });

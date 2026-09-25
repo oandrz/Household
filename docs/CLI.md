@@ -49,6 +49,16 @@ Set `HEARTH_CONFIG_DIR` to put it somewhere else. `hearthctl logout` revokes
 it. `hearthctl whoami` prints who you are — including your **membership id**,
 which the transaction and bill inserts take as `--paid-by`.
 
+**`GET /household/access`** — the Settings Access panel's list of every
+member's live tokens and linked Telegram chats, not just your own — also
+needs a browser session, the same restriction `token create` and
+`token revoke` carry above and stricter than `token list`'s own
+`GET /auth/tokens` (cookie **or** token): what it discloses, every member's
+token prefixes and chat usernames, is more than a self-only read should hand
+a leaked token. Reach it with `hearthctl api GET /household/access` from a
+password login (`hearthctl routes` shows it too); a token session gets
+`403 SESSION_REQUIRED`.
+
 **Do not loop on login.** Five wrong passwords lock the whole household out.
 The CLI itself never retries.
 

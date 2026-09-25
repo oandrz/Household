@@ -331,6 +331,7 @@ describe("MembersPanel", () => {
     renderPanel();
 
     fireEvent.click(await screen.findByRole("button", { name: "Withdraw the invite to Jane" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Yes, withdraw" }));
 
     expect(await screen.findByRole("switch", { name: "Jane's role" })).toBeInTheDocument();
     await waitFor(() =>

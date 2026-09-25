@@ -6,7 +6,10 @@ import (
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres/sqlcgen"
 	"github.com/andreasoentoro/hearth/api/internal/domain"
+	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
+
+var _ usecase.HouseholdTokenLister = (*APITokenRepo)(nil)
 
 type APITokenRepo struct{ q *sqlcgen.Queries }
 
@@ -41,6 +44,21 @@ func (r *APITokenRepo) ListForUser(ctx context.Context, userID string) ([]domain
 	rows, err := r.q.ListAPITokensForUser(ctx, uuid(userID))
 	if err != nil {
 		return nil, translate(err, "list api tokens")
+	}
+	out := make([]domain.APIToken, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, toAPIToken(row))
+	}
+	return out, nil
+}
+
+// ListForHousehold returns every member's live tokens -- not revoked, not
+// expired -- newest first. It is the only token query that crosses members,
+// so its WHERE clause is the household boundary; see the query's comment.
+func (r *APITokenRepo) ListForHousehold(ctx context.Context, householdID string) ([]domain.APIToken, error) {
+	rows, err := r.q.ListLiveAPITokensForHousehold(ctx, uuid(householdID))
+	if err != nil {
+		return nil, translate(err, "list household api tokens")
 	}
 	out := make([]domain.APIToken, 0, len(rows))
 	for _, row := range rows {
