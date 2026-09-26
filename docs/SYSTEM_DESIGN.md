@@ -507,9 +507,16 @@ untouched by any of it, because Caddy's ACME challenge is HTTP-01 over port 80
 and needs no DNS record at all. The DDNS restriction bites only on mail.
 
 **Caddy exists to renew certificates, not to route.** nginx already does the
-routing, and `web/nginx.conf` carries a security control in its header
-rewriting that would have to be re-implemented if Caddy served the SPA
-directly. Caddy sits in front purely so TLS issuance and renewal are automatic
+routing, and `web/nginx.conf` carries two security controls that would have to
+be re-implemented if Caddy served the SPA directly: its client-IP header
+rewriting (below), and the browser security headers on every response — HSTS,
+a strict Content-Security-Policy with `frame-ancestors 'none'`,
+`X-Frame-Options`, `nosniff`, `Referrer-Policy: no-referrer` — plus
+`server_tokens off`. They live in nginx rather than Caddy so every environment
+that runs the image gets them, and they sit at `server` level only, because
+nginx silently drops every inherited `add_header` from a `location` that
+declares one of its own; `web/src/nginxSecurityHeaders.test.ts` fails if either
+rule is broken. Caddy sits in front purely so TLS issuance and renewal are automatic
 for as long as the product runs — a certbot cron is the kind of thing that
 works for six years and then quietly stops.
 
@@ -972,7 +979,9 @@ graph TD
     Req["Request"] --> RID["RequestID · trustedProxyRealIP · Recoverer<br/>(recoverer writes the standard error envelope)"]
     RID --> Public{"Public route?"}
 
-    Public -->|"sign-in, magic-link,<br/>magic-link/consume,<br/>invites/{token},<br/>currencies"| Handler
+    Public -->|"magic-link/consume,<br/>invites/{token},<br/>currencies"| Handler
+    Public -->|"sign-in, magic-link"| PublicLimit["rateLimitByIP<br/>each route its own bucket —<br/>429 RATE_LIMITED when spent"]
+    PublicLimit --> Handler
     Public -->|"sign-up*, telegram/start"| PublicFeature["requireFeature(flag)<br/>no Scope yet — resolves the<br/>GLOBAL flag set only; 404 if off"]
     PublicFeature --> Handler
     Public -->|no| Session["requireSession<br/>reads hearth_session cookie,<br/>re-reads membership, resolves this<br/>household's flags, extends when<br/>under a day remains, then touches<br/>last_seen_at when it is null or older<br/>than an hour — best-effort, like the extend"]
@@ -1231,9 +1240,23 @@ form their own third `requireCSRF` sub-group, for the same reason as the
 first two — Goals can grow its own route list without touching budgets',
 transactions', or categories'.
 
-**Two public routes are wrapped in an extra middleware, `rateLimitByIP` — and
-they hold separate buckets on purpose.** It is a per-process, in-memory token
-bucket keyed on the request's resolved IP.
+**Four public routes are wrapped in an extra middleware, `rateLimitByIP` — and
+each holds its own bucket on purpose.** It is a per-process, in-memory
+fixed-window counter keyed on the request's resolved IP.
+
+- `POST /auth/sign-in` — **20 per 15 minutes**. Every attempt runs a full
+  argon2id derivation (64 MiB), including the decoy for an unknown address, so
+  without a limit one stranger could make the server hash as fast as they can
+  send requests (security review 2026-09-25, H1). It is generous next to the
+  household lockout's three failures because one address can be a whole
+  office; its job is to stop a loop, not to stop guessing. The memory is capped
+  a second time, whatever gets past this, inside `crypto.Argon2Hasher` — see
+  "Sign in, with the lockout" in §5.
+- `POST /auth/magic-link` — **10/hour**. The per-address limit in
+  `AuthService` is bypassed by varying the address, exactly as sign-up's is,
+  so this is what stops the route being an unmetered way to send mail. Its own
+  bucket, not sign-in's: someone who mistypes their password a few times must
+  still be able to ask for a link.
 
 - `POST /auth/sign-up` — **5/hour**. It is the only sign-up route that can
   trigger outbound mail without a token already proving an address, so it is
@@ -1280,9 +1303,9 @@ rows, and a link redemption writes neither.
 
 | Method | Path | Guards |
 |---|---|---|
-| POST | `/auth/sign-in` | none — this *is* the credential check |
-| POST | `/auth/magic-link` | none — always 202 |
-| POST | `/auth/magic-link/consume` | none — the token is the credential |
+| POST | `/auth/sign-in` | none — this *is* the credential check — plus its own per-IP bucket (20 per 15 minutes) |
+| POST | `/auth/magic-link` | none, plus its own per-IP bucket (10/hour) — always 202 |
+| POST | `/auth/magic-link/consume` | none — the token is the credential. No per-IP limit: it runs no argon2, sends nothing, and the token is 256 bits. The web screen that calls it waits for a click (§5, "Magic link") |
 | POST | `/auth/sign-up` | none, plus a per-IP token bucket (5/hour) and `requireFeature(signups_open)` (global set — no session exists) — always 202, the same silent contract as magic-link |
 | GET | `/auth/sign-up/{token}` | none, plus `requireFeature(signups_open)` — a half-finished sign-up must not be completable once registration closes |
 | POST | `/auth/sign-up/{token}/complete` | none, plus `requireFeature(signups_open)`, same group as the row above |
@@ -1507,6 +1530,28 @@ for fifteen minutes. Magic link is never gated by the lock — that is the
 recovery path. The decoy verification exists so argon2's cost cannot distinguish
 the branches.
 
+**That cost is bounded twice, because it is paid by strangers.** In front, the
+per-IP limit on this route (§4). Behind it, `crypto.Argon2Hasher` runs at most
+one derivation per CPU at a time (two on the production box, so 2 × 64 MiB);
+the rest wait on a channel, costing kilobytes each. They wait rather than being
+refused because `Verify` answers a bool: "busy" would have to look like "wrong
+password", count as a failure, and lock a real household out. The API
+container also has a `mem_limit` (`deploy/docker-compose.prod.yml`), so if the
+memory still ran away, the kernel kills and restarts the API rather than
+choosing Postgres.
+
+**The body must be declared `application/json`** — true of every route, and
+checked in `decodeJSONBodyLimit`, not in a middleware. It matters most here.
+An HTML form on another site can post `text/plain` that happens to parse as
+JSON, and `SameSite=Lax` stops the browser *sending* our cookie cross-site but
+not *storing* the one this route returns — so without the check, a hostile page
+could sign its visitor in to the attacker's household (login CSRF). A form
+cannot send `application/json`, and a script can only do so cross-origin after a
+CORS preflight this API never answers. A request that fails the check gets
+`415 UNSUPPORTED_MEDIA_TYPE` and no cookie. An empty body with no
+`Content-Type` still gets the old `400 INVALID_BODY`, since it has nothing to
+forge.
+
 ### Magic link — deliberately silent
 
 ```mermaid
@@ -1531,6 +1576,14 @@ Nothing about the response reveals whether the address exists, including when
 the rate limit is exhausted or the send fails. **The frontend is therefore the
 only place a send failure can surface**, which is why the sent panel carries
 retry copy.
+
+**Opening the link does not sign anyone in.** `MagicLinkConsumeScreen` shows
+"Continue signing in" and posts to `/auth/magic-link/consume` only on that
+click, with a "Signed in as …" warning above it when this browser already has a
+session. Consuming on page load would let anyone send someone else a link to
+the *sender's own* account and silently switch them into the sender's household
+(login CSRF), and would let mail scanners that pre-open links spend the
+single-use token before the person clicked.
 
 ### Invite acceptance — one transaction, and the email path only
 

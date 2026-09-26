@@ -156,8 +156,27 @@ func NewRouter(deps Deps) http.Handler {
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Route("/auth", func(auth chi.Router) {
 			// Public: no session exists yet.
-			auth.Post("/sign-in", handleSignIn(deps))
-			auth.Post("/magic-link", handleRequestMagicLink(deps))
+			//
+			// Sign-in and the magic-link request each get their own per-IP
+			// limiter, for two different reasons. Every sign-in attempt runs a
+			// full argon2id derivation -- a decoy one for unknown addresses, so
+			// the answer never reveals who has an account -- which makes an
+			// unmetered sign-in route a way for one stranger to spend the box's
+			// CPU. The magic-link request's per-address limit is bypassed by
+			// varying the address, exactly like sign-up's, so it needs a per-IP
+			// limit to stop being an unmetered way to send mail. Consume has
+			// none: it runs no argon2, sends nothing, and its token is 256 bits.
+			//
+			// Separate instances, not one shared: a person who mistypes their
+			// password a few times must still be able to ask for a magic link.
+			// A closure, not deps.Clock.Now: see the sign-up group below.
+			// Each .Post stays on the same line as its path because
+			// cmd/hearthctl/routes_test.go finds routes by that shape.
+			authNow := func() time.Time { return deps.Clock.Now() }
+			signInLimit := rateLimitByIP(newIPRateLimiter(signInAttemptsPerIPPerWindow, signInLimitWindow, authNow))
+			magicLinkLimit := rateLimitByIP(newIPRateLimiter(magicLinkRequestsPerIPPerHour, time.Hour, authNow))
+			auth.With(signInLimit).Post("/sign-in", handleSignIn(deps))
+			auth.With(magicLinkLimit).Post("/magic-link", handleRequestMagicLink(deps))
 			auth.Post("/magic-link/consume", handleConsumeMagicLink(deps))
 
 			// Public: no session exists yet, and no CSRF cookie either.

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -133,6 +134,9 @@ func (m *signupMailer) SendSignupForExistingAccount(context.Context, string, str
 // public API exactly as a browser would.
 type testEnv struct {
 	router http.Handler
+
+	// signInSeq gives each signIn call its own client address; see signIn.
+	signInSeq int
 
 	householdID string
 
@@ -539,6 +543,13 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 // --- small request/response helpers ---------------------------------------
 
 func (env *testEnv) do(method, path string, body any, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+	return env.doFrom("", method, path, body, cookies...)
+}
+
+// doFrom is do with an explicit client address. An empty remoteAddr keeps
+// httptest's fixed default, which is what makes repeated env.do calls share one
+// per-IP rate-limit bucket exactly as a real repeat caller would.
+func (env *testEnv) doFrom(remoteAddr, method, path string, body any, cookies ...*http.Cookie) *httptest.ResponseRecorder {
 	var reader io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -548,6 +559,9 @@ func (env *testEnv) do(method, path string, body any, cookies ...*http.Cookie) *
 		reader = bytes.NewReader(b)
 	}
 	req := httptest.NewRequest(method, path, reader)
+	if remoteAddr != "" {
+		req.RemoteAddr = remoteAddr
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -668,9 +682,18 @@ func (env *testEnv) auditEntries(t *testing.T, limit int) []usecase.AdminAuditEn
 
 // signIn signs in through the public API, exactly as a browser would, and
 // returns the two cookies the response sets.
+//
+// Each call arrives from its own client address. Role-matrix tests sign in
+// dozens of times per environment, and from one address they would trip the
+// per-IP sign-in limiter (router.go) -- a real limit on a real client, not
+// something a setup helper should be able to exhaust. The limiter's wiring is
+// pinned separately by TestSignInPassesThroughThePerIPLimiter, which uses
+// env.do's single fixed address on purpose.
 func (env *testEnv) signIn(t *testing.T, email, password string) (session, csrf *http.Cookie) {
 	t.Helper()
-	rec := env.do(http.MethodPost, "/api/v1/auth/sign-in", map[string]string{"email": email, "password": password})
+	env.signInSeq++
+	addr := fmt.Sprintf("198.51.100.%d:1234", env.signInSeq%250+1)
+	rec := env.doFrom(addr, http.MethodPost, "/api/v1/auth/sign-in", map[string]string{"email": email, "password": password})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("sign-in: status = %d, body = %s", rec.Code, rec.Body.String())
 	}

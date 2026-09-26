@@ -8,7 +8,9 @@ import (
 )
 
 // ipRateLimiter is a fixed-window counter keyed by client IP, used to bound the
-// unauthenticated sign-up endpoint.
+// unauthenticated endpoints: sign-up, sign-in, the magic-link request and
+// Telegram start each hold their own instance (router.go). The reasoning below
+// was written for sign-up and applies to each.
 //
 // Sign-up is open to anyone -- a deliberate product decision -- and the
 // per-address limit in SignupService is trivially bypassed by varying the
@@ -68,6 +70,22 @@ func (l *ipRateLimiter) allow(ip string) bool {
 	l.counts[ip]++
 	return true
 }
+
+// signInAttemptsPerIPPerWindow is generous next to the per-household lockout
+// (3 failures), because one address can be a whole office or a mobile carrier's
+// shared exit. Its job is not to stop guessing -- the lockout does that -- but to
+// stop one client making the server run argon2 as fast as it can send requests.
+// The concurrency bound in crypto.Argon2Hasher caps the memory whatever gets
+// past this.
+const (
+	signInAttemptsPerIPPerWindow = 20
+	signInLimitWindow            = 15 * time.Minute
+)
+
+// magicLinkRequestsPerIPPerHour matches the reasoning of sign-up's limit: the
+// per-address limit in AuthService is trivially bypassed by varying the
+// address, so this is what stands between the mail relay and a loop.
+const magicLinkRequestsPerIPPerHour = 10
 
 // telegramStartsPerIPPerHour is more generous than the sign-up limit because
 // this endpoint mails nothing and costs one small row -- but it is limited

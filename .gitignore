@@ -32,3 +32,12 @@ deploy/.previous-image-tag
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+
+# `go build` run inside api/ or api/cmd/hearthctl/ drops its binary next to the
+# source. Two were committed by accident (#22); `make hearthctl` builds to /bin/.
+/api/api
+/api/cmd/hearthctl/hearthctl
+
+# Screenshots shared with an agent while working. They can show account names,
+# IP addresses and control panels, and this repository is public.
+.claude/communicate/

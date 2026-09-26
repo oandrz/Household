@@ -144,10 +144,12 @@ export function useConsumeMagicLink() {
     onSuccess: (data) => {
       // setQueryData primes the cache directly and synchronously from this
       // mutation's own response -- invalidateQueries alone isn't enough
-      // here: it only forces a refetch of *active* observers, and nothing
-      // on the /sign-in/magic route mounts a useMe() of its own. Kept
-      // alongside setQueryData anyway, for any other tab/observer sharing
-      // this queryClient that might already be watching ['me'].
+      // here: it only forces a refetch of *active* observers. (The
+      // /sign-in/magic screen does mount a useMe() now, for its "already
+      // signed in" warning, but that observer may be holding a 401 error
+      // and must not be what the landing route waits on.) Kept alongside
+      // setQueryData anyway, for any other tab/observer sharing this
+      // queryClient that might already be watching ['me'].
       queryClient.setQueryData(meQueryKey, data);
       queryClient.invalidateQueries({ queryKey: meQueryKey });
       navigate({ to: "/", replace: true });
@@ -161,7 +163,7 @@ export function useConsumeMagicLink() {
     },
   });
 
-  return { mutate: mutation.mutate, errorMessage };
+  return { mutate: mutation.mutate, isPending: mutation.isPending, errorMessage };
 }
 
 export function useAcceptInvite() {
