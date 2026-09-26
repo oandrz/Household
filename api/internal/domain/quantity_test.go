@@ -114,7 +114,7 @@ func TestValueUsesTheHighWordOfThe128BitProduct(t *testing.T) {
 	}
 }
 
-// Rounding is half away from zero, the same rule usecase.Rate.Apply already
+// Rounding is half away from zero, the same rule domain.Rate.Apply already
 // uses. One rounding rule in this codebase, not two.
 func TestValueRoundsHalfAwayFromZero(t *testing.T) {
 	var half int64 = domain.QuantityScale / 2 // 0.5 of a unit

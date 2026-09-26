@@ -3,7 +3,6 @@ package usecase_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -106,7 +105,7 @@ func newBillService(t *testing.T, repo *fakeBillRepo, opts ...billServiceOption)
 			"cat-utilities": domain.CategoryExpense,
 			"cat-salary":    domain.CategoryIncome,
 		}},
-		fx: staticTestRates{},
+		fx: newFXDouble(),
 	}
 	for _, opt := range opts {
 		opt(f)
@@ -134,9 +133,8 @@ func newBillServiceWith(t *testing.T, records ...usecase.BillRecord) *usecase.Bi
 }
 
 // newBillServiceWithFX is newBillServiceWith with the FX double swapped, for
-// TestSummaryExcludesABillWithNoRateAndCountsIt: staticTestRates already
-// knows SGD<->IDR, so that test needs a double with no rates at all, not the
-// default one.
+// TestSummaryExcludesABillWithNoRateAndCountsIt: the default FX double
+// knows SGD<->IDR, so that test needs newFXDouble().withNoRates() instead.
 func newBillServiceWithFX(t *testing.T, fx usecase.FXRateProvider, records ...usecase.BillRecord) *usecase.BillService {
 	t.Helper()
 	repo := &fakeBillRepo{}
@@ -144,15 +142,6 @@ func newBillServiceWithFX(t *testing.T, fx usecase.FXRateProvider, records ...us
 		repo.add(r)
 	}
 	return newBillService(t, repo, withFX(fx))
-}
-
-// noRateFX has no rate for anything -- staticTestRates already knows
-// SGD<->IDR, which is exactly the pair TestSummaryExcludesABillWithNoRateAndCountsIt
-// needs to fail, so that double cannot stand in for "no rate available" here.
-type noRateFX struct{}
-
-func (noRateFX) Rate(_ context.Context, from, to string) (usecase.Rate, error) {
-	return usecase.Rate{}, fmt.Errorf("no rate available for %s to %s", from, to)
 }
 
 // bill is the default fixture: a monthly SGD bill, paid from "acct-1" --
@@ -362,7 +351,7 @@ func TestListReadsTheDueThisMonthProbeInUTCRegardlessOfTodaysLocation(t *testing
 	sevenHoursWest := time.FixedZone("-07:00", -7*60*60)
 	today := time.Date(2026, time.July, 31, 20, 0, 0, 0, sevenHoursWest)
 
-	svc := newBillServiceWithFX(t, noRateFX{}, billOn("Arisan", "IDR", "2026-08-09", 50_000_000))
+	svc := newBillServiceWithFX(t, newFXDouble().withNoRates(), billOn("Arisan", "IDR", "2026-08-09", 50_000_000))
 	view, err := svc.List(context.Background(), "h1", false, today)
 	if err != nil {
 		t.Fatalf("List: %v", err)
@@ -445,7 +434,7 @@ func TestSubscriptionsRollupDividesTheCombinedAnnualTotalNotEachBill(t *testing.
 func TestSummaryExcludesABillWithNoRateAndCountsIt(t *testing.T) {
 	// Household primary SGD; one bill on an IDR account the FX double has no
 	// rate for.
-	svc := newBillServiceWithFX(t, noRateFX{},
+	svc := newBillServiceWithFX(t, newFXDouble().withNoRates(),
 		bill("SP utilities", "2026-08-08", 14230),         // SGD
 		billOn("Arisan", "IDR", "2026-08-15", 50_000_000), // no rate
 	)
@@ -479,7 +468,7 @@ func TestSummaryCountsEveryNoRateSubscriptionSeparately(t *testing.T) {
 		rec.Bill.IsSubscription = true
 		return rec
 	}
-	svc := newBillServiceWithFX(t, noRateFX{},
+	svc := newBillServiceWithFX(t, newFXDouble().withNoRates(),
 		makeSub("Netflix ID"),
 		makeSub("Spotify ID"),
 		makeSub("iCloud ID"),
@@ -503,7 +492,7 @@ func TestSummaryCountsEveryNoRateSubscriptionSeparately(t *testing.T) {
 func TestSummaryCountsABillOnceEvenWhenBothDueThisMonthAndASubscription(t *testing.T) {
 	rec := billOn("Arisan", "IDR", "2026-08-15", 500_000) // due this month
 	rec.Bill.IsSubscription = true
-	svc := newBillServiceWithFX(t, noRateFX{}, rec)
+	svc := newBillServiceWithFX(t, newFXDouble().withNoRates(), rec)
 
 	view, err := svc.List(context.Background(), "h1", false, day("2026-08-09"))
 	if err != nil {
@@ -532,7 +521,7 @@ func TestSummaryCountsANoRatePaymentSeparatelyFromItsCurrentBill(t *testing.T) {
 		},
 		BillName: "Arisan",
 	})
-	svc := newBillService(t, repo, withFX(noRateFX{}))
+	svc := newBillService(t, repo, withFX(newFXDouble().withNoRates()))
 
 	view, err := svc.List(context.Background(), "h1", false, day("2026-08-09"))
 	if err != nil {
@@ -1303,5 +1292,34 @@ func TestSetArchivedReturnsAViewWithNoSecondGet(t *testing.T) {
 	}
 	if restored.Bill.IsArchived() {
 		t.Fatal("bill still archived after restore")
+	}
+}
+
+// A failed lookup must fail the bills list rather than count the IDR bill as
+// "no rate" and leave it out of DueThisMonth.
+func TestBillsSummaryFailsWhenTheRateLookupItselfFails(t *testing.T) {
+	svc := newBillServiceWithFX(t, newFXDouble().failWith(errProviderDown),
+		bill("SP utilities", "2026-08-08", 14230),         // SGD
+		billOn("Arisan", "IDR", "2026-08-15", 50_000_000), // needs a rate
+	)
+
+	_, err := svc.List(context.Background(), "h1", false, day("2026-08-09"))
+	if !errors.Is(err, errProviderDown) {
+		t.Fatalf("List error = %v, want the provider's error", err)
+	}
+}
+
+// The subscriptions total is the one conversion in List that a bill can reach
+// alone: a subscription due outside this month feeds no due or paid figure.
+// So it needs its own outage test; the one above is caught by the
+// due-this-month sites first and cannot see this one regress.
+func TestBillsSubscriptionTotalFailsWhenTheRateLookupItselfFails(t *testing.T) {
+	sub := billOn("Netflix ID", "IDR", "2026-11-20", 50_000) // due in November, not August
+	sub.Bill.IsSubscription = true
+	svc := newBillServiceWithFX(t, newFXDouble().failWith(errProviderDown), sub)
+
+	_, err := svc.List(context.Background(), "h1", false, day("2026-08-09"))
+	if !errors.Is(err, errProviderDown) {
+		t.Fatalf("List error = %v, want the provider's error", err)
 	}
 }

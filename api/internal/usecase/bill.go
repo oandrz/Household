@@ -208,6 +208,7 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 		return BillsView{}, err
 	}
 	primary := household.PrimaryCurrency
+	conv := NewConverter(s.deps.FX, primary)
 
 	records, err := s.deps.Bills.List(ctx, householdID, includeArchived)
 	if err != nil {
@@ -267,14 +268,18 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 		// rate.
 		excludedThisBill := false
 		if b.NextDue != nil && dueInMonthOf(*b.NextDue, today) {
-			if _, convErr := s.convert(ctx, b.Amount, primary); convErr != nil {
+			_, hasRate, convErr := conv.TryConvert(ctx, b.Amount)
+			if convErr != nil {
+				return BillsView{}, convErr
+			}
+			if !hasRate {
 				excludedThisBill = true
 			}
 		}
 
 		if b.IsSubscription {
 			var noRate bool
-			subscriptionsAnnual, noRate, err = s.addSubscriptionAnnual(ctx, subscriptionsAnnual, b, primary)
+			subscriptionsAnnual, noRate, err = s.addSubscriptionAnnual(ctx, conv, subscriptionsAnnual, b)
 			if err != nil {
 				return BillsView{}, err
 			}
@@ -289,13 +294,17 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 		}
 	}
 
-	excludedNoRate += s.countExcludedPayments(ctx, paymentRecords, excludedBillIDs, primary)
-
-	dueTotal, err := s.sumConvertible(ctx, dueMinor, zero)
+	excludedPayments, err := s.countExcludedPayments(ctx, conv, paymentRecords, excludedBillIDs)
 	if err != nil {
 		return BillsView{}, err
 	}
-	paidSoFarTotal, err := s.sumConvertible(ctx, paidMinor, zero)
+	excludedNoRate += excludedPayments
+
+	dueTotal, err := s.sumConvertible(ctx, conv, dueMinor, zero)
+	if err != nil {
+		return BillsView{}, err
+	}
+	paidSoFarTotal, err := s.sumConvertible(ctx, conv, paidMinor, zero)
 	if err != nil {
 		return BillsView{}, err
 	}
@@ -373,14 +382,18 @@ func dueInMonthOf(due, today time.Time) bool {
 // into primary, to total. noRate reports a bill whose currency has no rate: it
 // adds nothing, and List counts it in ExcludedNoRate. A one-off answers total
 // unchanged and noRate false -- not a recurring cost, ticked or not, and never
-// a reason to exclude anything.
-func (s *BillService) addSubscriptionAnnual(ctx context.Context, total domain.Money, b domain.Bill, primary string) (sum domain.Money, noRate bool, err error) {
+// a reason to exclude anything. Any error from Converter.TryConvert is
+// returned.
+func (s *BillService) addSubscriptionAnnual(ctx context.Context, conv *Converter, total domain.Money, b domain.Bill) (sum domain.Money, noRate bool, err error) {
 	annual, ok := domain.AnnualEquivalentMinor(b.Cadence, b.Amount.Amount)
 	if !ok {
 		return total, false, nil
 	}
-	converted, convErr := s.convert(ctx, domain.Money{Amount: annual, Currency: b.Amount.Currency}, primary)
+	converted, hasRate, convErr := conv.TryConvert(ctx, domain.Money{Amount: annual, Currency: b.Amount.Currency})
 	if convErr != nil {
+		return domain.Money{}, false, convErr
+	}
+	if !hasRate {
 		return total, true, nil
 	}
 	sum, err = total.Add(converted)
@@ -395,19 +408,24 @@ func (s *BillService) addSubscriptionAnnual(ctx context.Context, total domain.Mo
 // Bills.MonthTotals' own header comment states), but a payment is a distinct
 // entity from the bill that generated it, so its own no-rate exclusion is
 // counted here -- unless that bill was already counted by List's per-bill
-// pass, per List's own comment. excludedBillIDs is updated as it goes.
-func (s *BillService) countExcludedPayments(ctx context.Context, payments []BillPaymentRecord, excludedBillIDs map[string]bool, primary string) int {
+// pass, per List's own comment. excludedBillIDs is updated as it goes. Any
+// error from Converter.TryConvert is returned.
+func (s *BillService) countExcludedPayments(ctx context.Context, conv *Converter, payments []BillPaymentRecord, excludedBillIDs map[string]bool) (int, error) {
 	count := 0
 	for _, p := range payments {
 		if excludedBillIDs[p.Payment.BillID] {
 			continue
 		}
-		if _, convErr := s.convert(ctx, p.Payment.Amount, primary); convErr != nil {
+		_, hasRate, convErr := conv.TryConvert(ctx, p.Payment.Amount)
+		if convErr != nil {
+			return 0, convErr
+		}
+		if !hasRate {
 			count++
 			excludedBillIDs[p.Payment.BillID] = true
 		}
 	}
-	return count
+	return count, nil
 }
 
 // sumConvertible is the actual sum behind DueThisMonth and PaidSoFar:
@@ -415,12 +433,16 @@ func (s *BillService) countExcludedPayments(ctx context.Context, payments []Bill
 // zero's currency, then added. A currency with no rate is simply skipped here
 // -- its exclusion was already counted, precisely, by List's two per-entity
 // passes; counting it again here (once per currency) is exactly the bug List's
-// own comment describes fixing.
-func (s *BillService) sumConvertible(ctx context.Context, byCurrency map[string]int64, zero domain.Money) (domain.Money, error) {
+// own comment describes fixing. Any error from Converter.TryConvert is
+// returned.
+func (s *BillService) sumConvertible(ctx context.Context, conv *Converter, byCurrency map[string]int64, zero domain.Money) (domain.Money, error) {
 	total := zero
 	for currency, amount := range byCurrency {
-		converted, convErr := s.convert(ctx, domain.Money{Amount: amount, Currency: currency}, zero.Currency)
+		converted, hasRate, convErr := conv.TryConvert(ctx, domain.Money{Amount: amount, Currency: currency})
 		if convErr != nil {
+			return domain.Money{}, convErr
+		}
+		if !hasRate {
 			continue
 		}
 		var err error
@@ -911,24 +933,4 @@ func (s *BillService) validateCategory(ctx context.Context, householdID, categor
 		return domain.ErrCategoryKindMismatch
 	}
 	return nil
-}
-
-// convert turns one amount into the household's primary currency. This
-// duplicates GoalService.convert and AccountService.convert deliberately --
-// see either's own comment: each service declares its own dependencies, and
-// hoisting this into a shared helper would give one service a reason to
-// change when another's FX needs do.
-func (s *BillService) convert(ctx context.Context, m domain.Money, primary string) (domain.Money, error) {
-	if m.Currency == primary {
-		return m, nil
-	}
-	rate, err := s.deps.FX.Rate(ctx, m.Currency, primary)
-	if err != nil {
-		return domain.Money{}, err
-	}
-	amount, err := rate.Apply(m.Amount)
-	if err != nil {
-		return domain.Money{}, err
-	}
-	return domain.Money{Amount: amount, Currency: primary}, nil
 }

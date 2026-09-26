@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -165,4 +166,25 @@ func mustCreate(t *testing.T, svc *usecase.TransactionService, in usecase.NewTra
 		t.Fatalf("create %q: %v", in.Description, err)
 	}
 	return created
+}
+
+// A failed lookup must fail the month summary rather than report the IDR
+// expense as "no rate" and a Spent figure that leaves it out.
+func TestMonthSummaryFailsWhenTheRateLookupItselfFails(t *testing.T) {
+	svc, _ := newTransactionFixtureWithFX(t, map[string]fakeAccountRecord{
+		"idr-card": {householdID: "house-1", currency: "IDR"},
+	}, newFXDouble().failWith(errProviderDown))
+	ctx := context.Background()
+	july := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+
+	mustCreate(t, svc, usecase.NewTransaction{
+		HouseholdID: "house-1", Kind: "expense", OccurredOn: july.AddDate(0, 0, 8),
+		Description: "Warung", CategoryID: "cat-groceries",
+		FromAccountID: "idr-card", AmountMinor: 12_410,
+	})
+
+	_, err := svc.MonthSummary(ctx, "house-1", july)
+	if !errors.Is(err, errProviderDown) {
+		t.Fatalf("MonthSummary error = %v, want the provider's error", err)
+	}
 }

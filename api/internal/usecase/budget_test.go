@@ -23,6 +23,7 @@ type budgetFixture struct {
 	households   *householdDouble
 	members      *membershipDouble
 	goals        *goalDouble
+	fx           *fxDouble
 }
 
 func newBudgetFixture(t *testing.T) *budgetFixture {
@@ -50,20 +51,21 @@ func newBudgetFixture(t *testing.T) *budgetFixture {
 	budgets.setGoals(goals)
 	goals.setBudgets(budgets)
 
+	fx := newFXDouble()
 	svc := usecase.NewBudgetService(usecase.BudgetDeps{
 		Budgets:      budgets,
 		Transactions: transactions,
 		Categories:   categories,
 		Households:   households,
 		Members:      members,
-		FX:           staticTestRates{},
+		FX:           fx,
 		Goals:        goals,
 	})
 
 	return &budgetFixture{
 		svc: svc, budgets: budgets, transactions: transactions,
 		categories: categories, households: households, members: members,
-		goals: goals,
+		goals: goals, fx: fx,
 	}
 }
 
@@ -227,7 +229,7 @@ func TestBudgetMonthSpentReusesTheMonthSummaryRule(t *testing.T) {
 		FromAccountID: "acc-1", ToAccountID: "acc-2",
 		Amount: domain.Money{Amount: 50000, Currency: "SGD"},
 	})
-	// USD: staticTestRates only knows SGD<->IDR, so this has no rate.
+	// USD: the FX double only knows SGD<->IDR, so this has no rate.
 	f.addExpense("tx-no-rate", "cat-groceries", "", july.AddDate(0, 0, 3), 3999, "USD")
 
 	got, err := f.svc.Month(ctx, "house-1", july, july.AddDate(0, 0, 17))
@@ -455,7 +457,7 @@ func TestByPersonRowsSumToSpentAcrossCurrencyConversion(t *testing.T) {
 
 	f.addMember("membership-andreas", "user-andreas", "Andreas")
 	f.addExpense("tx-groceries", "cat-groceries", "membership-andreas", july.AddDate(0, 0, 5), 12000, "SGD")
-	// IDR, not SGD -- staticTestRates knows SGD<->IDR, so this converts
+	// IDR, not SGD -- the FX double knows SGD<->IDR, so this converts
 	// rather than landing in ExcludedNoRate.
 	f.addExpense("tx-foreign-bill", "cat-dining", "", july.AddDate(0, 0, 6), 1_000_000, "IDR")
 
@@ -464,7 +466,7 @@ func TestByPersonRowsSumToSpentAcrossCurrencyConversion(t *testing.T) {
 		t.Fatalf("month: %v", err)
 	}
 	if len(got.ExcludedNoRate) != 0 {
-		t.Fatalf("excludedNoRate = %+v, want none -- staticTestRates knows SGD<->IDR", got.ExcludedNoRate)
+		t.Fatalf("excludedNoRate = %+v, want none -- the FX double knows SGD<->IDR", got.ExcludedNoRate)
 	}
 	var total int64
 	for _, p := range got.ByPerson {
@@ -822,7 +824,7 @@ func TestBudgetRollOverRefusesNothingUnspent(t *testing.T) {
 // currency column and are implicitly in the household's primary currency,
 // while a goal carries an explicit one. Converting inside a rollover would
 // store a rate nobody can audit, so a goal outside the primary currency is
-// refused even though staticTestRates knows a live SGD<->IDR rate -- the
+// refused even though the FX double knows a live SGD<->IDR rate -- the
 // refusal is about auditability, not availability.
 func TestBudgetRollOverRefusesANonPrimaryCurrencyGoal(t *testing.T) {
 	f := newBudgetFixture(t)
@@ -944,5 +946,21 @@ func TestBudgetRollOverRefusesAGoalFromAnotherHousehold(t *testing.T) {
 	}
 	if _, done := f.budgets.rolledOverGoalID("house-1", july); done {
 		t.Fatal("July stamped as rolled over even though the goal fetch should have failed first, before any write")
+	}
+}
+
+// The budget's Spent reuses the month-summary rule, including this half of
+// it: only ErrNoRate may leave an expense out; a failed lookup fails Month.
+func TestBudgetMonthFailsWhenTheRateLookupItselfFails(t *testing.T) {
+	f := newBudgetFixture(t)
+	f.fx.failWith(errProviderDown)
+	ctx := context.Background()
+	july := julyMonth()
+
+	f.addExpense("tx-idr", "cat-groceries", "", july.AddDate(0, 0, 3), 12_410, "IDR")
+
+	_, err := f.svc.Month(ctx, "house-1", july, july.AddDate(0, 0, 17))
+	if !errors.Is(err, errProviderDown) {
+		t.Fatalf("Month error = %v, want the provider's error", err)
 	}
 }

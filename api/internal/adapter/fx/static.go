@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/andreasoentoro/hearth/api/internal/domain"
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
@@ -16,21 +17,24 @@ type StaticProvider struct {
 	units map[[2]string]int64
 }
 
+// The adapter honours the whole port contract, ErrNoRate included.
+var _ usecase.FXRateProvider = (*StaticProvider)(nil)
+
 func NewStaticProvider() *StaticProvider {
 	return &StaticProvider{units: map[[2]string]int64{
 		{"SGD", "IDR"}: 12_410, // per the design's Settings screen
 	}}
 }
 
-func (p *StaticProvider) Rate(_ context.Context, from, to string) (usecase.Rate, error) {
+func (p *StaticProvider) Rate(_ context.Context, from, to string) (domain.Rate, error) {
 	if from == to {
-		return usecase.Rate{Numerator: 1, Denominator: 1}, nil
+		return domain.Rate{Numerator: 1, Denominator: 1}, nil
 	}
 	if n, ok := p.units[[2]string{from, to}]; ok {
-		return usecase.Rate{Numerator: n, Denominator: 1}, nil
+		return domain.Rate{Numerator: n, Denominator: 1}, nil
 	}
 	if n, ok := p.units[[2]string{to, from}]; ok {
-		return usecase.Rate{Numerator: 1, Denominator: n}, nil
+		return domain.Rate{Numerator: 1, Denominator: n}, nil
 	}
-	return usecase.Rate{}, fmt.Errorf("no rate available for %s to %s", from, to)
+	return domain.Rate{}, fmt.Errorf("%w: %s to %s", domain.ErrNoRate, from, to)
 }
