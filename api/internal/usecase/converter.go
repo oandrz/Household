@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
@@ -18,19 +19,22 @@ import (
 // service gains a reason to change when another's FX needs do. Only the
 // algorithm is shared. Do not copy it back into the services.
 //
-// Remembering each rate for the request is load-bearing, not an
-// optimisation. Every figure on one screen must use the same rate for the same
-// currency, or, the day a live provider returns two different rates within one
-// request, a headline and the chart beneath it would disagree.
+// Remembering each answer for the request -- a rate, or "no rate" -- is
+// load-bearing, not an optimisation. Within one Converter, every amount in
+// the same currency gets the same answer, so a list cannot exclude a currency
+// as "no rate" in one figure and add it into another, and two amounts in one
+// currency are never converted at two rates. That holds per Converter only:
+// two services, or two helpers that each build their own, can each ask once.
 type Converter struct {
 	fx      FXRateProvider
 	primary string
 	rates   map[string]domain.Rate
+	noRate  map[string]error // the provider's ErrNoRate answer, per currency
 }
 
 // NewConverter returns a Converter into primary, backed by fx.
 func NewConverter(fx FXRateProvider, primary string) *Converter {
-	return &Converter{fx: fx, primary: primary, rates: map[string]domain.Rate{}}
+	return &Converter{fx: fx, primary: primary, rates: map[string]domain.Rate{}, noRate: map[string]error{}}
 }
 
 // Convert returns m in the primary currency. An amount already in primary is
@@ -40,16 +44,23 @@ func NewConverter(fx FXRateProvider, primary string) *Converter {
 // An error wrapping domain.ErrNoRate means m's currency has no rate. That is
 // the ONLY error a caller may answer by leaving m out of a total (CONTEXT.md,
 // "No rate"). Anything else (a failed lookup, domain.ErrInvalidRate,
-// domain.ErrAmountOverflow) must fail the request. A failed lookup is not
-// remembered, so the next Convert asks again.
+// domain.ErrAmountOverflow) must fail the request. "No rate" is remembered
+// like a rate; a failed lookup is not, so the next Convert asks again.
 func (c *Converter) Convert(ctx context.Context, m domain.Money) (domain.Money, error) {
 	if m.Currency == c.primary {
 		return m, nil
+	}
+	if err, ok := c.noRate[m.Currency]; ok {
+		return domain.Money{}, err
 	}
 	rate, ok := c.rates[m.Currency]
 	if !ok {
 		var err error
 		rate, err = c.fx.Rate(ctx, m.Currency, c.primary)
+		if errors.Is(err, domain.ErrNoRate) {
+			c.noRate[m.Currency] = err
+			return domain.Money{}, err
+		}
 		if err != nil {
 			return domain.Money{}, err
 		}

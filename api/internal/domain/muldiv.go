@@ -6,16 +6,21 @@ import (
 )
 
 // mulDivRoundHalfAway returns a*num/den, rounded half away from zero. It is
-// the one rounding rule for every monetary multiply-then-divide in Hearth:
-// currency conversion (Rate.Apply), a holding's value (Quantity.Value) and a
-// cost pool's share (Money.Prorate). It exists so that those three stop each
-// carrying a copy with a comment promising the copies match.
+// the rounding rule shared by the three places that turn money into other
+// money: currency conversion (Rate.Apply), a holding's value (Quantity.Value)
+// and a cost pool's share (Money.Prorate). It exists so that those three stop
+// each carrying a copy with a comment promising the copies match. Two
+// percentage calculations (domain.PercentUsed, usecase changeBasisPoints)
+// still round on their own; they are not money, and moving them is separate
+// work.
 //
-// a may be negative. num must be >= 0 and den must be > 0; every caller checks
-// that first and reports its own error, so ok=false here means only "the
-// answer does not fit in an int64". The product is taken in 128 bits, so an
-// intermediate that is too big never causes a refusal on its own; only the
-// answer can.
+// a may be negative. num must be >= 0 and den must be > 0. ok=false means
+// the answer does not fit in an int64 OR that precondition was broken; the
+// function cannot tell its caller which. Every current caller checks num and
+// den first and reports its own error, so for them false can only mean
+// overflow. A new caller must do the same, or it will report a bad input as
+// an overflow. The product is taken in 128 bits, so an intermediate that is
+// too big never causes a refusal on its own; only the answer can.
 func mulDivRoundHalfAway(a, num, den int64) (int64, bool) {
 	if num < 0 || den <= 0 {
 		return 0, false

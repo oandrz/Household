@@ -100,3 +100,23 @@ func TestConverterDoesNotRememberAFailedLookup(t *testing.T) {
 		t.Fatalf("provider asked %d times, want 2", fx.calls)
 	}
 }
+
+// "No rate" is an answer about the currency, not a failed lookup, so the
+// Converter remembers it for the request like a rate. Otherwise a live
+// provider could say "no rate" for EUR to one figure and give a rate to the
+// next, and a page would add EUR into a total while naming it as excluded.
+func TestConverterRemembersNoRateForTheRequest(t *testing.T) {
+	fx := newFXDouble()
+	c := usecase.NewConverter(fx, "SGD")
+	ctx := context.Background()
+
+	for _, amount := range []int64{500, 900} {
+		_, err := c.Convert(ctx, domain.Money{Amount: amount, Currency: "EUR"})
+		if !errors.Is(err, domain.ErrNoRate) {
+			t.Fatalf("Convert(EUR %d) error = %v, want domain.ErrNoRate", amount, err)
+		}
+	}
+	if fx.calls != 1 {
+		t.Fatalf("provider asked %d times, want 1", fx.calls)
+	}
+}

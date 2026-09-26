@@ -49,10 +49,10 @@ type NetWorthTrend struct {
 // the same balance a second time, so the bar and the figure above it cannot
 // disagree even if the rate provider is asked twice and answers differently
 // (spec decision 3 -- "the last bar is the headline figure, by construction").
-// This is the load-bearing guarantee; Converter's per-request rate cache
-// (TestSummaryLooksUpEachRateOnce) is a supporting refactor that happens to
-// make today's provider agree with itself too, not the thing this correctness
-// property rests on. A live provider is free to return two different rates
+// This is the load-bearing guarantee for the trend. Converter's per-request
+// cache (TestSummaryLooksUpEachRateOnce) keeps other figures that share a
+// Converter consistent, but the bar-equals-headline property does not rest
+// on it. A live provider is free to return two different rates
 // for the same currency inside one request -- nothing here forbids it -- and
 // reusing inPrimary is what survives that.
 //
