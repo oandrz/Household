@@ -2774,22 +2774,50 @@ func (d *goalDouble) MonthContributionTotals(_ context.Context, householdID stri
 // assertions give for the postgres adapters.
 var _ usecase.GoalRepository = (*goalDouble)(nil)
 
-// staticTestRates knows the one pair fx.StaticProvider knows, and errors on
-// everything else -- so a test for the no-rate branch does not have to invent
-// a second, differently-behaved double.
-type staticTestRates struct{}
+// fxDouble is the one FX double. By default it knows exactly the pair
+// fx.StaticProvider knows (SGD<->IDR) and answers every other pair with
+// domain.ErrNoRate, as the real provider does.
+//
+//   - withNoRates empties the table, for "this currency has no rate".
+//   - failWith makes every lookup fail with an error that is NOT ErrNoRate,
+//     standing in for a provider outage. A caller must fail the request on it,
+//     never leave the amount out.
+//   - calls counts lookups, for the Converter's per-request cache.
+type fxDouble struct {
+	rates map[[2]string]domain.Rate
+	fail  error
+	calls int
+}
 
-func (staticTestRates) Rate(_ context.Context, from, to string) (usecase.Rate, error) {
-	switch {
-	case from == to:
-		return usecase.Rate{Numerator: 1, Denominator: 1}, nil
-	case from == "SGD" && to == "IDR":
-		return usecase.Rate{Numerator: 12_410, Denominator: 1}, nil
-	case from == "IDR" && to == "SGD":
-		return usecase.Rate{Numerator: 1, Denominator: 12_410}, nil
-	default:
-		return usecase.Rate{}, fmt.Errorf("no rate available for %s to %s", from, to)
+func newFXDouble() *fxDouble {
+	return &fxDouble{rates: map[[2]string]domain.Rate{
+		{"SGD", "IDR"}: {Numerator: 12_410, Denominator: 1},
+		{"IDR", "SGD"}: {Numerator: 1, Denominator: 12_410},
+	}}
+}
+
+func (f *fxDouble) withNoRates() *fxDouble {
+	f.rates = map[[2]string]domain.Rate{}
+	return f
+}
+
+func (f *fxDouble) failWith(err error) *fxDouble {
+	f.fail = err
+	return f
+}
+
+func (f *fxDouble) Rate(_ context.Context, from, to string) (domain.Rate, error) {
+	f.calls++
+	if f.fail != nil {
+		return domain.Rate{}, f.fail
 	}
+	if from == to {
+		return domain.Rate{Numerator: 1, Denominator: 1}, nil
+	}
+	if r, ok := f.rates[[2]string{from, to}]; ok {
+		return r, nil
+	}
+	return domain.Rate{}, fmt.Errorf("%w: %s to %s", domain.ErrNoRate, from, to)
 }
 
 // --- Transactions ------------------------------------------------------

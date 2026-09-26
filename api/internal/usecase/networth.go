@@ -70,7 +70,7 @@ func (s *AccountService) Summary(ctx context.Context, householdID string, views 
 		return NetWorthSummary{}, err
 	}
 	primary := household.PrimaryCurrency
-	conv := &converter{fx: s.d.FX, primary: primary, rates: map[string]Rate{}}
+	conv := &converter{fx: s.d.FX, primary: primary, rates: map[string]domain.Rate{}}
 
 	zero, err := domain.NewMoney(0, primary)
 	if err != nil {
@@ -192,7 +192,7 @@ func (s *AccountService) Summary(ctx context.Context, householdID string, views 
 type converter struct {
 	fx      FXRateProvider
 	primary string
-	rates   map[string]Rate
+	rates   map[string]domain.Rate
 }
 
 // convert turns one balance into the household's primary currency. A

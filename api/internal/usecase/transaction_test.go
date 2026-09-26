@@ -21,7 +21,7 @@ func transactionFixture(t *testing.T) (*usecase.TransactionService, *fakeTransac
 }
 
 // transactionFixtureWithAccount is transactionFixture plus one extra account
-// under "house-1", for a test that needs a currency staticTestRates cannot
+// under "house-1", for a test that needs a currency the FX double cannot
 // convert (e.g. USD) without inventing a second, differently-wired fixture.
 func transactionFixtureWithAccount(t *testing.T, accountID, currency string) (*usecase.TransactionService, *fakeTransactionRepo) {
 	t.Helper()
@@ -60,7 +60,7 @@ func newTransactionFixture(t *testing.T, extraAccounts map[string]fakeAccountRec
 			},
 		},
 		Households: households,
-		FX:         staticTestRates{},
+		FX:         newFXDouble(),
 		Clock:      &fixedClock{now: time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)},
 	})
 	return svc, repo

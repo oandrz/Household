@@ -30,7 +30,7 @@ func newGoalFixture(t *testing.T) *goalFixture {
 	svc := usecase.NewGoalService(usecase.GoalDeps{
 		Goals:      goals,
 		Households: households,
-		FX:         staticTestRates{},
+		FX:         newFXDouble(),
 	})
 
 	return &goalFixture{svc: svc, goals: goals, households: households}
@@ -268,7 +268,7 @@ func TestGoalListCountsOnlyDatedUnachievedGoals(t *testing.T) {
 // TestGoalListPlannedTotalConvertsThenAdds is LEARNING pattern 12, pinned for
 // goals: PlannedMonthlyTotal is each goal's own figure converted to primary
 // FIRST, then added -- never summed in minor units and converted once. A
-// goal whose currency has no rate to primary (EUR, which staticTestRates
+// goal whose currency has no rate to primary (EUR, which the FX double
 // does not know) is excluded from the total and counted in ExcludedNoRate,
 // while its own card keeps rendering in its own currency untouched.
 func TestGoalListPlannedTotalConvertsThenAdds(t *testing.T) {
@@ -280,7 +280,7 @@ func TestGoalListPlannedTotalConvertsThenAdds(t *testing.T) {
 		Name: "SGD goal", Target: domain.Money{Amount: 10000000, Currency: "SGD"},
 		PlannedMonthly: domain.Money{Amount: 40000, Currency: "SGD"}, // S$400.00/mo
 	})
-	// Rp124,100.00/mo converts to exactly S$10.00/mo: staticTestRates' IDR->SGD
+	// Rp124,100.00/mo converts to exactly S$10.00/mo: the FX double's IDR->SGD
 	// is {1, 12410}, so Apply(12,410,000) = (12,410,000 + 6,205) / 12,410 = 1,000
 	// with no remainder ambiguity. Dated and contributed-to, so its card also
 	// carries a RequiredMonthly figure -- both this and Contributed must stay

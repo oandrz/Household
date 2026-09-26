@@ -273,7 +273,7 @@ func TestSummaryOfAnAllArchivedHouseholdIsAGenuineZero(t *testing.T) {
 // account and again per month. fx.StaticProvider returns one number forever,
 // so nothing else in the suite would ever notice the difference.
 func TestSummaryLooksUpEachRateOnce(t *testing.T) {
-	counter := &countingRates{}
+	counter := newFXDouble()
 	svc := newAccountServiceWithFX(t, counter)
 
 	// Distinct ids: `account()` derives one from the currency and the type, so
@@ -295,14 +295,6 @@ func TestSummaryLooksUpEachRateOnce(t *testing.T) {
 	if counter.calls != 1 {
 		t.Errorf("provider called %d times for three accounts in one currency, want 1", counter.calls)
 	}
-}
-
-// countingRates is staticTestRates that remembers how often it was asked.
-type countingRates struct{ calls int }
-
-func (c *countingRates) Rate(ctx context.Context, from, to string) (usecase.Rate, error) {
-	c.calls++
-	return staticTestRates{}.Rate(ctx, from, to)
 }
 
 // newAccountServiceWithFX is newAccountService with the FX double swapped,
