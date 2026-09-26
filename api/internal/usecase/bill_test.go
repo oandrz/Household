@@ -1294,3 +1294,32 @@ func TestSetArchivedReturnsAViewWithNoSecondGet(t *testing.T) {
 		t.Fatal("bill still archived after restore")
 	}
 }
+
+// A failed lookup must fail the bills list rather than count the IDR bill as
+// "no rate" and leave it out of DueThisMonth.
+func TestBillsSummaryFailsWhenTheRateLookupItselfFails(t *testing.T) {
+	svc := newBillServiceWithFX(t, newFXDouble().failWith(errProviderDown),
+		bill("SP utilities", "2026-08-08", 14230),         // SGD
+		billOn("Arisan", "IDR", "2026-08-15", 50_000_000), // needs a rate
+	)
+
+	_, err := svc.List(context.Background(), "h1", false, day("2026-08-09"))
+	if !errors.Is(err, errProviderDown) {
+		t.Fatalf("List error = %v, want the provider's error", err)
+	}
+}
+
+// The subscriptions total is the one conversion in List that a bill can reach
+// alone: a subscription due outside this month feeds no due or paid figure.
+// So it needs its own outage test; the one above is caught by the
+// due-this-month sites first and cannot see this one regress.
+func TestBillsSubscriptionTotalFailsWhenTheRateLookupItselfFails(t *testing.T) {
+	sub := billOn("Netflix ID", "IDR", "2026-11-20", 50_000) // due in November, not August
+	sub.Bill.IsSubscription = true
+	svc := newBillServiceWithFX(t, newFXDouble().failWith(errProviderDown), sub)
+
+	_, err := svc.List(context.Background(), "h1", false, day("2026-08-09"))
+	if !errors.Is(err, errProviderDown) {
+		t.Fatalf("List error = %v, want the provider's error", err)
+	}
+}
