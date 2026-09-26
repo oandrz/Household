@@ -23,6 +23,7 @@ type budgetFixture struct {
 	households   *householdDouble
 	members      *membershipDouble
 	goals        *goalDouble
+	fx           *fxDouble
 }
 
 func newBudgetFixture(t *testing.T) *budgetFixture {
@@ -50,20 +51,21 @@ func newBudgetFixture(t *testing.T) *budgetFixture {
 	budgets.setGoals(goals)
 	goals.setBudgets(budgets)
 
+	fx := newFXDouble()
 	svc := usecase.NewBudgetService(usecase.BudgetDeps{
 		Budgets:      budgets,
 		Transactions: transactions,
 		Categories:   categories,
 		Households:   households,
 		Members:      members,
-		FX:           newFXDouble(),
+		FX:           fx,
 		Goals:        goals,
 	})
 
 	return &budgetFixture{
 		svc: svc, budgets: budgets, transactions: transactions,
 		categories: categories, households: households, members: members,
-		goals: goals,
+		goals: goals, fx: fx,
 	}
 }
 
@@ -944,5 +946,21 @@ func TestBudgetRollOverRefusesAGoalFromAnotherHousehold(t *testing.T) {
 	}
 	if _, done := f.budgets.rolledOverGoalID("house-1", july); done {
 		t.Fatal("July stamped as rolled over even though the goal fetch should have failed first, before any write")
+	}
+}
+
+// The budget's Spent reuses the month-summary rule, including this half of
+// it: only ErrNoRate may leave an expense out; a failed lookup fails Month.
+func TestBudgetMonthFailsWhenTheRateLookupItselfFails(t *testing.T) {
+	f := newBudgetFixture(t)
+	f.fx.failWith(errProviderDown)
+	ctx := context.Background()
+	july := julyMonth()
+
+	f.addExpense("tx-idr", "cat-groceries", "", july.AddDate(0, 0, 3), 12_410, "IDR")
+
+	_, err := f.svc.Month(ctx, "house-1", july, july.AddDate(0, 0, 17))
+	if !errors.Is(err, errProviderDown) {
+		t.Fatalf("Month error = %v, want the provider's error", err)
 	}
 }

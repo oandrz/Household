@@ -32,6 +32,13 @@ func transactionFixtureWithAccount(t *testing.T, accountID, currency string) (*u
 
 func newTransactionFixture(t *testing.T, extraAccounts map[string]fakeAccountRecord) (*usecase.TransactionService, *fakeTransactionRepo) {
 	t.Helper()
+	return newTransactionFixtureWithFX(t, extraAccounts, newFXDouble())
+}
+
+// newTransactionFixtureWithFX is newTransactionFixture with the FX double
+// chosen by the test, the same shape as bill_test.go's newBillServiceWithFX.
+func newTransactionFixtureWithFX(t *testing.T, extraAccounts map[string]fakeAccountRecord, fx usecase.FXRateProvider) (*usecase.TransactionService, *fakeTransactionRepo) {
+	t.Helper()
 	repo := &fakeTransactionRepo{}
 	households := newHouseholdDouble()
 	households.put(domain.Household{ID: "house-1", PrimaryCurrency: "SGD"})
@@ -60,7 +67,7 @@ func newTransactionFixture(t *testing.T, extraAccounts map[string]fakeAccountRec
 			},
 		},
 		Households: households,
-		FX:         newFXDouble(),
+		FX:         fx,
 		Clock:      &fixedClock{now: time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)},
 	})
 	return svc, repo
