@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -172,6 +173,7 @@ func (s *GoalService) List(ctx context.Context, householdID string, includeArchi
 	var counts goalCounts
 	excludedNoRate := 0
 
+	conv := NewConverter(s.d.FX, primary)
 	views := make([]GoalView, 0, len(records))
 	for _, rec := range records {
 		g := rec.Goal
@@ -185,7 +187,10 @@ func (s *GoalService) List(ctx context.Context, householdID string, includeArchi
 		}
 		counts.add(g, view.Status)
 
-		plannedInPrimary, actualInPrimary, hasActual, excluded := s.monthlyInPrimary(ctx, g, actualByGoal, primary)
+		plannedInPrimary, actualInPrimary, hasActual, excluded, err := s.monthlyInPrimary(ctx, conv, g, actualByGoal)
+		if err != nil {
+			return GoalsView{}, err
+		}
 		if excluded {
 			excludedNoRate++
 			continue
@@ -285,27 +290,36 @@ func (c *goalCounts) add(g domain.Goal, status domain.GoalStatus) {
 
 // monthlyInPrimary converts one goal's planned monthly figure and, if the goal
 // received anything this month, its actual figure into primary. excluded means
-// neither may be added to a total.
+// the goal's currency has no rate, and neither figure may be added to a total.
 //
 // Convert-then-add, per goal: the planned and actual figures share the goal's
 // one currency, so either both convert or neither does. Splitting these into
 // two independently-guarded conversions would let the two totals disagree
 // about which goals had a rate, which List's "excluded from BOTH totals" rule
 // forbids.
-func (s *GoalService) monthlyInPrimary(ctx context.Context, g domain.Goal, actualByGoal map[string]int64, primary string) (planned, actual domain.Money, hasActual, excluded bool) {
-	planned, err := s.convert(ctx, g.PlannedMonthly, primary)
+//
+// Only domain.ErrNoRate means excluded. Any other conversion error is
+// returned, and List fails with it.
+func (s *GoalService) monthlyInPrimary(ctx context.Context, conv *Converter, g domain.Goal, actualByGoal map[string]int64) (planned, actual domain.Money, hasActual, excluded bool, err error) {
+	planned, err = conv.Convert(ctx, g.PlannedMonthly)
+	if errors.Is(err, domain.ErrNoRate) {
+		return domain.Money{}, domain.Money{}, false, true, nil
+	}
 	if err != nil {
-		return domain.Money{}, domain.Money{}, false, true
+		return domain.Money{}, domain.Money{}, false, false, err
 	}
 	amount, ok := actualByGoal[g.ID]
 	if !ok {
-		return planned, domain.Money{}, false, false
+		return planned, domain.Money{}, false, false, nil
 	}
-	actual, err = s.convert(ctx, domain.Money{Amount: amount, Currency: g.Target.Currency}, primary)
+	actual, err = conv.Convert(ctx, domain.Money{Amount: amount, Currency: g.Target.Currency})
+	if errors.Is(err, domain.ErrNoRate) {
+		return domain.Money{}, domain.Money{}, false, true, nil
+	}
 	if err != nil {
-		return domain.Money{}, domain.Money{}, false, true
+		return domain.Money{}, domain.Money{}, false, false, err
 	}
-	return planned, actual, true, false
+	return planned, actual, true, false, nil
 }
 
 // Create validates and writes a new goal. Every check runs before the
@@ -487,24 +501,4 @@ func (s *GoalService) DeleteContribution(ctx context.Context, householdID, goalI
 // convention).
 func (s *GoalService) Contributions(ctx context.Context, householdID, goalID string) ([]domain.GoalContribution, error) {
 	return s.d.Goals.ListContributions(ctx, householdID, goalID, 0)
-}
-
-// convert turns one amount into the household's primary currency. This
-// duplicates BudgetService.convert deliberately -- see that method's own
-// comment: each service declares its own dependencies, and hoisting this
-// into a shared helper would give one service a reason to change when
-// another's FX needs do.
-func (s *GoalService) convert(ctx context.Context, m domain.Money, primary string) (domain.Money, error) {
-	if m.Currency == primary {
-		return m, nil
-	}
-	rate, err := s.d.FX.Rate(ctx, m.Currency, primary)
-	if err != nil {
-		return domain.Money{}, err
-	}
-	amount, err := rate.Apply(m.Amount)
-	if err != nil {
-		return domain.Money{}, err
-	}
-	return domain.Money{Amount: amount, Currency: primary}, nil
 }
