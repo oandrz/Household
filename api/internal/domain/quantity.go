@@ -166,11 +166,12 @@ func (m Money) Prorate(part, whole Quantity) (Money, error) {
 		return Money{}, fmt.Errorf("%w: a Money zero value has no currency", ErrInvalidMoney)
 	}
 	// A cost pool is never negative here: a holding event refuses a negative
-	// amount, and a disposal's cost is capped at the pool it leaves. Refusing
-	// outright is better than carrying two's-complement sign handling that
-	// nothing exercises -- untested cleverness on a monetary path is what the
-	// house rule against it is for. The day a caller genuinely needs to
-	// prorate a negative, it can be added WITH a test.
+	// amount, and a disposal's cost is capped at the pool it leaves. So a
+	// negative amount means something upstream is already wrong, and it is
+	// refused rather than prorated. mulDivRoundHalfAway could compute it (it
+	// handles negatives for Rate.Apply), but no holding figure should ever
+	// need it. The day a caller genuinely needs to prorate a negative, drop
+	// this refusal WITH a test.
 	if m.Amount < 0 {
 		return Money{}, fmt.Errorf("%w: cannot prorate a negative amount, got %d", ErrInvalidMoney, m.Amount)
 	}
