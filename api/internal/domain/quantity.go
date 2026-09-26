@@ -2,8 +2,6 @@ package domain
 
 import (
 	"fmt"
-	"math"
-	"math/bits"
 	"strconv"
 	"strings"
 )
@@ -58,9 +56,9 @@ func (q Quantity) Nano() int64 { return q.nano }
 //	product                        = 1e19, and an int64 stops at 9.223e18
 //
 // The answer, 1e10 minor units, fits with room to spare; it is only the
-// intermediate that does not. So the product is taken in 128 bits via
-// math/bits and divided back down, which keeps the whole calculation in
-// integers -- the same commitment Money.Add and usecase.Rate.Apply make.
+// intermediate that does not. So the product is taken in 128 bits by
+// mulDivRoundHalfAway and divided back down, which keeps the whole calculation
+// in integers -- the same commitment Money.Add and Rate.Apply make.
 func (q Quantity) Value(unitPrice Money) (Money, error) {
 	if unitPrice.Currency == "" {
 		return Money{}, fmt.Errorf("%w: a Money zero value has no currency", ErrInvalidMoney)
@@ -72,39 +70,11 @@ func (q Quantity) Value(unitPrice Money) (Money, error) {
 		return Money{}, fmt.Errorf("%w: a unit price cannot be negative, got %d", ErrInvalidMoney, unitPrice.Amount)
 	}
 
-	// Both operands are non-negative by the checks above and by NewQuantity,
-	// so the unsigned product below needs no sign handling at all. That is
-	// why those two refusals come first: they buy the rest of this function.
-	hi, lo := bits.Mul64(uint64(q.nano), uint64(unitPrice.Amount))
-
-	// bits.Div64 PANICS when the quotient will not fit in 64 bits, rather
-	// than reporting it. Checking hi against the divisor first is what turns
-	// that panic into an error: the quotient is (hi*2^64+lo)/QuantityScale,
-	// which needs 64 bits or more exactly when hi >= QuantityScale. A panic
-	// in a monetary path is worse than the overflow it would replace, so this
-	// guard must stay ahead of the divide.
-	if hi >= QuantityScale {
+	out, ok := mulDivRoundHalfAway(q.nano, unitPrice.Amount, QuantityScale)
+	if !ok {
 		return Money{}, fmt.Errorf("%w: %d nano units at %d", ErrAmountOverflow, q.nano, unitPrice.Amount)
 	}
-	quo, rem := bits.Div64(hi, lo, QuantityScale)
-
-	// Round half away from zero, matching usecase.Rate.Apply. Both operands
-	// are non-negative, so "away from zero" is always up, and doubling the
-	// remainder compares it against the divisor without leaving integers.
-	if rem*2 >= QuantityScale {
-		quo++
-		// The increment is the one step that can carry a quotient which was
-		// exactly math.MaxInt64 over the edge, so it is checked after, not
-		// before.
-		if quo == 0 {
-			return Money{}, fmt.Errorf("%w: rounding %d nano units at %d", ErrAmountOverflow, q.nano, unitPrice.Amount)
-		}
-	}
-	if quo > math.MaxInt64 {
-		return Money{}, fmt.Errorf("%w: %d nano units at %d", ErrAmountOverflow, q.nano, unitPrice.Amount)
-	}
-
-	return Money{Amount: int64(quo), Currency: unitPrice.Currency}, nil
+	return Money{Amount: out, Currency: unitPrice.Currency}, nil
 }
 
 // ParseQuantity reads a quantity the way a person types it -- "300.5" grams,
@@ -211,24 +181,9 @@ func (m Money) Prorate(part, whole Quantity) (Money, error) {
 		return Money{}, fmt.Errorf("%w: %d of %d", ErrProratePartExceedsWhole, part.nano, whole.nano)
 	}
 
-	// Both operands are non-negative by the checks above, so the 128-bit
-	// arithmetic stays unsigned -- the only form math/bits offers.
-	hi, lo := bits.Mul64(uint64(m.Amount), uint64(part.nano))
-	// part <= whole was checked above, so the quotient cannot exceed the
-	// magnitude and this guard can only fire on a Money that was already
-	// beyond reach. It stays because bits.Div64 panics rather than erroring,
-	// and a panic on a monetary path is worse than the overflow it replaces.
-	if hi >= uint64(whole.nano) {
+	out, ok := mulDivRoundHalfAway(m.Amount, part.nano, whole.nano)
+	if !ok {
 		return Money{}, fmt.Errorf("%w: %d prorated by %d/%d", ErrAmountOverflow, m.Amount, part.nano, whole.nano)
 	}
-	quo, rem := bits.Div64(hi, lo, uint64(whole.nano))
-
-	// Half away from zero, matching Quantity.Value and usecase.Rate.Apply.
-	if rem*2 >= uint64(whole.nano) {
-		quo++
-	}
-	if quo > math.MaxInt64 {
-		return Money{}, fmt.Errorf("%w: %d prorated by %d/%d", ErrAmountOverflow, m.Amount, part.nano, whole.nano)
-	}
-	return Money{Amount: int64(quo), Currency: m.Currency}, nil
+	return Money{Amount: out, Currency: m.Currency}, nil
 }
