@@ -49,7 +49,7 @@ type NetWorthTrend struct {
 // the same balance a second time, so the bar and the figure above it cannot
 // disagree even if the rate provider is asked twice and answers differently
 // (spec decision 3 -- "the last bar is the headline figure, by construction").
-// This is the load-bearing guarantee; the converter's per-request rate cache
+// This is the load-bearing guarantee; Converter's per-request rate cache
 // (TestSummaryLooksUpEachRateOnce) is a supporting refactor that happens to
 // make today's provider agree with itself too, not the thing this correctness
 // property rests on. A live provider is free to return two different rates
@@ -104,7 +104,7 @@ type trendAccount struct {
 func (s *AccountService) trend(
 	ctx context.Context,
 	householdID string,
-	conv *converter,
+	conv *Converter,
 	counted []trendAccount,
 	today time.Time,
 	zero domain.Money,
@@ -158,7 +158,7 @@ func (s *AccountService) trend(
 
 			inPrimary := a.inPrimary
 			if i != trendMonths-1 {
-				inPrimary, err = conv.convert(ctx, domain.Money{
+				inPrimary, err = conv.Convert(ctx, domain.Money{
 					Amount:   native[i],
 					Currency: a.balance.Currency,
 				})

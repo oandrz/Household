@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -313,4 +314,18 @@ func newAccountServiceWithFX(t *testing.T, fx usecase.FXRateProvider) *usecase.A
 		Clock:      &fixedClock{now: fixedNow},
 		Holdings:   holdingCounterDouble{},
 	})
+}
+
+// A provider outage must fail the summary, not render a net worth that
+// silently leaves out every foreign account as "no rate".
+func TestNetWorthSummaryFailsWhenTheRateLookupItselfFails(t *testing.T) {
+	svc := newAccountServiceWithFX(t, newFXDouble().failWith(errProviderDown))
+
+	_, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{
+		account(t, domain.AccountCash, 824_055, "SGD"),
+		account(t, domain.AccountCash, 124_100_000, "IDR"),
+	}, fixedNow)
+	if !errors.Is(err, errProviderDown) {
+		t.Fatalf("Summary error = %v, want the provider's error", err)
+	}
 }

@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/andreasoentoro/hearth/api/internal/domain"
@@ -70,7 +71,7 @@ func (s *AccountService) Summary(ctx context.Context, householdID string, views 
 		return NetWorthSummary{}, err
 	}
 	primary := household.PrimaryCurrency
-	conv := &converter{fx: s.d.FX, primary: primary, rates: map[string]domain.Rate{}}
+	conv := NewConverter(s.d.FX, primary)
 
 	zero, err := domain.NewMoney(0, primary)
 	if err != nil {
@@ -101,13 +102,16 @@ func (s *AccountService) Summary(ctx context.Context, householdID string, views 
 		}
 		considered++
 
-		inPrimary, err := conv.convert(ctx, view.Balance)
-		if err != nil {
+		inPrimary, err := conv.Convert(ctx, view.Balance)
+		if errors.Is(err, domain.ErrNoRate) {
 			summary.ExcludedNoRate = append(summary.ExcludedNoRate, ExcludedAccount{
 				AccountID: view.Account.ID,
 				Currency:  view.Balance.Currency,
 			})
 			continue
+		}
+		if err != nil {
+			return NetWorthSummary{}, err
 		}
 		converted++
 
@@ -177,44 +181,4 @@ func (s *AccountService) Summary(ctx context.Context, householdID string, views 
 		}
 	}
 	return summary, nil
-}
-
-// converter turns balances into one primary currency, looking each rate up at
-// most once per request.
-//
-// One lookup, reused, is not an optimisation. Summary's headline and the
-// trend's newest bar must apply the SAME rate to the same account, or the
-// chart's last bar disagrees with the figure printed directly above it.
-// fx.StaticProvider returns one number forever, so two independent lookups
-// agree today by coincidence; a live provider could return two different rates
-// inside one request, and no test against the static provider would ever see
-// it.
-type converter struct {
-	fx      FXRateProvider
-	primary string
-	rates   map[string]domain.Rate
-}
-
-// convert turns one balance into the household's primary currency. A
-// same-currency balance short-circuits without consulting the provider at all
-// -- that is the overwhelmingly common case, it is exact, and it means a
-// single-currency household never depends on a rate table it does not need.
-func (c *converter) convert(ctx context.Context, m domain.Money) (domain.Money, error) {
-	if m.Currency == c.primary {
-		return m, nil
-	}
-	rate, ok := c.rates[m.Currency]
-	if !ok {
-		var err error
-		rate, err = c.fx.Rate(ctx, m.Currency, c.primary)
-		if err != nil {
-			return domain.Money{}, err
-		}
-		c.rates[m.Currency] = rate
-	}
-	amount, err := rate.Apply(m.Amount)
-	if err != nil {
-		return domain.Money{}, err
-	}
-	return domain.Money{Amount: amount, Currency: c.primary}, nil
 }
