@@ -2,7 +2,6 @@ package usecase
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/andreasoentoro/hearth/api/internal/domain"
@@ -102,16 +101,16 @@ func (s *AccountService) Summary(ctx context.Context, householdID string, views 
 		}
 		considered++
 
-		inPrimary, err := conv.Convert(ctx, view.Balance)
-		if errors.Is(err, domain.ErrNoRate) {
+		inPrimary, hasRate, err := conv.TryConvert(ctx, view.Balance)
+		if err != nil {
+			return NetWorthSummary{}, err
+		}
+		if !hasRate {
 			summary.ExcludedNoRate = append(summary.ExcludedNoRate, ExcludedAccount{
 				AccountID: view.Account.ID,
 				Currency:  view.Balance.Currency,
 			})
 			continue
-		}
-		if err != nil {
-			return NetWorthSummary{}, err
 		}
 		converted++
 

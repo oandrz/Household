@@ -2,7 +2,6 @@ package usecase
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"time"
 
@@ -298,26 +297,26 @@ func (c *goalCounts) add(g domain.Goal, status domain.GoalStatus) {
 // about which goals had a rate, which List's "excluded from BOTH totals" rule
 // forbids.
 //
-// Only domain.ErrNoRate means excluded. Any other conversion error is
-// returned, and List fails with it.
+// Converter.TryConvert decides what "excluded" means; any error it returns
+// is returned here, and List fails with it.
 func (s *GoalService) monthlyInPrimary(ctx context.Context, conv *Converter, g domain.Goal, actualByGoal map[string]int64) (planned, actual domain.Money, hasActual, excluded bool, err error) {
-	planned, err = conv.Convert(ctx, g.PlannedMonthly)
-	if errors.Is(err, domain.ErrNoRate) {
-		return domain.Money{}, domain.Money{}, false, true, nil
-	}
+	planned, hasRate, err := conv.TryConvert(ctx, g.PlannedMonthly)
 	if err != nil {
 		return domain.Money{}, domain.Money{}, false, false, err
+	}
+	if !hasRate {
+		return domain.Money{}, domain.Money{}, false, true, nil
 	}
 	amount, ok := actualByGoal[g.ID]
 	if !ok {
 		return planned, domain.Money{}, false, false, nil
 	}
-	actual, err = conv.Convert(ctx, domain.Money{Amount: amount, Currency: g.Target.Currency})
-	if errors.Is(err, domain.ErrNoRate) {
-		return domain.Money{}, domain.Money{}, false, true, nil
-	}
+	actual, hasRate, err = conv.TryConvert(ctx, domain.Money{Amount: amount, Currency: g.Target.Currency})
 	if err != nil {
 		return domain.Money{}, domain.Money{}, false, false, err
+	}
+	if !hasRate {
+		return domain.Money{}, domain.Money{}, false, true, nil
 	}
 	return planned, actual, true, false, nil
 }

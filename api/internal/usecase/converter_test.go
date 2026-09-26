@@ -120,3 +120,42 @@ func TestConverterRemembersNoRateForTheRequest(t *testing.T) {
 		t.Fatalf("provider asked %d times, want 1", fx.calls)
 	}
 }
+
+// TryConvert is where "exclude only on ErrNoRate" lives, so no caller
+// re-derives it. Its three answers are: converted, no rate (not an error),
+// or an error the caller must fail on.
+func TestTryConvertConvertsWhenThereIsARate(t *testing.T) {
+	c := usecase.NewConverter(newFXDouble(), "SGD")
+
+	got, hasRate, err := c.TryConvert(context.Background(), domain.Money{Amount: 124_100_000, Currency: "IDR"})
+	if err != nil || !hasRate {
+		t.Fatalf("TryConvert = (%+v, %v, %v), want a conversion", got, hasRate, err)
+	}
+	if got != (domain.Money{Amount: 10_000, Currency: "SGD"}) {
+		t.Fatalf("TryConvert = %+v, want S$100.00", got)
+	}
+}
+
+func TestTryConvertAnswersNoRateWithoutAnError(t *testing.T) {
+	c := usecase.NewConverter(newFXDouble(), "SGD")
+
+	_, hasRate, err := c.TryConvert(context.Background(), domain.Money{Amount: 500, Currency: "EUR"})
+	if err != nil {
+		t.Fatalf("TryConvert error = %v, want nil: no rate is an answer, not a failure", err)
+	}
+	if hasRate {
+		t.Fatal("hasRate = true, want false for a currency with no rate")
+	}
+}
+
+func TestTryConvertReturnsAFailedLookupAsAnError(t *testing.T) {
+	c := usecase.NewConverter(newFXDouble().failWith(errProviderDown), "SGD")
+
+	_, hasRate, err := c.TryConvert(context.Background(), domain.Money{Amount: 12_410, Currency: "IDR"})
+	if !errors.Is(err, errProviderDown) {
+		t.Fatalf("TryConvert error = %v, want the provider's error", err)
+	}
+	if hasRate {
+		t.Fatal("hasRate = true alongside an error")
+	}
+}

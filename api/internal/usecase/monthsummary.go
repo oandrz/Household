@@ -2,7 +2,6 @@ package usecase
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/andreasoentoro/hearth/api/internal/domain"
@@ -80,16 +79,16 @@ func (s *TransactionService) MonthSummary(ctx context.Context, householdID strin
 		if view.Transaction.Kind != domain.TransactionExpense {
 			continue
 		}
-		inPrimary, err := conv.Convert(ctx, view.Transaction.Amount)
-		if errors.Is(err, domain.ErrNoRate) {
+		inPrimary, hasRate, err := conv.TryConvert(ctx, view.Transaction.Amount)
+		if err != nil {
+			return MonthSummary{}, err
+		}
+		if !hasRate {
 			summary.ExcludedNoRate = append(summary.ExcludedNoRate, ExcludedTransaction{
 				TransactionID: view.Transaction.ID,
 				Currency:      view.Transaction.Amount.Currency,
 			})
 			continue
-		}
-		if err != nil {
-			return MonthSummary{}, err
 		}
 		summary.Spent, err = summary.Spent.Add(inPrimary)
 		if err != nil {

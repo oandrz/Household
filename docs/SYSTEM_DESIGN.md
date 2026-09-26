@@ -2264,7 +2264,11 @@ the request.** `usecase.Converter` is shared by every screen that adds money
 across currencies (net worth, month summary, budget, goals, bills). It returns
 an error wrapping `domain.ErrNoRate` when the provider has no rate for a
 currency, and that is the only error a caller answers by excluding the item
-and listing it under `ExcludedNoRate`. A provider outage, a cancelled request,
+and listing it under `ExcludedNoRate`. Callers do not check for it themselves:
+`Converter.TryConvert` returns "no rate" as `hasRate == false` with a nil
+error, so the rule lives in one place and any error a caller sees means fail.
+Only the net-worth trend calls `Convert` directly, because there "no rate"
+must fail too. A provider outage, a cancelled request,
 a rate that is not positive (`domain.ErrInvalidRate`) or an overflow is
 returned instead, and reaches the browser as a logged 500. Before this rule,
 each service had its own `convert` and treated any error as "no rate", so an

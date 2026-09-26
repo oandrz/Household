@@ -323,16 +323,16 @@ func (s *BudgetService) tallySpend(ctx context.Context, views []TransactionView,
 			continue
 		}
 
-		inPrimary, err := conv.Convert(ctx, t.Amount)
-		if errors.Is(err, domain.ErrNoRate) {
+		inPrimary, hasRate, err := conv.TryConvert(ctx, t.Amount)
+		if err != nil {
+			return spendTally{}, err
+		}
+		if !hasRate {
 			tally.excluded = append(tally.excluded, ExcludedTransaction{
 				TransactionID: t.ID,
 				Currency:      t.Amount.Currency,
 			})
 			continue
-		}
-		if err != nil {
-			return spendTally{}, err
 		}
 
 		tally.spent, err = tally.spent.Add(inPrimary)

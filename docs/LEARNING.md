@@ -2223,7 +2223,15 @@ time a reviewer found it by building a probe rather than reading the diff.
   rate from a provider; it now returns `ErrInvalidRate`. **What would have
   caught it sooner:** a port whose failure modes are named in its contract.
   "Returns an error" is not a contract when callers must treat two kinds of
-  error differently.
+  error differently. **The code review then found two more instances of the
+  same pattern, one level up.** First, the Converter remembered rates but
+  not "no rate" answers, so a live provider could exclude EUR from one figure
+  and add it into the next on the same page; it now remembers both. Second,
+  the fixed rule was still written by hand at nine call sites, each one line
+  away from reintroducing `if err != nil { exclude }`. It now lives in
+  `Converter.TryConvert`, and one mutation there (`errors.Is(err, ErrNoRate)`
+  changed to `err != nil`) fails all seven outage tests at once. **A rule that every caller
+  must remember belongs in the module the callers share, not in each of them.**
 
 **Any two writes that must both happen need a transaction or a loud failure.**
 And a function that accepts a field must persist it or refuse it — silently

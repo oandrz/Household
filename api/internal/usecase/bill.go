@@ -2,7 +2,6 @@ package usecase
 
 import (
 	"context"
-	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -269,11 +268,12 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 		// rate.
 		excludedThisBill := false
 		if b.NextDue != nil && dueInMonthOf(*b.NextDue, today) {
-			_, convErr := conv.Convert(ctx, b.Amount)
-			if errors.Is(convErr, domain.ErrNoRate) {
-				excludedThisBill = true
-			} else if convErr != nil {
+			_, hasRate, convErr := conv.TryConvert(ctx, b.Amount)
+			if convErr != nil {
 				return BillsView{}, convErr
+			}
+			if !hasRate {
+				excludedThisBill = true
 			}
 		}
 
@@ -382,19 +382,19 @@ func dueInMonthOf(due, today time.Time) bool {
 // into primary, to total. noRate reports a bill whose currency has no rate: it
 // adds nothing, and List counts it in ExcludedNoRate. A one-off answers total
 // unchanged and noRate false -- not a recurring cost, ticked or not, and never
-// a reason to exclude anything. Only domain.ErrNoRate means noRate; any other
-// conversion error is returned.
+// a reason to exclude anything. Any error from Converter.TryConvert is
+// returned.
 func (s *BillService) addSubscriptionAnnual(ctx context.Context, conv *Converter, total domain.Money, b domain.Bill) (sum domain.Money, noRate bool, err error) {
 	annual, ok := domain.AnnualEquivalentMinor(b.Cadence, b.Amount.Amount)
 	if !ok {
 		return total, false, nil
 	}
-	converted, convErr := conv.Convert(ctx, domain.Money{Amount: annual, Currency: b.Amount.Currency})
-	if errors.Is(convErr, domain.ErrNoRate) {
-		return total, true, nil
-	}
+	converted, hasRate, convErr := conv.TryConvert(ctx, domain.Money{Amount: annual, Currency: b.Amount.Currency})
 	if convErr != nil {
 		return domain.Money{}, false, convErr
+	}
+	if !hasRate {
+		return total, true, nil
 	}
 	sum, err = total.Add(converted)
 	if err != nil {
@@ -408,22 +408,21 @@ func (s *BillService) addSubscriptionAnnual(ctx context.Context, conv *Converter
 // Bills.MonthTotals' own header comment states), but a payment is a distinct
 // entity from the bill that generated it, so its own no-rate exclusion is
 // counted here -- unless that bill was already counted by List's per-bill
-// pass, per List's own comment. excludedBillIDs is updated as it goes. Only
-// domain.ErrNoRate counts; any other conversion error is returned.
+// pass, per List's own comment. excludedBillIDs is updated as it goes. Any
+// error from Converter.TryConvert is returned.
 func (s *BillService) countExcludedPayments(ctx context.Context, conv *Converter, payments []BillPaymentRecord, excludedBillIDs map[string]bool) (int, error) {
 	count := 0
 	for _, p := range payments {
 		if excludedBillIDs[p.Payment.BillID] {
 			continue
 		}
-		_, convErr := conv.Convert(ctx, p.Payment.Amount)
-		if errors.Is(convErr, domain.ErrNoRate) {
-			count++
-			excludedBillIDs[p.Payment.BillID] = true
-			continue
-		}
+		_, hasRate, convErr := conv.TryConvert(ctx, p.Payment.Amount)
 		if convErr != nil {
 			return 0, convErr
+		}
+		if !hasRate {
+			count++
+			excludedBillIDs[p.Payment.BillID] = true
 		}
 	}
 	return count, nil
@@ -434,17 +433,17 @@ func (s *BillService) countExcludedPayments(ctx context.Context, conv *Converter
 // zero's currency, then added. A currency with no rate is simply skipped here
 // -- its exclusion was already counted, precisely, by List's two per-entity
 // passes; counting it again here (once per currency) is exactly the bug List's
-// own comment describes fixing. Any conversion error other than
-// domain.ErrNoRate is returned.
+// own comment describes fixing. Any error from Converter.TryConvert is
+// returned.
 func (s *BillService) sumConvertible(ctx context.Context, conv *Converter, byCurrency map[string]int64, zero domain.Money) (domain.Money, error) {
 	total := zero
 	for currency, amount := range byCurrency {
-		converted, convErr := conv.Convert(ctx, domain.Money{Amount: amount, Currency: currency})
-		if errors.Is(convErr, domain.ErrNoRate) {
-			continue
-		}
+		converted, hasRate, convErr := conv.TryConvert(ctx, domain.Money{Amount: amount, Currency: currency})
 		if convErr != nil {
 			return domain.Money{}, convErr
+		}
+		if !hasRate {
+			continue
 		}
 		var err error
 		total, err = total.Add(converted)
