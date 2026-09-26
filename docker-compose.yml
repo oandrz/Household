@@ -7,7 +7,11 @@ services:
       POSTGRES_USER: hearth
       POSTGRES_PASSWORD: hearth
       POSTGRES_DB: hearth
-    ports: ["5432:5432"]
+    # Every published port in this file is bound to 127.0.0.1: reachable from
+    # this machine, not from everyone on the same Wi-Fi. Mailpit here holds
+    # working dev magic links and Postgres uses the password "hearth", so
+    # 0.0.0.0 would hand both to the next table in the cafe.
+    ports: ["127.0.0.1:5432:5432"]
     volumes: ["hearth-pgdata:/var/lib/postgresql/data"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hearth -d hearth"]
@@ -106,7 +110,7 @@ services:
       # The daily Telegram digest. Both or neither; refused without Telegram.
       NUDGES_AT: ${NUDGES_AT:-}
       NUDGES_TIMEZONE: ${NUDGES_TIMEZONE:-}
-    ports: ["8080:8080"]
+    ports: ["127.0.0.1:8080:8080"]
     volumes: ["./api:/src"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -119,7 +123,7 @@ services:
     command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
     environment:
       VITE_API_PROXY_TARGET: http://api:8080
-    ports: ["5173:5173"]
+    ports: ["127.0.0.1:5173:5173"]
     volumes:
       - ./web:/app
       - hearth-node-modules:/app/node_modules
@@ -127,7 +131,7 @@ services:
 
   mailpit:
     image: axllent/mailpit:v1.30.5
-    ports: ["8025:8025", "1025:1025"]
+    ports: ["127.0.0.1:8025:8025", "127.0.0.1:1025:1025"]
 
 volumes:
   hearth-pgdata:

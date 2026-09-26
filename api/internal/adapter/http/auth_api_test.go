@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -736,5 +737,105 @@ func TestSignUpRoutesDoNotRequireCSRF(t *testing.T) {
 	rec := env.do(http.MethodPost, "/api/v1/auth/sign-up", map[string]string{"email": "nocsrf@example.test"})
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("= %d, want 202 with no CSRF token", rec.Code)
+	}
+}
+
+// TestSignInPassesThroughThePerIPLimiter proves the router's wiring for the
+// sign-in limiter, the same way TestSignUpPassesThroughThePerIPLimiter does for
+// sign-up. Every sign-in attempt runs a full argon2id derivation -- a decoy for
+// an unknown address, so the answer cannot reveal who has an account -- which
+// makes an unmetered sign-in route a way for a stranger to spend the box's CPU
+// and memory. Unknown addresses are used on purpose: they never trip the
+// per-household lockout, so the only thing that can answer 429 here is the
+// per-IP limiter.
+//
+// signInAttemptsPerIPPerWindow (router.go) is unexported, so its value is
+// repeated as a literal -- keep the two in lockstep.
+func TestSignInPassesThroughThePerIPLimiter(t *testing.T) {
+	env := newTestEnv(t)
+
+	const perIPLimit = 20
+	for i := 0; i < perIPLimit; i++ {
+		rec := env.do(http.MethodPost, "/api/v1/auth/sign-in", map[string]string{
+			"email":    fmt.Sprintf("nobody-%d@example.test", i),
+			"password": "not the password",
+		})
+		if rec.Code == http.StatusTooManyRequests {
+			t.Fatalf("attempt %d answered 429 before the limit of %d", i, perIPLimit)
+		}
+	}
+
+	rec := env.do(http.MethodPost, "/api/v1/auth/sign-in", map[string]string{
+		"email":    "nobody-last@example.test",
+		"password": "not the password",
+	})
+	assertErrorResponse(t, rec, http.StatusTooManyRequests, "RATE_LIMITED")
+}
+
+// TestMagicLinkRequestPassesThroughThePerIPLimiter: the per-address limit in
+// AuthService is bypassed by varying the address, exactly as sign-up's is, so
+// without a per-IP limit this route is an unmetered way to make the server
+// send mail. magicLinkRequestsPerIPPerHour (router.go) is repeated as a
+// literal for the same reason as above.
+func TestMagicLinkRequestPassesThroughThePerIPLimiter(t *testing.T) {
+	env := newTestEnv(t)
+
+	const perIPLimit = 10
+	for i := 0; i < perIPLimit; i++ {
+		rec := env.do(http.MethodPost, "/api/v1/auth/magic-link",
+			map[string]string{"email": fmt.Sprintf("someone-%d@example.test", i)})
+		if rec.Code == http.StatusTooManyRequests {
+			t.Fatalf("request %d answered 429 before the limit of %d", i, perIPLimit)
+		}
+	}
+
+	rec := env.do(http.MethodPost, "/api/v1/auth/magic-link",
+		map[string]string{"email": "someone-last@example.test"})
+	assertErrorResponse(t, rec, http.StatusTooManyRequests, "RATE_LIMITED")
+}
+
+// TestSignInRefusesABodyThatIsNotDeclaredJSON closes login CSRF. A page on any
+// other site can auto-submit an HTML form to /auth/sign-in with
+// enctype="text/plain", and a form field named `{"email":"…","password":"…","x":"`
+// with value `"}` produces a body that is valid JSON. SameSite=Lax stops the
+// browser *sending* our cookie on that cross-site post, not *storing* the
+// session cookie that comes back -- so without this check the visitor is
+// silently signed in to the attacker's household and types their real
+// balances into it. An HTML form cannot send application/json without a CORS
+// preflight, and this API answers no preflight, so demanding the JSON media
+// type is what makes the form unable to reach the handler at all.
+//
+// The credentials here are the owner's real ones on purpose: the request must
+// be refused for its shape, not because the password was wrong, and it must
+// leave no session cookie behind.
+func TestSignInRefusesABodyThatIsNotDeclaredJSON(t *testing.T) {
+	env := newTestEnv(t)
+
+	for _, contentType := range []string{"text/plain", "application/x-www-form-urlencoded", "multipart/form-data; boundary=x", ""} {
+		t.Run(contentType, func(t *testing.T) {
+			body := fmt.Sprintf(`{"email":%q,"password":%q,"x":"="}`, env.ownerEmail, env.ownerPassword)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/sign-in", strings.NewReader(body))
+			if contentType != "" {
+				req.Header.Set("Content-Type", contentType)
+			}
+			rec := httptest.NewRecorder()
+			env.router.ServeHTTP(rec, req)
+
+			assertErrorResponse(t, rec, http.StatusUnsupportedMediaType, "UNSUPPORTED_MEDIA_TYPE")
+			if cookies := rec.Result().Cookies(); len(cookies) != 0 {
+				t.Fatalf("refused request still set cookies: %+v", cookies)
+			}
+		})
+	}
+
+	// The same body declared as JSON -- with a charset parameter, which a
+	// browser or client library may add -- still signs in.
+	body := fmt.Sprintf(`{"email":%q,"password":%q}`, env.ownerEmail, env.ownerPassword)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/sign-in", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	rec := httptest.NewRecorder()
+	env.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("JSON sign-in status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 }

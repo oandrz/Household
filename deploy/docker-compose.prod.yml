@@ -20,6 +20,7 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    mem_limit: 256m
     ports: ["80:80", "443:443"]
     environment:
       DOMAIN: ${DOMAIN}
@@ -34,12 +35,19 @@ services:
   web:
     image: ghcr.io/oandrz/hearth-web:${IMAGE_TAG}
     restart: unless-stopped
+    mem_limit: 256m
     depends_on: [api]
     networks: [hearth]
 
   api:
     image: ghcr.io/oandrz/hearth-api:${IMAGE_TAG}
     restart: unless-stopped
+    # A ceiling, so a runaway API is killed and restarted on its own instead of
+    # the kernel choosing a victim on a 4 GB box -- which could be Postgres.
+    # Normal use is well under 100 MiB; the peak is argon2, bounded in code to
+    # one derivation per CPU at ARGON2_MEMORY_KIB each (2 x 64 MiB here). Raise
+    # this together with ARGON2_MEMORY_KIB or the CPU count, never alone.
+    mem_limit: 512m
     env_file: [.env]
     environment:
       # The peers whose X-Real-IP header the API believes about who the client
@@ -111,12 +119,17 @@ services:
   mailpit:
     image: axllent/mailpit:v1.30.5
     restart: unless-stopped
+    mem_limit: 256m
     ports: ["127.0.0.1:8025:8025"]
     networks: [hearth]
 
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
+    # Stated so the sum of every mem_limit in this file stays under the box's
+    # 4 GB with room for the OS and Docker itself (ADR 2): 512m api + 1536m
+    # postgres + 256m each for caddy, web and mailpit = 2.8 GB.
+    mem_limit: 1536m
     # Deliberately no `ports:`. The database is reachable only from this
     # network, which is what makes sslmode=disable correct.
     environment:

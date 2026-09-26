@@ -4077,8 +4077,21 @@ like it was closed by one milestone's own fix.
   and refuse before anything downstream can act on the credential as if it
   belonged here. See the enumeration-ordering half of this same fix under
   pattern 6.
-- **Findings 1 and 5 are the same shape and remain open — not this
-  milestone's work, named here so the pattern's ledger is honest.**
+- **Finding 1 fixed 2026-09-25 (security hardening, "today" list of
+  `docs/reviews/2026-09-25-security-review.md`).** The context the sign-in
+  body was missing is *who sent it*, and the cheapest proof of that the
+  browser offers is the media type: `decodeJSONBodyLimit` now answers
+  `415` unless the body is declared `application/json`, which an HTML form
+  on another site cannot send and a cross-origin script cannot send
+  without a CORS preflight this API never answers. The second route into
+  the same shape was on the frontend: `MagicLinkConsumeScreen` consumed
+  its token on page load, so a link to the *attacker's own* magic link did
+  the same job as the form. It now waits for a click and says who is
+  signed in first. Checked with a real cross-site form in a real browser
+  (`localhost` posting to `127.0.0.1`), answered 415 with no cookie.
+  **Finding 5 is still open.**
+- **Findings 1 and 5 are the same shape — as of 2026-09-20 both were open,
+  named here so the pattern's ledger is honest.**
   Finding 1 (login CSRF): a JSON-shaped body is accepted from **any**
   origin because `decodeJSONBodyLimit` checks that the body parses, never
   that the request came from a context Hearth's own frontend controls —
@@ -4692,6 +4705,48 @@ route with a missing guard has no second line of defence.
   throttle is an hour`. A middleware that writes on every request is not a
   failure any status code would show, so the negative case is the only test
   that can hold the throttle in place.
+- **Sign-in was an unmetered way to make the server hash — security
+  hardening, 2026-09-25.** `POST /auth/sign-in` had no per-IP limit, and
+  every attempt runs a 64 MiB argon2id derivation, including the decoy for
+  an unknown address that keeps the answer from revealing who has an
+  account. About 60 parallel requests would have used up the 4 GB box.
+  Nothing showed it: no test, no log, no error — the cost is invisible until
+  someone pays it on purpose. Two reviewers found it independently; the
+  first review had found it too, six days earlier, and it was not fixed
+  (see "Tooling and infrastructure"). Fixed twice over: a per-IP limit on
+  sign-in and on the magic-link request, and a cap of one derivation per CPU
+  inside `crypto.Argon2Hasher`. The cap **waits** rather than refusing,
+  because `Verify` answers a bool and "busy" would have been recorded as a
+  wrong password and locked a household out. **What would have caught it
+  sooner:** for every route reachable without a session, write down what
+  one request costs the server and what stops a loop of them. Sign-up had
+  that sentence in `middleware_ratelimit.go` since the day it shipped;
+  sign-in, which is more expensive, never did.
+- **Adding the limiter broke tests that were not about limits.** The
+  role-matrix tests sign in dozens of times per environment through
+  `env.signIn`, all from `httptest`'s one fixed address, and started
+  answering 429 halfway through. The fix was to give the **helper** a fresh
+  address per call, not to raise the limit until the tests fit under it — a
+  limit sized by the test suite is a limit sized by nobody. The limiter's
+  own wiring test keeps the single fixed address on purpose, so the real
+  limit is still what it checks.
+- **A test that reads `router.go` as text constrains how routes may be
+  written.** `cmd/hearthctl/routes_test.go` finds routes with the regexp
+  `\.(Get|Post|…)\("…"`, so `auth.With(limit).\n    Post("/sign-in", …)`
+  — the same registration, split over two lines by an ordinary refactor —
+  made it report `POST /auth/sign-in` as missing from the router. The fix
+  kept `.Post("/sign-in"` on one line and says why at that spot in
+  `router.go`. Same lesson as the `hearthctl` entry in "Tooling and
+  infrastructure", part *(b)*: a test that parses source knows the shape of
+  that source, and that shape is now a rule someone has to be told.
+- **Every JSON body now has to say it is JSON, and a bare empty body is the
+  one exception.** The login-CSRF gate (pattern 25) first broke two dozen
+  role-matrix subtests that post *no* body to prove the guard passes and
+  the handler answers `400 INVALID_BODY`. An empty body with no
+  `Content-Type` has nothing in it to forge, so it still reaches the decoder
+  and still gets 400; everything else undeclared gets 415. The first version
+  refused it too, and would have turned a correct 400 into a misleading 415
+  across every route.
 
 ### Frontend
 
@@ -6113,6 +6168,42 @@ route with a missing guard has no second line of defence.
   the shape a fix here would need. Grepping `useConfirmAction.ts`'s own
   callers for `isConfirming()` wrapping an `errorFor()` read would have
   caught this the same day *(j)* was fixed, not two weeks later.
+- **A security review nobody filed is a review nobody acted on
+  (2026-09-25).** `docs/reviews/2026-09-19-security-review.md` found 18
+  issues, three rated High, each with a first fix of a few lines. It was
+  never committed and none of its findings became an issue. Six days and
+  four merged pull requests later, a fresh review found **17 of the 18
+  still open** — only the one that happened to sit in the path of the
+  milestone being built (Telegram group chats) had been fixed. Nothing was
+  wrong with the review; it was simply not anywhere the next piece of work
+  would trip over it. A finding belongs in the tracker (`gh` issues, see
+  `docs/agents/issue-tracker.md`) the day it is written, or it is a
+  document, not a to-do. **But mind the order on a public repository:** a
+  review of unfixed issues is an attack plan, so file the issues after the
+  quick fixes land, or keep them private.
+- **The Go toolchain drifted six patch releases with nothing noticing
+  (2026-09-25).** `api/Dockerfile` pinned `golang:1.25.7-alpine`, correctly
+  — a floating tag breaks builds (pattern 7) — but a pin with no one
+  watching it just ages. `govulncheck` against 1.25.7 found 16 reachable
+  standard-library vulnerabilities in `cmd/api`; against 1.25.13 it found
+  none. Two traps when scanning: `go run …/govulncheck@latest` needs a
+  newer Go than the module and **silently switches toolchain**, scanning
+  that newer standard library instead of the one production ships — set
+  `GOTOOLCHAIN` to the Dockerfile's version (`@v1.1.4` still runs on 1.25).
+  And the Go version lives in four places — both `FROM` lines, `go.mod`,
+  the two `GOTOOLCHAIN=` lines in the `Makefile`, and `CLAUDE.md` — which
+  must move together. **What would catch the next one:** `govulncheck` in
+  CI, and Dependabot on the `docker` ecosystem, so a pin is watched rather
+  than only held.
+- **nginx drops every inherited `add_header` from a `location` that
+  declares one of its own (2026-09-25).** The security headers went in at
+  `server` level in `web/nginx.conf`, and the obvious next edit — "add one
+  debug header to `/api/`" — would silently strip HSTS and CSP from every
+  API response, with no warning from `nginx -t`. The rule is now pinned by
+  `web/src/nginxSecurityHeaders.test.ts`, mutation-checked by adding exactly
+  that header to `/api/`. The same test also fails if `index.html` gains an
+  inline `<script>`, which the new CSP would block in production and
+  nowhere else, since `vite` dev does not go through nginx.
 
 ### Provisioning the read-only role on the box (2026-09-05)
 

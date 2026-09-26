@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
+	"runtime"
 	"strings"
 
 	"golang.org/x/crypto/argon2"
@@ -18,13 +19,49 @@ type Argon2Hasher struct {
 	threads uint8
 	keyLen  uint32
 	saltLen int
+
+	// slots bounds how many derivations run at once. Each one holds
+	// `memory` KiB (64 MiB by default) for its whole duration, and sign-in
+	// runs one for every attempt -- including a decoy for unknown addresses,
+	// which must stay so an attempt cannot tell who has an account. Unbounded,
+	// ~60 parallel sign-ins exhaust a 4 GB box and the kernel kills the API
+	// or Postgres. Bounded, the same flood only queues: goroutines waiting on
+	// this channel cost kilobytes, not megabytes.
+	//
+	// Callers wait rather than being refused, on purpose. Verify's contract
+	// is a bool, so "busy" would have to be reported as "wrong password" --
+	// which would count as a failed attempt and lock a real household out.
+	// The per-IP limiter in front of sign-in is what refuses a flood; this is
+	// what caps the memory whatever gets past it.
+	slots chan struct{}
+	// idKey is argon2.IDKey, held as a field only so a test can observe how
+	// many derivations are running at once.
+	idKey func(password, salt []byte, time, memory uint32, threads uint8, keyLen uint32) []byte
 }
 
 // NewArgon2Hasher takes its cost parameters from configuration so they can be
 // raised without a code change, as the spec requires. Callers pass
 // cfg.Argon2Time, cfg.Argon2MemoryKiB and cfg.Argon2Threads.
 func NewArgon2Hasher(time uint32, memoryKiB uint32, threads uint8) *Argon2Hasher {
-	return &Argon2Hasher{time: time, memory: memoryKiB, threads: threads, keyLen: 32, saltLen: 16}
+	return &Argon2Hasher{
+		time: time, memory: memoryKiB, threads: threads, keyLen: 32, saltLen: 16,
+		slots: make(chan struct{}, maxConcurrentDerivations()),
+		idKey: argon2.IDKey,
+	}
+}
+
+// maxConcurrentDerivations is one per CPU, with a floor of two. More than one
+// per CPU adds memory without adding throughput -- argon2 is CPU-bound -- so
+// on the 2-vCPU production box the ceiling is 2 x 64 MiB.
+func maxConcurrentDerivations() int {
+	return max(runtime.NumCPU(), 2)
+}
+
+// derive runs one argon2id derivation inside a slot; see slots.
+func (h *Argon2Hasher) derive(plain string, salt []byte, time, memory uint32, threads uint8) []byte {
+	h.slots <- struct{}{}
+	defer func() { <-h.slots }()
+	return h.idKey([]byte(plain), salt, time, memory, threads, h.keyLen)
 }
 
 func (h *Argon2Hasher) Hash(plain string) (string, error) {
@@ -32,7 +69,7 @@ func (h *Argon2Hasher) Hash(plain string) (string, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return "", fmt.Errorf("read salt: %w", err)
 	}
-	key := argon2.IDKey([]byte(plain), salt, h.time, h.memory, h.threads, h.keyLen)
+	key := h.derive(plain, salt, h.time, h.memory, h.threads)
 
 	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
 		argon2.Version, h.memory, h.time, h.threads,
@@ -95,6 +132,6 @@ func (h *Argon2Hasher) Verify(plain, encoded string) bool {
 		return false
 	}
 
-	got := argon2.IDKey([]byte(plain), salt, time, memory, threads, h.keyLen)
+	got := h.derive(plain, salt, time, memory, threads)
 	return subtle.ConstantTimeCompare(got, want) == 1
 }

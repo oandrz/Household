@@ -5,7 +5,7 @@
 // consume request twice (StrictMode double-invokes effects) would turn a
 // successful sign-in into a visible failure on the second call.
 import { StrictMode } from "react";
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Me } from "./schemas";
 import { stubFetchRoutes } from "../../test/fetchStub";
@@ -43,9 +43,45 @@ function meFixture(): Me {
   };
 }
 
+const signedOut = {
+  "GET /api/v1/auth/me": {
+    status: 401,
+    body: { error: { code: "UNAUTHENTICATED", message: "Sign in to continue." } },
+  },
+};
+
+function consumeCalls(fetchMock: ReturnType<typeof stubFetchRoutes>) {
+  return fetchMock.mock.calls.filter(
+    ([input]) => String(input) === "/api/v1/auth/magic-link/consume",
+  );
+}
+
 describe("MagicLinkConsumeScreen", () => {
-  it("consumes the token exactly once even under StrictMode's double-invoke", async () => {
+  // Login CSRF: anyone can mail themselves a magic link and send the URL to
+  // someone else. If opening it signed the visitor in by itself, the victim
+  // would land in the attacker's household and type their real balances
+  // into it. Mail scanners that pre-open links would also spend the single-
+  // use token before the person ever clicked. So opening the link must do
+  // nothing until the person asks.
+  it("does not consume the token until the person clicks to continue", async () => {
     const fetchMock = stubFetchRoutes({
+      ...signedOut,
+      "POST /api/v1/auth/magic-link/consume": { status: 200, body: meFixture() },
+    });
+
+    renderWithRouter(<MagicLinkConsumeScreen token="tok123" />);
+
+    expect(
+      await screen.findByRole("button", { name: /continue signing in/i }),
+    ).toBeInTheDocument();
+    // Let any effect that would fire on mount run before asserting silence.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(consumeCalls(fetchMock)).toHaveLength(0);
+  });
+
+  it("consumes the token exactly once when the person clicks, even under StrictMode", async () => {
+    const fetchMock = stubFetchRoutes({
+      ...signedOut,
       "POST /api/v1/auth/magic-link/consume": { status: 200, body: meFixture() },
     });
 
@@ -55,16 +91,29 @@ describe("MagicLinkConsumeScreen", () => {
       </StrictMode>,
     );
 
-    await waitFor(() => {
-      const calls = fetchMock.mock.calls.filter(
-        ([input]) => String(input) === "/api/v1/auth/magic-link/consume",
-      );
-      expect(calls).toHaveLength(1);
+    const button = await screen.findByRole("button", { name: /continue signing in/i });
+    fireEvent.click(button);
+    fireEvent.click(button);
+
+    await waitFor(() => expect(consumeCalls(fetchMock)).toHaveLength(1));
+  });
+
+  it("warns when someone is already signed in on this device", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      "POST /api/v1/auth/magic-link/consume": { status: 200, body: meFixture() },
     });
+
+    renderWithRouter(<MagicLinkConsumeScreen token="tok123" />);
+
+    const warning = await screen.findByRole("status");
+    expect(warning).toHaveTextContent(/signed in as andreas/i);
+    expect(warning).toHaveTextContent(/sign them out/i);
   });
 
   it("shows the server's error message when the token is invalid or expired", async () => {
     stubFetchRoutes({
+      ...signedOut,
       "POST /api/v1/auth/magic-link/consume": {
         status: 410,
         body: {
@@ -74,6 +123,7 @@ describe("MagicLinkConsumeScreen", () => {
     });
 
     renderWithRouter(<MagicLinkConsumeScreen token="tok123" />);
+    fireEvent.click(await screen.findByRole("button", { name: /continue signing in/i }));
 
     expect(await screen.findByText("This link has expired.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /back to sign in/i })).toBeInTheDocument();
@@ -102,6 +152,7 @@ describe("MagicLinkConsumeScreen", () => {
   // tried."
   it("navigates to / once the link is consumed successfully", async () => {
     stubFetchRoutes({
+      ...signedOut,
       "POST /api/v1/auth/magic-link/consume": { status: 200, body: meFixture() },
     });
 
@@ -111,6 +162,7 @@ describe("MagicLinkConsumeScreen", () => {
       </StrictMode>,
       "/sign-in/magic",
     );
+    fireEvent.click(await screen.findByRole("button", { name: /continue signing in/i }));
 
     await waitFor(() => {
       expect(router.state.location.pathname).toBe("/");

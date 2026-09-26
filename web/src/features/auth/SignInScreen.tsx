@@ -366,14 +366,17 @@ export function SignInScreen() {
                   // No "noopener" third argument here: per spec,
                   // window.open(url, target, "noopener") returns null, which
                   // would leave nothing to navigate once the response
-                  // arrives. Dropping it is fine -- the URL this tab is
-                  // later pointed at is first-party and minted by this
-                  // backend, not attacker-controlled, so the opener-hijack
-                  // risk "noopener" guards against does not apply here.
+                  // arrives. So the opener handle is cut by hand instead,
+                  // before the tab leaves this origin. It must be: the URL
+                  // is minted by our backend but points at t.me, which is
+                  // not ours, and a page holding window.opener can replace
+                  // this Hearth tab with a look-alike sign-in page (reverse
+                  // tabnabbing).
                   const popup = window.open("", "_blank");
                   startTelegram.mutate(undefined, {
                     onSuccess: (data) => {
                       if (popup) {
+                        popup.opener = null;
                         popup.location.href = data.url;
                         return;
                       }

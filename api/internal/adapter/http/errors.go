@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"mime"
 	"net/http"
 
 	"github.com/go-chi/chi/v5/middleware"
@@ -67,6 +68,15 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, dest any) bool {
 // Every other route keeps using the tighter default via decodeJSONBody
 // above.
 func decodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, dest any, maxBytes int64) bool {
+	// An empty body with no Content-Type is let through to the decoder, which
+	// answers 400 INVALID_BODY as it always has: there is nothing in it to
+	// forge, so it is not the login-CSRF shape isJSONMediaType exists for.
+	emptyAndUndeclared := r.ContentLength == 0 && r.Header.Get("Content-Type") == ""
+	if !emptyAndUndeclared && !isJSONMediaType(r.Header.Get("Content-Type")) {
+		WriteError(w, http.StatusUnsupportedMediaType, "UNSUPPORTED_MEDIA_TYPE",
+			"The request body must be sent as application/json.", nil)
+		return false
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 	if err := json.NewDecoder(r.Body).Decode(dest); err != nil {
 		var tooLarge *http.MaxBytesError
@@ -79,6 +89,25 @@ func decodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, dest any, maxBy
 		return false
 	}
 	return true
+}
+
+// isJSONMediaType is the login-CSRF guard, and it is a security check, not
+// tidiness. An HTML form on any other site can post text/plain whose body
+// happens to be valid JSON, and the decoder alone would accept it. That
+// matters most on the public routes that hand out a session cookie -- sign-in,
+// magic-link consume, sign-up complete, invite accept -- because they cannot
+// sit behind requireCSRF (no session exists yet) and SameSite=Lax does not stop
+// a browser storing a cookie from a cross-site form post. So a hostile page
+// could sign its visitor in to the attacker's household.
+//
+// A form cannot send application/json; a script can only do so cross-origin
+// after a CORS preflight, which this API never answers. Requiring the media
+// type therefore closes the hole for every route at once, including routes
+// added later. Parameters such as charset are allowed. The web client
+// (apiFetch) and hearthctl already send this header on every body.
+func isJSONMediaType(header string) bool {
+	mediaType, _, err := mime.ParseMediaType(header)
+	return err == nil && mediaType == "application/json"
 }
 
 // telegramChatTakenMessage and telegramAlreadyLinkedMessage are the two

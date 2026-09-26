@@ -687,7 +687,11 @@ describe("SignInScreen", () => {
   // call happened *before* anything about the request has settled, not just
   // that it eventually happened somewhere in the sequence.
   it("opens a blank tab synchronously in the click, then points it at the returned deep link once the request resolves", async () => {
-    const fakePopup = { location: { href: "" }, close: vi.fn() };
+    const fakePopup: { location: { href: string }; close: () => void; opener: unknown } = {
+      location: { href: "" },
+      close: vi.fn(),
+      opener: window,
+    };
     const open = vi.fn(() => fakePopup as unknown as Window);
     vi.stubGlobal("open", open);
 
@@ -744,6 +748,12 @@ describe("SignInScreen", () => {
       "https://t.me/HearthBot?start=abc123",
     );
     expect(open).toHaveBeenCalledTimes(1);
+    // Reverse tabnabbing: the tab ends up on t.me, which is not ours. With
+    // window.opener still set, that page (or anything it redirects to) could
+    // swap this Hearth tab for a look-alike sign-in page. "noopener" cannot
+    // be passed to open() here (see the component's comment), so the handle
+    // is cut by hand before the tab leaves this origin.
+    expect(fakePopup.opener).toBeNull();
   });
 
   // Fix round 1, Item 1: the reviewer specifically asked for this branch --

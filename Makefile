@@ -98,10 +98,10 @@ lint-web: ## Lint the frontend
 # findings are the SQL file's problem, not this report's. deadcode exits 0
 # either way, hence the explicit check on each tool's filtered output.
 lint-dead: ## Report unreachable Go code, staticcheck findings, and unused frontend exports and packages
-	@cd api && out=$$(GOTOOLCHAIN=go1.25.7 go run golang.org/x/tools/cmd/deadcode@v0.36.0 -test ./... 2>&1 | grep -v '/sqlcgen/' || true); \
+	@cd api && out=$$(GOTOOLCHAIN=go1.25.13 go run golang.org/x/tools/cmd/deadcode@v0.36.0 -test ./... 2>&1 | grep -v '/sqlcgen/' || true); \
 	 if [ -n "$$out" ]; then echo "$$out"; echo "deadcode: unreachable code found"; exit 1; fi; \
 	 echo "deadcode passed"
-	@cd api && out=$$(GOTOOLCHAIN=go1.25.7 go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./... 2>&1 | grep -v '/sqlcgen/' || true); \
+	@cd api && out=$$(GOTOOLCHAIN=go1.25.13 go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./... 2>&1 | grep -v '/sqlcgen/' || true); \
 	 if [ -n "$$out" ]; then echo "$$out"; echo "staticcheck: findings"; exit 1; fi; \
 	 echo "staticcheck passed"
 	cd web && npx --yes knip@5.88.1 --no-progress

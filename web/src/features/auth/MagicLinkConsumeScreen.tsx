@@ -4,35 +4,56 @@
 // magic-link coverage stops at the "sent" panel -- so the copy below is
 // authored, in the sign-in screen's established voice, not transcribed.
 //
-// The token is single-use (ConsumeMagicLink), so this must fire the consume
-// request exactly once even under StrictMode's double-invoke of effects --
-// a second call for the same token would fail even though the first one
-// already signed the user in, turning a successful sign-in into a visible
-// error.
+// Opening the link does nothing until the person clicks "Continue signing
+// in". This is a security decision, not a UX flourish -- do not "improve" it
+// back into consume-on-mount:
+//
+//   - Login CSRF. Anyone can request a magic link for their *own* account and
+//     send the URL to someone else. If opening it signed the visitor in by
+//     itself, the victim would be silently switched into the attacker's
+//     household and type their real balances into it. The click, plus the
+//     "Signed in as ..." warning below, is what gives them the chance to
+//     notice.
+//   - Link scanners. Mail filters that pre-open links in a headless browser
+//     would otherwise spend the single-use token before the person ever
+//     clicked it.
+//
+// The token is single-use (ConsumeMagicLink), so the click must fire the
+// consume request exactly once: the button is disabled while the request is
+// in flight and firedRef guards a double click that lands before the
+// disabled state renders.
 //
 // Both outcomes (sign-in success -> navigate; failure -> show the message)
 // are handled inside useConsumeMagicLink itself, not here -- see that
-// hook's comment in useAuth.ts for why. This screen only fires the mutation
-// once and renders whichever of "Signing you in…" or the error state the
-// hook reports back.
-import { useEffect, useRef } from "react";
-import { useConsumeMagicLink } from "./useAuth";
+// hook's comment in useAuth.ts for why.
+import { useRef } from "react";
+import { useConsumeMagicLink, useMe } from "./useAuth";
+
+// The same warning, in the same words, as InviteScreen's: a shared device
+// with someone already signed in is exactly the situation login CSRF relies
+// on, so it is said out loud before the click rather than discovered after.
+function ExistingSessionWarning({ displayName }: { displayName: string }) {
+  return (
+    <p
+      role="status"
+      className="mb-4 rounded-lg border border-hairline bg-canvas px-3.5 py-3 text-left text-[12.5px] leading-relaxed text-label"
+    >
+      Signed in as <strong className="font-semibold">{displayName}</strong>.
+      Continuing will sign them out and sign you in with this link instead.
+    </p>
+  );
+}
 
 export function MagicLinkConsumeScreen({ token }: { token: string }) {
-  const { mutate, errorMessage } = useConsumeMagicLink();
+  const { mutate, isPending, errorMessage } = useConsumeMagicLink();
+  const me = useMe();
   const firedRef = useRef(false);
 
-  useEffect(() => {
+  function continueSigningIn() {
     if (firedRef.current) return;
     firedRef.current = true;
     mutate({ token });
-    // Deliberately fires once for this screen's lifetime, keyed on nothing
-    // but mount: token is a prop of a screen the router only ever renders
-    // once per emailed link, and re-running this for a changed `token`
-    // isn't a case that occurs (the token comes from the URL that reached
-    // this screen). mutate is stable.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }
 
   return (
     <main className="min-h-dvh grid place-items-center bg-canvas p-6 font-sans text-ink">
@@ -72,9 +93,25 @@ export function MagicLinkConsumeScreen({ token }: { token: string }) {
               </a>
             </>
           ) : (
-            <p className="text-[13px] leading-relaxed text-muted">
-              Signing you in…
-            </p>
+            <>
+              {me.isSuccess && (
+                <ExistingSessionWarning displayName={me.data.user.displayName} />
+              )}
+              <h1 className="mb-1 mt-0.5 font-serif text-[27px] font-medium tracking-[-0.015em]">
+                Sign in to Hearth
+              </h1>
+              <p className="mb-5 text-[13px] leading-relaxed text-muted">
+                You opened a sign-in link. Continue only if you asked for it.
+              </p>
+              <button
+                type="button"
+                onClick={continueSigningIn}
+                disabled={isPending}
+                className="w-full rounded-[9px] bg-accent py-3 text-center text-[13.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isPending ? "Signing you in…" : "Continue signing in"}
+              </button>
+            </>
           )}
         </div>
       </div>
