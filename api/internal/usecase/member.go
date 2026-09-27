@@ -46,34 +46,63 @@ func (s *MemberService) List(ctx context.Context, householdID string) ([]MemberV
 	return s.d.Members.List(ctx, householdID)
 }
 
-// Update changes a member's role and/or capabilities.
-// domain.ValidateMembershipChange weighs the change against the whole
-// household -- the last-owner rule is not a property of one membership in
-// isolation -- and it runs INSIDE the write's own transaction, on the
-// memberships read under the household's lock, not as a separate read before
-// it: two owners demoting each other are each legal alone and illegal
-// together, and checking then writing lets both through. The rule stays here;
-// UpdateWithCheck supplies the lock.
+// MembershipPatch is a change to one membership where a nil field means
+// "keep what the membership has". Both are pointers for the same reason the
+// HTTP request's fields are: a zero value cannot tell "left out" apart from
+// "set to empty".
+type MembershipPatch struct {
+	Role         *domain.Role
+	Capabilities *domain.Capabilities
+}
+
+// Update applies patch to a member's role and/or capabilities and returns the
+// membership as written.
+//
+// Everything that reads the membership's current state happens INSIDE the
+// write's own transaction, on the memberships read under the household's
+// lock -- never from a read made before it:
+//
+//   - Omitted fields are filled in from that locked read. Filled in from an
+//     earlier read, a capabilities-only change can carry a stale role into
+//     the write and silently undo a promotion that committed in between.
+//   - domain.ValidateMembershipChange weighs the resolved change against the
+//     whole household. The last-owner rule is about the whole list, and two
+//     owners demoting each other are each legal alone and illegal together.
+//
+// The rules stay here; UpdateWithCheck supplies the lock. Role and
+// capabilities are validated together, so a role-only patch is checked
+// against the member's existing capabilities and a capabilities-only patch
+// against their existing role.
 //
 // A successful change revokes the member's sessions: a capability or role
 // change that stayed effective in an already-open tab would defeat the point
-// of granting or revoking it.
-func (s *MemberService) Update(ctx context.Context, householdID, membershipID string, role domain.Role, caps domain.Capabilities) error {
-	// The check records whose credentials to revoke from the same locked read
-	// it validated, so the revocation below targets exactly the member the
-	// change was applied to.
-	var targetUserID string
-	err := s.d.Members.UpdateWithCheck(ctx, householdID, membershipID, role, caps,
-		func(current []domain.Membership) error {
-			if err := domain.ValidateMembershipChange(current, membershipID, role, caps); err != nil {
-				return err
+// of granting or revoking it. If only that revocation fails, the written
+// membership is still returned alongside ErrSessionRevocationFailed.
+func (s *MemberService) Update(ctx context.Context, householdID, membershipID string, patch MembershipPatch) (domain.Membership, error) {
+	// written is set by the callback from the same locked read it validated,
+	// so the response and the revocation below describe exactly the change
+	// that was applied.
+	var written domain.Membership
+	err := s.d.Members.UpdateWithCheck(ctx, householdID, membershipID,
+		func(current []domain.Membership) (domain.Role, domain.Capabilities, error) {
+			target, err := membershipIn(current, membershipID)
+			if err != nil {
+				return "", nil, err
 			}
-			userID, err := userIDOf(current, membershipID)
-			targetUserID = userID
-			return err
+			if patch.Role != nil {
+				target.Role = *patch.Role
+			}
+			if patch.Capabilities != nil {
+				target.Capabilities = *patch.Capabilities
+			}
+			if err := domain.ValidateMembershipChange(current, membershipID, target.Role, target.Capabilities); err != nil {
+				return "", nil, err
+			}
+			written = target
+			return target.Role, target.Capabilities, nil
 		})
 	if err != nil {
-		return err
+		return domain.Membership{}, err
 	}
 
 	// The mutation above is already committed by this point. If the
@@ -85,12 +114,12 @@ func (s *MemberService) Update(ctx context.Context, householdID, membershipID st
 	// reverts itself, which is worse than either outcome alone and would
 	// need its own failure handling anyway). See auth.go for the same style
 	// of documented, deliberate asymmetry.
-	if err := s.revokeCredentials(ctx, targetUserID); err != nil {
+	if err := s.revokeCredentials(ctx, written.UserID); err != nil {
 		slog.Error("failed to revoke credentials after a membership update",
 			"error", err, "household_id", householdID, "membership_id", membershipID)
-		return fmt.Errorf("%w: %v", ErrSessionRevocationFailed, err)
+		return written, fmt.Errorf("%w: %v", ErrSessionRevocationFailed, err)
 	}
-	return nil
+	return written, nil
 }
 
 // revokeCredentials is the one place "this person's access is reset" is
@@ -120,8 +149,8 @@ func (s *MemberService) Remove(ctx context.Context, householdID, membershipID st
 			if err := domain.ValidateMembershipRemoval(current, membershipID); err != nil {
 				return err
 			}
-			userID, err := userIDOf(current, membershipID)
-			targetUserID = userID
+			target, err := membershipIn(current, membershipID)
+			targetUserID = target.UserID
 			return err
 		})
 	if err != nil {
@@ -142,18 +171,17 @@ func (s *MemberService) Remove(ctx context.Context, householdID, membershipID st
 	return nil
 }
 
-// userIDOf finds the user behind a membership ID in the list the check was
+// membershipIn finds a membership by ID in the list a locked callback was
 // handed. It returns domain.ErrNotFound for a miss, matching what
-// ValidateMembershipChange/ValidateMembershipRemoval already return for the
-// same target -- by the time it is called, validation has just confirmed the
-// ID exists in the same list, so a miss here would be the identical case.
-func userIDOf(memberships []domain.Membership, membershipID string) (string, error) {
+// ValidateMembershipChange/ValidateMembershipRemoval return for the same
+// target, so an unknown ID reads the same whichever of them notices first.
+func membershipIn(memberships []domain.Membership, membershipID string) (domain.Membership, error) {
 	for _, m := range memberships {
 		if m.ID == membershipID {
-			return m.UserID, nil
+			return m, nil
 		}
 	}
-	return "", domain.ErrNotFound
+	return domain.Membership{}, domain.ErrNotFound
 }
 
 // membershipsFrom projects a member list down to the plain memberships the

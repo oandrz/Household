@@ -81,11 +81,11 @@ func (r *MembershipRepo) Create(ctx context.Context, m domain.Membership) (domai
 // across the write.
 //
 // It locks the household row, lists the household's memberships inside the
-// same transaction, and hands them to check -- the caller's own rule, which is
-// domain.ValidateMembershipChange. Only if check accepts does the update
-// happen, and the lock is not released until the transaction commits. A
-// second writer blocks on the lock and therefore checks the FIRST one's
-// result, not a stale copy of it.
+// same transaction, and hands them to decide -- the caller's own code, which
+// resolves the PATCH and runs domain.ValidateMembershipChange. Only if decide
+// accepts does the update happen, and the lock is not released until the
+// transaction commits. A second writer blocks on the lock and therefore
+// decides from the FIRST one's result, not a stale copy of it.
 //
 // Without this, two owners demoting each other at the same moment each see
 // "another owner remains", both commit, and the household is left with no
@@ -94,34 +94,22 @@ func (r *MembershipRepo) Create(ctx context.Context, m domain.Membership) (domai
 func (r *MembershipRepo) UpdateWithCheck(
 	ctx context.Context,
 	householdID, membershipID string,
-	role domain.Role, caps domain.Capabilities,
-	check func([]domain.Membership) error,
+	decide func([]domain.Membership) (domain.Role, domain.Capabilities, error),
 ) error {
-	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
-		q := r.q.WithTx(tx)
-		current, err := lockAndListMembershipsTx(ctx, q, householdID)
-		if err != nil {
-			return err
-		}
-		if err := check(current); err != nil {
-			return err
-		}
-		n, err := q.UpdateMembership(ctx, sqlcgen.UpdateMembershipParams{
-			HouseholdID:  uuid(householdID),
-			ID:           uuid(membershipID),
-			Role:         string(role),
-			Capabilities: caps.Strings(),
+	return r.writeUnderHouseholdLock(ctx, householdID, "update membership",
+		func(q *sqlcgen.Queries, current []domain.Membership) (int64, error) {
+			role, caps, err := decide(current)
+			if err != nil {
+				return 0, err
+			}
+			n, err := q.UpdateMembership(ctx, sqlcgen.UpdateMembershipParams{
+				HouseholdID:  uuid(householdID),
+				ID:           uuid(membershipID),
+				Role:         string(role),
+				Capabilities: caps.Strings(),
+			})
+			return n, translate(err, "update membership")
 		})
-		if err != nil {
-			return translate(err, "update membership")
-		}
-		// An UPDATE that matched nothing is not success: the membership is
-		// not this household's, and the caller must be told so.
-		if n == 0 {
-			return domain.ErrNotFound
-		}
-		return nil
-	})
 }
 
 // DeleteWithCheck is UpdateWithCheck's guarantee for removing a membership.
@@ -131,27 +119,56 @@ func (r *MembershipRepo) DeleteWithCheck(
 	householdID, membershipID string,
 	check func([]domain.Membership) error,
 ) error {
-	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+	return r.writeUnderHouseholdLock(ctx, householdID, "delete membership",
+		func(q *sqlcgen.Queries, current []domain.Membership) (int64, error) {
+			if err := check(current); err != nil {
+				return 0, err
+			}
+			n, err := q.DeleteMembership(ctx, sqlcgen.DeleteMembershipParams{
+				HouseholdID: uuid(householdID),
+				ID:          uuid(membershipID),
+			})
+			return n, translate(err, "delete membership")
+		})
+}
+
+// writeUnderHouseholdLock is the one shape both guarded writes share: begin a
+// transaction, take the household's membership lock, list the memberships,
+// then hand them to write, which runs the caller's check and the one
+// statement. A write that touched no row is domain.ErrNotFound: the
+// membership is not this household's, and the caller must be told so rather
+// than see a silent success.
+//
+// Errors are handled in two groups on purpose. An error from inside the
+// transaction is already a domain error -- the caller's check's own error, or
+// one translate has produced -- and comes back unchanged, which the port
+// promises. Anything else pgx.BeginFunc returns is BEGIN or COMMIT itself
+// failing, a raw driver error that must be translated here so no pgx type
+// leaves the adapter.
+func (r *MembershipRepo) writeUnderHouseholdLock(
+	ctx context.Context,
+	householdID, op string,
+	write func(q *sqlcgen.Queries, current []domain.Membership) (rowsAffected int64, err error),
+) error {
+	var inner error
+	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		q := r.q.WithTx(tx)
 		current, err := lockAndListMembershipsTx(ctx, q, householdID)
 		if err != nil {
+			inner = err
 			return err
 		}
-		if err := check(current); err != nil {
-			return err
+		n, err := write(q, current)
+		if err == nil && n == 0 {
+			err = domain.ErrNotFound
 		}
-		n, err := q.DeleteMembership(ctx, sqlcgen.DeleteMembershipParams{
-			HouseholdID: uuid(householdID),
-			ID:          uuid(membershipID),
-		})
-		if err != nil {
-			return translate(err, "delete membership")
-		}
-		if n == 0 {
-			return domain.ErrNotFound
-		}
-		return nil
+		inner = err
+		return err
 	})
+	if inner != nil {
+		return inner
+	}
+	return translate(err, op)
 }
 
 // lockAndListMembershipsTx is the shared first half of the two guarded

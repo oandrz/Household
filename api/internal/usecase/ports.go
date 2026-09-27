@@ -132,26 +132,42 @@ type MembershipRepository interface {
 	Create(ctx context.Context, m domain.Membership) (domain.Membership, error)
 	// UpdateWithCheck changes one membership's role and capabilities with a
 	// household-wide rule held ACROSS the write. The implementation locks the
-	// household, lists its memberships in the same transaction, calls check
-	// with them, and writes only if check returns nil -- so a second writer
-	// blocks and then checks the first one's result rather than a stale copy.
-	// A check error is returned unchanged and nothing is written.
+	// household, lists its memberships in the same transaction, and calls
+	// decide with them. decide returns the role and capabilities to write,
+	// or an error; only if it returns nil error does the write happen, and an
+	// error is returned unchanged with nothing written. A second writer
+	// blocks on the lock and then decides from the first one's result
+	// rather than a stale copy.
+	//
+	// decide is where the caller resolves what to write, not only whether:
+	// a PATCH that omits a field means "keep what the membership has NOW",
+	// and "now" must be read under the lock. Filling omitted fields in from
+	// an earlier read lets a capabilities-only change write a stale role back
+	// over a role change that committed in between.
 	//
 	// Listing, checking and writing as three separate calls is NOT
 	// equivalent: two owners demoting each other at the same moment would
 	// each see "another owner remains", both commit, and leave the household
-	// with no owner. check is the caller's own rule
+	// with no owner. The rule is the caller's own
 	// (domain.ValidateMembershipChange); this port owns the transaction and
 	// the lock, never the rule.
+	//
+	// decide MUST BE PURE: no I/O and no repository calls. It runs inside an
+	// open transaction that holds the household lock and one pool
+	// connection. A decide that asks the pool for a second connection can
+	// deadlock the pool under load, the way VisionRepo.Save once did (see
+	// the comment in adapter/postgres/agreement_write_repo.go).
 	//
 	// There is deliberately no unguarded Update: every role change can
 	// affect the last-owner rule, so there is no safe way to skip the check.
 	// A membership that is not this household's is domain.ErrNotFound.
-	UpdateWithCheck(ctx context.Context, householdID, membershipID string, role domain.Role, caps domain.Capabilities, check func(current []domain.Membership) error) error
+	UpdateWithCheck(ctx context.Context, householdID, membershipID string, decide func(current []domain.Membership) (domain.Role, domain.Capabilities, error)) error
 	// DeleteWithCheck is the same guarantee for removing a membership. check
 	// receives the memberships as they are BEFORE the removal
-	// (domain.ValidateMembershipRemoval works out what would remain), and the
-	// same "no unguarded Delete" and domain.ErrNotFound rules apply.
+	// (domain.ValidateMembershipRemoval works out what would remain). The
+	// same rules apply: check must be pure (no I/O, no repository calls),
+	// there is no unguarded Delete, and a membership that is not this
+	// household's is domain.ErrNotFound.
 	DeleteWithCheck(ctx context.Context, householdID, membershipID string, check func(current []domain.Membership) error) error
 }
 

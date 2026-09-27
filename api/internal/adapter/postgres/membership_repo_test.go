@@ -78,7 +78,7 @@ func TestMembershipRepoRoundTrip(t *testing.T) {
 		t.Fatalf("ByUser returned a different membership: %+v", byUser)
 	}
 
-	if err := members.UpdateWithCheck(ctx, h.ID, created.ID, domain.RoleLimited, domain.Capabilities{domain.CapCalendar}, allowAny); err != nil {
+	if err := members.UpdateWithCheck(ctx, h.ID, created.ID, write(domain.RoleLimited, domain.Capabilities{domain.CapCalendar})); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 	byUser, err = members.ByUser(ctx, u.ID)
@@ -101,9 +101,14 @@ func TestMembershipRepoRoundTrip(t *testing.T) {
 	}
 }
 
-// allowAny is a check that accepts every membership change, for tests about
-// the write itself rather than the rule guarding it.
+// allowAny is a check that accepts every removal, and write a decide that
+// writes the given role and capabilities whatever the household holds. Both
+// are for tests about the write itself rather than the rule guarding it.
 func allowAny([]domain.Membership) error { return nil }
+
+func write(role domain.Role, caps domain.Capabilities) func([]domain.Membership) (domain.Role, domain.Capabilities, error) {
+	return func([]domain.Membership) (domain.Role, domain.Capabilities, error) { return role, caps, nil }
+}
 
 // twoOwnerHousehold creates a household whose two members are both owners and
 // returns the household ID and the two membership IDs.
@@ -165,24 +170,22 @@ func TestADemotionAndARemovalRacingCannotLeaveAHouseholdWithoutAnOwner(t *testin
 	// With the lock: the second call blocks on it before it ever lists, and
 	// then checks against the first call's committed result.
 	// Without it: both list two owners, both sleep, both write.
-	holdWindowOpen := func(check func([]domain.Membership) error) func([]domain.Membership) error {
-		return func(current []domain.Membership) error {
-			time.Sleep(300 * time.Millisecond)
-			return check(current)
-		}
-	}
+	holdWindowOpen := func() { time.Sleep(300 * time.Millisecond) }
 	limited := domain.Capabilities{domain.CapCalendar, domain.CapChores, domain.CapMoney}
 	demoteAndreas := func() error {
-		return members.UpdateWithCheck(ctx, householdID, andreasID, domain.RoleLimited, limited,
-			holdWindowOpen(func(current []domain.Membership) error {
-				return domain.ValidateMembershipChange(current, andreasID, domain.RoleLimited, limited)
-			}))
+		return members.UpdateWithCheck(ctx, householdID, andreasID,
+			func(current []domain.Membership) (domain.Role, domain.Capabilities, error) {
+				holdWindowOpen()
+				err := domain.ValidateMembershipChange(current, andreasID, domain.RoleLimited, limited)
+				return domain.RoleLimited, limited, err
+			})
 	}
 	removeChristine := func() error {
 		return members.DeleteWithCheck(ctx, householdID, christineID,
-			holdWindowOpen(func(current []domain.Membership) error {
+			func(current []domain.Membership) error {
+				holdWindowOpen()
 				return domain.ValidateMembershipRemoval(current, christineID)
-			}))
+			})
 	}
 
 	results := make(chan error, 2)
@@ -240,8 +243,10 @@ func TestARefusedCheckWritesNothingAndReturnsTheCheckError(t *testing.T) {
 		return refusal
 	}
 
-	if err := members.UpdateWithCheck(ctx, householdID, andreasID, domain.RoleLimited,
-		domain.Capabilities{domain.CapCalendar}, refuse); !errors.Is(err, refusal) {
+	refuseUpdate := func(current []domain.Membership) (domain.Role, domain.Capabilities, error) {
+		return domain.RoleLimited, domain.Capabilities{domain.CapCalendar}, refuse(current)
+	}
+	if err := members.UpdateWithCheck(ctx, householdID, andreasID, refuseUpdate); !errors.Is(err, refusal) {
 		t.Fatalf("UpdateWithCheck error = %v, want the check's own error", err)
 	}
 	if len(seen) != 2 {
@@ -275,8 +280,8 @@ func TestCheckedWritesOnAnotherHouseholdsMembershipAreNotFound(t *testing.T) {
 	_, andreasID, _ := twoOwnerHousehold(t, db)
 	otherHousehold := insertTestHousehold(t, db)
 
-	if err := members.UpdateWithCheck(ctx, otherHousehold, andreasID, domain.RoleLimited,
-		domain.Capabilities{domain.CapCalendar}, allowAny); !errors.Is(err, domain.ErrNotFound) {
+	if err := members.UpdateWithCheck(ctx, otherHousehold, andreasID,
+		write(domain.RoleLimited, domain.Capabilities{domain.CapCalendar})); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("UpdateWithCheck across households: error = %v, want ErrNotFound", err)
 	}
 	if err := members.DeleteWithCheck(ctx, otherHousehold, andreasID, allowAny); !errors.Is(err, domain.ErrNotFound) {

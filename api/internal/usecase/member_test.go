@@ -21,6 +21,41 @@ func seedLiveSession(t *testing.T, f *fixture, userID string) {
 	}
 }
 
+// fullPatch is a MembershipPatch that sets both fields, the shape every test
+// here used before Update took a patch.
+func fullPatch(role domain.Role, caps domain.Capabilities) usecase.MembershipPatch {
+	return usecase.MembershipPatch{Role: &role, Capabilities: &caps}
+}
+
+// A field the patch leaves out keeps the value the membership holds when the
+// write happens -- read by the service under the household lock, not
+// supplied by the caller.
+func TestUpdateFillsOmittedFieldsFromTheMembershipAsItIsNow(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	caps := domain.Capabilities{domain.CapCalendar, domain.CapMoney}
+	written, err := f.memberSvc.Update(ctx, f.householdID, "membership-ethan", usecase.MembershipPatch{Capabilities: &caps})
+	if err != nil {
+		t.Fatalf("capabilities-only Update: %v", err)
+	}
+	if written.Role != domain.RoleLimited || !written.Capabilities.Has(domain.CapMoney) || len(written.Capabilities) != 2 {
+		t.Fatalf("written = %+v, want Ethan still limited with [calendar money]", written)
+	}
+
+	limited := domain.RoleLimited
+	written, err = f.memberSvc.Update(ctx, f.householdID, "membership-ethan", usecase.MembershipPatch{Role: &limited})
+	if err != nil {
+		t.Fatalf("role-only Update: %v", err)
+	}
+	if len(written.Capabilities) != 2 || !written.Capabilities.Has(domain.CapCalendar) || !written.Capabilities.Has(domain.CapMoney) {
+		t.Fatalf("written = %+v, want the [calendar money] from the previous change kept", written)
+	}
+	if got := f.members.byID["membership-ethan"]; got.Role != domain.RoleLimited || len(got.Capabilities) != 2 {
+		t.Fatalf("stored = %+v, want what Update returned", got)
+	}
+}
+
 func TestUpdateDemotingTheOnlyOwnerReturnsErrLastOwnerAndWritesNothing(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -30,8 +65,8 @@ func TestUpdateDemotingTheOnlyOwnerReturnsErrLastOwnerAndWritesNothing(t *testin
 	// a capability set that is otherwise perfectly valid for a limited role
 	// (no marriage) -- must be rejected for the last-owner reason, not any
 	// capability-shape reason.
-	err := f.memberSvc.Update(ctx, f.householdID, "membership-andreas", domain.RoleLimited,
-		domain.Capabilities{domain.CapCalendar, domain.CapChores, domain.CapMoney})
+	_, err := f.memberSvc.Update(ctx, f.householdID, "membership-andreas", fullPatch(domain.RoleLimited,
+		domain.Capabilities{domain.CapCalendar, domain.CapChores, domain.CapMoney}))
 	if !errors.Is(err, domain.ErrLastOwner) {
 		t.Fatalf("err = %v, want domain.ErrLastOwner", err)
 	}
@@ -52,8 +87,8 @@ func TestUpdateGrantingMarriageToALimitedMemberReturnsErrLimitedCannotHoldMarria
 	f := newFixture(t)
 	ctx := context.Background()
 
-	err := f.memberSvc.Update(ctx, f.householdID, "membership-ethan", domain.RoleLimited,
-		domain.Capabilities{domain.CapChores, domain.CapMarriage})
+	_, err := f.memberSvc.Update(ctx, f.householdID, "membership-ethan", fullPatch(domain.RoleLimited,
+		domain.Capabilities{domain.CapChores, domain.CapMarriage}))
 	if !errors.Is(err, domain.ErrLimitedCannotHoldMarriage) {
 		t.Fatalf("err = %v, want domain.ErrLimitedCannotHoldMarriage", err)
 	}
@@ -68,8 +103,8 @@ func TestUpdatePromotingAMemberToOwnerWithAPartialCapabilitySetReturnsErrOwnerMu
 	f := newFixture(t)
 	ctx := context.Background()
 
-	err := f.memberSvc.Update(ctx, f.householdID, "membership-ethan", domain.RoleOwner,
-		domain.Capabilities{domain.CapCalendar, domain.CapChores, domain.CapMoney}) // missing marriage
+	_, err := f.memberSvc.Update(ctx, f.householdID, "membership-ethan", fullPatch(domain.RoleOwner,
+		domain.Capabilities{domain.CapCalendar, domain.CapChores, domain.CapMoney})) // missing marriage
 	if !errors.Is(err, domain.ErrOwnerMustHoldAllCapabilities) {
 		t.Fatalf("err = %v, want domain.ErrOwnerMustHoldAllCapabilities", err)
 	}
@@ -84,8 +119,8 @@ func TestUpdateOnAMembershipIDThatDoesNotExistInTheHouseholdReturnsErrNotFound(t
 	f := newFixture(t)
 	ctx := context.Background()
 
-	err := f.memberSvc.Update(ctx, f.householdID, "no-such-membership", domain.RoleLimited,
-		domain.Capabilities{domain.CapChores})
+	_, err := f.memberSvc.Update(ctx, f.householdID, "no-such-membership", fullPatch(domain.RoleLimited,
+		domain.Capabilities{domain.CapChores}))
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("err = %v, want domain.ErrNotFound", err)
 	}
@@ -109,8 +144,8 @@ func TestUpdateChangingOnlyCapabilitiesOfALimitedMemberSucceedsWithNoOtherOwner(
 	delete(f.members.byID, "membership-andreas")
 	delete(f.members.byUser, f.andreasID)
 
-	err := f.memberSvc.Update(ctx, f.householdID, "membership-ethan", domain.RoleLimited,
-		domain.Capabilities{domain.CapChores, domain.CapCalendar})
+	_, err := f.memberSvc.Update(ctx, f.householdID, "membership-ethan", fullPatch(domain.RoleLimited,
+		domain.Capabilities{domain.CapChores, domain.CapCalendar}))
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -127,8 +162,8 @@ func TestUpdateSucceedingRevokesThatMembersSessionsOnly(t *testing.T) {
 	seedLiveSession(t, f, f.ethanID)
 	seedLiveSession(t, f, f.andreasID)
 
-	err := f.memberSvc.Update(ctx, f.householdID, "membership-ethan", domain.RoleLimited,
-		domain.Capabilities{domain.CapChores, domain.CapCalendar})
+	_, err := f.memberSvc.Update(ctx, f.householdID, "membership-ethan", fullPatch(domain.RoleLimited,
+		domain.Capabilities{domain.CapChores, domain.CapCalendar}))
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -158,8 +193,8 @@ func TestUpdateSucceedingButSessionRevocationFailingReturnsADistinctErrorAndKeep
 	ctx := context.Background()
 	f.sessions.failNextRevokeAllForUser(errors.New("simulated revoke failure"))
 
-	err := f.memberSvc.Update(ctx, f.householdID, "membership-ethan", domain.RoleLimited,
-		domain.Capabilities{domain.CapChores, domain.CapCalendar})
+	_, err := f.memberSvc.Update(ctx, f.householdID, "membership-ethan", fullPatch(domain.RoleLimited,
+		domain.Capabilities{domain.CapChores, domain.CapCalendar}))
 	if !errors.Is(err, usecase.ErrSessionRevocationFailed) {
 		t.Fatalf("err = %v, want usecase.ErrSessionRevocationFailed", err)
 	}

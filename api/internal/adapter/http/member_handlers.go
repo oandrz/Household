@@ -251,20 +251,6 @@ type updateMemberRequest struct {
 	Capabilities *[]string `json:"capabilities"`
 }
 
-// currentMembership finds membershipID's row in an already-loaded member
-// list. Returns domain.ErrNotFound for a miss, matching what
-// domain.ValidateMembershipChange itself returns for the same target --
-// asking to patch a membership that doesn't exist should look identical
-// either way.
-func currentMembership(views []usecase.MemberView, membershipID string) (domain.Membership, error) {
-	for _, v := range views {
-		if v.Membership.ID == membershipID {
-			return v.Membership, nil
-		}
-	}
-	return domain.Membership{}, domain.ErrNotFound
-}
-
 // handleUpdateMember sits behind requireOwner. A successful update's normal
 // body just echoes what was set; if the update itself succeeded but
 // usecase.ErrSessionRevocationFailed comes back, that same body gets a
@@ -273,19 +259,16 @@ func currentMembership(views []usecase.MemberView, membershipID string) (domain.
 // is checked here, before MapDomainError, because MapDomainError only ever
 // sees the error, not this route's success body to append the warning to.
 //
-// This is a real PATCH: it reads the membership's current role and
-// capabilities first (via deps.Members.List, the same read
-// handleListMembers uses) and applies only the fields present in the
-// request, exactly as handleUpdateHousehold does for /household. Role and
-// capabilities interact through domain rules that only make sense evaluated
-// together -- an owner must hold every capability, a limited member may
-// never hold "marriage" -- so a role-only patch is validated against the
-// membership's *existing* capabilities, and a capabilities-only patch is
-// validated against its *existing* role, never against a half-populated
-// candidate. usecase.MemberService.Update already runs the fully-resolved
-// candidate through domain.ValidateMembershipChange internally; building
-// that candidate here, before calling it, is what makes that validation
-// correct rather than vacuous.
+// This is a real PATCH: only the fields present in the request change. The
+// handler parses what was sent and hands it to usecase.MemberService.Update
+// as a MembershipPatch; it deliberately does NOT read the membership first
+// to fill in the omitted fields. The service fills them in from the
+// memberships it reads under the household's lock. A read here, before that
+// lock, could carry a stale role into the write and silently undo a role
+// change another owner made in between. Role and capabilities are still
+// validated together against the resolved result -- a role-only patch
+// against the existing capabilities, a capabilities-only patch against the
+// existing role -- by the service, on that locked state.
 func handleUpdateMember(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, ok := RequestScope(r)
@@ -300,43 +283,32 @@ func handleUpdateMember(deps Deps) http.HandlerFunc {
 			return
 		}
 
-		views, err := deps.Members.List(r.Context(), scope.HouseholdID)
-		if err != nil {
-			MapDomainError(w, r, err)
-			return
-		}
-		current, err := currentMembership(views, membershipID)
-		if err != nil {
-			MapDomainError(w, r, err)
-			return
-		}
-
-		role := current.Role
+		var patch usecase.MembershipPatch
 		if req.Role != nil {
-			role, err = domain.ParseRole(*req.Role)
+			role, err := domain.ParseRole(*req.Role)
 			if err != nil {
 				MapDomainError(w, r, err)
 				return
 			}
+			patch.Role = &role
 		}
-		caps := current.Capabilities
 		if req.Capabilities != nil {
-			caps, err = domain.ParseCapabilities(*req.Capabilities)
+			caps, err := domain.ParseCapabilities(*req.Capabilities)
 			if err != nil {
 				MapDomainError(w, r, err)
 				return
 			}
+			patch.Capabilities = &caps
 		}
 
-		body := map[string]any{"id": membershipID, "role": string(role), "capabilities": caps.Strings()}
-		if err := deps.Members.Update(r.Context(), scope.HouseholdID, membershipID, role, caps); err != nil {
-			if errors.Is(err, usecase.ErrSessionRevocationFailed) {
-				body["warning"] = sessionRevocationWarning
-				WriteJSON(w, http.StatusOK, body)
-				return
-			}
+		written, err := deps.Members.Update(r.Context(), scope.HouseholdID, membershipID, patch)
+		if err != nil && !errors.Is(err, usecase.ErrSessionRevocationFailed) {
 			MapDomainError(w, r, err)
 			return
+		}
+		body := map[string]any{"id": membershipID, "role": string(written.Role), "capabilities": written.Capabilities.Strings()}
+		if err != nil {
+			body["warning"] = sessionRevocationWarning
 		}
 		WriteJSON(w, http.StatusOK, body)
 	}

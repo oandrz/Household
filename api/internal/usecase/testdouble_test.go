@@ -341,15 +341,17 @@ func (d *membershipDouble) Create(_ context.Context, m domain.Membership) (domai
 	return m, nil
 }
 
-// UpdateWithCheck honours the port's contract on the double's own state: the
-// check sees the household's current memberships, a refusal writes nothing and
-// comes back unchanged, and a membership that is not this household's is
-// domain.ErrNotFound. The lock has no in-memory equivalent to test -- the
-// usecase tests are single-goroutine -- so the race itself is covered against
-// real Postgres in membership_repo_test.go.
+// UpdateWithCheck honours the port's contract on the double's own state:
+// decide sees the household's current memberships and chooses what to write,
+// a refusal writes nothing and comes back unchanged, and a membership that is
+// not this household's is domain.ErrNotFound. The lock has no in-memory
+// equivalent to test -- the usecase tests are single-goroutine -- so the
+// races are covered against real Postgres (membership_repo_test.go and
+// member_patch_race_api_test.go).
 func (d *membershipDouble) UpdateWithCheck(_ context.Context, householdID, membershipID string,
-	role domain.Role, caps domain.Capabilities, check func([]domain.Membership) error) error {
-	if err := check(d.householdMemberships(householdID)); err != nil {
+	decide func([]domain.Membership) (domain.Role, domain.Capabilities, error)) error {
+	role, caps, err := decide(d.householdMemberships(householdID))
+	if err != nil {
 		return err
 	}
 	m, ok := d.byID[membershipID]
