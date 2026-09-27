@@ -10,19 +10,18 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
-// BillRecord is a bill joined to the names the screen displays -- its category
-// and its pay-from account's nickname. Same shape and same reason as
-// AccountView and TransactionView: every consumer of the list wants
-// the names, and re-reading them per row is a query per row.
+// BillRecord is a bill joined to the names the screen displays -- its
+// category and its pay-from account's nickname. Same shape and reason as
+// AccountView and TransactionView: every consumer wants the names, and
+// re-reading them per row is a query per row.
 //
-// Bill.Amount carries the pay-from account's currency: a bill has no
-// currency column of its own (see 00008_bills.sql's own comment), so every
-// method below that returns a BillRecord -- Create included -- populates
-// Bill.Amount.Currency from the same account join that supplies AccountName,
-// the same way TransactionService.Create already forces an expense's
-// currency to its from-account's. There is deliberately no second Currency
-// field here: two fields carrying the same fact would let them disagree
-// with nothing to catch it.
+// Bill.Amount carries the pay-from account's currency, since a bill has no
+// currency column of its own (00008_bills.sql). Every method that returns a
+// BillRecord, Create included, must populate Bill.Amount.Currency from
+// that account join, the same way TransactionService.Create forces an
+// expense's currency to its from-account's. There is no second Currency
+// field on purpose: two fields carrying the same fact could disagree with
+// nothing to catch it.
 type BillRecord struct {
 	Bill         domain.Bill
 	CategoryName string
@@ -30,13 +29,13 @@ type BillRecord struct {
 }
 
 // BillPaymentRecord is one settled occurrence joined to its bill's name and
-// autopay flag, which is what the "Paid this month" list renders ("Singtel
-// fibre · Internet · autopay · DBS").
+// autopay flag, for the "Paid this month" list ("Singtel fibre · Internet ·
+// autopay · DBS").
 //
-// ListPayments populates both joined fields. RecordPayment populates BillName
-// only and leaves Autopay false: its caller has just read the whole bill and
-// already holds the flag, so joining it back would be a second read of
-// something the service is looking at.
+// ListPayments populates both joined fields. RecordPayment populates
+// BillName only and leaves Autopay false: its caller already holds the
+// flag from reading the whole bill, so joining it back would be a
+// redundant read.
 type BillPaymentRecord struct {
 	Payment  domain.BillPayment
 	BillName string
@@ -62,13 +61,13 @@ type NewBillRow struct {
 	IsSubscription     bool
 }
 
-// PaymentWrite is everything RecordPayment needs to write all three rows. The
-// service assembles it; the repository does not look anything up.
+// PaymentWrite is everything RecordPayment needs to write all three rows.
+// The service assembles it; the repository does not look anything up.
 //
 // Currency is the pay-from account's, resolved by the service through
-// AccountLookup. Description is the bill's name, so the ledger row is
-// recognisable as the bill's own -- which is what makes a household's
-// accidental duplicate entry visible rather than invisible.
+// AccountLookup. Description is the bill's name, so the ledger row reads
+// as the bill's own -- which is what makes an accidental duplicate entry
+// visible.
 type PaymentWrite struct {
 	HouseholdID        string
 	BillID             string
@@ -85,36 +84,32 @@ type PaymentWrite struct {
 	NextDue *time.Time
 }
 
-// BillRepository is one household's bills and their payment history.
-//
-// Two contracts here are load-bearing and neither is enforced by the database:
+// BillRepository is one household's bills and their payment history. Two
+// contracts here are load-bearing and neither is enforced by the database:
 //
 //   - bill_payments has no constraint tying its household_id to its bill's, so
-//     a row could in principle carry a household_id that disagrees with the
-//     bill it names. Every method that reads or writes a payment must filter
-//     by household_id AND bill_id together, never by payment id alone, or a
-//     payment leaks across households. This is the GoalRepository contract,
-//     for the same reason.
+//     a row could disagree with the bill it names. Every method that reads or
+//     writes a payment must filter by household_id AND bill_id together, never
+//     by payment id alone, or a payment leaks across households -- same rule
+//     GoalRepository follows.
 //
-//   - MonthTotals cannot be computed from bills alone. A monthly bill paid on
-//     8 July has next_due = 8 August, so a query filtering bills.next_due into
-//     the month misses every bill already paid -- which is the entire "paid so
-//     far" half of the figure. The implementation must union bill_payments by
-//     due_on with unpaid bills by next_due. The naive query passes review and
-//     returns a wrong number.
+//   - MonthTotals cannot be computed from bills alone: a monthly bill paid on
+//     8 July has next_due = 8 August, so filtering on bills.next_due alone
+//     misses every bill already paid. The implementation must union
+//     bill_payments by due_on with unpaid bills by next_due.
 //
-//     The two halves filter archived bills differently, on purpose. The unpaid
-//     half excludes an archived bill: a bill nobody intends to pay again is
-//     not an obligation. The paid half includes it: the money left the
-//     household, and archiving a bill afterwards must not retroactively empty
-//     the month it was paid in. A reviewer meeting this asymmetry cold will
-//     read it as a bug, which is why it is written here.
+//     The two halves filter archived bills differently on purpose: the
+//     unpaid half excludes an archived bill (nobody intends to pay it
+//     again), but the paid half includes it (the money already left, and
+//     archiving afterwards must not retroactively empty a month it was
+//     paid in).
 type BillRepository interface {
 	// List returns one household's bills with their category and account
-	// names. includeArchived is a UNION, not a filter swap: false returns the
-	// live bills, true returns the live ones AND the archived ones together,
-	// each carrying its own ArchivedAt. That is the AccountRepository.List and
-	// GoalRepository.List contract; do not implement it as "archived instead".
+	// names. includeArchived is a UNION, not a filter swap: false returns
+	// the live bills, true returns live AND archived together, each
+	// carrying its own ArchivedAt -- the AccountRepository.List /
+	// GoalRepository.List contract. Don't implement it as "archived
+	// instead".
 	List(ctx context.Context, householdID string, includeArchived bool) ([]BillRecord, error)
 	// Get reports domain.ErrNotFound when no bill with this id exists in this
 	// household -- including when one exists in a different household, which
@@ -122,22 +117,20 @@ type BillRepository interface {
 	Get(ctx context.Context, householdID, billID string) (BillRecord, error)
 	// Create writes one row. A name colliding with UNIQUE (household_id, name)
 	// -- archived rows included -- surfaces as domain.ErrBillNameTaken. The
-	// returned record's Bill.Amount.Currency comes from the pay-from account,
-	// per BillRecord's own comment -- NewBillRow carries no currency of its
-	// own for Create to fall back on.
+	// returned Bill.Amount.Currency comes from the pay-from account, per
+	// BillRecord's own comment -- NewBillRow carries no currency of its own.
 	Create(ctx context.Context, in NewBillRow) (BillRecord, error)
 	// Update replaces every mutable column. BillService is what turns a
 	// partial PATCH into a complete domain.Bill; this port never merges. Same
 	// collision contract as Create.
 	Update(ctx context.Context, b domain.Bill) (BillRecord, error)
 	// SetArchived stamps archived_at with at, or clears it when archived is
-	// false, and returns the bill as it now stands -- the same
-	// at-supplied-by-the-caller convention AccountRepository.SetArchived and
-	// GoalRepository.SetArchived use, returning the record (BillRecord here,
-	// rather than a bare domain.Bill, so the joined names come with it) as
-	// they do rather than a bare error. Every 2xx except 204 carries a JSON
-	// body in this product, so a bare error would force the archive handler
-	// into a second Get purely to build its response.
+	// false, and returns the bill as it now stands. Same
+	// at-supplied-by-the-caller convention as AccountRepository.SetArchived and
+	// GoalRepository.SetArchived; returns BillRecord rather than a bare
+	// domain.Bill (so the joined names come with it) or a bare error -- every
+	// 2xx except 204 carries a JSON body in this product, so a bare error would
+	// force the handler into a second Get just to build its response.
 	SetArchived(ctx context.Context, householdID, billID string, archived bool, at time.Time) (BillRecord, error)
 	// RecordPayment writes the bill_payments row, the expense transaction and
 	// the advanced next_due in ONE database transaction. A bill left advanced
@@ -146,27 +139,27 @@ type BillRepository interface {
 	// domain.ErrAlreadyExists, from UNIQUE (bill_id, due_on).
 	RecordPayment(ctx context.Context, in PaymentWrite) (BillPaymentRecord, error)
 	// UndoPayment deletes the payment, deletes its transaction when the link
-	// still points at one, and rewinds next_due to the payment's due_on -- in
-	// ONE database transaction, all three or none.
+	// still points at one, and rewinds next_due to the payment's due_on -- all
+	// in ONE database transaction, all three or none.
 	//
 	// It refuses any payment that is not the bill's most recent, with
-	// *domain.BillPaymentNotLatestError (whose Unwrap is domain.ErrForbidden,
-	// so a caller matching the bare sentinel still works): undoing an older
-	// one would rewind next_due behind a period that is still paid, and the
-	// screen would show a due date for money already spent. The error itself
-	// carries the due date that WOULD have been accepted, so the HTTP layer
-	// can name it rather than answering a bare, contextless refusal.
+	// *domain.BillPaymentNotLatestError (Unwrap is domain.ErrForbidden, so
+	// matching the bare sentinel still works): undoing an older payment would
+	// rewind next_due behind a period that is still paid, showing a due date
+	// for money already spent. The error carries the due date that would have
+	// been accepted, so the HTTP layer can name it instead of a bare refusal.
 	UndoPayment(ctx context.Context, householdID, billID, paymentID string) error
 	// ListPayments returns one household's payments whose due_on falls in the
 	// month containing `month`, newest paid_on first, ties by bill name.
 	ListPayments(ctx context.Context, householdID string, month time.Time) ([]BillPaymentRecord, error)
 	// MonthTotals returns the two figures the stat cards pair: paidMinor is
-	// the sum of payments due in the month, and dueMinor is that plus every
-	// unarchived bill still due in it. See this interface's own header comment
-	// for why the second cannot come from bills alone.
+	// the sum of payments due in the month, dueMinor is that plus every
+	// unarchived bill still due in it -- see this interface's header
+	// comment for why the second can't come from bills alone.
 	//
-	// Both are per-currency, keyed by the pay-from account's currency, because
-	// a household can hold accounts in more than one. The service converts and
-	// adds; the repository never does money arithmetic across currencies.
+	// Both are per-currency, keyed by the pay-from account's currency,
+	// since a household can hold accounts in more than one. The service
+	// converts and adds; the repository never does money arithmetic across
+	// currencies.
 	MonthTotals(ctx context.Context, householdID string, month time.Time) (dueMinor, paidMinor map[string]int64, err error)
 }

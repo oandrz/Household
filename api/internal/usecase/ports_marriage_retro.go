@@ -14,11 +14,9 @@ import (
 type RetroRecord struct {
 	ID string
 	// Month is always the first of the calendar month, midnight UTC -- the
-	// same normalised convention budgets.month and
-	// TransactionRepository.MonthTotals's own month parameter use. A
-	// repository must store and return it that way; a caller comparing two
-	// Month values (RetroService does, for the mood chart and the startable
-	// month) may rely on that rather than re-normalising itself.
+	// same convention budgets.month and TransactionRepository.MonthTotals's
+	// month param use. A repository must store and return it that way, so a
+	// caller may compare two Month values directly without renormalising.
 	Month       time.Time
 	Mood        *int
 	WentWell    string
@@ -28,28 +26,22 @@ type RetroRecord struct {
 	Version     int
 }
 
-// RetroSummary is one row of the history list: the stored retro plus the
-// action counts the row displays. Quote is the exception to "what the
-// repository can supply": RetroService.List always overwrites it with
-// domain.FirstSentence(Retro.Notes) (per the spec's formulas table, "History
-// row"), unconditionally, so a RetroRepository.List implementation has no
-// reason to populate it -- whatever it puts there is discarded, not merged.
-// This struct carries the field anyway so Tasks 4-8 have one name for the
-// row rather than a repository type plus a service-only wrapper around it.
+// RetroSummary is one row of the history list: the stored retro plus its
+// action counts. RetroService.List always overwrites Quote with
+// domain.FirstSentence(Retro.Notes), discarding whatever a
+// RetroRepository.List implementation put there. The field exists so
+// callers have one row type instead of a wrapper around the repository
+// struct.
 type RetroSummary struct {
 	Retro RetroRecord
 	// ActionCount is every action the retro has ever recorded, ticked or
-	// not -- the History row's own "K actions" figure (spec's formulas
-	// table: "K counts all of that retro's actions, ticked or not").
+	// not -- the History row's "K actions" figure.
 	ActionCount int
-	// OpenActionCount is the subset of ActionCount still undone --
-	// count(*) WHERE done_at IS NULL, the same predicate SetActionDone's
-	// own done=false branch clears. Overview's "Next retro" card reads
-	// THIS field, never ActionCount: a retro whose three actions are all
-	// ticked has ActionCount 3 but OpenActionCount 0, and the card exists
-	// to answer "is there anything still outstanding," not "how many
-	// actions were ever written down." Ticking an action leaves this
-	// number; it never rejoins it.
+	// OpenActionCount is the subset of ActionCount not yet done -- count(*)
+	// WHERE done_at IS NULL, the same predicate SetDone's done=false branch
+	// clears. Overview's "Next retro" card reads this field, never
+	// ActionCount: it answers "anything still outstanding," not "how many
+	// actions were ever recorded."
 	OpenActionCount int
 	Quote           string
 }
@@ -82,14 +74,11 @@ type RetroUpdate struct {
 	HouseholdID string
 	RetroID     string
 	// Month is the retro's own month, carried so the repository can tell a
-	// retro that no longer exists (ErrNotFound) from one whose version moved
-	// under the editor (ErrRetroChanged) after a zero-row UPDATE. The HTTP
-	// layer reads {month} from the URL, but passes it through un-normalised
-	// -- RetroService.Save is the caller that normalises it (with
-	// startOfMonth) before ever setting this field, the same way it already
-	// normalises before comparing in List and Month. Always the first of the
-	// month, midnight UTC by the time it reaches here -- RetroRecord.Month's
-	// own convention; the repository does not normalise it either.
+	// retro that no longer exists (domain.ErrNotFound) from one whose
+	// version moved under the editor (domain.ErrRetroChanged) after a
+	// zero-row UPDATE. Must already be normalised to the first of the
+	// month, midnight UTC -- RetroService.Save does this before setting the
+	// field; the repository does not normalise it.
 	Month    time.Time
 	Mood     *int
 	WentWell string
@@ -103,44 +92,40 @@ type RetroUpdate struct {
 // another household must be indistinguishable from one that does not exist.
 type RetroRepository interface {
 	// Create writes an empty draft for the month and returns it. A month that
-	// already has a retro surfaces as domain.ErrAlreadyExists -- the UNIQUE
-	// (household_id, month) constraint, translated, never a raw pgx error.
-	// This is also what makes a double-clicked button harmless. month must
-	// already be the first of the calendar month, midnight UTC -- the caller
-	// (RetroService) normalises before calling; this method does not.
+	// already has a retro reports domain.ErrAlreadyExists -- the UNIQUE
+	// (household_id, month) constraint, translated, never a raw pgx error,
+	// which also makes a double-clicked button harmless. month must already
+	// be normalised to the first of the calendar month, midnight UTC; the
+	// caller (RetroService) does that, not this method.
 	Create(ctx context.Context, householdID string, month time.Time) (RetroRecord, error)
 	// ByMonth reports domain.ErrNotFound when the month has no retro, which
-	// the page reads as "not started" rather than as an error. month must
-	// already be normalised the same way Create's own parameter is -- see
-	// that method's comment.
+	// the page reads as "not started," not an error. month must already be
+	// normalised the same way Create's is.
 	ByMonth(ctx context.Context, householdID string, month time.Time) (RetroRecord, error)
-	// List returns every retro, newest month first, each carrying its own
-	// action count AND open action count (RetroSummary's own doc comment
-	// says which is which). Deliberately unbounded: a household writes
-	// twelve rows a year, so a decade is 120 rows and one query, and the
-	// design's "Show 2025 (7 more)" is a disclosure over data the page
-	// already holds, not a second request. Do not add paging without a
+	// List returns every retro, newest month first, with its action count
+	// and open action count (see RetroSummary). Deliberately unbounded -- a
+	// household writes twelve rows a year, so a decade is 120 rows in one
+	// query, and the design's "Show 2025 (7 more)" is client-side
+	// disclosure, not a second request. Don't add paging without a
 	// household the flat list actually hurts.
 	List(ctx context.Context, householdID string) ([]RetroSummary, error)
-	// Update replaces mood and the three text columns, and bumps version, but
-	// ONLY when the stored version equals u.Version. A mismatch returns
-	// domain.ErrRetroChanged and writes nothing -- the other partner saved
-	// while this one was typing, and merging the two would silently lose one
-	// of them. The returned record carries the NEW version, so a caller never
-	// has to guess what to send next. u.Month must already be normalised --
-	// see its own doc comment on RetroUpdate.
+	// Update replaces mood and the three text columns and bumps version, but
+	// only when the stored version equals u.Version -- a mismatch returns
+	// domain.ErrRetroChanged and writes nothing, since the other partner
+	// saved first and merging would silently lose their edit. The returned
+	// record carries the new version, so a caller never has to guess what to
+	// send next. u.Month must already be normalised, per RetroUpdate.Month.
 	Update(ctx context.Context, u RetroUpdate) (RetroRecord, error)
 	// Complete stamps completed_at with at. Idempotent: completing an already
 	// finished retro leaves the original timestamp and is not an error, the
 	// same shape GoalRepository.SetArchived takes.
 	Complete(ctx context.Context, householdID, retroID string, at time.Time) (RetroRecord, error)
-	// DeleteDraft removes a retro that has NOT been finished. The
-	// completed_at IS NULL condition belongs in the WHERE clause, not in a
-	// service if: a check-then-delete can race, and -- the reason that
-	// matters here -- a zero-row match must report domain.ErrNotFound rather
-	// than success. SetBillNextDue shipped the other way round and committed
-	// two of three writes on a zero-row match (docs/LEARNING.md, database
-	// catalogue).
+	// DeleteDraft removes a retro that has NOT been finished. completed_at
+	// IS NULL belongs in the WHERE clause, not a service-level
+	// check-then-delete, which can race; a zero-row match must report
+	// domain.ErrNotFound, never a silent success. Don't repeat
+	// SetBillNextDue's mistake of committing partial writes on a zero-row
+	// match (see docs/LEARNING.md).
 	DeleteDraft(ctx context.Context, householdID, retroID string) error
 }
 
@@ -162,11 +147,10 @@ type RetroActionRepository interface {
 	// cannot orphan anything.
 	Remove(ctx context.Context, householdID, actionID string) error
 	// OpenInMonth returns that month's unticked actions -- the "Still open
-	// from July" offer. The caller passes the immediately previous month
-	// only: a household that skipped four months must not be handed an
-	// unbounded backlog on the night it comes back (spec decision 4). month
-	// must already be the first of the calendar month, midnight UTC --
-	// RetroRecord.Month's own convention; the caller normalises, not this
-	// method.
+	// from July" offer. The caller passes only the immediately previous
+	// month: a household that skipped four months must not be handed an
+	// unbounded backlog on the night it comes back. month must already be
+	// normalised to the first of the calendar month, midnight UTC; the
+	// caller normalises, not this method.
 	OpenInMonth(ctx context.Context, householdID string, month time.Time) ([]RetroActionRecord, error)
 }

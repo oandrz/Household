@@ -27,8 +27,7 @@ type TelegramLinkRedemption struct {
 // TelegramLinkRequest is one row of telegram_link_requests, read back for the
 // browser that minted it. Consumed, carrying a UserID, with no
 // telegram_accounts row yet, is the pending state a confirm screen polls
-// for -- there is no separate status column (see decision 5 of the linking
-// design).
+// for -- there is no separate status column.
 type TelegramLinkRequest struct {
 	ID           string
 	UserID       string
@@ -43,21 +42,20 @@ type TelegramLinkRequest struct {
 // never raw, like every other token in this system.
 type TelegramLinkRepository interface {
 	// Create stores a nonce and returns the new row's id. userID is "" for a
-	// sign-in nonce -- the browser has not said who it is -- and a user id for
-	// a link nonce minted by a signed-in member for their own account. That
-	// difference is the only thing separating the two kinds of row, so a
-	// Create that dropped it would silently turn a link into a sign-in. The
-	// id is returned because TelegramLinkService.Start hands it straight back
-	// to the browser to poll with -- Create is the only moment it exists to
-	// return; a later lookup by nonce_hash would be a second way to address a
-	// row by its secret.
+	// sign-in nonce -- the browser has not said who it is -- or a user id
+	// for a link nonce minted by a signed-in member for their own account;
+	// that is the only thing separating the two kinds of row, so dropping it
+	// would silently turn a link into a sign-in. The id is returned because
+	// TelegramLinkService.Start hands it straight back to the browser to
+	// poll with, the only moment it exists to return; a later lookup by
+	// nonce_hash would be a second way to address a row by its secret.
 	Create(ctx context.Context, userID string, nonceHash []byte, expiresAt time.Time) (string, error)
-	// Consume stamps the row consumed and records which chat redeemed it, in one
-	// statement, and returns the row's id and the user it was minted for. The
-	// chat is unknown when the nonce is minted -- the browser has not met
-	// Telegram yet -- so redemption is the only moment the two can be joined, and
-	// CountLinksSince depends on it happening here. Returns domain.ErrNotFound if
-	// the nonce is unknown, expired or already consumed; those three are
+	// Consume stamps the row consumed and records which chat redeemed it, in
+	// one statement, returning the row's id and the user it was minted for.
+	// The chat is unknown at mint time -- the browser has not met Telegram
+	// yet -- so redemption is the only moment the two can be joined, and
+	// CountLinksSince depends on it happening here. Returns domain.ErrNotFound
+	// if the nonce is unknown, expired or already consumed; those three are
 	// deliberately indistinguishable to a caller.
 	Consume(ctx context.Context, nonceHash []byte, chatID int64, chatUsername string) (TelegramLinkRedemption, error)
 	// ByID reads one link request for the browser that minted it. The caller must
@@ -89,16 +87,15 @@ type TelegramBinding struct {
 }
 
 // TelegramAccountRepository is the binding between a Telegram chat and the
-// Hearth user it belongs to. Bindings are written in three places and
-// nowhere else: inside SignupRepository.Provision's transaction, when a
-// stranger creates a household from a chat; inside InviteRepo.Admit's own
-// transaction, when an owner lets a knocked Telegram invite in -- the same
-// reason as Provision, the write has to be inside a transaction this port
-// cannot join; and by TelegramLinkService.Confirm, when a member who
-// already has an account connects their chat from Settings. Both
-// directions are UNIQUE in the database -- one chat per user, one user per
-// chat -- and that constraint, not any check in Go, is what makes a
-// sign-in unambiguous.
+// Hearth user it belongs to. Bindings are written in exactly three places:
+// inside SignupRepository.Provision's transaction, when a stranger creates a
+// household from a chat; inside InviteRepo.Admit's own transaction, when an
+// owner lets a knocked Telegram invite in -- both write it themselves because
+// the write has to be inside a transaction this port cannot join; and by
+// TelegramLinkService.Confirm, when an existing member connects their chat
+// from Settings. Both directions are UNIQUE in the database -- one chat per
+// user, one user per chat -- and that constraint, not any check in Go, is
+// what makes a sign-in unambiguous.
 type TelegramAccountRepository interface {
 	// ByChatID returns domain.ErrNotFound when the chat is bound to no user,
 	// which is the ordinary "this person has no account yet" case, not an error
@@ -107,7 +104,7 @@ type TelegramAccountRepository interface {
 	// ByUserID returns domain.ErrNotFound when this user has no chat bound.
 	ByUserID(ctx context.Context, userID string) (TelegramBinding, error)
 	// Create returns domain.ErrAlreadyExists for either UNIQUE -- one chat per
-	// user, one user per chat. Which of the two collided is not distinguished:
+	// user, one user per chat -- without distinguishing which one collided:
 	// the caller knows which side it was asking about (a fresh sign-up binds a
 	// chat that must be free; Confirm binds a user who must have no chat yet)
 	// and chooses the sentence, rather than a repository guessing at intent.
@@ -126,30 +123,25 @@ type TelegramAccountRepository interface {
 // the bot says inside TelegramAuthService and every invite rule inside
 // InviteService.
 type InviteKnocker interface {
-	// Knock records the first tap on a Telegram invite link and returns
-	// the four digits to show the tapper. Every refusal about the *link*
-	// -- unknown, expired, accepted, already knocked, email-channel --
-	// is domain.ErrNotFound, with no exception, because the chat gets one
-	// bland reply for all of them and must not be able to tell them apart
-	// by probing. The one refusal that is NOT domain.ErrNotFound is
-	// domain.ErrChatAlreadyBound: a chat that already belongs to a Hearth
-	// account, which is safe to name plainly because it says nothing
-	// about the link -- only about the tapper's own chat, which they
-	// could learn by sending /start with no payload at all.
+	// Knock records the first tap on a Telegram invite link and returns the four
+	// digits to show the tapper. Every refusal about the *link* -- unknown,
+	// expired, accepted, already knocked, email-channel -- is
+	// domain.ErrNotFound: one bland reply for all of them, so a chat cannot tell
+	// them apart by probing. The exception is domain.ErrChatAlreadyBound, for a
+	// chat already bound to a Hearth account -- safe to name plainly, since it
+	// reveals only the tapper's own chat state, which /start with no payload
+	// would tell them anyway.
 	Knock(ctx context.Context, rawToken string, chatID int64, username string) (code string, err error)
 }
 
 // InviteChats is what InviteService needs from the Telegram side: the two
 // messages an invite causes. TelegramAuthService implements it, reusing its
-// own sendSignIn, so no second magic-link path exists. The split mirrors
-// InviteKnocker just above, in the opposite direction -- that interface is
-// what TelegramAuthService needs from InviteService; this one is what
-// InviteService needs back from TelegramAuthService, and main.go closes
-// the resulting cycle with InviteService.SetChats.
+// own sendSignIn so no second magic-link path exists. The split mirrors
+// InviteKnocker in the opposite direction; main.go closes that cycle with
+// InviteService.SetChats.
 type InviteChats interface {
 	// SendSignIn delivers an ordinary magic link to a chat that has just
-	// been admitted. It is called after the commit, never inside it (spec
-	// decision 6).
+	// been admitted. It is called after the commit, never inside it.
 	SendSignIn(ctx context.Context, chatID int64, userID string) error
 	// SendLinkCancelled tells a chat that knocked that its link is no
 	// longer valid, because the owner asked for a new one.

@@ -16,10 +16,10 @@ import (
 // household Role and Capabilities (see domain/admin.go): these repositories
 // answer "who runs this install", never "what may this member do".
 //
-// Nothing here decides whether a caller is allowed to do something. The HTTP
-// layer's requirePlatformAdmin does that. Where a userID is passed into a
-// write below it is stored -- in updated_by, or in the audit row -- and never
-// consulted for permission.
+// Nothing here decides whether a caller is allowed to do something -- the
+// HTTP layer's requirePlatformAdmin does that. Where a userID is passed into
+// a write below, it is only stored (in updated_by, or in the audit row) and
+// never consulted for permission.
 
 type PlatformAdminRepository interface {
 	Get(ctx context.Context, userID string) (domain.PlatformAdmin, error)
@@ -61,11 +61,10 @@ type AdminAuditEntry struct {
 	At          time.Time
 }
 
-// AdminAuditRepository is write-only on purpose. The log is append-only by
-// convention and nothing in the product reads it back: the audit screen was
-// descoped on 2026-09-02, and the read path it left behind was deleted on
-// 2026-09-13 rather than kept alive only for its own tests. An operator reads
-// admin_audit_log through psql; tests read the table directly.
+// AdminAuditRepository is write-only on purpose: the log is append-only by
+// convention, and nothing in the product reads it back. Don't add a read
+// path back just to serve its own tests -- an operator reads admin_audit_log
+// through psql, and tests read the table directly.
 type AdminAuditRepository interface {
 	Record(ctx context.Context, entry AdminAuditEntry) error
 }
@@ -77,21 +76,22 @@ type AdminReauthAttemptRepository interface {
 }
 
 // AdminDirectoryRepository is the operator's read-only view across every
-// household. It is the only port in the product that reads across
-// household boundaries; every other repository answers for one household.
-// Nothing on it writes. Its consumer is AdminDirectoryService and its
-// callers are guarded in the HTTP layer alone.
+// household -- the only port in the product that reads across household
+// boundaries; every other repository answers for one household. Nothing on
+// it writes. Its consumer is AdminDirectoryService, and its callers are
+// guarded in the HTTP layer alone.
 type AdminDirectoryRepository interface {
-	// Metrics answers the four counters on the households page. The
-	// cutoffs are passed in rather than computed here so the service's
-	// clock is the only clock (see AdminDirectoryService).
+	// Metrics answers the four counters on the households page. The cutoffs
+	// arrive already computed from AdminDirectoryService's own single call
+	// to Clock.Now(), so this repository never reads a clock of its own.
 	Metrics(ctx context.Context, activeSince, signupsSince, now time.Time) (DirectoryMetrics, error)
 
 	// SearchHouseholds returns up to limit households matching q, most
-	// recently active first, never-active last. An empty q matches every
-	// household. The predicate is the spec's §4: case-insensitive substring
-	// over household name, family name, member display name and member
-	// email. The caller passes limit+1 to learn whether more exist.
+	// recently active first and never-active last; an empty q matches every
+	// household. The predicate (2026-09-02-hearth-admin-households-design.md
+	// §4) is a case-insensitive substring over household name, family name,
+	// member display name and member email. Callers pass limit+1 to learn
+	// whether more exist.
 	SearchHouseholds(ctx context.Context, q string, limit int, now time.Time) ([]HouseholdListing, error)
 
 	// Household returns one household with its members and the invites
@@ -174,13 +174,11 @@ type PendingInvite struct {
 }
 
 // DatabaseBrowser is a read-only, structural view of the database, for the
-// operator's admin surface.
-//
-// Every value it returns is already rendered as text: no driver type, no
-// `any`, and nothing a caller could accidentally write through. That is not
-// only the clean-architecture rule -- it is what lets the implementation
-// render a redacted column as a constant inside its own SELECT list, so the
-// secret bytes never leave Postgres at all (the spec's decision 7).
+// operator's admin surface. Every value it returns is already rendered as
+// text: no driver type, no `any`, nothing a caller could accidentally write
+// through. That is not only the clean-architecture rule -- it is what lets
+// an implementation render a redacted column as a constant inside its own
+// SELECT list, so the secret bytes never leave Postgres at all.
 //
 // An implementation must:
 //   - answer domain.ErrNotFound for a table it cannot see, whether because
@@ -200,17 +198,16 @@ type TableInfo struct {
 	Columns  []ColumnInfo
 }
 
-// ColumnInfo describes one column. Redacted is returned to the screen rather
-// than being kept private to the implementation, so the operator can see that
-// a column was withheld rather than empty -- "there is no value here" and
-// "you may not see the value here" are different facts and the screen must
-// not merge them.
+// ColumnInfo describes one column. Redacted is returned to the screen,
+// not kept private to the implementation, so the operator can see that a
+// column was withheld rather than merely empty -- "no value here" and "you
+// may not see the value here" are different facts the screen must not merge.
 //
 // DataType is a type name for a human to read, not a catalogue value to
 // branch on: "citext", "text[]", "timestamp with time zone". An
-// implementation reading information_schema must not put data_type here
-// unexamined, because that column reports a category rather than a name for
-// arrays and for domains -- see adapter/postgres's displayType.
+// implementation must not put information_schema's data_type here
+// unexamined: that column reports a category, not a name, for arrays and
+// domains -- see adapter/postgres's displayType.
 type ColumnInfo struct {
 	Name     string
 	DataType string
@@ -219,10 +216,10 @@ type ColumnInfo struct {
 
 // RowPage is one page of one table.
 //
-// Rows is column-ordered text, parallel to Columns: a Postgres table may
-// carry two columns whose names differ only in ways a JSON object key would
-// not preserve, and the column list is being sent anyway. A cell is never a
-// bare empty string where the value was absent -- see domain.NullCell.
+// Rows is column-ordered text, parallel to Columns -- two columns can have
+// names a JSON object key would not tell apart, and the column list is sent
+// anyway. A cell is never a bare empty string where the value was absent --
+// see domain.NullCell.
 type RowPage struct {
 	Columns []ColumnInfo
 	Rows    [][]string
@@ -237,31 +234,30 @@ type RowPage struct {
 // the first is something to fix on the box, the second is a typo in a URL.
 var ErrBrowseUnavailable = errors.New("database browse unavailable")
 
-// ErrOutboxUnavailable means the outbox itself could not be read: it is
-// unreachable, it timed out, or it answered something this code cannot map.
-// It is declared here rather than in an adapter because it is part of the
-// port's contract -- every implementation must be able to say "the store is
-// there, I just could not reach it", and the HTTP layer answers 502 for it.
+// ErrOutboxUnavailable means the outbox itself could not be read -- it is
+// unreachable, timed out, or answered something this code cannot map. It
+// lives here, not in an adapter, because every implementation must be able
+// to say "the store is there, I just could not reach it"; the HTTP layer
+// answers 502 for it.
 //
-// It is deliberately distinct from domain.ErrNotFound, which means the outbox
-// answered and does not hold that message. An operator needs different advice
-// in each case: one is "Mailpit is down", the other is "that message has aged
-// out of a store with no volume".
+// It is deliberately distinct from domain.ErrNotFound, which means the
+// outbox answered but does not hold that message -- one is "Mailpit is
+// down", the other is "that message has aged out of a store with no volume".
 var ErrOutboxUnavailable = errors.New("the message outbox could not be read")
 
-// MailOutbox reads messages the product has sent. It exists so the operator
-// can hand someone a link that mail cannot deliver (see ADR 3). The only
-// implementation today reads Mailpit; when mail leaves the box this port gets
-// a second one instead of a rewrite.
+// MailOutbox reads messages the product has sent, so the operator can hand
+// someone a link that mail cannot deliver (ADR 3). The only implementation
+// today reads Mailpit; if mail ever leaves the box this port gets a second
+// implementation, not a rewrite.
 //
 // Message reports domain.ErrNotFound for a message the outbox does not hold.
 // Both methods report ErrOutboxUnavailable when the outbox itself cannot be
 // read.
 //
 // Neither method extracts anything: an implementation hands back the body
-// parts exactly as the store gave them, and AdminOutboxService turns those
-// into what a screen shows. That split is what keeps "which strings are
-// links" testable without an HTTP server.
+// parts exactly as given, and AdminOutboxService turns those into what a
+// screen shows -- keeping "which strings are links" testable without an
+// HTTP server.
 type MailOutbox interface {
 	// Recent returns up to limit messages, newest first, with both body
 	// fields left empty -- a list never carries a body, because a body can
