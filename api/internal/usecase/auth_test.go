@@ -254,9 +254,7 @@ func TestSignInForARemovedMemberFailsIdenticallyToAnUnknownAddress(t *testing.T)
 	f := newFixture(t)
 	ctx := context.Background()
 
-	if err := f.members.Delete(ctx, f.householdID, "membership-andreas"); err != nil {
-		t.Fatalf("Delete: %v", err)
-	}
+	f.members.remove("membership-andreas")
 
 	_, removedErr := f.auth.SignIn(ctx, "andreas@hearth.family", "hunter2")
 	_, unknownErr := f.auth.SignIn(ctx, "stranger@example.com", "whatever")
@@ -472,9 +470,7 @@ func TestRequestMagicLinkStaysSilentForARemovedMember(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
 
-	if err := f.members.Delete(ctx, f.householdID, "membership-andreas"); err != nil {
-		t.Fatalf("Delete: %v", err)
-	}
+	f.members.remove("membership-andreas")
 
 	if err := f.auth.RequestMagicLink(ctx, "andreas@hearth.family"); err != nil {
 		t.Fatalf("a removed member's address must not produce an error: %v", err)

@@ -341,10 +341,22 @@ func (d *membershipDouble) Create(_ context.Context, m domain.Membership) (domai
 	return m, nil
 }
 
-func (d *membershipDouble) Update(_ context.Context, householdID, membershipID string, role domain.Role, caps domain.Capabilities) error {
+// UpdateWithCheck honours the port's contract on the double's own state:
+// decide sees the household's current memberships and chooses what to write,
+// a refusal writes nothing and comes back unchanged, and a membership that is
+// not this household's is domain.ErrNotFound. The lock has no in-memory
+// equivalent to test -- the usecase tests are single-goroutine -- so the
+// races are covered against real Postgres (membership_repo_test.go and
+// member_patch_race_api_test.go).
+func (d *membershipDouble) UpdateWithCheck(_ context.Context, householdID, membershipID string,
+	decide func([]domain.Membership) (domain.Role, domain.Capabilities, error)) error {
+	role, caps, err := decide(d.householdMemberships(householdID))
+	if err != nil {
+		return err
+	}
 	m, ok := d.byID[membershipID]
 	if !ok || m.HouseholdID != householdID {
-		return nil // UpdateMembership is :exec — an unmatched row is a silent no-op.
+		return domain.ErrNotFound
 	}
 	m.Role = role
 	m.Capabilities = caps
@@ -352,16 +364,44 @@ func (d *membershipDouble) Update(_ context.Context, householdID, membershipID s
 	return nil
 }
 
-func (d *membershipDouble) Delete(_ context.Context, householdID, membershipID string) error {
+// DeleteWithCheck is UpdateWithCheck's contract for a removal: the check sees
+// the memberships as they are before it.
+func (d *membershipDouble) DeleteWithCheck(_ context.Context, householdID, membershipID string,
+	check func([]domain.Membership) error) error {
+	if err := check(d.householdMemberships(householdID)); err != nil {
+		return err
+	}
 	m, ok := d.byID[membershipID]
 	if !ok || m.HouseholdID != householdID {
-		return nil // DeleteMembership is :exec — an unmatched row is a silent no-op.
+		return domain.ErrNotFound
+	}
+	d.remove(m.ID)
+	return nil
+}
+
+// remove deletes a membership with no check at all. It is a fixture helper
+// for tests that need a member gone as a precondition (a departed owner, a
+// rolled-back provisioning), NOT part of the port -- production code has no
+// unguarded delete to call.
+func (d *membershipDouble) remove(membershipID string) {
+	m, ok := d.byID[membershipID]
+	if !ok {
+		return
 	}
 	delete(d.byID, membershipID)
 	if d.byUser[m.UserID] == membershipID {
 		delete(d.byUser, m.UserID)
 	}
-	return nil
+}
+
+func (d *membershipDouble) householdMemberships(householdID string) []domain.Membership {
+	var out []domain.Membership
+	for _, m := range d.byID {
+		if m.HouseholdID == householdID {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // --- SessionRepository ----------------------------------------------
@@ -1420,7 +1460,7 @@ func (d *signupDouble) Provision(ctx context.Context, signupID, passwordHash str
 		created2, err := d.spaces.Create(ctx, s)
 		if err != nil {
 			d.removeSpaces(madeSpaceIDs)
-			_ = d.members.Delete(ctx, household.ID, created.ID)
+			d.members.remove(created.ID)
 			d.users.rollback(user)
 			delete(d.households.rows, household.ID)
 			return usecase.ProvisionedHousehold{}, err
@@ -1430,7 +1470,7 @@ func (d *signupDouble) Provision(ctx context.Context, signupID, passwordHash str
 
 	if _, err := d.notifications.Upsert(ctx, household.ID, b.Notifications); err != nil {
 		d.removeSpaces(madeSpaceIDs)
-		_ = d.members.Delete(ctx, household.ID, created.ID)
+		d.members.remove(created.ID)
 		d.users.rollback(user)
 		delete(d.households.rows, household.ID)
 		return usecase.ProvisionedHousehold{}, err

@@ -366,7 +366,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateU
 	return i, err
 }
 
-const deleteMembership = `-- name: DeleteMembership :exec
+const deleteMembership = `-- name: DeleteMembership :execrows
 DELETE FROM memberships WHERE household_id = $1 AND id = $2
 `
 
@@ -375,9 +375,12 @@ type DeleteMembershipParams struct {
 	ID          pgtype.UUID
 }
 
-func (q *Queries) DeleteMembership(ctx context.Context, arg DeleteMembershipParams) error {
-	_, err := q.db.Exec(ctx, deleteMembership, arg.HouseholdID, arg.ID)
-	return err
+func (q *Queries) DeleteMembership(ctx context.Context, arg DeleteMembershipParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteMembership, arg.HouseholdID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteUnacceptedInvite = `-- name: DeleteUnacceptedInvite :one
@@ -980,6 +983,33 @@ func (q *Queries) ListSpaces(ctx context.Context, householdID pgtype.UUID) ([]Sp
 	return items, nil
 }
 
+const lockHouseholdMemberships = `-- name: LockHouseholdMemberships :one
+SELECT id FROM households WHERE id = $1 FOR NO KEY UPDATE
+`
+
+// LockHouseholdMemberships takes a row lock on the household so that two
+// membership changes in it run one after the other. It returns the id only
+// because a query must return something; the lock is the point. Callers take
+// it first inside a transaction, THEN list the memberships and check them --
+// see MembershipRepository.UpdateWithCheck. Because the list is a new
+// statement run after the lock is held, it sees whatever the previous writer
+// committed; the second of two racing owners checks the first one's result.
+//
+// Why the household row and not the membership rows: one row is one simple
+// queue for "anything changing who is in this household", and the list that
+// follows needs no reasoning about how Postgres re-reads a locked row.
+//
+// Why FOR NO KEY UPDATE and not FOR UPDATE: every insert into a table that
+// references households (transactions, bills, ...) takes FOR KEY SHARE on the
+// household row, which FOR UPDATE would block and FOR NO KEY UPDATE does not.
+// Two membership changes still exclude each other, because FOR NO KEY UPDATE
+// conflicts with itself -- which is all this lock is for.
+func (q *Queries) LockHouseholdMemberships(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockHouseholdMemberships, id)
+	err := row.Scan(&id)
+	return id, err
+}
+
 const markInviteAccepted = `-- name: MarkInviteAccepted :one
 UPDATE invites SET accepted_at = now()
 WHERE id = $1 AND accepted_at IS NULL AND expires_at > now()
@@ -1235,7 +1265,7 @@ func (q *Queries) UpdateHousehold(ctx context.Context, arg UpdateHouseholdParams
 	return i, err
 }
 
-const updateMembership = `-- name: UpdateMembership :exec
+const updateMembership = `-- name: UpdateMembership :execrows
 UPDATE memberships SET role = $3, capabilities = $4 WHERE household_id = $1 AND id = $2
 `
 
@@ -1246,14 +1276,21 @@ type UpdateMembershipParams struct {
 	Capabilities []string
 }
 
-func (q *Queries) UpdateMembership(ctx context.Context, arg UpdateMembershipParams) error {
-	_, err := q.db.Exec(ctx, updateMembership,
+// UpdateMembership and DeleteMembership report how many rows they touched so
+// the repository can answer domain.ErrNotFound for a membership that is not
+// this household's, instead of a silent success. Call them only through
+// MembershipRepository.UpdateWithCheck / DeleteWithCheck, which hold the lock.
+func (q *Queries) UpdateMembership(ctx context.Context, arg UpdateMembershipParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateMembership,
 		arg.HouseholdID,
 		arg.ID,
 		arg.Role,
 		arg.Capabilities,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const upsertNotificationPreferences = `-- name: UpsertNotificationPreferences :one

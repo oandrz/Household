@@ -537,9 +537,7 @@ func TestSeedNamesTheOrphanedUserWhenChristinesMembershipWasRemovedAfterAcceptin
 	// Simulate an owner removing Christine afterward: this deletes only her
 	// membership, exactly as MemberService.Remove does, leaving her users
 	// row (and its claim on christine@hearth.family) behind.
-	if err := f.members.Delete(ctx, householdID, accepted.MembershipID); err != nil {
-		t.Fatalf("Delete membership: %v", err)
-	}
+	f.members.remove(accepted.MembershipID)
 
 	_, err = usecase.Seed(ctx, f.deps)
 	if err == nil {
@@ -569,10 +567,7 @@ func TestSeedRefusesToDuplicateAnOrphanedChild(t *testing.T) {
 	}
 
 	kayla := f.memberByName(t, "Kayla")
-	householdID := f.theHousehold(t).ID
-	if err := f.members.Delete(ctx, householdID, kayla.Membership.ID); err != nil {
-		t.Fatalf("Delete: %v", err)
-	}
+	f.members.remove(kayla.Membership.ID)
 
 	_, err := usecase.Seed(ctx, f.deps)
 	if err == nil {

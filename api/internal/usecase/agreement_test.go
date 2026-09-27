@@ -243,9 +243,7 @@ func TestAgreementProposeSignsTheProposerAndTheAwaitingListFollowsTheOwners(t *t
 	if got := awaiting(); len(got) != 2 {
 		t.Fatalf("awaiting = %v, want both non-proposers -- an owner who joins is bound by the promise", got)
 	}
-	if err := members.Delete(ctx, "hh", "m3"); err != nil {
-		t.Fatalf("Delete: %v", err)
-	}
+	members.remove("m3")
 	if got := awaiting(); len(got) != 1 || got[0] != "Christine" {
 		t.Fatalf("awaiting = %v, want [Christine] -- an owner who leaves stops blocking it", got)
 	}

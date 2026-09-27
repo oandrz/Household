@@ -865,7 +865,7 @@ refuses (spec decision 7).
 | Port | Implemented by | Notes |
 |---|---|---|
 | `UserRepository` | `adapter/postgres` | Includes the transactional `CreateWithMembership` |
-| `HouseholdRepository`, `MembershipRepository`, `SessionRepository`, `MagicLinkRepository`, `LoginAttemptRepository`, `SignupRepository`, `SpaceRepository`, `NotificationRepository` | `adapter/postgres` | Ten narrow repositories rather than one wide one (with `UserRepository` above and `InviteRepository` below) |
+| `HouseholdRepository`, `MembershipRepository`, `SessionRepository`, `MagicLinkRepository`, `LoginAttemptRepository`, `SignupRepository`, `SpaceRepository`, `NotificationRepository` | `adapter/postgres` | Ten narrow repositories rather than one wide one (with `UserRepository` above and `InviteRepository` below). **`MembershipRepository` has no unguarded update or delete.** Its two writes are `UpdateWithCheck` and `DeleteWithCheck`: each locks the household row (`FOR NO KEY UPDATE`), lists the household's memberships in the same transaction, calls the caller's callback with them and writes only if it accepts. For an update the callback also *decides what to write*: `MemberService` fills a PATCH's omitted fields from that locked list, then runs the domain's last-owner validators. The callback must be pure — no I/O, no repository calls — because it runs holding the lock and a pool connection. This is the `InsertWithFold` shape (portfolio, §5) for the same reason: two owners demoting or removing each other at once would otherwise both pass the rule and leave the household with no owner. A write that matches no row is `domain.ErrNotFound` (§5, "Members") |
 | `InviteRepository` | `adapter/postgres` | `Create`, `ByTokenHash`, `LiveInviteForEmail`, `MarkAccepted`, the one-transaction `Accept` (§5) — and, since the partner-invite lobby's milestone 1, **`ListPending`** and **`Delete`**. `ListPending` holds the one definition of a *pending* invite (§6) and returns `[]InviteSummary`, never nil. The type is `InviteSummary`, not `PendingInvite`, because `PendingInvite` was already the admin directory's differently-shaped view of an invite (no id, no capabilities). `Delete` is scoped by `household_id` inside the SQL (`DeleteUnacceptedInvite`), so another household's id answers `domain.ErrNotFound` exactly like an id that never existed. An accepted invite is history: it answers `domain.ErrInviteAlreadyAccepted` and nothing is deleted. Telling those two apart takes a second read (`InviteAcceptedInHousehold`), made only after the delete matched nothing. **Milestone 2 adds four more methods** (§5, §6): `CreateTelegram` (a channel-`telegram` row with no email); `RecordKnock`, one guarded `UPDATE` that is the whole of "one knock per link", reporting `domain.ErrNotFound` for every case it does not match so the bot's one bland reply covers all of them; `ReplaceToken`, the single write behind "get a new link" and "Not them" together, which reads the chat that had knocked back through a `RETURNING (SELECT …)` subselect (a narrow, accepted race — `docs/LEARNING.md`); and `Admit`, Let in's own transaction — user, membership, `telegram_accounts` row and acceptance stamp, the stamp written first for the same cheap-fail reason `Accept`'s own guard is |
 | `InviteKnocker` | `usecase.InviteService` | One method, `Knock(ctx, rawToken, chatID, username) (code, err)` — declared for `TelegramAuthService`, which calls it from inside `HandleStart` when a `/start` payload begins `inv_`. Every refusal about the *link* is `domain.ErrNotFound`, with one exception: `domain.ErrChatAlreadyBound` is named plainly, because it says something about the tapper's own chat rather than the link |
 | `InviteChats` | `usecase.TelegramAuthService` | Two methods, declared for `InviteService`: `SendSignIn` (the ordinary magic link, sent after Admit's commit, never inside it) and `SendLinkCancelled` (told to a chat whose knock a new link just cleared). `InviteKnocker` and `InviteChats` point at each other across the two services — `TelegramAuthService` needs `InviteService` and `InviteService` needs `TelegramAuthService` back — and `cmd/api/main.go` closes the resulting cycle with `InviteService.SetChats`, called once both services exist, rather than either package importing the other |
@@ -2216,6 +2216,63 @@ reported to the chat that made it — recorded as a defect in
 while at least one Telegram invite in the current list has no knock yet**,
 not on every render of the pending-invite list — an emailed invite, or a
 knocked-but-not-yet-decided one, is not what this loop exists to catch.
+
+### Members — changing a role or removing someone; the last-owner rule runs under a lock
+
+```mermaid
+sequenceDiagram
+    participant W as Web
+    participant H as "HTTP: CSRF + owner + cookie session"
+    participant S as MemberService
+    participant R as "MembershipRepo"
+    participant DB as Postgres
+
+    W->>H: "PATCH or DELETE /household/members/{id}"
+    H->>S: "Update(MembershipPatch) or Remove"
+    S->>R: "UpdateWithCheck / DeleteWithCheck(id, check)"
+    R->>DB: BEGIN
+    R->>DB: "SELECT id FROM households FOR NO KEY UPDATE"
+    Note over R,DB: A second change in the same household<br/>blocks HERE, before it reads anything
+    R->>DB: "SELECT the household's memberships"
+    R-->>S: "callback(current memberships)"
+    S->>S: "fill the PATCH's omitted fields from them,<br/>then domain.ValidateMembershipChange / Removal<br/>refuses with ErrLastOwner"
+    R->>DB: "UPDATE or DELETE the membership, then COMMIT"
+    S->>DB: "revoke the member's sessions and API tokens"
+    H-->>W: "200 (PATCH) or 204 (DELETE); 409 on ErrLastOwner"
+```
+
+**The rule is checked inside the write, not before it.** A household must
+always keep at least one owner. That is a rule about the whole list of
+members, so it cannot be checked on one row. Reading the list, checking it and
+writing as three separate calls let two owners demote or remove each other at
+the same moment: both read "two owners", both pass, both commit, and the
+household has nobody left who can manage it. Nothing in the schema would stop
+that. So the repository locks the household row first, reads the list after
+the lock is held, and runs `MemberService`'s check on that list. A second
+change blocks on the lock and then checks the first one's committed result.
+
+**The PATCH is filled in under the lock too.** A PATCH that leaves a field
+out means "keep what the member has now". The handler parses the request
+into a `usecase.MembershipPatch`, where each field is optional, and does not
+read the member itself. The service fills in the missing field from the
+list it read under the lock. If the handler filled it in from its own
+earlier read, a capabilities-only change could write a stale role back over
+a promotion that committed in between.
+
+**Why the household row, and why `FOR NO KEY UPDATE`.** One row gives every
+membership change in a household a single queue, and the list read after it
+is an ordinary read — no reasoning about how Postgres re-reads locked rows.
+`FOR UPDATE` would also block every insert into a table that references
+`households` (transactions, bills, …), because each such insert takes
+`FOR KEY SHARE` on the household row. `FOR NO KEY UPDATE` does not conflict
+with that, and still conflicts with itself, which is all this lock needs.
+Adding a member (invite accept, Let in, sign-up) takes no lock: adding can
+never remove the last owner.
+
+**Revoking credentials happens after the commit, outside the lock.** If it
+fails, the change stays made and the caller gets
+`ErrSessionRevocationFailed` (a 200 with a `warning`). The comments in
+`usecase/member.go` explain why it is not rolled back.
 
 ### Accounts — net worth is composed on read, not stored
 
