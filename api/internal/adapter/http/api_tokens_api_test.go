@@ -163,6 +163,53 @@ func TestATokenCannotReachAdmin(t *testing.T) {
 	}
 }
 
+// TestAPlatformAdminsTokenCannotReachAdmin is ADR 7 rule 3 for the case the
+// test above cannot see: a token that belongs to a platform admin. The admin
+// guard asks who the caller is, and for this caller the honest answer is
+// "an admin" -- so the guard must also ask how they authenticated. A token
+// gets exactly what a non-admin gets: the same 404 body, and no side effect
+// anywhere behind the guard (no re-auth attempt recorded, no audit row).
+func TestAPlatformAdminsTokenCannotReachAdmin(t *testing.T) {
+	env := newTestEnv(t)
+	env.makePlatformAdmin(t, env.ownerEmail)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	adminToken := env.mustCreateToken(t, session, csrf, "admin's token")
+	limited, limitedCSRF := env.signIn(t, env.limitedEmail, env.limitedPassword)
+	nonAdminToken := env.mustCreateToken(t, limited, limitedCSRF, "non-admin's token")
+
+	for _, probe := range []struct {
+		method, path string
+		body         any
+	}{
+		{http.MethodPost, "/api/v1/admin/session", map[string]string{"password": "not-the-password"}},
+		{http.MethodGet, "/api/v1/admin/flags", nil},
+		{http.MethodGet, "/api/v1/admin/households", nil},
+	} {
+		want := env.bearer(t, probe.method, probe.path, probe.body, nonAdminToken.Token)
+		got := env.bearer(t, probe.method, probe.path, probe.body, adminToken.Token)
+		// Read both bodies before assertErrorResponse, which drains the
+		// recorder's buffer as it decodes.
+		gotBody, wantBody := got.Body.String(), want.Body.String()
+		assertErrorResponse(t, got, http.StatusNotFound, "NOT_FOUND")
+		if gotBody != wantBody {
+			t.Fatalf("%s %s: an admin's token must get the non-admin body byte for byte\n got: %s\nwant: %s",
+				probe.method, probe.path, gotBody, wantBody)
+		}
+	}
+
+	var attempts int
+	if err := env.db.Pool().QueryRow(context.Background(),
+		`SELECT count(*) FROM admin_reauth_attempts`).Scan(&attempts); err != nil {
+		t.Fatalf("count re-auth attempts: %v", err)
+	}
+	if attempts != 0 {
+		t.Fatalf("a token request must never reach the admin password check, but %d attempt(s) were recorded", attempts)
+	}
+	if n := env.auditRowCount(t); n != 0 {
+		t.Fatalf("a token request must stop at the guard, before the audit middleware, but %d audit row(s) were written", n)
+	}
+}
+
 func TestRemovingAMemberKillsTheirToken(t *testing.T) {
 	env := newTestEnv(t)
 	owner, ownerCSRF := env.signIn(t, env.ownerEmail, env.ownerPassword)

@@ -25,18 +25,23 @@ func handleAdminSession(deps Deps) http.HandlerFunc {
 			WriteError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Sign in required.", nil)
 			return
 		}
+		// The cookie is checked before the password, not after: a request
+		// with no session cookie can never be given a grant, so it must not
+		// spend one of the operator's re-auth attempts either. This is tidy
+		// ordering, not a second guard -- it only asks whether a cookie is
+		// present, not whether it is the credential the request authenticated
+		// with. Keeping tokens out is requirePlatformAdmin's job alone.
+		cookie, err := r.Cookie(sessionCookieName)
+		if err != nil || cookie.Value == "" {
+			WriteError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Sign in required.", nil)
+			return
+		}
 		var req adminSessionRequest
 		if !decodeJSONBody(w, r, &req) {
 			return
 		}
 		if err := deps.AdminReauth.Verify(r.Context(), scope.UserID, req.Password); err != nil {
 			MapDomainError(w, r, err)
-			return
-		}
-
-		cookie, err := r.Cookie(sessionCookieName)
-		if err != nil || cookie.Value == "" {
-			WriteError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Sign in required.", nil)
 			return
 		}
 		expiresAt := deps.Clock.Now().Add(adminGrantTTL)

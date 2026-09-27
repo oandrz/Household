@@ -45,12 +45,27 @@ const adminGrantTTL = 30 * time.Minute
 // anyway. What this guard buys is that a signed-in household member poking
 // at the API learns nothing, and that nobody can enumerate the subtree's
 // shape by watching which paths answer differently.
+//
+// Being an admin is not enough: the request must also have arrived on a
+// browser session. ADR 7 rule 3 promises that a personal API token never
+// reaches /admin, and checking only WHO the caller is keeps that promise for
+// non-admins alone -- an admin's own token would pass, and get as far as the
+// re-auth password check behind this guard. So anything that is not a
+// session gets the non-admin 404, before the lookup, so it leaves no trace
+// behind the guard either. It is "not a session" rather than "is a token"
+// on purpose: an unset AuthVia is refused too (see authVia's doc comment),
+// and so is any third kind of credential added later until someone decides
+// it belongs here.
 func requirePlatformAdmin(deps Deps) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			scope, ok := RequestScope(r)
 			if !ok {
 				WriteError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Sign in required.", nil)
+				return
+			}
+			if scope.AuthVia != authViaSession {
+				writeNotFound(w)
 				return
 			}
 			isAdmin, err := deps.Admin.IsPlatformAdmin(r.Context(), scope.UserID)

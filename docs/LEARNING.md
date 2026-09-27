@@ -1605,6 +1605,26 @@ person to ask whether the test could ever have gone red in the first place.
   query that returns on the first match, not on every source settling, needs
   an explicit anchor proving the slower source has rendered before the count
   it draws is trusted.**
+- `TestATokenCannotReachAdmin` guarded ADR 7 rule 3 ("a token cannot reach
+  `/admin`") and stayed green for as long as it existed, because its token
+  belonged to an owner who was **not** a platform admin. `requirePlatformAdmin`
+  refused that caller for the easy reason — not an admin — so the test never
+  asked the question the rule is about: what happens when an admin's own
+  token arrives? The answer on `dfb00f2` was that it passed the guard and
+  reached the re-auth password check (a wrong password answered
+  `401 INVALID_CREDENTIALS` rather than the non-admin 404, and each attempt
+  counted towards the operator's lockout). It could never obtain a grant,
+  because the grant is written against a session cookie. Found by reading
+  the code during the 2026-09-26 architecture review (B2), not by any test.
+  `TestAPlatformAdminsTokenCannotReachAdmin` now uses an admin's token and
+  checks three things only the new guard can produce: the 404 body is
+  byte-identical to a non-admin token's, no `admin_reauth_attempts` row is
+  written, and no `admin_audit_log` row is written. Mutation-checked by
+  disabling the guard: red with the original `401 INVALID_CREDENTIALS`. Same
+  lesson as the owner-gated route-walk matrix above: **a refusal test whose
+  caller is turned away for a different reason proves nothing about the rule
+  it is named after.** Also see pattern 25 — the guard checked *who* the
+  caller was, never *how* they had authenticated.
 
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
@@ -4214,6 +4234,18 @@ like it was closed by one milestone's own fix.
   a private chat id is always positive. The database-level half of this
   fix is therefore two-thirds done, on purpose, and the gap is a live
   security-review item, not a closed one.
+
+- **B2, fixed 2026-09-27: the admin guard checked the user, not the
+  credential.** `requirePlatformAdmin` asked "is this user a platform
+  admin?" and nothing else. For a request that arrived on a personal API
+  token, the honest answer can still be yes — the token belongs to that
+  user — so ADR 7 rule 3's promise held for non-admins only (details under
+  pattern 2). The missing context was **how the caller authenticated**. The
+  fix names it: anything whose `Scope.AuthVia` is not exactly
+  `authViaSession` gets the non-admin 404 before the admin lookup. It is
+  written as "not a session", not "is a token", so an unset `AuthVia` or a
+  future third kind of credential is refused too — the same fail-closed
+  shape as `requireCookieSession`.
 
 **When a check passes, ask what it actually proved, and about whom.** "This
 chat is bound" proved a binding exists, not that one person is on the other
