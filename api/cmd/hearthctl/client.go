@@ -11,11 +11,10 @@ import (
 	"time"
 )
 
-// These two names are the server's, copied from
-// internal/adapter/http/middleware_session.go and middleware_csrf.go. The
-// CLI stores the cookie values itself rather than using net/http's cookie
-// jar: a jar hides expiry and cannot be written to a file with a
-// permission mode, and there are only ever two cookies to track.
+// These two names are the server's, from middleware_session.go and
+// middleware_csrf.go. The CLI stores cookie values itself rather than using
+// net/http's cookie jar: a jar hides expiry and can't be written to a file
+// with a permission mode, and there are only ever two cookies to track.
 const (
 	sessionCookieName = "hearth_session"
 	csrfCookieName    = "csrf_token"
@@ -56,8 +55,7 @@ type response struct {
 
 // do sends one request. path is relative to /api/v1 unless it already
 // starts with /api/. The session cookie goes on every call; the CSRF cookie
-// and its matching header go on writes only, mirroring exactly what
-// requireCSRF checks so a read never carries a token it does not need.
+// and header go on writes only, mirroring what requireCSRF checks.
 //
 // It returns an *exitError only for a network failure, and a plain response
 // for every status -- a 401 included, because its body matters: a wrong
@@ -129,9 +127,8 @@ func isWrite(method string) bool {
 }
 
 // absorbCookies records the session and CSRF cookies a sign-in sets, and
-// forgets them when sign-out clears them (an empty value or a past expiry).
-// Any other cookie is ignored: the CLI is not a browser and has no business
-// keeping state the API did not ask it to.
+// forgets them when sign-out clears them (empty value or past expiry). Any
+// other cookie is ignored -- the CLI is not a browser.
 func (c *client) absorbCookies(cookies []*http.Cookie) {
 	for _, ck := range cookies {
 		switch ck.Name {

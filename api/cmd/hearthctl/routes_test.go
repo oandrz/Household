@@ -8,10 +8,9 @@ import (
 	"testing"
 )
 
-// The route table is prose the agent trusts, so it is checked against the
+// The route table is prose an agent trusts, so it is checked against the
 // code it describes: every method+path here must be registered in
-// router.go, and every route router.go registers must be here. Either
-// drift fails the build.
+// router.go and vice versa, or the build fails.
 func TestRouteTableMatchesRouterGo(t *testing.T) {
 	src, err := os.ReadFile("../../internal/adapter/http/router.go")
 	if err != nil {
@@ -33,12 +32,11 @@ func TestRouteTableMatchesRouterGo(t *testing.T) {
 		}
 	}
 
-	// Routes the CLI deliberately does not list: sign-up, magic link,
-	// Telegram and invites are browser flows; the platform-admin surface
-	// (registered under api.Route("/admin"), so its literals are /session,
-	// /flags, /households, /db, /mail) is an operator flow behind its own
-	// re-authentication; the family calendar is a dark stub; the health
-	// probes are not API.
+	// Routes the CLI deliberately excludes: sign-up, magic link, Telegram
+	// and invites are browser flows; the platform-admin surface (under
+	// api.Route("/admin"): /session, /flags, /households, /db, /mail) sits
+	// behind its own re-authentication; the family calendar is a dark stub;
+	// health probes are not API.
 	skip := regexp.MustCompile(`^(GET|POST|PUT|PATCH|DELETE) (/(sign-up|magic-link|telegram)|/invites|/session|/flags|/households|/db|/mail|/healthz|/readyz|/family)`)
 	for key := range registered {
 		if skip.MatchString(key) {

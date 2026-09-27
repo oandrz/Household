@@ -84,13 +84,12 @@ func migrationsDir(t *testing.T) string {
 
 // readOnlyPassword is the role's password in tests only. It is set here
 // rather than in deploy/readonly-role.sql because psql's :'var' syntax is
-// client-side and unusable from pgx -- the spec's decision 5.
+// client-side and unusable from pgx.
 const readOnlyPassword = "hearth-readonly"
 
 // createReadOnlyRole runs deploy/readonly-role.sql against the freshly
-// migrated database, so every test in this repository sees the same role
-// production will have. A test that opened the browse against DATABASE_URL
-// would prove nothing about the guard that matters.
+// migrated database, so every test sees the same role production has;
+// testing against DATABASE_URL instead would prove nothing about the guard.
 func createReadOnlyRole(t *testing.T, url string) {
 	t.Helper()
 

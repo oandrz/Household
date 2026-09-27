@@ -14,8 +14,7 @@ import (
 // credentials is what the store keeps between runs: the two cookie values
 // the server issued, when the session lapses, and who it belongs to. The
 // session value is a bearer secret -- whoever holds the file is signed in --
-// which is why the file is written 0600 and why login never puts the
-// password itself anywhere.
+// so the file is written 0600, and login never stores the password itself.
 type credentials struct {
 	BaseURL string `json:"baseUrl"`
 	Email   string `json:"email"`
@@ -34,17 +33,15 @@ func (c *credentials) signedIn() bool {
 }
 
 // store is the credential file for one base URL. One file per host means a
-// localhost session and the production one can never be confused for each
-// other -- a write meant for the dev stack cannot land in a real household
-// because the last login happened to be there.
+// localhost session and a production one can never be confused -- a write
+// meant for the dev stack cannot land in a real household by accident.
 type store struct {
 	path string
 }
 
-// newStore derives the file path from the base URL's host and port. The
-// directory is $HEARTH_CONFIG_DIR, then $XDG_CONFIG_HOME/hearth, then
-// ~/.config/hearth. HEARTH_CONFIG_DIR exists so tests and sandboxes never
-// touch the real home directory.
+// newStore derives the file path from the base URL's host and port, under
+// $HEARTH_CONFIG_DIR, then $XDG_CONFIG_HOME/hearth, then ~/.config/hearth --
+// HEARTH_CONFIG_DIR exists so tests and sandboxes never touch the real home.
 func newStore(baseURL string) (*store, error) {
 	u, err := url.Parse(baseURL)
 	if err != nil || u.Host == "" {

@@ -9,9 +9,9 @@ import (
 )
 
 // token create / list / revoke. Creating and revoking need a browser
-// session (a token cannot mint or revoke a token, server rule), so these
-// are run right after `hearthctl login --email=...`; the token is then used
-// on the headless machine with `hearthctl login --token`.
+// session -- a token cannot mint or revoke a token -- so run them right
+// after `hearthctl login --email=...`; use the resulting token on a
+// headless machine with `hearthctl login --token`.
 func cmdToken(ctx context.Context, c *client, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		return fail(exitUsage, "usage: hearthctl token <create --name=<n> [--days=90] | list | revoke <id>>")

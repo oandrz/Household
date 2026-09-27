@@ -72,12 +72,11 @@ func run(args []string) error {
 		return err
 	}
 
-	// Both of seed's guards run before postgres.Open below, not after:
-	// Open verifies the pool by pinging it, so checking afterwards would
-	// mean a connection to the wrong database had already been attempted by
-	// the time either guard had a say. Refusing first is the only way
-	// "refuse to seed a production database" also means "never even talk to
-	// one."
+	// Both of seed's guards run before postgres.Open below, not after: Open
+	// verifies the pool by pinging it, so checking afterwards would mean a
+	// connection to the wrong database had already been attempted. Refusing
+	// first is the only way "refuse to seed production" also means "never
+	// even talk to it."
 	if args[0] == "seed" {
 		if !cfg.IsDevelopment() {
 			return fmt.Errorf("refusing to seed outside development (APP_ENV=%s)", cfg.AppEnv)
@@ -209,14 +208,12 @@ func runSeed(ctx context.Context, deps usecase.SeedDeps) error {
 }
 
 // requireLocalDatabase is Seed's second, independent guard. APP_ENV and
-// DATABASE_URL are set separately: APP_ENV=development alone says nothing
-// about which database is actually about to receive a known password and a
-// known invite token, so the environment guard above is honestly the "only
-// thing standing between Seed and a production database" (see DevPassword's
-// doc comment in seed.go) only for as long as nothing else can point Seed at
-// one. This closes that gap by naming the target: two independent
-// conditions must now hold before Seed runs, and this is the one that
-// actually inspects which database it is about to write to.
+// DATABASE_URL are set separately, so APP_ENV=development alone says
+// nothing about which database is about to receive a known password and
+// invite token -- the environment guard above is only the "only thing
+// standing between Seed and a production database" (DevPassword's doc
+// comment in seed.go) for as long as nothing else can point Seed elsewhere.
+// This guard closes that gap by naming the target database itself.
 func requireLocalDatabase(databaseURL string) error {
 	u, err := url.Parse(databaseURL)
 	if err != nil {
@@ -235,12 +232,10 @@ func requireLocalDatabase(databaseURL string) error {
 
 // runResetPassword revokes every one of the user's live sessions once the
 // new password is set. A password reset is precisely the moment an account
-// may be compromised -- that is the whole reason an operator is doing this
-// by hand rather than the member using their own "forgot password" flow --
-// and an attacker's existing session surviving the reset would defeat the
-// point of it: the operator sees "password reset for x@y.com" and believes
-// the account is secured, while a session minted before the reset keeps
-// working exactly as it did before.
+// may be compromised -- the reason an operator does this by hand instead of
+// the member's own "forgot password" flow -- so a surviving session would
+// defeat the point: the operator believes the account is secured while a
+// session minted before the reset keeps working exactly as before.
 func runResetPassword(ctx context.Context, args []string, users usecase.UserRepository, hasher usecase.PasswordHasher,
 	sessions usecase.SessionRepository) error {
 	fs := flag.NewFlagSet("reset-password", flag.ContinueOnError)
@@ -261,11 +256,10 @@ func runResetPassword(ctx context.Context, args []string, users usecase.UserRepo
 		return fmt.Errorf("look up %q: %w", *email, err)
 	}
 
-	// Read from the terminal, not a flag: a password passed as a
-	// command-line argument would sit in shell history and in this
-	// process's argv for as long as it runs (visible to anyone who can read
-	// /proc or run ps). term.ReadPassword also puts the terminal in raw
-	// mode for the read, so the password is never echoed back either.
+	// Read from the terminal, not a flag: a password on the command line
+	// would sit in shell history and in this process's argv for as long as
+	// it runs (visible via /proc or ps). term.ReadPassword also raw-modes
+	// the terminal, so the password is never echoed back either.
 	password, err := readPassword("New password: ")
 	if err != nil {
 		return fmt.Errorf("read password: %w", err)
@@ -303,8 +297,8 @@ func readPassword(prompt string) (string, error) {
 }
 
 // runUnlockHousehold resolves the household through --email, any member's
-// address -- see resolveHouseholdByEmail for why that replaced resolving
-// "the household" through the seeded owner alone.
+// address -- see resolveHouseholdByEmail for why not through the seeded
+// owner alone.
 func runUnlockHousehold(ctx context.Context, args []string, users usecase.UserRepository,
 	memberships usecase.MembershipRepository, attempts usecase.LoginAttemptRepository) error {
 	fs := flag.NewFlagSet("unlock-household", flag.ContinueOnError)
@@ -356,10 +350,9 @@ func runCreateInvite(ctx context.Context, args []string, deps usecase.InviteDeps
 	}
 	// No default expansion for role=owner here: domain.NewMembership (via
 	// InviteService.Create) is the single enforcement point for "an owner
-	// must hold every capability", and it must be free to reject an
-	// incomplete --capabilities list rather than have this CLI silently
-	// widen an operator's typed input into a bigger grant than they asked
-	// for.
+	// must hold every capability," free to reject an incomplete
+	// --capabilities list rather than have this CLI silently widen the
+	// grant beyond what the operator typed.
 	caps, err := domain.ParseCapabilities(capValues)
 	if err != nil {
 		return err
@@ -386,19 +379,17 @@ func runCreateInvite(ctx context.Context, args []string, deps usecase.InviteDeps
 }
 
 // resolveHouseholdByEmail finds the household the given address belongs to,
-// along with that user's id. It replaces a version that resolved "the
-// household" through usecase.AndreasEmail, which was correct only while there
-// was exactly one household per deployment -- self-serve sign-up ended that,
-// and an operator unlocking the wrong customer's household is a worse failure
-// than having to type an address.
+// along with that user's id. Don't resolve "the household" through
+// usecase.AndreasEmail instead: self-serve sign-up means more than one
+// household exists, and unlocking the wrong customer's household is a worse
+// failure than making an operator type an address.
 //
 // AndreasEmail remains the default in development so `make unlock-household`
 // keeps working with no arguments against a seeded database.
 //
 // flagName is the caller's flag for this address (e.g. "email" for
-// unlock-household, "inviter-email" for create-invite, which already has its
-// own --email for the invitee) -- it names the right flag in the error below
-// rather than pointing at one that means something else in that command.
+// unlock-household, "inviter-email" for create-invite, which has its own
+// --email for the invitee) -- it names the right flag in the error below.
 func resolveHouseholdByEmail(ctx context.Context, users usecase.UserRepository,
 	memberships usecase.MembershipRepository, email, flagName string) (householdID, userID string, err error) {
 	user, err := users.ByEmail(ctx, email)
@@ -421,9 +412,8 @@ func resolveHouseholdByEmail(ctx context.Context, users usecase.UserRepository,
 // resolveUserByEmail is resolveHouseholdByEmail's counterpart for the
 // platform-admin commands below, which act on one account rather than a
 // household. It exists so a mistyped address gets the same actionable
-// answer -- naming --email and saying there is no account -- however it
-// reached this file, rather than each command wrapping ByEmail's error in
-// its own words.
+// answer -- naming --email, saying there is no account -- everywhere,
+// rather than each command wrapping ByEmail's error in its own words.
 func resolveUserByEmail(ctx context.Context, users usecase.UserRepository, email string) (usecase.StoredUser, error) {
 	user, err := users.ByEmail(ctx, email)
 	if err != nil {
@@ -437,12 +427,11 @@ func resolveUserByEmail(ctx context.Context, users usecase.UserRepository, email
 
 // runGrantPlatformAdmin is the only way a platform admin comes into
 // existence. There is deliberately no HTTP route for this and no
-// self-promotion path anywhere in the product: an admin surface that could
-// mint its own admins would turn one stolen session into permanent access to
-// every household's data. Keeping creation here, on a command a stranger
-// cannot reach without a shell on this box, means the box itself is the
-// boundary -- not a password, not a session, not a role check that a bug
-// could get wrong.
+// self-promotion path: an admin surface that could mint its own admins
+// would turn one stolen session into permanent access to every household's
+// data. Keeping creation here, reachable only with a shell on this box,
+// makes the box itself the boundary -- not a password, session or role
+// check that a bug could get wrong.
 func runGrantPlatformAdmin(ctx context.Context, users usecase.UserRepository,
 	admins usecase.PlatformAdminRepository, email, note string) error {
 	if email == "" {
@@ -503,11 +492,10 @@ func runListPlatformAdmins(ctx context.Context, admins usecase.PlatformAdminRepo
 
 // runUnlockAdmin is the escape hatch AdminReauthService.Verify's own comment
 // names: admin re-auth has no in-product recovery (no magic-link equivalent
-// for a locked admin the way household sign-in has one), so this command is
-// the only way back in once the lockout trips. That is an acceptable
-// trade-off rather than a gap, because the box is already the boundary that
-// grants platform admin in the first place -- nobody without shell access
-// here could have become an admin to get locked out as one.
+// the way household sign-in has), so this is the only way back in once the
+// lockout trips. That's a trade-off, not a gap: the box is already the
+// boundary that grants platform admin, so nobody without shell access here
+// could have become an admin to get locked out as one.
 //
 // It defaults to the seeded owner exactly as unlock-household does, for the
 // same reason: `adminctl unlock-admin` with no arguments keeps working

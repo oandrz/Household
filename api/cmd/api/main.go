@@ -25,14 +25,12 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
-// The poller is handed its service through telegram.StartHandler, an interface
-// the adapter declares rather than imports from usecase -- so the compiler
-// only checks the two signatures agree at the one place both packages are
-// visible. Today that place is the NewPoller call below, which already
-// enforces it. This assertion states the relationship independently of that
-// call site, so a signature drifting on either side fails the build naming the
-// interface, and keeps failing if construction ever moves behind a helper or a
-// conditional where the check would be easy to lose.
+// telegram.StartHandler is declared by the adapter, not imported from
+// usecase, so the compiler checks the two signatures agree only where both
+// packages are visible -- today, the NewPoller call below. This assertion
+// checks the same thing independently of that call site, so a signature
+// drift still fails the build, by name, even if construction later moves
+// behind a helper or a conditional.
 var _ telegram.StartHandler = (*usecase.TelegramAuthService)(nil)
 
 var _ usecase.MailOutbox = (*mail.MailpitOutbox)(nil)
@@ -52,18 +50,14 @@ func run() error {
 		return err
 	}
 
-	// Deps.Secure below (and the session/CSRF cookies it governs) is
-	// !cfg.IsDevelopment(): Secure outside development, which means a
-	// browser will only ever return either cookie over HTTPS. This process
-	// itself never terminates TLS -- it just listens on cfg.Port -- so
-	// outside development that guarantee depends entirely on a reverse
-	// proxy or load balancer terminating TLS in front of it (see
-	// web/nginx.conf and .env.example). Deployed with nothing doing that,
-	// every cookie this service sets is silently dropped by the browser and
-	// every authenticated request 401s with no indication why. This can't be
-	// fixed from here -- it's a deployment-topology requirement, not a code
-	// path -- so the best this can do is make it loud at the one moment an
-	// operator is watching: startup.
+	// Deps.Secure is !cfg.IsDevelopment(): outside development, session and
+	// CSRF cookies are Secure, so a browser returns them only over HTTPS.
+	// This process never terminates TLS, so that guarantee depends on a
+	// reverse proxy or load balancer in front of it (web/nginx.conf,
+	// .env.example) -- without one, every cookie is silently dropped and
+	// every authenticated request 401s with no indication why. That can't be
+	// fixed from here, so this warns loudly at the one moment an operator is
+	// watching: startup.
 	if !cfg.IsDevelopment() {
 		slog.Warn("APP_ENV is not development: session and CSRF cookies are Secure and will only be " +
 			"returned by a browser over HTTPS. TLS termination in front of this service (a reverse proxy " +
@@ -90,10 +84,9 @@ func run() error {
 		defer readonlyDB.Close()
 	}
 
-	// Repositories. Each is constructed once and shared by every service (and,
-	// for Users/Memberships/Sessions, by the HTTP layer directly too) that
-	// needs it -- there is exactly one implementation of each port in
-	// production, backed by this one connection pool.
+	// Repositories. Each is constructed once and shared by every service
+	// (and, for Users/Memberships/Sessions, by the HTTP layer directly too)
+	// that needs it: one implementation per port, backed by this one pool.
 	users := postgres.NewUserRepo(db)
 	households := postgres.NewHouseholdRepo(db)
 	memberships := postgres.NewMembershipRepo(db)
@@ -190,11 +183,10 @@ func run() error {
 		SessionTTL: httpadapter.SessionTTL,
 		BaseURL:    cfg.AppBaseURL,
 	})
-	// Nil unless a bot is configured. httpadapter.Deps.Telegram and
-	// Deps.TelegramLink being nil is what makes POST /auth/telegram/start
-	// and the five /auth/telegram link/unlink routes answer 404, so "not
-	// configured" is expressed once, here, rather than re-derived by every
-	// consumer.
+	// Nil unless a bot is configured: nil Deps.Telegram and Deps.TelegramLink
+	// is what makes POST /auth/telegram/start and the five /auth/telegram
+	// link/unlink routes answer 404, so "not configured" is expressed once,
+	// here, rather than re-derived by every consumer.
 	var telegramSvc *usecase.TelegramAuthService
 	var telegramLinkSvc *usecase.TelegramLinkService
 	var telegramPoller *telegram.Poller
@@ -206,10 +198,10 @@ func run() error {
 			Links:      telegramLinks,
 			Accounts:   telegramAccounts,
 			MagicLinks: magicLinks,
-			// The same signups repository SignupService holds. Telegram mints
+			// The same signups repository SignupService holds: Telegram mints
 			// no token type of its own -- it writes a row in the existing
-			// table, on the existing 24-hour expiry, counted by the existing
-			// global daily ceiling.
+			// table, on the existing 24-hour expiry, under the existing global
+			// daily ceiling.
 			Signups:     signups,
 			Sender:      client,
 			Tokens:      tokens,
@@ -218,11 +210,11 @@ func run() error {
 			BotUsername: cfg.TelegramBotUsername,
 			Invites:     inviteSvc,
 		})
-		// Closes the two-way wiring InviteService.SetChats' own doc comment
-		// describes: inviteSvc above was built with no Chats, because
-		// telegramSvc could not exist yet -- it needs inviteSvc itself, as
-		// TelegramAuthDeps.Invites just above. Must run before the poller
-		// or the HTTP server starts serving requests.
+		// Closes the two-way wiring InviteService.SetChats describes:
+		// inviteSvc above was built with no Chats because telegramSvc could
+		// not exist yet (it needs inviteSvc itself, as TelegramAuthDeps.Invites
+		// above). Must run before the poller or the HTTP server starts serving
+		// requests.
 		inviteSvc.SetChats(telegramSvc)
 		telegramPoller = telegram.NewPoller(client, telegramSvc)
 		// Built from the same configuration as telegramSvc above: no bot
@@ -280,12 +272,10 @@ func run() error {
 		Households:   households,
 		Members:      memberships,
 		FX:           fxProvider,
-		// Goals is read only by RollOver (Task 9's route) to fetch the
-		// target goal before writing a rollover contribution. Wired here,
-		// alongside Deps.Goals below, in this task rather than that one: a
-		// nil port reachable from an already-wired service is a panic
-		// waiting for the next task to trip over, and Task 8 is the change
-		// that first constructs goalRepo.
+		// Goals is read only by RollOver to fetch the target goal before
+		// writing a rollover contribution. Wire it anyway: a nil port
+		// reachable from an already-wired service is a panic waiting to
+		// happen.
 		Goals: goalRepo,
 	})
 	billSvc := usecase.NewBillService(usecase.BillDeps{
@@ -296,10 +286,9 @@ func run() error {
 		// declares, the same one TransactionDeps.Accounts is wired with above
 		// -- one repository, two ports, each caller seeing only what it needs.
 		Accounts: accountRepo,
-		// The same CategoryLookup TransactionDeps is wired with: a bill's
-		// category ends up on a real expense the moment it is paid, so it is
-		// validated against the same rule the ledger applies to a
-		// hand-entered one (BillDeps' own comment).
+		// The same CategoryLookup TransactionDeps is wired with: a paid bill
+		// becomes a real expense, so its category is validated by the same
+		// rule as a hand-entered one (see BillDeps).
 		Categories: categoryRepo,
 	})
 	retroSvc := usecase.NewRetroService(retroRepo, retroActionRepo)
@@ -315,9 +304,9 @@ func run() error {
 		Clock:  sysClock,
 	})
 	// Policy is left zero on purpose: NewAdminReauthService fills in
-	// domain.DefaultLockoutPolicy(), the same shape NewAuthService uses for
-	// the household lock. The two locks share that policy while deliberately
-	// counting into separate ledgers -- see 00012_admin.sql.
+	// domain.DefaultLockoutPolicy(), the same policy NewAuthService uses for
+	// the household lock. Both locks share that policy but count into
+	// separate ledgers (00012_admin.sql).
 	adminReauthSvc := usecase.NewAdminReauthService(usecase.AdminReauthDeps{
 		Users:    users,
 		Attempts: adminReauthRepo,
@@ -378,24 +367,21 @@ func run() error {
 			TrustedProxies: cfg.TrustedProxies,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
-		// ReadTimeout bounds the whole request, not just its headers:
-		// ReadHeaderTimeout alone leaves a slow-body attack (or a request
-		// that simply never finishes sending) free to hold a connection open
-		// indefinitely once the headers have arrived.
+		// ReadTimeout bounds the whole request, not just its headers --
+		// ReadHeaderTimeout alone leaves a slow-body attack, or a request
+		// that never finishes, free to hold the connection open indefinitely.
 		ReadTimeout: 15 * time.Second,
 		// MaxHeaderBytes is set explicitly rather than left to net/http's
-		// unstated default -- this is the request-size bound that lives on
-		// the *server*, alongside the JSON-body bound
-		// (httpadapter's unexported maxRequestBodyBytes, in errors.go) that
-		// lives in the handler layer.
+		// unstated default: it is the request-size bound on the *server*,
+		// alongside the JSON-body bound (httpadapter's maxRequestBodyBytes,
+		// in errors.go) that lives in the handler layer.
 		MaxHeaderBytes: 1 << 20,
 	}
 
-	// serveErr carries the outcome of ListenAndServe back to the main path.
-	// It is buffered so the goroutine never blocks sending to it, and it is
-	// only ever read after <-ctx.Done() returns, so there is no data race:
-	// a listen failure sends before calling stop() (which is what unblocks
-	// ctx.Done() below), so the send always happens-before the read.
+	// serveErr carries ListenAndServe's outcome back to the main path.
+	// Buffered so the goroutine never blocks sending, and read only after
+	// <-ctx.Done(): a listen failure sends before calling stop() (which is
+	// what unblocks ctx.Done()), so the send always happens-before the read.
 	serveErr := make(chan error, 1)
 
 	go func() {
@@ -410,26 +396,22 @@ func run() error {
 	}()
 
 	// The poller is a bare goroutine beside the server's, cancelled by the same
-	// signal context. Nothing waits on it at shutdown, and that is a deliberate
-	// trade-off rather than an oversight: it passes ctx straight through to
-	// HandleStart, so a /start being handled when SIGTERM arrives is cancelled
-	// mid-flight. Cancelling it is safe because HandleStart holds no
-	// multi-statement transaction -- every repository call it makes is one
-	// atomic statement -- so the worst durable outcome is a nonce spent with no
-	// reply sent, which the person recovers from by pressing the button again
-	// (the bot's own refusal copy already says "Start again from the app"), or
-	// an unused magic-link row that expires in fifteen minutes. Draining it
-	// instead would need a WaitGroup the process would then have to wait on
-	// before returning from run(), and that buys completion only if the
-	// supervisor's kill timeout is longer than the in-flight send -- otherwise
-	// it trades a clean cancellation for a write racing process death. Add the
-	// WaitGroup when something in this loop starts writing more than one row.
+	// signal context, and nothing waits on it at shutdown -- a deliberate
+	// trade-off: ctx passes straight through to HandleStart, so a /start in
+	// flight at SIGTERM is cancelled mid-flight. That's safe because
+	// HandleStart holds no multi-statement transaction, so the worst durable
+	// outcome is a spent nonce with no reply (the person presses Start again
+	// -- the bot's refusal already says so) or an unused magic-link row that
+	// expires in fifteen minutes. Draining instead would need a WaitGroup
+	// that run() waits on, which only helps if the supervisor's kill timeout
+	// outlasts the in-flight send; otherwise it trades a clean cancellation
+	// for a write racing process death. Add the WaitGroup once this loop
+	// writes more than one row per update.
 	if telegramPoller != nil {
-		// Chat commands ride the same poller. The Commander is the
-		// channel's inbound guard (ADR 8): it resolves the chat to a
-		// membership and refuses anyone who is not an owner with Money
-		// before any service is called. Wired here, after the money
-		// services exist, rather than where the poller was built.
+		// Chat commands ride the same poller. The Commander is the channel's
+		// inbound guard (ADR 8): it resolves the chat to a membership and
+		// refuses anyone who is not an owner with Money before any service is
+		// called -- wired here, after the money services exist.
 		commander := telegram.NewCommander(
 			&usecase.TelegramCallerService{Accounts: telegramAccounts, Memberships: memberships},
 			usecase.NewTelegramCommandService(usecase.TelegramCommandDeps{
@@ -459,10 +441,10 @@ func run() error {
 		go telegramPoller.Run(ctx)
 
 		// The daily digest: a bare goroutine like the poller's, cancelled by
-		// the same context, recovering for the same reason (no Recoverer
-		// over it). It ticks every fifteen minutes and lets NudgeDue and the
-		// claim ledger decide; a restart at 09:01 still delivers at 09:15,
-		// and every tick after the first is a no-op in the database.
+		// the same context and recovering the same way (no Recoverer over
+		// it). It ticks every fifteen minutes and lets NudgeDue and the claim
+		// ledger decide, so a restart at 09:01 still delivers at 09:15 and
+		// every tick after the first is a no-op in the database.
 		if cfg.NudgesEnabled() {
 			nudges := usecase.NewNudgeService(usecase.NudgeDeps{
 				Recipients: nudgeRepo, Bills: billSvc, Budgets: budgetSvc, Sender: telegramClient,
@@ -476,25 +458,22 @@ func run() error {
 		slog.Info("outbound message inspector enabled", "mailpit_api_url", cfg.MailpitAPIURL)
 	}
 
-	// The predicate is readonlyDB != nil -- "a live read-only pool was
-	// opened" -- and neither cfg.BrowseEnabled() nor adminBrowseSvc != nil.
-	// All three agree except in the case that matters: configured but
-	// unreachable, where the service exists (so the browse can answer
-	// DB_BROWSE_UNAVAILABLE rather than "you never set the variable") but
-	// nothing is enabled, and saying so here would contradict the error
-	// openBrowse already logged. No arguments: the value is a DSN carrying a
-	// password.
+	// The predicate is readonlyDB != nil ("a live pool was opened"), not
+	// cfg.BrowseEnabled() or adminBrowseSvc != nil: those three agree except
+	// when configured-but-unreachable, where the service exists (so the
+	// browse answers DB_BROWSE_UNAVAILABLE, not "you never set the variable")
+	// but logging "enabled" here would contradict openBrowse's own error. No
+	// arguments logged -- the value is a DSN carrying a password.
 	if readonlyDB != nil {
 		slog.Info("database browse enabled")
 	}
 
 	<-ctx.Done()
 
-	// If the listener itself failed to start, there is nothing to shut down
+	// If the listener itself failed to start, there is nothing to shut down,
 	// and the failure must propagate so the process exits non-zero. A
-	// signal-driven shutdown leaves serveErr empty at this point, since
-	// ListenAndServe only returns (with ErrServerClosed) once Shutdown is
-	// called below.
+	// signal-driven shutdown leaves serveErr empty here, since ListenAndServe
+	// only returns (with ErrServerClosed) once Shutdown is called below.
 	select {
 	case err := <-serveErr:
 		if err != nil {
@@ -510,35 +489,28 @@ func run() error {
 	return srv.Shutdown(shutdownCtx)
 }
 
-// openBrowse decides what the operator's database browse is wired with, and
-// is the whole of that decision: run() only propagates the error and closes
-// the pool. It is its own function rather than a block inside run() because
-// its outcomes are the security-relevant ones on this path -- a browse served
-// through a writable connection is worse than no browse at all -- and a
-// function is something a test can call, which a block inside a function that
-// starts an HTTP server is not.
+// openBrowse decides what the operator's database browse is wired with --
+// run() only propagates the error and closes the pool. It is a separate,
+// testable function because these outcomes are security-relevant: a browse
+// served through a writable connection is worse than no browse at all.
 //
 // The four outcomes are deliberately not the same:
 //
-//   - Not configured. Both returns are nil, Deps.AdminBrowse is nil, and the
-//     two /admin/db routes answer 503 naming DATABASE_READONLY_URL. The
-//     routes are registered either way, so the route tree never changes with
-//     configuration.
-//   - Misconfigured -- a DSN that cannot be parsed, or one that connects as a
-//     role which may write. Refuses the boot. Both are things a human typed,
-//     no retry fixes them, and serving a "read-only" browse through a
-//     writable connection is worse than serving nothing.
+//   - Not configured. Both returns are nil, so Deps.AdminBrowse is nil and
+//     the two /admin/db routes answer 503 naming DATABASE_READONLY_URL --
+//     registered either way, so the route tree never changes with config.
+//   - Misconfigured -- an unparseable DSN, or one that connects as a role
+//     that may write. Refuses the boot: both are typos no retry fixes, and a
+//     "read-only" browse over a writable connection is worse than none.
 //   - Opened but unusable -- unreachable, the pool could not be created, or
-//     the privilege check itself errored. Does NOT refuse the boot: the day
-//     that happens is the day someone is restoring this product onto a fresh
-//     box from the paper key, with the variable already in .env and the role
-//     not created yet, and taking the whole household product down over an
-//     operator panel would invert the very promise the read-only role exists
-//     to keep. The browse is wired with postgres.UnavailableBrowse so it
-//     answers 503 DB_BROWSE_UNAVAILABLE -- "the box could not open this" --
-//     rather than the "you never set the variable" 503 a nil service
-//     produces, which would send the operator to edit an .env line that is
-//     already correct.
+//     the privilege check errored. Does NOT refuse the boot: this is the
+//     case where someone is restoring the product from the paper key with
+//     the role not created yet, and taking the whole household product down
+//     over an operator panel would invert the promise the read-only role
+//     exists to keep. Wired with postgres.UnavailableBrowse, so it answers
+//     503 DB_BROWSE_UNAVAILABLE ("the box could not open this") rather than
+//     the "you never set the variable" 503 a nil service gives, which would
+//     send the operator to fix an .env line that is already correct.
 //   - Live. The service is real and the *ReadOnlyDB comes back so run() can
 //     close it.
 //
@@ -558,11 +530,11 @@ func openBrowse(ctx context.Context, cfg config.Config) (*usecase.AdminBrowseSer
 		return nil, nil, err
 	default:
 		// The variable is named in the message rather than left to the
-		// wrapped error's text: pgx builds its connect errors out of `user=`
-		// and `database=` alone, so without this the one log line reporting
-		// the failure would never mention the .env line that caused it. The
-		// DSN itself is still absent -- a Postgres URL carries a password,
-		// and credentials never go to a log (see logStartupAddresses).
+		// wrapped error's text: pgx builds connect errors from `user=` and
+		// `database=` alone, so without this the log line would never
+		// mention the .env line that caused it. The DSN itself stays absent:
+		// it carries a password, and credentials never go to a log (see
+		// logStartupAddresses).
 		slog.Error("DATABASE_READONLY_URL is set but the read-only database could not be opened; "+
 			"the database browse will answer 503 and the rest of Hearth is unaffected", "error", err)
 		// The failure travels with the stand-in, so every 503 it produces can
@@ -572,18 +544,17 @@ func openBrowse(ctx context.Context, cfg config.Config) (*usecase.AdminBrowseSer
 }
 
 // logStartupAddresses reports the two addresses an operator needs at the one
-// moment they are watching: the port this process listens on, and the SMTP
-// server it sends through. Mail is on the recovery path -- magic link is the
-// only way back into a locked household -- and the send is fire-and-forget
-// (see usecase/auth.go's sendMagicLinkAsync), so nothing downstream ever
-// surfaces a wrong SMTP target. Printing it here is what lets someone tell
-// "pointed at the wrong host" from "the relay refused it", and in development
-// it is the reminder that mail lands in Mailpit rather than a real inbox.
+// moment they are watching: this process's listen port, and the SMTP server
+// it sends through. Mail is the recovery path (magic link is the only way
+// back into a locked household) and the send is fire-and-forget, so nothing
+// downstream ever surfaces a wrong SMTP target -- printing it here is what
+// lets someone tell "pointed at the wrong host" from "the relay refused it",
+// and in development it reminds you that mail lands in Mailpit rather than a
+// real inbox.
 //
 // SMTPUsername and SMTPPassword are deliberately absent: credentials never go
-// to a log, and SMTPTLSMode is the field that actually explains a silent
-// failure, because a relay reached under the wrong TLS policy fails the same
-// way an unreachable one does.
+// to a log. SMTPTLSMode explains a silent failure, since a relay reached
+// under the wrong TLS policy fails the same way an unreachable one does.
 func logStartupAddresses(cfg config.Config, listenAddr string) {
 	slog.Info("listening", "addr", listenAddr, "env", cfg.AppEnv)
 	slog.Info("sending mail", "smtp_addr", cfg.SMTPAddr, "tls_mode", cfg.SMTPTLSMode)

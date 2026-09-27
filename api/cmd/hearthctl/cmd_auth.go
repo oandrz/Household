@@ -14,16 +14,13 @@ import (
 	"golang.org/x/term"
 )
 
-// cmdLogin signs in with email and password and stores the session.
+// cmdLogin signs in with email and password and stores the session. The
+// password comes from $HEARTH_PASSWORD or stdin, never a flag: a flag would
+// leak into shell history and `ps` output.
 //
-// The password is read from $HEARTH_PASSWORD or from stdin, never from a
-// flag: a flag lands in shell history and in `ps` output. On a terminal the
-// prompt hides what is typed; piped in, one line is read so
-// `printf '%s' "$PW" | hearthctl login --email=...` works from a script.
-//
-// It never retries. Five wrong passwords lock the whole household out
-// (domain.DefaultLockoutPolicy), and an agent that loops on a bad password
-// would do exactly that. One attempt, one answer.
+// It never retries: five wrong passwords lock the household
+// (domain.DefaultLockoutPolicy), so a caller must not loop on a bad
+// password.
 func cmdLogin(ctx context.Context, c *client, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -70,10 +67,10 @@ func cmdLogin(ctx context.Context, c *client, args []string, stdin io.Reader, st
 	return nil
 }
 
-// loginWithToken stores a personal API token as the credential. The token
-// is read the way a password is -- environment or stdin, never a flag -- and
-// proven against /auth/me before it is written, so a mistyped token is
-// refused now rather than on the first real command.
+// loginWithToken stores a personal API token as the credential, read the
+// way a password is: environment or stdin, never a flag. It is proven
+// against /auth/me before being written, so a mistyped token is refused
+// now, not on the first real command.
 func loginWithToken(ctx context.Context, c *client, stdin io.Reader, stdout, stderr io.Writer) error {
 	raw := os.Getenv("HEARTH_TOKEN")
 	if raw == "" {
@@ -137,11 +134,10 @@ func readSecret(stdin io.Reader, stderr io.Writer, prompt, missing string) (stri
 	return secret, nil
 }
 
-// cmdLogout revokes the session server-side and forgets the file. The file
-// is cleared even if the server refuses (a session already expired answers
-// 401): the stored value is useless either way. A stored token is only
-// forgotten -- revoking it is `hearthctl token revoke`, from a browser
-// session, because a token cannot revoke a token.
+// cmdLogout revokes the session server-side and forgets the file, even if
+// the server refuses (an expired session just answers 401). A stored token
+// is only forgotten, not revoked -- that needs `hearthctl token revoke`
+// from a browser session, since a token cannot revoke a token.
 func cmdLogout(ctx context.Context, c *client, stdout, stderr io.Writer) error {
 	if err := c.requireCreds(); err != nil {
 		return err
@@ -168,10 +164,9 @@ func cmdLogout(ctx context.Context, c *client, stdout, stderr io.Writer) error {
 	return nil
 }
 
-// cmdWhoami prints the /auth/me bundle: the user, household, membership
-// (whose id the bill and transaction inserts take as paidBy), capabilities
-// and feature flags. It is also the cheapest "is my session still good"
-// check an agent can make.
+// cmdWhoami prints the /auth/me bundle: user, household, membership (whose
+// id bill and transaction inserts take as paidBy), capabilities and feature
+// flags. It doubles as the cheapest "is my session still good" check.
 func cmdWhoami(ctx context.Context, c *client, stdout io.Writer) error {
 	if err := c.requireCreds(); err != nil {
 		return err
