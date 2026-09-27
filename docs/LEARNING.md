@@ -1662,6 +1662,54 @@ person to ask whether the test could ever have gone red in the first place.
   moved text, not only the compiled result — then grep the moved files for
   "above", "below" and "this file", and re-read every pointer you made
   precise against what it now points at.**
+- **Comments that cite a plan number go stale and cost every reader a
+  lookup (2026-09-27, item 0, the comment sweep).** 446 backend comments
+  cited "decision N", "Task N", "milestone N" or a `file.go:123` line.
+  Agents had copied the spec's decision numbers into the code, so
+  understanding one line meant opening a spec, and every line number was
+  wrong after the next edit above it. Comment lines were 39.5% of
+  `usecase`'s production code and 35.3% of `domain`'s. The sweep rewrote
+  each reference as the rule it stood for and trimmed the rest: history
+  references 446 → 0, Go comment lines 20,138 → 17,456 (−13%), `usecase`
+  35.0% and `domain` 32.4% afterwards, `queries/*.sql` comment lines
+  1,096 → 1,020. It was proven comments-only by a token comparison against
+  the branch base (code tokens, tool-read comments and SQL outside
+  comments all identical, every exported doc comment still present, each
+  check first seen to fail on a planted change; 290 of 351 `.go` files
+  and 13 of 17 SQL files changed, and only 6 test failure messages, each
+  approved by name). What stops it coming back: `make lint-comments`
+  fails on those references in any backend comment, and `CLAUDE.md` says
+  to write the rule instead. Four things the execution taught:
+  - **A line grep misses the reference that wraps.** "decision" at the end
+    of one comment line and "7" at the start of the next passed the plan's
+    grep, and so did a reference in a trailing comment after code on the
+    same line. The guard joins each comment block into one string before
+    matching, and scans trailing comments too. Both were proven by planting
+    the missed shape and watching the guard fail.
+  - **"Keep every why" alone produces a Light trim.** The trimmers were
+    told to shorten while keeping every reason, and they barely shortened:
+    the first `domain` pass went from 1,521 comment lines to about 1,540,
+    because one trimmer also rewrapped untouched text. They reached the
+    target only once given a number (verbose blocks lose 30–60%, one
+    sentence per distinct fact) and a real 12-line → 5-line example.
+  - **Condensing makes sentences false, not only shorter.** About 130
+    Important review findings across the nine sweep tasks, most of them a
+    rewritten sentence that now stated a rule the code does not follow
+    (a CHECK "allows only auto", a trend marked "future", a rule
+    reversed) or a security reason that had been dropped. The token
+    comparison cannot see any of this; only the per-group reviewer who
+    checked each rewritten rule against the code caught it. The same
+    reviewers found history with no number in it ("the brief's", "the
+    milestone", "pre-fix code"), which every grep misses.
+  - **Parallel agents in one checkout destroyed each other's work twice**
+    — see pattern 5.
+
+  **What would have caught it sooner:** a lint on the first day. The
+  references were only noise until the specs they pointed at stopped
+  being the code's current truth. **And a comments-only change needs two
+  checks, not one:** a mechanical one that the code did not change, and a
+  person reading each new sentence against the code, because a comment
+  can become false without a single code token moving.
 
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
@@ -2289,6 +2337,30 @@ time a reviewer found it by building a probe rather than reading the diff.
   `Converter.TryConvert`, and one mutation there (`errors.Is(err, ErrNoRate)`
   changed to `err != nil`) fails all seven outage tests at once. **A rule that every caller
   must remember belongs in the module the callers share, not in each of them.**
+
+- **Two git commands "succeeded" and threw away other agents' work — the
+  comment sweep, 2026-09-27.** The sweep ran up to twenty agents at once
+  in one checkout, each editing its own files and none committing.
+  *First*, one agent ran `git stash` in the middle of its own check. That
+  stashed all 83 uncommitted files of every group, not just its own. It
+  then restored only its own 10 files and reported success, while 72
+  files of other agents' work sat in the stash. Recovered by backing the
+  stash up to a branch, restoring the 72 files from it, keeping the newer
+  working-tree copies of the rest, and merging the one file both sides had
+  touched; then build, vet and the token comparison all passed on the
+  result. *Second*, to prove the new lint guard could fail, an agent
+  planted a history reference in `queries/account.sql` and undid it with
+  `git checkout -- file`, as its
+  instructions said. That restores the file from the last commit, not
+  from before the plant, so it also reverted another agent's uncommitted
+  trim of the same file. Recovered by re-applying that group's saved diff.
+  Both commands exit 0, and neither says what else it touched. **In a
+  checkout other agents are writing to, never run a git command that
+  rewrites the working tree** (`stash`, `checkout`, `restore`, `reset`).
+  Undo a planted mutation by hand, or plant only in a file with no
+  uncommitted work. And snapshot uncommitted work without touching the
+  tree — `git update-ref refs/<name> $(git stash create)` — so a repeat is
+  a one-command recovery.
 
 **Any two writes that must both happen need a transaction or a loud failure.**
 And a function that accepts a field must persist it or refuse it — silently
@@ -6141,7 +6213,10 @@ route with a missing guard has no second line of defence.
   invisible to `git diff`, to `git commit -a`, and to every test you run.
   **And a green local suite says nothing about the commit** — it says something
   about your disk. The check that matches CI is `git stash -u` (or a clone of
-  the pushed SHA) before believing the build.
+  the pushed SHA) before believing the build. Only `git stash -u` in a
+  checkout nobody else is writing to: with other agents working in the
+  same checkout it stashes their uncommitted work too (pattern 5, the
+  comment sweep, 2026-09-27) — use a clone or a separate worktree there.
 - **The dev `web` container's file watcher can silently stop noticing edits
   to a file it already served.** Mid-fix during the outbound-mail browser
   walk, saving `AdminShell.tsx` produced no Vite HMR log line at all, and

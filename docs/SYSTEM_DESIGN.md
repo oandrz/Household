@@ -742,13 +742,20 @@ dependency still points inward, which is why every service is testable against i
 
 **One relationship in this system has no arrow here at all, and the absence is
 the point.** `adapter/telegram`'s `Poller` calls
-`TelegramAuthService.HandleStart`, but the package never imports `usecase` —
-`grep -rn "internal/usecase" api/internal/adapter/telegram/` finds nothing,
-test files included. It depends on `StartHandler`, an interface it declares
-itself (`poller.go:12`), which `*usecase.TelegramAuthService` satisfies
-structurally and which `cmd/api/main.go` alone connects. So there is no
-compile-time edge to draw between those two packages, and drawing one would
-tell a reader the compiler is already checking that relationship. It is not:
+`TelegramAuthService.HandleStart`, but `poller.go` itself never imports
+`usecase` — `grep -rn "internal/usecase" api/internal/adapter/telegram/`
+finds only `commands.go` and `commands_test.go`, not `poller.go` or
+`poller_test.go`. Those two files import `usecase` only for data types,
+errors and the `IntentParser` port (`TelegramSpend`, `AccountView`,
+`ErrNudgesUnavailable`, ...) that cross `Commander`'s boundary — never for a
+concrete service: `CommandService` is an interface the package declares for
+itself, "so this package depends on shapes, not services" (`commands.go`'s
+own comment). `StartHandler` is declared the same way (in
+`adapter/telegram/poller.go`), and
+`*usecase.TelegramAuthService` satisfies it structurally; only
+`cmd/api/main.go` connects the two. So there is no compile-time edge to draw
+between `Poller` and `TelegramAuthService`, and drawing one would tell a
+reader the compiler is already checking that relationship. It is not:
 `main.go`'s `var _ telegram.StartHandler = (*usecase.TelegramAuthService)(nil)`
 is what does. §3 carries the full reasoning.
 
@@ -838,13 +845,15 @@ refuses (spec decision 7).
   is the thing to understand before touching it.** `adapter/http` imports
   `usecase` and holds concrete services (`router.go`'s `Deps` names
   `*usecase.AuthService` and thirteen others), which is the solid arrow you see
-  from `HTTP`. `adapter/telegram` imports nothing from `usecase` at all;
+  from `HTTP`. `adapter/telegram`'s `Poller` imports nothing from `usecase`;
   it declares `StartHandler` locally and lets `main.go` supply something that
   fits. So the driving edge here is **inverted** — the adapter states the shape
   it needs, and the wiring, not the compiler, connects it — which is why there
   is no arrow between those two boxes and why the assertion in `main.go` exists.
   `make lint-arch` passes either way, but for a stronger reason in this case:
-  the package has no inward-pointing import to check. Nothing in
+  `poller.go` has no inward-pointing import to check (the package's
+  `commands.go` imports `usecase` only for data types, errors and the
+  `IntentParser` port — never a concrete service). Nothing in
   `internal/domain` or `internal/usecase` may ever import this package or any
   Telegram type — that is the boundary the arrows, and the one missing arrow,
   are drawing.
@@ -908,14 +917,15 @@ in one file.
 | `Clock` | `adapter/clock` | So lockout windows and expiry are deterministic in tests |
 | `FXRateProvider` | `adapter/fx` | Static table today (SGD↔IDR only); a live provider drops in behind it. Returns a `domain.Rate` (an exact fraction). A pair it has no rate for is an error wrapping `domain.ErrNoRate`; any other error means the lookup itself failed. No service calls it for arithmetic directly: each builds a `usecase.Converter` (`usecase/converter.go`) per request from its own `FX` dependency, and the Converter skips the provider for an amount already in primary, looks each currency up once per Converter (remembering a rate or a "no rate" answer, never a failed lookup), and applies the rate. Callers are net worth (`AccountService`), month summary (`TransactionService`), `BudgetService`, `GoalService` and `BillService` (§5) |
 
-**`telegram.StartHandler` is the one interface in this system declared outside
-the `usecase/ports*.go` files, and it points the other way.** Every port in the table above
+**`telegram.StartHandler` (and, the same way, `CallerResolver` and
+`CommandService` in `commands.go`) are declared by the adapter, not in
+`usecase/ports*.go`, and point the other way.** Every port in the table above
 is declared by `usecase` and implemented by an adapter. `StartHandler` —
 `HandleStart(ctx, chatID int64, payload, username string) error` — is declared by the
 *adapter*, in `poller.go`, and satisfied by `*usecase.TelegramAuthService`. That
 is a legal direction for a **driving** adapter, and `adapter/http` is the other
 one: it drives by *importing* `usecase` and holding concrete services, where
-this package drives without importing `usecase` at all (§2's missing arrow).
+`Poller` drives without importing `usecase` at all (§2's missing arrow).
 Either shape would have been allowed; this one keeps the adapter's own tests
 free of the usecase package — `poller_test.go`'s `handlerSpy` satisfies
 `StartHandler` with a `sync.Mutex` and a slice, and that file imports nothing
@@ -2743,7 +2753,7 @@ sequenceDiagram
         alt pay-from account is archived
             Svc-->>H: BillNotPayableError{PayFromAccountArchived}
         else
-            Svc->>Svc: currency := account's own currency --<br/>transaction.go:232's identical rule;<br/>a test asserts the two agree
+            Svc->>Svc: currency := account's own currency --<br/>TransactionService.validate's identical rule;<br/>a test asserts the two agree
             Svc->>Svc: next, ok := domain.NextDue(cadence, dueOn, anchorDay)<br/>-- advances from the DUE date, never PaidOn
             Svc->>Repo: RecordPayment(...)
             Repo->>DB: BEGIN
