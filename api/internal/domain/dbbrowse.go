@@ -4,23 +4,19 @@ import "strings"
 
 // The two markers a browsed cell carries instead of a value.
 //
-// Guillemets, and not a bare word, so that a real value reading "redacted"
-// cannot be mistaken for a withheld one -- and so the screen has something
-// specific to explain in its legend. NullCell exists because RowPage carries
+// Guillemets, not a bare word, so a real value reading "redacted" can't be
+// mistaken for a withheld one. NullCell exists because RowPage carries
 // [][]string: without it, a SQL NULL and an empty text column would both
-// arrive as "" and a reader would conclude they are the same thing. In this
-// schema they are not, and the difference is sometimes the bug being
-// investigated (users.email is NULL for a member who signed in through
-// Telegram and never gave an address, and empty on nobody -- a magic link is
-// SENT to an address, so a magic-link member necessarily has one).
+// arrive as "", though the difference is sometimes the bug under
+// investigation (users.email is NULL for a Telegram-only member; a magic-link
+// member always has one, since the link is SENT to it).
 //
-// The two markers never compete for the same cell: redaction is decided in
-// the SELECT list, so a redacted column's value is never fetched and a NULL
-// in one still reads RedactedCell. users.password_hash is the example to
-// avoid reaching for here -- it is NULL for every member who has never set a
-// password, and it renders RedactedCell for all of them anyway, because
-// ColumnIsRedacted matches its _hash suffix. Pick a nullable column that is
-// NOT redacted when looking for NullCell on a real screen.
+// The two markers never compete for one cell: redaction is decided in the
+// SELECT list, so a NULL in a redacted column still reads RedactedCell. Don't
+// test NullCell against users.password_hash for this reason -- it's NULL for
+// anyone without a password, but reads RedactedCell anyway, since
+// ColumnIsRedacted matches its _hash suffix. Pick a nullable column that
+// isn't redacted instead.
 const (
 	RedactedCell = "«redacted»"
 	NullCell     = "«null»"
@@ -37,35 +33,24 @@ const (
 var redactedColumns = map[string]bool{}
 
 // ColumnIsRedacted reports whether a column's values must never be rendered.
-// name, dataType and udtName all come from information_schema.columns, so all
-// three are compared case-insensitively: nothing here may depend on how a
-// migration happened to spell them.
+// name, dataType and udtName come from information_schema.columns, compared
+// case-insensitively so nothing here depends on how a migration spelled them.
 //
-// Two type strings rather than one, because data_type is not always a type
-// name. For two families it reports the CATEGORY instead: an array reports
-// "ARRAY" and a domain or an extension type reports "USER-DEFINED". udt_name
-// carries the real name in both cases -- "_bytea" for bytea[], the domain's
-// own name for a domain. So bytea is matched on both columns, and a caller
-// holding only one of them still gets the plain case right.
+// Two type strings, not one, because data_type isn't always a type name: for
+// an array it reports "ARRAY" and for a domain or extension type
+// "USER-DEFINED", while udt_name carries the real name in both cases. bytea
+// is matched on both columns, so a caller holding only one still gets it
+// right.
 //
-// The three rules are deliberately ordered by how much they can be relied on.
-// The type rule is first because it is the one that survives a schema this
-// file has never seen: every token in Hearth is stored as bytea, so a bytea
-// column -- or an array of them -- added by a migration years from now is
-// redacted before its author has heard of this file.
-//
-// What the type rule does NOT cover, said here because an overstated
-// guarantee is worse than a known gap: a DOMAIN over bytea
-// (CREATE DOMAIN token AS bytea) reports its own name in udt_name, and
-// resolving that back to bytea needs pg_type.typbasetype -- a catalogue this
-// stdlib-only package cannot reach. Such a column is caught only by rule 2 or
-// rule 3. What catches it instead is a test rather than this function:
-// adapter/postgres's schema sweep resolves every column's base type through
-// the catalogue and goes red the day a migration introduces one.
-//
-// The name rules exist because the type rule is not complete even for today's
-// schema -- an Argon2 hash is a self-describing string, so users.password_hash
-// is text. The denylist is the escape hatch for anything the first two miss.
+// The three rules are ordered by how much they can be relied on. The type
+// rule goes first because it survives a schema this file has never seen:
+// every token in Hearth is stored as bytea, so a future bytea column is
+// redacted before its author has heard of this file. It does NOT cover a
+// DOMAIN over bytea, which needs pg_type.typbasetype -- a catalogue this
+// stdlib-only package can't reach; adapter/postgres's schema sweep test
+// catches that case instead. The name rules exist because the type rule isn't
+// complete even today -- users.password_hash is text -- and the denylist is
+// the last-resort escape hatch for anything the first two miss.
 func ColumnIsRedacted(name, dataType, udtName string) bool {
 	lowerName := strings.ToLower(name)
 	lowerType := strings.ToLower(dataType)

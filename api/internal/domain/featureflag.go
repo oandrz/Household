@@ -12,8 +12,8 @@ const (
 	// FlagSignupsOpen gates POST /auth/sign-up and the public sign-up screen,
 	// so registration can be closed without a redeploy.
 	FlagSignupsOpen Flag = "signups_open"
-	// FlagTelegramSignIn gates the Telegram routes, which until now were
-	// reachable or not purely by whether a bot was configured (ADR 4).
+	// FlagTelegramSignIn gates the Telegram routes, on top of whether a bot
+	// is configured at all (ADR 4).
 	FlagTelegramSignIn Flag = "telegram_sign_in"
 	// FlagNotificationDelivery gates sending on the notification preferences.
 	// Default off: the preferences are real, nothing sends them yet, and a
@@ -81,17 +81,15 @@ func (f FlagSet) Strings() map[string]bool {
 }
 
 // ResolveFlags answers, for one household, what every flag in defs is set to.
-//
 // Precedence: a household override beats a global override, which beats the
-// compile-time default. Keys neither map's caller could have validated are
-// simply not consulted -- the result is built by walking defs, never by
-// walking the overrides -- so an override row naming a flag this build does
-// not define can never enable anything. That row can exist: `key` has no
-// foreign key, deliberately, because the registry is compile-time.
+// compile-time default. The result is built by walking defs, never the
+// overrides, so an override row naming a flag this build doesn't define can
+// never enable anything -- that row can exist, since `key` deliberately
+// carries no foreign key (the registry is compile-time).
 //
 // Pass a nil household map for a caller with no household (the pre-auth
-// routes); household overrides are meaningless before there is a household and
-// must never be treated as "on".
+// routes): household overrides are meaningless before there is a household,
+// and must never be treated as "on".
 func ResolveFlags(defs []FlagDefinition, global, household map[Flag]bool) FlagSet {
 	out := make(FlagSet, len(defs))
 	for _, def := range defs {

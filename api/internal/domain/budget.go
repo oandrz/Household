@@ -18,35 +18,31 @@ type Budget struct {
 	Lines          []BudgetLine
 
 	// RolledOverAt and RolloverGoalID are the stamp 00007_goals.sql adds to
-	// budgets: nil/"" until BudgetService.RollOver moves this month's
-	// unspent money into a goal, and set exactly once thereafter. The two
-	// always move together -- both nil, or both populated -- which
-	// migrations/00007_goals.sql's rollover_stamp_is_whole CHECK constraint
-	// enforces at the schema level, so nothing in this layer needs to guard
-	// against seeing one without the other. RolloverGoalID follows the same
-	// "" <-> SQL NULL convention Account.OwnerMembershipID documents.
+	// budgets: nil/"" until BudgetService.RollOver moves this month's unspent
+	// money into a goal, and set exactly once thereafter. The two always move
+	// together, which migrations/00007_goals.sql's rollover_stamp_is_whole
+	// CHECK constraint enforces at the schema level, so nothing in this layer
+	// guards against one without the other. RolloverGoalID follows the same ""
+	// <-> SQL NULL convention Account.OwnerMembershipID documents.
 	RolledOverAt   *time.Time
 	RolloverGoalID string
 
 	// RolloverAmountMinor is the amount RollOver actually moved -- read off
 	// the goal_contributions row it wrote (source = 'budget_rollover'), never
-	// recomputed from Budgeted minus Spent. That recomputation is exactly the
-	// bug this field exists to close: Remaining moves with every later
-	// transaction in the month (a backdated entry, an edit, a delete), so a
-	// caller that rendered Remaining next to a past-tense "moved into X"
-	// sentence was quietly restating a completed action with a live number
-	// (see BudgetService.Month's own comment on RolloverAmountMinor for the
-	// concrete failure).
+	// recomputed from Budgeted minus Spent. Recomputing is exactly the bug
+	// this field exists to close: Remaining moves with every later transaction
+	// in the month, so a caller rendering it next to a past-tense "moved into
+	// X" sentence would restate a completed action with a live number (see
+	// usecase.BudgetMonthView.RolloverAmountMinor's comment).
 	//
 	// Unlike RolledOverAt/RolloverGoalID, this is NOT DB-CHECK-enforced to
-	// move with the other two -- it comes from a different table
-	// (goal_contributions), read via a join, not a column on budgets itself.
-	// It is populated with a real value ONLY by BudgetRepository.Get. Upsert
-	// and History both return a domain.Budget too, but neither one's result
-	// ever reaches BudgetMonthView -- BudgetService.Month builds its Budget
-	// exclusively through Get -- so both leave this nil regardless of
-	// whether the month was actually rolled over, and that nil is never
-	// observed by anything that renders it.
+	// move with the other two: it comes from a different table
+	// (goal_contributions), read via a join. It is populated with a real value
+	// ONLY by BudgetRepository.Get -- Upsert and History also return a
+	// domain.Budget, but neither result reaches BudgetMonthView, since
+	// BudgetService.Month builds its Budget exclusively through Get, so both
+	// leave this nil regardless of whether the month was rolled over, and
+	// nothing renders that nil.
 	RolloverAmountMinor *int64
 }
 

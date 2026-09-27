@@ -21,18 +21,16 @@ type Space struct {
 	RequiredCapability Capability // empty means no capability is required
 }
 
-// BuiltinSpaces is the set every household starts with, taken from the design's
-// Settings screen. Marriage is structurally locked to parents (VisibilityParentsOnly;
-// the domain also forbids a limited member from ever holding CapMarriage). Money is
-// visible to everyone but gated on CapMoney, matching the invite modal's "Money &
-// balances" toggle ("Off for kids by default") — a child can be granted access, and
-// gating on visibility instead of capability would make that toggle meaningless,
-// since visibility is checked before capability. Family is unconditional: the design
-// labels its audience "Everyone" with no qualifier, so it carries no required
-// capability; gating the Calendar page's content is a later slice, not this one.
+// BuiltinSpaces is the set every household starts with, from the design's
+// Settings screen. Marriage is locked to parents (VisibilityParentsOnly; the
+// domain also forbids a limited member from holding CapMarriage). Money is
+// visible to everyone but gated on CapMoney, so the invite modal's "Money &
+// balances" toggle can grant it to a child -- gating on visibility would
+// make that toggle meaningless, since visibility is checked first. Family
+// carries no required capability: the design labels its audience "Everyone".
 //
-// ID is left empty: identifiers are assigned by the database when a household
-// is seeded (Task 9's schema, Task 17's seed), not by this constructor.
+// ID is left empty: the spaces table's gen_random_uuid() default assigns it
+// when sign-up or the seed inserts them, not this constructor.
 func BuiltinSpaces(householdID string) []Space {
 	return []Space{
 		{HouseholdID: householdID, Key: "money", Name: "Money",
@@ -44,15 +42,15 @@ func BuiltinSpaces(householdID string) []Space {
 	}
 }
 
-// VisibleSpaces filters spaces for one membership. Visibility is checked before
-// capability, so a parents-only space stays hidden from a limited member even
-// if their capability set would otherwise allow it. An unrecognised Visibility
-// value is treated as owner-only rather than as everyone -- see the default
-// case below.
+// VisibleSpaces filters spaces for one membership. Visibility is checked
+// before capability, so a parents-only space stays hidden from a limited
+// member even if their capabilities would allow it. An unrecognised
+// Visibility is owner-only, not everyone -- see the default case below.
 //
 // The result preserves the input order; VisibleSpaces does not sort. Callers
-// must supply all already ordered by Position — Task 9's query does this with
-// an ORDER BY, and Task 19's sidebar relies on the order coming out as given.
+// must supply all already ordered by Position -- SpaceRepo.List's query does
+// this with an ORDER BY, and the frontend sidebar (Sidebar.tsx) relies on the
+// order coming out as given.
 func VisibleSpaces(all []Space, m Membership) []Space {
 	visible := make([]Space, 0, len(all))
 	for _, s := range all {
@@ -64,21 +62,19 @@ func VisibleSpaces(all []Space, m Membership) []Space {
 				continue
 			}
 		case VisibilityCustom:
-			// Provisional: per-space member lists do not exist yet, and the
-			// design marks custom space pages "not built". A visibility mode
-			// whose membership model is unbuilt must fail closed rather than
-			// default to maximum exposure, so custom spaces are owner-only
-			// until per-space membership is implemented.
+			// Provisional: per-space member lists don't exist yet, and the
+			// design marks custom space pages "not built". An unbuilt
+			// membership model must fail closed, not default to maximum
+			// exposure -- so custom spaces are owner-only until it exists.
 			if m.Role != RoleOwner {
 				continue
 			}
 		default:
 			// An unrecognised Visibility is a data or version problem, not a
-			// choice anyone made -- the same situation validateCapabilitiesForRole
-			// faces with an unknown Role rebuilt from a Postgres column (see
-			// ErrUnknownRole in identity.go). VisibleSpaces has no error return
-			// to report that, so it fails closed instead: the safe reading of
-			// "I do not know who may see this" is "not everyone", so an unknown
+			// choice -- the same situation validateCapabilitiesForRole faces
+			// with an unknown Role (see ErrUnknownRole). With no error return
+			// to report that, VisibleSpaces fails closed instead: "I don't
+			// know who may see this" reads as "not everyone", so an unknown
 			// value is owner-only, like VisibilityCustom.
 			if m.Role != RoleOwner {
 				continue

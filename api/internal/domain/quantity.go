@@ -6,25 +6,22 @@ import (
 	"strings"
 )
 
-// QuantityScale is how many stored units make one whole unit of a thing held:
-// one share, one gram. A quantity is therefore an int64 count of billionths,
-// the same way Money is an int64 count of minor units, and for the same reason
-// -- float64 never appears anywhere a figure on a money screen comes from.
+// QuantityScale is how many stored units make one whole unit held: one
+// share, one gram. A quantity is an int64 count of billionths, the same way
+// Money is int64 minor units -- float64 never appears in a money figure.
 //
-// Nine decimal places is far past anything real: a broker's smallest fractional
-// share is a millionth, and gold is weighed to milligrams. The headroom is
-// deliberate, because the alternative -- discovering the scale is too coarse
-// after rows exist -- is a migration over live data.
+// Nine decimal places is far past anything real -- a broker's smallest
+// share is a millionth. The headroom is deliberate: finding the scale too
+// coarse after rows exist would mean a migration over live data.
 //
-// Changing this constant silently restates every quantity already stored. If it
-// ever has to change, it needs a migration that rewrites the column, not a new
-// value here.
+// Changing this constant silently restates every quantity already stored: a
+// future change needs a migration that rewrites the column, not a new value
+// here.
 const QuantityScale = 1_000_000_000
 
-// Quantity is how much of a holding is held, in billionths of a unit. It is
-// deliberately not a Money: it has no currency, because "300.5 grams" is not
-// denominated in anything. Value is what turns it into money, and needs a
-// price to do it.
+// Quantity is how much of a holding is held, in billionths of a unit --
+// deliberately not a Money, since "300.5 grams" isn't denominated in
+// anything. Value turns it into money, given a price.
 type Quantity struct {
 	// nano is unexported so that the only way to hold a Quantity is through
 	// NewQuantity, which refuses a negative one. A bare struct literal would
@@ -47,18 +44,17 @@ func (q Quantity) Nano() int64 { return q.nano }
 
 // Value is what this quantity is worth at unitPrice, in unitPrice's currency.
 //
-// The arithmetic is the whole reason this type exists. The obvious version --
-// q.nano * unitPrice.Amount / QuantityScale in int64 -- overflows on an
+// The arithmetic is the whole reason this type exists: the obvious version
+// (q.nano * unitPrice.Amount / QuantityScale in int64) overflows on an
 // entirely ordinary holding, not an exotic one:
 //
 //	10,000 shares                  = 1e13 nano units
 //	Rp 10,000 each (IDR, 2 places) = 1e6 minor units
 //	product                        = 1e19, and an int64 stops at 9.223e18
 //
-// The answer, 1e10 minor units, fits with room to spare; it is only the
-// intermediate that does not. So the product is taken in 128 bits by
-// mulDivRoundHalfAway and divided back down, which keeps the whole calculation
-// in integers -- the same commitment Money.Add and Rate.Apply make.
+// Only the intermediate overflows -- the answer, 1e10 minor units, fits
+// with room to spare. mulDivRoundHalfAway takes the product in 128 bits,
+// the same integer-only commitment Money.Add and Rate.Apply make.
 func (q Quantity) Value(unitPrice Money) (Money, error) {
 	if unitPrice.Currency == "" {
 		return Money{}, fmt.Errorf("%w: a Money zero value has no currency", ErrMoneyWithoutCurrency)
@@ -80,18 +76,16 @@ func (q Quantity) Value(unitPrice Money) (Money, error) {
 // ParseQuantity reads a quantity the way a person types it -- "300.5" grams,
 // "0.5" of a share -- into nano units.
 //
-// It is a sibling of ParseAmount rather than a call to it, and deliberately so:
-// ParseAmount caps its scale at six decimal places and refuses zero, because a
-// transaction of nothing is not a transaction. Neither rule fits here. A
-// quantity has nine places, and zero is a real quantity -- a holding sold down
-// to nothing still has to be readable. Bending ParseAmount to cover both would
-// give one function two contracts.
+// It is a sibling of ParseAmount, not a call to it: ParseAmount caps at six
+// decimal places and refuses zero, since a transaction of nothing isn't one.
+// Neither rule fits here -- a quantity has nine places, and zero is real,
+// since a holding sold to nothing must stay readable. Bending ParseAmount to
+// cover both would give one function two contracts.
 //
-// It refuses rather than rounds, for ParseAmount's reason: "0.0000000001" means
-// the person and the product disagree about what can be represented, and
-// silently dropping the last digit would store a different number from the one
-// that was typed. A sign is refused too -- a disposal is its own event kind,
-// never a negative acquisition.
+// It refuses rather than rounds: silently dropping a digit finer than a
+// billionth would store a different number from the one typed. A sign is
+// refused too -- a disposal is its own event kind, never a negative
+// acquisition.
 func ParseQuantity(text string) (Quantity, error) {
 	const places = 9 // QuantityScale is 10^9
 
@@ -127,12 +121,11 @@ func ParseQuantity(text string) (Quantity, error) {
 // FormatQuantity renders a quantity the way ParseQuantity would read it back,
 // trimming the zeros nobody wants: 300.5 grams is not "300.500000000".
 //
-// This pair exists so that a browser NEVER divides by 1e9 to show a quantity.
-// That division is float64 arithmetic on a figure a money screen displays, and
-// docs/LEARNING.md already records what that costs: 333333 * 0.3 evaluates to
-// 99999.90000000001 in JavaScript, and a pool floored one unit low. The string
-// crosses the wire already formatted, and comes back as a string to be parsed
-// here in integers.
+// This pair exists so a browser NEVER divides by 1e9 to show a quantity:
+// that division is float64 arithmetic on a money-screen figure, and
+// docs/LEARNING.md already records the cost -- 333333 * 0.3 floored a pool
+// one unit low in JavaScript. The string crosses the wire already formatted,
+// and is parsed back here in integers.
 func FormatQuantity(q Quantity) string {
 	whole := q.nano / QuantityScale
 	frac := q.nano % QuantityScale
@@ -150,28 +143,26 @@ func FormatQuantity(q Quantity) string {
 // the same arithmetic, named for the direction the caller is thinking in.
 func (m Money) Mul(q Quantity) (Money, error) { return q.Value(m) }
 
-// Prorate returns the share of m that corresponds to part out of whole. It is
-// what takes a disposal's cost out of a holding's cost pool: selling 5 of 20
-// units removes exactly a quarter of what those 20 units cost, which is what
-// keeps the average cost of the remainder unchanged.
+// Prorate returns the share of m for part out of whole -- what takes a
+// disposal's cost out of a holding's cost pool. Selling 5 of 20 units
+// removes exactly a quarter of what those 20 cost, keeping the average cost
+// of the remainder unchanged.
 //
-// It is deliberately not "compute an average, then multiply". An average cost
-// per nano unit is a fraction far below one minor unit -- 3000 minor over 20
-// units is 0.00000015 per nano -- so computing it first truncates it to zero
-// and every disposal would cost nothing. Multiplying before dividing keeps the
-// precision, at the price of needing the same 128-bit intermediate
-// Quantity.Value needs, and for the same reason.
+// Deliberately not "compute an average, then multiply": an average cost per
+// nano unit is far below one minor unit (3000 minor over 20 units is
+// 0.00000015 per nano), so computing it first truncates to zero, costing
+// every disposal nothing. Multiplying first keeps the precision, needing
+// the same 128-bit intermediate as Quantity.Value.
 func (m Money) Prorate(part, whole Quantity) (Money, error) {
 	if m.Currency == "" {
 		return Money{}, fmt.Errorf("%w: a Money zero value has no currency", ErrMoneyWithoutCurrency)
 	}
-	// A cost pool is never negative here: a holding event refuses a negative
-	// amount, and a disposal's cost is capped at the pool it leaves. So a
-	// negative amount means something upstream is already wrong, and it is
-	// refused rather than prorated. mulDivRoundHalfAway could compute it (it
-	// handles negatives for Rate.Apply), but no holding figure should ever
-	// need it. The day a caller genuinely needs to prorate a negative, drop
-	// this refusal WITH a test.
+	// A cost pool is never negative here -- a holding event refuses a
+	// negative amount, and a disposal's cost is capped at the pool it
+	// leaves -- so a negative amount means something upstream is already
+	// wrong, and it's refused rather than prorated. mulDivRoundHalfAway
+	// could handle it (it does for Rate.Apply), but no holding figure should
+	// need to. Drop this refusal WITH a test, the day one genuinely does.
 	if m.Amount < 0 {
 		return Money{}, fmt.Errorf("%w: cannot prorate a negative amount, got %d", ErrNegativeAmount, m.Amount)
 	}

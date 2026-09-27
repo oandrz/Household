@@ -5,10 +5,9 @@ import (
 	"time"
 )
 
-// PeriodKind is the length of a reporting period. The three the PRD names --
-// calendar quarters, calendar half-years and the calendar year -- and no
-// others: a month is too short to read a portfolio in, and anything custom is
-// a different feature with a date picker in it.
+// PeriodKind is the length of a reporting period: calendar quarters,
+// half-years or the calendar year, never a month (too short to read a
+// portfolio in) or anything custom (a date-picker feature of its own).
 type PeriodKind string
 
 const (
@@ -44,10 +43,10 @@ func ParsePeriodKind(s string) (PeriodKind, error) {
 
 // Period is one reporting window: Q3 2026, H1 2025, 2024.
 //
-// Its fields are unexported so that an impossible period -- a fifth quarter, a
-// zeroth half -- cannot be constructed at all, which is the same reason
-// Quantity hides its nano field. Build one with NewPeriod or
-// PeriodContaining; read it with Kind, Year, Index, Start, End and Label.
+// Fields are unexported so an impossible period -- a fifth quarter, a
+// zeroth half -- can't be constructed, the same reason Quantity hides its
+// nano field. Build via NewPeriod or PeriodContaining; read via Kind, Year,
+// Index, Start, End and Label.
 //
 // index is 1-based and always 1 for a year, so that one shape covers all
 // three kinds and no caller has to special-case the year.
@@ -79,11 +78,11 @@ func (p Period) monthsEach() int { return 12 / periodsPerYear[p.kind] }
 
 // Start is the first day of the period, at midnight UTC.
 //
-// UTC is the same normalisation budget.go's startOfMonth applies, and for the
-// same reason: no household in Hearth stores a timezone
-// (usecase/account.go:165, transaction_repo.go:318 both record this), so a
-// period boundary that depended on the caller's location would put the same
-// trade in two different quarters depending on who opened the page.
+// UTC is the same normalisation usecase/budget.go's startOfMonth applies,
+// for the same reason: no household in Hearth stores a timezone
+// (usecase.AccountService.validate and the postgres adapter's startOfMonth
+// both record this) -- a caller-local boundary would put the same trade in
+// different quarters depending on who opened the page.
 func (p Period) Start() time.Time {
 	firstMonth := time.Month((p.index-1)*p.monthsEach() + 1)
 	return time.Date(p.year, firstMonth, 1, 0, 0, 0, 0, time.UTC)
@@ -91,23 +90,20 @@ func (p Period) Start() time.Time {
 
 // End is the LAST DAY of the period, inclusive, at midnight UTC.
 //
-// Inclusive, not the first day of the next period: every figure in the report
-// is measured over [Start, End], and the last day of a quarter is the day a
-// household is most likely to have recorded a closing price on. Computed by
-// stepping a whole month count forward and a day back, never by adding 90
-// days -- February is why.
+// Every figure in the report is measured over [Start, End], and the last day
+// of a quarter is the day a household is most likely to have recorded a
+// closing price on. Computed by stepping the period's whole months forward
+// and a day back, never by adding 90 days -- February is why.
 func (p Period) End() time.Time {
 	return p.Start().AddDate(0, p.monthsEach(), 0).AddDate(0, 0, -1)
 }
 
-// Previous is the period of the same kind immediately before this one. It is
-// what supplies a period's OPENING value: a quarter opens at the value it
-// closed the previous quarter on, so the two chain and no separate rule is
-// needed for the first day of a year.
-// It returns an error it is not expected to be able to produce, rather than
-// falling back to something plausible. The fallback would be THIS period,
-// which as an opening window silently measures the period against itself --
-// a wrong figure that looks like a right one, in a monetary path.
+// Previous is the period immediately before this one, of the same kind,
+// supplying a period's OPENING value: a quarter opens at what the previous
+// quarter closed on, chaining with no special case for a year's first day.
+// It returns an error it should never produce, rather than fall back to
+// THIS period, which would silently measure the period against itself -- a
+// wrong figure that looks right, in a monetary path.
 func (p Period) Previous() (Period, error) {
 	index, year := p.index-1, p.year
 	if index < 1 {
@@ -117,11 +113,10 @@ func (p Period) Previous() (Period, error) {
 	return NewPeriod(p.kind, year, index)
 }
 
-// Contains judges the DAY, not the instant. A timestamp recorded at 23:00 in
-// Singapore on 30 June is 15:00 UTC on 30 June, and both are the last day of
-// H1; comparing instants would put it in H2 for anyone who typed it after
-// 08:00 local. Truncating first is what makes the answer independent of who
-// is asking.
+// Contains judges the DAY, not the instant: 23:00 in Singapore on 30 June is
+// 15:00 UTC the same day, and both are the last day of H1, though comparing
+// instants would put it in H2 for anyone who typed after 08:00 local.
+// Truncating first makes the answer independent of who is asking.
 func (p Period) Contains(t time.Time) bool {
 	day := startOfDayUTC(t)
 	return !day.Before(p.Start()) && !day.After(p.End())
@@ -158,10 +153,9 @@ func PeriodContaining(kind PeriodKind, t time.Time) (Period, error) {
 // PeriodsEndingOn is the series the report draws: `count` consecutive periods
 // of this kind, OLDEST FIRST, ending with the one `today` falls in.
 //
-// It ends with the current period rather than the last closed one because the
-// owner's first question is "how am I doing now" -- with one price recorded,
-// a closed-periods-only report would be empty until a quarter ended, and the
-// feature could not be judged for three months.
+// It ends with the current period, not the last closed one, because the
+// owner's first question is "how am I doing now": a closed-only report would
+// stay empty until a quarter ended, unjudgeable for months.
 //
 // Walking backwards decrements the year when the index runs below one, which
 // is the step that a loop doing index-- alone gets wrong once a year.
@@ -196,12 +190,11 @@ func PeriodsEndingOn(kind PeriodKind, today time.Time, count int) ([]Period, err
 // looking at, stamped midnight UTC. Every period comparison goes through it so
 // that there is one place where "which day is this" is decided.
 //
-// It reads Date() in the value's OWN location and does NOT convert to UTC
-// first. Converting first moves 00:30 on 1 January in Singapore back to 31
-// December, which would file a trade in the wrong year for the eight hours a
-// day this household is ahead of UTC -- the defect class docs/LEARNING.md
-// pattern 1 has now recorded six times. budget.go's startOfMonth reads
-// t.Year() and t.Month() the same way and for the same reason.
+// It reads Date() in the value's OWN location, never converting to UTC
+// first -- that would move 00:30 on 1 January in Singapore back to 31
+// December, filing a trade in the wrong year for the eight hours a day this
+// household is ahead of UTC (docs/LEARNING.md pattern 1, seen six times).
+// usecase/budget.go's startOfMonth reads the same way, for the same reason.
 func startOfDayUTC(t time.Time) time.Time {
 	year, month, day := t.Date()
 	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)

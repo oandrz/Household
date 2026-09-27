@@ -8,14 +8,14 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
-// A holding's quantity is genuinely fractional -- 300.5 grams of gold, half a
-// share -- so it cannot be the plain int64 count every other number in this
-// package is. It is held in nano units: one unit is domain.QuantityScale.
+// A holding's quantity is genuinely fractional -- 300.5 grams of gold, half
+// a share -- so it can't be a plain int64 count; it's nano units, one unit
+// is domain.QuantityScale.
 //
-// These tests exist because the obvious implementation of Value --
-// quantity * price / scale in int64 -- is wrong, and wrong on an ordinary
-// holding rather than an exotic one. TestValueDoesNotOverflowOnAnOrdinaryIDRHolding
-// below is the case that drove the design.
+// These tests exist because the obvious Value implementation (quantity *
+// price / scale in int64) is wrong on an ordinary holding, not just an
+// exotic one -- TestValueDoesNotOverflowOnAnOrdinaryIDRHolding is the case
+// that drove the design.
 
 func TestNewQuantityRefusesANegativeAmount(t *testing.T) {
 	if _, err := domain.NewQuantity(-1); !errors.Is(err, domain.ErrQuantityNegative) {
@@ -59,13 +59,12 @@ func TestValueOfOneWholeUnitIsTheUnitPrice(t *testing.T) {
 	}
 }
 
-// The case the whole design turns on. IDR has two minor units
-// (domain/currency.go), so Rp 10,000 per share is 1_000_000 minor units, and
-// 10,000 shares is 1e13 nano. Their product is 1e19, which does NOT fit in an
-// int64 (max 9.223e18) -- so an implementation that multiplies in int64 refuses
-// to value a perfectly ordinary Indonesian position. The 128-bit intermediate
-// exists for this. The quotient, 1e10 minor units (Rp 100,000,000), fits with
-// room to spare: it is only the intermediate that overflows.
+// The case the whole design turns on: IDR has two minor units, so Rp 10,000
+// per share is 1_000_000 minor units, and 10,000 shares is 1e13 nano --
+// their product, 1e19, doesn't fit an int64 (max 9.223e18), so an
+// int64-multiplying implementation refuses a perfectly ordinary Indonesian
+// position. The 128-bit intermediate exists for this; the quotient, 1e10
+// minor units, fits with room to spare.
 func TestValueDoesNotOverflowOnAnOrdinaryIDRHolding(t *testing.T) {
 	const shares = 10_000
 	q, err := domain.NewQuantity(shares * domain.QuantityScale)
@@ -90,12 +89,12 @@ func TestValueDoesNotOverflowOnAnOrdinaryIDRHolding(t *testing.T) {
 	}
 }
 
-// The IDR case above overflows an int64 but its product (1e19) still fits in a
-// uint64, so it does not on its own prove the high word of the 128-bit product
-// is used -- an implementation that truncated to 64 bits would pass it. A
-// larger, still-real position does need the high word: 100,000 shares (1,000
-// IDX lots) at Rp 10,000 is a product of 1e20, past 2^64 = 1.845e19. Without
-// this case, dropping to a single 64-bit word is a mutation the suite misses.
+// The IDR case above overflows int64 but its product still fits a uint64, so
+// it alone doesn't prove the 128-bit product's high word is used -- a
+// 64-bit-truncated implementation would still pass it. 100,000 shares
+// (1,000 IDX lots) at Rp 10,000 needs the high word: a product of 1e20, past
+// 2^64. Without this case, truncating to one 64-bit word is a mutation the
+// suite misses.
 func TestValueUsesTheHighWordOfThe128BitProduct(t *testing.T) {
 	const shares = 100_000
 	q, err := domain.NewQuantity(shares * domain.QuantityScale)
@@ -149,11 +148,10 @@ func TestValueRoundsHalfAwayFromZero(t *testing.T) {
 	}
 }
 
-// A result that genuinely cannot fit must report ErrAmountOverflow -- and must
-// not panic. This case is specifically the one that makes a naive
-// math/bits.Div64 blow up: Div64 panics rather than erroring when the quotient
-// would not fit in 64 bits, so the implementation has to check before dividing.
-// A panic in a monetary path is worse than the overflow it replaces.
+// A result that genuinely can't fit must report ErrAmountOverflow, never
+// panic: math/bits.Div64 panics when the quotient needs more than 64 bits,
+// so the implementation must check before dividing -- a panic in a monetary
+// path is worse than the overflow it replaces.
 func TestValueReportsOverflowRatherThanPanicking(t *testing.T) {
 	q, err := domain.NewQuantity(math.MaxInt64)
 	if err != nil {
@@ -172,10 +170,10 @@ func TestValueReportsOverflowRatherThanPanicking(t *testing.T) {
 	}
 }
 
-// A unit price is a price: negative is not a meaningful one, and accepting it
-// would let a holding contribute a negative market value, which is a liability,
-// which is what an account type is for. Fail closed on a value this package did
-// not construct.
+// A unit price is a price: negative isn't meaningful, and accepting one
+// would make a holding contribute negative market value -- a liability,
+// which is what an account type is for. Fail closed on a value this
+// package did not construct.
 func TestValueRefusesANegativeUnitPrice(t *testing.T) {
 	q, _ := domain.NewQuantity(domain.QuantityScale)
 	price, _ := domain.NewMoney(-1, "SGD")
@@ -185,12 +183,11 @@ func TestValueRefusesANegativeUnitPrice(t *testing.T) {
 	}
 }
 
-// A quantity crosses the wire as a STRING, the way a person types it -- "300.5"
-// grams, "0.5" of a share. It must never cross as nano units for a browser to
-// divide by 1e9: that division is float64 arithmetic on a figure a money screen
-// shows, which is the defect docs/LEARNING.md already records (333333 * 0.3
-// === 99999.90000000001 in JavaScript). ParseQuantity and FormatQuantity are
-// the pair that keeps that division out of both ends.
+// A quantity crosses the wire as a STRING, the way a person types it --
+// "300.5" grams, "0.5" of a share -- never as nano units for a browser to
+// divide by 1e9, which is float64 arithmetic on a money-screen figure (the
+// defect docs/LEARNING.md already records). ParseQuantity and FormatQuantity
+// are the pair that keeps that division out of both ends.
 func TestParseQuantityReadsWhatAPersonWouldType(t *testing.T) {
 	cases := []struct {
 		in   string
@@ -217,10 +214,9 @@ func TestParseQuantityReadsWhatAPersonWouldType(t *testing.T) {
 }
 
 func TestParseQuantityRefusesWhatItCannotRepresent(t *testing.T) {
-	// Ten decimal places is finer than a nano unit. Silently truncating it
-	// would accept a number and store a different one, which is worse than
-	// refusing -- the household would have typed one figure and be shown
-	// another.
+	// Ten decimal places is finer than a nano unit. Silently truncating would
+	// store a different number than the one typed -- worse than refusing,
+	// since the household would see a figure it didn't enter.
 	for _, s := range []string{"", "   ", "abc", "-1", "1.2.3", "0.0000000001", "1e9", "1.", "--1"} {
 		if _, err := domain.ParseQuantity(s); err == nil {
 			t.Fatalf("ParseQuantity(%q) was accepted; it must be refused", s)

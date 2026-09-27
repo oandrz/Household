@@ -5,10 +5,9 @@ import (
 	"unicode/utf8"
 )
 
-// The collection caps. A save rewrites every child of a document, so the cost
-// of one write has to be bounded by something other than whatever a request
-// body happens to contain. The numbers are generous against a design that
-// draws three pillars and three milestones.
+// The collection caps bound one save's cost -- a save rewrites every
+// child of a document, so cost can't depend on request-body size.
+// Generous against a three-pillar, three-milestone design.
 const (
 	MaxVisionPillars        = 12
 	MaxPillarMeasures       = 8
@@ -19,10 +18,9 @@ const (
 	MaxVisionYear           = 2200
 )
 
-// MeasureKind is which of three shapes a measure has. MeasureBroken exists
-// only because ON DELETE SET NULL produces it when a linked goal is deleted:
-// the page renders such a measure as a label with no figure, and Validate
-// refuses to create one. Read tolerantly, write strictly.
+// MeasureKind is which of three shapes a measure has. MeasureBroken comes
+// from ON DELETE SET NULL on a deleted linked goal: rendered as a label
+// with no figure, but refused by Validate on the write path.
 type MeasureKind string
 
 const (
@@ -70,10 +68,9 @@ type Vision struct {
 	Milestones  []Milestone
 }
 
-// Validate is the write path's rules. It is deliberately stricter than the
-// database: MeasureBroken passes the schema's third CHECK branch but is
-// refused here, because nothing should be able to create a measure whose
-// figure is missing on purpose.
+// Validate is the write path's rules, stricter than the database:
+// MeasureBroken passes the schema's CHECK branch but is refused here, so
+// a measure can't be created with a missing figure on purpose.
 func (v Vision) Validate() error {
 	if strings.TrimSpace(v.Theme) == "" {
 		return ErrVisionThemeRequired

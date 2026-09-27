@@ -93,21 +93,15 @@ type BillPayment struct {
 }
 
 // BillPaymentNotLatestError is BillRepository.UndoPayment's own
-// most-recent-only refusal (that method's own doc comment), enriched with
-// the due date that WOULD have been accepted. The repository already
-// computes that date to decide the refusal in the first place -- it is not
-// a second lookup, just carrying forward a fact already in hand.
+// most-recent-only refusal, enriched with the due date that WOULD have been
+// accepted. The repository already computes that date to decide the refusal,
+// so this is not a second lookup, just carrying the fact forward.
 //
 // Unwrap returns ErrForbidden, the SignInFailedError precedent in
-// usecase/auth.go applied here: errors.Is(err, ErrForbidden) still matches
-// through this type, so the postgres and usecase suites' existing
-// bare-sentinel assertions (TestUndoRefusesAnythingButTheMostRecentPayment,
-// TestUndoPaymentPassesThroughTheMostRecentOnlyRefusal) need no change.
-// Only the HTTP layer, which has to NAME which payment is undoable (the
-// design's own "409, naming which payment is undoable"), needs to reach for
-// the richer type via errors.As -- exactly the same split SignInFailedError
-// draws between the sentinel most callers match and the struct one caller
-// needs the detail from.
+// usecase/auth.go applied here: a plain errors.Is(err, ErrForbidden) still
+// matches, so the existing bare-sentinel test assertions need no change. Only
+// the HTTP layer, which has to NAME which payment is undoable, needs
+// errors.As to reach the richer type.
 type BillPaymentNotLatestError struct {
 	MostRecentDueOn time.Time
 }
@@ -119,12 +113,10 @@ func (e *BillPaymentNotLatestError) Error() string {
 func (e *BillPaymentNotLatestError) Unwrap() error { return ErrForbidden }
 
 // BillNotPayableReason is which of MarkPaid's three checks refused the
-// attempt -- the archived bill, the settled one-off and the archived
+// attempt -- the archived bill, the settled one-off, and the archived
 // pay-from account each mean a different thing to the household, and the
-// design's own error table gives two of the three their own named 422
-// ("Paying from an archived account | 422, naming the account"; "Paying a
-// settled one-off | 422"). A bare domain.ErrForbidden cannot carry which one
-// happened; this can.
+// design's own error table names two of the three with their own 422. A bare
+// domain.ErrForbidden can't carry which one happened; this can.
 type BillNotPayableReason string
 
 const (
@@ -134,13 +126,11 @@ const (
 )
 
 // BillNotPayableError is MarkPaid's own refusal, enriched with which of the
-// three checks it was. Unwrap returns ErrForbidden -- the
-// BillPaymentNotLatestError precedent above applied here -- so the existing
-// bare-sentinel assertions (TestMarkPaidRefusesAnArchivedBill,
-// TestMarkPaidRefusesAnArchivedPayFromAccount,
-// TestMarkPaidRefusesASettledOneOff) need no change. Only the HTTP layer,
-// which has to name each cause rather than answer one generic 403 for all
-// three, needs to reach for the richer type via errors.As.
+// three checks it was. Unwrap returns ErrForbidden, the
+// BillPaymentNotLatestError precedent above applied here, so the existing
+// bare-sentinel assertions need no change. Only the HTTP layer, which has to
+// name each cause rather than answer one generic 403 for all three, needs
+// errors.As to reach the richer type.
 type BillNotPayableError struct {
 	Reason BillNotPayableReason
 }

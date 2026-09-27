@@ -8,13 +8,11 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
-// A holding is what the household owns some of; its events are the acquisitions
-// and disposals that got it there. Position folds those events into the three
-// figures every screen in this feature needs: how much is still held, what it
-// cost, and what has already been realised by selling.
-//
-// The fold is where this feature's arithmetic is easy to get wrong, so most of
-// what follows is about the fold rather than the structs.
+// A holding is what the household owns some of; its events are the
+// acquisitions and disposals that got it there. Position folds those events
+// into the three figures every screen needs: how much is still held, what it
+// cost, and what has already been realised by selling -- the fold is where
+// this arithmetic is easy to get wrong, so most of what follows is about it.
 
 func on(day int) time.Time {
 	return time.Date(2026, 3, day, 0, 0, 0, 0, time.UTC)
@@ -184,10 +182,9 @@ func TestProrateRefusesAnEmptyWhole(t *testing.T) {
 }
 
 // A cost pool is never negative: events refuse a negative amount, and a
-// disposal's cost is capped at the pool it comes out of. Prorate therefore
-// refuses a negative amount outright rather than carrying sign-handling code
-// that nothing exercises -- untested two's-complement care on a monetary path
-// is exactly what "no cleverness in security-sensitive code" is about.
+// disposal's cost is capped at the pool it comes from. Prorate refuses one
+// outright rather than carry untested sign-handling code -- exactly what "no
+// cleverness in security-sensitive code" warns against.
 func TestProrateRefusesANegativeAmount(t *testing.T) {
 	pool := sgdAmount(t, -100)
 	if _, err := pool.Prorate(units(t, 1), units(t, 2)); !errors.Is(err, domain.ErrNegativeAmount) {
@@ -195,11 +192,10 @@ func TestProrateRefusesANegativeAmount(t *testing.T) {
 	}
 }
 
-// Prorate's own refusal is deliberately NOT ErrHoldingOversold. Both guards
-// fire on the same shape, but this one means "that is not a proportion" while
-// the fold's means "this household does not own that much" -- and while they
-// shared an error, removing either one left the other still producing it, so
-// neither guard was actually pinned. Found by mutation testing.
+// Prorate's refusal is deliberately NOT ErrHoldingOversold: one means "that is
+// not a proportion", the other "this household does not own that much" --
+// sharing an error let either guard vanish while the other still fired, so
+// neither was actually pinned.
 func TestProrateRefusesAPartLargerThanTheWhole(t *testing.T) {
 	pool := sgdAmount(t, 3000)
 	if _, err := pool.Prorate(units(t, 21), units(t, 20)); !errors.Is(err, domain.ErrProratePartExceedsWhole) {
@@ -207,11 +203,10 @@ func TestProrateRefusesAPartLargerThanTheWhole(t *testing.T) {
 	}
 }
 
-// Prorate multiplies a money amount by a nano quantity, so it hits the same
-// 128-bit intermediate Quantity.Value does, and must not overflow on figures a
-// real IDR portfolio produces. Rp 1,000,000,000 (1e11 minor) across 100,000
-// units gives an intermediate of 1e11 * 1e14 = 1e25, far past int64 and past
-// uint64 too.
+// Prorate multiplies a money amount by a nano quantity, hitting the same
+// 128-bit intermediate Quantity.Value does, and must not overflow on real IDR
+// figures: Rp 1,000,000,000 (1e11 minor) across 100,000 units gives an
+// intermediate of 1e11 * 1e14 = 1e25, far past int64 and uint64 both.
 func TestProrateDoesNotOverflowOnALargeIDRPool(t *testing.T) {
 	pool, err := domain.NewMoney(100_000_000_000, "IDR")
 	if err != nil {
@@ -246,9 +241,8 @@ func TestPositionOfASingleAcquisitionIsItsQuantityAndItsCost(t *testing.T) {
 }
 
 // The asymmetry that makes average cost correct: buying at a new price moves
-// the average, selling never does. A disposal takes its own cost out of the
-// pool in exact proportion, so what is left is still valued at the same average
-// as before the sale.
+// it, selling never does -- a disposal takes its cost out in exact proportion,
+// leaving what remains at the same average as before.
 func TestADisposalLeavesTheAverageCostAloneAndAnAcquisitionMovesIt(t *testing.T) {
 	h := sgdHolding()
 
@@ -289,10 +283,10 @@ func TestADisposalLeavesTheAverageCostAloneAndAnAcquisitionMovesIt(t *testing.T)
 	}
 }
 
-// Realised gain is proceeds minus the cost of what was sold, valued at the
-// average *at the time of that sale* -- not the final average. The second sale
-// below is priced off a pool a later purchase had already moved, so a fold that
-// used one average for everything would get it wrong.
+// Realised gain is proceeds minus the cost sold, valued at the average *at the
+// time of that sale*, not the final one -- the second sale here is priced off
+// a pool a later purchase had already moved, so one final average would get it
+// wrong.
 func TestRealisedGainUsesTheAverageAtTheTimeOfEachSale(t *testing.T) {
 	p, err := sgdHolding().Position([]domain.HoldingEvent{
 		buy(t, 1, 10, 1000), // avg 100
@@ -315,10 +309,9 @@ func TestRealisedGainUsesTheAverageAtTheTimeOfEachSale(t *testing.T) {
 	}
 }
 
-// The fold must order events by date itself. A repository returning rows in
+// The fold must order events by date itself -- a repository returning rows in
 // insertion order, or a caller appending a backdated correction, would
-// otherwise produce a different answer for the same holding -- and the
-// difference is silent.
+// otherwise produce a different, silently wrong answer for the same holding.
 func TestPositionFoldsInDateOrderNotSliceOrder(t *testing.T) {
 	inOrder := []domain.HoldingEvent{
 		buy(t, 1, 10, 1000), buy(t, 2, 10, 2000), sell(t, 3, 5, 1500),
@@ -372,17 +365,14 @@ func TestPositionOfAHoldingWithNoEventsIsZeroInItsOwnCurrency(t *testing.T) {
 	}
 }
 
-// Two events on the same day are a real case -- occurred_on is a date, so
-// buying and selling the same morning share one -- and the order between them
-// changes the answer: buying first dilutes the average the sale is costed
-// against. Buy-then-sell realises 750 here; sell-then-buy realises 1000.
-//
-// The fold sorts stably, so a tie keeps the caller's order. That makes the
-// REPOSITORY's ordering load-bearing, which is why HoldingEventRepository's
-// contract fixes it at (occurred_on, created_at, id) -- the order the events
-// were actually recorded in. This test pins the domain half of that bargain:
-// if the sort ever stops being stable, the repository's guarantee stops
-// meaning anything and this fails.
+// Two same-day events are real -- occurred_on is date-only, so a morning's buy
+// and sell share one -- and their order changes the answer (buy-then-sell
+// realises 750, sell-then-buy 1000), since buying first dilutes the average
+// the sale costs against. The fold sorts stably, keeping a tie in the caller's
+// order, which makes the REPOSITORY's ordering load-bearing:
+// HoldingEventRepository fixes it at (occurred_on, created_at, id), the
+// recorded order. This pins the domain half of that bargain -- an unstable
+// sort would make the repository's guarantee meaningless.
 func TestPositionKeepsSliceOrderForEventsOnTheSameDay(t *testing.T) {
 	base := buy(t, 1, 10, 1000)
 	buyThenSell := []domain.HoldingEvent{base, buy(t, 1, 10, 2000), sell(t, 1, 5, 1500)}
@@ -405,20 +395,16 @@ func TestPositionKeepsSliceOrderForEventsOnTheSameDay(t *testing.T) {
 	}
 }
 
-// The test above pins the two answers but not the mechanism. Pinning the
-// stability itself needs care: Go's sort.Slice leaves an all-equal slice
-// completely untouched (pdqsort spots the already-sorted run), so a dozen
-// events on one day cannot tell a stable sort from an unstable one. Ties
-// inside a slice that genuinely needs sorting are a different matter -- there
-// sort.Slice does reorder equal keys, from about a dozen elements up.
-//
-// So this case mixes two days. The disposal sits second among the day-one
-// events, and nine more day-one acquisitions follow it, with day-two
-// acquisitions scattered through the slice so the sort has real work to do.
-// In recorded order the sale is costed against ten units at an average of 100:
-// 500 of cost leaves and 1000 is realised. Let it drift past the later
-// day-one buys and it is costed against a much larger pool, and the realised
-// figure moves -- same events, same days, different answer.
+// The test above pins the two answers, not the mechanism. Go's sort.Slice
+// leaves an all-equal slice untouched (pdqsort spots the already-sorted run),
+// so a dozen same-day events can't distinguish stable from unstable; ties in a
+// slice that genuinely needs sorting DO reorder, from about a dozen elements
+// up. So this case mixes two days: the disposal sits second among the
+// day-one events, nine more day-one buys follow it, and day-two buys are
+// scattered through the slice so the sort has real work. Recorded order costs
+// the sale against ten units at an average of 100 (500 leaves, 1000 realised);
+// drifting past the later buys costs a larger pool instead, changing the
+// realised figure for identical events on identical days.
 func TestPositionKeepsSameDayOrderWhenTheSortHasRealWorkToDo(t *testing.T) {
 	dayOne := []domain.HoldingEvent{buy(t, 1, 10, 1000), sell(t, 1, 5, 1500)}
 	for i := 0; i < 9; i++ {
@@ -482,10 +468,9 @@ func TestMarketValueIsTheHeldQuantityAtTheValuationPrice(t *testing.T) {
 	}
 }
 
-// A valuation carries the same cross-currency rule its holding's events do,
-// because it is the same question: a figure in USD needs its primary-currency
-// twin, and one already in primary must not carry a second. The rule lives in
-// one place so the two cannot drift.
+// A valuation carries the same cross-currency rule its holding's events do --
+// a figure in USD needs its primary-currency twin, one already in primary must
+// not carry a second, and the rule lives in one place so the two can't drift.
 func TestValuationCarriesTheSameCrossCurrencyRuleAsAnEvent(t *testing.T) {
 	crossNoPrimary := domain.Valuation{AsOf: on(1)}
 	crossNoPrimary.UnitPrice, _ = domain.NewMoney(250, "USD")
@@ -519,10 +504,9 @@ func TestValuationRefusesAPriceInTheWrongCurrency(t *testing.T) {
 
 // --- the primary-currency pool ----------------------------------------------
 //
-// A holding in a currency the household does not keep its books in carries two
-// cost pools, folded side by side: the native one, and the household's own.
-// The second is not derivable from the first afterwards, which is the whole
-// reason it is folded rather than converted -- see the tests below.
+// A holding in a currency the household doesn't keep its books in carries two
+// cost pools, folded side by side -- native and the household's own -- because
+// the second can't be derived from the first afterwards; see the tests below.
 
 func usdHolding() domain.Holding {
 	return domain.Holding{
@@ -569,11 +553,10 @@ func sellUSD(t *testing.T, day int, qty, usdMinor, sgdMinor int64) domain.Holdin
 	}
 }
 
-// The test the whole decision rests on. Two lots bought at the same USD price
-// but different exchange rates blend to an SGD cost per unit that is neither
-// rate: S$135.00 and S$130.00 per unit average to S$132.50. No single rate
-// applied to the USD realised figure produces the SGD one, which is why the
-// primary pool is folded rather than converted after the fact.
+// Two lots at the same USD price under different exchange rates blend to an
+// SGD cost matching neither rate (S$135.00 and S$130.00 average to S$132.50);
+// no single rate applied to the USD figure produces that SGD one -- why the
+// primary pool is folded, not converted after the fact.
 func TestRealisedInPrimaryCurrencyUsesTheBlendedRateNotTheLatestOne(t *testing.T) {
 	h := usdHolding()
 	events := []domain.HoldingEvent{
@@ -607,11 +590,10 @@ func TestRealisedInPrimaryCurrencyUsesTheBlendedRateNotTheLatestOne(t *testing.T
 	}
 }
 
-// A holding already in the household's currency carries no second amount --
-// validatePrimaryAmount refuses one, because two figures for the same number
-// can disagree later with nothing to say which is true. The fold fills the
-// primary pool from the native one instead, so every caller reads the primary
-// figures without asking which case it is in.
+// A holding already in its household's currency carries no second amount --
+// validatePrimaryAmount refuses a duplicate that could disagree with nothing
+// to say which is true -- so the fold fills the primary pool from the native
+// amount instead.
 func TestAHoldingAlreadyInThePrimaryCurrencyFillsBothPoolsFromOneAmount(t *testing.T) {
 	h := sgdHolding()
 	p, err := h.Position([]domain.HoldingEvent{
@@ -649,10 +631,9 @@ func TestAnEmptyPositionsPrimaryPoolIsInTheHouseholdsCurrency(t *testing.T) {
 	}
 }
 
-// The fold reads rows it did not construct. A primary amount in a third
-// currency is refused rather than added into the household's pool -- the
-// fail-closed rule CLAUDE.md states for any value arriving from a database
-// column.
+// The fold reads rows it did not construct, so a primary amount in a third
+// currency is refused rather than added to the household's pool -- CLAUDE.md's
+// fail-closed rule for any value arriving from a database column.
 func TestTheFoldRefusesAPrimaryAmountInSomeOtherCurrency(t *testing.T) {
 	wrong := money(t, 999, "IDR")
 	events := []domain.HoldingEvent{{

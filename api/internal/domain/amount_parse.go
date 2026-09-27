@@ -6,16 +6,15 @@ import (
 )
 
 // ParseAmount turns what a person typed -- "84.50", "1,250", "12", "0.5" --
-// into minor units for a currency with the given number of decimal places.
-// It is the one place a decimal string enters the money model, and it does
-// it with integer string arithmetic: no float64 ever touches an amount
-// (CLAUDE.md's money rule), so "0.1" in a 2-place currency is exactly 10,
-// never 9.999… rounded.
+// into minor units for a currency with the given number of decimal places,
+// using integer string arithmetic so no float64 ever touches an amount
+// (CLAUDE.md's money rule): "0.1" in a 2-place currency is exactly 10, never
+// 9.999… rounded.
 //
-// It refuses rather than rounds: more decimal places than the currency has
-// is an error, because "84.505" means the person and the product disagree
-// about what the currency can represent, and silently dropping the 5 would
-// hide that. A sign is refused too; the kind of transaction carries it.
+// It refuses rather than rounds: more decimal places than the currency has is
+// an error, since "84.505" means the person and the product disagree about
+// what the currency can represent, and dropping the 5 would hide that. A sign
+// is refused too; the kind of transaction carries it.
 func ParseAmount(text string, minorUnits int) (int64, error) {
 	s := strings.ReplaceAll(strings.TrimSpace(text), ",", "")
 	if s == "" || minorUnits < 0 || minorUnits > 6 {

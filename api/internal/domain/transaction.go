@@ -35,18 +35,14 @@ func ParseTransactionKind(s string) (TransactionKind, error) {
 
 // Transaction is one thing that happened to a household's accounts.
 //
-// The four id fields follow the same "" <-> SQL NULL convention as
-// Account.OwnerMembershipID: "" means the column is NULL. An expense has no
-// ToAccountID, an income has no FromAccountID, and a transfer has both -- the
-// accounts_match_kind constraint enforces that combination at the database
-// too, because a row that breaks it produces a balance that is wrong with
-// nothing on screen to explain it.
+// The four id fields use "" for SQL NULL, as Account.OwnerMembershipID
+// does: an expense has no ToAccountID, an income no FromAccountID, a
+// transfer both -- accounts_match_kind enforces this at the database
+// too, against a silently wrong balance.
 //
-// ReceivedAmount is what landed in the destination account, in that account's
-// own currency. It is nil when nothing but the amount sent is known, which is
-// the ordinary same-currency case. It is required for a transfer whose two
-// accounts differ in currency, and permitted for one whose accounts match so
-// that a bank fee is recordable.
+// ReceivedAmount is what landed in the destination account, in its own
+// currency: nil in the ordinary same-currency case, required when a
+// transfer's accounts differ, optional (a bank fee) when they match.
 type Transaction struct {
 	ID                 string
 	HouseholdID        string
@@ -65,16 +61,15 @@ type Transaction struct {
 	IdempotencyKey string
 }
 
-// Idempotency keys are caller-supplied, so their shape is refused rather
-// than trusted: 1 to 128 printable ASCII characters with no spaces. Long
-// enough for a hash, short enough to index, and nothing a log line or a
-// header cannot carry verbatim.
+// MaxIdempotencyKeyLength caps a caller-supplied key, whose shape is refused
+// rather than trusted: 1 to 128 printable ASCII characters, no spaces --
+// long enough for a hash, short enough to index, and safe to carry verbatim
+// in a header or log line.
 const MaxIdempotencyKeyLength = 128
 
 // ValidateIdempotencyKey reports ErrIdempotencyKeyInvalid for anything a
-// key must not be. An empty string is invalid here on purpose: "" is the
-// stored meaning of "no key", so a caller who sends an empty header is
-// refused rather than silently treated as having sent none.
+// key must not be. Empty is invalid on purpose: "" is the stored meaning
+// of "no key", so an empty header is refused, not silently read as none.
 func ValidateIdempotencyKey(key string) error {
 	if key == "" || len(key) > MaxIdempotencyKeyLength {
 		return ErrIdempotencyKeyInvalid
@@ -88,10 +83,10 @@ func ValidateIdempotencyKey(key string) error {
 }
 
 // SameCreate reports whether a repeated create with this key asked for the
-// same transaction as the stored one: every field the caller controls,
-// compared after validation normalised both sides. The id and the key are
-// not compared -- the key is what brought the two together, and the id is
-// the server's. A nil and a non-nil ReceivedAmount differ.
+// same transaction as the stored one: every caller-controlled field,
+// compared after validation normalises both sides. The id and key are
+// excluded -- the key is what matched them, the id is the server's -- and
+// a nil ReceivedAmount is not treated as equal to a non-nil one.
 func (t Transaction) SameCreate(stored Transaction) bool {
 	if t.Kind != stored.Kind ||
 		!t.OccurredOn.Equal(stored.OccurredOn) ||
@@ -114,17 +109,10 @@ func (t Transaction) SameCreate(stored Transaction) bool {
 }
 
 // CreditedAmount is what arrives in the destination account: the received
-// amount when one was recorded, and otherwise the amount that left.
-//
-// No production code calls this or BalanceEffect below. Read that before
-// changing either: the balance every screen shows is summed in SQL, by the
-// balance_minor expression in adapter/postgres/queries/account.sql, and
-// editing these two would not move it by a cent. They are kept as the
-// domain's written statement of what a transaction does to an account -- the
-// rule in one readable place, tested in transaction_test.go -- and the SQL
-// carries its own copy of it. If a second reader ever needs this arithmetic
-// in Go (a projection, an import preview, an undo), this is the shape it
-// should take, and the SQL is what it has to agree with.
+// amount if one was recorded, else the amount sent. No production code
+// calls it or BalanceEffect: balances are summed in SQL (balance_minor in
+// adapter/postgres/queries/account.sql), so editing them moves no balance.
+// They state the rule in Go; a future Go caller must agree with that SQL.
 func (t Transaction) CreditedAmount() Money {
 	if t.ReceivedAmount != nil {
 		return *t.ReceivedAmount
@@ -133,37 +121,27 @@ func (t Transaction) CreditedAmount() Money {
 }
 
 // BalanceEffect reports what this transaction does to the named account's
-// balance, and whether it touches that account at all. Like CreditedAmount
-// above, it has no production caller today -- see that comment for why it is
-// still here and what actually computes the balances a household sees.
+// balance, and whether it touches that account at all. No production
+// caller today -- see CreditedAmount above for why. A transfer supplies
+// both effects from one row, so it can never move net worth: the two
+// sides are the same money, with no second row to go missing.
 //
-// A transfer supplies both of its effects from this one row, which is why a
-// transfer cannot change net worth: the two sides are the same money, and
-// there is no second row that could go missing. That invariant is a property
-// of the shape rather than a rule someone has to remember.
-//
-// It returns ok=false in two cases. First, for any account the transaction
-// does not touch, because zero is a real effect -- a caller must be able to
-// tell "this transaction moved nothing here" from "this transaction is not
-// about this account at all". Second, for the unreachable overflow case when
-// the amount is math.MinInt64, which cannot be safely negated. The signature
-// returns bool rather than error because the overflow guard is unreachable
-// through any path this product ships -- the database enforces positive
-// amounts -- so an error return would be a second failure mode every future
-// caller has to handle in exchange for nothing. A caller must not read
-// ok=false as proof the account was untouched.
+// ok=false means either the account isn't touched (zero is a real effect,
+// so this must be distinguishable from "not about this account"), or the
+// unreachable math.MinInt64 overflow case, so ok=false is not proof the
+// account was untouched. It's bool, not error, because that overflow
+// guard never fires -- the database enforces positive amounts -- so
+// error would be a needless failure mode for every caller.
 func (t Transaction) BalanceEffect(accountID string) (Money, bool) {
 	if accountID == "" {
 		return Money{}, false
 	}
 	switch {
 	case accountID == t.FromAccountID:
-		// math.MinInt64 has no positive counterpart in two's complement, so a
-		// naive negation would turn the largest possible outflow into an
-		// inflow. The amount is constrained positive at the database (see Task 1),
-		// making this unreachable -- and it is guarded anyway, for the same
-		// reason AccountType.SignedNetWorthAmount guards it: when an amount flows
-		// out, negating it must not inadvertently turn it into an inflow.
+		// math.MinInt64 has no positive counterpart in two's complement, so
+		// naive negation would flip the largest outflow into an inflow.
+		// Unreachable since the database constrains amounts to be positive;
+		// guarded anyway, matching AccountType.SignedNetWorthAmount.
 		if t.Amount.Amount == math.MinInt64 {
 			return Money{}, false
 		}

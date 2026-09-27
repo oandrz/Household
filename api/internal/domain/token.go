@@ -28,13 +28,10 @@ func (s TokenState) String() string {
 
 // TokenLifecycle reports whether a token is still usable, and if not, why.
 //
-// The ordering is the load-bearing part: consumed is checked before expired.
-// A token that was used and has since passed its expiry must report consumed,
-// because the two cases need different answers -- "you already used this, sign
-// in" versus "this lapsed, start again" -- and reporting expiry for an
-// already-used token sends someone chasing a replacement for an account they
-// already have. usecase.checkInviteLive has always had this ordering; this is
-// where it now lives so sign-up cannot get it backwards.
+// Consumed is checked before expired: a used token must still report
+// consumed, or the holder is sent chasing a replacement for an account
+// they already have. Invites and sign-up both call this, so neither can
+// get the order backwards.
 //
 // consumedAt is a pointer because "not consumed" is the absence of a
 // timestamp, matching the nullable column it is read from.

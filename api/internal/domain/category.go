@@ -15,10 +15,9 @@ const (
 	CategoryIncome  CategoryKind = "income"
 )
 
-// ParseCategoryKind refuses anything it does not recognise. The default is the
-// point: a kind arrives from a database column, so it is a value this code did
-// not construct, and guessing at an unknown one would offer a spending
-// category for income.
+// ParseCategoryKind refuses anything it does not recognise: a kind arrives
+// from a database column, a value this code did not construct, and guessing
+// at an unknown one would offer a spending category for income.
 func ParseCategoryKind(s string) (CategoryKind, error) {
 	switch CategoryKind(s) {
 	case CategoryExpense:
@@ -42,9 +41,8 @@ type Category struct {
 }
 
 // IsArchived reports whether Budget's "Edit categories" has retired this one.
-// An archived category keeps its row so transactions that reference it keep
-// their name, and keeps its unique key so the starter set is not re-seeded
-// over it.
+// An archived category keeps its row so referencing transactions keep their
+// name, and keeps its unique key so the starter set isn't re-seeded over it.
 func (c Category) IsArchived() bool { return c.ArchivedAt != nil }
 
 // StarterCategories is what a household gets the first time anything reads its
