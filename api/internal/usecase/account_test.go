@@ -31,7 +31,7 @@ func newAccountService(t *testing.T) (*usecase.AccountService, *fakeAccountRepo)
 	svc := usecase.NewAccountService(usecase.AccountDeps{
 		Accounts:   repo,
 		Households: households,
-		FX:         staticTestRates{},
+		FX:         newFXDouble(),
 		Clock:      &fixedClock{now: fixedNow},
 		Holdings:   holdingCounterDouble{},
 	})
@@ -52,7 +52,7 @@ func newAccountServiceWithHoldings(t *testing.T, count int64) (*usecase.AccountS
 	return usecase.NewAccountService(usecase.AccountDeps{
 		Accounts:   repo,
 		Households: households,
-		FX:         staticTestRates{},
+		FX:         newFXDouble(),
 		Clock:      &fixedClock{now: fixedNow},
 		Holdings:   holdingCounterDouble{n: count},
 	}), repo

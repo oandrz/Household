@@ -48,7 +48,18 @@ var (
 	ErrRateLimited      = errors.New("too many requests")
 
 	// Added in the Task 6 fix round (see task-6-report.md, "Fix round 1").
-	ErrAmountOverflow               = errors.New("amount overflows a signed 64-bit integer")
+	ErrAmountOverflow = errors.New("amount overflows a signed 64-bit integer")
+	// ErrNoRate: there is no rate between two currencies. An FXRateProvider
+	// returns it, wrapped, for a pair it does not cover. It is the ONLY
+	// conversion failure a screen may answer by leaving an amount out of a
+	// total (CONTEXT.md, "No rate"); every other conversion error fails the
+	// request, because a smaller total labelled "no rate" would be a false
+	// statement about the household's money.
+	ErrNoRate = errors.New("no rate between these currencies")
+	// ErrInvalidRate: a rate whose numerator or denominator is not positive.
+	// Rates come from a provider this code does not construct, so Rate.Apply
+	// checks rather than trusts.
+	ErrInvalidRate                  = errors.New("rate is invalid")
 	ErrInvalidMoney                 = errors.New("money value is invalid")
 	ErrOwnerMustHoldAllCapabilities = errors.New("an owner must hold every capability")
 

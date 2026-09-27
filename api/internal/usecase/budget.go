@@ -306,6 +306,7 @@ type spendTally struct {
 // tallySpend sums a month's expense transactions, converting each into primary
 // before adding it, per Month's own comment.
 func (s *BudgetService) tallySpend(ctx context.Context, views []TransactionView, primary string, zero domain.Money) (spendTally, error) {
+	conv := NewConverter(s.d.FX, primary)
 	tally := spendTally{
 		spent:      zero,
 		byCategory: map[string]domain.Money{},
@@ -322,8 +323,11 @@ func (s *BudgetService) tallySpend(ctx context.Context, views []TransactionView,
 			continue
 		}
 
-		inPrimary, err := s.convert(ctx, t.Amount, primary)
+		inPrimary, hasRate, err := conv.TryConvert(ctx, t.Amount)
 		if err != nil {
+			return spendTally{}, err
+		}
+		if !hasRate {
 			tally.excluded = append(tally.excluded, ExcludedTransaction{
 				TransactionID: t.ID,
 				Currency:      t.Amount.Currency,
@@ -460,27 +464,6 @@ func (s *BudgetService) memberNames(ctx context.Context, householdID string) (ma
 		names[v.Membership.ID] = v.User.DisplayName
 	}
 	return names, nil
-}
-
-// convert turns one amount into the household's primary currency. This
-// duplicates TransactionService.convert deliberately, the same way
-// TransactionService.convert itself documents duplicating AccountService's:
-// each service declares its own dependencies, and hoisting this into a
-// shared helper would give one service a reason to change when another's FX
-// needs do.
-func (s *BudgetService) convert(ctx context.Context, m domain.Money, primary string) (domain.Money, error) {
-	if m.Currency == primary {
-		return m, nil
-	}
-	rate, err := s.d.FX.Rate(ctx, m.Currency, primary)
-	if err != nil {
-		return domain.Money{}, err
-	}
-	amount, err := rate.Apply(m.Amount)
-	if err != nil {
-		return domain.Money{}, err
-	}
-	return domain.Money{Amount: amount, Currency: primary}, nil
 }
 
 // Save validates the whole line set before BudgetRepository ever sees it,

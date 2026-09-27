@@ -17,6 +17,7 @@ type goalFixture struct {
 	svc        *usecase.GoalService
 	goals      *goalDouble
 	households *householdDouble
+	fx         *fxDouble
 }
 
 func newGoalFixture(t *testing.T) *goalFixture {
@@ -26,14 +27,15 @@ func newGoalFixture(t *testing.T) *goalFixture {
 	households.put(domain.Household{ID: "house-1", PrimaryCurrency: "SGD"})
 
 	goals := newGoalDouble()
+	fx := newFXDouble()
 
 	svc := usecase.NewGoalService(usecase.GoalDeps{
 		Goals:      goals,
 		Households: households,
-		FX:         staticTestRates{},
+		FX:         fx,
 	})
 
-	return &goalFixture{svc: svc, goals: goals, households: households}
+	return &goalFixture{svc: svc, goals: goals, households: households, fx: fx}
 }
 
 // seedGoal writes a goal directly into the double, bypassing Create, the
@@ -268,7 +270,7 @@ func TestGoalListCountsOnlyDatedUnachievedGoals(t *testing.T) {
 // TestGoalListPlannedTotalConvertsThenAdds is LEARNING pattern 12, pinned for
 // goals: PlannedMonthlyTotal is each goal's own figure converted to primary
 // FIRST, then added -- never summed in minor units and converted once. A
-// goal whose currency has no rate to primary (EUR, which staticTestRates
+// goal whose currency has no rate to primary (EUR, which the FX double
 // does not know) is excluded from the total and counted in ExcludedNoRate,
 // while its own card keeps rendering in its own currency untouched.
 func TestGoalListPlannedTotalConvertsThenAdds(t *testing.T) {
@@ -280,7 +282,7 @@ func TestGoalListPlannedTotalConvertsThenAdds(t *testing.T) {
 		Name: "SGD goal", Target: domain.Money{Amount: 10000000, Currency: "SGD"},
 		PlannedMonthly: domain.Money{Amount: 40000, Currency: "SGD"}, // S$400.00/mo
 	})
-	// Rp124,100.00/mo converts to exactly S$10.00/mo: staticTestRates' IDR->SGD
+	// Rp124,100.00/mo converts to exactly S$10.00/mo: the FX double's IDR->SGD
 	// is {1, 12410}, so Apply(12,410,000) = (12,410,000 + 6,205) / 12,410 = 1,000
 	// with no remainder ambiguity. Dated and contributed-to, so its card also
 	// carries a RequiredMonthly figure -- both this and Contributed must stay
@@ -804,5 +806,23 @@ func TestGoalViewOfAGoalThatIsNotHereIsNotFound(t *testing.T) {
 		if _, err := f.svc.View(context.Background(), "house-1", id, today); !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("View(house-1, %s) = %v, want domain.ErrNotFound", id, err)
 		}
+	}
+}
+
+// A failed lookup must fail the goals list rather than count the IDR goal in
+// ExcludedNoRate and leave it out of both monthly totals.
+func TestGoalListFailsWhenTheRateLookupItselfFails(t *testing.T) {
+	f := newGoalFixture(t)
+	f.fx.failWith(errProviderDown)
+	today := time.Date(2026, 8, 15, 0, 0, 0, 0, time.UTC)
+
+	f.seedGoal(domain.Goal{
+		Name: "IDR goal", Target: domain.Money{Amount: 500_000_000, Currency: "IDR"},
+		PlannedMonthly: domain.Money{Amount: 12_410_000, Currency: "IDR"},
+	})
+
+	_, err := f.svc.List(context.Background(), "house-1", false, today)
+	if !errors.Is(err, errProviderDown) {
+		t.Fatalf("List error = %v, want the provider's error", err)
 	}
 }

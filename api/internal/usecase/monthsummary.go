@@ -74,12 +74,16 @@ func (s *TransactionService) MonthSummary(ctx context.Context, householdID strin
 		Spent:    zero,
 	}
 
+	conv := NewConverter(s.d.FX, primary)
 	for _, view := range views {
 		if view.Transaction.Kind != domain.TransactionExpense {
 			continue
 		}
-		inPrimary, err := s.convert(ctx, view.Transaction.Amount, primary)
+		inPrimary, hasRate, err := conv.TryConvert(ctx, view.Transaction.Amount)
 		if err != nil {
+			return MonthSummary{}, err
+		}
+		if !hasRate {
 			summary.ExcludedNoRate = append(summary.ExcludedNoRate, ExcludedTransaction{
 				TransactionID: view.Transaction.ID,
 				Currency:      view.Transaction.Amount.Currency,
@@ -92,28 +96,4 @@ func (s *TransactionService) MonthSummary(ctx context.Context, householdID strin
 		}
 	}
 	return summary, nil
-}
-
-// convert turns one amount into the household's primary currency. A
-// same-currency amount short-circuits without consulting the provider at
-// all: that is the overwhelmingly common case, it is exact, and it means a
-// single-currency household never depends on a rate table it does not need.
-//
-// This duplicates AccountService.convert deliberately rather than sharing
-// it: the two services declare their own dependencies, and hoisting this
-// into a shared helper would give one service a reason to change when the
-// other's FX needs do.
-func (s *TransactionService) convert(ctx context.Context, m domain.Money, primary string) (domain.Money, error) {
-	if m.Currency == primary {
-		return m, nil
-	}
-	rate, err := s.d.FX.Rate(ctx, m.Currency, primary)
-	if err != nil {
-		return domain.Money{}, err
-	}
-	amount, err := rate.Apply(m.Amount)
-	if err != nil {
-		return domain.Money{}, err
-	}
-	return domain.Money{Amount: amount, Currency: primary}, nil
 }

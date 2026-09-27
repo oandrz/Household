@@ -5,7 +5,6 @@ package usecase
 import (
 	"context"
 	"errors"
-	"math"
 	"time"
 
 	"github.com/andreasoentoro/hearth/api/internal/domain"
@@ -913,55 +912,18 @@ type NotificationRepository interface {
 	Upsert(ctx context.Context, householdID string, p NotificationPreferences) (NotificationPreferences, error)
 }
 
-// Rate is a ratio, held as a fraction rather than a scaled decimal. SGD to IDR
-// is {12410, 1}; IDR to SGD is {1, 12410}. A scaled decimal cannot represent
-// the second direction — 0.0000806 truncates to zero at any sane scale — and
-// IDR to SGD is precisely the direction the design's Finances screen uses.
-type Rate struct {
-	Numerator   int64
-	Denominator int64
-}
-
-// Apply converts an amount of minor units, rounding half away from zero. It
-// reports domain.ErrAmountOverflow rather than silently wrapping when
-// minorUnits * r.Numerator would not fit in an int64 — the same failure mode
-// domain.Money.Add already refuses to allow on this codebase's monetary
-// path, and multiplication overflows far sooner than addition does.
-func (r Rate) Apply(minorUnits int64) (int64, error) {
-	if mulOverflows(minorUnits, r.Numerator) {
-		return 0, domain.ErrAmountOverflow
-	}
-	num := minorUnits * r.Numerator
-	half := r.Denominator / 2
-	if num < 0 {
-		return (num - half) / r.Denominator, nil
-	}
-	return (num + half) / r.Denominator, nil
-}
-
-// mulOverflows reports whether a*b would overflow an int64. It computes the
-// product (which may wrap, but wrapping a signed integer is well-defined in
-// Go, never a panic) and divides back by b: for any b != 0, (a*b)/b == a
-// unless the multiplication actually wrapped. The one case that check misses
-// is a==-1,b==math.MinInt64 (or the reverse): math.MinInt64 has no positive
-// counterpart, so negating it wraps right back to math.MinInt64 and the
-// divide-back reproduces a even though the multiplication did overflow —
-// that pair is therefore checked explicitly, before the general rule runs.
-func mulOverflows(a, b int64) bool {
-	if a == 0 || b == 0 {
-		return false
-	}
-	if (a == -1 && b == math.MinInt64) || (b == -1 && a == math.MinInt64) {
-		return true
-	}
-	return (a*b)/b != a
-}
-
-// FXRateProvider converts between the household's primary and secondary
-// currencies. The design labels the rate "auto"; a live provider replaces the
-// static one without any caller changing.
+// FXRateProvider looks up the rate between two currencies. The design labels
+// the rate "auto"; a live provider replaces the static one without any caller
+// changing.
+//
+// For a pair it has no rate for, it returns an error wrapping domain.ErrNoRate,
+// and callers rely on that: it is the only failure a screen may answer by
+// leaving an amount out of a total. Any other error means the lookup itself
+// failed (a provider outage, a cancelled request), and the caller fails the
+// request. Callers do not use this directly for arithmetic; they build a
+// Converter (converter.go) per request.
 type FXRateProvider interface {
-	Rate(ctx context.Context, from, to string) (Rate, error)
+	Rate(ctx context.Context, from, to string) (domain.Rate, error)
 }
 
 // AccountView is an account joined to its owner's display name, which is what

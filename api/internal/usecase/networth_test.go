@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -273,7 +274,7 @@ func TestSummaryOfAnAllArchivedHouseholdIsAGenuineZero(t *testing.T) {
 // account and again per month. fx.StaticProvider returns one number forever,
 // so nothing else in the suite would ever notice the difference.
 func TestSummaryLooksUpEachRateOnce(t *testing.T) {
-	counter := &countingRates{}
+	counter := newFXDouble()
 	svc := newAccountServiceWithFX(t, counter)
 
 	// Distinct ids: `account()` derives one from the currency and the type, so
@@ -297,14 +298,6 @@ func TestSummaryLooksUpEachRateOnce(t *testing.T) {
 	}
 }
 
-// countingRates is staticTestRates that remembers how often it was asked.
-type countingRates struct{ calls int }
-
-func (c *countingRates) Rate(ctx context.Context, from, to string) (usecase.Rate, error) {
-	c.calls++
-	return staticTestRates{}.Rate(ctx, from, to)
-}
-
 // newAccountServiceWithFX is newAccountService with the FX double swapped,
 // the same shape bill_test.go's newBillServiceWithFX already uses.
 func newAccountServiceWithFX(t *testing.T, fx usecase.FXRateProvider) *usecase.AccountService {
@@ -321,4 +314,18 @@ func newAccountServiceWithFX(t *testing.T, fx usecase.FXRateProvider) *usecase.A
 		Clock:      &fixedClock{now: fixedNow},
 		Holdings:   holdingCounterDouble{},
 	})
+}
+
+// A provider outage must fail the summary, not render a net worth that
+// silently leaves out every foreign account as "no rate".
+func TestNetWorthSummaryFailsWhenTheRateLookupItselfFails(t *testing.T) {
+	svc := newAccountServiceWithFX(t, newFXDouble().failWith(errProviderDown))
+
+	_, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{
+		account(t, domain.AccountCash, 824_055, "SGD"),
+		account(t, domain.AccountCash, 124_100_000, "IDR"),
+	}, fixedNow)
+	if !errors.Is(err, errProviderDown) {
+		t.Fatalf("Summary error = %v, want the provider's error", err)
+	}
 }

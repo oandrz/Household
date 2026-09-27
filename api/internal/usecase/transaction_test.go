@@ -21,7 +21,7 @@ func transactionFixture(t *testing.T) (*usecase.TransactionService, *fakeTransac
 }
 
 // transactionFixtureWithAccount is transactionFixture plus one extra account
-// under "house-1", for a test that needs a currency staticTestRates cannot
+// under "house-1", for a test that needs a currency the FX double cannot
 // convert (e.g. USD) without inventing a second, differently-wired fixture.
 func transactionFixtureWithAccount(t *testing.T, accountID, currency string) (*usecase.TransactionService, *fakeTransactionRepo) {
 	t.Helper()
@@ -31,6 +31,13 @@ func transactionFixtureWithAccount(t *testing.T, accountID, currency string) (*u
 }
 
 func newTransactionFixture(t *testing.T, extraAccounts map[string]fakeAccountRecord) (*usecase.TransactionService, *fakeTransactionRepo) {
+	t.Helper()
+	return newTransactionFixtureWithFX(t, extraAccounts, newFXDouble())
+}
+
+// newTransactionFixtureWithFX is newTransactionFixture with the FX double
+// chosen by the test, the same shape as bill_test.go's newBillServiceWithFX.
+func newTransactionFixtureWithFX(t *testing.T, extraAccounts map[string]fakeAccountRecord, fx usecase.FXRateProvider) (*usecase.TransactionService, *fakeTransactionRepo) {
 	t.Helper()
 	repo := &fakeTransactionRepo{}
 	households := newHouseholdDouble()
@@ -60,7 +67,7 @@ func newTransactionFixture(t *testing.T, extraAccounts map[string]fakeAccountRec
 			},
 		},
 		Households: households,
-		FX:         staticTestRates{},
+		FX:         fx,
 		Clock:      &fixedClock{now: time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)},
 	})
 	return svc, repo

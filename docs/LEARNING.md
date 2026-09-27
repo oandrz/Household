@@ -2201,6 +2201,38 @@ time a reviewer found it by building a probe rather than reading the diff.
   "what does `pg_dump` not contain" is a question with a short, checkable
   answer, and nobody asked it until the role existed.
 
+- **Every conversion failure read as "no rate", 2026-09-26.** Five services
+  each carried a private `convert`, and every caller treated *any* error from
+  it as "this currency has no rate": the item was left out of the total and
+  listed under `ExcludedNoRate`. A provider outage, a cancelled request or an
+  overflow therefore rendered as a smaller total with a false reason beside
+  it. Nothing distinguished them, because the static provider returned a
+  plain `fmt.Errorf`. Fixed by `domain.ErrNoRate`, a port contract that
+  requires it, and one `usecase.Converter`. Callers exclude only on
+  `ErrNoRate`, and fail otherwise. Pinned per caller by a
+  `…FailsWhenTheRateLookupItselfFails` test; each was mutation-checked
+  (`errors.Is(err, domain.ErrNoRate)` → `err != nil` fails it: net worth,
+  month summary, budget, goals). Bills taught a second lesson: its one test
+  passed with the check reverted at the due-this-month probe, or at the sum,
+  because each site masks the other. Its subscriptions total is reachable
+  alone (a subscription due in another month), so it got its own test,
+  `TestBillsSubscriptionTotalFailsWhenTheRateLookupItselfFails`. **When one
+  test covers several sites that each could catch the fault, mutate each
+  site, not just one.** Found by an architecture review, not by a user. The
+  same review found `Rate.Apply` would divide by zero on a zero-denominator
+  rate from a provider; it now returns `ErrInvalidRate`. **What would have
+  caught it sooner:** a port whose failure modes are named in its contract.
+  "Returns an error" is not a contract when callers must treat two kinds of
+  error differently. **The code review then found two more instances of the
+  same pattern, one level up.** First, the Converter remembered rates but
+  not "no rate" answers, so a live provider could exclude EUR from one figure
+  and add it into the next on the same page; it now remembers both. Second,
+  the fixed rule was still written by hand at nine call sites, each one line
+  away from reintroducing `if err != nil { exclude }`. It now lives in
+  `Converter.TryConvert`, and one mutation there (`errors.Is(err, ErrNoRate)`
+  changed to `err != nil`) fails all seven outage tests at once. **A rule that every caller
+  must remember belongs in the module the callers share, not in each of them.**
+
 **Any two writes that must both happen need a transaction or a loud failure.**
 And a function that accepts a field must persist it or refuse it — silently
 keeping the old value is the same failure wearing a 200. **And a recovery

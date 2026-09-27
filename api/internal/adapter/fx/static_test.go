@@ -3,7 +3,6 @@ package fx_test
 import (
 	"context"
 	"errors"
-	"math"
 	"testing"
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/fx"
@@ -61,45 +60,13 @@ func TestStaticProviderReturnsUnityForTheSameCurrency(t *testing.T) {
 	}
 }
 
-func TestStaticProviderRejectsAnUnknownPair(t *testing.T) {
+// The port's contract: a pair the provider does not cover is ErrNoRate, and
+// only that. It is what lets a screen leave an amount out instead of failing.
+func TestStaticProviderAnswersAnUnknownPairWithErrNoRate(t *testing.T) {
 	p := fx.NewStaticProvider()
 
-	if _, err := p.Rate(context.Background(), "SGD", "JPY"); err == nil {
-		t.Fatal("expected an error for a pair the static table does not cover")
-	}
-}
-
-func TestApplyConvertsAnOrdinaryAmount(t *testing.T) {
-	p := fx.NewStaticProvider()
-
-	rate, err := p.Rate(context.Background(), "SGD", "IDR")
-	if err != nil {
-		t.Fatalf("Rate: %v", err)
-	}
-
-	// S$100.00 (10_000 minor units) at 12,410 should be exactly Rp 1,241,000.00.
-	got, err := rate.Apply(10_000)
-	if err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-	if want := int64(10_000 * 12_410); got != want {
-		t.Fatalf("Apply = %d, want %d", got, want)
-	}
-}
-
-func TestApplyReturnsErrAmountOverflowOnOverflow(t *testing.T) {
-	p := fx.NewStaticProvider()
-
-	rate, err := p.Rate(context.Background(), "SGD", "IDR")
-	if err != nil {
-		t.Fatalf("Rate: %v", err)
-	}
-
-	// math.MaxInt64 / 12_410 is about 743 billion minor units; the design's
-	// households never approach that, but Apply is a general-purpose
-	// conversion on a port a live rate provider will feed later, and it must
-	// refuse to wrap rather than hand back a silently negative amount.
-	if _, err := rate.Apply(math.MaxInt64); !errors.Is(err, domain.ErrAmountOverflow) {
-		t.Fatalf("Apply(math.MaxInt64) error = %v, want domain.ErrAmountOverflow", err)
+	_, err := p.Rate(context.Background(), "SGD", "JPY")
+	if !errors.Is(err, domain.ErrNoRate) {
+		t.Fatalf("Rate(SGD, JPY) error = %v, want domain.ErrNoRate", err)
 	}
 }
