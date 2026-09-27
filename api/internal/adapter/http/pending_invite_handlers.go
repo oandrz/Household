@@ -26,11 +26,11 @@ type inviteKnockDTO struct {
 
 // inviteSummaryDTO is one row of GET /household/invites, wrapping
 // usecase.InviteSummary. Named for that type rather than "pendingInviteDTO"
-// because admin_directory_handlers.go already declares a pendingInviteDTO
-// for the operator directory's own, differently-shaped view of an invite
-// (no ID, no Capabilities) -- the same collision the usecase layer resolves
-// the same way (InviteSummary vs PendingInvite; see ports.go). Email is
-// always the real address: the route is owner-only, the same rule that lets
+// because admin_directory_handlers.go already declares a pendingInviteDTO for
+// the operator directory's own, differently-shaped view of an invite (no ID,
+// no Capabilities) -- the same collision the usecase layer resolves the same
+// way (InviteSummary vs PendingInvite; see InviteSummary's doc comment). Email
+// is always the real address: the route is owner-only, the same rule that lets
 // only an owner see members' addresses (handleListMembers).
 type inviteSummaryDTO struct {
 	ID           string          `json:"id"`

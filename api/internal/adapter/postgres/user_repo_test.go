@@ -9,12 +9,11 @@ import (
 )
 
 // TestUserRepoStoresAnEmptyEmailAsNull proves the "" <-> SQL NULL convention
-// documented for PasswordHash also holds for Email, which ports.go does not
-// spell out explicitly but users.email being citext UNIQUE and nullable
-// requires: if Create stored "" instead of NULL for a credential-less child,
-// a second such child would collide on the unique index. Multiple NULLs
-// never collide, so this only passes if nullableText (not text) is used for
-// Email in UserRepo.Create.
+// StoredUser's doc comment gives Email as well as PasswordHash, which
+// users.email being citext UNIQUE and nullable requires: if Create stored ""
+// instead of NULL for a credential-less child, a second such child would
+// collide on the unique index. Multiple NULLs never collide, so this only
+// passes if nullableText (not text) is used for Email in UserRepo.Create.
 func TestUserRepoStoresAnEmptyEmailAsNull(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

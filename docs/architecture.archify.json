@@ -415,7 +415,7 @@
       "title": "Inside api — dependencies point inward",
       "items": [
         "internal/domain — money as int64 minor units, currency, roles; standard library only",
-        "internal/usecase — services plus ports.go; no actor parameter, guards sit at each channel's edge (ADR 8)",
+        "internal/usecase — services plus ports*.go, one per slice; no actor parameter, guards sit at each channel's edge (ADR 8)",
         "internal/adapter — http, postgres, mail, telegram, openrouter, intent, crypto, clock, fx",
         "The digest ticks every 15 min beside the poller; a nudge_deliveries row makes it exactly-once (ADR 9)"
       ]

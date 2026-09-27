@@ -55,8 +55,8 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, dest any) bool {
 //     cap). budget_handlers.go's maxBudgetRequestBodyBytes is the caller
 //     that needs this.
 //   - PATCH /retros/{month} carries three free-text fields (went well / was
-//     hard / notes) this feature deliberately never caps (RetroUpdate's own
-//     doc comment in ports.go). retro_handlers.go's
+//     hard / notes) this feature deliberately never caps (usecase.RetroUpdate's
+//     own doc comment). retro_handlers.go's
 //     maxRetroRequestBodyBytes is the caller that needs this.
 //   - POST /marriage/agreements/proposals and
 //     POST /marriage/agreements/proposals/{id}/park carry rune-capped free

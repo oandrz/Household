@@ -192,7 +192,7 @@ func TestOpenInMonthReturnsOnlyThatMonthsUntickedActions(t *testing.T) {
 	}
 }
 
-// ForRetro's own contract (usecase/ports.go, and 00009_retros.sql's comment
+// RetroActionRepository.ForRetro's own contract (and 00009_retros.sql's comment
 // on why retro_actions carries no position column) is insertion order:
 // created_at, id. ListRetroActions computes this with a GROUP BY, whose
 // output order Postgres does not guarantee is insertion order on its own --

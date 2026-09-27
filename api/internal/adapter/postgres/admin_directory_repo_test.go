@@ -112,7 +112,7 @@ func TestSearchHouseholdsMatchesEveryFieldCaseInsensitively(t *testing.T) {
 	// The household's own name deliberately does not contain "christ" --
 	// "Andreas & Christine" would, since "Christine" contains it as a
 	// substring, which would make h.name ILIKE '%christ%' true and (per
-	// ports.go's own contract on HouseholdListing.Match) suppress the
+	// HouseholdListing.Match's own doc comment) suppress the
 	// member match this case exists to prove.
 	h := f.household(t, "Andreas & Kris", "Oentoro")
 	f.member(t, h.ID, "christine@hearth.family", "Christine", domain.RoleOwner, domain.AllCapabilities())

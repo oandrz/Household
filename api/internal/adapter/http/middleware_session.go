@@ -137,12 +137,12 @@ func requireSession(deps Deps) func(http.Handler) http.Handler {
 				return
 			}
 
-			// ByUser cannot take a household scope (see its doc comment in
-			// ports.go), so its result is cross-checked against the
-			// session's own HouseholdID rather than trusted blindly -- a
-			// defensive check against a future multi-household user, not
-			// something the current schema's UNIQUE constraint should ever
-			// actually trigger.
+			// ByUser cannot take a household scope (see
+			// usecase.MembershipRepository.ByUser's doc comment), so its
+			// result is cross-checked against the session's own HouseholdID
+			// rather than trusted blindly -- a defensive check against a
+			// future multi-household user, not something the current schema's
+			// UNIQUE constraint should ever actually trigger.
 			membership, err := deps.Memberships.ByUser(ctx, record.UserID)
 			if err != nil || membership.HouseholdID != record.HouseholdID {
 				WriteError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Sign in required.", nil)

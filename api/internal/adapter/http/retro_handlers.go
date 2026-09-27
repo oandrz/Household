@@ -14,7 +14,7 @@ import (
 // maxRetroRequestBodyBytes replaces the ordinary maxRequestBodyBytes for
 // PATCH /retros/{month} only: its body carries three free-text fields (went
 // well / was hard / notes) that this feature deliberately never caps
-// (RetroUpdate's own doc comment in ports.go), and the design's own worked
+// (usecase.RetroUpdate's own doc comment), and the design's own worked
 // example already runs to nine bullets across two of those fields before
 // JSON-escaping even doubles the cost of every newline. 8 KiB is generous
 // for an honest ten-minute retro while still refusing anything absurd -- the

@@ -746,14 +746,14 @@ type inviteRow struct {
 }
 
 // inviteDouble plays the same role invite_repo.go's InviteRepo plays over
-// Postgres: ByTokenHash joins through users and a household name the same
-// way GetInviteByTokenHash's SQL does, and Accept performs the user
-// creation, membership creation and acceptance stamp together, mirroring
-// the one-transaction guarantee the real Accept gives (see its doc comment
-// in ports.go). It holds the same userDouble and membershipDouble the rest
-// of the fixture uses, rather than private state of its own, so a test can
-// check "exactly one user, exactly one membership" through those doubles
-// after calling InviteService.Accept.
+// Postgres: ByTokenHash joins through users and a household name the same way
+// GetInviteByTokenHash's SQL does, and Accept performs the user creation,
+// membership creation and acceptance stamp together, mirroring the
+// one-transaction guarantee the real Accept gives (see
+// InviteRepository.Accept's doc comment). It holds the same userDouble and
+// membershipDouble the rest of the fixture uses, rather than private state of
+// its own, so a test can check "exactly one user, exactly one membership"
+// through those doubles after calling InviteService.Accept.
 type inviteDouble struct {
 	clock      *fixedClock
 	users      *userDouble
@@ -1150,12 +1150,13 @@ type signupRow struct {
 // signupDouble plays the same role postgres's (future) SignupRepo plays over
 // Postgres: Provision performs the household, owner user, owner membership,
 // builtin-space and notification-preference writes together, mirroring the
-// one-transaction guarantee the real Provision gives (see its doc comment in
-// ports.go). It holds the same household/user/membership/space/notification
-// doubles the rest of the fixture uses, rather than private state of its own,
-// so a test can check "exactly one household, exactly one user, exactly one
-// membership" through those doubles after calling SignupService.Complete --
-// exactly the pattern inviteDouble already establishes for Accept.
+// one-transaction guarantee the real Provision gives (see
+// SignupRepository.Provision's doc comment). It holds the same
+// household/user/membership/space/notification doubles the rest of the fixture
+// uses, rather than private state of its own, so a test can check "exactly one
+// household, exactly one user, exactly one membership" through those doubles
+// after calling SignupService.Complete -- exactly the pattern inviteDouble
+// already establishes for Accept.
 type signupDouble struct {
 	clock         *fixedClock
 	households    *householdDouble
@@ -1325,7 +1326,7 @@ func (d *signupDouble) CreateConsumed(_ context.Context, email string, tokenHash
 }
 
 // CreateForTelegram mirrors Create, except the row names a chat id instead of
-// an address -- CreateForTelegram's own doc comment in ports.go says why the
+// an address -- SignupRepository.CreateForTelegram's doc comment says why the
 // two are mutually exclusive per row. It shares failCreate with Create and
 // CreateConsumed, for the same reason CreateConsumed does.
 func (d *signupDouble) CreateForTelegram(_ context.Context, chatID int64, tokenHash []byte, expiresAt time.Time) error {
@@ -1407,14 +1408,14 @@ func (d *signupDouble) lastCountSinceArg() time.Time { return d.countSinceArg }
 // user and membership, seeds the builtin spaces and sets the notification
 // preferences, and stamps the signup consumed.
 //
-// Every write is undone on any later step's failure -- the same
-// all-or-nothing guarantee userDouble.CreateWithMembership gives its two
-// writes, extended here to five. This is not a nicety: Provision's whole
-// reason to exist is that a partial provision leaves a users row occupying
-// users.email's unique index with no membership under it, permanently
-// blocking that address (see Provision's doc comment in ports.go). A double
-// that left a partial write in place on a mid-sequence failure would hide
-// exactly the defect this method is supposed to make impossible.
+// Every write is undone on any later step's failure -- the same all-or-nothing
+// guarantee userDouble.CreateWithMembership gives its two writes, extended
+// here to five. This is not a nicety: Provision's whole reason to exist is
+// that a partial provision leaves a users row occupying users.email's unique
+// index with no membership under it, permanently blocking that address (see
+// SignupRepository.Provision's doc comment). A double that left a partial
+// write in place on a mid-sequence failure would hide exactly the defect this
+// method is supposed to make impossible.
 func (d *signupDouble) Provision(ctx context.Context, signupID, passwordHash string,
 	b usecase.HouseholdBlueprint) (usecase.ProvisionedHousehold, error) {
 	d.provisions++
@@ -1530,8 +1531,8 @@ type sentMail struct {
 }
 
 // signupMail is sentMail without a Name: neither SendSignupLink nor
-// SendSignupForExistingAccount carries one (see Mailer's doc comments in
-// ports.go for why).
+// SendSignupForExistingAccount carries one (see Mailer's doc comments for
+// why).
 type signupMail struct {
 	To  string
 	URL string
@@ -1638,7 +1639,7 @@ func (d *mailerDouble) lastInviteURL() string {
 // SendSignupLink and SendSignupForExistingAccount record into their own
 // slices rather than sharing one -- so a test can assert *which* of the two
 // sign-up emails went out, the same distinction that oracle
-// (SendSignupForExistingAccount's doc comment in ports.go) depends on a test
+// (Mailer.SendSignupForExistingAccount's doc comment) depends on a test
 // being able to make. Both are signalled through the same sent channel every
 // other Send* method uses, and both honour sendErr, since
 // SignupService.sendAsync fires them off the request path exactly as
@@ -2806,11 +2807,10 @@ func (d *goalDouble) MonthContributionTotals(_ context.Context, householdID stri
 	return out, nil
 }
 
-// var _ usecase.GoalRepository = (*goalDouble)(nil) below is load-bearing,
-// not decoration: nothing in internal/usecase constructs a GoalService yet
-// (that is Task 6's job), so without this assertion a signature drift
-// between this double and ports.go's GoalRepository would not surface until
-// then -- the same reasoning convert.go's own compile-time repository
+// var _ usecase.GoalRepository = (*goalDouble)(nil) below is load-bearing, not
+// decoration: without this assertion a signature drift between this double and
+// GoalRepository would surface only when a test first builds a GoalService
+// with it -- the same reasoning convert.go's own compile-time repository
 // assertions give for the postgres adapters.
 var _ usecase.GoalRepository = (*goalDouble)(nil)
 
@@ -3791,7 +3791,7 @@ type telegramLinkRow struct {
 // telegramLinkRepoDouble plays the same role postgres's TelegramLinkRepo
 // plays over Postgres: Consume stamps a row consumed and records the
 // redeeming chat in one step, mirroring the one-statement guarantee the real
-// Consume gives (see its doc comment in ports.go and
+// Consume gives (see TelegramLinkRepository.Consume's doc comment and
 // adapter/postgres/telegram_link_repo.go).
 //
 // It holds a reference to the same seqTokens the fixture wires into the
@@ -4290,7 +4290,7 @@ func newTelegramAuthService(t *testing.T) (*usecase.TelegramAuthService, *telegr
 	sender := newTelegramSenderDouble()
 
 	// InviteKnocker's only real implementation is *usecase.InviteService
-	// (see ports.go's doc comment), so the double is built one layer down,
+	// (see InviteKnocker's doc comment), so the double is built one layer down,
 	// at InviteRepository, and handed to a real InviteService -- exactly
 	// the shape main.go wires accounts and codes into.
 	invites := newInviteDouble(clock, users, members, accounts)

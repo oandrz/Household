@@ -47,7 +47,7 @@ func (r *HouseholdRepo) Update(ctx context.Context, h domain.Household) (domain.
 // Create writes h. h.ID and h.FXRateMode are ignored: the database assigns
 // the id, and fx_rate_mode keeps its column default ('auto'), which the CHECK
 // constraint makes the only safe value to assume at creation time -- see
-// HouseholdRepository.Create's doc comment in ports.go.
+// usecase.HouseholdRepository.Create's doc comment.
 func (r *HouseholdRepo) Create(ctx context.Context, h domain.Household) (domain.Household, error) {
 	row, err := r.q.CreateHousehold(ctx, sqlcgen.CreateHouseholdParams{
 		Name:                  h.Name,

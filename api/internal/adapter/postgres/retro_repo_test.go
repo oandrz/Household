@@ -157,7 +157,7 @@ func TestRetroByMonthIsScopedToItsHousehold(t *testing.T) {
 	}
 }
 
-// Create's own contract (usecase/ports.go): the caller normalises the month
+// RetroRepository.Create's own contract: the caller normalises the month
 // before calling, and the repository stores and returns it exactly as the
 // first-of-month, midnight-UTC value a later caller (RetroService.List's
 // month.Equal comparisons) is entitled to rely on without re-normalising.

@@ -324,8 +324,8 @@ func TestRetroSaveRefusesAnImpossibleMood(t *testing.T) {
 //
 // Month is set on both RetroUpdate literals here, unlike the brief's own
 // version of this test. retroRepoDouble.Update (Task 3) matches a row on
-// id + household + month together -- RetroUpdate.Month's own doc comment in
-// ports.go explains why -- so a RetroUpdate with a zero-value Month can
+// id + household + month together -- RetroUpdate.Month's own doc comment
+// explains why -- so a RetroUpdate with a zero-value Month can
 // never match the row retros.seed created at aug2026(), and even the FIRST
 // save would come back domain.ErrNotFound instead of succeeding. Filed as a
 // brief defect and fixed here rather than left broken, per the task's own

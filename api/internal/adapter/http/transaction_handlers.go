@@ -29,7 +29,7 @@ const monthLayout = "2006-01"
 const monthAll = "all"
 
 // defaultPageSize and maxPageSize mirror TransactionRepository.List's own
-// constants (see its doc comment in usecase/ports.go): the repository
+// constants (see its doc comment in package usecase): the repository
 // defaults an unset or non-positive limit to 50 and clamps anything above 200
 // down to it. The handler clamps here too, before the filter is ever built, so
 // filter.Limit always holds the limit the repository will *actually* use.

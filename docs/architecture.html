@@ -5482,7 +5482,7 @@
         </div>
         <ul>
           <li>&bull; internal/domain — money as int64 minor units, currency, roles; standard library only</li>
-          <li>&bull; internal/usecase — services plus ports.go; no actor parameter, guards sit at each channel&#39;s edge (ADR 8)</li>
+          <li>&bull; internal/usecase — services plus ports*.go, one per slice; no actor parameter, guards sit at each channel&#39;s edge (ADR 8)</li>
           <li>&bull; internal/adapter — http, postgres, mail, telegram, openrouter, intent, crypto, clock, fx</li>
           <li>&bull; The digest ticks every 15 min beside the poller; a nudge_deliveries row makes it exactly-once (ADR 9)</li>
         </ul>

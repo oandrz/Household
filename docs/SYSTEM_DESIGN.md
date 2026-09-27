@@ -689,7 +689,7 @@ graph TD
         FX["fx — static rates"]
     end
 
-    subgraph usecase["internal/usecase/ — services + ports.go"]
+    subgraph usecase["internal/usecase/ — services + ports*.go"]
         Auth["AuthService"]
         Invite["InviteService"]
         Signup["SignupService"]
@@ -737,8 +737,8 @@ graph TD
 ```
 
 Solid arrows are compile-time dependencies. Dotted arrows are adapters
-satisfying an interface declared in `usecase/ports.go` — the dependency still
-points inward, which is why every service is testable against in-memory doubles.
+satisfying an interface declared in the `usecase/ports*.go` files — the
+dependency still points inward, which is why every service is testable against in-memory doubles.
 
 **One relationship in this system has no arrow here at all, and the absence is
 the point.** `adapter/telegram`'s `Poller` calls
@@ -830,7 +830,7 @@ refuses (spec decision 7).
   `ForMember`, because the server, not the request, chose the method.
 - **`adapter/telegram` both serves the usecase layer and drives it, and it does
   the second one without importing it.** Its `Client` is an ordinary *driven*
-  adapter — it satisfies `usecase.TelegramSender`, declared in `ports.go`,
+  adapter — it satisfies `usecase.TelegramSender`, a port declared by `usecase`,
   exactly as `adapter/mail` satisfies `Mailer` (the dotted arrow). Its `Poller`
   is a *driving* adapter — an inbound `/start` is an inbound request, it simply
   arrives over a long-poll this process opened itself rather than over a
@@ -860,7 +860,10 @@ refuses (spec decision 7).
 
 ## 3 · Ports and their adapters
 
-`usecase/ports.go` is the contract between the layers.
+The `usecase/ports*.go` files are the contract between the layers: one file per
+product slice, with `ports.go` holding the package doc comment that lists them.
+The split (2026-09) exists so a change to one slice's contract is a small diff
+in one file.
 
 | Port | Implemented by | Notes |
 |---|---|---|
@@ -890,7 +893,7 @@ refuses (spec decision 7).
 | `PlatformAdminRepository` | `adapter/postgres` | Twenty-second. `Get`/`Grant`/`Revoke`/`List` over `platform_admins`. `Grant` has exactly one call site in the whole repository outside test code — `adminctl`'s `runGrantPlatformAdmin` — which is the property [ADR 5](adr/0005-platform-admin-authorization.md) exists to keep true; there is no `AdminService` method that calls it, on purpose, since granting is not a decision the running service ever makes |
 | `NudgeRepository` | `adapter/postgres` | The daily digest's at-most-once ledger and opt-out ([ADR 9](adr/0009-scheduled-work-runs-inside-the-api.md)). `Recipients` is the authorisation for the outbound direction: `telegram_accounts ⋈ memberships` keeping only owners with Money whose chat has not said `/nudges off` — a postgres test plants each excluded shape. `Claim` is `INSERT … ON CONFLICT DO NOTHING` on `(chat_id, household_id, day)`, insert-first like the transaction idempotency key; `Release` deletes it after a failed send; `Prune` keeps a month. `BillsReader` and `BudgetReader` are the two narrow reads `NudgeService` declares, satisfied by the bill and budget services |
 | `APITokenRepository` | `adapter/postgres` | Personal API tokens ([ADR 7](adr/0007-personal-api-tokens.md)): `Create` stores only the SHA-256 and an 8-character prefix; `ByTokenHash` is the live lookup (revoked or expired is `ErrNotFound`, like `GetLiveSession`); `Revoke` is user-scoped so a guessed id from another member is a miss; `RevokeAllForUser` sits beside `SessionRepository.RevokeAllForUser` in `MemberService.revokeCredentials`; `Touch` is throttled by the caller to one write an hour. `ListForUser` keeps expired rows in (revoked only is excluded) — see `HouseholdTokenLister` below for the query that does not |
-| `HouseholdTokenLister`, `HouseholdChatLister`, `MemberLister` | `adapter/postgres` (`*APITokenRepo`, `*TelegramAccountRepo` and `*MembershipRepo` already satisfy them) | Unnumbered, like `AccountLookup`/`GoalLookup` above — three narrow ports for the household access list (partner-invite lobby milestone 3), declared beside `AccessListService` in `access_list.go` rather than in `ports.go`, so the existing wide `APITokenRepository`/`TelegramAccountRepository`/`MembershipRepository` doubles never grow a method they do not use. `HouseholdTokenLister.ListForHousehold` is `ListLiveAPITokensForHousehold`: unlike `APITokenRepository.ListForUser` above, it drops expired rows as well as revoked ones, because this list answers "what can get in right now," not "what has this member ever minted" — the query's own SQL comment says so. `HouseholdChatLister.ListForHousehold` joins `telegram_accounts` through `memberships`, since the chat table itself carries no household id (§6). `MemberLister.List` is the one `MembershipRepository` method the service calls, for display names. Neither lister returns `domain.ErrNotFound` for an empty household — both answer `[]` — and a row whose user is no longer a member (left after its token or chat was created) is dropped by `AccessListService` itself, not by either query (fail closed) |
+| `HouseholdTokenLister`, `HouseholdChatLister`, `MemberLister` | `adapter/postgres` (`*APITokenRepo`, `*TelegramAccountRepo` and `*MembershipRepo` already satisfy them) | Unnumbered, like `AccountLookup`/`GoalLookup` above — three narrow ports for the household access list (partner-invite lobby milestone 3), declared beside `AccessListService` in `access_list.go` rather than in a `ports*.go` file, so the existing wide `APITokenRepository`/`TelegramAccountRepository`/`MembershipRepository` doubles never grow a method they do not use. `HouseholdTokenLister.ListForHousehold` is `ListLiveAPITokensForHousehold`: unlike `APITokenRepository.ListForUser` above, it drops expired rows as well as revoked ones, because this list answers "what can get in right now," not "what has this member ever minted" — the query's own SQL comment says so. `HouseholdChatLister.ListForHousehold` joins `telegram_accounts` through `memberships`, since the chat table itself carries no household id (§6). `MemberLister.List` is the one `MembershipRepository` method the service calls, for display names. Neither lister returns `domain.ErrNotFound` for an empty household — both answer `[]` — and a row whose user is no longer a member (left after its token or chat was created) is dropped by `AccessListService` itself, not by either query (fail closed) |
 | `IntentParser` | `adapter/openrouter` | The Telegram bot's free-text reader (stage 5b of the chat-commands spec): an open-weight model through OpenRouter's OpenAI-dialect API over plain `net/http`, up to three model ids tried in order. One implementation and one caller, which is normally the wrong shape for a port — it is one anyway because the implementation is a third-party API behind a key, and the product must behave identically without it: `nil` means "commands only". (A Claude adapter was its second implementation for one day, 2026-09-08, and was removed when the owner chose free models; git has it.) The prompt, the `log_transaction` schema, and the reader that turns the model's arguments into an `Intent` and fails closed on any kind it did not name live in `adapter/intent`, apart from the HTTP, because the reader is the last line between a model's output and the ledger and earns its own tests. The port returns text fields, never ids, so what the person confirms is what they can read. The Commander caps every call at 30 s, because the poller handles one update at a time and a stalled provider would hold every chat |
 | `FeatureFlagRepository` | `adapter/postgres` | Twenty-third. `OverridesFor` is the one query `requireSession` runs on every authenticated request — both the global and the household layer in a single `UNION ALL` statement, never two round trips. `key` carries no foreign key to a registry table, because the registry (`domain.AllFlags`) is compile-time; a row can outlive the `const` that named it, and `SetHousehold`/`ClearHousehold` are two different operations on purpose — setting a household's override to `false` and removing the override row entirely are different states downstream, not the same write with a different value |
 | `AdminAuditRepository` | `adapter/postgres` | Twenty-fourth, append-only by convention rather than by any database privilege, and **write-only**: `Record` is its one method, there is no `Delete`, and `adminctl prune` does not touch `admin_audit_log`. It had a `Recent` read and `AdminService.RecentAudit` over it for the audit screen; when that screen was descoped (2026-09-02, `docs/FEATURE_TRACKER.md`) the read stayed behind with no production caller, and it was deleted on 2026-09-13. The log is read through `psql`, or through the read-only database browse (§4), which audits its own reads. Tests that need to see what `Record` wrote query the table directly |
@@ -906,7 +909,7 @@ refuses (spec decision 7).
 | `FXRateProvider` | `adapter/fx` | Static table today (SGD↔IDR only); a live provider drops in behind it. Returns a `domain.Rate` (an exact fraction). A pair it has no rate for is an error wrapping `domain.ErrNoRate`; any other error means the lookup itself failed. No service calls it for arithmetic directly: each builds a `usecase.Converter` (`usecase/converter.go`) per request from its own `FX` dependency, and the Converter skips the provider for an amount already in primary, looks each currency up once per Converter (remembering a rate or a "no rate" answer, never a failed lookup), and applies the rate. Callers are net worth (`AccountService`), month summary (`TransactionService`), `BudgetService`, `GoalService` and `BillService` (§5) |
 
 **`telegram.StartHandler` is the one interface in this system declared outside
-`usecase/ports.go`, and it points the other way.** Every port in the table above
+the `usecase/ports*.go` files, and it points the other way.** Every port in the table above
 is declared by `usecase` and implemented by an adapter. `StartHandler` —
 `HandleStart(ctx, chatID int64, payload, username string) error` — is declared by the
 *adapter*, in `poller.go`, and satisfied by `*usecase.TelegramAuthService`. That
@@ -3037,7 +3040,7 @@ reload to see it" — never claims the partner's text was lost, because it
 was not: `Update` writes nothing on a stale version, so the only thing that
 needs recovering is the *other* browser's own unsent paragraph, which is
 still sitting in its own textarea. `RetroRepository.Update`'s own doc
-comment (`ports.go`) is where a future editor would look to change this, and
+comment is where a future editor would look to change this, and
 it says why the check has to be a single `WHERE id = $1 AND version = $2`
 rather than a read-then-compare: a check-then-write can itself race, the
 same class of bug `docs/LEARNING.md`'s database catalogue already carries for
@@ -4219,7 +4222,7 @@ Notes that are not obvious from the shapes:
   `contributed` sum is the one place in this schema still trusted to join on
   `goal_id` alone (the real query and its in-memory test double are
   deliberately consistent on this one point). `GoalRepository`'s own doc
-  comment in `usecase/ports.go` states the underlying warning in full.
+  comment states the underlying warning in full.
 - **`goal_contributions_one_rollover_per_month` is belt-and-braces beside the
   conditional `UPDATE` in `RollOverToGoal`.** The application-level guard
   (`WHERE rolled_over_at IS NULL`) is what actually stops a second rollover
@@ -4260,7 +4263,7 @@ Notes that are not obvious from the shapes:
 - **`bill_payments.household_id` has no database-level constraint tying it
   to its own `bill_id`'s household**, the identical gap
   `goal_contributions.household_id` has against its `goal_id` (above).
-  `BillRepository`'s own doc comment in `usecase/ports.go` carries the same
+  `BillRepository`'s own doc comment carries the same
   warning: every method filters by `household_id` **and** `bill_id`
   together, never by payment id alone.
 - **`bill_payments.transaction_id` is `ON DELETE SET NULL`, not `CASCADE`.**

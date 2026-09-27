@@ -246,10 +246,11 @@ func (s *SignupService) Request(ctx context.Context, email string) error {
 	}
 
 	if alreadyRegistered {
-		// This row can never provision anything -- see CreateConsumed's doc
-		// comment in ports.go -- and its token is never mailed. It exists so
-		// this branch's own CountForEmailSince/CountSince advance, the same
-		// way Create makes the fresh branch's advance below.
+		// This row can never provision anything -- see
+		// SignupRepository.CreateConsumed's doc comment -- and its token is
+		// never mailed. It exists so this branch's own
+		// CountForEmailSince/CountSince advance, the same way Create makes the
+		// fresh branch's advance below.
 		if err := s.d.Signups.CreateConsumed(ctx, email, hash, now.Add(SignupTTL)); err != nil {
 			slog.Error("sign-up persistence failed (existing-account counter row)",
 				"error", err, "email_hash", hashPrefix(s.d.Tokens.HashToken(email), 12))

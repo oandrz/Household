@@ -294,8 +294,8 @@ var (
 	// bare 409.
 	ErrBillNameTaken = errors.New("bill name taken")
 	// ErrBillCurrencyImmutable is BillService.Update's own guard: a bill's
-	// amount is stored in its pay-from account's currency (BillRecord's own
-	// comment in ports.go), so re-pointing PayFromAccountID at an account in
+	// amount is stored in its pay-from account's currency (usecase.BillRecord's
+	// own doc comment), so re-pointing PayFromAccountID at an account in
 	// a different currency would silently reinterpret every past figure.
 	// Added in Task 6 (see task-6-report.md).
 	ErrBillCurrencyImmutable = errors.New("a bill's currency cannot be changed")

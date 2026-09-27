@@ -25,8 +25,8 @@ func text(s string) *string { return &s }
 // email of their own, and storing ” for each of them would collide on the
 // unique index where storing NULL does not. The brief's own test
 // (`users.Create(ctx, "", "", "Ethan")`) exercises exactly this path, so the
-// convention is applied to both columns even though ports.go's doc comment
-// only spells it out for PasswordHash.
+// convention is applied to both columns, as StoredUser's doc comment spells
+// out for each.
 func nullableText(s string) *string {
 	if s == "" {
 		return nil
@@ -291,10 +291,9 @@ func dateToTimePtr(d pgtype.Date) *time.Time {
 	return &t
 }
 
-// Compile-time confirmation that every repository satisfies its port.
-// Nothing in internal/usecase constructs these yet -- that is Task 12's job
-// -- so without this, a signature drift from ports.go would not surface
-// until then.
+// Compile-time confirmation that every repository satisfies its port: a
+// signature drift from a usecase port fails the build here, in the adapter
+// that drifted, rather than at whichever caller first wires it.
 var (
 	_ usecase.UserRepository         = (*UserRepo)(nil)
 	_ usecase.HouseholdRepository    = (*HouseholdRepo)(nil)
