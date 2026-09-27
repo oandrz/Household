@@ -3809,6 +3809,39 @@ formality after a passing test. Three of the mutations across this feature
 survived first time, and each one was a test that proved less than its name
 claimed.
 
+**Second instance, 2026-09-27: the last-owner rule.** The same check-then-write
+shape had been sitting in `MemberService.Update` and `Remove` since the first
+slice, two weeks before the oversell fix and never found by it. Each did
+`Members.List`, then `domain.ValidateMembershipChange` /
+`ValidateMembershipRemoval`, then `Members.Update` / `Delete` — three calls, no
+transaction, no lock. Two owners demoting or removing each other at the same
+moment both read "two owners", both pass the rule, both commit.
+
+- **Symptom:** a household with **no owner at all**. Nobody left who can manage
+  members, invites or settings, and no screen that can fix it — only a hand
+  edit in the database. Nothing in the schema stops it either; the rule lives
+  only in the domain.
+- **How it was found:** by reading the code in an architecture review, not by a
+  user. Reproduced before fixing: a throwaway Postgres test that slowed
+  `List` by 300ms made two concurrent `MemberService.Update` calls end with
+  `0 of 2 racing demotions were refused (want 1); household now has 0 owner(s)`.
+- **Fix:** the `InsertWithFold` shape again. `MembershipRepository.Update` and
+  `Delete` became `UpdateWithCheck` and `DeleteWithCheck`: lock the household
+  row (`FOR NO KEY UPDATE`), list the memberships in the same transaction, run
+  the caller's check, write only if it passes. The unguarded methods were
+  **removed**, not kept beside the new ones, so nothing can skip the lock.
+- **The test** follows this pattern's rule: the 300ms sleep sits inside the
+  check, one call demotes and the other removes, and it asserts exactly one
+  `domain.ErrLastOwner` and exactly one owner left. With the lock query deleted
+  it fails: `0 of 2 racing ownership changes were refused, want exactly 1`.
+- **What would have caught it sooner:** a sibling hunt after the oversell fix
+  for the *shape* — "a service reads a list, runs a rule over the whole list,
+  then writes" — rather than for holdings. Two more of that shape are still
+  open, on counts rather than lists: an account's type change against a
+  concurrent holding create (`usecase/account.go`, `CountLiveForAccount`), and
+  a primary-currency change against the same (`usecase/household.go`,
+  `CountForHousehold`).
+
 ### 20. Every test can pass while the page has no styling at all
 
 Found 2026-09-12, in the browser walk of the portfolio screen.
