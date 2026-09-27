@@ -3841,6 +3841,38 @@ moment both read "two owners", both pass the rule, both commit.
   concurrent holding create (`usecase/account.go`, `CountLiveForAccount`), and
   a primary-currency change against the same (`usecase/household.go`,
   `CountForHousehold`).
+- **The first fix was not the whole fix. Code review found a lost update in
+  the same flow.** `PATCH /household/members/{id}` fills the fields a request
+  leaves out with what the member has now. The handler did that from its own
+  `Members.List`, *before* the lock, and then sent the complete role and
+  capabilities to `MemberService.Update`. Example: owner B promotes M to owner.
+  At the same moment owner A sends a capabilities-only PATCH for M, and A's
+  read happened before B committed. A's write carries M's old "limited" role
+  and demotes M again. The last-owner check passes, because B is still an
+  owner. **Symptom:** a promotion that "didn't stick", with every request
+  answering 200. **Fix:** the handler now passes a `usecase.MembershipPatch`
+  (both fields optional), and the service fills in the omitted fields inside
+  the locked callback, from the list read under the lock. **Test:**
+  `TestACapabilitiesOnlyPatchCannotUndoARoleChangeItRacedWith` (HTTP, real
+  Postgres). It holds the promotion inside the lock and only then sends the
+  capabilities-only PATCH. Before the fix, and again with the service
+  mutated to fill fields from a read taken before the lock:
+  `member is "limited" after the race, want owner`. **The lesson:** moving
+  the *check* under the lock is not enough. *Every* read that decides what
+  gets written must happen under the lock, including the read that fills in
+  a PATCH's omitted fields.
+- **Open races of this shape, not fixed here:**
+  - *Agreement signing* (`adapter/postgres/agreement_write_repo.go`, `Sign`,
+    around line 89). `Sign` counts the household's owners without the
+    household lock. So a promotion racing the last signature can make an
+    agreement binding without a current owner's signature.
+  - *A demoted owner's request that is already waiting still runs.* Owner A's
+    request waits on the household lock. Meanwhile B demotes A. A's request
+    then gets the lock and is applied, even though A is no longer an owner.
+    This is not fixed, because closing it means passing the caller (an
+    "actor") into the service. ADR 8 and CLAUDE.md forbid that: authorisation
+    lives only at the channel's edge. The request was authorised when it
+    arrived.
 
 ### 20. Every test can pass while the page has no styling at all
 
